@@ -420,8 +420,8 @@ export function useSavedQueries(
   }
 
   // loadSourceQueries fetches saved queries for a single source. teamId is no
-  // longer required — visibility is via source access through any team.
-  async function loadSourceQueries(sourceId: number, _legacyTeamId?: number) {
+  // longer needed — visibility is gated by source access via any team membership.
+  async function loadSourceQueries(sourceId: number) {
     try {
       isLoading.value = true
       searchQuery.value = ''
@@ -492,12 +492,8 @@ export function useSavedQueries(
     });
   }
 
-  // updateSavedQuery is kept for callers that still pass a raw payload (e.g.
-  // the SavedQueriesView edit dialog). teamId/sourceId are accepted but ignored
-  // since saved queries are no longer team-scoped.
+  // updateSavedQuery wraps the saved-queries store action used by edit dialogs.
   async function updateSavedQuery(
-      _legacyTeamId: number | undefined,
-      _legacySourceId: number | undefined,
       queryId: string | number,
       updateData: {
         name?: string;

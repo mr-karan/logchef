@@ -125,15 +125,15 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusGone, "Share link has expired", models.NotFoundErrorType)
 	}
 
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
-		if err != nil {
-			s.log.Error("failed to check query share access", "error", err, "token", token, "user_id", user.ID)
-			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this shared query", models.AuthorizationErrorType)
-		}
+	// Admins do not get a free pass on share visibility — they must be a
+	// member of a team that has the source.
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
+	if err != nil {
+		s.log.Error("failed to check query share access", "error", err, "token", token, "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this shared query", models.AuthorizationErrorType)
 	}
 
 	if err := s.sqlite.TouchQueryShare(c.Context(), token, time.Now().UTC()); err != nil {

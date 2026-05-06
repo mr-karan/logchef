@@ -87,7 +87,8 @@ func unmarshalPayload(raw sql.NullString) (map[string]any, error) {
 	return out, nil
 }
 
-// CreateAlert inserts a new alert definition for a team/source pair.
+// CreateAlert inserts a new alert definition. Alerts are scoped to a single
+// source; visibility is governed by source membership at the application layer.
 func (db *DB) CreateAlert(ctx context.Context, alert *models.Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")

@@ -5,12 +5,20 @@
 -- who lacks source access still surfaces with a runnable: false flag from the
 -- application layer.
 
+-- created_by is nullable + ON DELETE SET NULL so deleting a user does NOT
+-- destroy shared collections their teammates rely on. The collection becomes
+-- ownerless; remaining members keep access, and a global admin can manage it.
+-- For personal collections (is_personal = 1), the unique partial index below
+-- means a user can have at most one — and when the user is deleted the row
+-- is left as a tombstone with NULL created_by, which is semantically fine
+-- (no one will ever see it because nobody else is a member of a personal
+-- collection by definition).
 CREATE TABLE collections (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
     description TEXT,
     is_personal INTEGER NOT NULL DEFAULT 0 CHECK (is_personal IN (0, 1)),
-    created_by INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
     created_at DATETIME NOT NULL DEFAULT (datetime('now')),
     updated_at DATETIME NOT NULL DEFAULT (datetime('now'))
 );

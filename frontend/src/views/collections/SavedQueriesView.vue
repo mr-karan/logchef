@@ -320,17 +320,12 @@ async function handleSaveQuery(formData: SaveQueryFormData) {
 
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
   try {
-    const result = await updateSavedQuery(
-      undefined,
-      undefined,
-      queryId,
-      {
-        name: formData.name,
-        description: formData.description,
-        query_content: formData.query_content,
-        query_type: formData.query_type as 'logchefql' | 'sql',
-      }
-    );
+    const result = await updateSavedQuery(queryId, {
+      name: formData.name,
+      description: formData.description,
+      query_content: formData.query_content,
+      query_type: formData.query_type as 'logchefql' | 'sql',
+    });
 
     if (result.success) {
       showSaveQueryModal.value = false;

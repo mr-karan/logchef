@@ -28,6 +28,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
@@ -55,6 +56,11 @@ const showRename = ref(false);
 const renameName = ref("");
 const renameDescription = ref("");
 
+// Confirm-dialog state — populated by handleRemove* and consumed by the
+// ConfirmDialog instance at the bottom of the template.
+const pendingMemberRemoval = ref<number | null>(null);
+const pendingItemRemoval = ref<number | null>(null);
+
 async function load() {
   if (!collectionID.value) return;
   if (!collection.value) {
@@ -80,9 +86,14 @@ async function handleAddMember() {
   }
 }
 
-async function handleRemoveMember(userId: number) {
-  if (!window.confirm("Remove this member from the collection?")) return;
-  await store.removeMember(collectionID.value, userId);
+function handleRemoveMember(userId: number) {
+  pendingMemberRemoval.value = userId;
+}
+
+async function confirmMemberRemoval() {
+  if (pendingMemberRemoval.value == null) return;
+  await store.removeMember(collectionID.value, pendingMemberRemoval.value);
+  pendingMemberRemoval.value = null;
 }
 
 function openRename() {
@@ -101,9 +112,14 @@ async function handleRename() {
   if (result.success) showRename.value = false;
 }
 
-async function handleRemoveItem(queryId: number) {
-  if (!window.confirm("Remove this query from the collection?")) return;
-  await store.removeItem(collectionID.value, queryId);
+function handleRemoveItem(queryId: number) {
+  pendingItemRemoval.value = queryId;
+}
+
+async function confirmItemRemoval() {
+  if (pendingItemRemoval.value == null) return;
+  await store.removeItem(collectionID.value, pendingItemRemoval.value);
+  pendingItemRemoval.value = null;
 }
 
 function openQuery(queryId: number) {
@@ -291,5 +307,24 @@ function openQuery(queryId: number) {
         </form>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      :open="pendingMemberRemoval !== null"
+      title="Remove member?"
+      description="They will no longer see this collection."
+      confirm-text="Remove"
+      destructive
+      @update:open="(v) => { if (!v) pendingMemberRemoval = null }"
+      @confirm="confirmMemberRemoval"
+    />
+    <ConfirmDialog
+      :open="pendingItemRemoval !== null"
+      title="Remove query from collection?"
+      description="The saved query itself is not deleted."
+      confirm-text="Remove"
+      destructive
+      @update:open="(v) => { if (!v) pendingItemRemoval = null }"
+      @confirm="confirmItemRemoval"
+    />
   </div>
 </template>

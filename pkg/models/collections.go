@@ -20,7 +20,7 @@ type Collection struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description,omitempty"`
 	IsPersonal  bool           `json:"is_personal"`
-	CreatedBy   UserID         `json:"created_by"`
+	CreatedBy   *UserID        `json:"created_by,omitempty"`
 	CallerRole  CollectionRole `json:"caller_role"`
 	MemberCount int            `json:"member_count"`
 	ItemCount   int            `json:"item_count"`

@@ -16,19 +16,20 @@ func (db *DB) CreateCollection(ctx context.Context, name, description string, is
 		Name:        name,
 		Description: nullString(description),
 		IsPersonal:  boolToInt(isPersonal),
-		CreatedBy:   int64(createdBy),
+		CreatedBy:   sql.NullInt64{Int64: int64(createdBy), Valid: true},
 	})
 	if err != nil {
 		db.log.Error("failed to create collection", "error", err, "name", name, "is_personal", isPersonal)
 		return nil, fmt.Errorf("error creating collection: %w", err)
 	}
 
+	owner := createdBy
 	return &models.Collection{
 		ID:          int(row.ID),
 		Name:        name,
 		Description: description,
 		IsPersonal:  isPersonal,
-		CreatedBy:   createdBy,
+		CreatedBy:   &owner,
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
 	}, nil
@@ -46,7 +47,7 @@ func (db *DB) GetCollection(ctx context.Context, collectionID int) (*models.Coll
 // GetPersonalCollection returns the user's personal collection, or sql.ErrNoRows
 // if one has not been created yet.
 func (db *DB) GetPersonalCollection(ctx context.Context, userID models.UserID) (*models.Collection, error) {
-	row, err := db.readQueries.GetPersonalCollection(ctx, int64(userID))
+	row, err := db.readQueries.GetPersonalCollection(ctx, sql.NullInt64{Int64: int64(userID), Valid: true})
 	if err != nil {
 		return nil, err
 	}
@@ -84,18 +85,22 @@ func (db *DB) ListCollectionsForUser(ctx context.Context, userID models.UserID) 
 	}
 	out := make([]*models.Collection, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, &models.Collection{
+		c := &models.Collection{
 			ID:          int(r.ID),
 			Name:        r.Name,
 			Description: r.Description.String,
 			IsPersonal:  r.IsPersonal == 1,
-			CreatedBy:   models.UserID(r.CreatedBy),
 			CallerRole:  models.CollectionRole(r.CallerRole),
 			MemberCount: int(r.MemberCount),
 			ItemCount:   int(r.ItemCount),
 			CreatedAt:   r.CreatedAt,
 			UpdatedAt:   r.UpdatedAt,
-		})
+		}
+		if r.CreatedBy.Valid {
+			uid := models.UserID(r.CreatedBy.Int64)
+			c.CreatedBy = &uid
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }
@@ -111,10 +116,8 @@ func (db *DB) AddCollectionMember(ctx context.Context, collectionID int, userID 
 		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
 	}
 	if err := db.writeQueries.AddCollectionMember(ctx, params); err != nil {
-		if isUniqueConstraintSQLiteError(err, "", "") {
-			// User is already a member — treat as a no-op for idempotency.
-			return nil
-		}
+		// The SQL itself uses ON CONFLICT DO NOTHING, so re-adding an existing
+		// member is a no-op at the DB level — any error here is unexpected.
 		db.log.Error("failed to add collection member", "error", err, "collection_id", collectionID, "user_id", userID)
 		return fmt.Errorf("error adding collection member: %w", err)
 	}
@@ -190,10 +193,7 @@ func (db *DB) AddCollectionItem(ctx context.Context, collectionID, savedQueryID,
 		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
 	}
 	if err := db.writeQueries.AddCollectionItem(ctx, params); err != nil {
-		if isUniqueConstraintSQLiteError(err, "", "") {
-			// Saved query is already in the collection — treat as a no-op.
-			return nil
-		}
+		// SQL uses ON CONFLICT DO NOTHING, so duplicate inserts are a no-op.
 		return fmt.Errorf("error adding collection item: %w", err)
 	}
 	return nil
@@ -251,13 +251,17 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 }
 
 func mapCollectionRow(row sqlc.Collection) *models.Collection {
-	return &models.Collection{
+	c := &models.Collection{
 		ID:          int(row.ID),
 		Name:        row.Name,
 		Description: row.Description.String,
 		IsPersonal:  row.IsPersonal == 1,
-		CreatedBy:   models.UserID(row.CreatedBy),
 		CreatedAt:   row.CreatedAt,
 		UpdatedAt:   row.UpdatedAt,
 	}
+	if row.CreatedBy.Valid {
+		uid := models.UserID(row.CreatedBy.Int64)
+		c.CreatedBy = &uid
+	}
+	return c
 }

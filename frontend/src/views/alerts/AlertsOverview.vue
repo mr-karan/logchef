@@ -112,8 +112,9 @@ function confirmDelete(alert: Alert) {
 }
 
 async function handleDelete() {
-  if (!alertToDelete.value || !currentTeamId.value || !currentSourceId.value) return;
-  await alertsStore.deleteAlert(currentTeamId.value, currentSourceId.value, alertToDelete.value.id);
+  if (!alertToDelete.value) return;
+  // Alerts are no longer team-scoped — the API ignores teamId/sourceId.
+  await alertsStore.deleteAlert(undefined, undefined, alertToDelete.value.id);
   showDeleteDialog.value = false;
   alertToDelete.value = null;
 }
@@ -124,8 +125,7 @@ function cancelDelete() {
 }
 
 async function toggleAlert(alert: Alert) {
-  if (!currentTeamId.value || !currentSourceId.value) return;
-  await alertsStore.toggleAlertActivity(currentTeamId.value, currentSourceId.value, alert.id, !alert.is_active);
+  await alertsStore.toggleAlertActivity(undefined, undefined, alert.id, !alert.is_active);
 }
 
 function openHistory(alert: Alert) {
@@ -137,8 +137,9 @@ function duplicateAlert(alert: Alert) {
 }
 
 async function retryLoad() {
-  if (!currentTeamId.value || !currentSourceId.value) return;
-  await alertsStore.fetchAlerts(currentTeamId.value, currentSourceId.value);
+  // sourceId is optional — without one the API returns every alert the
+  // caller can see across all their team-mediated sources.
+  await alertsStore.fetchAlerts(undefined, currentSourceId.value ?? undefined);
 }
 
 function refreshAlerts() {

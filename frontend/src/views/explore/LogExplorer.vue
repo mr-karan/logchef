@@ -468,7 +468,7 @@ watch(
     if (isInitializing.value) return;
     if (!newSourceId || !currentTeamId.value) return;
     try {
-      await loadSourceQueries(currentTeamId.value, newSourceId);
+      await loadSourceQueries(newSourceId);
     } catch (e) {
       console.error('Error loading saved queries for source:', e);
     }

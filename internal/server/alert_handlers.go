@@ -49,15 +49,16 @@ func (s *Server) loadAlertWithVisibility(c *fiber.Ctx) (*models.Alert, *models.U
 		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load alert", models.GeneralErrorType)
 	}
 
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, alert.SourceID)
-		if accessErr != nil {
-			s.log.Error("failed to check source access for alert", "error", accessErr, "user_id", user.ID, "source_id", alert.SourceID)
-			return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
-		}
+	// Admins do not get a free pass on visibility — they must be a member of a
+	// team that has the source. Edit gates (UserCanEditAlert) still let an
+	// admin who can SEE an alert also edit it.
+	hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, alert.SourceID)
+	if accessErr != nil {
+		s.log.Error("failed to check source access for alert", "error", accessErr, "user_id", user.ID, "source_id", alert.SourceID)
+		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 	}
 
 	return alert, user, nil
@@ -72,14 +73,12 @@ func (s *Server) handleListAlerts(c *fiber.Ctx) error {
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 		}
-		if user.Role != models.UserRoleAdmin {
-			hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, sourceID)
-			if err != nil {
-				return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-			}
-			if !hasAccess {
-				return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
-			}
+		hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, sourceID)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+		}
+		if !hasAccess {
+			return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 		}
 		alerts, err := core.ListAlertsBySource(c.Context(), s.sqlite, sourceID)
 		if err != nil {
@@ -115,14 +114,12 @@ func (s *Server) handleCreateAlert(c *fiber.Ctx) error {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
 
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
-		}
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
 	alert, err := core.CreateAlert(c.Context(), s.sqlite, s.log, req.SourceID, user.ID, &req)
@@ -269,14 +266,12 @@ func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
 	if req.SourceID == 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "source_id is required", models.ValidationErrorType)
 	}
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
-		}
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
 	if req.QueryType == "" {

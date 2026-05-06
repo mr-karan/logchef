@@ -3,18 +3,11 @@
 -- they had bookmarked (best-effort, only for queries with a known creator).
 
 -- 1. Create a personal collection for every user that does not have one yet.
---    Name follows "<full_name>'s Collection" and falls back to the email if
---    the full name is empty. Existing personal collections (including the
---    "My Collection" name from the v1.6.0-dev preview) are left untouched —
---    that name may have been intentional or already user-customized.
+--    The default name is "My Collection" — personal collections are never
+--    shared, so the label is purely owner-facing. Users can rename via the UI.
+--    Existing personal collections are left untouched.
 INSERT INTO collections (name, description, is_personal, created_by, created_at, updated_at)
-SELECT
-    COALESCE(NULLIF(TRIM(u.full_name), ''), u.email) || '''s Collection',
-    '',
-    1,
-    u.id,
-    datetime('now'),
-    datetime('now')
+SELECT 'My Collection', '', 1, u.id, datetime('now'), datetime('now')
 FROM users u
 WHERE NOT EXISTS (
     SELECT 1 FROM collections c WHERE c.created_by = u.id AND c.is_personal = 1
@@ -30,7 +23,10 @@ WHERE c.is_personal = 1;
 
 -- 3. Migrate bookmarked queries into their creator's personal collection.
 --    Bookmarks were per-query, not per-user, so the creator is the only
---    honest signal we have. Legacy queries with NULL created_by are skipped.
+--    honest signal we have. NOTE: Legacy queries with NULL created_by are
+--    silently skipped — there's no user to attribute the bookmark to. If the
+--    deployment has a non-trivial number of NULL-creator bookmarked queries,
+--    snapshot saved_queries before running this migration.
 INSERT OR IGNORE INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
 SELECT
     pc.id,

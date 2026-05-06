@@ -27,7 +27,7 @@ SELECT
     sq.id,
     COALESCE(
         (SELECT MIN(ts.team_id) FROM team_sources ts WHERE ts.source_id = sq.source_id),
-        1
+        (SELECT MIN(id) FROM teams)
     ),
     sq.source_id,
     sq.name,

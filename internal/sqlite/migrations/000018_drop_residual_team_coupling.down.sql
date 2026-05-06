@@ -49,7 +49,7 @@ SELECT
     a.id,
     COALESCE(
         (SELECT MIN(ts.team_id) FROM team_sources ts WHERE ts.source_id = a.source_id),
-        1
+        (SELECT MIN(id) FROM teams)
     ),
     a.source_id, a.name, a.description, a.query_type, a.query, a.condition_json,
     a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds,
@@ -92,7 +92,7 @@ SELECT
     qs.token,
     COALESCE(
         (SELECT MIN(ts.team_id) FROM team_sources ts WHERE ts.source_id = qs.source_id),
-        1
+        (SELECT MIN(id) FROM teams)
     ),
     qs.source_id,
     qs.created_by, qs.payload_json, qs.expires_at, qs.last_accessed_at, qs.created_at
@@ -138,7 +138,7 @@ SELECT
     ej.id,
     COALESCE(
         (SELECT MIN(ts.team_id) FROM team_sources ts WHERE ts.source_id = ej.source_id),
-        1
+        (SELECT MIN(id) FROM teams)
     ),
     ej.source_id,
     ej.created_by, ej.status, ej.format, ej.request_json, ej.file_name, ej.file_path,

@@ -769,11 +769,10 @@ WHERE cm.user_id = ?
 ORDER BY c.is_personal DESC, c.updated_at DESC;
 
 -- name: AddCollectionMember :exec
--- Add a member; the application layer dedupes via the unique constraint on
--- (collection_id, user_id). sqlc 1.30 has a parser bug with ON CONFLICT on
--- SQLite, so we keep the statement plain.
+-- Add a member; idempotent on (collection_id, user_id).
 INSERT INTO collection_members (collection_id, user_id, role, added_by)
-VALUES (?, ?, ?, ?);
+VALUES (?, ?, ?, ?)
+ON CONFLICT(collection_id, user_id) DO NOTHING;
 
 -- name: GetCollectionMember :one
 -- Look up a single membership row
@@ -795,10 +794,10 @@ ORDER BY cm.role DESC, u.email ASC;
 DELETE FROM collection_members WHERE collection_id = ? AND user_id = ?;
 
 -- name: AddCollectionItem :exec
--- Add a saved query to a collection; the application layer treats unique
--- constraint violations as no-ops (sqlc 1.30 mangles ON CONFLICT on SQLite).
+-- Add a saved query to a collection; idempotent on (collection_id, saved_query_id).
 INSERT INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
-VALUES (?, ?, ?, ?);
+VALUES (?, ?, ?, ?)
+ON CONFLICT(collection_id, saved_query_id) DO NOTHING;
 
 -- name: RemoveCollectionItem :exec
 -- Remove an item from a collection

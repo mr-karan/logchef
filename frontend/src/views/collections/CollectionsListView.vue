@@ -16,6 +16,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
@@ -29,6 +30,8 @@ const showCreate = ref(false);
 const createName = ref("");
 const createDescription = ref("");
 const isCreating = ref(false);
+
+const pendingDelete = ref<Collection | null>(null);
 
 const personal = computed(() => store.personalCollection);
 const shared = computed(() => store.sharedCollections);
@@ -56,7 +59,7 @@ async function handleCreate() {
   }
 }
 
-async function handleDelete(collection: Collection) {
+function handleDelete(collection: Collection) {
   if (collection.is_personal) {
     toast({
       title: "Personal collection",
@@ -66,8 +69,13 @@ async function handleDelete(collection: Collection) {
     });
     return;
   }
-  if (!window.confirm(`Delete collection "${collection.name}"? Saved queries inside it will not be deleted.`)) return;
-  await store.deleteCollection(collection.id);
+  pendingDelete.value = collection;
+}
+
+async function confirmDelete() {
+  if (!pendingDelete.value) return;
+  await store.deleteCollection(pendingDelete.value.id);
+  pendingDelete.value = null;
 }
 
 function viewCollection(collection: Collection) {
@@ -197,5 +205,15 @@ function viewCollection(collection: Collection) {
         </form>
       </DialogContent>
     </Dialog>
+
+    <ConfirmDialog
+      :open="pendingDelete !== null"
+      :title="pendingDelete ? `Delete “${pendingDelete.name}”?` : 'Delete collection?'"
+      description="Saved queries inside this collection are not deleted."
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) pendingDelete = null }"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>

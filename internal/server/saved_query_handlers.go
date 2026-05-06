@@ -46,15 +46,16 @@ func (s *Server) loadSavedQueryWithVisibility(c *fiber.Ctx) (*models.SavedQuery,
 		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load saved query", models.GeneralErrorType)
 	}
 
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, query.SourceID)
-		if accessErr != nil {
-			s.log.Error("failed to check source access for saved query", "error", accessErr, "user_id", user.ID, "source_id", query.SourceID)
-			return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
-		}
+	// Admins do not get a free pass on visibility — they must be a member of a
+	// team that has the source. Edit gates (UserCanEditSavedQuery) still let
+	// an admin who can SEE a query also edit it.
+	hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, query.SourceID)
+	if accessErr != nil {
+		s.log.Error("failed to check source access for saved query", "error", accessErr, "user_id", user.ID, "source_id", query.SourceID)
+		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 	}
 
 	return query, user, nil
@@ -97,15 +98,13 @@ func (s *Server) handleCreateSavedQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Missing required fields (name, source_id, query_type, query_content)", models.ValidationErrorType)
 	}
 
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
-		if err != nil {
-			s.log.Error("failed to check source access for saved query create", "error", err, "user_id", user.ID, "source_id", req.SourceID)
-			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
-		}
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
+	if err != nil {
+		s.log.Error("failed to check source access for saved query create", "error", err, "user_id", user.ID, "source_id", req.SourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
 	created, err := core.CreateSavedQuery(c.Context(), s.sqlite, s.log, req.SourceID, req.Name, req.Description, req.QueryContent, string(req.QueryType), user.ID)

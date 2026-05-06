@@ -32,6 +32,8 @@ func mapCollectionError(c *fiber.Ctx, err error) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Personal collections cannot be modified or deleted", models.ValidationErrorType)
 	case errors.Is(err, core.ErrInvalidCollectionRole):
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Role must be 'owner' or 'member'", models.ValidationErrorType)
+	case errors.Is(err, core.ErrLastOwnerRemoval):
+		return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ValidationErrorType)
 	case errors.Is(err, core.ErrQueryNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 	}
@@ -77,7 +79,7 @@ func (s *Server) handleGetCollection(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	collection, _, err := core.GetCollectionForUser(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin)
+	collection, _, err := core.GetCollectionForUser(c.Context(), s.sqlite, s.log, id, user.ID)
 	if err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
@@ -100,7 +102,7 @@ func (s *Server) handleUpdateCollection(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, err := core.UpdateCollection(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin, req.Name, req.Description)
+	updated, err := core.UpdateCollection(c.Context(), s.sqlite, s.log, id, user.ID, req.Name, req.Description)
 	if err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
@@ -119,7 +121,7 @@ func (s *Server) handleDeleteCollection(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	if err := core.DeleteCollection(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin); err != nil {
+	if err := core.DeleteCollection(c.Context(), s.sqlite, s.log, id, user.ID); err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
 		}
@@ -136,7 +138,7 @@ func (s *Server) handleListCollectionMembers(c *fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	members, err := core.ListCollectionMembers(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin)
+	members, err := core.ListCollectionMembers(c.Context(), s.sqlite, s.log, id, user.ID)
 	if err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
@@ -157,7 +159,7 @@ func (s *Server) handleAddCollectionMember(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	if err := core.AddCollectionMember(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin, req.UserID, req.Role); err != nil {
+	if err := core.AddCollectionMember(c.Context(), s.sqlite, s.log, id, user.ID, req.UserID, req.Role); err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
 		}
@@ -178,7 +180,7 @@ func (s *Server) handleRemoveCollectionMember(c *fiber.Ctx) error {
 	if err != nil || userIDNum <= 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user id", models.ValidationErrorType)
 	}
-	if err := core.RemoveCollectionMember(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin, models.UserID(userIDNum)); err != nil {
+	if err := core.RemoveCollectionMember(c.Context(), s.sqlite, s.log, id, user.ID, models.UserID(userIDNum)); err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
 		}
@@ -194,7 +196,7 @@ func (s *Server) handleListCollectionItems(c *fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	items, err := core.ListCollectionItems(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin)
+	items, err := core.ListCollectionItems(c.Context(), s.sqlite, s.log, id, user.ID)
 	if err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
@@ -215,7 +217,7 @@ func (s *Server) handleAddCollectionItem(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	if err := core.AddCollectionItem(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin, req.SavedQueryID, req.SortOrder); err != nil {
+	if err := core.AddCollectionItem(c.Context(), s.sqlite, s.log, id, user.ID, req.SavedQueryID, req.SortOrder); err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
 		}
@@ -236,7 +238,7 @@ func (s *Server) handleRemoveCollectionItem(c *fiber.Ctx) error {
 	if err != nil || queryIDNum <= 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid query id", models.ValidationErrorType)
 	}
-	if err := core.RemoveCollectionItem(c.Context(), s.sqlite, s.log, id, user.ID, user.Role == models.UserRoleAdmin, queryIDNum); err != nil {
+	if err := core.RemoveCollectionItem(c.Context(), s.sqlite, s.log, id, user.ID, queryIDNum); err != nil {
 		if mapped := mapCollectionError(c, err); mapped != nil {
 			return mapped
 		}
