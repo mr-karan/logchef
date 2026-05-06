@@ -8,6 +8,7 @@ import {
   Trash2,
   Loader2,
   Search,
+  FolderMinus,
   Link,
   FolderPlus,
   FolderHeart,
@@ -140,6 +141,14 @@ async function handleDeleteQuery(query: SavedQuery) {
   if (result.success) {
     await loadQueries();
   }
+}
+
+async function removeFromCurrentCollection(query: SavedQuery) {
+  if (selectedCollection.value === "all") return;
+  const collectionId = Number(selectedCollection.value);
+  await collectionsApi.removeItem(collectionId, query.id);
+  await collectionsStore.fetchCollections();
+  await loadQueries();
 }
 
 function copyShareUrl(query: SavedQuery) {
@@ -281,6 +290,13 @@ function manageCollection() {
                   </DropdownMenuItem>
                   <DropdownMenuItem @click="openCollectionDrawer(query)">
                     <FolderPlus class="mr-2 h-4 w-4" /> Add to Collection
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    v-if="selectedCollection !== 'all'"
+                    @click="removeFromCurrentCollection(query)"
+                    class="text-destructive"
+                  >
+                    <FolderMinus class="mr-2 h-4 w-4" /> Remove from {{ selectedCollectionName }}
                   </DropdownMenuItem>
                   <DropdownMenuItem @click="copyShareUrl(query)">
                     <Link class="mr-2 h-4 w-4" /> Copy Link

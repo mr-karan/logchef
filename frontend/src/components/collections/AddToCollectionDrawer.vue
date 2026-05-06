@@ -82,8 +82,10 @@ async function toggleItem(collectionId: number) {
       }
       itemIndex.value.get(collectionId)!.add(props.queryId);
     }
-    // Force reactivity
+    // Force reactivity on the index
     itemIndex.value = new Map(itemIndex.value);
+    // Refresh collection list so item_count updates in the picker
+    await store.fetchCollections();
   } finally {
     isMutating.value = null;
   }
@@ -103,6 +105,8 @@ async function handleCreate() {
       itemIndex.value = new Map(itemIndex.value);
       newName.value = "";
       showInlineCreate.value = false;
+      // Refresh counts
+      await store.fetchCollections();
     }
   } finally {
     isCreating.value = false;
