@@ -41,7 +41,7 @@ func (e ErrInvalidTimeout) Error() string {
 type TemplateVariable struct {
 	Name  string      `json:"name"`  // Variable name (without braces)
 	Type  string      `json:"type"`  // "string", "text", "number", or "date"
-	Value interface{} `json:"value"` // The value to substitute
+	Value any `json:"value"` // The value to substitute
 }
 
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
@@ -73,7 +73,7 @@ type APIHistogramRequest struct {
 
 // LogQueryResult represents the result of a log query
 type LogQueryResult struct {
-	Data     []map[string]interface{} `json:"data"`
+	Data     []map[string]any `json:"data"`
 	Stats    QueryStats               `json:"stats"`
 	Columns  []ColumnInfo             `json:"columns"`
 	Warnings []QueryWarning           `json:"warnings,omitempty"`
@@ -93,9 +93,9 @@ type LogContextRequest struct {
 // LogContextResponse represents temporal context query results
 type LogContextResponse struct {
 	TargetTimestamp int64                    `json:"target_timestamp"`
-	BeforeLogs      []map[string]interface{} `json:"before_logs"`
-	TargetLogs      []map[string]interface{} `json:"target_logs"` // Multiple logs might have the same timestamp
-	AfterLogs       []map[string]interface{} `json:"after_logs"`
+	BeforeLogs      []map[string]any `json:"before_logs"`
+	TargetLogs      []map[string]any `json:"target_logs"` // Multiple logs might have the same timestamp
+	AfterLogs       []map[string]any `json:"after_logs"`
 	Stats           QueryStats               `json:"stats"`
 }
 
@@ -142,8 +142,8 @@ type SavedQueryVariable struct {
 	Type         string                     `json:"type"`
 	Label        string                     `json:"label"`
 	InputType    string                     `json:"inputType"`
-	Value        interface{}                `json:"value"`
-	DefaultValue interface{}                `json:"defaultValue,omitempty"`
+	Value        any                `json:"value"`
+	DefaultValue any                `json:"defaultValue,omitempty"`
 	IsOptional   bool                       `json:"isOptional,omitempty"`
 	IsRequired   bool                       `json:"isRequired,omitempty"`
 	Options      []SavedQueryVariableOption `json:"options,omitempty"`

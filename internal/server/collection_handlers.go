@@ -11,15 +11,8 @@ import (
 )
 
 func parseCollectionID(c *fiber.Ctx) (int, error) {
-	idStr := c.Params("collectionID")
-	if idStr == "" {
-		return 0, errors.New("missing collection id")
-	}
-	id, err := strconv.Atoi(idStr)
-	if err != nil || id <= 0 {
-		return 0, errors.New("invalid collection id")
-	}
-	return id, nil
+	id, err := parsePositiveIntParam(c, "collectionID")
+	return int(id), err
 }
 
 func mapCollectionError(c *fiber.Ctx, err error) error {

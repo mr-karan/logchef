@@ -13,17 +13,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// parseAlertID extracts and validates the :alertID URL parameter.
 func parseAlertID(c *fiber.Ctx) (models.AlertID, error) {
-	idStr := c.Params("alertID")
-	if idStr == "" {
-		return 0, errors.New("missing alert id")
-	}
-	id, err := strconv.ParseInt(idStr, 10, 64)
-	if err != nil || id <= 0 {
-		return 0, errors.New("invalid alert id")
-	}
-	return models.AlertID(id), nil
+	id, err := parsePositiveIntParam(c, "alertID")
+	return models.AlertID(id), err
 }
 
 // loadAlertWithVisibility fetches an alert and verifies the caller has source

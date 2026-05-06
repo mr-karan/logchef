@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"strconv"
 
 	core "github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -10,17 +9,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 )
 
-// parseSavedQueryID extracts and validates the :queryID URL parameter.
 func parseSavedQueryID(c *fiber.Ctx) (int, error) {
-	idStr := c.Params("queryID")
-	if idStr == "" {
-		return 0, errors.New("missing query id")
-	}
-	id, err := strconv.Atoi(idStr)
-	if err != nil || id <= 0 {
-		return 0, errors.New("invalid query id")
-	}
-	return id, nil
+	id, err := parsePositiveIntParam(c, "queryID")
+	return int(id), err
 }
 
 // loadSavedQueryWithVisibility fetches a saved query and verifies the caller
@@ -193,22 +184,12 @@ func (s *Server) handleDeleteSavedQuery(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Saved query deleted successfully"})
 }
 
-// handleResolveSavedQuery returns the query plus enough metadata for the explorer
+// handleResolveSavedQuery returns the full saved-query struct for the explorer
 // to hydrate without round-tripping through URL params.
 func (s *Server) handleResolveSavedQuery(c *fiber.Ctx) error {
 	query, _, err := s.loadSavedQueryWithVisibility(c)
 	if err != nil {
 		return err
 	}
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{
-		"id":            query.ID,
-		"source_id":     query.SourceID,
-		"name":          query.Name,
-		"description":   query.Description,
-		"query_type":    query.QueryType,
-		"query_content": query.QueryContent,
-		"created_by":    query.CreatedBy,
-		"created_at":    query.CreatedAt,
-		"updated_at":    query.UpdatedAt,
-	})
+	return SendSuccess(c, fiber.StatusOK, query)
 }
