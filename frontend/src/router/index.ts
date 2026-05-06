@@ -123,6 +123,24 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Loading Saved Query..." },
       },
+      {
+        path: "collections",
+        name: "CollectionsList",
+        component: () => import("@/views/collections/CollectionsListView.vue").catch(err => {
+          error("Router", "Failed to load CollectionsListView component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Collections" },
+      },
+      {
+        path: "collections/:collectionID",
+        name: "CollectionDetail",
+        component: () => import("@/views/collections/CollectionDetailView.vue").catch(err => {
+          error("Router", "Failed to load CollectionDetailView component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Collection" },
+      },
 
     ],
   },

@@ -67,8 +67,8 @@ const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
 
 const isLoadingAlerts = computed(() => {
-  if (!currentTeamId.value || !currentSourceId.value) return false;
-  return alertsStore.isLoadingOperation(`fetchAlerts-${currentTeamId.value}-${currentSourceId.value}`);
+  if (!currentSourceId.value) return false;
+  return alertsStore.isLoadingOperation(`fetchAlerts-${currentSourceId.value}`);
 });
 
 const loadError = computed((): { message: string; operation?: string } | null => {
