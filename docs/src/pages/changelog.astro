@@ -100,22 +100,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        Logchef 1.6 narrows the <strong>Team</strong> abstraction to its real job &mdash; access control &mdash; and adds <strong>Collections</strong>, a cross-team curation primitive that replaces the short-lived "Query Folders" experiment from the v1.6 preview build.
+        Logchef 1.6 narrows the <strong>Team</strong> abstraction to access control only and adds <strong>Collections</strong> &mdash; cross-team curation lists for saved queries. The unified Saved Queries view replaces the old team-scoped layout with a flat, searchable table and collection-picker dropdown.
       </p>
-
-      <div class="change-section">
-        <div class="change-type changed">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          API & URL changes
-        </div>
-        <ul class="change-list">
-          <li><strong>Saved queries are no longer team-scoped.</strong> Visibility is "any user with source access via any team they belong to"; edit access is "creator + global admin". Legacy queries (rows that pre-date <code>created_by</code>) are global-admin-only.</li>
-          <li><strong>Alerts follow the same model.</strong> <code>alerts.team_id</code> is dropped, <code>alerts.created_by</code> is added, and edit/delete/resolve gate on creator + global admin.</li>
-          <li><strong>Endpoint shape.</strong> New <code>/api/v1/saved-queries</code>, <code>/api/v1/alerts</code>, and <code>/api/v1/collections</code> route groups replace the old <code>/api/v1/teams/:teamID/sources/:sourceID/{collections,alerts}/*</code> tree. Old paths return 404 &mdash; clients must upgrade.</li>
-          <li><strong>Frontend URLs.</strong> <code>/logs/saved/:queryId</code> is the new canonical share link. The legacy <code>/logs/collection/:teamId/:sourceId/:collectionId</code> URL is gone.</li>
-          <li><strong>CLI compatibility.</strong> <code>logchef collections</code> still works (the CLI internally hits the new endpoint) but older binaries pointed at a 1.6 backend will fail with 404s. Upgrade the CLI to the matching version.</li>
-        </ul>
-      </div>
 
       <div class="change-section">
         <div class="change-type added">
@@ -123,13 +109,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Collections</strong> &mdash; Cross-team curation lists for saved queries. Each user gets an auto-created personal collection on first call to <code>GET /api/v1/collections</code>. Shared collections are invite-only with two roles: <code>owner</code> (full control) and <code>member</code> (read + run items they have source access to). Items the requester cannot run still surface in the UI with a lock icon. New routes: <code>/logs/collections</code> and <code>/logs/collections/:collectionID</code>.</li>
-          <li><strong>Forward-only saved-query links</strong> &mdash; <code>/logs/saved/:queryId</code> resolves the query, infers its source, and redirects into <code>/logs/explore</code> with the right context.</li>
-          <li><strong>Shareable saved-query links</strong> &mdash; Generate time-limited share links for saved queries with a configurable TTL.</li>
-          <li><strong>Result downloads</strong> &mdash; Backend-streamed CSV/JSON exports with synchronous admission control (HTTP 429 at create-time when the active-job cap is hit, instead of accepting and async-failing).</li>
-          <li><strong>Calendar drill-down</strong> &mdash; Click the month heading in the date picker to surface a 12-month grid; click the year heading for a 10-year grid (decade boundaries match common dashboard tooling).</li>
-          <li><strong>OIDC <code>skip_email_verified_check</code></strong> &mdash; Optionally bypass the <code>email_verified</code> claim for IdPs that don't set it. Logs a startup warning so the bypass is visible.</li>
-          <li><strong>Native ClickHouse TLS</strong> &mdash; TLS support for ClickHouse native-protocol connections.</li>
+          <li><strong>Collections</strong> &mdash; Cross-team curation lists. Personal collection auto-created per user. Shared collections are invite-only with <code>owner</code> + <code>member</code> roles. Items a member can't run show with a lock icon.</li>
+          <li><strong>Unified Saved Queries view</strong> &mdash; Single page at <code>/logs/saved</code> with a collection-picker dropdown (All / Personal / Shared), search, and a flat table with type icon, name, source, and date.</li>
+          <li><strong>"Add to Collection" drawer</strong> &mdash; Per-row action on saved queries. Slide-out panel shows all collections as checkboxes for quick pin/unpin. Create new collections inline.</li>
+          <li><strong>Deterministic saved-query resolution</strong> &mdash; <code>/resolve</code> endpoint returns <code>resolved_team_id</code> using priority: explicit hint &rarr; <code>created_from_team_id</code> &rarr; first accessible team.</li>
+          <li><strong>Shareable saved-query links</strong> &mdash; <code>/logs/saved/:queryId</code> is the canonical share URL. Resolves source + team automatically.</li>
+          <li><strong>Backend-streamed downloads</strong> &mdash; CSV/JSON exports with synchronous admission control (429 at capacity).</li>
+          <li><strong>Calendar drill-down</strong>, <strong>OIDC email-verified bypass</strong> (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), <strong>native ClickHouse TLS</strong> (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>).</li>
         </ul>
       </div>
 
@@ -139,11 +125,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Sidebar splits Collections from Saved Queries.</strong> "Saved Queries" remains the flat list of all queries you can see; "Collections" is the new curated-list surface.</li>
-          <li><strong>Alert notifications drop team labels.</strong> Email body, webhook payload, and generator URLs no longer include <code>team_id</code> / <code>team_name</code>. Recipients are users (not team members), so any user can be a recipient.</li>
-          <li><strong>Explore UI polish</strong> &mdash; Quieter top bar (Limit and timezone as muted pills), concrete query placeholders, calmer fields sidebar, tighter histogram styling, and a regrouped action bar with a Local|UTC segmented timezone control. Tabular-nums on timestamps; method chips get a stable width for vertical scanning.</li>
-          <li><strong>Export &rarr; Download</strong> &mdash; Toolbar button renamed; the backend-streamed pipe is the single download path.</li>
-          <li><strong>AI SQL insert</strong> &mdash; Inserting an AI-generated query clears any loaded saved query and explicitly switches to SQL mode.</li>
+          <li><strong>Saved queries are source-scoped, not team-scoped.</strong> Team is an access path, not ownership. <code>created_from_team_id</code> is metadata for resolve preference, not ACL.</li>
+          <li><strong>Alerts de-teamed.</strong> New <code>/api/v1/alerts</code> route; <code>team_id</code> dropped, <code>created_by</code> added. Edit/delete = creator + admin.</li>
+          <li><strong>API endpoints restructured.</strong> New <code>/api/v1/saved-queries</code>, <code>/api/v1/alerts</code>, <code>/api/v1/collections</code>. Old team-scoped paths return 404.</li>
+          <li><strong>Alert notifications</strong> drop <code>team_id</code>/<code>team_name</code>. Recipients resolve to users directly.</li>
+          <li><strong>Explore UI polish</strong> &mdash; quieter top bar, concrete placeholders, Local|UTC timezone control.</li>
         </ul>
       </div>
 
@@ -153,8 +139,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Removed
         </div>
         <ul class="change-list">
-          <li><strong>Query Folders.</strong> The team-scoped folder feature briefly carried in the v1.6 preview is gone. Folders couldn't serve the actual user need (cross-team curation), so Collections take their place. Migration drops the <code>query_folders</code> and <code>query_folder_items</code> tables; fold any folder-shaped state into Collections after upgrading.</li>
-          <li><strong><code>team_id</code> on saved queries, alerts, query shares, and export jobs.</strong> Schema columns and the corresponding API response fields are dropped.</li>
+          <li><strong>Query Folders</strong> &mdash; replaced by Collections.</li>
+          <li><strong>Bookmarks</strong> (<code>is_bookmarked</code>) &mdash; replaced by personal collections.</li>
+          <li><strong><code>team_id</code></strong> on saved queries, alerts, query shares, and export jobs.</li>
         </ul>
       </div>
 
@@ -164,12 +151,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Query result limits</strong> &mdash; Introduced <code>max_limit</code> (default 100k rows) to prevent the SQL&rarr;buffer path from materializing huge result sets in memory. Preview/export limits and timeout handling are aligned across modes.</li>
-          <li><strong>URL state for raw SQL</strong> &mdash; Round-tripping large SQL via URL state no longer overflows the request header limit.</li>
-          <li><strong>Crash-safe export pruner</strong> &mdash; Unlinks files before deleting DB rows.</li>
-          <li><strong>Query share TTL validation</strong> &mdash; TTL above the configured max returns HTTP 400 instead of silently clamping.</li>
-          <li><strong>Translate API errors surface</strong> &mdash; LogchefQL&rarr;SQL translation failures are no longer swallowed.</li>
-          <li><strong>Relative export URLs</strong> &mdash; Backend returns relative download paths so reverse-proxy and bastion-fronted deployments produce correct links.</li>
+          <li><strong>Saved query loads wrong source</strong> &mdash; resolved query's <code>source_id</code> overrides stale URL params; source details must match before execution fires.</li>
+          <li><strong>Redirect spinner stuck</strong> &mdash; reactive <code>route.params</code> watch prevents stale state on route reuse.</li>
+          <li><strong>Migration cascade-delete</strong> &mdash; FK enforcement disabled during table rebuilds to preserve child rows.</li>
+          <li><strong>Query result OOM</strong>, raw SQL URL overflow, crash-safe export pruner, relative export URLs.</li>
         </ul>
       </div>
 
