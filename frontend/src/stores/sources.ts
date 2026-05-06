@@ -422,6 +422,11 @@ export const useSourcesStore = defineStore("sources", () => {
         onSuccess: async (data: any) => {
           if (!data) return;
 
+          // Stale-request guard: only commit if this source is still the
+          // one the user has selected. A fast source switch can cause an
+          // older request to resolve after a newer one.
+          if (contextStore.sourceId !== sourceId) return;
+
           state.data.value.currentSourceDetails = data as Source;
 
           // Update the source in teamSources as well (like the existing getSource does)

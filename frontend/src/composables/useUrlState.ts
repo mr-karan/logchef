@@ -230,9 +230,14 @@ export function useUrlState(): UrlStateReturn {
               // The resolved query's source_id is the source of truth.
               // Override the URL's ?source= if it disagrees (e.g. user came
               // from a different source context and clicked a saved-query link).
-              if (response.data.source_id && String(response.data.source_id) !== params.source) {
-                params.source = String(response.data.source_id);
+              const resolvedSource = String(response.data.source_id);
+              if (response.data.source_id && resolvedSource !== params.source) {
+                params.source = resolvedSource;
                 contextStore.selectSource(response.data.source_id);
+                // Update the URL to reflect the correct source so it's not misleading
+                await router.replace({
+                  query: { ...route.query, source: resolvedSource, id: result.queryId },
+                });
               }
               const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
               shouldExecute = hydrateResult.shouldExecute;

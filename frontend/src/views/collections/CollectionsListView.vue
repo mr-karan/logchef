@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import { useRouter } from "vue-router";
-import { Plus, Trash2, FolderHeart, Folder, Users, Loader2, AlertCircle } from "lucide-vue-next";
+import { Plus, FolderHeart, Folder, Users, Loader2, AlertCircle } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,16 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
@@ -38,9 +28,6 @@ const showCreate = ref(false);
 const createName = ref("");
 const createDescription = ref("");
 const isCreating = ref(false);
-
-const showDeleteDialog = ref(false);
-const pendingDelete = ref<Collection | null>(null);
 
 const personal = computed(() => store.personalCollection);
 const shared = computed(() => store.sharedCollections);
@@ -66,32 +53,6 @@ async function handleCreate() {
   } finally {
     isCreating.value = false;
   }
-}
-
-function handleDelete(collection: Collection) {
-  if (collection.is_personal) {
-    toast({
-      title: "Personal collection",
-      description: "Personal collections cannot be deleted.",
-      variant: "destructive",
-      duration: TOAST_DURATION.WARNING,
-    });
-    return;
-  }
-  pendingDelete.value = collection;
-  showDeleteDialog.value = true;
-}
-
-async function confirmDelete() {
-  if (!pendingDelete.value) return;
-  await store.deleteCollection(pendingDelete.value.id);
-  showDeleteDialog.value = false;
-  pendingDelete.value = null;
-}
-
-function cancelDelete() {
-  showDeleteDialog.value = false;
-  pendingDelete.value = null;
 }
 
 function viewCollection(collection: Collection) {
@@ -157,16 +118,6 @@ function viewCollection(collection: Collection) {
             · {{ c.member_count }} {{ c.member_count === 1 ? "member" : "members" }}
           </span>
         </button>
-        <Button
-          v-if="c.caller_role === 'owner'"
-          variant="ghost"
-          size="icon"
-          class="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-          :disabled="store.isLoadingOperation(`deleteCollection-${c.id}`)"
-          @click.stop="handleDelete(c)"
-        >
-          <Trash2 class="h-3.5 w-3.5 text-destructive" />
-        </Button>
       </div>
 
       <!-- Empty state for shared -->
@@ -209,17 +160,5 @@ function viewCollection(collection: Collection) {
       </DialogContent>
     </Dialog>
 
-    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete "{{ pendingDelete?.name }}"?</AlertDialogTitle>
-          <AlertDialogDescription>Saved queries inside this collection are not deleted.</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="cancelDelete">Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="confirmDelete">Delete</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
   </div>
 </template>

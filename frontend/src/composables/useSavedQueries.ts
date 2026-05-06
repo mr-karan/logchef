@@ -308,17 +308,15 @@ export function useSavedQueries(
         exploreStore.setActiveSavedQueryName(queryData.name);
       }
 
+      // Only include source + id — don't carry forward stale team/limit/t params
       const queryParams: Record<string, string> = {
         source: queryData.source_id.toString(),
         id: queryData.id.toString(),
       };
-      if (route.query.team) {
-        queryParams.team = route.query.team as string;
-      }
 
       const currentId = route.query.id as string | undefined;
-      if (currentId !== queryData.id.toString()) {
-        router.replace({ query: queryParams });
+      if (currentId !== queryData.id.toString() || route.query.source !== queryParams.source) {
+        router.replace({ path: '/logs/explore', query: queryParams });
       }
 
       return true
