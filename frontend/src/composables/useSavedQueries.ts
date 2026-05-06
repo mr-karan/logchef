@@ -4,6 +4,7 @@ import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useContextStore } from '@/stores/context'
 import { useAuthStore } from '@/stores/auth';
+import { useTeamsStore } from '@/stores/teams';
 import { useVariableStore } from '@/stores/variables'
 import type { VariableState } from '@/stores/variables'
 import { useToast } from '@/composables/useToast'
@@ -49,10 +50,14 @@ export function useSavedQueries(
 
   const isEditingExistingQuery = computed(() => !!route.query.id);
 
-  // Saved queries are no longer team-scoped. Anyone authenticated can attempt
-  // to save against a source they have access to; the backend gates by source
-  // access. Per-row edit/delete authorization lives in canEditQuery() below.
-  const canManageCollections = computed(() => authStore.isAuthenticated);
+  // Collection mutations (create, invite, add items) require team admin/editor
+  // or global admin. Regular members can only view.
+  const teamsStore = useTeamsStore();
+  const canManageCollections = computed(() => {
+    if (!authStore.isAuthenticated || !authStore.user) return false;
+    if (authStore.user.role === 'admin') return true;
+    return teamsStore.isAnyTeamAdmin;
+  });
 
   function canEditQuery(query: SavedQuery | null | undefined): boolean {
     if (!query || !authStore.user) return false;

@@ -225,16 +225,17 @@ func (s *Server) setupRoutes() {
 	// are invite-only with two roles: owner (full control) and member (read).
 	collections := api.Group("/collections", s.requireAuth)
 	collections.Get("/", s.handleListCollections)
-	collections.Post("/", s.handleCreateCollection)
 	collections.Get("/:collectionID", s.handleGetCollection)
-	collections.Put("/:collectionID", s.handleUpdateCollection)
-	collections.Delete("/:collectionID", s.handleDeleteCollection)
 	collections.Get("/:collectionID/members", s.handleListCollectionMembers)
-	collections.Post("/:collectionID/members", s.handleAddCollectionMember)
-	collections.Delete("/:collectionID/members/:userID", s.handleRemoveCollectionMember)
 	collections.Get("/:collectionID/items", s.handleListCollectionItems)
-	collections.Post("/:collectionID/items", s.handleAddCollectionItem)
-	collections.Delete("/:collectionID/items/:queryID", s.handleRemoveCollectionItem)
+	// Mutations require team admin/editor or global admin
+	collections.Post("/", s.requireAnyTeamAdmin, s.handleCreateCollection)
+	collections.Put("/:collectionID", s.requireAnyTeamAdmin, s.handleUpdateCollection)
+	collections.Delete("/:collectionID", s.requireAnyTeamAdmin, s.handleDeleteCollection)
+	collections.Post("/:collectionID/members", s.requireAnyTeamAdmin, s.handleAddCollectionMember)
+	collections.Delete("/:collectionID/members/:userID", s.requireAnyTeamAdmin, s.handleRemoveCollectionMember)
+	collections.Post("/:collectionID/items", s.requireAnyTeamAdmin, s.handleAddCollectionItem)
+	collections.Delete("/:collectionID/items/:queryID", s.requireAnyTeamAdmin, s.handleRemoveCollectionItem)
 
 	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete: creator + global admin (legacy queries
