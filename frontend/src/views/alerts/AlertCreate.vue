@@ -71,7 +71,7 @@ watch(duplicateAlertId, async () => {
   await loadAlertForDuplication();
 });
 
-async function handleCreate(payload: CreateAlertRequest) {
+async function handleCreate(payload: Omit<CreateAlertRequest, "source_id">) {
   // Source is still required (alerts are scoped to a source); team is not.
   if (!currentSourceId.value) {
     return;

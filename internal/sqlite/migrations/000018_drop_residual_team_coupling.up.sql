@@ -2,6 +2,11 @@
 -- created_by to alerts (the other two already have it). Visibility and edit
 -- access are now driven by source membership and creator/admin checks at the
 -- application layer, mirroring the saved-queries change in 000017.
+--
+-- IMPORTANT: alert_history has FK to alerts(id) ON DELETE CASCADE. We disable
+-- FK enforcement during the alerts table rebuild to preserve history rows.
+
+PRAGMA foreign_keys = OFF;
 
 -- ---------------- alerts ----------------
 
@@ -59,6 +64,10 @@ CREATE INDEX idx_alerts_active ON alerts(is_active);
 CREATE INDEX idx_alerts_last_evaluated ON alerts(last_evaluated_at);
 CREATE INDEX idx_alerts_last_state ON alerts(last_state);
 CREATE INDEX idx_alerts_created_by ON alerts(created_by);
+
+-- Re-enable FK enforcement and verify integrity after alerts rebuild.
+PRAGMA foreign_keys = ON;
+PRAGMA foreign_key_check;
 
 -- ---------------- query_shares ----------------
 

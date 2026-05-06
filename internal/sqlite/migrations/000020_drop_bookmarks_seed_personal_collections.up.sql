@@ -39,6 +39,11 @@ WHERE sq.is_bookmarked = 1 AND sq.created_by IS NOT NULL;
 
 -- 4. Drop the is_bookmarked column from saved_queries. SQLite can't DROP
 --    COLUMN cleanly when an index references it, so we rebuild the table.
+--    IMPORTANT: collection_items has a FK to saved_queries(id) ON DELETE CASCADE.
+--    We must disable FK enforcement during the rebuild to avoid cascade-deleting
+--    all collection items when the old table is dropped.
+PRAGMA foreign_keys = OFF;
+
 DROP INDEX IF EXISTS idx_saved_queries_source_bookmark;
 
 CREATE TABLE saved_queries_new (
@@ -64,3 +69,6 @@ ALTER TABLE saved_queries_new RENAME TO saved_queries;
 
 CREATE INDEX IF NOT EXISTS idx_saved_queries_source ON saved_queries(source_id);
 CREATE INDEX IF NOT EXISTS idx_saved_queries_created_by ON saved_queries(created_by);
+
+PRAGMA foreign_keys = ON;
+PRAGMA foreign_key_check;

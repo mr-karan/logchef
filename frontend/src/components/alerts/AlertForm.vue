@@ -33,10 +33,11 @@ import { X, Plus, User, Bell } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
 
 // Extended types for local usage until API types are updated
-interface ExtendedCreateAlertRequest extends CreateAlertRequest {
+// The form doesn't include source_id — the parent adds it from context.
+type FormCreatePayload = Omit<CreateAlertRequest, "source_id"> & {
   recipient_user_ids: number[];
   webhook_urls: string[];
-}
+};
 
 interface ExtendedUpdateAlertRequest extends UpdateAlertRequest {
   recipient_user_ids?: number[];
@@ -56,7 +57,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "cancel"): void;
-  (e: "create", payload: ExtendedCreateAlertRequest): void;
+  (e: "create", payload: FormCreatePayload): void;
   (e: "update", payload: ExtendedUpdateAlertRequest): void;
 }>();
 

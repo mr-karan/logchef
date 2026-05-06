@@ -47,11 +47,12 @@ export const useAlertsStore = defineStore("alerts", () => {
     state.data.value.selectedAlertId = null;
   }
 
-  async function fetchAlerts(_teamId: number | undefined, sourceId: number) {
-    return await state.withLoading(`fetchAlerts-${sourceId}`, async () => {
+  async function fetchAlerts(_teamId?: number | undefined, sourceId?: number) {
+    const key = sourceId ? `fetchAlerts-${sourceId}` : 'fetchAlerts-all';
+    return await state.withLoading(key, async () => {
       return await state.callApi<Alert[]>({
         apiCall: () => alertsApi.list(sourceId),
-        operationKey: `fetchAlerts-${sourceId}`,
+        operationKey: key,
         onSuccess: (response) => {
           state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
           // Clear selected alert if it no longer exists in the new list.
