@@ -414,18 +414,19 @@ func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQuerySharePara
 
 const createSavedQuery = `-- name: CreateSavedQuery :one
 
-INSERT INTO saved_queries (source_id, name, description, query_type, query_content, created_by)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_type, query_content, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
 type CreateSavedQueryParams struct {
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedBy    sql.NullInt64  `json:"created_by"`
+	SourceID          int64          `json:"source_id"`
+	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryType         string         `json:"query_type"`
+	QueryContent      string         `json:"query_content"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
 }
 
 // Saved Queries (cross-team, source-scoped)
@@ -433,6 +434,7 @@ type CreateSavedQueryParams struct {
 func (q *Queries) CreateSavedQuery(ctx context.Context, arg CreateSavedQueryParams) (int64, error) {
 	row := q.queryRow(ctx, q.createSavedQueryStmt, createSavedQuery,
 		arg.SourceID,
+		arg.CreatedFromTeamID,
 		arg.Name,
 		arg.Description,
 		arg.QueryType,
@@ -1001,7 +1003,7 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 }
 
 const getSavedQuery = `-- name: GetSavedQuery :one
-SELECT id, source_id, name, description, query_type, query_content, created_by, created_at, updated_at FROM saved_queries WHERE id = ?
+SELECT id, source_id, name, description, query_type, query_content, created_by, created_at, updated_at, created_from_team_id FROM saved_queries WHERE id = ?
 `
 
 // Look up one saved query by id
@@ -1018,6 +1020,7 @@ func (q *Queries) GetSavedQuery(ctx context.Context, id int64) (SavedQuery, erro
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedFromTeamID,
 	)
 	return i, err
 }
@@ -1974,6 +1977,7 @@ const listSavedQueriesForUser = `-- name: ListSavedQueriesForUser :many
 SELECT
     sq.id,
     sq.source_id,
+    sq.created_from_team_id,
     sq.name,
     sq.description,
     sq.query_type,
@@ -1994,16 +1998,17 @@ ORDER BY sq.updated_at DESC
 `
 
 type ListSavedQueriesForUserRow struct {
-	ID           int64          `json:"id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	CreatedBy    sql.NullInt64  `json:"created_by"`
-	SourceName   string         `json:"source_name"`
+	ID                int64          `json:"id"`
+	SourceID          int64          `json:"source_id"`
+	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryType         string         `json:"query_type"`
+	QueryContent      string         `json:"query_content"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
+	SourceName        string         `json:"source_name"`
 }
 
 // List every saved query the user can see (any source attached to any of their teams)
@@ -2019,6 +2024,7 @@ func (q *Queries) ListSavedQueriesForUser(ctx context.Context, userID int64) ([]
 		if err := rows.Scan(
 			&i.ID,
 			&i.SourceID,
+			&i.CreatedFromTeamID,
 			&i.Name,
 			&i.Description,
 			&i.QueryType,
@@ -2045,6 +2051,7 @@ const listSavedQueriesForUserBySource = `-- name: ListSavedQueriesForUserBySourc
 SELECT
     sq.id,
     sq.source_id,
+    sq.created_from_team_id,
     sq.name,
     sq.description,
     sq.query_type,
@@ -2070,16 +2077,17 @@ type ListSavedQueriesForUserBySourceParams struct {
 }
 
 type ListSavedQueriesForUserBySourceRow struct {
-	ID           int64          `json:"id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
-	CreatedBy    sql.NullInt64  `json:"created_by"`
-	SourceName   string         `json:"source_name"`
+	ID                int64          `json:"id"`
+	SourceID          int64          `json:"source_id"`
+	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryType         string         `json:"query_type"`
+	QueryContent      string         `json:"query_content"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
+	SourceName        string         `json:"source_name"`
 }
 
 // List saved queries for a specific source, scoped to a user that has access to it
@@ -2095,6 +2103,7 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 		if err := rows.Scan(
 			&i.ID,
 			&i.SourceID,
+			&i.CreatedFromTeamID,
 			&i.Name,
 			&i.Description,
 			&i.QueryType,

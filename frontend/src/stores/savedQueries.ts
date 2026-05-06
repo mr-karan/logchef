@@ -118,7 +118,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     const key = `fetchSavedQuery-${queryId}`;
     return await state.withLoading(key, async () => {
       return await state.callApi<SavedQuery>({
-        apiCall: () => savedQueriesApi.get(queryId),
+        apiCall: () => savedQueriesApi.resolve(queryId, contextStore.teamId),
         operationKey: key,
         onSuccess: (response) => {
           state.data.value.selectedQuery = response;
@@ -129,6 +129,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
 
   async function create(
     sourceId: number,
+    createdFromTeamId: number | null | undefined,
     name: string,
     description: string,
     queryContent: SavedQueryContent,
@@ -139,6 +140,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       const apiQueryContent = { ...queryContent };
       const payload = {
         source_id: sourceId,
+        created_from_team_id: createdFromTeamId ?? null,
         name,
         description,
         query_type: queryType,

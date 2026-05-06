@@ -58,8 +58,6 @@ const queryId = ref('');
 const { allVariables } = storeToRefs(variableStore);
 
 const currentTeamId = computed(() => {
-  if (props.editData?.team_id) return Number(props.editData.team_id);
-  if (props.initialData?.team_id) return Number(props.initialData.team_id);
   return teamsStore.currentTeamId;
 });
 
@@ -97,16 +95,10 @@ const currentSourceId = computed(() => {
   return '';
 });
 
-// Get current team name
-const currentTeamName = computed(() => {
-  if (!currentTeamId.value) return '';
-
-  const team = teamsStore.teams.find(t => t.id === currentTeamId.value);
-  return team ? team.name : '';
-});
-
 // Get source name for display
 const sourceName = computed(() => {
+  if (props.editData?.source_name) return props.editData.source_name;
+  if (props.initialData?.source_name) return props.initialData.source_name;
   if (!currentSourceId.value) return '';
 
   // Find the source in the sources list
@@ -437,10 +429,9 @@ async function handleSubmit(event: Event) {
       // Prepare the query content with the proper structure
       const preparedContent = prepareQueryContent(saveTimestamp.value);
 
-      // Create the base payload
       const payload = {
-        team_id: currentTeamId.value?.toString() || '',
         source_id: currentSourceId.value,
+        created_from_team_id: currentTeamId.value ?? null,
         name: name.value,
         description: description.value,
         query_content: preparedContent,
@@ -482,8 +473,8 @@ function handleClose() {
 }
 
 // Add computed properties for the descriptions
-const editDescription = 'Update details for this collection item.'
-const saveDescription = 'Save your current query to your collection for future use.'
+const editDescription = 'Update this saved query.'
+const saveDescription = 'Save this query for reuse. Collections can organize it afterward.'
 </script>
 
 <template>
@@ -493,11 +484,11 @@ const saveDescription = 'Save your current query to your collection for future u
         <DialogTitle>
           <span v-if="isEditing" class="flex items-center">
             <Pencil class="h-4 w-4 mr-2" />
-            Edit Collection Item
+            Edit Saved Query
           </span>
           <span v-else class="flex items-center">
             <SaveIcon class="h-4 w-4 mr-2" />
-            Add to Collection
+            Save Query
           </span>
         </DialogTitle>
         <DialogDescription>
@@ -506,23 +497,12 @@ const saveDescription = 'Save your current query to your collection for future u
       </DialogHeader>
 
       <form @submit="handleSubmit" class="space-y-4">
-        <!-- Source and Team Information (non-editable) -->
+        <!-- Source information (non-editable) -->
         <div class="border rounded-md p-3 bg-muted/20">
-          <div class="grid grid-cols-2 gap-4">
-            <!-- Team Information -->
-            <div>
-              <div class="text-sm font-medium">Team</div>
-              <div class="text-sm text-muted-foreground mt-1">
-                {{ currentTeamName }}
-              </div>
-            </div>
-
-            <!-- Source Information -->
-            <div>
-              <div class="text-sm font-medium">Source</div>
-              <div class="text-sm text-muted-foreground mt-1">
-                {{ sourceName }}
-              </div>
+          <div>
+            <div class="text-sm font-medium">Source</div>
+            <div class="text-sm text-muted-foreground mt-1">
+              {{ sourceName }}
             </div>
           </div>
         </div>

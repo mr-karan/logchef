@@ -2,6 +2,7 @@ import { ref, computed, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
+import { useContextStore } from '@/stores/context'
 import { useAuthStore } from '@/stores/auth';
 import { useVariableStore } from '@/stores/variables'
 import type { VariableState } from '@/stores/variables'
@@ -34,6 +35,7 @@ export function useSavedQueries(
   const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
+  const contextStore = useContextStore()
   const authStore = useAuthStore();
   const variableStore = useVariableStore();
   const { toast } = useToast()
@@ -174,6 +176,7 @@ export function useSavedQueries(
 
           response = await savedQueriesStore.create(
               formData.source_id,
+              formData.created_from_team_id,
               formData.name,
               formData.description,
               parsedContent,
@@ -239,6 +242,19 @@ export function useSavedQueries(
 
       exploreStore.clearError()
       exploreStore.setActiveMode(isLogchefQL ? 'logchefql' : 'sql')
+
+      const resolvedTeamId = 'resolved_team_id' in queryData
+        ? Number((queryData as SavedQuery & { resolved_team_id?: number }).resolved_team_id)
+        : null;
+
+      if (resolvedTeamId && resolvedTeamId !== contextStore.teamId) {
+        contextStore.selectTeam(resolvedTeamId);
+      }
+
+      if (queryData.source_id && queryData.source_id !== contextStore.sourceId) {
+        exploreStore.suppressNextSourceReset(queryData.source_id);
+        contextStore.selectSource(queryData.source_id);
+      }
 
       if (isLogchefQL) {
         exploreStore.setLogchefqlCode(queryToLoad)
@@ -308,14 +324,20 @@ export function useSavedQueries(
         exploreStore.setActiveSavedQueryName(queryData.name);
       }
 
-      // Only include source + id — don't carry forward stale team/limit/t params
+      // Only include resolved execution context + id; don't carry forward stale
+      // limit/time/mode params from the previous explorer state.
       const queryParams: Record<string, string> = {
+        ...(resolvedTeamId ? { team: resolvedTeamId.toString() } : {}),
         source: queryData.source_id.toString(),
         id: queryData.id.toString(),
       };
 
       const currentId = route.query.id as string | undefined;
-      if (currentId !== queryData.id.toString() || route.query.source !== queryParams.source) {
+      if (
+        currentId !== queryData.id.toString() ||
+        route.query.source !== queryParams.source ||
+        (queryParams.team && route.query.team !== queryParams.team)
+      ) {
         router.replace({ path: '/logs/explore', query: queryParams });
       }
 
@@ -347,13 +369,9 @@ export function useSavedQueries(
     openingQueryId.value = query.id
 
     try {
-      const exploreQuery: Record<string, string> = {
-        source: query.source_id.toString(),
-        id: query.id.toString(),
-      };
       await router.push({
-        path: '/logs/explore',
-        query: exploreQuery,
+        path: `/logs/saved/${query.id}`,
+        query: {},
       })
     } catch (error: unknown) {
       const err = error as { name?: string }

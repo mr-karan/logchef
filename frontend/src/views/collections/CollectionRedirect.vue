@@ -33,7 +33,8 @@ onMounted(async () => {
   }
 
   try {
-    const response = await savedQueriesApi.resolve(queryIdNum);
+    const preferredTeam = typeof route.query.team === 'string' ? route.query.team : undefined;
+    const response = await savedQueriesApi.resolve(queryIdNum, preferredTeam);
     if (!response.data) {
       throw new Error('Saved query not found.');
     }
@@ -41,6 +42,7 @@ onMounted(async () => {
     await router.replace({
       path: '/logs/explore',
       query: {
+        team: response.data.resolved_team_id.toString(),
         source: response.data.source_id.toString(),
         id: queryIdNum.toString(),
       },

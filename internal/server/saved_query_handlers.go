@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"strconv"
 
 	core "github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -98,7 +99,27 @@ func (s *Server) handleCreateSavedQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
-	created, err := core.CreateSavedQuery(c.Context(), s.sqlite, s.log, req.SourceID, req.Name, req.Description, req.QueryContent, string(req.QueryType), user.ID)
+	if req.CreatedFromTeamID != nil {
+		isMember, memberErr := core.IsTeamMember(c.Context(), s.sqlite, *req.CreatedFromTeamID, user.ID)
+		if memberErr != nil {
+			s.log.Error("failed to check saved query team membership", "error", memberErr, "user_id", user.ID, "team_id", *req.CreatedFromTeamID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify team access", models.GeneralErrorType)
+		}
+		if !isMember {
+			return SendErrorWithType(c, fiber.StatusForbidden, "You are not a member of the selected team", models.AuthorizationErrorType)
+		}
+
+		teamHasSource, teamSourceErr := core.TeamHasSourceAccess(c.Context(), s.sqlite, *req.CreatedFromTeamID, req.SourceID)
+		if teamSourceErr != nil {
+			s.log.Error("failed to check saved query team source access", "error", teamSourceErr, "team_id", *req.CreatedFromTeamID, "source_id", req.SourceID)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
+		}
+		if !teamHasSource {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Selected team does not have access to this source", models.ValidationErrorType)
+		}
+	}
+
+	created, err := core.CreateSavedQuery(c.Context(), s.sqlite, s.log, req.SourceID, req.CreatedFromTeamID, req.Name, req.Description, req.QueryContent, string(req.QueryType), user.ID)
 	if err != nil {
 		if errors.Is(err, core.ErrQueryTypeRequired) || errors.Is(err, core.ErrInvalidQueryType) || errors.Is(err, core.ErrInvalidQueryContent) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -187,9 +208,48 @@ func (s *Server) handleDeleteSavedQuery(c *fiber.Ctx) error {
 // handleResolveSavedQuery returns the full saved-query struct for the explorer
 // to hydrate without round-tripping through URL params.
 func (s *Server) handleResolveSavedQuery(c *fiber.Ctx) error {
-	query, _, err := s.loadSavedQueryWithVisibility(c)
+	query, user, err := s.loadSavedQueryWithVisibility(c)
 	if err != nil {
 		return err
 	}
-	return SendSuccess(c, fiber.StatusOK, query)
+
+	teams, err := core.ListTeamsWithAccessToSource(c.Context(), s.sqlite, s.log, query.SourceID, user.ID)
+	if err != nil {
+		s.log.Error("failed to resolve saved query team", "error", err, "query_id", query.ID, "source_id", query.SourceID, "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve saved query context", models.GeneralErrorType)
+	}
+	if len(teams) == 0 {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
+	}
+
+	resolvedTeamID := teams[0].ID
+	hasAccessibleTeam := func(teamID models.TeamID) bool {
+		for _, team := range teams {
+			if team.ID == teamID {
+				return true
+			}
+		}
+		return false
+	}
+
+	usedPreferredTeam := false
+	if preferredTeam := c.Query("team_id"); preferredTeam != "" {
+		if parsed, parseErr := strconv.ParseInt(preferredTeam, 10, 64); parseErr == nil {
+			preferredTeamID := models.TeamID(parsed)
+			if hasAccessibleTeam(preferredTeamID) {
+				resolvedTeamID = preferredTeamID
+				usedPreferredTeam = true
+			}
+		}
+	}
+	if !usedPreferredTeam && query.CreatedFromTeamID != nil {
+		if hasAccessibleTeam(*query.CreatedFromTeamID) {
+			resolvedTeamID = *query.CreatedFromTeamID
+		}
+	}
+
+	return SendSuccess(c, fiber.StatusOK, &models.ResolvedSavedQuery{
+		SavedQuery:     *query,
+		ResolvedTeamID: resolvedTeamID,
+	})
 }

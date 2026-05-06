@@ -98,14 +98,14 @@ func validateSavedQueryFields(queryType, queryContentJSON string, requireType bo
 }
 
 // CreateSavedQuery persists a new saved query owned by the supplied creator.
-func CreateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, name, description, queryContentJSON, queryType string, createdBy models.UserID) (*models.SavedQuery, error) {
+func CreateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryContentJSON, queryType string, createdBy models.UserID) (*models.SavedQuery, error) {
 	if err := validateSavedQueryFields(queryType, queryContentJSON, true); err != nil {
 		log.Warn("invalid saved query create payload", "error", err, "source_id", sourceID, "name", name)
 		return nil, err
 	}
 
 	owner := createdBy
-	created, err := db.CreateSavedQuery(ctx, sourceID, name, description, queryType, queryContentJSON, &owner)
+	created, err := db.CreateSavedQuery(ctx, sourceID, createdFromTeamID, name, description, queryType, queryContentJSON, &owner)
 	if err != nil {
 		log.Error("failed to create saved query", "error", err, "source_id", sourceID, "name", name)
 		return nil, fmt.Errorf("error creating saved query: %w", err)

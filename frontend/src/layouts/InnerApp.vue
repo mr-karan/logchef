@@ -87,18 +87,9 @@ onMounted(() => {
 
 // Function to navigate to collections with clean URL  
 const navigateToCollections = () => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
-  
-  // Explicitly define only the query params we want
-  const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  
-  // Use router.push to completely replace the URL with only our desired params
   router.push({
     path: "/logs/saved", 
-    query
+    query: {},
   });
 };
 

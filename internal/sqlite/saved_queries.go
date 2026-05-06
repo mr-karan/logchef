@@ -12,14 +12,15 @@ import (
 // mapSavedQueryRow converts a generated sqlc.SavedQuery into the domain model.
 func mapSavedQueryRow(row sqlc.SavedQuery) *models.SavedQuery {
 	q := &models.SavedQuery{
-		ID:           int(row.ID),
-		SourceID:     models.SourceID(row.SourceID),
-		Name:         row.Name,
-		Description:  row.Description.String,
-		QueryType:    models.SavedQueryType(row.QueryType),
-		QueryContent: row.QueryContent,
-		CreatedAt:    row.CreatedAt,
-		UpdatedAt:    row.UpdatedAt,
+		ID:                int(row.ID),
+		SourceID:          models.SourceID(row.SourceID),
+		Name:              row.Name,
+		Description:       row.Description.String,
+		QueryType:         models.SavedQueryType(row.QueryType),
+		QueryContent:      row.QueryContent,
+		CreatedFromTeamID: nullableTeamID(row.CreatedFromTeamID),
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
 	}
 	if row.CreatedBy.Valid {
 		uid := models.UserID(row.CreatedBy.Int64)
@@ -28,14 +29,25 @@ func mapSavedQueryRow(row sqlc.SavedQuery) *models.SavedQuery {
 	return q
 }
 
+func nullableTeamID(value sql.NullInt64) *models.TeamID {
+	if !value.Valid {
+		return nil
+	}
+	teamID := models.TeamID(value.Int64)
+	return &teamID
+}
+
 // CreateSavedQuery inserts a new saved query and returns the persisted record.
-func (db *DB) CreateSavedQuery(ctx context.Context, sourceID models.SourceID, name, description, queryType, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error) {
+func (db *DB) CreateSavedQuery(ctx context.Context, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryType, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error) {
 	params := sqlc.CreateSavedQueryParams{
 		SourceID:     int64(sourceID),
 		Name:         name,
 		Description:  nullString(description),
 		QueryType:    queryType,
 		QueryContent: queryContent,
+	}
+	if createdFromTeamID != nil {
+		params.CreatedFromTeamID = sql.NullInt64{Int64: int64(*createdFromTeamID), Valid: true}
 	}
 	if createdBy != nil {
 		params.CreatedBy = sql.NullInt64{Int64: int64(*createdBy), Valid: true}
@@ -95,15 +107,16 @@ func (db *DB) ListSavedQueriesForUser(ctx context.Context, userID models.UserID)
 	queries := make([]*models.SavedQuery, 0, len(rows))
 	for _, r := range rows {
 		q := &models.SavedQuery{
-			ID:           int(r.ID),
-			SourceID:     models.SourceID(r.SourceID),
-			Name:         r.Name,
-			Description:  r.Description.String,
-			QueryType:    models.SavedQueryType(r.QueryType),
-			QueryContent: r.QueryContent,
-			CreatedAt:    r.CreatedAt,
-			UpdatedAt:    r.UpdatedAt,
-			SourceName:   r.SourceName,
+			ID:                int(r.ID),
+			SourceID:          models.SourceID(r.SourceID),
+			CreatedFromTeamID: nullableTeamID(r.CreatedFromTeamID),
+			Name:              r.Name,
+			Description:       r.Description.String,
+			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryContent:      r.QueryContent,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			SourceName:        r.SourceName,
 		}
 		if r.CreatedBy.Valid {
 			uid := models.UserID(r.CreatedBy.Int64)
@@ -128,15 +141,16 @@ func (db *DB) ListSavedQueriesForUserBySource(ctx context.Context, userID models
 	queries := make([]*models.SavedQuery, 0, len(rows))
 	for _, r := range rows {
 		q := &models.SavedQuery{
-			ID:           int(r.ID),
-			SourceID:     models.SourceID(r.SourceID),
-			Name:         r.Name,
-			Description:  r.Description.String,
-			QueryType:    models.SavedQueryType(r.QueryType),
-			QueryContent: r.QueryContent,
-			CreatedAt:    r.CreatedAt,
-			UpdatedAt:    r.UpdatedAt,
-			SourceName:   r.SourceName,
+			ID:                int(r.ID),
+			SourceID:          models.SourceID(r.SourceID),
+			CreatedFromTeamID: nullableTeamID(r.CreatedFromTeamID),
+			Name:              r.Name,
+			Description:       r.Description.String,
+			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryContent:      r.QueryContent,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			SourceName:        r.SourceName,
 		}
 		if r.CreatedBy.Valid {
 			uid := models.UserID(r.CreatedBy.Int64)

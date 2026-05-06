@@ -39,9 +39,9 @@ func (e ErrInvalidTimeout) Error() string {
 // TemplateVariable represents a variable for SQL template substitution.
 // Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
 type TemplateVariable struct {
-	Name  string      `json:"name"`  // Variable name (without braces)
-	Type  string      `json:"type"`  // "string", "text", "number", or "date"
-	Value any `json:"value"` // The value to substitute
+	Name  string `json:"name"`  // Variable name (without braces)
+	Type  string `json:"type"`  // "string", "text", "number", or "date"
+	Value any    `json:"value"` // The value to substitute
 }
 
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
@@ -74,9 +74,9 @@ type APIHistogramRequest struct {
 // LogQueryResult represents the result of a log query
 type LogQueryResult struct {
 	Data     []map[string]any `json:"data"`
-	Stats    QueryStats               `json:"stats"`
-	Columns  []ColumnInfo             `json:"columns"`
-	Warnings []QueryWarning           `json:"warnings,omitempty"`
+	Stats    QueryStats       `json:"stats"`
+	Columns  []ColumnInfo     `json:"columns"`
+	Warnings []QueryWarning   `json:"warnings,omitempty"`
 }
 
 // LogContextRequest represents a request to get temporal context around a log
@@ -92,11 +92,11 @@ type LogContextRequest struct {
 
 // LogContextResponse represents temporal context query results
 type LogContextResponse struct {
-	TargetTimestamp int64                    `json:"target_timestamp"`
+	TargetTimestamp int64            `json:"target_timestamp"`
 	BeforeLogs      []map[string]any `json:"before_logs"`
 	TargetLogs      []map[string]any `json:"target_logs"` // Multiple logs might have the same timestamp
 	AfterLogs       []map[string]any `json:"after_logs"`
-	Stats           QueryStats               `json:"stats"`
+	Stats           QueryStats       `json:"stats"`
 }
 
 // SavedQueryTab represents the active tab in the explorer
@@ -142,8 +142,8 @@ type SavedQueryVariable struct {
 	Type         string                     `json:"type"`
 	Label        string                     `json:"label"`
 	InputType    string                     `json:"inputType"`
-	Value        any                `json:"value"`
-	DefaultValue any                `json:"defaultValue,omitempty"`
+	Value        any                        `json:"value"`
+	DefaultValue any                        `json:"defaultValue,omitempty"`
 	IsOptional   bool                       `json:"isOptional,omitempty"`
 	IsRequired   bool                       `json:"isRequired,omitempty"`
 	Options      []SavedQueryVariableOption `json:"options,omitempty"`
@@ -167,25 +167,36 @@ type SavedQueryContent struct {
 // (each user has an auto-created personal collection that takes the role
 // bookmarks used to play).
 type SavedQuery struct {
-	ID           int            `json:"id" db:"id"`
-	SourceID     SourceID       `json:"source_id" db:"source_id"`
-	Name         string         `json:"name" db:"name"`
-	Description  string         `json:"description" db:"description"`
-	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
-	QueryContent string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	CreatedBy    *UserID        `json:"created_by,omitempty" db:"created_by"`
-	CreatedAt    time.Time      `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at" db:"updated_at"`
-	SourceName   string         `json:"source_name,omitempty"`
+	ID                int            `json:"id" db:"id"`
+	SourceID          SourceID       `json:"source_id" db:"source_id"`
+	CreatedFromTeamID *TeamID        `json:"created_from_team_id,omitempty" db:"created_from_team_id"`
+	Name              string         `json:"name" db:"name"`
+	Description       string         `json:"description" db:"description"`
+	QueryType         SavedQueryType `json:"query_type" db:"query_type"`
+	QueryContent      string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	CreatedBy         *UserID        `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt         time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at" db:"updated_at"`
+	SourceName        string         `json:"source_name,omitempty"`
+}
+
+// ResolvedSavedQuery is the explorer-facing representation of a saved query.
+// Saved queries are source-scoped, but query execution is still routed through
+// a team/source URL, so the resolver supplies a team that links the user to the
+// query's source.
+type ResolvedSavedQuery struct {
+	SavedQuery
+	ResolvedTeamID TeamID `json:"resolved_team_id"`
 }
 
 // CreateSavedQueryRequest is the JSON body for POST /api/v1/saved-queries.
 type CreateSavedQueryRequest struct {
-	Name         string         `json:"name" validate:"required"`
-	Description  string         `json:"description"`
-	SourceID     SourceID       `json:"source_id" validate:"required"`
-	QueryType    SavedQueryType `json:"query_type" validate:"required"`
-	QueryContent string         `json:"query_content" validate:"required"`
+	Name              string         `json:"name" validate:"required"`
+	Description       string         `json:"description"`
+	SourceID          SourceID       `json:"source_id" validate:"required"`
+	CreatedFromTeamID *TeamID        `json:"created_from_team_id,omitempty"`
+	QueryType         SavedQueryType `json:"query_type" validate:"required"`
+	QueryContent      string         `json:"query_content" validate:"required"`
 }
 
 // UpdateSavedQueryRequest is the JSON body for PUT /api/v1/saved-queries/:id.

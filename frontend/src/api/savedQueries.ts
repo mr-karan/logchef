@@ -26,6 +26,7 @@ export interface SavedQueryContent {
 export interface SavedQuery {
   id: number;
   source_id: number;
+  created_from_team_id?: number | null;
   name: string;
   description: string;
   query_type: string;
@@ -34,6 +35,10 @@ export interface SavedQuery {
   created_at: string;
   updated_at: string;
   source_name?: string;
+}
+
+export interface ResolvedSavedQuery extends SavedQuery {
+  resolved_team_id: number;
 }
 
 /**
@@ -62,6 +67,7 @@ export const savedQueriesApi = {
 
   create: (query: {
     source_id: number;
+    created_from_team_id?: number | null;
     name: string;
     description: string;
     query_type: string;
@@ -76,8 +82,10 @@ export const savedQueriesApi = {
   delete: (queryId: number | string) =>
     apiClient.delete<{ message: string }>(`/saved-queries/${queryId}`),
 
-  resolve: (queryId: number | string) =>
-    apiClient.get<SavedQuery>(`/saved-queries/${queryId}/resolve`),
+  resolve: (queryId: number | string, preferredTeamId?: number | string | null) => {
+    const suffix = preferredTeamId ? `?team_id=${encodeURIComponent(String(preferredTeamId))}` : "";
+    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`);
+  },
 
   getUserTeams: () => apiClient.get<Team[]>("/me/teams"),
 };

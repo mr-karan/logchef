@@ -226,8 +226,8 @@ ORDER BY t.name;
 
 -- name: CreateSavedQuery :one
 -- Insert a new saved query and return its id
-INSERT INTO saved_queries (source_id, name, description, query_type, query_content, created_by)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_type, query_content, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetSavedQuery :one
@@ -253,6 +253,7 @@ DELETE FROM saved_queries WHERE id = ?;
 SELECT
     sq.id,
     sq.source_id,
+    sq.created_from_team_id,
     sq.name,
     sq.description,
     sq.query_type,
@@ -276,6 +277,7 @@ ORDER BY sq.updated_at DESC;
 SELECT
     sq.id,
     sq.source_id,
+    sq.created_from_team_id,
     sq.name,
     sq.description,
     sq.query_type,

@@ -144,13 +144,9 @@ const isUserAuthenticated = computed(() => authStore.isAuthenticated);
 const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
 
 const navigateToCollectionsView = () => {
-  const query: Record<string, string | number> = {};
-  if (props.selectedTeamId) query.team = props.selectedTeamId;
-  if (props.selectedSourceId) query.source = props.selectedSourceId;
-
   router.push({
     path: '/logs/saved',
-    query
+    query: {},
   });
   isOpen.value = false;
 };

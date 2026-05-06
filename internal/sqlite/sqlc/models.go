@@ -115,15 +115,16 @@ type QueryShare struct {
 }
 
 type SavedQuery struct {
-	ID           int64          `json:"id"`
-	SourceID     int64          `json:"source_id"`
-	Name         string         `json:"name"`
-	Description  sql.NullString `json:"description"`
-	QueryType    string         `json:"query_type"`
-	QueryContent string         `json:"query_content"`
-	CreatedBy    sql.NullInt64  `json:"created_by"`
-	CreatedAt    time.Time      `json:"created_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	ID                int64          `json:"id"`
+	SourceID          int64          `json:"source_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryType         string         `json:"query_type"`
+	QueryContent      string         `json:"query_content"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
 }
 
 type Session struct {

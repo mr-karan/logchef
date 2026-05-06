@@ -366,6 +366,24 @@ router.beforeEach(async (to) => {
     return { path: "/" };
   }
 
+  const querylessRouteNames = new Set([
+    "SavedQueries",
+    "SavedQueryRedirect",
+    "CollectionsList",
+    "CollectionDetail",
+  ]);
+  if (
+    querylessRouteNames.has(String(to.name)) &&
+    Object.keys(to.query).length > 0
+  ) {
+    return {
+      path: to.path,
+      hash: to.hash,
+      query: {},
+      replace: true,
+    };
+  }
+
   if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {
     return { name: "Forbidden" };
   }

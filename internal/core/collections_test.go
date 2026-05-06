@@ -192,7 +192,7 @@ func TestAddCollectionItemSourceAccessGate(t *testing.T) {
 	}
 
 	// Save a query against that source.
-	savedQuery, err := db.CreateSavedQuery(context.Background(), source.ID, "test", "", "sql", `{"version":1,"sourceId":1,"timeRange":null,"limit":100,"content":"SELECT 1"}`, &owner.ID)
+	savedQuery, err := db.CreateSavedQuery(context.Background(), source.ID, nil, "test", "", "sql", `{"version":1,"sourceId":1,"timeRange":null,"limit":100,"content":"SELECT 1"}`, &owner.ID)
 	if err != nil {
 		t.Fatalf("CreateSavedQuery failed: %v", err)
 	}
