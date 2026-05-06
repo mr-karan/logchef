@@ -43,12 +43,21 @@ import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
 import { useAuthStore } from "@/stores/auth";
+import { useUsersStore } from "@/stores/users";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 const route = useRoute();
 const router = useRouter();
 const { toast } = useToast();
 const store = useCollectionsStore();
 const authStore = useAuthStore();
+const usersStore = useUsersStore();
 const { data } = storeToRefs(store);
 
 const collectionID = computed(() => Number(route.params.collectionID));
@@ -61,6 +70,12 @@ const isOwner = computed(() => collection.value?.caller_role === "owner" || auth
 const showAddMember = ref(false);
 const newMemberId = ref("");
 const newMemberRole = ref<"owner" | "member">("member");
+
+// Users available for invite: all users minus current members
+const availableUsers = computed(() => {
+  const memberIds = new Set(members.value.map(m => String(m.user_id)));
+  return (usersStore.users ?? []).filter(u => !memberIds.has(String(u.id)));
+});
 
 const showRename = ref(false);
 const renameName = ref("");
@@ -81,7 +96,11 @@ async function load() {
   await Promise.all([store.fetchItems(collectionID.value), store.fetchMembers(collectionID.value)]);
 }
 
-onMounted(load);
+onMounted(async () => {
+  await load();
+  // Load users list for the invite dropdown
+  await usersStore.loadUsers();
+});
 watch(collectionID, load);
 
 async function handleAddMember() {
@@ -288,20 +307,40 @@ async function handleDeleteCollection() {
         <DialogHeader>
           <DialogTitle>Invite member</DialogTitle>
           <DialogDescription>
-            Add a member by user id. Owners can fully manage the collection; members can read and run items they have source access to.
+            Select a user by email. Owners can fully manage the collection; members can read and run items they have source access to.
           </DialogDescription>
         </DialogHeader>
         <form @submit.prevent="handleAddMember" class="space-y-4">
           <div class="grid gap-2">
-            <Label for="member-id">User id</Label>
-            <Input id="member-id" v-model="newMemberId" type="number" min="1" required />
+            <Label>User</Label>
+            <Select v-model="newMemberId">
+              <SelectTrigger>
+                <SelectValue placeholder="Select a user to invite" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem
+                  v-for="user in availableUsers"
+                  :key="user.id"
+                  :value="String(user.id)"
+                  :text-value="user.email"
+                >
+                  {{ user.email }}
+                  <span v-if="user.full_name" class="ml-2 text-muted-foreground text-xs">({{ user.full_name }})</span>
+                </SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div class="grid gap-2">
-            <Label for="member-role">Role</Label>
-            <select id="member-role" v-model="newMemberRole" class="h-9 rounded-md border bg-background px-3 text-sm">
-              <option value="member">Member</option>
-              <option value="owner">Owner</option>
-            </select>
+            <Label>Role</Label>
+            <Select v-model="newMemberRole">
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="member">Member</SelectItem>
+                <SelectItem value="owner">Owner</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" @click="showAddMember = false">Cancel</Button>
