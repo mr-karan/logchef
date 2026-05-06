@@ -227,6 +227,13 @@ export function useUrlState(): UrlStateReturn {
           try {
             const response = await savedQueriesApi.resolve(parseInt(result.queryId));
             if (response.data) {
+              // The resolved query's source_id is the source of truth.
+              // Override the URL's ?source= if it disagrees (e.g. user came
+              // from a different source context and clicked a saved-query link).
+              if (response.data.source_id && String(response.data.source_id) !== params.source) {
+                params.source = String(response.data.source_id);
+                contextStore.selectSource(response.data.source_id);
+              }
               const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
               shouldExecute = hydrateResult.shouldExecute;
             }
