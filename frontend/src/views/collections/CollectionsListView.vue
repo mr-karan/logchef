@@ -16,7 +16,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
@@ -31,6 +40,7 @@ const createName = ref("");
 const createDescription = ref("");
 const isCreating = ref(false);
 
+const showDeleteDialog = ref(false);
 const pendingDelete = ref<Collection | null>(null);
 
 const personal = computed(() => store.personalCollection);
@@ -70,11 +80,18 @@ function handleDelete(collection: Collection) {
     return;
   }
   pendingDelete.value = collection;
+  showDeleteDialog.value = true;
 }
 
 async function confirmDelete() {
   if (!pendingDelete.value) return;
   await store.deleteCollection(pendingDelete.value.id);
+  showDeleteDialog.value = false;
+  pendingDelete.value = null;
+}
+
+function cancelDelete() {
+  showDeleteDialog.value = false;
   pendingDelete.value = null;
 }
 
@@ -102,9 +119,9 @@ function viewCollection(collection: Collection) {
       </CardHeader>
 
       <CardContent class="space-y-6">
-        <Alert v-if="store.error.value" variant="destructive">
+        <Alert v-if="store.error" variant="destructive">
           <AlertCircle class="h-4 w-4" />
-          <AlertDescription>{{ store.error.value.message }}</AlertDescription>
+          <AlertDescription>{{ store.error.message }}</AlertDescription>
         </Alert>
 
         <div v-if="isLoading" class="flex items-center justify-center py-10">
@@ -206,14 +223,17 @@ function viewCollection(collection: Collection) {
       </DialogContent>
     </Dialog>
 
-    <ConfirmDialog
-      :open="pendingDelete !== null"
-      :title="pendingDelete ? `Delete “${pendingDelete.name}”?` : 'Delete collection?'"
-      description="Saved queries inside this collection are not deleted."
-      confirm-text="Delete"
-      destructive
-      @update:open="(v) => { if (!v) pendingDelete = null }"
-      @confirm="confirmDelete"
-    />
+    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete "{{ pendingDelete?.name }}"?</AlertDialogTitle>
+          <AlertDialogDescription>Saved queries inside this collection are not deleted.</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel @click="cancelDelete">Cancel</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" @click="confirmDelete">Delete</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 </template>

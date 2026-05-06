@@ -91,9 +91,10 @@ function handleRemoveMember(userId: number) {
 }
 
 async function confirmMemberRemoval() {
-  if (pendingMemberRemoval.value == null) return;
-  await store.removeMember(collectionID.value, pendingMemberRemoval.value);
+  const userId = pendingMemberRemoval.value;
   pendingMemberRemoval.value = null;
+  if (userId == null) return;
+  await store.removeMember(collectionID.value, userId);
 }
 
 function openRename() {
@@ -117,9 +118,10 @@ function handleRemoveItem(queryId: number) {
 }
 
 async function confirmItemRemoval() {
-  if (pendingItemRemoval.value == null) return;
-  await store.removeItem(collectionID.value, pendingItemRemoval.value);
+  const queryId = pendingItemRemoval.value;
   pendingItemRemoval.value = null;
+  if (queryId == null) return;
+  await store.removeItem(collectionID.value, queryId);
 }
 
 function openQuery(queryId: number) {
@@ -136,7 +138,7 @@ function openQuery(queryId: number) {
       </Button>
     </div>
 
-    <Card v-if="!collection && !store.isLoading.value">
+    <Card v-if="!collection && !store.isLoading">
       <CardHeader>
         <CardTitle>Collection not found</CardTitle>
         <CardDescription>It may have been deleted or you may not be a member.</CardDescription>
@@ -177,9 +179,9 @@ function openQuery(queryId: number) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <Alert v-if="store.error.value" variant="destructive">
+          <Alert v-if="store.error" variant="destructive">
             <AlertCircle class="h-4 w-4" />
-            <AlertDescription>{{ store.error.value.message }}</AlertDescription>
+            <AlertDescription>{{ store.error.message }}</AlertDescription>
           </Alert>
           <div v-if="store.isLoadingOperation(`listItems-${collectionID}`)" class="flex items-center justify-center py-6">
             <Loader2 class="h-5 w-5 animate-spin text-primary" />

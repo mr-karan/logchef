@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
   AlertDialog,
-  AlertDialogAction,
   AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
@@ -9,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 
 // Small reusable confirm dialog that wraps shadcn's AlertDialog with two-way
 // `open` binding and a confirm-callback prop. Use for "are you sure?" prompts
@@ -55,12 +55,12 @@ function handleCancel() {
       </AlertDialogHeader>
       <AlertDialogFooter>
         <AlertDialogCancel @click="handleCancel">{{ cancelText }}</AlertDialogCancel>
-        <AlertDialogAction
-          :class="destructive ? 'bg-destructive text-destructive-foreground hover:bg-destructive/90' : ''"
+        <Button
+          :variant="destructive ? 'destructive' : 'default'"
           @click="handleConfirm"
         >
           {{ confirmText }}
-        </AlertDialogAction>
+        </Button>
       </AlertDialogFooter>
     </AlertDialogContent>
   </AlertDialog>
