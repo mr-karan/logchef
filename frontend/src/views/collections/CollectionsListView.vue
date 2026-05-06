@@ -2,7 +2,6 @@
 import { ref, onMounted, computed } from "vue";
 import { useRouter } from "vue-router";
 import { Plus, Trash2, FolderHeart, Folder, Users, Loader2, AlertCircle } from "lucide-vue-next";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -101,99 +100,86 @@ function viewCollection(collection: Collection) {
 </script>
 
 <template>
-  <div class="space-y-6">
-    <Card>
-      <CardHeader>
-        <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div>
-            <CardTitle>Collections</CardTitle>
-            <CardDescription>
-              Curated lists of saved queries. Each user has a personal collection plus any shared collections they own or have been invited to.
-            </CardDescription>
+  <div class="space-y-5">
+    <!-- Page header — tight, no card wrapper -->
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-lg font-semibold tracking-tight">Collections</h1>
+        <p class="text-sm text-muted-foreground">Organize saved queries into shareable lists.</p>
+      </div>
+      <Button size="sm" @click="showCreate = true">
+        <Plus class="mr-1.5 h-3.5 w-3.5" />
+        New
+      </Button>
+    </div>
+
+    <Alert v-if="store.error" variant="destructive">
+      <AlertCircle class="h-4 w-4" />
+      <AlertDescription>{{ store.error.message }}</AlertDescription>
+    </Alert>
+
+    <div v-if="isLoading" class="flex items-center justify-center py-10">
+      <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+
+    <!-- Grid of collection cards -->
+    <div v-else class="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <!-- Personal collection -->
+      <button
+        v-if="personal"
+        type="button"
+        class="group flex flex-col gap-1 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/50"
+        @click="viewCollection(personal)"
+      >
+        <div class="flex items-center gap-2">
+          <FolderHeart class="h-4 w-4 text-amber-500 shrink-0" />
+          <span class="font-medium text-sm truncate">{{ personal.name }}</span>
+        </div>
+        <span class="text-xs text-muted-foreground pl-6">
+          {{ personal.item_count }} {{ personal.item_count === 1 ? "query" : "queries" }}
+        </span>
+      </button>
+
+      <!-- Shared collections -->
+      <div
+        v-for="c in shared"
+        :key="c.id"
+        class="group relative flex flex-col gap-1 rounded-lg border bg-card p-4 text-left transition-colors hover:border-primary/40 hover:bg-muted/50"
+      >
+        <button type="button" class="flex flex-col gap-1 text-left" @click="viewCollection(c)">
+          <div class="flex items-center gap-2">
+            <Folder class="h-4 w-4 text-muted-foreground shrink-0" />
+            <span class="font-medium text-sm truncate">{{ c.name }}</span>
+            <span v-if="c.caller_role" class="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground font-medium">{{ c.caller_role }}</span>
           </div>
-          <Button @click="showCreate = true">
-            <Plus class="mr-2 h-4 w-4" />
-            New Collection
-          </Button>
-        </div>
-      </CardHeader>
+          <span class="text-xs text-muted-foreground pl-6">
+            {{ c.item_count }} {{ c.item_count === 1 ? "query" : "queries" }}
+            · {{ c.member_count }} {{ c.member_count === 1 ? "member" : "members" }}
+          </span>
+        </button>
+        <Button
+          v-if="c.caller_role === 'owner'"
+          variant="ghost"
+          size="icon"
+          class="absolute top-2 right-2 h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+          :disabled="store.isLoadingOperation(`deleteCollection-${c.id}`)"
+          @click.stop="handleDelete(c)"
+        >
+          <Trash2 class="h-3.5 w-3.5 text-destructive" />
+        </Button>
+      </div>
 
-      <CardContent class="space-y-6">
-        <Alert v-if="store.error" variant="destructive">
-          <AlertCircle class="h-4 w-4" />
-          <AlertDescription>{{ store.error.message }}</AlertDescription>
-        </Alert>
-
-        <div v-if="isLoading" class="flex items-center justify-center py-10">
-          <Loader2 class="h-6 w-6 animate-spin text-primary" />
-          <p class="ml-2 text-muted-foreground">Loading collections…</p>
-        </div>
-
-        <template v-else>
-          <section v-if="personal" class="space-y-3">
-            <h3 class="text-sm font-semibold text-muted-foreground">Personal</h3>
-            <button
-              type="button"
-              class="flex w-full items-center justify-between gap-4 rounded-md border bg-card p-4 text-left transition-colors hover:bg-muted"
-              @click="viewCollection(personal)"
-            >
-              <div class="flex items-center gap-3">
-                <FolderHeart class="h-5 w-5 text-amber-500" />
-                <div>
-                  <div class="font-medium">{{ personal.name }}</div>
-                  <p class="text-sm text-muted-foreground">
-                    {{ personal.item_count }} {{ personal.item_count === 1 ? "query" : "queries" }}
-                  </p>
-                </div>
-              </div>
-            </button>
-          </section>
-
-          <section class="space-y-3">
-            <h3 class="text-sm font-semibold text-muted-foreground">Shared</h3>
-            <div v-if="shared.length === 0" class="rounded-md border p-6 text-center">
-              <Folder class="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
-              <p class="text-sm text-muted-foreground">
-                You're not in any shared collections yet. Create one and invite teammates by user id.
-              </p>
-            </div>
-            <div v-else class="space-y-2">
-              <div
-                v-for="c in shared"
-                :key="c.id"
-                class="flex items-center justify-between gap-4 rounded-md border bg-card p-4 transition-colors hover:bg-muted"
-              >
-                <button
-                  type="button"
-                  class="flex flex-1 items-center gap-3 text-left"
-                  @click="viewCollection(c)"
-                >
-                  <Folder class="h-5 w-5 text-muted-foreground" />
-                  <div>
-                    <div class="font-medium">{{ c.name }}</div>
-                    <p class="text-sm text-muted-foreground">
-                      {{ c.item_count }} {{ c.item_count === 1 ? "query" : "queries" }}
-                      · <Users class="inline h-3 w-3 align-middle" />
-                      {{ c.member_count }} {{ c.member_count === 1 ? "member" : "members" }}
-                      <span v-if="c.caller_role" class="ml-2 inline-flex items-center rounded bg-muted px-1.5 py-0.5 text-xs">{{ c.caller_role }}</span>
-                    </p>
-                  </div>
-                </button>
-                <Button
-                  v-if="c.caller_role === 'owner'"
-                  variant="ghost"
-                  size="icon"
-                  :disabled="store.isLoadingOperation(`deleteCollection-${c.id}`)"
-                  @click.stop="handleDelete(c)"
-                >
-                  <Trash2 class="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            </div>
-          </section>
-        </template>
-      </CardContent>
-    </Card>
+      <!-- Empty state for shared -->
+      <div
+        v-if="shared.length === 0"
+        class="flex flex-col items-center justify-center gap-2 rounded-lg border border-dashed p-6 text-center col-span-full sm:col-span-1"
+      >
+        <Folder class="h-5 w-5 text-muted-foreground" />
+        <p class="text-xs text-muted-foreground max-w-[200px]">
+          No shared collections yet. Create one and invite teammates.
+        </p>
+      </div>
+    </div>
 
     <Dialog :open="showCreate" @update:open="(val) => !val && (showCreate = false)">
       <DialogContent class="sm:max-w-md">

@@ -387,10 +387,6 @@ async function copyCollectionUrl(query: SavedQuery) {
               Saved searches and SQL queries for quick reuse across your sources.
             </CardDescription>
           </div>
-          <Button v-if="canManageCollections && !isAllTeamsMode" @click="handleCreateNewQuery">
-            <Plus class="mr-2 h-4 w-4" />
-            Add to Collection
-          </Button>
         </div>
       </CardHeader>
 
@@ -561,25 +557,19 @@ async function copyCollectionUrl(query: SavedQuery) {
                 <Button v-if="searchQuery" variant="outline" @click="clearSearch">
                   Clear Search
                 </Button>
-                <Button
-                  v-if="canManageCollections && !searchQuery && !isAllTeamsMode"
-                  @click="handleCreateNewQuery"
-                >
-                  Add to Collection
-                </Button>
               </div>
             </div>
 
             <div v-else class="rounded-md border">
-              <Table>
+              <Table class="table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead class="w-[240px]">Name</TableHead>
-                    <TableHead v-if="isAllSourcesMode" class="w-[150px]">Source</TableHead>
-                    <TableHead>Description</TableHead>
-                    <TableHead class="w-[100px]">Type</TableHead>
+                    <TableHead class="w-[180px]">Name</TableHead>
+                    <TableHead v-if="isAllSourcesMode" class="w-[130px]">Source</TableHead>
+                    <TableHead class="w-[250px]">Description</TableHead>
+                    <TableHead class="w-[70px]">Type</TableHead>
                     <TableHead class="w-[150px]">Updated</TableHead>
-                    <TableHead class="w-[100px] text-right">Actions</TableHead>
+                    <TableHead class="w-[70px] text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -609,7 +599,7 @@ async function copyCollectionUrl(query: SavedQuery) {
                       </a>
                     </TableCell>
                     <TableCell v-if="isAllSourcesMode">{{ query.source_name || getSourceName(query.source_id) }}</TableCell>
-                    <TableCell>{{ query.description || "-" }}</TableCell>
+                    <TableCell class="truncate">{{ query.description || "-" }}</TableCell>
                     <TableCell>
                       <Badge :variant="query.query_type === 'logchefql' ? 'outline' : 'secondary'">
                         {{
