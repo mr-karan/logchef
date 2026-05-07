@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader, PageSection, EmptyState, LoadingState } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -164,90 +164,49 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
 
 <template>
     <div class="space-y-6">
-        <!-- Header -->
-        <div>
-            <h1 class="text-2xl font-bold tracking-tight">My Profile</h1>
-            <p class="text-muted-foreground mt-2">
-                Manage your account information
-            </p>
-        </div>
+        <PageHeader title="Profile" description="Manage your account information." />
 
-        <div class="space-y-6">
-            <!-- Account Info -->
-            <Card>
-                <CardHeader>
-                    <CardTitle>Account Information</CardTitle>
-                    <CardDescription>
-                        View your account details
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <dl class="space-y-4 text-sm">
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Email</dt>
-                            <dd class="font-medium">{{ authStore.user?.email }}</dd>
-                        </div>
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Role</dt>
-                            <dd class="font-medium capitalize">{{ authStore.user?.role }}</dd>
-                        </div>
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Last Login</dt>
-                            <dd class="font-medium">
-                                {{ authStore.user?.last_login_at ? formatDate(authStore.user.last_login_at) :
-                                    'Never'
-                                }}
-                            </dd>
-                        </div>
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Account Created</dt>
-                            <dd class="font-medium">{{ formatDate(authStore.user?.created_at || '') }}</dd>
-                        </div>
-                    </dl>
-                </CardContent>
-            </Card>
+        <PageSection title="Account information" description="View your account details.">
+            <dl class="space-y-4 text-sm">
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Email</dt>
+                    <dd class="font-medium">{{ authStore.user?.email }}</dd>
+                </div>
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Role</dt>
+                    <dd class="font-medium capitalize">{{ authStore.user?.role }}</dd>
+                </div>
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Last Login</dt>
+                    <dd class="font-medium">
+                        {{ authStore.user?.last_login_at ? formatDate(authStore.user.last_login_at) : 'Never' }}
+                    </dd>
+                </div>
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Account Created</dt>
+                    <dd class="font-medium">{{ formatDate(authStore.user?.created_at || '') }}</dd>
+                </div>
+            </dl>
+        </PageSection>
 
-            <!-- Profile Settings -->
-            <Card>
-                <CardHeader>
-                    <CardTitle>Profile Settings</CardTitle>
-                    <CardDescription>
-                        Update your profile information
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <form @submit.prevent="handleSubmit" class="space-y-6">
-                        <div class="space-y-4">
-                            <div class="grid gap-2">
-                                <Label for="full_name">Full Name</Label>
-                                <Input id="full_name" v-model="fullName" required />
-                            </div>
-                        </div>
+        <PageSection title="Profile settings" description="Update your profile information.">
+            <form @submit.prevent="handleSubmit" class="space-y-6">
+                <div class="grid gap-2">
+                    <Label for="full_name">Full Name</Label>
+                    <Input id="full_name" v-model="fullName" required />
+                </div>
+                <div class="flex justify-end">
+                    <Button type="submit" :disabled="isSubmitting">
+                        <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
+                        Save Changes
+                    </Button>
+                </div>
+            </form>
+        </PageSection>
 
-                        <div class="flex justify-end">
-                            <Button type="submit" :disabled="isSubmitting">
-                                <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
-                                Save Changes
-                            </Button>
-                        </div>
-                    </form>
-                </CardContent>
-            </Card>
-
-            <!-- API Tokens -->
-            <Card>
-                <CardHeader>
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <CardTitle class="flex items-center gap-2">
-                                <Key class="h-5 w-5" />
-                                API Tokens
-                            </CardTitle>
-                            <CardDescription>
-                                Manage your personal access tokens for API authentication
-                            </CardDescription>
-                        </div>
-                        <Dialog v-model:open="showCreateTokenDialog">
+        <PageSection title="API tokens" description="Manage your personal access tokens for API authentication.">
+            <template #actions>
+                <Dialog v-model:open="showCreateTokenDialog">
                             <DialogTrigger asChild>
                                 <Button class="flex items-center gap-2">
                                     <Plus class="h-4 w-4" />
@@ -313,20 +272,18 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                 </DialogFooter>
                             </DialogContent>
                         </Dialog>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div v-if="apiTokensStore.isLoading" class="flex items-center justify-center py-8">
-                        <Loader2 class="h-6 w-6 animate-spin" />
-                    </div>
-                    
-                    <div v-else-if="apiTokensStore.tokens.length === 0" class="text-center py-8 text-muted-foreground">
-                        <Key class="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>No API tokens found</p>
-                        <p class="text-sm">Create your first token to get started</p>
-                    </div>
-                    
-                    <div v-else class="space-y-4">
+            </template>
+
+            <LoadingState v-if="apiTokensStore.isLoading" />
+
+            <EmptyState
+                v-else-if="apiTokensStore.tokens.length === 0"
+                :icon="Key"
+                title="No API tokens"
+                description="Create your first token to get started."
+            />
+
+            <div v-else class="space-y-3">
                         <div 
                             v-for="token in apiTokensStore.tokens" 
                             :key="token.id"
@@ -398,9 +355,7 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                             </AlertDialog>
                         </div>
                     </div>
-                </CardContent>
-            </Card>
-        </div>
+        </PageSection>
 
         <!-- Token Display Dialog -->
         <Dialog v-model:open="showTokenDisplay">

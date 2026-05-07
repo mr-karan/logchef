@@ -2,7 +2,6 @@
 import { ref, onMounted, computed, watch } from "vue";
 import { useRouter, useRoute } from "vue-router";
 import {
-  ChevronDown,
   Eye,
   Pencil,
   Trash2,
@@ -13,10 +12,12 @@ import {
   FolderPlus,
   FolderHeart,
   Folder,
+  FolderOpen,
   MoreHorizontal,
   FileSearch,
   FileCode,
 } from "lucide-vue-next";
+import { PageHeader } from "@/components/layout";
 import { formatDate } from "@/utils/format";
 import {
   DropdownMenu,
@@ -166,8 +167,17 @@ function manageCollection() {
 </script>
 
 <template>
-  <div class="space-y-4">
-    <!-- Header row: collection picker + search -->
+  <div class="space-y-6">
+    <PageHeader title="Saved Queries" description="Search and run queries you've saved across collections.">
+      <template #actions>
+        <Button variant="outline" size="sm" @click="router.push({ path: '/logs/collections', query: {} })">
+          <FolderOpen class="mr-2 h-4 w-4" />
+          Manage collections
+        </Button>
+      </template>
+    </PageHeader>
+
+    <!-- Filter row: collection picker + search -->
     <div class="flex items-center gap-3">
       <Select v-model="selectedCollection">
         <SelectTrigger class="w-[220px] h-9">

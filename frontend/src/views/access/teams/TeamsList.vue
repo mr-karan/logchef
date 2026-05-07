@@ -1,19 +1,10 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
 import { Input } from '@/components/ui/input'
-import { Plus, Trash2, Settings, Search, Loader2 } from 'lucide-vue-next'
+import { Plus, Trash2, Settings, Search, Users } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import {
     Table,
@@ -141,143 +132,112 @@ onMounted(() => {
 
 <template>
     <div class="space-y-6">
-        <Card>
-            <CardHeader>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <CardTitle>Teams</CardTitle>
-                        <CardDescription>
-                            {{ isGlobalAdmin ? 'Groups of users that have common dashboard and permission needs' : 'Teams you administer' }}
-                        </CardDescription>
-                    </div>
-                    <!-- Only global admins can create teams -->
-                    <AddTeam v-if="isGlobalAdmin" @team-created="handleTeamCreated" />
-                </div>
-            </CardHeader>
-            <CardContent>
-                <div class="space-y-4">
-                    <!-- Enhanced search input -->
-                    <div class="relative flex items-center">
-                        <Search class="absolute left-3 h-4 w-4 text-muted-foreground" />
-                        <Input v-model="searchQuery" type="text" placeholder="Search teams by name or description..."
-                            class="pl-9 w-full" />
-                    </div>
+        <PageHeader
+            title="Teams"
+            :description="isGlobalAdmin ? 'Groups of users that have common dashboard and permission needs.' : 'Teams you administer.'"
+        >
+            <template v-if="isGlobalAdmin" #actions>
+                <AddTeam @team-created="handleTeamCreated" />
+            </template>
+        </PageHeader>
 
-                    <!-- Loading State -->
-                    <div v-if="isLoading" class="flex flex-col items-center justify-center py-10">
-                        <Loader2 class="h-8 w-8 animate-spin text-primary mb-2" />
-                        <p class="text-muted-foreground">Loading teams...</p>
-                    </div>
+        <LoadingState v-if="isLoading" label="Loading teams…" />
 
-                    <!-- Empty State -->
-                    <div v-else-if="showEmptyState" class="rounded-lg border p-6 text-center">
-                        <div class="mx-auto flex h-14 w-14 items-center justify-center rounded-full bg-muted mb-4">
-                            <Plus class="h-6 w-6" />
-                        </div>
-                        <h3 class="text-lg font-semibold mb-1">No teams found</h3>
-                        <p class="text-muted-foreground mb-4">
-                            {{ isGlobalAdmin ? 'Create your first team to get started' : 'You are not an admin of any teams' }}
-                        </p>
-                        <!-- Only global admins can create teams -->
-                        <AddTeam v-if="isGlobalAdmin" @team-created="handleTeamCreated">
-                            <Button>
-                                <Plus class="mr-2 h-4 w-4" />
-                                Create Your First Team
-                            </Button>
-                        </AddTeam>
-                    </div>
+        <EmptyState
+            v-else-if="showEmptyState"
+            :icon="Users"
+            title="No teams yet"
+            :description="isGlobalAdmin ? 'Create your first team to get started.' : 'You are not an admin of any teams.'"
+        >
+            <template v-if="isGlobalAdmin" #action>
+                <AddTeam @team-created="handleTeamCreated">
+                    <Button size="sm">
+                        <Plus class="mr-2 h-4 w-4" />
+                        Create team
+                    </Button>
+                </AddTeam>
+            </template>
+        </EmptyState>
 
-                    <!-- Search Not Found State -->
-                    <div v-else-if="showNotFoundState" class="rounded-lg border p-6 text-center">
-                        <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-muted/50 mb-3">
-                            <Search class="h-5 w-5 text-muted-foreground" />
-                        </div>
-                        <h3 class="text-lg font-semibold mb-1">No results found</h3>
-                        <p class="text-muted-foreground">No teams match your search criteria</p>
-                    </div>
+        <div v-else class="space-y-4">
+            <div class="relative w-full max-w-sm">
+                <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input v-model="searchQuery" type="text" placeholder="Search teams by name or description…"
+                    class="pl-8 h-9" />
+            </div>
 
-                    <!-- Teams Table -->
-                    <div v-else>
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead class="w-[200px]">Name</TableHead>
-                                    <TableHead class="w-[300px]">Description</TableHead>
-                                    <TableHead class="w-[100px]">Members</TableHead>
-                                    <TableHead class="w-[150px]">Created At</TableHead>
-                                    <TableHead class="w-[100px] text-right">Actions</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                <TableRow v-for="team in filteredTeams" :key="team.id">
-                                    <TableCell>
-                                        <router-link :to="{ name: 'TeamSettings', params: { id: String(team.id) } }"
-                                            class="font-medium hover:underline flex items-center gap-2">
-                                            {{ team.name }}
-                                        </router-link>
-                                    </TableCell>
-                                    <TableCell>
-                                        <span class="line-clamp-1">{{ team.description || 'No description' }}</span>
-                                    </TableCell>
-                                    <TableCell>{{ team.memberCount }}</TableCell>
-                                    <TableCell>{{ formatDate(team.created_at) }}</TableCell>
-                                    <TableCell class="text-right">
-                                        <div class="flex justify-end gap-2">
-                                            <Tooltip>
-                                                <TooltipTrigger asChild>
-                                                    <Button variant="ghost" size="icon"
-                                                        @click="router.push({ name: 'TeamSettings', params: { id: String(team.id) } })">
-                                                        <Settings class="h-4 w-4" />
-                                                    </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    <p>Edit team settings</p>
-                                                </TooltipContent>
-                                            </Tooltip>
+            <EmptyState
+                v-if="showNotFoundState"
+                :icon="Search"
+                title="No results"
+                description="No teams match your search."
+                class="rounded-md border"
+            />
 
-                                            <!-- Only global admins can delete teams -->
-                                            <Tooltip v-if="isGlobalAdmin">
-                                                <TooltipTrigger asChild>
-                                                    <Button variant="destructive" size="icon"
-                                                        @click="handleDelete(team)">
-                                                        <Trash2 class="h-4 w-4" />
-                                                    </Button>
-                                                </TooltipTrigger>
-                                                <TooltipContent>
-                                                    <p>Delete team</p>
-                                                </TooltipContent>
-                                            </Tooltip>
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            </TableBody>
-                        </Table>
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
+            <div v-else class="rounded-md border">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead class="w-[200px]">Name</TableHead>
+                            <TableHead class="w-[300px]">Description</TableHead>
+                            <TableHead class="w-[100px]">Members</TableHead>
+                            <TableHead class="w-[150px]">Created At</TableHead>
+                            <TableHead class="w-[100px] text-right">Actions</TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        <TableRow v-for="team in filteredTeams" :key="team.id">
+                            <TableCell>
+                                <router-link :to="{ name: 'TeamSettings', params: { id: String(team.id) } }"
+                                    class="font-medium hover:underline flex items-center gap-2">
+                                    {{ team.name }}
+                                </router-link>
+                            </TableCell>
+                            <TableCell>
+                                <span class="line-clamp-1">{{ team.description || 'No description' }}</span>
+                            </TableCell>
+                            <TableCell>{{ team.memberCount }}</TableCell>
+                            <TableCell>{{ formatDate(team.created_at) }}</TableCell>
+                            <TableCell class="text-right">
+                                <div class="flex justify-end gap-2">
+                                    <Tooltip>
+                                        <TooltipTrigger asChild>
+                                            <Button variant="ghost" size="icon"
+                                                @click="router.push({ name: 'TeamSettings', params: { id: String(team.id) } })">
+                                                <Settings class="h-4 w-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            <p>Edit team settings</p>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                    <Tooltip v-if="isGlobalAdmin">
+                                        <TooltipTrigger asChild>
+                                            <Button variant="destructive" size="icon"
+                                                @click="handleDelete(team)">
+                                                <Trash2 class="h-4 w-4" />
+                                            </Button>
+                                        </TooltipTrigger>
+                                        <TooltipContent>
+                                            <p>Delete team</p>
+                                        </TooltipContent>
+                                    </Tooltip>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    </TableBody>
+                </Table>
+            </div>
+        </div>
 
-        <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = false">
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Delete Team</AlertDialogTitle>
-                    <AlertDialogDescription class="space-y-2">
-                        <p>Are you sure you want to delete team "{{ teamToDelete?.name }}"?</p>
-                        <p class="font-medium text-destructive">
-                            This action cannot be undone.
-                        </p>
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel @click="showDeleteDialog = false">
-                        Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction @click="confirmDelete"
-                        class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        Delete
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmDialog
+            :open="showDeleteDialog"
+            title="Delete team?"
+            :description="teamToDelete ? `Delete team &quot;${teamToDelete.name}&quot;? This action cannot be undone.` : undefined"
+            confirm-text="Delete"
+            destructive
+            @update:open="(v) => { if (!v) { showDeleteDialog = false; teamToDelete = null } }"
+            @confirm="confirmDelete"
+        />
     </div>
 </template>

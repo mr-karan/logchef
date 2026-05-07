@@ -33,7 +33,6 @@ func mapCollectionError(c *fiber.Ctx, err error) error {
 	return nil
 }
 
-
 // handleListCollections returns the caller's collections (auto-creates personal).
 func (s *Server) handleListCollections(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)

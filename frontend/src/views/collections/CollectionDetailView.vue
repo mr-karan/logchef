@@ -4,16 +4,15 @@ import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import {
   ArrowLeft,
-  Loader2,
   Lock,
   Pencil,
   Trash2,
   UserPlus,
-  Users,
   X,
   AlertCircle,
+  FileSearch,
 } from "lucide-vue-next";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader, PageSection, EmptyState, LoadingState } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -43,6 +42,7 @@ import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
 import { useAuthStore } from "@/stores/auth";
+import { useTeamsStore } from "@/stores/teams";
 import { useUsersStore } from "@/stores/users";
 import {
   Select,
@@ -57,6 +57,7 @@ const router = useRouter();
 const { toast } = useToast();
 const store = useCollectionsStore();
 const authStore = useAuthStore();
+const teamsStore = useTeamsStore();
 const usersStore = useUsersStore();
 const { data } = storeToRefs(store);
 
@@ -66,6 +67,11 @@ const items = computed(() => data.value.items[collectionID.value] ?? []);
 const members = computed(() => data.value.members[collectionID.value] ?? []);
 
 const isOwner = computed(() => collection.value?.caller_role === "owner" || authStore.user?.role === "admin");
+// Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
+// invite UI from owners who lack that role since the dropdown can't be
+// populated without it.
+const canListUsers = computed(() => authStore.user?.role === "admin" || teamsStore.isAnyTeamAdmin);
+const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !collection.value?.is_personal);
 
 const showAddMember = ref(false);
 const newMemberId = ref("");
@@ -96,12 +102,18 @@ async function load() {
   await Promise.all([store.fetchItems(collectionID.value), store.fetchMembers(collectionID.value)]);
 }
 
-onMounted(async () => {
-  await load();
-  // Load users list for the invite dropdown
-  await usersStore.loadUsers();
-});
+onMounted(load);
 watch(collectionID, load);
+
+// Load users only when the invite dialog opens, and only if the caller can
+// list users. Guards against 403 spam on collection detail pages when a
+// non-team-admin owner views the page.
+watch(showAddMember, async (isOpen) => {
+  if (!isOpen || !canListUsers.value) return;
+  if (!usersStore.users.length) {
+    await usersStore.loadUsers();
+  }
+});
 
 async function handleAddMember() {
   const idNum = Number(newMemberId.value);
@@ -169,137 +181,120 @@ async function handleDeleteCollection() {
 
 <template>
   <div class="space-y-6">
-    <div class="flex items-center gap-2">
-      <Button variant="ghost" size="sm" @click="router.push({ path: '/logs/collections', query: {} })">
-        <ArrowLeft class="mr-2 h-4 w-4" />
-        Back to Collections
-      </Button>
-    </div>
+    <Button
+      variant="ghost"
+      size="sm"
+      class="-ml-2"
+      @click="router.push({ path: '/logs/collections', query: {} })"
+    >
+      <ArrowLeft class="mr-2 h-4 w-4" />
+      Back to Collections
+    </Button>
 
-    <Card v-if="!collection && !store.isLoading">
-      <CardHeader>
-        <CardTitle>Collection not found</CardTitle>
-        <CardDescription>It may have been deleted or you may not be a member.</CardDescription>
-      </CardHeader>
-    </Card>
+    <EmptyState
+      v-if="!collection && !store.isLoading"
+      title="Collection not found"
+      description="It may have been deleted or you may not be a member."
+    />
 
     <template v-else-if="collection">
-      <Card>
-        <CardHeader>
-          <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div class="space-y-1">
-              <CardTitle class="flex items-center gap-2">
-                {{ collection.name }}
-                <Badge v-if="collection.is_personal" variant="secondary">personal</Badge>
-                <Badge v-else-if="collection.caller_role" variant="outline">{{ collection.caller_role }}</Badge>
-              </CardTitle>
-              <CardDescription v-if="collection.description">{{ collection.description }}</CardDescription>
-            </div>
-            <div class="flex flex-wrap items-center gap-2">
-              <Button v-if="isOwner && !collection.is_personal" variant="outline" size="sm" @click="openRename">
-                <Pencil class="mr-2 h-4 w-4" />
-                Rename
-              </Button>
-              <Button v-if="isOwner && !collection.is_personal" variant="outline" size="sm" @click="showAddMember = true">
-                <UserPlus class="mr-2 h-4 w-4" />
-                Invite member
-              </Button>
-              <Button v-if="isOwner && !collection.is_personal" variant="destructive" size="sm" @click="showDeleteDialog = true">
-                <Trash2 class="mr-2 h-4 w-4" />
-                Delete
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
+      <PageHeader :title="collection.name" :description="collection.description || undefined">
+        <template #actions>
+          <Badge v-if="collection.is_personal" variant="secondary">personal</Badge>
+          <Badge v-else-if="collection.caller_role" variant="outline">{{ collection.caller_role }}</Badge>
+          <Button v-if="isOwner && !collection.is_personal" variant="outline" size="sm" @click="openRename">
+            <Pencil class="mr-2 h-4 w-4" />
+            Rename
+          </Button>
+          <Button v-if="canInviteMembers" variant="outline" size="sm" @click="showAddMember = true">
+            <UserPlus class="mr-2 h-4 w-4" />
+            Invite member
+          </Button>
+          <Button v-if="isOwner && !collection.is_personal" variant="destructive" size="sm" @click="showDeleteDialog = true">
+            <Trash2 class="mr-2 h-4 w-4" />
+            Delete
+          </Button>
+        </template>
+      </PageHeader>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Items</CardTitle>
-          <CardDescription>
-            Saved queries pinned to this collection. Items you can't run for this source show with a lock icon.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Alert v-if="store.error" variant="destructive">
-            <AlertCircle class="h-4 w-4" />
-            <AlertDescription>{{ store.error.message }}</AlertDescription>
-          </Alert>
-          <div v-if="store.isLoadingOperation(`listItems-${collectionID}`)" class="flex items-center justify-center py-6">
-            <Loader2 class="h-5 w-5 animate-spin text-primary" />
-          </div>
-          <div v-else-if="items.length === 0" class="rounded-md border p-6 text-center text-sm text-muted-foreground">
-            No queries pinned yet. From a saved query you can edit, add it here.
-          </div>
-          <ul v-else class="divide-y rounded-md border">
-            <li
-              v-for="item in items"
-              :key="item.query.id"
-              class="flex items-center gap-3 px-4 py-3"
+      <Alert v-if="store.error" variant="destructive">
+        <AlertCircle class="h-4 w-4" />
+        <AlertDescription>{{ store.error.message }}</AlertDescription>
+      </Alert>
+
+      <PageSection
+        title="Items"
+        description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
+        :content-class="items.length === 0 ? 'p-0' : 'p-0'"
+      >
+        <LoadingState v-if="store.isLoadingOperation(`listItems-${collectionID}`)" />
+        <EmptyState
+          v-else-if="items.length === 0"
+          :icon="FileSearch"
+          title="No queries pinned"
+          description="From a saved query you can edit, add it to this collection."
+        />
+        <ul v-else class="divide-y">
+          <li
+            v-for="item in items"
+            :key="item.query.id"
+            class="flex items-center gap-3 px-4 py-3"
+          >
+            <Lock v-if="!item.runnable" class="h-4 w-4 text-muted-foreground" :title="'You cannot run this query (no source access).'" />
+            <div class="min-w-0 flex-1">
+              <button
+                type="button"
+                class="block truncate text-left text-sm font-medium hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
+                :class="!item.runnable && 'text-muted-foreground'"
+                :disabled="!item.runnable"
+                @click="openQuery(item.query.id)"
+              >
+                {{ item.query.name }}
+              </button>
+              <p class="truncate text-xs text-muted-foreground">
+                {{ item.query.source_name || `source ${item.query.source_id}` }} ·
+                {{ item.query.query_type === "logchefql" ? "Search" : "SQL" }}
+              </p>
+            </div>
+            <Button
+              v-if="isOwner"
+              variant="ghost"
+              size="icon"
+              @click="handleRemoveItem(item.query.id)"
             >
-              <Lock v-if="!item.runnable" class="h-4 w-4 text-muted-foreground" :title="'You cannot run this query (no source access).'" />
-              <div class="min-w-0 flex-1">
-                <button
-                  type="button"
-                  class="block truncate text-left text-sm font-medium hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
-                  :class="!item.runnable && 'text-muted-foreground'"
-                  :disabled="!item.runnable"
-                  @click="openQuery(item.query.id)"
-                >
-                  {{ item.query.name }}
-                </button>
-                <p class="truncate text-xs text-muted-foreground">
-                  {{ item.query.source_name || `source ${item.query.source_id}` }} ·
-                  {{ item.query.query_type === "logchefql" ? "Search" : "SQL" }}
-                </p>
-              </div>
+              <Trash2 class="h-4 w-4 text-destructive" />
+            </Button>
+          </li>
+        </ul>
+      </PageSection>
+
+      <PageSection
+        v-if="!collection.is_personal"
+        title="Members"
+        description="Owners can invite new members and adjust roles. Members can read items they have source access to."
+        content-class="p-0"
+      >
+        <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
+        <ul v-else class="divide-y">
+          <li v-for="m in members" :key="m.user_id" class="flex items-center justify-between gap-3 px-4 py-3">
+            <div class="min-w-0">
+              <p class="truncate text-sm font-medium">{{ m.full_name || m.email || `User ${m.user_id}` }}</p>
+              <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
+            </div>
+            <div class="flex items-center gap-2">
+              <Badge variant="outline">{{ m.role }}</Badge>
               <Button
-                v-if="isOwner"
+                v-if="isOwner && m.user_id !== authStore.user?.id"
                 variant="ghost"
                 size="icon"
-                @click="handleRemoveItem(item.query.id)"
+                @click="handleRemoveMember(m.user_id)"
               >
-                <Trash2 class="h-4 w-4 text-destructive" />
+                <X class="h-4 w-4 text-destructive" />
               </Button>
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
-
-      <Card v-if="!collection.is_personal">
-        <CardHeader>
-          <CardTitle class="flex items-center gap-2">
-            <Users class="h-4 w-4" /> Members
-          </CardTitle>
-          <CardDescription>
-            Owners can invite new members and adjust roles. Members can read items they have source access to.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" class="flex items-center justify-center py-6">
-            <Loader2 class="h-5 w-5 animate-spin text-primary" />
-          </div>
-          <ul v-else class="divide-y rounded-md border">
-            <li v-for="m in members" :key="m.user_id" class="flex items-center justify-between gap-3 px-4 py-3">
-              <div class="min-w-0">
-                <p class="truncate text-sm font-medium">{{ m.full_name || m.email || `User ${m.user_id}` }}</p>
-                <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
-              </div>
-              <div class="flex items-center gap-2">
-                <Badge variant="outline">{{ m.role }}</Badge>
-                <Button
-                  v-if="isOwner && m.user_id !== authStore.user?.id"
-                  variant="ghost"
-                  size="icon"
-                  @click="handleRemoveMember(m.user_id)"
-                >
-                  <X class="h-4 w-4 text-destructive" />
-                </Button>
-              </div>
-            </li>
-          </ul>
-        </CardContent>
-      </Card>
+            </div>
+          </li>
+        </ul>
+      </PageSection>
     </template>
 
     <Dialog :open="showAddMember" @update:open="(val) => !val && (showAddMember = false)">

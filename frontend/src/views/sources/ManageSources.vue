@@ -3,18 +3,9 @@ import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { Plus, Trash2, Copy, Pencil } from 'lucide-vue-next'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
+import { Plus, Trash2, Copy, Pencil, Database } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { type Source } from '@/api/sources'
 import {
@@ -104,35 +95,35 @@ import { formatDate } from '@/utils/format'
 
 <template>
     <div class="space-y-6">
-        <Card>
-            <CardHeader>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <CardTitle>Manage Sources</CardTitle>
-                        <CardDescription>
-                            View and manage all log sources
-                        </CardDescription>
-                    </div>
-                    <Button @click="router.push({ name: 'NewSource' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add Source
-                    </Button>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <div v-if="sourcesStore.isLoadingOperation('loadAllSourcesForAdmin')" class="text-center py-4">
-                    Loading sources...
-                </div>
-                <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
-                    @retry="retryLoading" />
-                <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
-                    <p class="text-muted-foreground mb-4">No sources configured yet</p>
-                    <Button @click="router.push({ name: 'NewSource' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add Your First Source
-                    </Button>
-                </div>
-                <div v-else class="space-y-4">
+        <PageHeader title="Sources" description="View and manage all log sources.">
+            <template #actions>
+                <Button size="sm" @click="router.push({ name: 'NewSource' })">
+                    <Plus class="mr-2 h-4 w-4" />
+                    Add source
+                </Button>
+            </template>
+        </PageHeader>
+
+        <LoadingState
+            v-if="sourcesStore.isLoadingOperation('loadAllSourcesForAdmin')"
+            label="Loading sources…"
+        />
+        <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
+            @retry="retryLoading" />
+        <EmptyState
+            v-else-if="sourcesStore.sources.length === 0"
+            :icon="Database"
+            title="No sources configured"
+            description="Connect your first ClickHouse log source to get started."
+        >
+            <template #action>
+                <Button size="sm" @click="router.push({ name: 'NewSource' })">
+                    <Plus class="mr-2 h-4 w-4" />
+                    Add source
+                </Button>
+            </template>
+        </EmptyState>
+        <div v-else class="space-y-4">
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -221,35 +212,16 @@ import { formatDate } from '@/utils/format'
                             </TableRow>
                         </TableBody>
                     </Table>
-                </div>
-            </CardContent>
-        </Card>
+        </div>
 
-        <!-- Delete Confirmation Dialog -->
-        <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = false">
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Delete Source</AlertDialogTitle>
-                    <AlertDialogDescription class="space-y-2">
-                        <p>Are you sure you want to delete source "{{ sourceToDelete?.name }}"?</p>
-                        <p class="font-medium text-muted-foreground">
-                            Note: This will only remove the source configuration from LogChef. The actual data in
-                            Clickhouse will not
-                            be deleted -
-                            you'll need to manage the data cleanup in Clickhouse separately.
-                        </p>
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel @click="showDeleteDialog = false">
-                        Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction @click="confirmDelete"
-                        class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        Delete
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmDialog
+            :open="showDeleteDialog"
+            title="Delete source?"
+            :description="sourceToDelete ? `Delete source &quot;${sourceToDelete.name}&quot;? This only removes the source from LogChef — the underlying ClickHouse data is not deleted.` : undefined"
+            confirm-text="Delete"
+            destructive
+            @update:open="(v) => { if (!v) { showDeleteDialog = false; sourceToDelete = null } }"
+            @confirm="confirmDelete"
+        />
     </div>
 </template>

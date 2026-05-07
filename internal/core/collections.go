@@ -12,7 +12,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-
 var (
 	// ErrCollectionNotFound is returned when a collection cannot be located or
 	// the caller has no membership relation to it.

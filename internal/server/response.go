@@ -26,10 +26,10 @@ func parsePositiveIntParam(c *fiber.Ctx, paramName string) (int64, error) {
 
 // Response defines the standard JSON structure for API responses.
 type Response struct {
-	Status    string      `json:"status"` // "success" or "error"
-	Data      any `json:"data,omitempty"`
-	Message   string      `json:"message,omitempty"`
-	ErrorType string      `json:"error_type,omitempty"` // Application-specific error type code.
+	Status    string `json:"status"` // "success" or "error"
+	Data      any    `json:"data,omitempty"`
+	Message   string `json:"message,omitempty"`
+	ErrorType string `json:"error_type,omitempty"` // Application-specific error type code.
 }
 
 // NewSuccessResponse creates a standard success response structure.

@@ -2,17 +2,8 @@
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { PageHeader, LoadingState } from '@/components/layout'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Pencil, Eye, EyeOff, Save, X, Mail, Webhook, Loader2 } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
@@ -43,7 +34,9 @@ import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
-import { toast } from 'vue-sonner'
+import { useToast } from '@/composables/useToast'
+
+const { toast } = useToast()
 
 const authStore = useAuthStore()
 
@@ -180,7 +173,7 @@ const handleTestEmail = async () => {
 
 const handleTestWebhook = async () => {
   if (!testWebhookUrl.value.trim()) {
-    toast.error('Webhook URL is required')
+    toast({ title: 'Webhook URL is required', variant: 'destructive' })
     return
   }
   isTestingWebhook.value = true
@@ -201,18 +194,10 @@ onMounted(() => {
 
 <template>
   <div class="space-y-6">
-    <Card>
-      <CardHeader>
-        <CardTitle>System Settings</CardTitle>
-        <CardDescription>
-          Manage runtime configuration settings for LogChef
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div v-if="isLoading" class="text-center py-4">
-          Loading settings...
-        </div>
-        <Tabs v-else v-model="currentTab" class="w-full">
+    <PageHeader title="System Settings" description="Manage runtime configuration settings for LogChef." />
+
+    <LoadingState v-if="isLoading" label="Loading settings…" />
+    <Tabs v-else v-model="currentTab" class="w-full">
           <TabsList>
             <TabsTrigger value="alerts">Alerts</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
@@ -436,8 +421,6 @@ onMounted(() => {
             </div>
           </TabsContent>
         </Tabs>
-      </CardContent>
-    </Card>
 
     <!-- Edit Dialog -->
     <Dialog :open="showEditDialog" @update:open="showEditDialog = false">
@@ -507,31 +490,15 @@ onMounted(() => {
       </DialogContent>
     </Dialog>
 
-    <!-- Delete Confirmation Dialog -->
-    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = false">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete Setting</AlertDialogTitle>
-          <AlertDialogDescription class="space-y-2">
-            <p>Are you sure you want to delete setting "{{ settingToDelete?.key }}"?</p>
-            <p class="font-medium text-destructive">
-              This action cannot be undone. The system will fall back to the default value from config.toml.
-            </p>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="showDeleteDialog = false">
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            @click="confirmDelete"
-            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      :open="showDeleteDialog"
+      title="Delete setting?"
+      :description="settingToDelete ? `Delete &quot;${settingToDelete.key}&quot;? The system will fall back to the default value from config.toml.` : undefined"
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) { showDeleteDialog = false; settingToDelete = null } }"
+      @confirm="confirmDelete"
+    />
 
     <!-- Test Email Dialog -->
     <Dialog :open="showTestEmailDialog" @update:open="showTestEmailDialog = false">

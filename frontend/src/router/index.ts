@@ -144,9 +144,9 @@ const routes: RouteRecordRaw[] = [
 
     ],
   },
-  // Management Section (Admin only)
+  // Admin Section (Admin only)
   {
-    path: "/management",
+    path: "/admin",
     component: () => import("@/views/access/AccessLayout.vue").catch(err => {
       error("Router", "Failed to load AccessLayout component", err);
       return { default: ComponentLoadError };
@@ -160,7 +160,6 @@ const routes: RouteRecordRaw[] = [
         path: "",
         redirect: "users",
       },
-      // Users Management
       {
         path: "users",
         name: "ManageUsers",
@@ -179,7 +178,6 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "New User" },
       },
-      // Teams Management
       {
         path: "teams",
         name: "Teams",
@@ -198,14 +196,8 @@ const routes: RouteRecordRaw[] = [
         }),
         meta: { title: "Team Settings" },
       },
-      // Sources Management
       {
         path: "sources",
-        redirect: "sources/list",
-        meta: { requiresAdmin: true },
-      },
-      {
-        path: "sources/list",
         name: "Sources",
         component: () => import("@/views/sources/ManageSources.vue").catch(err => {
           error("Router", "Failed to load ManageSources component", err);
@@ -223,7 +215,7 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "New Source", requiresAdmin: true },
       },
       {
-        path: "sources/edit/:sourceId",
+        path: "sources/:sourceId/edit",
         name: "EditSource",
         component: () => import("@/views/sources/AddSource.vue").catch(err => {
           error("Router", "Failed to load AddSource component", err);
@@ -235,12 +227,11 @@ const routes: RouteRecordRaw[] = [
         path: "sources/stats",
         name: "SourceStats",
         component: () => import("@/views/sources/SourceStats.vue").catch(err => {
-          error("Router", "Failed to load SourceStats component", err);
+          error("Router", "Failed to load Source Stats component", err);
           return { default: ComponentLoadError };
         }),
         meta: { title: "Source Stats", requiresAdmin: true },
       },
-      // System Settings (Admin only)
       {
         path: "settings",
         name: "AdminSettings",
@@ -253,31 +244,7 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
-  // Profile Section
-  {
-    path: "/profile",
-    component: () => import("@/views/settings/SettingsLayout.vue").catch(err => {
-      error("Router", "Failed to load SettingsLayout component", err);
-      return { default: ComponentLoadError };
-    }),
-    meta: {
-      requiresAuth: true,
-      title: "Profile"
-    },
-    children: [
-      {
-        path: "",
-        name: "Profile",
-        component: () => import("@/views/settings/UserProfile.vue").catch(err => {
-          error("Router", "Failed to load UserProfile component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "Profile" },
-      },
-    ],
-  },
-
-  // Settings Section
+  // Settings Section (user-scoped)
   {
     path: "/settings",
     component: () => import("@/views/settings/SettingsLayout.vue").catch(err => {
@@ -290,7 +257,16 @@ const routes: RouteRecordRaw[] = [
     children: [
       {
         path: "",
-        redirect: "preferences",
+        redirect: "profile",
+      },
+      {
+        path: "profile",
+        name: "Profile",
+        component: () => import("@/views/settings/UserProfile.vue").catch(err => {
+          error("Router", "Failed to load UserProfile component", err);
+          return { default: ComponentLoadError };
+        }),
+        meta: { title: "Profile" },
       },
       {
         path: "preferences",
