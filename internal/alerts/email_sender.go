@@ -133,11 +133,6 @@ func (s *EmailSender) buildBody(notification AlertNotification) string {
 		fmt.Sprintf("Status: %s", status),
 		fmt.Sprintf("Severity: %s", severity),
 	}
-	if notification.TeamName != "" {
-		lines = append(lines, fmt.Sprintf("Team: %s", notification.TeamName))
-	} else if notification.TeamID > 0 {
-		lines = append(lines, fmt.Sprintf("Team ID: %d", notification.TeamID))
-	}
 	if notification.SourceName != "" {
 		lines = append(lines, fmt.Sprintf("Source: %s", notification.SourceName))
 	} else if notification.SourceID > 0 {

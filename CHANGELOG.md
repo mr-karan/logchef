@@ -5,6 +5,120 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [1.6.0] - 2026-05-06
+
+LogChef 1.6 narrows the **Team** abstraction to access control only and adds
+**Collections** — cross-team curation lists for saved queries. The unified
+Saved Queries view replaces the old team-scoped collections page with a flat,
+searchable table and a collection-picker dropdown.
+
+### API & URL changes
+- **Saved queries are source-scoped, not team-scoped.** `team_queries` is
+  rebuilt as `saved_queries(source_id, created_from_team_id, created_by, …)`.
+  Visibility: any user with source access via any team. Edit: creator +
+  global admin.
+- **`/api/v1/saved-queries/:id/resolve`** returns a transient
+  `resolved_team_id` computed from the user's access paths — no team
+  ownership stored on the query itself.
+- **Alerts de-teamed.** New `/api/v1/alerts` route group; `alerts.team_id`
+  dropped, `alerts.created_by` added.
+- **`query_shares` and `export_jobs` lose `team_id`.**
+- **New `/api/v1/collections`** — CRUD for collections + members + items.
+- **Old team-scoped paths return 404.** No shims, no redirects.
+- **Frontend URL:** `/logs/saved/:queryId` is the canonical share link.
+
+### Added
+- **Collections** — Cross-team curation lists. Personal collection
+  auto-created per user ("My Collection"). Shared collections are
+  invite-only with `owner` + `member` roles. Items a member can't run
+  show with a `runnable: false` flag (lock icon in UI).
+- **Unified Saved Queries view** — Single page at `/logs/saved` with a
+  collection-picker dropdown (All Queries / My Collection / shared
+  collections), inline search, and a Metabase-style flat table.
+- **"Add to Collection" drawer** — Per-row action on saved queries.
+  Slide-out panel shows all collections as checkboxes for quick
+  pin/unpin. Create new collections inline.
+- **"Remove from collection" action** — When viewing a specific
+  collection, each row's menu gains a destructive remove action.
+- **Saved query resolve with `resolved_team_id`** — The `/resolve`
+  endpoint deterministically picks the correct team for execution using
+  priority: explicit `?team_id` hint → `created_from_team_id` →
+  first accessible team fallback.
+- **`created_from_team_id`** on saved queries — nullable metadata
+  recording which team context the query was saved from. Used as a
+  preference hint during resolve; not an ACL gate.
+- **Invite members by email** — Collection member invite uses an email
+  dropdown (same UX as team member management), not a raw user ID.
+- **Shareable saved-query links** with configurable TTL.
+- **Backend-streamed result downloads** with synchronous admission
+  control (HTTP 429 at capacity).
+- **Calendar month/year drill-down** in the date picker.
+- **OIDC `skip_email_verified_check`** option.
+  ([#85](https://github.com/mr-karan/logchef/issues/85),
+  [#86](https://github.com/mr-karan/logchef/pull/86))
+- **Native ClickHouse TLS.**
+  ([#88](https://github.com/mr-karan/logchef/pull/88))
+
+### Changed
+- **Saved Queries view is now the unified entry point.** The old two-page
+  layout (separate /logs/saved + /logs/collections list) is replaced by
+  a single flat table with the collection picker. `/logs/collections`
+  is a standalone management page (create, delete, navigate to detail).
+- **Alert notifications** drop `team_id` / `team_name` fields.
+  Recipients resolve to users directly.
+- **Explore UI polish** — quieter top bar, concrete query placeholders,
+  tighter histogram styling, Local|UTC segmented timezone control.
+- **Export → Download** rename; backend-streamed pipe is the only path.
+- **AI SQL insert** clears saved-query state and switches to SQL mode.
+
+### Fixed
+- **Saved query loads wrong source** — resolved query's `source_id` now
+  overrides stale URL `?source=` param; URL updates via `router.replace`.
+- **"No source selected" race** — explorer waits for
+  `currentSourceDetails.id === contextStore.sourceId` before executing.
+- **Redirect spinner stuck on param reuse** — `CollectionRedirect`
+  watches `route.params.queryId` reactively instead of `onMounted` only.
+- **Stale-request guard** in `sourcesStore.loadSourceDetails` prevents
+  a fast source switch from being overwritten by an older response.
+- **Collection item counts update live** after pin/unpin in the drawer.
+- **Migration cascade-delete prevention** — `PRAGMA foreign_keys = OFF`
+  around table rebuilds in 000018 and 000020 to preserve `alert_history`
+  and `collection_items`.
+- **Unbounded query result OOM** — `max_limit` (default 100k rows).
+- **Raw SQL in URL overflow**, crash-safe export pruner, query share TTL
+  validation, translate API error surfacing, relative export URLs.
+
+### Removed
+- **Query Folders** (the team-scoped experiment from v1.6.0-dev).
+- **Bookmarks** (`is_bookmarked` column) — replaced by personal
+  collections.
+- **`team_id` on saved queries, alerts, query shares, export jobs.**
+- Dead frontend code paths (`loadTeamSourceQueries`,
+  `createTeamSourceQuery`, `useQueryFoldersStore`, etc.).
+
+### Migration notes (000016 → 000021)
+| Migration | What it does |
+|-----------|-------------|
+| 000016 | Drops `query_folders` + `query_folder_items` |
+| 000017 | Rebuilds `team_queries` → `saved_queries`, drops `team_id`, adds `created_by` |
+| 000018 | Drops `team_id` from `alerts`, `query_shares`, `export_jobs`; adds `alerts.created_by` |
+| 000019 | Creates `collections`, `collection_members`, `collection_items` |
+| 000020 | Drops `is_bookmarked`; seeds personal collections; migrates bookmarks to collection items |
+| 000021 | Adds `created_from_team_id` to `saved_queries`; backfills from `team_sources` |
+
+### Follow-ups
+- `logchef-mcp` (separate repo) needs rewiring to `/api/v1/saved-queries`.
+- Provisionable collections out of scope for 1.6.
+
+### Contributors
+- [@m0nikasingh](https://github.com/m0nikasingh) — OIDC email
+  verification skip
+  ([#86](https://github.com/mr-karan/logchef/pull/86)), native ClickHouse
+  TLS ([#88](https://github.com/mr-karan/logchef/pull/88)), AI SQL
+  insert mode fix ([#89](https://github.com/mr-karan/logchef/pull/89))
+
 ## [1.5.0] - 2026-04-08
 
 ### Added

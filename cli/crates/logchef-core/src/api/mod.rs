@@ -298,12 +298,13 @@ impl Client {
         Ok(api_response.data)
     }
 
-    pub async fn list_collections(&self, team_id: i64, source_id: i64) -> Result<Vec<Collection>> {
+    pub async fn list_collections(&self, _team_id: i64, source_id: i64) -> Result<Vec<Collection>> {
+        // v2.0: saved queries are no longer team-scoped. The team_id arg is
+        // accepted for API compatibility with older callers but ignored —
+        // visibility is computed server-side from the caller's team
+        // membership.
         let response: ApiResponse<Vec<Collection>> = self
-            .get(&format!(
-                "/api/v1/teams/{}/sources/{}/collections",
-                team_id, source_id
-            ))
+            .get(&format!("/api/v1/saved-queries?source_id={}", source_id))
             .await?;
         Ok(response.data)
     }

@@ -85,6 +85,11 @@ func boolToInt(b bool) int64 {
 	return 0
 }
 
+// nullString wraps a string into sql.NullString, treating empty as NULL.
+func nullString(value string) sql.NullString {
+	return sql.NullString{String: value, Valid: value != ""}
+}
+
 // mapSourceRowToModel maps a sqlc.Source to a models.Source
 func mapSourceRowToModel(row *sqlc.Source) *models.Source {
 	if row == nil {

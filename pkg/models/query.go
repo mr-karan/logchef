@@ -39,9 +39,9 @@ func (e ErrInvalidTimeout) Error() string {
 // TemplateVariable represents a variable for SQL template substitution.
 // Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
 type TemplateVariable struct {
-	Name  string      `json:"name"`  // Variable name (without braces)
-	Type  string      `json:"type"`  // "string", "text", "number", or "date"
-	Value interface{} `json:"value"` // The value to substitute
+	Name  string `json:"name"`  // Variable name (without braces)
+	Type  string `json:"type"`  // "string", "text", "number", or "date"
+	Value any    `json:"value"` // The value to substitute
 }
 
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
@@ -73,10 +73,10 @@ type APIHistogramRequest struct {
 
 // LogQueryResult represents the result of a log query
 type LogQueryResult struct {
-	Data     []map[string]interface{} `json:"data"`
-	Stats    QueryStats               `json:"stats"`
-	Columns  []ColumnInfo             `json:"columns"`
-	Warnings []QueryWarning           `json:"warnings,omitempty"`
+	Data     []map[string]any `json:"data"`
+	Stats    QueryStats       `json:"stats"`
+	Columns  []ColumnInfo     `json:"columns"`
+	Warnings []QueryWarning   `json:"warnings,omitempty"`
 }
 
 // LogContextRequest represents a request to get temporal context around a log
@@ -92,11 +92,11 @@ type LogContextRequest struct {
 
 // LogContextResponse represents temporal context query results
 type LogContextResponse struct {
-	TargetTimestamp int64                    `json:"target_timestamp"`
-	BeforeLogs      []map[string]interface{} `json:"before_logs"`
-	TargetLogs      []map[string]interface{} `json:"target_logs"` // Multiple logs might have the same timestamp
-	AfterLogs       []map[string]interface{} `json:"after_logs"`
-	Stats           QueryStats               `json:"stats"`
+	TargetTimestamp int64            `json:"target_timestamp"`
+	BeforeLogs      []map[string]any `json:"before_logs"`
+	TargetLogs      []map[string]any `json:"target_logs"` // Multiple logs might have the same timestamp
+	AfterLogs       []map[string]any `json:"after_logs"`
+	Stats           QueryStats       `json:"stats"`
 }
 
 // SavedQueryTab represents the active tab in the explorer
@@ -142,8 +142,8 @@ type SavedQueryVariable struct {
 	Type         string                     `json:"type"`
 	Label        string                     `json:"label"`
 	InputType    string                     `json:"inputType"`
-	Value        interface{}                `json:"value"`
-	DefaultValue interface{}                `json:"defaultValue,omitempty"`
+	Value        any                        `json:"value"`
+	DefaultValue any                        `json:"defaultValue,omitempty"`
 	IsOptional   bool                       `json:"isOptional,omitempty"`
 	IsRequired   bool                       `json:"isRequired,omitempty"`
 	Options      []SavedQueryVariableOption `json:"options,omitempty"`
@@ -158,75 +158,55 @@ type SavedQueryContent struct {
 	Variables []SavedQueryVariable `json:"variables"`
 }
 
-// QueryFolder represents a team-level folder for saved queries.
-type QueryFolder struct {
-	ID          int       `json:"id" db:"id"`
-	TeamID      TeamID    `json:"team_id" db:"team_id"`
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	Color       string    `json:"color" db:"color"`
-	SortOrder   int       `json:"sort_order" db:"sort_order"`
-	CreatedBy   *UserID   `json:"created_by,omitempty" db:"created_by"`
-	QueryCount  int       `json:"query_count" db:"query_count"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
+// SavedQuery represents a cross-team saved query bound to a single source.
+// Visibility is "any user with access to the source via any team they belong to".
+// Edit access is "creator + global admin"; rows with NULL CreatedBy are legacy
+// queries that pre-date created_by tracking and can only be edited by global admins.
+//
+// The legacy is_bookmarked flag is gone; users curate queries via Collections
+// (each user has an auto-created personal collection that takes the role
+// bookmarks used to play).
+type SavedQuery struct {
+	ID                int            `json:"id" db:"id"`
+	SourceID          SourceID       `json:"source_id" db:"source_id"`
+	CreatedFromTeamID *TeamID        `json:"created_from_team_id,omitempty" db:"created_from_team_id"`
+	Name              string         `json:"name" db:"name"`
+	Description       string         `json:"description" db:"description"`
+	QueryType         SavedQueryType `json:"query_type" db:"query_type"`
+	QueryContent      string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	CreatedBy         *UserID        `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt         time.Time      `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at" db:"updated_at"`
+	SourceName        string         `json:"source_name,omitempty"`
 }
 
-// QueryFolderSummary is embedded in saved-query responses.
-type QueryFolderSummary struct {
-	ID    int    `json:"id"`
-	Name  string `json:"name"`
-	Color string `json:"color"`
+// ResolvedSavedQuery is the explorer-facing representation of a saved query.
+// Saved queries are source-scoped, but query execution is still routed through
+// a team/source URL, so the resolver supplies a team that links the user to the
+// query's source.
+type ResolvedSavedQuery struct {
+	SavedQuery
+	ResolvedTeamID TeamID `json:"resolved_team_id"`
 }
 
-// SavedTeamQuery represents a saved query associated with a team
-type SavedTeamQuery struct {
-	ID           int                  `json:"id" db:"id"`
-	TeamID       TeamID               `json:"team_id" db:"team_id"`
-	SourceID     SourceID             `json:"source_id" db:"source_id"`
-	Name         string               `json:"name" db:"name"`
-	Description  string               `json:"description" db:"description"`
-	QueryType    SavedQueryType       `json:"query_type" db:"query_type"`
-	QueryContent string               `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	IsBookmarked bool                 `json:"is_bookmarked" db:"is_bookmarked"`
-	CreatedAt    time.Time            `json:"created_at" db:"created_at"`
-	UpdatedAt    time.Time            `json:"updated_at" db:"updated_at"`
-	TeamName     string               `json:"team_name,omitempty"`
-	SourceName   string               `json:"source_name,omitempty"`
-	Folders      []QueryFolderSummary `json:"folders,omitempty"`
+// CreateSavedQueryRequest is the JSON body for POST /api/v1/saved-queries.
+type CreateSavedQueryRequest struct {
+	Name              string         `json:"name" validate:"required"`
+	Description       string         `json:"description"`
+	SourceID          SourceID       `json:"source_id" validate:"required"`
+	CreatedFromTeamID *TeamID        `json:"created_from_team_id,omitempty"`
+	QueryType         SavedQueryType `json:"query_type" validate:"required"`
+	QueryContent      string         `json:"query_content" validate:"required"`
 }
 
-// CreateTeamQueryRequest represents a request to create a team query
-type CreateTeamQueryRequest struct {
-	Name         string         `json:"name" validate:"required"`
-	Description  string         `json:"description"`
-	SourceID     SourceID       `json:"source_id" validate:"required"`
-	QueryType    SavedQueryType `json:"query_type" validate:"required"`
-	QueryContent string         `json:"query_content" validate:"required"`
-	FolderIDs    []int          `json:"folder_ids,omitempty"`
-}
-
-// UpdateTeamQueryRequest represents a request to update a team query
-type UpdateTeamQueryRequest struct {
+// UpdateSavedQueryRequest is the JSON body for PUT /api/v1/saved-queries/:id.
+// SourceID is intentionally not updatable — re-targeting a query to a new source
+// is equivalent to creating a new one.
+type UpdateSavedQueryRequest struct {
 	Name         string         `json:"name"`
 	Description  string         `json:"description"`
-	SourceID     SourceID       `json:"source_id"`
 	QueryType    SavedQueryType `json:"query_type"`
 	QueryContent string         `json:"query_content"`
-	FolderIDs    []int          `json:"folder_ids,omitempty"`
-}
-
-// SavedQuery represents a generic saved query
-type SavedQuery struct {
-	ID          int       `json:"id" db:"id"`
-	TeamID      string    `json:"team_id" db:"team_id"`
-	SourceID    string    `json:"source_id" db:"source_id"`
-	Name        string    `json:"name" db:"name"`
-	Description string    `json:"description" db:"description"`
-	QuerySQL    string    `json:"query_sql" db:"query_sql"`
-	CreatedBy   UserID    `json:"created_by" db:"created_by"`
-	CreatedAt   time.Time `json:"created_at" db:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at" db:"updated_at"`
 }
 
 // GenerateSQLRequest defines the request body for SQL generation from natural language.
@@ -243,7 +223,6 @@ type GenerateSQLResponse struct {
 // QueryShare stores an ad hoc query payload behind a short token.
 type QueryShare struct {
 	Token          string          `json:"token" db:"token"`
-	TeamID         TeamID          `json:"team_id" db:"team_id"`
 	SourceID       SourceID        `json:"source_id" db:"source_id"`
 	CreatedBy      UserID          `json:"created_by" db:"created_by"`
 	Payload        json.RawMessage `json:"payload" db:"payload_json"`
@@ -275,7 +254,6 @@ type CreateQueryShareRequest struct {
 type QueryShareResponse struct {
 	Token     string          `json:"token"`
 	ShareURL  string          `json:"share_url,omitempty"`
-	TeamID    TeamID          `json:"team_id"`
 	SourceID  SourceID        `json:"source_id"`
 	Payload   json.RawMessage `json:"payload"`
 	ExpiresAt time.Time       `json:"expires_at"`
@@ -304,7 +282,6 @@ type CreateExportJobRequest struct {
 // ExportJob stores an async export request and its eventual artifact metadata.
 type ExportJob struct {
 	ID             string          `json:"id" db:"id"`
-	TeamID         TeamID          `json:"team_id" db:"team_id"`
 	SourceID       SourceID        `json:"source_id" db:"source_id"`
 	CreatedBy      UserID          `json:"created_by" db:"created_by"`
 	Status         ExportJobStatus `json:"status" db:"status"`

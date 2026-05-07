@@ -15,13 +15,12 @@ export interface QueryExecutionState {
 
 // Query save form data
 export interface SaveQueryFormData {
-  team_id: number;
   name: string;
   description: string;
   source_id: number;
+  created_from_team_id?: number | null;
   query_type: 'logchefql' | 'sql';
   query_content: string;
-  folder_ids?: number[];
 }
 
 // Editor modes

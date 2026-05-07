@@ -71,11 +71,12 @@ watch(duplicateAlertId, async () => {
   await loadAlertForDuplication();
 });
 
-async function handleCreate(payload: CreateAlertRequest) {
-  if (!currentTeamId.value || !currentSourceId.value) {
+async function handleCreate(payload: Omit<CreateAlertRequest, "source_id">) {
+  // Source is still required (alerts are scoped to a source); team is not.
+  if (!currentSourceId.value) {
     return;
   }
-  const result = await alertsStore.createAlert(currentTeamId.value, currentSourceId.value, payload);
+  const result = await alertsStore.createAlert(undefined, currentSourceId.value, payload);
   if (result.success && result.data) {
     // Remove the duplicate query param when navigating away
     const { duplicate, ...restQuery } = route.query;

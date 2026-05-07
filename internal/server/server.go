@@ -151,7 +151,6 @@ func (s *Server) setupRoutes() {
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.handleListCurrentUserTeams)
-	api.Get("/me/collections", s.requireAuth, s.handleListCurrentUserCollections)
 	api.Get("/me/preferences", s.requireAuth, s.handleGetUserPreferences)
 	api.Put("/me/preferences", s.requireAuth, s.handleUpdateUserPreferences)
 
@@ -221,20 +220,33 @@ func (s *Server) setupRoutes() {
 	// Team settings — managed guard only on structural changes (rename/description)
 	api.Put("/teams/:teamID", s.requireAuth, s.requireTeamNotManaged, s.requireTeamAdminOrGlobalAdmin, s.handleUpdateTeam)
 
-	// Team-level collections (all sources)
-	api.Get("/teams/:teamID/collections", s.requireAuth, s.requireTeamMember, s.handleListTeamCollections)
+	// Collections (cross-team curation lists). Each user gets an auto-created
+	// personal collection on first GET /api/v1/collections. Other collections
+	// are invite-only with two roles: owner (full control) and member (read).
+	collections := api.Group("/collections", s.requireAuth)
+	collections.Get("/", s.handleListCollections)
+	collections.Get("/:collectionID", s.handleGetCollection)
+	collections.Get("/:collectionID/members", s.handleListCollectionMembers)
+	collections.Get("/:collectionID/items", s.handleListCollectionItems)
+	// Mutations require team admin/editor or global admin
+	collections.Post("/", s.requireAnyTeamAdmin, s.handleCreateCollection)
+	collections.Put("/:collectionID", s.requireAnyTeamAdmin, s.handleUpdateCollection)
+	collections.Delete("/:collectionID", s.requireAnyTeamAdmin, s.handleDeleteCollection)
+	collections.Post("/:collectionID/members", s.requireAnyTeamAdmin, s.handleAddCollectionMember)
+	collections.Delete("/:collectionID/members/:userID", s.requireAnyTeamAdmin, s.handleRemoveCollectionMember)
+	collections.Post("/:collectionID/items", s.requireAnyTeamAdmin, s.handleAddCollectionItem)
+	collections.Delete("/:collectionID/items/:queryID", s.requireAnyTeamAdmin, s.handleRemoveCollectionItem)
 
-	// Team-level query folders
-	folders := api.Group("/teams/:teamID/folders", s.requireAuth, s.requireTeamMember)
-	folders.Get("/", s.handleListQueryFolders)
-	folders.Get("/:folderID", s.handleGetQueryFolder)
-	folders.Get("/:folderID/collections", s.handleListQueryFolderCollections)
-	folders.Post("/", s.requireCollectionManagement, s.handleCreateQueryFolder)
-	folders.Put("/:folderID", s.requireCollectionManagement, s.handleUpdateQueryFolder)
-	folders.Delete("/:folderID", s.requireCollectionManagement, s.handleDeleteQueryFolder)
-	folders.Post("/:folderID/collections/bulk", s.requireCollectionManagement, s.handleBulkUpdateQueryFolderCollections)
-	folders.Post("/:folderID/collections/:collectionID", s.requireCollectionManagement, s.handleAddQueryToFolder)
-	folders.Delete("/:folderID/collections/:collectionID", s.requireCollectionManagement, s.handleRemoveQueryFromFolder)
+	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
+	// access via any team. Edit/delete: creator + global admin (legacy queries
+	// without created_by are global-admin-only).
+	savedQueries := api.Group("/saved-queries", s.requireAuth)
+	savedQueries.Get("/", s.handleListSavedQueries)
+	savedQueries.Post("/", s.handleCreateSavedQuery)
+	savedQueries.Get("/:queryID", s.handleGetSavedQuery)
+	savedQueries.Put("/:queryID", s.handleUpdateSavedQuery)
+	savedQueries.Delete("/:queryID", s.handleDeleteSavedQuery)
+	savedQueries.Get("/:queryID/resolve", s.handleResolveSavedQuery)
 
 	// Team Source Management (linking/unlinking)
 	teamSources := api.Group("/teams/:teamID/sources", s.requireAuth, s.requireTeamMember)
@@ -274,29 +286,20 @@ func (s *Server) setupRoutes() {
 		teamSourceOps.Get("/fields/values", s.handleGetAllFieldValues)         // Get all LowCardinality field values
 		teamSourceOps.Get("/fields/:fieldName/values", s.handleGetFieldValues) // Get values for a specific field
 
-		// Collections (Saved Queries) scoped to Team & Source
-		// Regular team members can view and use collections
-		collections := teamSourceOps.Group("/collections")
-		collections.Get("/", s.handleListTeamSourceCollections)
-		collections.Get("/:collectionID", s.handleGetTeamSourceCollection)
-		collections.Get("/:collectionID/resolve", s.handleResolveQuery)
-
-		// Only team editors, team admins, or global admins can manage collections
-		collections.Post("/", s.requireCollectionManagement, s.handleCreateTeamSourceCollection)
-		collections.Put("/:collectionID", s.requireCollectionManagement, s.handleUpdateTeamSourceCollection)
-		collections.Delete("/:collectionID", s.requireCollectionManagement, s.handleDeleteTeamSourceCollection)
-		collections.Patch("/:collectionID/bookmark", s.requireCollectionManagement, s.handleToggleQueryBookmark)
-
-		alertRoutes := teamSourceOps.Group("/alerts")
-		alertRoutes.Get("/", s.handleListAlerts)
-		alertRoutes.Get("/:alertID", s.handleGetAlert)
-		alertRoutes.Get("/:alertID/history", s.handleListAlertHistory)
-		alertRoutes.Post("/test", s.handleTestAlertQuery) // Test query endpoint (accessible to all team members)
-		alertRoutes.Post("/", s.requireTeamAdminOrGlobalAdmin, s.handleCreateAlert)
-		alertRoutes.Put("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleUpdateAlert)
-		alertRoutes.Delete("/:alertID", s.requireTeamAdminOrGlobalAdmin, s.handleDeleteAlert)
-		alertRoutes.Post("/:alertID/resolve", s.requireTeamAdminOrGlobalAdmin, s.handleResolveAlert)
 	}
+
+	// Alerts (cross-team, source-scoped). Visibility: any user with source
+	// access via any team. Edit/delete/resolve: creator + global admin
+	// (legacy alerts without created_by are global-admin-only).
+	alertRoutes := api.Group("/alerts", s.requireAuth)
+	alertRoutes.Get("/", s.handleListAlerts)
+	alertRoutes.Post("/", s.handleCreateAlert)
+	alertRoutes.Post("/test", s.handleTestAlertQuery)
+	alertRoutes.Get("/:alertID", s.handleGetAlert)
+	alertRoutes.Put("/:alertID", s.handleUpdateAlert)
+	alertRoutes.Delete("/:alertID", s.handleDeleteAlert)
+	alertRoutes.Get("/:alertID/history", s.handleListAlertHistory)
+	alertRoutes.Post("/:alertID/resolve", s.handleResolveAlert)
 
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s

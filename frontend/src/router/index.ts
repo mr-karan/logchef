@@ -6,13 +6,21 @@ import {
 import { useAuthStore } from "@/stores/auth";
 import { error } from "@/utils/debug";
 import { contextRouterGuard } from "./contextGuard";
-
-// Import the error component for reuse
 import ComponentLoadError from "@/views/error/ComponentLoadError.vue";
 
-/**
- * Route definitions
- */
+const lazy = (name: string, loader: () => Promise<unknown>) => () =>
+  loader().catch((err) => {
+    error("Router", `Failed to load ${name} component`, err);
+    return { default: ComponentLoadError } as { default: typeof ComponentLoadError };
+  });
+
+const QUERYLESS_ROUTE_NAMES = new Set([
+  "SavedQueries",
+  "SavedQueryRedirect",
+  "CollectionsList",
+  "CollectionDetail",
+]);
+
 const routes: RouteRecordRaw[] = [
   {
     path: "/",
@@ -26,10 +34,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "login",
         name: "Login",
-        component: () => import("@/views/auth/Login.vue").catch(err => {
-          error("Router", "Failed to load Login component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("Login", () => import("@/views/auth/Login.vue")),
         meta: {
           title: "Login",
           public: true,
@@ -40,10 +45,7 @@ const routes: RouteRecordRaw[] = [
       {
         path: "logout",
         name: "Logout",
-        component: () => import("@/views/auth/Logout.vue").catch(err => {
-          error("Router", "Failed to load Logout component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("Logout", () => import("@/views/auth/Logout.vue")),
         meta: {
           title: "Logout",
           public: true,
@@ -57,10 +59,7 @@ const routes: RouteRecordRaw[] = [
   // Logs Section
   {
     path: "/logs",
-    component: () => import("@/views/explore/LogsLayout.vue").catch(err => {
-      error("Router", "Failed to load LogsLayout component", err);
-      return { default: ComponentLoadError };
-    }),
+    component: lazy("LogsLayout", () => import("@/views/explore/LogsLayout.vue")),
     meta: {
       requiresAuth: true,
     },
@@ -72,67 +71,58 @@ const routes: RouteRecordRaw[] = [
       {
         path: "explore",
         name: "LogExplorer",
-        component: () => import("@/views/explore/LogExplorer.vue").catch(err => {
-          error("Router", "Failed to load LogExplorer component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("LogExplorer", () => import("@/views/explore/LogExplorer.vue")),
         meta: { title: "Log Explorer" },
       },
       {
         path: "saved",
         name: "SavedQueries",
-        component: () => import("@/views/collections/SavedQueriesView.vue").catch(err => {
-          error("Router", "Failed to load SavedQueriesView component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("SavedQueriesView", () => import("@/views/collections/SavedQueriesView.vue")),
         meta: { title: "Collections" },
       },
       {
         path: "alerts",
         name: "AlertsOverview",
-        component: () => import("@/views/alerts/AlertsOverview.vue").catch(err => {
-          error("Router", "Failed to load AlertsOverview component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("AlertsOverview", () => import("@/views/alerts/AlertsOverview.vue")),
         meta: { title: "Alerts" },
       },
       {
         path: "alerts/new",
         name: "AlertCreate",
-        component: () => import("@/views/alerts/AlertCreate.vue").catch(err => {
-          error("Router", "Failed to load AlertCreate component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("AlertCreate", () => import("@/views/alerts/AlertCreate.vue")),
         meta: { title: "Create Alert" },
       },
       {
         path: "alerts/:alertID",
         name: "AlertDetail",
-        component: () => import("@/views/alerts/AlertDetail.vue").catch(err => {
-          error("Router", "Failed to load AlertDetail component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("AlertDetail", () => import("@/views/alerts/AlertDetail.vue")),
         meta: { title: "Alert Detail" },
       },
       {
-        path: "collection/:teamId/:sourceId/:collectionId",
-        name: "CollectionRedirect",
-        component: () => import("@/views/collections/CollectionRedirect.vue").catch(err => {
-          error("Router", "Failed to load CollectionRedirect component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "Loading Collection..." },
+        path: "saved/:queryId",
+        name: "SavedQueryRedirect",
+        component: lazy("SavedQueryRedirect", () => import("@/views/collections/CollectionRedirect.vue")),
+        meta: { title: "Loading Saved Query..." },
       },
-
+      {
+        path: "collections",
+        name: "CollectionsList",
+        component: lazy("CollectionsListView", () => import("@/views/collections/CollectionsListView.vue")),
+        meta: { title: "Collections" },
+      },
+      {
+        path: "collections/:collectionID",
+        name: "CollectionDetail",
+        component: lazy("CollectionDetailView", () => import("@/views/collections/CollectionDetailView.vue")),
+        meta: { title: "Collection" },
+      },
     ],
   },
-  // Management Section (Admin only)
+
+  // Admin Section (Admin only)
   {
-    path: "/management",
-    component: () => import("@/views/access/AccessLayout.vue").catch(err => {
-      error("Router", "Failed to load AccessLayout component", err);
-      return { default: ComponentLoadError };
-    }),
+    path: "/admin",
+    component: lazy("AccessLayout", () => import("@/views/access/AccessLayout.vue")),
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
@@ -142,145 +132,79 @@ const routes: RouteRecordRaw[] = [
         path: "",
         redirect: "users",
       },
-      // Users Management
       {
         path: "users",
         name: "ManageUsers",
-        component: () => import("@/views/access/users/UsersList.vue").catch(err => {
-          error("Router", "Failed to load UsersList component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("UsersList", () => import("@/views/access/users/UsersList.vue")),
         meta: { title: "Users" },
       },
       {
-        path: "users/new",
-        name: "NewUser",
-        component: () => import("@/views/access/users/AddUser.vue").catch(err => {
-          error("Router", "Failed to load AddUser component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "New User" },
-      },
-      // Teams Management
-      {
         path: "teams",
         name: "Teams",
-        component: () => import("@/views/access/teams/TeamsList.vue").catch(err => {
-          error("Router", "Failed to load TeamsList component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("TeamsList", () => import("@/views/access/teams/TeamsList.vue")),
         meta: { title: "Teams" },
       },
       {
         path: "teams/:id",
         name: "TeamSettings",
-        component: () => import("@/views/access/teams/TeamSettings.vue").catch(err => {
-          error("Router", "Failed to load TeamSettings component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("TeamSettings", () => import("@/views/access/teams/TeamSettings.vue")),
         meta: { title: "Team Settings" },
       },
-      // Sources Management
       {
         path: "sources",
-        redirect: "sources/list",
-        meta: { requiresAdmin: true },
-      },
-      {
-        path: "sources/list",
         name: "Sources",
-        component: () => import("@/views/sources/ManageSources.vue").catch(err => {
-          error("Router", "Failed to load ManageSources component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("ManageSources", () => import("@/views/sources/ManageSources.vue")),
         meta: { title: "Sources", requiresAdmin: true },
       },
       {
         path: "sources/new",
         name: "NewSource",
-        component: () => import("@/views/sources/AddSource.vue").catch(err => {
-          error("Router", "Failed to load AddSource component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("AddSource", () => import("@/views/sources/AddSource.vue")),
         meta: { title: "New Source", requiresAdmin: true },
       },
       {
-        path: "sources/edit/:sourceId",
+        path: "sources/:sourceId/edit",
         name: "EditSource",
-        component: () => import("@/views/sources/AddSource.vue").catch(err => {
-          error("Router", "Failed to load AddSource component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("AddSource", () => import("@/views/sources/AddSource.vue")),
         meta: { title: "Edit Source", requiresAdmin: true },
       },
       {
         path: "sources/stats",
         name: "SourceStats",
-        component: () => import("@/views/sources/SourceStats.vue").catch(err => {
-          error("Router", "Failed to load SourceStats component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("SourceStats", () => import("@/views/sources/SourceStats.vue")),
         meta: { title: "Source Stats", requiresAdmin: true },
       },
-      // System Settings (Admin only)
       {
         path: "settings",
         name: "AdminSettings",
-        component: () => import("@/views/admin/AdminSettings.vue").catch(err => {
-          error("Router", "Failed to load AdminSettings component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("AdminSettings", () => import("@/views/admin/AdminSettings.vue")),
         meta: { title: "System Settings", requiresAdmin: true },
       },
     ],
   },
 
-  // Profile Section
-  {
-    path: "/profile",
-    component: () => import("@/views/settings/SettingsLayout.vue").catch(err => {
-      error("Router", "Failed to load SettingsLayout component", err);
-      return { default: ComponentLoadError };
-    }),
-    meta: {
-      requiresAuth: true,
-      title: "Profile"
-    },
-    children: [
-      {
-        path: "",
-        name: "Profile",
-        component: () => import("@/views/settings/UserProfile.vue").catch(err => {
-          error("Router", "Failed to load UserProfile component", err);
-          return { default: ComponentLoadError };
-        }),
-        meta: { title: "Profile" },
-      },
-    ],
-  },
-
-  // Settings Section
+  // Settings Section (user-scoped)
   {
     path: "/settings",
-    component: () => import("@/views/settings/SettingsLayout.vue").catch(err => {
-      error("Router", "Failed to load SettingsLayout component", err);
-      return { default: ComponentLoadError };
-    }),
+    component: lazy("SettingsLayout", () => import("@/views/settings/SettingsLayout.vue")),
     meta: {
       requiresAuth: true,
     },
     children: [
       {
         path: "",
-        redirect: "preferences",
+        redirect: "profile",
+      },
+      {
+        path: "profile",
+        name: "Profile",
+        component: lazy("UserProfile", () => import("@/views/settings/UserProfile.vue")),
+        meta: { title: "Profile" },
       },
       {
         path: "preferences",
         name: "Preferences",
-        component: () => import("@/views/settings/UserPreferences.vue").catch(err => {
-          error("Router", "Failed to load UserPreferences component", err);
-          return { default: ComponentLoadError };
-        }),
+        component: lazy("UserPreferences", () => import("@/views/settings/UserPreferences.vue")),
         meta: { title: "User Preferences" },
       },
     ],
@@ -290,10 +214,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/forbidden",
     name: "Forbidden",
-    component: () => import("@/views/error/Forbidden.vue").catch(err => {
-      error("Router", "Failed to load Forbidden component", err);
-      return { default: ComponentLoadError };
-    }),
+    component: lazy("Forbidden", () => import("@/views/error/Forbidden.vue")),
     meta: {
       title: "Access Denied",
       public: true,
@@ -302,10 +223,7 @@ const routes: RouteRecordRaw[] = [
   {
     path: "/:pathMatch(.*)*",
     name: "NotFound",
-    component: () => import("@/views/error/NotFound.vue").catch(err => {
-      error("Router", "Failed to load NotFound component", err);
-      return { default: ComponentLoadError };
-    }),
+    component: lazy("NotFound", () => import("@/views/error/NotFound.vue")),
     meta: {
       title: "Not Found",
       public: true,
@@ -313,19 +231,11 @@ const routes: RouteRecordRaw[] = [
   },
 ];
 
-/**
- * Router instance
- */
 const router = createRouter({
   history: createWebHistory(),
   routes,
-  // Add scroll behavior to restore position
   scrollBehavior(_to, _from, savedPosition) {
-    if (savedPosition) {
-      return savedPosition;
-    } else {
-      return { top: 0 };
-    }
+    return savedPosition ?? { top: 0 };
   },
 });
 
@@ -334,8 +244,6 @@ router.beforeEach(async (to) => {
   const isAuthenticated = authStore.isAuthenticated;
   const isAdmin = authStore.user?.role === "admin";
   const isPublic = to.matched.some((record) => record.meta.public);
-
-  // Title is now managed reactively in App.vue via useTitle
 
   if (!isAuthenticated && !isPublic) {
     return {
@@ -346,6 +254,18 @@ router.beforeEach(async (to) => {
 
   if (isAuthenticated && to.name === "Login") {
     return { path: "/" };
+  }
+
+  if (
+    QUERYLESS_ROUTE_NAMES.has(String(to.name)) &&
+    Object.keys(to.query).length > 0
+  ) {
+    return {
+      path: to.path,
+      hash: to.hash,
+      query: {},
+      replace: true,
+    };
   }
 
   if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {

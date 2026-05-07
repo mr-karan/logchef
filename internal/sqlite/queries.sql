@@ -222,195 +222,79 @@ JOIN team_sources ts ON t.id = ts.team_id
 WHERE ts.source_id = ?
 ORDER BY t.name;
 
--- Team Queries
+-- Saved Queries (cross-team, source-scoped)
 
--- name: CreateTeamSourceQuery :one
--- Create a new query for a team and source
-INSERT INTO team_queries (team_id, source_id, name, description, query_type, query_content)
-VALUES (?, ?, ?, ?, ?, ?)
+-- name: CreateSavedQuery :one
+-- Insert a new saved query and return its id
+INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_type, query_content, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
--- name: GetTeamSourceQuery :one
--- Get a query by ID for a specific team and source
-SELECT * FROM team_queries
-WHERE id = ? AND team_id = ? AND source_id = ?;
+-- name: GetSavedQuery :one
+-- Look up one saved query by id
+SELECT * FROM saved_queries WHERE id = ?;
 
--- name: UpdateTeamSourceQuery :exec
--- Update a query for a team and source
-UPDATE team_queries
+-- name: UpdateSavedQuery :exec
+-- Update a saved query's mutable fields
+UPDATE saved_queries
 SET name = ?,
     description = ?,
     query_type = ?,
     query_content = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ? AND team_id = ? AND source_id = ?;
+WHERE id = ?;
 
--- name: DeleteTeamSourceQuery :exec
--- Delete a query by ID for a specific team and source
-DELETE FROM team_queries
-WHERE id = ? AND team_id = ? AND source_id = ?;
+-- name: DeleteSavedQuery :exec
+-- Delete a saved query
+DELETE FROM saved_queries WHERE id = ?;
 
--- name: ListQueriesByTeamAndSource :many
--- List all queries for a specific team and source (bookmarked first, then by updated_at)
-SELECT * FROM team_queries WHERE team_id = ? AND source_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
-
--- name: ListQueriesByTeam :many
--- List all queries for a specific team across all sources (bookmarked first, then by updated_at)
-SELECT * FROM team_queries WHERE team_id = ? ORDER BY is_bookmarked DESC, updated_at DESC;
-
--- name: ToggleQueryBookmark :exec
--- Toggle the bookmark status of a query
-UPDATE team_queries
-SET is_bookmarked = NOT is_bookmarked,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ? AND team_id = ? AND source_id = ?;
-
--- name: GetQueryBookmarkStatus :one
--- Get the current bookmark status of a query
-SELECT is_bookmarked FROM team_queries WHERE id = ? AND team_id = ? AND source_id = ?;
-
--- name: ListQueriesForUser :many
--- List all saved queries across all teams a user belongs to, with team and source names
+-- name: ListSavedQueriesForUser :many
+-- List every saved query the user can see (any source attached to any of their teams)
 SELECT
-    tq.id,
-    tq.team_id,
-    tq.source_id,
-    tq.name,
-    tq.description,
-    tq.query_type,
-    tq.query_content,
-    tq.created_at,
-    tq.updated_at,
-    tq.is_bookmarked,
-    t.name AS team_name,
+    sq.id,
+    sq.source_id,
+    sq.created_from_team_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.created_by,
     s.name AS source_name
-FROM team_queries tq
-JOIN team_members tm ON tm.team_id = tq.team_id
-JOIN teams t ON t.id = tq.team_id
-JOIN sources s ON s.id = tq.source_id
-WHERE tm.user_id = ?
-ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC;
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+WHERE sq.source_id IN (
+    SELECT DISTINCT ts.source_id
+    FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ?
+)
+ORDER BY sq.updated_at DESC;
 
--- Query Folders
-
--- name: ListQueryFolders :many
--- List all folders for a team with saved query counts
+-- name: ListSavedQueriesForUserBySource :many
+-- List saved queries for a specific source, scoped to a user that has access to it
 SELECT
-    qf.id,
-    qf.team_id,
-    qf.name,
-    qf.description,
-    qf.color,
-    qf.sort_order,
-    qf.created_by,
-    COUNT(qfi.query_id) AS query_count,
-    qf.created_at,
-    qf.updated_at
-FROM query_folders qf
-LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
-WHERE qf.team_id = ?
-GROUP BY qf.id
-ORDER BY qf.sort_order ASC, qf.name ASC;
-
--- name: CreateQueryFolder :one
--- Create a query folder for a team
-INSERT INTO query_folders (team_id, name, description, color, sort_order, created_by)
-VALUES (?, ?, ?, ?, ?, ?)
-RETURNING id, created_at, updated_at;
-
--- name: GetQueryFolder :one
--- Get one query folder scoped to a team
-SELECT
-    qf.id,
-    qf.team_id,
-    qf.name,
-    qf.description,
-    qf.color,
-    qf.sort_order,
-    qf.created_by,
-    COUNT(qfi.query_id) AS query_count,
-    qf.created_at,
-    qf.updated_at
-FROM query_folders qf
-LEFT JOIN query_folder_items qfi ON qfi.folder_id = qf.id
-WHERE qf.team_id = ? AND qf.id = ?
-GROUP BY qf.id;
-
--- name: UpdateQueryFolder :one
--- Update a query folder and return its ID
-UPDATE query_folders
-SET name = ?,
-    description = ?,
-    color = ?,
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE team_id = ? AND id = ?
-RETURNING id;
-
--- name: DeleteQueryFolder :one
--- Delete a query folder and return its ID
-DELETE FROM query_folders
-WHERE team_id = ? AND id = ?
-RETURNING id;
-
--- name: ListQueriesByFolder :many
--- List saved queries in a folder
-SELECT
-    tq.id,
-    tq.team_id,
-    tq.source_id,
-    tq.name,
-    tq.description,
-    tq.query_type,
-    tq.query_content,
-    tq.created_at,
-    tq.updated_at,
-    tq.is_bookmarked
-FROM team_queries tq
-JOIN query_folder_items qfi ON qfi.query_id = tq.id
-WHERE tq.team_id = ? AND qfi.folder_id = ?
-ORDER BY tq.is_bookmarked DESC, tq.updated_at DESC;
-
--- name: CountQueryFolderForTeam :one
--- Check whether a folder belongs to a team
-SELECT COUNT(*) FROM query_folders
-WHERE team_id = ? AND id = ?;
-
--- name: CountTeamQueryForTeam :one
--- Check whether a saved query belongs to a team
-SELECT COUNT(*) FROM team_queries
-WHERE team_id = ? AND id = ?;
-
--- name: DeleteQueryFolderItemsByQuery :exec
--- Remove all folder memberships for a saved query
-DELETE FROM query_folder_items
-WHERE query_id = ?;
-
--- name: CreateQueryFolderItem :exec
--- Add a saved query to a folder
-INSERT INTO query_folder_items (folder_id, query_id, added_by)
-VALUES (?, ?, ?);
-
--- name: CreateQueryFolderItemIgnore :exec
--- Add a saved query to a folder if not already present
-INSERT OR IGNORE INTO query_folder_items (folder_id, query_id, added_by)
-VALUES (?, ?, ?);
-
--- name: RemoveQueryFromFolder :exec
--- Remove a saved query from a folder
-DELETE FROM query_folder_items
-WHERE folder_id = ? AND query_id = ?;
-
--- name: ListQueryFoldersByQueryIDs :many
--- List folder summaries for a set of saved query IDs
-SELECT
-    qfi.query_id,
-    qf.id,
-    qf.name,
-    qf.color
-FROM query_folder_items qfi
-JOIN query_folders qf ON qf.id = qfi.folder_id
-WHERE qfi.query_id IN (sqlc.slice('query_ids'))
-ORDER BY qf.sort_order ASC, qf.name ASC;
+    sq.id,
+    sq.source_id,
+    sq.created_from_team_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+WHERE sq.source_id = ?
+  AND EXISTS (
+    SELECT 1 FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE ts.source_id = sq.source_id AND tm.user_id = ?
+  )
+ORDER BY sq.updated_at DESC;
 
 -- Query Shares
 
@@ -418,18 +302,16 @@ ORDER BY qf.sort_order ASC, qf.name ASC;
 -- Persist an ad hoc query share token
 INSERT INTO query_shares (
     token,
-    team_id,
     source_id,
     created_by,
     payload_json,
     expires_at
-) VALUES (?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?);
 
 -- name: GetQueryShare :one
 -- Retrieve an ad hoc query share by token with creator details
 SELECT
     qs.token,
-    qs.team_id,
     qs.source_id,
     qs.created_by,
     qs.payload_json,
@@ -465,7 +347,6 @@ WHERE expires_at < ?;
 -- Persist an async export job
 INSERT INTO export_jobs (
     id,
-    team_id,
     source_id,
     created_by,
     status,
@@ -474,13 +355,12 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
 
 -- name: GetExportJob :one
 -- Retrieve an export job by ID
 SELECT
     id,
-    team_id,
     source_id,
     created_by,
     status,
@@ -631,7 +511,6 @@ DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%
 
 -- name: CreateAlert :one
 INSERT INTO alerts (
-    team_id,
     source_id,
     name,
     description,
@@ -648,7 +527,8 @@ INSERT INTO alerts (
     recipient_user_ids_json,
     webhook_urls_json,
     generator_url,
-    is_active
+    is_active,
+    created_by
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
@@ -656,13 +536,22 @@ RETURNING *;
 -- name: GetAlert :one
 SELECT * FROM alerts WHERE id = ?;
 
--- name: GetAlertForTeamSource :one
-SELECT * FROM alerts WHERE id = ? AND team_id = ? AND source_id = ?;
-
--- name: ListAlertsByTeamAndSource :many
+-- name: ListAlertsBySource :many
+-- List alerts for one source
 SELECT * FROM alerts
-WHERE team_id = ? AND source_id = ?
+WHERE source_id = ?
 ORDER BY updated_at DESC, created_at DESC;
+
+-- name: ListAlertsForUser :many
+-- List every alert the user can see (any source attached to any of their teams)
+SELECT a.* FROM alerts a
+WHERE a.source_id IN (
+    SELECT DISTINCT ts.source_id
+    FROM team_sources ts
+    JOIN team_members tm ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ?
+)
+ORDER BY a.updated_at DESC, a.created_at DESC;
 
 -- name: UpdateAlert :one
 UPDATE alerts
@@ -833,3 +722,109 @@ SELECT managed FROM users WHERE id = ?;
 -- name: GetSourceByNameForProvisioning :one
 -- Get source by name for provisioning lookup
 SELECT * FROM sources WHERE name = ?;
+
+
+-- Collections (cross-team curation lists for saved queries)
+
+-- name: CreateCollection :one
+-- Insert a new collection (personal or shared)
+INSERT INTO collections (name, description, is_personal, created_by)
+VALUES (?, ?, ?, ?)
+RETURNING id, created_at, updated_at;
+
+-- name: GetCollection :one
+-- Look up a collection by id
+SELECT * FROM collections WHERE id = ?;
+
+-- name: GetPersonalCollection :one
+-- Find the caller's personal collection if it exists
+SELECT * FROM collections WHERE created_by = ? AND is_personal = 1;
+
+-- name: UpdateCollection :exec
+-- Update name/description (owner only - enforced in app code)
+UPDATE collections
+SET name = ?,
+    description = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?;
+
+-- name: DeleteCollection :exec
+-- Delete a collection. Personal collections cannot be deleted (enforced in app code).
+DELETE FROM collections WHERE id = ?;
+
+-- name: ListCollectionsForUser :many
+-- List collections the user owns or is a member of, with member count and item count
+SELECT
+    c.id,
+    c.name,
+    c.description,
+    c.is_personal,
+    c.created_by,
+    c.created_at,
+    c.updated_at,
+    cm.role AS caller_role,
+    (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
+FROM collections c
+JOIN collection_members cm ON cm.collection_id = c.id
+WHERE cm.user_id = ?
+ORDER BY c.is_personal DESC, c.updated_at DESC;
+
+-- name: AddCollectionMember :exec
+-- Add a member; idempotent on (collection_id, user_id).
+INSERT INTO collection_members (collection_id, user_id, role, added_by)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(collection_id, user_id) DO NOTHING;
+
+-- name: GetCollectionMember :one
+-- Look up a single membership row
+SELECT collection_id, user_id, role, added_by, created_at
+FROM collection_members
+WHERE collection_id = ? AND user_id = ?;
+
+-- name: ListCollectionMembers :many
+-- List members of a collection with user details
+SELECT cm.collection_id, cm.user_id, cm.role, cm.added_by, cm.created_at,
+       u.email, u.full_name
+FROM collection_members cm
+JOIN users u ON u.id = cm.user_id
+WHERE cm.collection_id = ?
+ORDER BY cm.role DESC, u.email ASC;
+
+-- name: RemoveCollectionMember :exec
+-- Remove a member from a collection
+DELETE FROM collection_members WHERE collection_id = ? AND user_id = ?;
+
+-- name: AddCollectionItem :exec
+-- Add a saved query to a collection; idempotent on (collection_id, saved_query_id).
+INSERT INTO collection_items (collection_id, saved_query_id, sort_order, added_by)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(collection_id, saved_query_id) DO NOTHING;
+
+-- name: RemoveCollectionItem :exec
+-- Remove an item from a collection
+DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id = ?;
+
+-- name: ListCollectionItems :many
+-- List items in a collection with saved-query details
+SELECT
+    ci.collection_id,
+    ci.saved_query_id,
+    ci.sort_order,
+    ci.added_by,
+    ci.created_at AS item_added_at,
+    sq.id AS query_id,
+    sq.source_id,
+    sq.name AS query_name,
+    sq.description AS query_description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_by AS query_created_by,
+    sq.created_at AS query_created_at,
+    sq.updated_at AS query_updated_at,
+    s.name AS source_name
+FROM collection_items ci
+JOIN saved_queries sq ON sq.id = ci.saved_query_id
+JOIN sources s ON s.id = sq.source_id
+WHERE ci.collection_id = ?
+ORDER BY ci.sort_order ASC, ci.created_at ASC;

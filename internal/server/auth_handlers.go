@@ -237,6 +237,12 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		"role", loginUser.Role,
 	)
 
+	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
+	// a transient failure here must not block login.
+	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, loginUser); err != nil {
+		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", loginUser.ID)
+	}
+
 	// Set the application session cookie.
 	c.Cookie(&fiber.Cookie{
 		Name:     sessionCookieName,

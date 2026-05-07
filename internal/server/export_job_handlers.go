@@ -79,7 +79,6 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	now := time.Now().UTC()
 	job := &models.ExportJob{
 		ID:             uuid.New().String(),
-		TeamID:         teamID,
 		SourceID:       sourceID,
 		CreatedBy:      user.ID,
 		Status:         models.ExportJobStatusPending,
@@ -128,7 +127,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	}
 	go s.runExportJob(job.ID, queryCtx, cancel, teamID, sourceID, user.Email, runReq)
 
-	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(job))
+	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(teamID, job))
 }
 
 func (s *Server) handleGetExportJob(c *fiber.Ctx) error {
@@ -139,7 +138,8 @@ func (s *Server) handleGetExportJob(c *fiber.Ctx) error {
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
 	}
-	return SendSuccess(c, fiber.StatusOK, exportJobResponse(job))
+	teamID, _ := core.ParseTeamID(c.Params("teamID"))
+	return SendSuccess(c, fiber.StatusOK, exportJobResponse(teamID, job))
 }
 
 func (s *Server) handleDownloadExportJob(c *fiber.Ctx) error {
@@ -207,9 +207,10 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 		s.log.Error("failed to get export job", "error", err, "job_id", exportID)
 		return nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get export job", models.GeneralErrorType)
 	}
-	if job.TeamID != teamID || job.SourceID != sourceID {
+	if job.SourceID != sourceID {
 		return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
 	}
+	_ = teamID // teamID in the URL is an auth gate via middleware; no need to compare on the row
 	if user.Role != models.UserRoleAdmin && job.CreatedBy != user.ID {
 		return nil, SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this export", models.AuthorizationErrorType)
 	}
@@ -355,7 +356,7 @@ func exportFailureMessage(err error) string {
 	return err.Error()
 }
 
-func exportJobResponse(job *models.ExportJob) models.ExportJobResponse {
+func exportJobResponse(teamID models.TeamID, job *models.ExportJob) models.ExportJobResponse {
 	return models.ExportJobResponse{
 		ID:           job.ID,
 		Status:       job.Status,
@@ -368,17 +369,17 @@ func exportJobResponse(job *models.ExportJob) models.ExportJobResponse {
 		CompletedAt:  job.CompletedAt,
 		CreatedAt:    job.CreatedAt,
 		UpdatedAt:    job.UpdatedAt,
-		StatusURL:    buildExportJobStatusURL(job),
-		DownloadURL:  buildExportJobDownloadURL(job),
+		StatusURL:    buildExportJobStatusURL(teamID, job),
+		DownloadURL:  buildExportJobDownloadURL(teamID, job),
 	}
 }
 
-func buildExportJobStatusURL(job *models.ExportJob) string {
-	return fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s", job.TeamID, job.SourceID, job.ID)
+func buildExportJobStatusURL(teamID models.TeamID, job *models.ExportJob) string {
+	return fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s", teamID, job.SourceID, job.ID)
 }
 
-func buildExportJobDownloadURL(job *models.ExportJob) string {
-	return fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s/download", job.TeamID, job.SourceID, job.ID)
+func buildExportJobDownloadURL(teamID models.TeamID, job *models.ExportJob) string {
+	return fmt.Sprintf("/api/v1/teams/%d/sources/%d/exports/%s/download", teamID, job.SourceID, job.ID)
 }
 
 func (s *Server) startBackgroundCleanup() {

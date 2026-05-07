@@ -100,7 +100,7 @@
 
         <!-- Saved Queries Dropdown -->
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
-          @select-saved-query="(query: SavedTeamQuery) => $emit('select-saved-query', query)"
+          @select-saved-query="(query: SavedQuery) => $emit('select-saved-query', query)"
           @save="$emit('save-query')" class="h-8" />
 
         <Select
@@ -387,7 +387,7 @@ import QueryHistoryDropdown from "./QueryHistoryDropdown.vue";
 import AiSqlDialog from "./AiSqlDialog.vue";
 import VariableConfigSheet from "./VariableConfigSheet.vue";
 import VariablesPanel from "./VariablesPanel.vue";
-import type { SavedTeamQuery } from "@/api/savedQueries";
+import type { SavedQuery } from "@/api/savedQueries";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -464,7 +464,7 @@ const emit = defineEmits<{
   (e: "update:activeMode", value: EditorMode, isModeSwitchOnly?: boolean): void;
   (e: "toggle-fields"): void;
   // SavedQueries events
-  (e: "select-saved-query", query: SavedTeamQuery): void;
+  (e: "select-saved-query", query: SavedQuery): void;
   (e: "save-query"): void;
   // Additional emits to prevent Vue warnings
   (e: "saveQueryAsNew"): void;

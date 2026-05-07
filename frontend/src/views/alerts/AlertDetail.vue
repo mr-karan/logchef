@@ -66,13 +66,9 @@ function goBack() {
 }
 
 async function handleUpdate(payload: UpdateAlertRequest) {
-  if (!currentTeamId.value || !currentSourceId.value || !alert.value) return;
-  await alertsStore.updateAlert(
-    currentTeamId.value,
-    currentSourceId.value,
-    alert.value.id,
-    payload
-  );
+  if (!alert.value) return;
+  // Alerts are no longer team-scoped — drop the team/source guards.
+  await alertsStore.updateAlert(undefined, undefined, alert.value.id, payload);
 }
 
 function confirmDelete() {
@@ -80,8 +76,8 @@ function confirmDelete() {
 }
 
 async function handleDelete() {
-  if (!alert.value || !currentTeamId.value || !currentSourceId.value) return;
-  const result = await alertsStore.deleteAlert(currentTeamId.value, currentSourceId.value, alert.value.id);
+  if (!alert.value) return;
+  const result = await alertsStore.deleteAlert(undefined, undefined, alert.value.id);
   showDeleteDialog.value = false;
   if (result.success) {
     goBack();
@@ -94,10 +90,10 @@ async function loadHistory() {
 }
 
 async function handleResolve(_historyId: number, message: string) {
-  if (!currentTeamId.value || !currentSourceId.value || !alertId.value) return;
+  if (!alertId.value) return;
   const result = await alertHistoryStore.resolveAlert(
-    currentTeamId.value,
-    currentSourceId.value,
+    undefined,
+    undefined,
     alertId.value,
     { message }
   );
@@ -117,8 +113,9 @@ watch(
 );
 
 onMounted(async () => {
-  if (!alert.value && currentTeamId.value && currentSourceId.value) {
-    await alertsStore.fetchAlerts(currentTeamId.value, currentSourceId.value);
+  if (!alert.value) {
+    // Cross-team alert listing: pull whatever is visible to the user.
+    await alertsStore.fetchAlerts(undefined, currentSourceId.value ?? undefined);
   }
   if (route.query.tab === "history") {
     currentTab.value = "history";

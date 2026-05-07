@@ -822,12 +822,18 @@ export const useExploreStore = defineStore("explore", () => {
       } else if (content.timeRange?.absolute?.start && content.timeRange?.absolute?.end) {
         absoluteStart = content.timeRange.absolute.start;
         absoluteEnd = content.timeRange.absolute.end;
-        
+
         state.data.value.timeRange = {
           start: timestampToCalendarDateTime(content.timeRange.absolute.start),
           end: timestampToCalendarDateTime(content.timeRange.absolute.end)
         };
         state.data.value.selectedRelativeTime = null;
+      } else {
+        // Saved query has no time range (timeRange: null) — use last 15 minutes
+        // so the explorer doesn't get stuck on "Loading explorer...".
+        const { start, end } = parseRelativeTimeString('15m');
+        state.data.value.selectedRelativeTime = '15m';
+        state.data.value.timeRange = { start, end };
       }
 
       state.data.value.savedQuerySnapshot = {

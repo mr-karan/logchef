@@ -14,14 +14,13 @@ import (
 func (db *DB) CreateQueryShare(ctx context.Context, share *models.QueryShare) error {
 	err := db.writeQueries.CreateQueryShare(ctx, sqlc.CreateQueryShareParams{
 		Token:       share.Token,
-		TeamID:      int64(share.TeamID),
 		SourceID:    int64(share.SourceID),
 		CreatedBy:   int64(share.CreatedBy),
 		PayloadJson: string(share.Payload),
 		ExpiresAt:   share.ExpiresAt,
 	})
 	if err != nil {
-		db.log.Error("failed to create query share", "error", err, "team_id", share.TeamID, "source_id", share.SourceID)
+		db.log.Error("failed to create query share", "error", err, "source_id", share.SourceID)
 		return fmt.Errorf("error creating query share: %w", err)
 	}
 	return nil
@@ -40,7 +39,6 @@ func (db *DB) GetQueryShare(ctx context.Context, token string) (*models.QuerySha
 
 	share := &models.QueryShare{
 		Token:          row.Token,
-		TeamID:         models.TeamID(row.TeamID),
 		SourceID:       models.SourceID(row.SourceID),
 		CreatedBy:      models.UserID(row.CreatedBy),
 		Payload:        []byte(row.PayloadJson),

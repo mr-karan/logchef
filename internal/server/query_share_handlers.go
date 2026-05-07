@@ -87,7 +87,6 @@ func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
 	now := time.Now().UTC()
 	share := &models.QueryShare{
 		Token:     token,
-		TeamID:    teamID,
 		SourceID:  sourceID,
 		CreatedBy: user.ID,
 		Payload:   append([]byte(nil), payloadBytes...),
@@ -98,6 +97,7 @@ func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
 		s.log.Error("failed to create query share", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create share link", models.GeneralErrorType)
 	}
+	_ = teamID // teamID is consumed by the route's auth middleware; not stored on the share
 
 	return SendSuccess(c, fiber.StatusCreated, queryShareResponse(share, buildQueryShareURL(c, s.config.Server.FrontendURL, token)))
 }
@@ -125,15 +125,15 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusGone, "Share link has expired", models.NotFoundErrorType)
 	}
 
-	if user.Role != models.UserRoleAdmin {
-		hasAccess, err := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, share.TeamID, share.SourceID)
-		if err != nil {
-			s.log.Error("failed to check query share access", "error", err, "token", token, "user_id", user.ID)
-			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this shared query", models.AuthorizationErrorType)
-		}
+	// Admins do not get a free pass on share visibility — they must be a
+	// member of a team that has the source.
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
+	if err != nil {
+		s.log.Error("failed to check query share access", "error", err, "token", token, "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
+	}
+	if !hasAccess {
+		return SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this shared query", models.AuthorizationErrorType)
 	}
 
 	if err := s.sqlite.TouchQueryShare(c.Context(), token, time.Now().UTC()); err != nil {
@@ -184,7 +184,6 @@ func queryShareResponse(share *models.QueryShare, shareURL string) models.QueryS
 	return models.QueryShareResponse{
 		Token:     share.Token,
 		ShareURL:  shareURL,
-		TeamID:    share.TeamID,
 		SourceID:  share.SourceID,
 		Payload:   share.Payload,
 		ExpiresAt: share.ExpiresAt,

@@ -33,7 +33,7 @@ import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
-import type { SavedTeamQuery } from "@/api/savedQueries";
+import type { SavedQuery } from "@/api/savedQueries";
 import { logchefqlApi, type FilterCondition } from "@/api/logchefql";
 import { generateCliCommand } from "@/utils/cliCommand";
 
@@ -206,7 +206,7 @@ const queryEditorRef = ref<ComponentPublicInstance<{
   toggleSqlEditorVisibility?: () => void;
 }> | null>(null);
 const isLoadingQuery = ref(false);
-const editQueryData = ref<SavedTeamQuery | null>(null);
+const editQueryData = ref<SavedQuery | null>(null);
 const topBarRef = ref<InstanceType<typeof ExploreTopBar> | null>(null);
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
 const isHistogramVisible = ref(true);
@@ -468,7 +468,7 @@ watch(
     if (isInitializing.value) return;
     if (!newSourceId || !currentTeamId.value) return;
     try {
-      await loadSourceQueries(currentTeamId.value, newSourceId);
+      await loadSourceQueries(newSourceId);
     } catch (e) {
       console.error('Error loading saved queries for source:', e);
     }
@@ -581,15 +581,11 @@ const handleSaveOrUpdateClick = async () => {
     return;
   }
 
-  if (queryId && currentTeamId.value && currentSourceId.value) {
+  if (queryId) {
     // --- Update Existing Query Flow ---
     try {
       isLoadingQuery.value = true;
-      const result = await savedQueriesStore.fetchTeamSourceQueryDetails(
-        currentTeamId.value,
-        currentSourceId.value,
-        queryId
-      );
+      const result = await savedQueriesStore.fetchById(queryId);
 
       if (result.success && savedQueriesStore.selectedQuery) {
         const existingQuery = savedQueriesStore.selectedQuery;
@@ -620,29 +616,13 @@ const handleSaveOrUpdateClick = async () => {
 
 // Handle updating an existing query
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
-  // Ensure we have the necessary IDs
-  if (!currentSourceId.value || !formData.team_id) {
-    toast({
-      title: "Error",
-      description: "Missing source or team ID for update.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-    return;
-  }
-
   try {
-    const response = await savedQueriesStore.updateTeamSourceQuery(
-      formData.team_id,
-      currentSourceId.value,
-      queryId,
-      {
-        name: formData.name,
-        description: formData.description,
-        query_type: formData.query_type,
-        query_content: formData.query_content,
-      }
-    );
+    const response = await savedQueriesStore.update(queryId, {
+      name: formData.name,
+      description: formData.description,
+      query_type: formData.query_type,
+      query_content: formData.query_content,
+    });
 
     if (response && response.success) {
       showSaveQueryModal.value = false;
@@ -1128,15 +1108,11 @@ watch(
       urlSource = route.query.source ? parseInt(route.query.source as string) : null;
     }
 
-    if (newQueryId && urlTeam && urlSource) {
+    if (newQueryId) {
       try {
         isLoadingQuery.value = true;
 
-        const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
-          urlTeam,
-          urlSource,
-          newQueryId as string
-        );
+        const fetchResult = await savedQueriesStore.fetchById(newQueryId as string);
 
         if (fetchResult.success && savedQueriesStore.selectedQuery) {
           exploreStore.setGroupByField("__none__");

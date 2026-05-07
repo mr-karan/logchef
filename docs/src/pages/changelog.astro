@@ -82,9 +82,92 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <!-- Unreleased -->
     <article class="version">
       <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+        <span class="version-date">In development</span>
+      </div>
+      <ul class="change-list">
+        <li>No unreleased changes yet.</li>
+      </ul>
+    </article>
+
+    <!-- v1.6.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.6.0</span>
+        <span class="version-date">May 6, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Logchef 1.6 narrows the <strong>Team</strong> abstraction to access control only and adds <strong>Collections</strong> &mdash; cross-team curation lists for saved queries. The unified Saved Queries view replaces the old team-scoped layout with a flat, searchable table and collection-picker dropdown.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Collections</strong> &mdash; Cross-team curation lists. Personal collection auto-created per user. Shared collections are invite-only with <code>owner</code> + <code>member</code> roles. Items a member can't run show with a lock icon.</li>
+          <li><strong>Unified Saved Queries view</strong> &mdash; Single page at <code>/logs/saved</code> with a collection-picker dropdown (All / Personal / Shared), search, and a flat table with type icon, name, source, and date.</li>
+          <li><strong>"Add to Collection" drawer</strong> &mdash; Per-row action on saved queries. Slide-out panel shows all collections as checkboxes for quick pin/unpin. Create new collections inline.</li>
+          <li><strong>Deterministic saved-query resolution</strong> &mdash; <code>/resolve</code> endpoint returns <code>resolved_team_id</code> using priority: explicit hint &rarr; <code>created_from_team_id</code> &rarr; first accessible team.</li>
+          <li><strong>Shareable saved-query links</strong> &mdash; <code>/logs/saved/:queryId</code> is the canonical share URL. Resolves source + team automatically.</li>
+          <li><strong>Backend-streamed downloads</strong> &mdash; CSV/JSON exports with synchronous admission control (429 at capacity).</li>
+          <li><strong>Calendar drill-down</strong>, <strong>OIDC email-verified bypass</strong> (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), <strong>native ClickHouse TLS</strong> (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>).</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Saved queries are source-scoped, not team-scoped.</strong> Team is an access path, not ownership. <code>created_from_team_id</code> is metadata for resolve preference, not ACL.</li>
+          <li><strong>Alerts de-teamed.</strong> New <code>/api/v1/alerts</code> route; <code>team_id</code> dropped, <code>created_by</code> added. Edit/delete = creator + admin.</li>
+          <li><strong>API endpoints restructured.</strong> New <code>/api/v1/saved-queries</code>, <code>/api/v1/alerts</code>, <code>/api/v1/collections</code>. Old team-scoped paths return 404.</li>
+          <li><strong>Alert notifications</strong> drop <code>team_id</code>/<code>team_name</code>. Recipients resolve to users directly.</li>
+          <li><strong>Explore UI polish</strong> &mdash; quieter top bar, concrete placeholders, Local|UTC timezone control.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type removed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 12H5"/></svg>
+          Removed
+        </div>
+        <ul class="change-list">
+          <li><strong>Query Folders</strong> &mdash; replaced by Collections.</li>
+          <li><strong>Bookmarks</strong> (<code>is_bookmarked</code>) &mdash; replaced by personal collections.</li>
+          <li><strong><code>team_id</code></strong> on saved queries, alerts, query shares, and export jobs.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Saved query loads wrong source</strong> &mdash; resolved query's <code>source_id</code> overrides stale URL params; source details must match before execution fires.</li>
+          <li><strong>Redirect spinner stuck</strong> &mdash; reactive <code>route.params</code> watch prevents stale state on route reuse.</li>
+          <li><strong>Migration cascade-delete</strong> &mdash; FK enforcement disabled during table rebuilds to preserve child rows.</li>
+          <li><strong>Query result OOM</strong>, raw SQL URL overflow, crash-safe export pruner, relative export URLs.</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong> <a href="https://github.com/m0nikasingh" target="_blank">@m0nikasingh</a> &mdash; OIDC email verification skip (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), native ClickHouse TLS (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>), AI SQL insert mode fix (<a href="https://github.com/mr-karan/logchef/pull/89" target="_blank">#89</a>)
+      </div>
+    </article>
+
+    <!-- v1.5.0 -->
+    <article class="version">
+      <div class="version-header">
         <span class="version-tag">v1.5.0</span>
         <span class="version-date">Apr 8, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.5.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

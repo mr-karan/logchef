@@ -1,6 +1,5 @@
 import { apiClient } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
-import type { QueryFolderColor } from "./queryFolders";
 
 export interface SavedQueryContent {
   version: number;
@@ -17,37 +16,29 @@ export interface SavedQueryContent {
   variables?: VariableState[];
 }
 
-export interface QueryFolderSummary {
-  id: number;
-  name: string;
-  color: QueryFolderColor;
-}
-
 /**
- * Saved team query representation
+ * Saved query representation. Cross-team — visibility is via source access
+ * through any team membership; edit access is creator + global admin.
+ *
+ * The legacy is_bookmarked flag is gone in v1.6 — users curate queries via
+ * Collections (every user has an auto-created personal collection).
  */
-export interface SavedTeamQuery {
+export interface SavedQuery {
   id: number;
-  team_id: number;
   source_id: number;
+  created_from_team_id?: number | null;
   name: string;
   description: string;
   query_type: string;
   query_content: string; // JSON string of SavedQueryContent
-  is_bookmarked: boolean;
+  created_by?: number | null;
   created_at: string;
   updated_at: string;
-  team_name?: string;
   source_name?: string;
-  folders?: QueryFolderSummary[];
 }
 
-/**
- * Toggle bookmark response
- */
-export interface ToggleBookmarkResponse {
-  is_bookmarked: boolean;
-  message: string;
+export interface ResolvedSavedQuery extends SavedQuery {
+  resolved_team_id: number;
 }
 
 /**
@@ -60,54 +51,41 @@ export interface Team {
 }
 
 /**
- * Team grouped query
- */
-export interface TeamGroupedQuery {
-  team_id: number;
-  team_name: string;
-  queries: SavedTeamQuery[];
-}
-
-/**
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  listTeamCollections: (teamId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/collections`),
+  list: (sourceId?: number) => {
+    const url =
+      sourceId !== undefined && sourceId !== null
+        ? `/saved-queries?source_id=${sourceId}`
+        : "/saved-queries";
+    return apiClient.get<SavedQuery[]>(url);
+  },
 
-  listTeamSourceQueries: (teamId: number, sourceId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/collections`),
+  get: (queryId: number | string) =>
+    apiClient.get<SavedQuery>(`/saved-queries/${queryId}`),
 
-  getTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
-    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
-
-  createTeamSourceQuery: (teamId: number, sourceId: number, query: {
+  create: (query: {
+    source_id: number;
+    created_from_team_id?: number | null;
     name: string;
     description: string;
     query_type: string;
     query_content: string;
-    folder_ids?: number[];
-  }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections`, query),
+  }) => apiClient.post<SavedQuery>("/saved-queries", query),
 
-  updateTeamSourceQuery: (
-    teamId: number,
-    sourceId: number,
-    collectionId: string,
-    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">> & { folder_ids?: number[] }
-  ) =>
-    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`, query),
+  update: (
+    queryId: number | string,
+    query: Partial<Omit<SavedQuery, "id" | "source_id" | "created_by" | "created_at" | "updated_at">>
+  ) => apiClient.put<SavedQuery>(`/saved-queries/${queryId}`, query),
 
-  deleteTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
-    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
+  delete: (queryId: number | string) =>
+    apiClient.delete<{ message: string }>(`/saved-queries/${queryId}`),
 
-  toggleBookmark: (teamId: number, sourceId: number, collectionId: number) =>
-    apiClient.patch<ToggleBookmarkResponse>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/bookmark`),
+  resolve: (queryId: number | string, preferredTeamId?: number | string | null) => {
+    const suffix = preferredTeamId ? `?team_id=${encodeURIComponent(String(preferredTeamId))}` : "";
+    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`);
+  },
 
-  resolveQuery: (teamId: number, sourceId: number, collectionId: number) =>
-    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/resolve`),
-
-  listMyCollections: () =>
-    apiClient.get<SavedTeamQuery[]>("/me/collections"),
-
-  getUserTeams: () => apiClient.get<Team[]>("/me/teams")
+  getUserTeams: () => apiClient.get<Team[]>("/me/teams"),
 };

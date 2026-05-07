@@ -13,7 +13,6 @@ import (
 func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error {
 	err := db.writeQueries.CreateExportJob(ctx, sqlc.CreateExportJobParams{
 		ID:          job.ID,
-		TeamID:      int64(job.TeamID),
 		SourceID:    int64(job.SourceID),
 		CreatedBy:   int64(job.CreatedBy),
 		Status:      string(job.Status),
@@ -24,7 +23,7 @@ func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error 
 		UpdatedAt:   job.UpdatedAt,
 	})
 	if err != nil {
-		db.log.Error("failed to create export job", "error", err, "job_id", job.ID, "team_id", job.TeamID, "source_id", job.SourceID)
+		db.log.Error("failed to create export job", "error", err, "job_id", job.ID, "source_id", job.SourceID)
 		return fmt.Errorf("error creating export job: %w", err)
 	}
 	return nil
@@ -127,7 +126,6 @@ func (db *DB) DeleteExpiredExportJobs(ctx context.Context, before time.Time) err
 func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 	job := &models.ExportJob{
 		ID:             row.ID,
-		TeamID:         models.TeamID(row.TeamID),
 		SourceID:       models.SourceID(row.SourceID),
 		CreatedBy:      models.UserID(row.CreatedBy),
 		Status:         models.ExportJobStatus(row.Status),

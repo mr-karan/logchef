@@ -232,7 +232,6 @@ pub struct TokenUser {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: i64,
-    pub team_id: i64,
     pub source_id: i64,
     pub name: String,
     #[serde(default)]
@@ -241,6 +240,8 @@ pub struct Collection {
     pub query_content: String,
     #[serde(default)]
     pub is_bookmarked: bool,
+    #[serde(default)]
+    pub created_by: Option<i64>,
     #[serde(default)]
     pub created_at: Option<DateTime<Utc>>,
     #[serde(default)]

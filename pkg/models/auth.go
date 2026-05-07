@@ -108,18 +108,6 @@ type UserTeamDetails struct {
 	Role        TeamRole  `json:"role"`
 }
 
-// TeamQuery represents a saved query in a team
-type TeamQuery struct {
-	ID           int            `json:"id" db:"id"`
-	TeamID       TeamID         `json:"team_id" db:"team_id"`
-	SourceID     SourceID       `json:"source_id" db:"source_id"`
-	Name         string         `json:"name" db:"name"`
-	Description  string         `json:"description" db:"description"`
-	QueryType    SavedQueryType `json:"query_type" db:"query_type"`
-	QueryContent string         `json:"query_content" db:"query_content"`
-	Timestamps
-}
-
 // APIToken represents an API token for authentication
 type APIToken struct {
 	ID         int        `json:"id" db:"id"`
