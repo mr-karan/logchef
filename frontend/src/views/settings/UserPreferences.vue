@@ -97,7 +97,7 @@ const fieldsPanelOpen = computed({
       </div>
     </PageSection>
 
-    <PageSection title="Log Explorer" description="Set defaults for log viewing and navigation." :content-class="'space-y-6 px-4 py-4'">
+    <PageSection title="Log Explorer" description="Set defaults for log viewing and navigation." content-class="space-y-6">
       <div class="grid gap-4 md:grid-cols-2">
         <div class="space-y-2">
           <Label for="timezone">Default Timezone</Label>

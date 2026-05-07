@@ -58,7 +58,7 @@ import { useAuthStore } from "@/stores/auth";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
-import { ref, watch, computed, onMounted } from "vue";
+import { ref, watch, onMounted } from "vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
 
@@ -83,29 +83,17 @@ onMounted(() => {
   preferencesStore.loadPreferences();
 });
 
-const explorerTo = computed(() => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
+// Carry team/source context into URLs that support it, so deep links keep
+// the user's current scope.
+function withContext(path: string) {
   const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  return {
-    path: "/logs/explore",
-    query,
-  };
-});
+  if (teamsStore.currentTeamId) query.team = String(teamsStore.currentTeamId);
+  if (exploreStore.sourceId) query.source = String(exploreStore.sourceId);
+  return { path, query };
+}
 
-const alertsTo = computed(() => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
-  const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  return {
-    path: "/logs/alerts",
-    query,
-  };
-});
+const CONTEXTUAL_URLS = new Set(["/logs/explore", "/logs/alerts"]);
+const resolveTo = (url: string) => CONTEXTUAL_URLS.has(url) ? withContext(url) : url;
 
 // Get initial sidebar state from cookie or default to true
 const getSavedState = () => {
@@ -250,7 +238,7 @@ const navItems = [
                   ">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url === '/logs/explore' ? explorerTo : item.url === '/logs/alerts' ? alertsTo : item.url" class="flex items-center" active-class="font-medium">
+                      <router-link :to="resolveTo(item.url)" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
                       </router-link>

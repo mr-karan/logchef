@@ -27,16 +27,13 @@ const { toast } = useToast()
 const teamsStore = useTeamsStore()
 const authStore = useAuthStore()
 
-// Check if user is a global admin
 const isGlobalAdmin = computed(() => authStore.user?.role === 'admin')
 
-// Improved loading state
 const isLoading = ref(true)
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
 const searchQuery = ref('')
 
-// Filter teams based on search query
 const filteredTeams = computed(() => {
     if (!searchQuery.value.trim()) {
         return teamsWithDefaults.value;
@@ -49,9 +46,8 @@ const filteredTeams = computed(() => {
     );
 });
 
-// Get processed teams with default values
-// Uses managedTeams which returns adminTeams for global admins,
-// or filtered userTeams (where role is admin) for team admins
+// managedTeams returns adminTeams for global admins, or userTeams filtered
+// to admin role for team admins.
 const teamsWithDefaults = computed(() => {
     return teamsStore.managedTeams.map(team => ({
         ...team,
@@ -60,20 +56,6 @@ const teamsWithDefaults = computed(() => {
         memberCount: team.member_count || 0
     }));
 });
-
-// Show empty state only if not loading and no teams after search
-const showEmptyState = computed(() =>
-    !isLoading.value &&
-    filteredTeams.value.length === 0 &&
-    !searchQuery.value
-);
-
-// Show not found state when search has no results
-const showNotFoundState = computed(() =>
-    !isLoading.value &&
-    filteredTeams.value.length === 0 &&
-    searchQuery.value.trim() !== ''
-);
 
 const handleDelete = (team: typeof teamsWithDefaults.value[number]) => {
     teamToDelete.value = team as Team
@@ -86,7 +68,6 @@ const confirmDelete = async () => {
     try {
         await teamsStore.deleteTeam(teamToDelete.value.id)
 
-        // Reset UI state
         showDeleteDialog.value = false
         teamToDelete.value = null
     } catch (error) {
@@ -144,7 +125,7 @@ onMounted(() => {
         <LoadingState v-if="isLoading" label="Loading teams…" />
 
         <EmptyState
-            v-else-if="showEmptyState"
+            v-else-if="filteredTeams.length === 0 && !searchQuery"
             :icon="Users"
             title="No teams yet"
             :description="isGlobalAdmin ? 'Create your first team to get started.' : 'You are not an admin of any teams.'"
@@ -167,7 +148,7 @@ onMounted(() => {
             </div>
 
             <EmptyState
-                v-if="showNotFoundState"
+                v-if="filteredTeams.length === 0 && searchQuery.trim()"
                 :icon="Search"
                 title="No results"
                 description="No teams match your search."

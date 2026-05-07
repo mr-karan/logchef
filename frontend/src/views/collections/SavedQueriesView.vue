@@ -16,7 +16,7 @@ import {
   FolderOpen,
   MoreHorizontal,
 } from "lucide-vue-next";
-import { PageHeader } from "@/components/layout";
+import { PageHeader, LoadingState, EmptyState } from "@/components/layout";
 import { formatDate } from "@/utils/format";
 import {
   DropdownMenu,
@@ -96,9 +96,14 @@ const selectedCollectionName = computed(() => {
   return c?.name ?? "Collection";
 });
 
-onMounted(async () => {
-  await collectionsStore.fetchCollections();
-  await loadQueries();
+const emptyDescription = computed(() => {
+  if (searchQuery.value) return "No queries match your search.";
+  if (selectedCollection.value === "all") return "No saved queries yet. Save a query from the Explorer.";
+  return "This collection is empty. Pin queries from All Queries.";
+});
+
+onMounted(() => {
+  Promise.all([collectionsStore.fetchCollections(), loadQueries()]);
 });
 
 watch(selectedCollection, async () => {
@@ -229,19 +234,17 @@ function manageCollection() {
       {{ queryCount }} {{ queryCount === 1 ? "query" : "queries" }}
     </p>
 
-    <!-- Loading -->
-    <div v-if="isLoadingItems || isLoading" class="flex items-center justify-center py-12">
-      <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
-    </div>
+    <LoadingState v-if="isLoadingItems || isLoading" />
 
-    <!-- Empty state -->
-    <div v-else-if="queryCount === 0" class="flex flex-col items-center justify-center py-16 gap-3">
-      <Search class="h-8 w-8 text-muted-foreground/50" />
-      <p class="text-sm text-muted-foreground">
-        {{ searchQuery ? "No queries match your search." : selectedCollection === "all" ? "No saved queries yet. Save a query from the Explorer." : "This collection is empty. Pin queries from All Queries." }}
-      </p>
-      <Button v-if="searchQuery" variant="outline" size="sm" @click="clearSearch">Clear search</Button>
-    </div>
+    <EmptyState
+      v-else-if="queryCount === 0"
+      :icon="Search"
+      :description="emptyDescription"
+    >
+      <template v-if="searchQuery" #action>
+        <Button variant="outline" size="sm" @click="clearSearch">Clear search</Button>
+      </template>
+    </EmptyState>
 
     <!-- Metabase-style flat table -->
     <div v-else class="rounded-md border">

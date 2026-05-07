@@ -102,7 +102,13 @@ async function load() {
   if (!collection.value) {
     await store.fetchCollections();
   }
-  await Promise.all([store.fetchItems(collectionID.value), store.fetchMembers(collectionID.value)]);
+  const tasks: Promise<unknown>[] = [store.fetchItems(collectionID.value)];
+  // Skip member fetch when the section won't render — personal collections
+  // hide it, and non-team-admins can't see it (canListUsers is false).
+  if (collection.value && !collection.value.is_personal && canListUsers.value) {
+    tasks.push(store.fetchMembers(collectionID.value));
+  }
+  await Promise.all(tasks);
 }
 
 onMounted(load);
@@ -228,7 +234,7 @@ async function handleDeleteCollection() {
       <PageSection
         title="Items"
         description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
-        content-class="p-0"
+        flush
       >
         <LoadingState v-if="store.isLoadingOperation(`listItems-${collectionID}`)" />
         <EmptyState
@@ -308,7 +314,7 @@ async function handleDeleteCollection() {
         v-if="!collection.is_personal && canListUsers"
         title="Members"
         description="Owners can invite new members and adjust roles. Members can read items they have source access to."
-        content-class="p-0"
+        flush
       >
         <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
         <ul v-else class="divide-y">

@@ -64,7 +64,6 @@ const editForm = ref<UpdateSettingRequest>({
   is_sensitive: false
 })
 
-// Get settings by category
 const alertsSettings = computed(() => settingsStore.getSettingsByCategory('alerts'))
 const aiSettings = computed(() => settingsStore.getSettingsByCategory('ai'))
 const authSettings = computed(() => settingsStore.getSettingsByCategory('auth'))
@@ -137,7 +136,6 @@ const getCategoryDescription = (category: string) => {
 }
 
 const formatKey = (key: string) => {
-  // Remove category prefix and convert to title case
   const parts = key.split('.')
   const name = parts[parts.length - 1]
   const acronyms = ['url', 'api', 'ai', 'tls', 'id', 'smtp']

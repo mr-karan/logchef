@@ -2,12 +2,13 @@
 import type { HTMLAttributes } from "vue";
 import { cn } from "@/lib/utils";
 
-defineProps<{
+withDefaults(defineProps<{
   title?: string;
   description?: string;
+  flush?: boolean;
   class?: HTMLAttributes["class"];
   contentClass?: HTMLAttributes["class"];
-}>();
+}>(), { flush: false });
 </script>
 
 <template>
@@ -28,7 +29,7 @@ defineProps<{
         <slot name="actions" />
       </div>
     </header>
-    <div :class="cn('px-4 py-3', contentClass)">
+    <div :class="cn(flush ? '' : 'px-4 py-3', contentClass)">
       <slot />
     </div>
   </section>

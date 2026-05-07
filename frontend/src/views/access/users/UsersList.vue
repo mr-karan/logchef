@@ -51,32 +51,22 @@ const editForm = ref({
 
 const searchQuery = ref('')
 
-// Computed properties from store
-const users = computed(() => usersStore.users)
-
-// Simple computed property to filter users
 const filteredUsers = computed(() => {
-    if (!searchQuery.value) return users.value;
-
+    if (!searchQuery.value) return usersStore.users;
     const query = searchQuery.value.toLowerCase();
-    return users.value.filter(user =>
+    return usersStore.users.filter(user =>
         user?.full_name?.toLowerCase().includes(query) ||
         user?.email?.toLowerCase().includes(query)
     );
 })
 
-// Load users with automatic error handling in store
 const loadUsers = async (forceReload = false) => {
     await usersStore.loadUsers(forceReload);
 }
 
 const confirmDelete = async () => {
     if (!userToDelete.value) return
-
     await usersStore.deleteUser(userToDelete.value.id);
-    // Store automatically handles errors and success
-
-    // Reset UI state
     showDeleteDialog.value = false;
     userToDelete.value = null;
 }
@@ -90,7 +80,6 @@ const toggleUserStatus = async (user: User) => {
     await usersStore.updateUser(user.id, {
         status: user.status === 'active' ? 'inactive' : 'active',
     });
-    // Store handles loading state and errors automatically
 }
 
 const handleEdit = (user: User) => {
@@ -111,8 +100,6 @@ const confirmEdit = async () => {
         email: editForm.value.email,
         role: editForm.value.role
     });
-
-    // Reset UI state
     showEditDialog.value = false;
     userToEdit.value = null;
 }
@@ -133,7 +120,7 @@ onMounted(() => {
         <LoadingState v-if="isLoading" label="Loading users…" />
 
         <EmptyState
-            v-else-if="users.length === 0"
+            v-else-if="usersStore.users.length === 0"
             :icon="Users"
             title="No users yet"
             description="Add your first user to get started."

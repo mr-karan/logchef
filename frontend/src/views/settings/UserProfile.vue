@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -21,19 +21,17 @@ const usersStore = useUsersStore()
 const apiTokensStore = useAPITokensStore()
 const { toast } = useToast()
 
-// Form state
 const fullName = ref('')
 const isSubmitting = ref(false)
 
-// API Token state
 const showCreateTokenDialog = ref(false)
 const newTokenName = ref('')
-const newTokenExpiry = ref('30d') // Default to 30 days
+const newTokenExpiry = ref('30d')
 const isCreatingToken = ref(false)
 const createdTokenData = ref<{ token: string; api_token: any } | null>(null)
 const showTokenDisplay = ref(false)
+const tokenToDelete = ref<{ id: number; name: string } | null>(null)
 
-// Expiry options
 const expiryOptions = [
     { value: '7d', label: '7 days', hours: 7 * 24 },
     { value: '30d', label: '30 days', hours: 30 * 24 },
@@ -41,12 +39,10 @@ const expiryOptions = [
     { value: 'never', label: 'Never expires', hours: null }
 ]
 
-// Load user data and API tokens
 onMounted(async () => {
     if (authStore.user) {
         fullName.value = authStore.user.full_name
     }
-    // Load API tokens
     await apiTokensStore.loadTokens()
 })
 
@@ -75,7 +71,6 @@ const handleSubmit = async () => {
     isSubmitting.value = false
 }
 
-// API Token management functions
 const handleCreateToken = async () => {
     if (!newTokenName.value.trim()) {
         toast({
@@ -112,8 +107,11 @@ const handleCreateToken = async () => {
     isCreatingToken.value = false
 }
 
-const handleDeleteToken = async (tokenId: number) => {
-    await apiTokensStore.deleteToken(tokenId)
+const confirmDeleteToken = async () => {
+    const target = tokenToDelete.value
+    tokenToDelete.value = null
+    if (!target) return
+    await apiTokensStore.deleteToken(target.id)
 }
 
 const copyToClipboard = async (text: string) => {
@@ -133,7 +131,6 @@ const closeTokenDisplay = () => {
     createdTokenData.value = null
 }
 
-// Token expiry utility functions
 const isTokenExpired = (expiresAt: string | null | undefined): boolean => {
     if (!expiresAt) return false
     return new Date(expiresAt) < new Date()
@@ -324,35 +321,14 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                     </div>
                                 </div>
                             </div>
-                            <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm"
-                                        class="text-destructive hover:text-destructive"
-                                    >
-                                        <Trash2 class="h-4 w-4" />
-                                    </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Delete API Token</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            Are you sure you want to delete the token "{{ token.name }}"? 
-                                            This action cannot be undone and any applications using this token will lose access.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction
-                                            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                            @click="handleDeleteToken(token.id)"
-                                        >
-                                            Delete Token
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                class="text-destructive hover:text-destructive"
+                                @click="tokenToDelete = { id: token.id, name: token.name }"
+                            >
+                                <Trash2 class="h-4 w-4" />
+                            </Button>
                         </div>
                     </div>
         </PageSection>
@@ -415,5 +391,15 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+
+        <ConfirmDialog
+            :open="tokenToDelete !== null"
+            title="Delete API token?"
+            :description="tokenToDelete ? `Delete &quot;${tokenToDelete.name}&quot;? Any applications using it will lose access. This cannot be undone.` : undefined"
+            confirm-text="Delete"
+            destructive
+            @update:open="(v) => { if (!v) tokenToDelete = null }"
+            @confirm="confirmDeleteToken"
+        />
     </div>
 </template>
