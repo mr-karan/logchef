@@ -7,6 +7,7 @@ import {
   Trash2,
   Loader2,
   Search,
+  Database,
   FolderMinus,
   Link,
   FolderPlus,
@@ -14,8 +15,6 @@ import {
   Folder,
   FolderOpen,
   MoreHorizontal,
-  FileSearch,
-  FileCode,
 } from "lucide-vue-next";
 import { PageHeader } from "@/components/layout";
 import { formatDate } from "@/utils/format";
@@ -263,8 +262,8 @@ function manageCollection() {
             class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
           >
             <td class="px-4 py-3">
-              <FileSearch v-if="query.query_type === 'logchefql'" class="h-4 w-4 text-muted-foreground" title="LogchefQL" />
-              <FileCode v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
+              <Search v-if="query.query_type === 'logchefql'" class="h-4 w-4 text-muted-foreground" title="LogchefQL" />
+              <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
             </td>
             <td class="px-4 py-3">
               <a

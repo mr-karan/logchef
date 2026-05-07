@@ -11,7 +11,10 @@ import {
   X,
   AlertCircle,
   FileSearch,
+  Search,
+  Database,
 } from "lucide-vue-next";
+import { formatDate } from "@/utils/format";
 import { PageHeader, PageSection, EmptyState, LoadingState } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -225,7 +228,7 @@ async function handleDeleteCollection() {
       <PageSection
         title="Items"
         description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
-        :content-class="items.length === 0 ? 'p-0' : 'p-0'"
+        content-class="p-0"
       >
         <LoadingState v-if="store.isLoadingOperation(`listItems-${collectionID}`)" />
         <EmptyState
@@ -234,42 +237,75 @@ async function handleDeleteCollection() {
           title="No queries pinned"
           description="From a saved query you can edit, add it to this collection."
         />
-        <ul v-else class="divide-y">
-          <li
-            v-for="item in items"
-            :key="item.query.id"
-            class="flex items-center gap-3 px-4 py-3"
-          >
-            <Lock v-if="!item.runnable" class="h-4 w-4 text-muted-foreground" :title="'You cannot run this query (no source access).'" />
-            <div class="min-w-0 flex-1">
-              <button
-                type="button"
-                class="block truncate text-left text-sm font-medium hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
-                :class="!item.runnable && 'text-muted-foreground'"
-                :disabled="!item.runnable"
-                @click="openQuery(item.query.id)"
-              >
-                {{ item.query.name }}
-              </button>
-              <p class="truncate text-xs text-muted-foreground">
-                {{ item.query.source_name || `source ${item.query.source_id}` }} ·
-                {{ item.query.query_type === "logchefql" ? "Search" : "SQL" }}
-              </p>
-            </div>
-            <Button
-              v-if="isOwner"
-              variant="ghost"
-              size="icon"
-              @click="handleRemoveItem(item.query.id)"
+        <table v-else class="w-full text-sm">
+          <thead>
+            <tr class="border-b bg-muted/30">
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">Type</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5">Name</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">Source</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">Updated</th>
+              <th class="w-[40px]"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr
+              v-for="item in items"
+              :key="item.query.id"
+              class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
+              :class="!item.runnable && 'opacity-60'"
             >
-              <Trash2 class="h-4 w-4 text-destructive" />
-            </Button>
-          </li>
-        </ul>
+              <td class="px-4 py-3">
+                <Lock
+                  v-if="!item.runnable"
+                  class="h-4 w-4 text-muted-foreground"
+                  title="You cannot run this query (no source access)."
+                />
+                <Search
+                  v-else-if="item.query.query_type === 'logchefql'"
+                  class="h-4 w-4 text-muted-foreground"
+                  title="LogchefQL"
+                />
+                <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
+              </td>
+              <td class="px-4 py-3">
+                <button
+                  type="button"
+                  class="font-medium text-foreground text-left hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
+                  :class="!item.runnable && 'text-muted-foreground'"
+                  :disabled="!item.runnable"
+                  @click="openQuery(item.query.id)"
+                >
+                  {{ item.query.name }}
+                </button>
+                <p v-if="item.query.description" class="text-xs text-muted-foreground mt-0.5 truncate max-w-[400px]">
+                  {{ item.query.description }}
+                </p>
+              </td>
+              <td class="px-4 py-3 text-muted-foreground text-xs">
+                {{ item.query.source_name || `source ${item.query.source_id}` }}
+              </td>
+              <td class="px-4 py-3 text-muted-foreground text-xs">
+                {{ formatDate(item.query.updated_at) }}
+              </td>
+              <td class="px-4 py-3">
+                <Button
+                  v-if="isOwner"
+                  variant="ghost"
+                  size="icon"
+                  class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                  @click="handleRemoveItem(item.query.id)"
+                  title="Remove from collection"
+                >
+                  <Trash2 class="h-4 w-4 text-destructive" />
+                </Button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </PageSection>
 
       <PageSection
-        v-if="!collection.is_personal"
+        v-if="!collection.is_personal && canListUsers"
         title="Members"
         description="Owners can invite new members and adjust roles. Members can read items they have source access to."
         content-class="p-0"
