@@ -524,6 +524,40 @@ func IsAnyTeamAdmin(ctx context.Context, db *sqlite.DB, userID models.UserID) (b
 	return false, nil
 }
 
+// IsTeamCollectionMutator reports whether the user has the role required to
+// mutate shared resources (collections) in a specific team. Both team admins
+// and team editors qualify. The per-collection ownership check happens
+// separately in core/collections.go and is unaffected by this role gate.
+func IsTeamCollectionMutator(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userID models.UserID) (bool, error) {
+	member, err := db.GetTeamMember(ctx, teamID, userID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("error checking team collection mutator status: %w", err)
+	}
+	if member == nil {
+		return false, nil
+	}
+	return member.Role == models.TeamRoleAdmin || member.Role == models.TeamRoleEditor, nil
+}
+
+// IsAnyTeamCollectionMutator reports whether the user is an admin or editor
+// in at least one team. Used as the coarse gate on collection mutation
+// endpoints — the per-collection owner check is enforced inside core.
+func IsAnyTeamCollectionMutator(ctx context.Context, db *sqlite.DB, userID models.UserID) (bool, error) {
+	teams, err := db.ListTeamsForUser(ctx, userID)
+	if err != nil {
+		return false, fmt.Errorf("error listing teams for user: %w", err)
+	}
+	for _, team := range teams {
+		if team.Role == string(models.TeamRoleAdmin) || team.Role == string(models.TeamRoleEditor) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // TeamHasSourceAccess checks if a specific team has access to a specific source.
 func TeamHasSourceAccess(ctx context.Context, db *sqlite.DB, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
 	hasAccess, err := db.TeamHasSource(ctx, teamID, sourceID)

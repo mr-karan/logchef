@@ -16,6 +16,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useToast } from "@/composables/useToast";
+import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
 import type { Collection } from "@/api/collections";
@@ -23,6 +24,7 @@ import type { Collection } from "@/api/collections";
 const router = useRouter();
 const { toast } = useToast();
 const store = useCollectionsStore();
+const { isAnyTeamCollectionMutator } = useTeamPermissions();
 
 const showCreate = ref(false);
 const createName = ref("");
@@ -68,7 +70,7 @@ function viewCollection(collection: Collection) {
         <h1 class="text-lg font-semibold tracking-tight">Collections</h1>
         <p class="text-sm text-muted-foreground">Organize saved queries into shareable lists.</p>
       </div>
-      <Button size="sm" @click="showCreate = true">
+      <Button v-if="isAnyTeamCollectionMutator" size="sm" @click="showCreate = true">
         <Plus class="mr-1.5 h-3.5 w-3.5" />
         New
       </Button>

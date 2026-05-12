@@ -42,7 +42,7 @@ const authStore = useAuthStore();
 
 const {
   isEditingExistingQuery,
-  canManageCollections,
+  canSaveQuery,
 } = useSavedQueries();
 
 // Local state
@@ -185,16 +185,16 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent class="w-64" align="end">
-      <DropdownMenuItem v-if="canManageCollections" @click="handleSave">
+      <DropdownMenuItem v-if="canSaveQuery" @click="handleSave">
         <Save class="w-4 h-4 mr-2" />
         <span>{{ isEditingExistingQuery ? 'Update Current Query' : 'Save Current Query to Collection...' }}</span>
       </DropdownMenuItem>
-      <DropdownMenuItem v-if="canManageCollections && isEditingExistingQuery" @click="handleRequestSaveAsNew">
+      <DropdownMenuItem v-if="canSaveQuery && isEditingExistingQuery" @click="handleRequestSaveAsNew">
         <PlusCircle class="w-4 h-4 mr-2" />
         <span>Save as New Query...</span>
       </DropdownMenuItem>
 
-      <DropdownMenuSeparator v-if="canManageCollections" />
+      <DropdownMenuSeparator v-if="canSaveQuery" />
 
       <DropdownMenuLabel v-if="hasQueries">Load from Collection</DropdownMenuLabel>
       <DropdownMenuSub v-if="hasQueries">

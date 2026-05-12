@@ -202,6 +202,37 @@ func (s *Server) requireUserNotManaged(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+// requireAnyTeamCollectionMutator is middleware that admits the caller if they
+// are a global admin, an admin of any team, or an editor of any team. This is
+// the coarse gate for endpoints that mutate cross-team resources (collections).
+// The per-collection ownership check still runs inside core, so this only
+// rejects callers who can't legitimately attempt any collection mutation.
+// It assumes requireAuth has already run.
+func (s *Server) requireAnyTeamCollectionMutator(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context for collection mutator check")
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
+
+	if user.Role == models.UserRoleAdmin {
+		return c.Next()
+	}
+
+	isMutator, err := core.IsAnyTeamCollectionMutator(c.Context(), s.sqlite, user.ID)
+	if err != nil {
+		s.log.Error("failed to check collection mutator status", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to verify role")
+	}
+
+	if !isMutator {
+		s.log.Warn("User is not a collection mutator in any team", "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusForbidden, "Team admin or editor role required", models.AuthorizationErrorType)
+	}
+
+	return c.Next()
+}
+
 // requireAnyTeamAdmin is middleware that ensures the authenticated user is an admin of at least one team,
 // or is a global admin. This is used for endpoints that should be accessible to team admins
 // without requiring a specific team context (e.g., listing users to add to teams).

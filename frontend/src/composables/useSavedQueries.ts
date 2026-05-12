@@ -3,10 +3,9 @@ import { useRouter, useRoute } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
 import { useContextStore } from '@/stores/context'
-import { useAuthStore } from '@/stores/auth';
-import { useTeamsStore } from '@/stores/teams';
 import { useVariableStore } from '@/stores/variables'
 import type { VariableState } from '@/stores/variables'
+import { useTeamPermissions } from '@/composables/useTeamPermissions'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
@@ -37,7 +36,6 @@ export function useSavedQueries(
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
   const contextStore = useContextStore()
-  const authStore = useAuthStore();
   const variableStore = useVariableStore();
   const { toast } = useToast()
 
@@ -50,20 +48,10 @@ export function useSavedQueries(
 
   const isEditingExistingQuery = computed(() => !!route.query.id);
 
-  // Collection mutations (create, invite, add items) require team admin/editor
-  // or global admin. Regular members can only view.
-  const teamsStore = useTeamsStore();
-  const canManageCollections = computed(() => {
-    if (!authStore.isAuthenticated || !authStore.user) return false;
-    if (authStore.user.role === 'admin') return true;
-    return teamsStore.isAnyTeamAdmin;
-  });
-
-  function canEditQuery(query: SavedQuery | null | undefined): boolean {
-    if (!query || !authStore.user) return false;
-    if (authStore.user.role === 'admin') return true;
-    return query.created_by != null && String(query.created_by) === String(authStore.user.id);
-  }
+  // Role gates delegate to useTeamPermissions so the matrix stays
+  // consistent with the backend role contract.
+  const { canSaveQuery, canEditSavedQuery, isAnyTeamCollectionMutator } = useTeamPermissions();
+  const canEditQuery = canEditSavedQuery;
 
   const filteredQueries = computed(() => {
     if (!searchQuery.value.trim()) {
@@ -562,8 +550,9 @@ export function useSavedQueries(
     totalQueryCount,
     searchQuery,
     isEditingExistingQuery,
-    canManageCollections,
+    canSaveQuery,
     canEditQuery,
+    isAnyTeamCollectionMutator,
 
     handleSaveQueryClick,
     handleSaveQuery,

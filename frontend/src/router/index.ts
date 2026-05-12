@@ -119,13 +119,14 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
-  // Admin Section (Admin only)
+  // Admin Section. Per-route gates: `requiresAdmin` blocks non-global admins;
+  // `requiresAnyTeamAdmin` lets team admins through for their team's pages.
+  // The parent has no role meta — children declare their own access.
   {
     path: "/admin",
     component: lazy("AccessLayout", () => import("@/views/access/AccessLayout.vue")),
     meta: {
       requiresAuth: true,
-      requiresAdmin: true,
     },
     children: [
       {
@@ -136,19 +137,19 @@ const routes: RouteRecordRaw[] = [
         path: "users",
         name: "ManageUsers",
         component: lazy("UsersList", () => import("@/views/access/users/UsersList.vue")),
-        meta: { title: "Users" },
+        meta: { title: "Users", requiresAdmin: true },
       },
       {
         path: "teams",
         name: "Teams",
         component: lazy("TeamsList", () => import("@/views/access/teams/TeamsList.vue")),
-        meta: { title: "Teams" },
+        meta: { title: "Teams", requiresAnyTeamAdmin: true },
       },
       {
         path: "teams/:id",
         name: "TeamSettings",
         component: lazy("TeamSettings", () => import("@/views/access/teams/TeamSettings.vue")),
-        meta: { title: "Team Settings" },
+        meta: { title: "Team Settings", requiresAnyTeamAdmin: true },
       },
       {
         path: "sources",
@@ -270,6 +271,14 @@ router.beforeEach(async (to) => {
 
   if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {
     return { name: "Forbidden" };
+  }
+
+  if (to.matched.some((record) => record.meta.requiresAnyTeamAdmin) && !isAdmin) {
+    // Lazy-import to avoid a circular store dependency at module init.
+    const { useTeamsStore } = await import("@/stores/teams");
+    if (!useTeamsStore().isAnyTeamAdmin) {
+      return { name: "Forbidden" };
+    }
   }
 
   if (isAuthenticated && !isPublic) {
