@@ -3,10 +3,7 @@ import type { ColumnDef, ColumnMeta, Row } from '@tanstack/vue-table'
 import {
     FlexRender,
     getCoreRowModel,
-    getSortedRowModel,
     getExpandedRowModel,
-    getPaginationRowModel,
-    getFilteredRowModel,
     useVueTable,
     type SortingState,
     type ExpandedState,
@@ -15,7 +12,7 @@ import {
     type ColumnSizingState,
     type ColumnResizeMode,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onBeforeUnmount, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
@@ -97,6 +94,7 @@ const globalFilter = ref('')
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
+const hoveredCellId = ref<string | null>(null)
 const preferencesStore = usePreferencesStore()
 const { preferences } = storeToRefs(preferencesStore)
 const displayTimezone = computed({
@@ -108,6 +106,8 @@ const displayTimezone = computed({
 const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
+let storageSaveTimer: ReturnType<typeof setTimeout> | null = null
+let measureContext: CanvasRenderingContext2D | null = null
 
 const enforceTimestampFirst = (order: string[]): string[] => {
     const tsField = timestampFieldName.value;
@@ -146,6 +146,54 @@ function saveStateToStorage(state: DataTableState) {
     } catch (error) {
         console.error("Error saving table state to localStorage:", error);
     }
+}
+
+function scheduleSaveStateToStorage(state: DataTableState) {
+    if (storageSaveTimer) {
+        clearTimeout(storageSaveTimer)
+    }
+
+    storageSaveTimer = setTimeout(() => {
+        storageSaveTimer = null
+        saveStateToStorage(state)
+    }, 250)
+}
+
+function flushStateToStorage() {
+    if (!storageSaveTimer) return
+
+    clearTimeout(storageSaveTimer)
+    storageSaveTimer = null
+    saveStateToStorage({
+        columnOrder: columnOrder.value,
+        columnSizing: columnSizing.value,
+        columnVisibility: columnVisibility.value
+    })
+}
+
+function arraysEqual<T>(left: T[], right: T[]): boolean {
+    return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function recordsEqual<T>(left: Record<string, T>, right: Record<string, T>): boolean {
+    const leftKeys = Object.keys(left)
+    const rightKeys = Object.keys(right)
+    return leftKeys.length === rightKeys.length && leftKeys.every(key => left[key] === right[key])
+}
+
+function compareValues(left: unknown, right: unknown): number {
+    if (left === right) return 0
+    if (left === null || left === undefined) return 1
+    if (right === null || right === undefined) return -1
+
+    if (typeof left === 'number' && typeof right === 'number') {
+        return left - right
+    }
+
+    return String(left).localeCompare(String(right), undefined, {
+        numeric: true,
+        sensitivity: 'base',
+    })
 }
 
 // Initialize state from localStorage or defaults
@@ -209,7 +257,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value, props.timestampField], // Also watch timestampField changes
+    () => [props.columns, displayTimezone.value, props.timestampField, props.queryFields, props.regexHighlights],
     ([newColumns, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
@@ -233,18 +281,17 @@ watch(
         // Re-initialize state based on the potentially new columns
         const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value);
 
-        // Only update if different to prevent infinite loops or unnecessary updates
-        if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
+        if (!arraysEqual(columnOrder.value, initialOrder)) {
             columnOrder.value = initialOrder;
         }
-        if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
+        if (!recordsEqual(columnSizing.value, initialSizing)) {
             columnSizing.value = initialSizing;
         }
-        if (JSON.stringify(columnVisibility.value) !== JSON.stringify(initialVisibility)) {
+        if (!recordsEqual(columnVisibility.value, initialVisibility)) {
             columnVisibility.value = initialVisibility;
         }
     },
-    { immediate: true, deep: true } // Use deep watch for searchTerms array changes
+    { immediate: true }
 );
 
 // Save state whenever relevant parts change
@@ -253,7 +300,7 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
 
     // Make sure we have columns loaded before saving
     if (props.columns && props.columns.length > 0) {
-        saveStateToStorage({
+        scheduleSaveStateToStorage({
             columnOrder: columnOrder.value,
             columnSizing: columnSizing.value,
             columnVisibility: columnVisibility.value
@@ -268,6 +315,89 @@ function formatCellValue(value: any): string {
     if (value === null || value === undefined) return '';
     return String(value);
 }
+
+const searchableColumnIds = computed(() => {
+    if (tableColumns.value.length > 0) {
+        return tableColumns.value.map(column => column.id).filter(Boolean) as string[]
+    }
+
+    if (props.data.length === 0) {
+        return []
+    }
+
+    return Object.keys(props.data[0])
+})
+
+const filteredData = computed(() => {
+    const filter = globalFilter.value.trim().toLowerCase()
+    if (!filter) {
+        return props.data
+    }
+
+    const columnIds = searchableColumnIds.value
+    return props.data.filter(row => {
+        return columnIds.some(columnId => {
+            const value = row[columnId]
+            if (value === null || value === undefined) {
+                return false
+            }
+            return String(value).toLowerCase().includes(filter)
+        })
+    })
+})
+
+const sortedData = computed(() => {
+    if (sorting.value.length === 0) {
+        return filteredData.value
+    }
+
+    const sortState = sorting.value[0]
+    if (!sortState?.id) {
+        return filteredData.value
+    }
+
+    const sorted = [...filteredData.value]
+    sorted.sort((left, right) => {
+        const result = compareValues(left[sortState.id], right[sortState.id])
+        return sortState.desc ? -result : result
+    })
+    return sorted
+})
+
+const pageCount = computed(() => {
+    return Math.max(1, Math.ceil(sortedData.value.length / pagination.value.pageSize))
+})
+
+const pagedData = computed(() => {
+    const start = pagination.value.pageIndex * pagination.value.pageSize
+    return sortedData.value.slice(start, start + pagination.value.pageSize)
+})
+
+function resetToFirstPage() {
+    if (pagination.value.pageIndex === 0) return
+
+    pagination.value = {
+        ...pagination.value,
+        pageIndex: 0,
+    }
+}
+
+watch(globalFilter, resetToFirstPage)
+watch(sorting, resetToFirstPage, { deep: true })
+watch(() => props.data, resetToFirstPage)
+
+watch(
+    [() => sortedData.value.length, () => pagination.value.pageSize],
+    () => {
+        const maxPageIndex = pageCount.value - 1
+        if (pagination.value.pageIndex > maxPageIndex) {
+            pagination.value = {
+                ...pagination.value,
+                pageIndex: maxPageIndex,
+            }
+        }
+    }
+)
 
 // Get column type from meta data
 function getColumnType(column: any): string | undefined {
@@ -290,12 +420,12 @@ function autoFitColumn(header: any) {
     const columnId = header.column.id;
     const minSize = header.column.columnDef.minSize || defaultColumn.minSize;
     
-    // Get all cells for this column
-    const rows = table.getRowModel().rows;
-    
-    // Create a temporary element to measure text width
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const rows = table.getRowModel().rows.slice(0, 200);
+    if (!measureContext) {
+        const canvas = document.createElement('canvas');
+        measureContext = canvas.getContext('2d');
+    }
+    const ctx = measureContext;
     if (!ctx) return;
     
     // Use the same font as the table cells
@@ -418,7 +548,7 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
 // Initialize table
 const table = useVueTable({
     get data() {
-        return props.data
+        return pagedData.value
     },
     // Use tableColumns directly
     get columns() {
@@ -463,10 +593,13 @@ const table = useVueTable({
         columnOrder.value = enforceTimestampFirst(nextValue);
     },
     getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
     getExpandedRowModel: getExpandedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
+    manualFiltering: true,
+    manualPagination: true,
+    manualSorting: true,
+    get pageCount() {
+        return pageCount.value
+    },
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
     // Let table derive column sizing info from the state ref
@@ -508,37 +641,8 @@ const handleCellClick = (_event: MouseEvent, cell: any) => {
     }, 1000)
 }
 
-// Initialize default sorting on mount
-onMounted(() => {
-    // Initialize default sort by timestamp if available
-    if (timestampFieldName.value) {
-        // Check if the column exists in the initial order derived from state/defaults
-        if (columnOrder.value.includes(timestampFieldName.value)) {
-            if (!sorting.value || sorting.value.length === 0) {
-                sorting.value = [{ id: timestampFieldName.value, desc: true }]
-            }
-        }
-    }
-})
-
-// Add refs for DOM elements
-const tableContainerRef = ref<HTMLElement | null>(null)
-const tableRef = ref<HTMLElement | null>(null)
-
-onMounted(() => {
-    if (!tableContainerRef.value) return
-
-    const resizeObserver = new ResizeObserver(() => {
-        // Track container width for flex-grow calculations
-        // Actual column resizing is handled via CSS flex on the last column
-        // This avoids mutating columnSizing state which would persist unwanted changes
-    })
-
-    resizeObserver.observe(tableContainerRef.value)
-
-    return () => {
-        resizeObserver.disconnect()
-    }
+onBeforeUnmount(() => {
+    flushStateToStorage()
 })
 
 const exploreStore = useExploreStore()
@@ -687,13 +791,13 @@ const isLastVisibleColumn = (columnId: string): boolean => {
         />
 
         <!-- Table Section with full-height scrolling -->
-        <div class="flex-1 relative overflow-hidden" ref="tableContainerRef"
+        <div class="flex-1 relative overflow-hidden"
             :class="{ 'opacity-60 pointer-events-none': props.isLoading }"> <!-- Dim table during load -->
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
                     class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;">
-                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
+                    <table class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <!-- Check table.getHeaderGroups() exists -->
@@ -782,14 +886,18 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             width: isLastVisibleColumn(cell.column.id) ? undefined : `${cell.column.getSize()}px`,
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
                                             flex: isLastVisibleColumn(cell.column.id) ? '1 1 auto' : undefined,
-                                        }">
+                                        }"
+                                        @mouseenter="hoveredCellId = cell.id"
+                                        @mouseleave="hoveredCellId === cell.id && (hoveredCellId = null)">
                                         <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
                                             :title="formatCellValue(cell.getValue())">
                                             <FlexRender v-if="cell.column.columnDef.cell"
                                                 :render="cell.column.columnDef.cell" :props="cell.getContext()" />
                                         </div>
                                         <!-- Minimal hover actions - positioned absolute, doesn't take content space -->
-                                        <div class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
+                                        <div
+                                            v-if="hoveredCellId === cell.id"
+                                            class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
                                             <!-- Copy button - always available -->
                                             <button 
                                                 class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"

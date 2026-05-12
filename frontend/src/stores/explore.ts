@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
-import { computed, watch } from "vue";
+import { computed, markRaw, watch } from "vue";
 import { exploreApi } from "@/api/explore";
-import { logchefqlApi } from "@/api/logchefql";
+import { logchefqlApi, type FilterCondition as LogchefQLFilterCondition } from "@/api/logchefql";
 import { isCanceledError } from "@/api/error-handler";
 import type {
   ColumnInfo,
@@ -88,6 +88,10 @@ export interface ExploreState {
     logchefqlQuery?: string;
     sqlQuery: string;
     sourceId: number;
+    logchefqlMeta?: {
+      fieldsUsed: string[];
+      conditions: LogchefQLFilterCondition[];
+    };
   };
   lastExecutionTimestamp: number | null;
   hasExecutedQuery: boolean;
@@ -106,6 +110,7 @@ const DEFAULT_QUERY_STATS: QueryStats = {
 };
 
 const DRAFT_STORAGE_PREFIX = "logchef.explore.draft";
+const DRAFT_SAVE_DELAY_MS = 500;
 
 function inferColumnType(value: unknown): string {
   if (value === null || value === undefined) {
@@ -209,6 +214,8 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   let suppressedSourceResetId: number | null = null;
+  let draftSaveTimer: ReturnType<typeof setTimeout> | null = null;
+  let pendingDraftKey: string | null = null;
 
   watch(
     () => contextStore.sourceId,
@@ -219,6 +226,7 @@ export const useExploreStore = defineStore("explore", () => {
           return;
         }
         suppressedSourceResetId = null;
+        flushDraft(pendingDraftKey ?? draftKey(useTeamsStore().currentTeamId, oldSourceId || 0));
         onSourceChange(newSourceId || 0);
       }
     }
@@ -246,16 +254,18 @@ export const useExploreStore = defineStore("explore", () => {
   const variableStore = useVariableStore();
   let suppressSharedVariableTracking = false;
 
-  function currentDraftKey(): string | null {
-    const teamId = useTeamsStore().currentTeamId;
-    if (!teamId || !sourceId.value) {
+  function draftKey(teamId: number | null | undefined, sourceIdValue: number | null | undefined): string | null {
+    if (!teamId || !sourceIdValue) {
       return null;
     }
-    return `${DRAFT_STORAGE_PREFIX}.${teamId}.${sourceId.value}`;
+    return `${DRAFT_STORAGE_PREFIX}.${teamId}.${sourceIdValue}`;
   }
 
-  function persistDraft() {
-    const key = currentDraftKey();
+  function currentDraftKey(): string | null {
+    return draftKey(useTeamsStore().currentTeamId, sourceId.value);
+  }
+
+  function persistDraftNow(key = currentDraftKey()) {
     if (!key) {
       return;
     }
@@ -287,6 +297,33 @@ export const useExploreStore = defineStore("explore", () => {
     } catch (error) {
       console.warn("Failed to persist query draft:", error);
     }
+  }
+
+  function persistDraft() {
+    pendingDraftKey = currentDraftKey();
+    if (!pendingDraftKey) {
+      return;
+    }
+
+    if (draftSaveTimer) {
+      clearTimeout(draftSaveTimer);
+    }
+
+    draftSaveTimer = setTimeout(() => {
+      const key = pendingDraftKey;
+      draftSaveTimer = null;
+      pendingDraftKey = null;
+      persistDraftNow(key);
+    }, DRAFT_SAVE_DELAY_MS);
+  }
+
+  function flushDraft(key = pendingDraftKey ?? currentDraftKey()) {
+    if (draftSaveTimer) {
+      clearTimeout(draftSaveTimer);
+      draftSaveTimer = null;
+    }
+    pendingDraftKey = null;
+    persistDraftNow(key);
   }
 
   function restoreDraftForCurrentContext(): boolean {
@@ -659,10 +696,10 @@ export const useExploreStore = defineStore("explore", () => {
     if (mode === currentMode) return;
     state.data.value.activeMode = mode;
     clearShareSelectionIfDirty();
-    persistDraft();
+    flushDraft();
   }
 
-  function _updateLastExecutedState() {
+  function _updateLastExecutedState(logchefqlMeta?: { fieldsUsed: string[]; conditions: LogchefQLFilterCondition[] }) {
     const executedSql = state.data.value.activeMode === 'logchefql'
       ? (state.data.value.generatedDisplaySql || sqlForExecution.value)
       : sqlForExecution.value;
@@ -673,7 +710,8 @@ export const useExploreStore = defineStore("explore", () => {
       mode: state.data.value.activeMode,
       logchefqlQuery: state.data.value.logchefqlCode,
       sqlQuery: executedSql,
-      sourceId: sourceId.value
+      sourceId: sourceId.value,
+      logchefqlMeta,
     };
     state.data.value.lastExecutionTimestamp = Date.now();
   }
@@ -1023,6 +1061,8 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.timeRange = { start, end };
     }
 
+    flushDraft();
+
     if (state.data.value.currentQueryAbortController) {
       state.data.value.currentQueryAbortController.abort();
     }
@@ -1100,9 +1140,9 @@ export const useExploreStore = defineStore("explore", () => {
           }, { signal: abortController.signal, timeout: queryTimeout });
 
           if (queryResponse.data) {
-            const logs = queryResponse.data.logs || [];
+            const logs = markRaw(queryResponse.data.logs || []) as Record<string, any>[];
             state.data.value.logs = logs;
-            state.data.value.columns = normalizeQueryColumns(queryResponse.data.columns, logs);
+            state.data.value.columns = markRaw(normalizeQueryColumns(queryResponse.data.columns, logs));
             state.data.value.queryStats = queryResponse.data.stats || DEFAULT_QUERY_STATS;
             state.data.value.queryWarnings = queryResponse.data.warnings || [];
 
@@ -1114,7 +1154,10 @@ export const useExploreStore = defineStore("explore", () => {
               state.data.value.generatedDisplaySql = queryResponse.data.generated_sql;
             }
 
-            _updateLastExecutedState();
+            _updateLastExecutedState({
+              fieldsUsed: queryResponse.data.fields_used || [],
+              conditions: queryResponse.data.conditions || [],
+            });
             persistDraft();
 
             try {
@@ -1215,9 +1258,9 @@ export const useExploreStore = defineStore("explore", () => {
           showToast: false, // Errors shown inline via QueryError component
           onSuccess: (data: QuerySuccessResponse | null) => {
             if (data && (data.data || data.logs)) {
-              const logs = data.data || data.logs || [];
+              const logs = markRaw(data.data || data.logs || []) as Record<string, any>[];
               state.data.value.logs = logs;
-              state.data.value.columns = normalizeQueryColumns(data.columns, logs);
+              state.data.value.columns = markRaw(normalizeQueryColumns(data.columns, logs));
               state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
               state.data.value.queryWarnings = data.warnings || [];
               if (data.params && typeof data.params === 'object' && "query_id" in data.params) {
@@ -1614,6 +1657,7 @@ export const useExploreStore = defineStore("explore", () => {
     getLogContext,
     createQueryShare,
     setActiveShareToken,
+    flushDraft,
     clearError,
     setGroupByField,
     setTimezoneIdentifier,

@@ -269,7 +269,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 		Limit:          req.Limit,
 	}
 
-	sql, err := logchefql.BuildFullQuery(params)
+	sql, translateResult, err := logchefql.BuildFullQueryWithResult(params)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
@@ -346,12 +346,22 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Add query_id and generated SQL to response
 	columns := normalizeResultColumns(source, result)
+	conditions := translateResult.Conditions
+	if conditions == nil {
+		conditions = []logchefql.FilterCondition{}
+	}
+	fieldsUsed := translateResult.FieldsUsed
+	if fieldsUsed == nil {
+		fieldsUsed = []string{}
+	}
 	responseData := map[string]interface{}{
 		"logs":          result.Logs,
 		"columns":       columns,
 		"stats":         result.Stats,
 		"query_id":      queryID,
 		"generated_sql": sql, // For "Show SQL" feature
+		"conditions":    conditions,
+		"fields_used":   fieldsUsed,
 		"warnings":      result.Warnings,
 	}
 

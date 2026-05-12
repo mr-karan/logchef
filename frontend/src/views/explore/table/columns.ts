@@ -43,6 +43,48 @@ const COLUMN_WIDTH_CONFIG: Record<string, { minWidth: number, defaultWidth: numb
   }
 };
 
+const TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/;
+const TIMESTAMP_CACHE_LIMIT = 1000;
+const timestampFormatCache = new Map<string, string>();
+
+function looksLikeTimestamp(value: string): boolean {
+  if (value.length < 19 || value.length > 35) return false;
+  if (value[4] !== '-' || value[7] !== '-') return false;
+  if (value[10] !== 'T' && value[10] !== ' ') return false;
+  if (value[13] !== ':' || value[16] !== ':') return false;
+  return TIMESTAMP_PATTERN.test(value);
+}
+
+function cachedFormatTimestamp(value: string, timezone: 'local' | 'utc'): string {
+  const cacheKey = `${timezone}\0${value}`;
+  const cached = timestampFormatCache.get(cacheKey);
+  if (cached !== undefined) {
+    timestampFormatCache.delete(cacheKey);
+    timestampFormatCache.set(cacheKey, cached);
+    return cached;
+  }
+
+  const formatted = formatTimestamp(value, timezone);
+  timestampFormatCache.set(cacheKey, formatted);
+  if (timestampFormatCache.size > TIMESTAMP_CACHE_LIMIT) {
+    const oldestKey = timestampFormatCache.keys().next().value;
+    if (oldestKey) {
+      timestampFormatCache.delete(oldestKey);
+    }
+  }
+  return formatted;
+}
+
+function compileHighlight(pattern: string): RegExp | null {
+  try {
+    const escapedPattern = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(${escapedPattern})`, 'gi');
+  } catch (err) {
+    console.warn('Error compiling regex highlight pattern:', err);
+    return null;
+  }
+}
+
 // Helper function to determine column type based on name or position
 function getColumnType(
   columnName: string,
@@ -99,6 +141,19 @@ export function createColumns(
 ): ColumnDef<Record<string, any>>[] {
   // Create a new array with the columns in the desired order
   let sortedColumns = [...columns];
+  const queryFieldSet = new Set(queryFields);
+  const compiledHighlights = new Map<string, RegExp>();
+
+  for (const [columnName, highlight] of Object.entries(regexHighlights)) {
+    if (highlight.isNegated) {
+      continue;
+    }
+
+    const regex = compileHighlight(highlight.pattern);
+    if (regex) {
+      compiledHighlights.set(columnName, regex);
+    }
+  }
 
   // First, prioritize the metadata timestamp field (from _meta_ts_field)
   const metaTsColumnIndex = sortedColumns.findIndex(
@@ -143,8 +198,10 @@ export function createColumns(
   return sortedColumns.map((col) => {
     const columnType = getColumnType(col.name, timestampField, severityField);
     const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
-    const isFieldInQuery = queryFields.includes(col.name);
-    const hasRegexHighlight = !!regexHighlights[col.name];
+    const isFieldInQuery = queryFieldSet.has(col.name);
+    const regexHighlight = regexHighlights[col.name];
+    const hasRegexHighlight = !!regexHighlight;
+    const compiledHighlight = compiledHighlights.get(col.name);
 
     // Make sure we have a valid id, but avoid adding accessorKey
     const id = col.name || `col_${Math.random().toString(36).substr(2, 9)}`;
@@ -161,7 +218,7 @@ export function createColumns(
         // Flag if this column has a regex highlight pattern
         hasRegexHighlight,
         // Store regex pattern if available
-        regexHighlight: regexHighlights[col.name]
+        regexHighlight
       },
       // Column sizing configuration
       enableResizing: true,
@@ -200,7 +257,7 @@ export function createColumns(
             // Regex indicator
             hasRegexHighlight && h('span', {
               class: 'text-xs text-amber-500 font-mono flex-shrink-0 opacity-80 ml-1',
-              title: `Regex pattern: ${regexHighlights[col.name]?.pattern}${regexHighlights[col.name]?.isNegated ? ' (negated)' : ''}`
+              title: `Regex pattern: ${regexHighlight?.pattern}${regexHighlight?.isNegated ? ' (negated)' : ''}`
             }, '~'),
 
             // Sort indicator (with spacing)
@@ -228,7 +285,7 @@ export function createColumns(
 
         // Special handling for timestamp column
         if (id === timestampField || col.name === timestampField || columnType === 'timestamp') {
-          const formattedTime = formatTimestamp(value as string, timezone);
+          const formattedTime = cachedFormatTimestamp(String(value), timezone);
           return h(
             "span",
             {
@@ -241,8 +298,8 @@ export function createColumns(
 
         // Check if the value looks like a timestamp regardless of column type
         // This is to catch timestamp values in columns that aren't explicitly identified as timestamps
-        if (typeof value === 'string' && value.match(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/)) {
-          const formattedTime = formatTimestamp(value, timezone);
+        if (typeof value === 'string' && looksLikeTimestamp(value)) {
+          const formattedTime = cachedFormatTimestamp(value, timezone);
           return h(
             "span",
             {
@@ -318,34 +375,22 @@ export function createColumns(
         let highlightedContent = null;
 
         // Check if we have a regex highlight specifically for this column
-        if (col.name && regexHighlights[col.name] && !isJsonObject) {
-          const highlightInfo = regexHighlights[col.name];
+        if (compiledHighlight && !isJsonObject) {
+          compiledHighlight.lastIndex = 0;
+          const parts = textValue.split(compiledHighlight);
 
-          if (!highlightInfo.isNegated) { // Only highlight for non-negated patterns
-            try {
-              // Create a regex that escapes special characters
-              const escapedPattern = highlightInfo.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              const regex = new RegExp(`(${escapedPattern})`, 'gi');
+          // Only render highlighted content if we found matches
+          if (parts.length > 1) {
+            highlightedContent = [];
 
-              // Split by the regex
-              const parts = textValue.split(regex);
-
-              // Only render highlighted content if we found matches
-              if (parts.length > 1) {
-                highlightedContent = [];
-
-                // Build the highlighted content
-                parts.forEach((part, i) => {
-                  if (i % 2 === 1) { // Match parts (odd indices)
-                    highlightedContent.push(h('span', { class: 'search-highlight' }, part));
-                  } else if (part) { // Non-match parts
-                    highlightedContent.push(part);
-                  }
-                });
+            // Build the highlighted content
+            parts.forEach((part, i) => {
+              if (i % 2 === 1) { // Match parts (odd indices)
+                highlightedContent.push(h('span', { class: 'search-highlight' }, part));
+              } else if (part) { // Non-match parts
+                highlightedContent.push(part);
               }
-            } catch (err) {
-              console.warn('Error highlighting regex pattern:', err);
-            }
+            });
           }
         }
 

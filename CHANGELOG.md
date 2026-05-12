@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Performance
+- **Explore 10k-row rendering** — Compact log results now virtualize rows and
+  cache row formatting/highlights. The local `agent-browser` 10k benchmark
+  rendered `29` row nodes and `2,157` DOM elements on this branch, compared
+  with `10,000` row nodes and `271,211` DOM elements on `main`. See
+  [the detailed benchmark report](docs/benchmarks/explore-10k-rendering.md).
+- **Explore table view rendering** — Table mode now pre-pages rows before
+  TanStack Table sees them and mounts copy/filter cell actions only on hover,
+  reducing idle table DOM in the 10k local benchmark from `9,284` elements to
+  `3,431`.
+
 ## [1.6.0] - 2026-05-06
 
 LogChef 1.6 narrows the **Team** abstraction to access control only and adds

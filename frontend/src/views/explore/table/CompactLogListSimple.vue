@@ -1,20 +1,11 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
 import TableControls from './TableControls.vue'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { Clock } from 'lucide-vue-next'
-import { 
-  useVueTable, 
-  getCoreRowModel, 
-  getPaginationRowModel,
-  getFilteredRowModel,
-  type PaginationState,
-  type VisibilityState,
-  type ColumnDef
-} from '@tanstack/vue-table'
-import { valueUpdater } from '@/lib/utils'
+import { useVirtualizer } from '@tanstack/vue-virtual'
+import type { ColumnDef, Table } from '@tanstack/vue-table'
 import type { QueryStats } from '@/api/explore'
 
 interface Props {
@@ -52,15 +43,10 @@ defineEmits<{
   'drill-down': [data: { column: string; value: any; operator: string }]
 }>()
 
-// Table state
-const pagination = ref<PaginationState>({
-  pageIndex: 0,
-  pageSize: 100, // Default to 100 for compact view
-})
 const globalFilter = ref('')
-const columnVisibility = ref<VisibilityState>({})
 const columnOrder = ref<string[]>([])
 const displayTimezone = ref<'local' | 'utc'>(props.timezone)
+const scrollParentRef = ref<HTMLElement | null>(null)
 
 // Watch for external timezone prop changes
 watch(() => props.timezone, (newVal) => {
@@ -104,51 +90,60 @@ const tableColumns = computed<ColumnDef<Record<string, any>>[]>(() => {
 // Initialize column state based on columns
 watch(tableColumns, (newColumns) => {
   if (newColumns.length > 0) {
-    const newVisibility: VisibilityState = {}
     const newOrder: string[] = []
     
     newColumns.forEach(col => {
       if (col.id) {
-        newVisibility[col.id] = true
         newOrder.push(col.id)
       }
     })
     
-    columnVisibility.value = newVisibility
     columnOrder.value = newOrder
   }
 }, { immediate: true })
 
-// Create table
-const table = useVueTable({
-  get data() {
-    return logs.value
-  },
-  get columns() {
-    return tableColumns.value
-  },
-  state: {
-    get pagination() {
-      return pagination.value
-    },
-    get globalFilter() {
-      return globalFilter.value
-    },
-    get columnVisibility() {
-      return columnVisibility.value
-    },
-    get columnOrder() {
-      return columnOrder.value
-    },
-  },
-  onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
-  onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
-  onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
-  onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
-  getCoreRowModel: getCoreRowModel(),
-  getPaginationRowModel: getPaginationRowModel(),
-  getFilteredRowModel: getFilteredRowModel(),
+const searchableColumnIds = computed(() => {
+  if (tableColumns.value.length > 0) {
+    return tableColumns.value.map(column => column.id).filter(Boolean) as string[]
+  }
+
+  if (logs.value.length === 0) {
+    return []
+  }
+
+  return Object.keys(logs.value[0])
 })
+
+const filteredLogs = computed(() => {
+  const filter = globalFilter.value.trim().toLowerCase()
+  if (!filter) {
+    return logs.value
+  }
+
+  const columns = searchableColumnIds.value
+  return logs.value.filter(row => {
+    return columns.some(column => {
+      const value = row[column]
+      if (value === null || value === undefined) {
+        return false
+      }
+      return String(value).toLowerCase().includes(filter)
+    })
+  })
+})
+
+const controlsTable = computed(() => ({
+  getState: () => ({
+    globalFilter: globalFilter.value,
+    columnOrder: columnOrder.value,
+  }),
+  setGlobalFilter: (value: string) => {
+    globalFilter.value = value
+  },
+  getRowModel: () => ({
+    rows: filteredLogs.value,
+  }),
+}) as unknown as Table<Record<string, any>>)
 
 // Format timestamp for compact view
 const formatTimestamp = (timestamp: any) => {
@@ -342,34 +337,140 @@ const highlightLogfmt = (text: string) => {
   )
 }
 
-// Pre-computed rows for performance - compact mode should render the full
-// filtered dataset as a scrollable log stream, not the current page only.
-const renderedRows = computed(() => {
-  const filteredRows = table.getFilteredRowModel().rows
-  
-  return filteredRows.map((tableRow) => {
-    const row = tableRow.original
-    const ts = formatTimestamp(row[props.timestampField])
-    const sev = row[props.severityField] || ''
-    const rawMsg = buildMessage(row)
-    const msg = highlightLogfmt(rawMsg)
-    const severityStyles = getSeverityClasses(sev)
-    
-    return {
-      id: `${row[props.timestampField]}-${tableRow.id}`, // Use table row ID for stability
-      timestamp: ts,
-      severity: sev,
-      message: msg,
-      rawMessage: rawMsg,
-      raw: row,
-      borderClass: severityStyles.border,
-      bgClass: severityStyles.bg
-    }
-  })
+interface RenderedRow {
+  id: string
+  timestamp: string
+  severity: string
+  message: string
+  rawMessage: string
+  raw: Record<string, any>
+  borderClass: string
+  bgClass: string
+  plainMessage: boolean
+}
+
+interface VirtualRenderedRow extends RenderedRow {
+  virtualIndex: number
+  virtualKey: string
+  virtualStart: number
+}
+
+let nextRowId = 0
+let rowIds = new WeakMap<Record<string, any>, string>()
+let rowBaseCache = new WeakMap<Record<string, any>, { id: string; rawMessage: string; raw: Record<string, any> }>()
+let rowFormatCache = new WeakMap<Record<string, any>, Map<string, RenderedRow>>()
+
+const highlightVersion = computed(() => JSON.stringify(props.regexHighlights))
+
+function getRowId(row: Record<string, any>): string {
+  let id = rowIds.get(row)
+  if (!id) {
+    id = `compact-row-${nextRowId++}`
+    rowIds.set(row, id)
+  }
+  return id
+}
+
+function getRowBase(row: Record<string, any>) {
+  const cached = rowBaseCache.get(row)
+  if (cached) {
+    return cached
+  }
+
+  const base = {
+    id: getRowId(row),
+    rawMessage: buildMessage(row),
+    raw: row,
+  }
+  rowBaseCache.set(row, base)
+  return base
+}
+
+function formatRenderedRow(row: Record<string, any>, plainMessage: boolean): RenderedRow {
+  const cacheKey = [
+    props.timestampField,
+    props.severityField,
+    displayTimezone.value,
+    plainMessage ? 'plain' : highlightVersion.value,
+  ].join('\0')
+  let rowCache = rowFormatCache.get(row)
+  if (!rowCache) {
+    rowCache = new Map()
+    rowFormatCache.set(row, rowCache)
+  }
+
+  const cached = rowCache.get(cacheKey)
+  if (cached) {
+    return cached
+  }
+
+  const base = getRowBase(row)
+  const ts = formatTimestamp(row[props.timestampField])
+  const sev = row[props.severityField] || ''
+  const msg = plainMessage ? '' : highlightLogfmt(base.rawMessage)
+  const severityStyles = getSeverityClasses(sev)
+
+  const renderedRow = {
+    id: base.id,
+    timestamp: ts,
+    severity: sev,
+    message: msg,
+    rawMessage: base.rawMessage,
+    raw: base.raw,
+    borderClass: severityStyles.border,
+    bgClass: severityStyles.bg,
+    plainMessage,
+  }
+  rowCache.set(cacheKey, renderedRow)
+  return renderedRow
+}
+
+watch(logs, () => {
+  nextRowId = 0
+  rowIds = new WeakMap()
+  rowBaseCache = new WeakMap()
+  rowFormatCache = new WeakMap()
 })
 
 // Handle row click interactions
 const expandedRowId = ref<string | null>(null)
+
+const rowVirtualizer = useVirtualizer(computed(() => ({
+  count: filteredLogs.value.length,
+  getScrollElement: () => scrollParentRef.value,
+  estimateSize: () => 24,
+  overscan: 12,
+  getItemKey: (index) => {
+    const row = filteredLogs.value[index]
+    return row ? getRowId(row) : index
+  },
+})))
+
+const measureExpandedRow = (el: Element | null, rowId: string) => {
+  if (!el || expandedRowId.value !== rowId) {
+    return
+  }
+
+  rowVirtualizer.value.measureElement(el)
+}
+
+const renderedRows = computed<VirtualRenderedRow[]>(() => {
+  return rowVirtualizer.value.getVirtualItems().flatMap((virtualRow) => {
+    const row = filteredLogs.value[virtualRow.index]
+    if (!row) {
+      return []
+    }
+
+    const plainMessage = rowVirtualizer.value.isScrolling && expandedRowId.value !== getRowId(row)
+
+    return [{
+      ...formatRenderedRow(row, plainMessage),
+      virtualIndex: virtualRow.index,
+      virtualKey: String(virtualRow.key),
+      virtualStart: virtualRow.start,
+    }]
+  })
+})
 
 // Context modal state
 const showContextModal = ref(false)
@@ -397,14 +498,22 @@ const handleClick = (event: MouseEvent, rowId: string) => {
 
   expandedRowId.value = expandedRowId.value === rowId ? null : rowId
 }
+
+watch([expandedRowId, filteredLogs], () => {
+  rowVirtualizer.value.measure()
+})
+
+watch(globalFilter, () => {
+  expandedRowId.value = null
+  rowVirtualizer.value.scrollToIndex(0)
+})
 </script>
 
 <template>
   <div class="h-full min-h-0 flex flex-col">
     <!-- Shared Table Controls -->
     <TableControls 
-      v-if="table"
-      :table="table"
+      :table="controlsTable"
       :stats="stats"
       :is-loading="isLoading"
       :show-column-selector="false"
@@ -414,14 +523,21 @@ const handleClick = (event: MouseEvent, rowId: string) => {
     />
     
     <!-- Compact log list container -->
-    <ScrollArea class="min-h-0 flex-1 font-mono text-xs">
-      <div v-if="renderedRows.length > 0" class="space-y-0">
+    <div ref="scrollParentRef" class="min-h-0 flex-1 font-mono text-xs overflow-auto">
+      <div
+        v-if="filteredLogs.length > 0"
+        class="relative"
+        :style="{ height: `${rowVirtualizer.getTotalSize()}px` }"
+      >
         <!-- Log rows with enhanced layout -->
         <div
           v-for="row in renderedRows"
-          :key="row.id"
+          :key="row.virtualKey"
           :data-row-id="row.id"
-          class="group grid grid-cols-[72px_1fr] gap-2 px-2 cursor-pointer border-b border-border/20 border-l-4 transition-colors"
+          :data-index="row.virtualIndex"
+          :ref="(el) => measureExpandedRow(el as Element | null, row.id)"
+          class="group absolute left-0 top-0 w-full grid grid-cols-[72px_1fr] gap-2 px-2 cursor-pointer border-b border-border/20 border-l-4 transition-colors"
+          :style="{ transform: `translateY(${row.virtualStart}px)` }"
           :class="[
             row.borderClass, 
             row.bgClass, 
@@ -442,7 +558,15 @@ const handleClick = (event: MouseEvent, rowId: string) => {
           
           <!-- Message with syntax highlighting -->
           <div class="flex flex-col gap-1 min-w-0">
-            <span 
+            <span
+              v-if="row.plainMessage"
+              :class="expandedRowId === row.id
+                ? 'whitespace-pre-wrap break-all text-foreground text-xs font-mono'
+                : 'truncate text-foreground text-xs font-mono'"
+              :title="expandedRowId === row.id ? '' : row.rawMessage"
+            >{{ row.rawMessage }}</span>
+            <span
+              v-else
               :class="expandedRowId === row.id 
                 ? 'whitespace-pre-wrap break-all text-foreground text-xs font-mono' 
                 : 'truncate text-foreground text-xs font-mono'"
@@ -467,14 +591,14 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       
       <!-- Empty state -->
       <div v-else class="p-4 text-center text-muted-foreground">
-        <template v-if="table.getState().globalFilter">
-          No logs matching "{{ table.getState().globalFilter }}"
+        <template v-if="globalFilter">
+          No logs matching "{{ globalFilter }}"
         </template>
         <template v-else>
           No logs to display
         </template>
       </div>
-    </ScrollArea>
+    </div>
 
     <!-- Log Context Modal -->
     <LogTimelineModal

@@ -76,6 +76,8 @@ export interface QueryResponse {
   };
   query_id?: string;
   generated_sql?: string;  // The SQL that was executed (for "Show SQL" feature)
+  conditions?: FilterCondition[];
+  fields_used?: string[];
 }
 
 /**
@@ -176,4 +178,3 @@ export async function translateWithCache(
     fields_used: [],
   };
 }
-
