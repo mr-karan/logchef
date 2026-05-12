@@ -310,28 +310,35 @@ func validateTableName(name string) *ParseError {
 // BuildFullQuery builds a complete SQL query from LogchefQL with time range and other parameters.
 // This is used when executing the query against ClickHouse.
 func BuildFullQuery(params QueryBuildParams) (string, error) {
+	sql, _, err := BuildFullQueryWithResult(params)
+	return sql, err
+}
+
+// BuildFullQueryWithResult builds a complete SQL query and returns the
+// translation metadata produced by the same parse pass.
+func BuildFullQueryWithResult(params QueryBuildParams) (string, *TranslateResult, error) {
 	if err := validateTimeFormat(params.StartTime); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := validateTimeFormat(params.EndTime); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := validateTimezone(params.Timezone); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := validateTableName(params.TableName); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if err := validateIdentifier(params.TimestampField, "timestamp field"); err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	translateResult := Translate(params.LogchefQL, params.Schema)
 	if !translateResult.Valid {
 		if translateResult.Error != nil {
-			return "", translateResult.Error
+			return "", translateResult, translateResult.Error
 		}
-		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
+		return "", translateResult, &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
 	}
 
 	var query strings.Builder
@@ -384,7 +391,7 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 		query.WriteString(fmt.Sprintf("LIMIT %d", params.Limit))
 	}
 
-	return query.String(), nil
+	return query.String(), translateResult, nil
 }
 
 // QueryBuildParams contains parameters for building a full SQL query

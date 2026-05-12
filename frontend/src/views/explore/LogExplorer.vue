@@ -18,6 +18,7 @@ import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { usePreferencesStore } from "@/stores/preferences";
 import { FieldSideBar } from "@/components/field-sidebar";
+import { EmptyState as LayoutEmptyState, LoadingState } from "@/components/layout";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
 import CompactLogList from "./table/CompactLogListSimple.vue";
@@ -28,17 +29,14 @@ import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
 import { useVariables } from "@/composables/useVariables";
+import { useExploreQueryParsing } from "./composables/useExploreQueryParsing";
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
-import { logchefqlApi, type FilterCondition } from "@/api/logchefql";
 import { generateCliCommand } from "@/utils/cliCommand";
-
-// Type alias for backwards compatibility
-type QueryCondition = FilterCondition;
 
 // Import refactored components
 import TeamSourceSelector from "./components/TeamSourceSelector.vue";
@@ -47,6 +45,7 @@ import HistogramVisualization from "./components/HistogramVisualization.vue";
 import EmptyResultsState from "./components/EmptyResultsState.vue";
 import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
+import { Cable, CircleAlert, Database, Info, RefreshCw, Users } from "lucide-vue-next";
 
 // Router and stores
 const router = useRouter();
@@ -77,6 +76,11 @@ const {
   handleTimeRangeUpdate,
   handleLimitUpdate: _handleLimitUpdate,
 } = useQuery();
+
+const { queryFields, regexHighlights } = useExploreQueryParsing(
+  activeMode,
+  computed(() => exploreStore.lastExecutedState)
+);
 
 const { handleHistogramTimeRangeZoom } = useTimeRange();
 
@@ -110,6 +114,15 @@ const availableFields = computed(() => {
   return [...sourceDetails.value.columns].sort((a, b) => a.name.localeCompare(b.name));
 });
 
+const queryEditorSchema = computed(() => {
+  return (sourceDetails.value?.columns || []).reduce((acc, col) => {
+    if (col.name && col.type) {
+      acc[col.name] = { type: col.type };
+    }
+    return acc;
+  }, {} as Record<string, { type: string }>);
+});
+
 // Simple loading state for UI (replacement for isChangingContext)
 const isChangingContext = computed(() => {
   const teamLoading = sourcesStore.isLoadingTeamSources;
@@ -119,55 +132,6 @@ const isChangingContext = computed(() => {
 const isExporting = ref(false);
 let exportAbortController: AbortController | null = null;
 
-const getQueryParamValue = (key: string) => {
-  const value = route.query[key];
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === "string" ? value : undefined;
-};
-
-const buildExploreNavigationQuery = (
-  overrides: Partial<Record<"team" | "source" | "t" | "start" | "end" | "limit" | "mode", string | undefined>> = {}
-) => {
-  const query: Record<string, string> = {};
-
-  for (const key of ["team", "source", "t", "start", "end", "limit", "mode"] as const) {
-    const value = Object.prototype.hasOwnProperty.call(overrides, key)
-      ? overrides[key]
-      : getQueryParamValue(key);
-    if (value) {
-      query[key] = value;
-    }
-  }
-
-  return query;
-};
-
-// Simple team/source change handlers using router
-function handleTeamChange(teamIdStr: string) {
-  const teamId = parseInt(teamIdStr);
-  if (isNaN(teamId)) return;
-
-  router.replace({
-    query: buildExploreNavigationQuery({
-      team: String(teamId),
-      source: undefined,
-    }),
-  });
-}
-
-function handleSourceChange(sourceIdStr: string) {
-  const sourceId = parseInt(sourceIdStr);
-  if (isNaN(sourceId)) return;
-
-  router.replace({
-    query: buildExploreNavigationQuery({
-      source: String(sourceId),
-    }),
-  });
-}
-
 const {
   showSaveQueryModal,
   handleSaveQueryClick: openSaveModalFlow,
@@ -176,21 +140,6 @@ const {
   updateSavedQuery: _updateSavedQuery,
   loadSourceQueries,
 } = useSavedQueries();
-
-// Create default empty parsed query state
-const EMPTY_PARSED_QUERY = {
-  success: false,
-  meta: { fieldsUsed: [], conditions: [] },
-};
-
-// Add parsed query structure to highlight columns used in search
-const lastParsedQuery = ref<{
-  success: boolean;
-  meta?: {
-    fieldsUsed: string[];
-    conditions: QueryCondition[];
-  };
-}>(EMPTY_PARSED_QUERY);
 
 // Basic state
 // Sidebar defaults to open, but respects user's saved preference
@@ -298,102 +247,6 @@ const currentQueryContentJson = computed(() => {
   });
 });
 
-// Update the parsed query whenever a new query is executed
-watch(
-  () => exploreStore.lastExecutedState,
-  async (newState) => {
-    if (!newState) {
-      lastParsedQuery.value = EMPTY_PARSED_QUERY;
-      return;
-    }
-
-    if (activeMode.value === "logchefql") {
-      // Check if query is empty
-      if (!logchefQuery.value || logchefQuery.value.trim() === "") {
-        lastParsedQuery.value = EMPTY_PARSED_QUERY;
-      } else {
-        // Parse the query using backend LogchefQL API
-        const teamId = teamsStore.currentTeamId;
-        const sourceId = currentSourceId.value;
-        
-        if (teamId && sourceId) {
-          try {
-            const response = await logchefqlApi.translate(teamId, sourceId, { query: logchefQuery.value });
-            if (response.data && response.data.valid) {
-              lastParsedQuery.value = {
-                success: true,
-                meta: {
-                  fieldsUsed: response.data.fields_used || [],
-                  conditions: response.data.conditions?.map((c: FilterCondition) => ({
-                    field: c.field,
-                    operator: c.operator,
-                    value: c.value,
-                    is_regex: c.is_regex
-                  })) || []
-                }
-              };
-            } else {
-              lastParsedQuery.value = EMPTY_PARSED_QUERY;
-            }
-          } catch (error) {
-            console.warn("Failed to parse query via backend:", error);
-            lastParsedQuery.value = EMPTY_PARSED_QUERY;
-          }
-        } else {
-          lastParsedQuery.value = EMPTY_PARSED_QUERY;
-        }
-      }
-    } else {
-      // Reset when in SQL mode
-      lastParsedQuery.value = EMPTY_PARSED_QUERY;
-    }
-  },
-  { immediate: true }
-);
-
-// Add computed property to get parsed query structure
-const parsedQuery = computed(() => {
-  return lastParsedQuery.value;
-});
-
-// Use structured data for query fields
-const queryFields = computed(() => {
-  if (!parsedQuery.value.success) return [];
-  return parsedQuery.value.meta?.fieldsUsed || [];
-});
-
-// Use structured data for regex patterns
-const regexHighlights = computed(() => {
-  const highlights: Record<string, { pattern: string; isNegated: boolean }> =
-    {};
-
-  if (!parsedQuery.value.success) return highlights;
-
-  // Extract only regex conditions
-  const regexConditions = (parsedQuery.value.meta?.conditions || []).filter(
-    (cond: QueryCondition) => cond.is_regex
-  );
-
-  // Process each regex condition
-  regexConditions.forEach((cond: QueryCondition) => {
-    let pattern = cond.value;
-    // Remove quotes if they exist
-    if (
-      (pattern.startsWith('"') && pattern.endsWith('"')) ||
-      (pattern.startsWith("'") && pattern.endsWith("'"))
-    ) {
-      pattern = pattern.slice(1, -1);
-    }
-
-    highlights[cond.field] = {
-      pattern,
-      isNegated: cond.operator === "!~",
-    };
-  });
-
-  return highlights;
-});
-
 // Function to execute a query and handle URL history
 // Modify the function to include a debouncingKey parameter to prevent duplicate executions
 const handleQueryExecution = async (debouncingKey = "") => {
@@ -474,25 +327,6 @@ watch(
     }
   },
   { immediate: false }
-)
-
-// Keep store selection in sync with URL when team/source query params change
-watch(
-  () => [route.query.team, route.query.source],
-  async ([teamParam, sourceParam]) => {
-    if (isInitializing.value) return;
-    const t = teamParam ? parseInt(teamParam as string) : null;
-    const s = sourceParam ? parseInt(sourceParam as string) : null;
-    if (t && t !== currentTeamId.value) {
-      await handleTeamChange(t.toString());
-      // If URL includes a specific source, switch to it after team change
-      if (s) {
-        await handleSourceChange(s.toString());
-      }
-    } else if (s && s !== currentSourceId.value) {
-      await handleSourceChange(s.toString());
-    }
-  }
 )
 
 // Function to handle drill-down from DataTable to add a filter condition
@@ -772,6 +606,7 @@ const handleExport = async () => {
 };
 
 onBeforeUnmount(() => {
+  exploreStore.flushDraft();
   exportAbortController?.abort();
   exportAbortController = null;
 });
@@ -1072,6 +907,40 @@ const onSaveQueryModalSave = (formData: SaveQueryFormData) => {
   processSaveQueryFromComposable(formData);
 };
 
+function isRouteContextAligned() {
+  const routeTeam = route.query.team ? parseInt(route.query.team as string, 10) : null;
+  const routeSource = route.query.source ? parseInt(route.query.source as string, 10) : null;
+
+  return !!routeTeam &&
+    !!routeSource &&
+    routeTeam === (currentTeamId.value ?? 0) &&
+    routeSource === (currentSourceId.value ?? 0);
+}
+
+function waitForRouteContextAlignment(maxWaitMs = 500): Promise<void> {
+  if (isRouteContextAligned()) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve) => {
+    const stop = watch(
+      [() => route.query.team, () => route.query.source, currentTeamId, currentSourceId],
+      () => {
+        if (isRouteContextAligned()) {
+          clearTimeout(timeout);
+          stop();
+          resolve();
+        }
+      }
+    );
+
+    const timeout = setTimeout(() => {
+      stop();
+      resolve();
+    }, maxWaitMs);
+  });
+}
+
 // Handle saved query id changes from URL, especially when component is kept alive
 watch(
   () => route.query.id,
@@ -1093,16 +962,7 @@ watch(
     let urlSource = route.query.source ? parseInt(route.query.source as string) : null;
 
     if (!urlTeam || !urlSource || urlTeam !== currentTeamId.value || urlSource !== currentSourceId.value) {
-      for (let i = 0; i < 5; i++) {
-        await new Promise(r => setTimeout(r, 100));
-        if (
-          route.query.team && route.query.source &&
-          parseInt(route.query.team as string) === (currentTeamId.value ?? 0) &&
-          parseInt(route.query.source as string) === (currentSourceId.value ?? 0)
-        ) {
-          break;
-        }
-      }
+      await waitForRouteContextAlignment();
       // Recompute after polling to avoid stale values
       urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
       urlSource = route.query.source ? parseInt(route.query.source as string) : null;
@@ -1167,59 +1027,38 @@ onMounted(async () => {
 </script>
 
 <template>
-  <KeepAlive>
-    <div class="log-explorer-wrapper">
+  <div class="log-explorer-wrapper">
       <!-- Loading State -->
-      <div v-if="showLoadingState" class="flex items-center justify-center h-[calc(100vh-12rem)]">
-        <p class="text-muted-foreground animate-pulse">Loading Explorer...</p>
-      </div>
+      <LoadingState
+        v-if="showLoadingState"
+        label="Loading Explorer..."
+        class="h-[calc(100vh-12rem)]"
+      />
 
       <!-- Initialization Error State -->
-      <div v-else-if="initializationError"
-        class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4 text-center px-4">
-        <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            class="text-muted-foreground">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="12" y1="8" x2="12" y2="12"></line>
-            <line x1="12" y1="16" x2="12.01" y2="16"></line>
-          </svg>
-        </div>
-        <h2 class="text-xl font-semibold">Unable to Load Explorer</h2>
-        <p class="text-muted-foreground max-w-md">{{ initializationError }}</p>
-        <div class="flex gap-3">
+      <LayoutEmptyState
+        v-else-if="initializationError"
+        :icon="CircleAlert"
+        title="Unable to Load Explorer"
+        :description="initializationError"
+        class="h-[calc(100vh-12rem)]"
+      >
+        <template #action>
           <Button variant="outline" @click="urlState.initialize()">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2">
-              <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
-              <path d="M3 3v5h5"></path>
-              <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
-              <path d="M16 21h5v-5"></path>
-            </svg>
+            <RefreshCw class="mr-2 h-4 w-4" />
             Retry
           </Button>
-        </div>
-      </div>
+        </template>
+      </LayoutEmptyState>
 
       <!-- No Teams State -->
-      <div v-else-if="showNoTeamsState"
-        class="flex flex-col items-center justify-center h-[calc(100vh-12rem)] gap-4 text-center px-4">
-        <div class="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
-          <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-            class="text-muted-foreground">
-            <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
-            <circle cx="9" cy="7" r="4"></circle>
-            <path d="M22 21v-2a4 4 0 0 0-3-3.87"></path>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
-          </svg>
-        </div>
-        <h2 class="text-xl font-semibold">No Teams Available</h2>
-        <p class="text-muted-foreground max-w-md">
-          You need to be part of a team to explore logs. Contact your administrator to get access.
-        </p>
-      </div>
+      <LayoutEmptyState
+        v-else-if="showNoTeamsState"
+        :icon="Users"
+        title="No Teams Available"
+        description="You need to be part of a team to explore logs. Contact your administrator to get access."
+        class="h-[calc(100vh-12rem)]"
+      />
 
       <!-- No Sources State (Team Selected) -->
       <div v-else-if="showNoSourcesState" class="flex flex-col h-[calc(100vh-12rem)]">
@@ -1233,13 +1072,12 @@ onMounted(async () => {
 />
         </div>
         <!-- Empty state content -->
-        <div class="flex flex-col items-center justify-center flex-1 gap-4 text-center">
-          <h2 class="text-2xl font-semibold">No Log Sources Found</h2>
-          <p class="text-muted-foreground max-w-md">
-            The selected team '{{ selectedTeamName }}' has no sources
-            configured. Add one or switch teams.
-          </p>
-        </div>
+        <LayoutEmptyState
+          :icon="Database"
+          title="No Log Sources Found"
+          :description="`The selected team '${selectedTeamName}' has no sources configured. Add one or switch teams.`"
+          class="flex-1"
+        />
       </div>
 
       <!-- Source Not Connected State -->
@@ -1255,21 +1093,14 @@ onMounted(async () => {
         </div>
 
         <!-- Source Not Connected Message -->
-        <div class="flex-1 flex flex-col items-center justify-center p-8">
-          <div class="max-w-xl w-full bg-destructive/10 border border-destructive/20 rounded-lg p-6 text-center">
-            <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-              class="mx-auto mb-4 text-destructive">
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
-            </svg>
-            <h2 class="text-xl font-semibold mb-2">Source Not Connected</h2>
-            <p class="text-muted-foreground mb-4">
-              The selected source "{{ selectedSourceName }}" is not properly
-              connected to the database. Please check the source configuration
-              or select a different source.
-            </p>
-
+        <div class="flex-1 flex items-center justify-center p-8">
+          <LayoutEmptyState
+            :icon="Cable"
+            title="Source Not Connected"
+            :description="`The selected source '${selectedSourceName}' is not properly connected to the database. Please check the source configuration or select a different source.`"
+            class="max-w-xl w-full rounded-lg border border-destructive/20 bg-destructive/10"
+          >
+            <template #action>
             <div class="flex items-center justify-center gap-3">
               <Button variant="outline" @click="
                 router.push({
@@ -1283,7 +1114,8 @@ onMounted(async () => {
                 Add New Source
               </Button>
             </div>
-          </div>
+            </template>
+          </LayoutEmptyState>
         </div>
       </div>
 
@@ -1311,23 +1143,10 @@ onMounted(async () => {
                 isChangingContext ||
                 (currentSourceId && sourcesStore.isLoadingSourceDetails)
               ">
-                <div
-                  class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
-                  <div class="flex items-center space-x-2">
-                    <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none"
-                      viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                      <path class="opacity-75" fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                      </path>
-                    </svg>
-                    <span>{{
-                      isChangingContext
-                        ? "Loading context data..."
-                        : "Loading source details..."
-                    }}</span>
-                  </div>
-                </div>
+                <LoadingState
+                  :label="isChangingContext ? 'Loading context data...' : 'Loading source details...'"
+                  class="rounded-md border bg-card shadow-sm"
+                />
               </template>
 
               <!-- Query Editor -->
@@ -1339,12 +1158,7 @@ onMounted(async () => {
                     ref="queryEditorRef" 
                     :sourceId="currentSourceId" 
                     :teamId="currentTeamId ?? 0" 
-                    :schema="(sourceDetails?.columns || []).reduce((acc: Record<string, { type: string }>, col) => {
-                      if (col.name && col.type) {
-                        acc[col.name] = { type: col.type };
-                      }
-                      return acc;
-                    }, {})"
+                    :schema="queryEditorSchema"
                     :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                     :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery"
                     :placeholder="exploreStore.activeMode === 'logchefql'
@@ -1381,12 +1195,7 @@ onMounted(async () => {
                       (sourceDetails.sort_keys.length === 1 &&
                         sourceDetails.sort_keys[0] !== sourceDetails?._meta_ts_field))
                   " class="flex items-center gap-2 px-3 py-1.5 text-xs bg-blue-50/50 dark:bg-blue-900/20 border-t">
-                    <svg class="h-3 w-3 text-blue-600 dark:text-blue-400 flex-shrink-0" xmlns="http://www.w3.org/2000/svg"
-                      viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                      <circle cx="12" cy="12" r="10"></circle>
-                      <line x1="12" y1="16" x2="12" y2="12"></line>
-                      <line x1="12" y1="8" x2="12.01" y2="8"></line>
-                    </svg>
+                    <Info class="h-3 w-3 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                     <span class="text-blue-700 dark:text-blue-300">
                       <span class="font-medium">Tip:</span> Filter by
                       <span v-for="(key, idx) in filteredSortKeys" :key="key">
@@ -1408,36 +1217,17 @@ onMounted(async () => {
 
               <!-- "Select source" message - only when no source selected -->
               <template v-else-if="currentTeamId && !currentSourceId">
-                <div class="flex items-center justify-center min-h-[400px]">
-                  <div class="text-center max-w-md mx-auto">
-                    <div class="w-16 h-16 mx-auto mb-4 rounded-full bg-muted/50 flex items-center justify-center">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none"
-                        stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"
-                        class="text-muted-foreground/70">
-                        <path d="M3 7v10a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2z" />
-                        <polyline points="3,7 12,13 21,7" />
-                      </svg>
-                    </div>
-                    <h3 class="text-lg font-medium mb-2">Select a Log Source</h3>
-                    <p class="text-sm text-muted-foreground mb-4">
-                      Choose a log source from the dropdown above to start exploring your data.
-                    </p>
-                    <div class="text-xs text-muted-foreground/70">
-                      Need to add a new source? Click "Add Source" in the selector.
-                    </div>
-                  </div>
-                </div>
+                <LayoutEmptyState
+                  :icon="Database"
+                  title="Select a Log Source"
+                  description="Choose a log source from the selector above to start exploring your data."
+                  class="min-h-[400px]"
+                />
               </template>
 
               <!-- Loading fallback - for any other state -->
               <template v-else>
-                <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
-                  <div class="text-center">
-                    <p class="text-sm text-muted-foreground">
-                      Loading explorer...
-                    </p>
-                  </div>
-                </div>
+                <LoadingState label="Loading explorer..." class="rounded-md border bg-card shadow-sm" />
               </template>
 
               <!-- Query Error Component -->
@@ -1508,9 +1298,7 @@ onMounted(async () => {
                   <!-- Loading placeholder -->
                   <div v-else-if="isExecutingQuery || isInitialQueryPending"
                     class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
-                    <p class="text-muted-foreground animate-pulse">
-                      Loading results...
-                    </p>
+                    <LoadingState label="Loading results..." />
                   </div>
                 </template>
 
@@ -1530,8 +1318,7 @@ onMounted(async () => {
 
 
       </div>
-    </div>
-  </KeepAlive>
+  </div>
 </template>
 
 <style scoped>
