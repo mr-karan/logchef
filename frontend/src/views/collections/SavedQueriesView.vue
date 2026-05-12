@@ -62,7 +62,7 @@ const {
   editQuery,
   deleteQuery,
   clearSearch,
-  canManageCollections,
+  canEditQuery,
 } = useSavedQueries(localQueries);
 
 // Collection picker state: "all" or a numeric collection id
@@ -313,10 +313,10 @@ function manageCollection() {
                   <DropdownMenuItem @click="copyShareUrl(query)">
                     <Link class="mr-2 h-4 w-4" /> Copy Link
                   </DropdownMenuItem>
-                  <DropdownMenuItem v-if="canManageCollections" @click="editQuery(query)">
+                  <DropdownMenuItem v-if="canEditQuery(query)" @click="editQuery(query)">
                     <Pencil class="mr-2 h-4 w-4" /> Edit
                   </DropdownMenuItem>
-                  <DropdownMenuItem v-if="canManageCollections" @click="handleDeleteQuery(query)" class="text-destructive">
+                  <DropdownMenuItem v-if="canEditQuery(query)" @click="handleDeleteQuery(query)" class="text-destructive">
                     <Trash2 class="mr-2 h-4 w-4" /> Delete
                   </DropdownMenuItem>
                 </DropdownMenuContent>

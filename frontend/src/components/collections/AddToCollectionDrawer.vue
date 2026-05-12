@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { useCollectionsStore } from "@/stores/collections";
 import { collectionsApi, type CollectionItem } from "@/api/collections";
+import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useRouter } from "vue-router";
 
 const props = defineProps<{
@@ -28,6 +29,7 @@ const emit = defineEmits<{
 
 const router = useRouter();
 const store = useCollectionsStore();
+const { canManageCollection, isAnyTeamCollectionMutator } = useTeamPermissions();
 
 const isLoadingIndex = ref(false);
 const isMutating = ref<number | null>(null);
@@ -38,7 +40,9 @@ const isCreating = ref(false);
 // Map<collectionId, Set<queryId>> — built on open
 const itemIndex = ref<Map<number, Set<number>>>(new Map());
 
-const collections = computed(() => store.collections);
+// Only show collections the caller can mutate. Members see their personal
+// collection (auto-owner) but not shared collections they can't pin to.
+const collections = computed(() => store.collections.filter((c) => canManageCollection(c)));
 const isQueryInCollection = (collectionId: number) =>
   itemIndex.value.get(collectionId)?.has(props.queryId) ?? false;
 
@@ -177,7 +181,7 @@ function navigateToCollection(collectionId: number) {
 
           <Separator />
 
-          <div v-if="!showInlineCreate">
+          <div v-if="!showInlineCreate && isAnyTeamCollectionMutator">
             <Button variant="ghost" size="sm" class="w-full justify-start" @click="showInlineCreate = true">
               <Plus class="mr-2 h-4 w-4" />
               New Collection
