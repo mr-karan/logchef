@@ -55,6 +55,7 @@ import {
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
+import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
@@ -68,6 +69,7 @@ const preferencesStore = usePreferencesStore();
 const metaStore = useMetaStore();
 const teamsStore = useTeamsStore();
 const exploreStore = useExploreStore();
+const { isGlobalAdmin, isAnyTeamAdmin } = useTeamPermissions();
 
 const setThemePreference = (mode: ThemeMode) => {
   themeStore.setTheme(mode);
@@ -249,15 +251,14 @@ const navItems = [
             </SidebarGroupContent>
           </SidebarGroup>
 
-          <!-- Admin Navigation -->
-          <!-- Show for global admins OR team admins -->
-          <SidebarGroup v-if="authStore.user?.role === 'admin' || teamsStore.isAnyTeamAdmin" class="mt-4">
+          <!-- Administration section: visible to global admins and any-team admins.
+               Global admins see every item; team admins see only Teams. -->
+          <SidebarGroup v-if="isGlobalAdmin || isAnyTeamAdmin" class="mt-4">
             <SidebarGroupLabel v-if="sidebarOpen">Administration</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <template v-for="item in adminNavItems" :key="item.title">
-                  <!-- Global admins see all items, team admins only see "Teams" -->
-                  <SidebarMenuItem v-if="authStore.user?.role === 'admin' || item.title === 'Teams'">
+                  <SidebarMenuItem v-if="isGlobalAdmin || item.title === 'Teams'">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
                       <router-link :to="item.url" class="flex items-center" active-class="font-medium">

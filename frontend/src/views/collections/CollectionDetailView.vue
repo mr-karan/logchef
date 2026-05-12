@@ -45,7 +45,7 @@ import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
 import { useAuthStore } from "@/stores/auth";
-import { useTeamsStore } from "@/stores/teams";
+import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useUsersStore } from "@/stores/users";
 import {
   Select,
@@ -60,20 +60,20 @@ const router = useRouter();
 const { toast } = useToast();
 const store = useCollectionsStore();
 const authStore = useAuthStore();
-const teamsStore = useTeamsStore();
 const usersStore = useUsersStore();
 const { data } = storeToRefs(store);
+const { isAnyTeamAdmin, isGlobalAdmin, canManageCollection } = useTeamPermissions();
 
 const collectionID = computed(() => Number(route.params.collectionID));
 const collection = computed(() => store.collections.find((c) => c.id === collectionID.value) ?? null);
 const items = computed(() => data.value.items[collectionID.value] ?? []);
 const members = computed(() => data.value.members[collectionID.value] ?? []);
 
-const isOwner = computed(() => collection.value?.caller_role === "owner" || authStore.user?.role === "admin");
+const isOwner = computed(() => canManageCollection(collection.value));
 // Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
 // invite UI from owners who lack that role since the dropdown can't be
 // populated without it.
-const canListUsers = computed(() => authStore.user?.role === "admin" || teamsStore.isAnyTeamAdmin);
+const canListUsers = computed(() => isGlobalAdmin.value || isAnyTeamAdmin.value);
 const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !collection.value?.is_personal);
 
 const showAddMember = ref(false);

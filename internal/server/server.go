@@ -228,14 +228,15 @@ func (s *Server) setupRoutes() {
 	collections.Get("/:collectionID", s.handleGetCollection)
 	collections.Get("/:collectionID/members", s.handleListCollectionMembers)
 	collections.Get("/:collectionID/items", s.handleListCollectionItems)
-	// Mutations require team admin/editor or global admin
-	collections.Post("/", s.requireAnyTeamAdmin, s.handleCreateCollection)
-	collections.Put("/:collectionID", s.requireAnyTeamAdmin, s.handleUpdateCollection)
-	collections.Delete("/:collectionID", s.requireAnyTeamAdmin, s.handleDeleteCollection)
-	collections.Post("/:collectionID/members", s.requireAnyTeamAdmin, s.handleAddCollectionMember)
-	collections.Delete("/:collectionID/members/:userID", s.requireAnyTeamAdmin, s.handleRemoveCollectionMember)
-	collections.Post("/:collectionID/items", s.requireAnyTeamAdmin, s.handleAddCollectionItem)
-	collections.Delete("/:collectionID/items/:queryID", s.requireAnyTeamAdmin, s.handleRemoveCollectionItem)
+	// Coarse gate: caller must be admin/editor in at least one team (or global admin).
+	// Per-collection ownership is enforced separately inside core/collections.go.
+	collections.Post("/", s.requireAnyTeamCollectionMutator, s.handleCreateCollection)
+	collections.Put("/:collectionID", s.requireAnyTeamCollectionMutator, s.handleUpdateCollection)
+	collections.Delete("/:collectionID", s.requireAnyTeamCollectionMutator, s.handleDeleteCollection)
+	collections.Post("/:collectionID/members", s.requireAnyTeamCollectionMutator, s.handleAddCollectionMember)
+	collections.Delete("/:collectionID/members/:userID", s.requireAnyTeamCollectionMutator, s.handleRemoveCollectionMember)
+	collections.Post("/:collectionID/items", s.requireAnyTeamCollectionMutator, s.handleAddCollectionItem)
+	collections.Delete("/:collectionID/items/:queryID", s.requireAnyTeamCollectionMutator, s.handleRemoveCollectionItem)
 
 	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete: creator + global admin (legacy queries
