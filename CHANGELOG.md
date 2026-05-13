@@ -7,12 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.6.0] - 2026-05-06
+## [1.6.0] - 2026-05-13
 
 LogChef 1.6 narrows the **Team** abstraction to access control only and adds
 **Collections** — cross-team curation lists for saved queries. The unified
 Saved Queries view replaces the old team-scoped collections page with a flat,
-searchable table and a collection-picker dropdown.
+searchable table and a collection-picker dropdown. The release also adds a
+new **Team Editor** role and restructures the admin URLs for consistency.
 
 ### API & URL changes
 - **Saved queries are source-scoped, not team-scoped.** `team_queries` is
@@ -26,6 +27,14 @@ searchable table and a collection-picker dropdown.
   dropped, `alerts.created_by` added.
 - **`query_shares` and `export_jobs` lose `team_id`.**
 - **New `/api/v1/collections`** — CRUD for collections + members + items.
+- **Collection mutation routes use `requireAnyTeamCollectionMutator`**
+  (admin or editor in any team). Team admin–only routes (membership
+  management, source linking, `/api/v1/users`) stay strict on
+  `requireAnyTeamAdmin`.
+- **Admin frontend URLs restructured.** `/management/*` → `/admin/*`,
+  `/profile` → `/settings/profile`, `/admin/sources/list` → `/admin/sources`,
+  `/admin/sources/edit/:id` → `/admin/sources/:id/edit`. No redirects from
+  old paths.
 - **Old team-scoped paths return 404.** No shims, no redirects.
 - **Frontend URL:** `/logs/saved/:queryId` is the canonical share link.
 
@@ -60,6 +69,21 @@ searchable table and a collection-picker dropdown.
   [#86](https://github.com/mr-karan/logchef/pull/86))
 - **Native ClickHouse TLS.**
   ([#88](https://github.com/mr-karan/logchef/pull/88))
+- **Team Editor role** — new team role between Member and Admin. Editors
+  can manage collections (create, rename, invite, pin items) and save
+  queries. They cannot invite team members or link sources — those stay
+  admin-only. ([#94](https://github.com/mr-karan/logchef/pull/94))
+- **Shared UI primitives** — `PageHeader`, `PageSection`, `EmptyState`,
+  `LoadingState` under `components/layout/`. Replace the ad-hoc empty/
+  loading/header markup across admin and settings pages with one
+  consistent visual language.
+- **`useTeamPermissions()` composable** — central frontend role-check
+  API: `isGlobalAdmin`, `isAnyTeamAdmin`, `isAnyTeamCollectionMutator`,
+  `isTeamAdmin(teamId)`, `isTeamCollectionMutator(teamId)`,
+  `canSaveQuery`, `canEditSavedQuery(query)`, `canManageCollection(c)`.
+- **Tests** — 18 backend cases for the new role helpers (cross-team
+  negatives + regression guards that editors stay distinct from admins),
+  28 frontend Vitest cases for `useTeamPermissions`.
 
 ### Changed
 - **Saved Queries view is now the unified entry point.** The old two-page
@@ -72,6 +96,17 @@ searchable table and a collection-picker dropdown.
   tighter histogram styling, Local|UTC segmented timezone control.
 - **Export → Download** rename; backend-streamed pipe is the only path.
 - **AI SQL insert** clears saved-query state and switches to SQL mode.
+- **Save button** in the query editor is now visible to all team members
+  (it was previously gated to admins by mistake; backend always allowed
+  it). Edit/delete of a saved query still requires the creator or a
+  global admin.
+- **Distinct icons** for LogchefQL vs SQL saved queries (`Search` and
+  `Database`); the previous near-identical file icons were hard to tell
+  apart at small sizes.
+- **Admin/settings pages** migrated to the shared `PageHeader` +
+  `PageSection` layout. The whole-page Card wrapper pattern is gone.
+- **Sidebar links** carry team + source context into Explorer and Alerts
+  via a single `resolveTo()` helper.
 
 ### Fixed
 - **Saved query loads wrong source** — resolved query's `source_id` now
@@ -89,6 +124,22 @@ searchable table and a collection-picker dropdown.
 - **Unbounded query result OOM** — `max_limit` (default 100k rows).
 - **Raw SQL in URL overflow**, crash-safe export pruner, query share TTL
   validation, translate API error surfacing, relative export URLs.
+- **Team Editors couldn't create saved queries or manage collections.**
+  The frontend gates predated the Editor role; both layers now agree.
+  Reported by @aswathsachin.
+  ([#94](https://github.com/mr-karan/logchef/pull/94))
+- **Team admins were locked out of `/admin/teams`** after the admin URL
+  restructure put `requiresAdmin: true` on the `/admin` parent. Per-route
+  gating now lets team admins reach the Teams pages they manage.
+- **Console 403 spam on Collection Detail** for non-team-admin owners —
+  the page was eagerly fetching `/api/v1/users` (admin-only) on every
+  load. Now lazy on the invite dialog, and the invite button is hidden
+  from owners who can't list users.
+- **Members section on Collection Detail** is hidden from non-team-admin
+  viewers — they don't need to see who else is in the collection.
+- **Collection Detail Items** now renders as a flat table (Type | Name |
+  Source | Updated | actions) matching the unified Saved Queries view,
+  instead of the previous three-card stack.
 
 ### Removed
 - **Query Folders** (the team-scoped experiment from v1.6.0-dev).
@@ -506,6 +557,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[1.6.0]: https://github.com/mr-karan/logchef/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0

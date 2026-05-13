@@ -94,13 +94,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <article class="version">
       <div class="version-header">
         <span class="version-tag">v1.6.0</span>
-        <span class="version-date">May 6, 2026</span>
+        <span class="version-date">May 13, 2026</span>
         <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        Logchef 1.6 narrows the <strong>Team</strong> abstraction to access control only and adds <strong>Collections</strong> &mdash; cross-team curation lists for saved queries. The unified Saved Queries view replaces the old team-scoped layout with a flat, searchable table and collection-picker dropdown.
+        Logchef 1.6 reorganizes saved queries around <strong>Collections</strong> &mdash; cross-team curation lists you can share with teammates. Teams now exist purely for access control. A new <strong>Editor</strong> team role sits between Member and Admin: editors can save queries and manage collections without getting full admin rights.
       </p>
 
       <div class="change-section">
@@ -109,13 +109,15 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Collections</strong> &mdash; Cross-team curation lists. Personal collection auto-created per user. Shared collections are invite-only with <code>owner</code> + <code>member</code> roles. Items a member can't run show with a lock icon.</li>
-          <li><strong>Unified Saved Queries view</strong> &mdash; Single page at <code>/logs/saved</code> with a collection-picker dropdown (All / Personal / Shared), search, and a flat table with type icon, name, source, and date.</li>
-          <li><strong>"Add to Collection" drawer</strong> &mdash; Per-row action on saved queries. Slide-out panel shows all collections as checkboxes for quick pin/unpin. Create new collections inline.</li>
-          <li><strong>Deterministic saved-query resolution</strong> &mdash; <code>/resolve</code> endpoint returns <code>resolved_team_id</code> using priority: explicit hint &rarr; <code>created_from_team_id</code> &rarr; first accessible team.</li>
-          <li><strong>Shareable saved-query links</strong> &mdash; <code>/logs/saved/:queryId</code> is the canonical share URL. Resolves source + team automatically.</li>
-          <li><strong>Backend-streamed downloads</strong> &mdash; CSV/JSON exports with synchronous admission control (429 at capacity).</li>
-          <li><strong>Calendar drill-down</strong>, <strong>OIDC email-verified bypass</strong> (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), <strong>native ClickHouse TLS</strong> (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>).</li>
+          <li><strong>Collections</strong> &mdash; Group saved queries into shareable lists. Everyone gets a personal collection automatically. Shared collections are invite-only; queries you can't run show with a lock icon.</li>
+          <li><strong>Unified Saved Queries page</strong> &mdash; One place to browse, search, and pin queries. Pick "All Queries", your personal collection, or any shared collection from a dropdown at the top.</li>
+          <li><strong>"Add to Collection" drawer</strong> &mdash; Open the menu on any saved query and tick the collections you want it pinned to. Create new collections inline.</li>
+          <li><strong>Editor team role</strong> &mdash; A new role for teammates who curate queries and collections. Editors can save queries, create collections, and invite collection members. They can't invite team members or link sources &mdash; those stay admin-only.</li>
+          <li><strong>Share a saved query with a link</strong> &mdash; <code>/logs/saved/:queryId</code> resolves the right team and source automatically, so the recipient lands directly on the query.</li>
+          <li><strong>CSV / JSON downloads</strong> stream from the backend with admission control, so very large exports don't tip the server over.</li>
+          <li><strong>Calendar month/year drill-down</strong> in the date picker.</li>
+          <li><strong>OIDC <code>skip_email_verified_check</code></strong> &mdash; Skip the email-verified claim on providers that don't pass it through (e.g. Cloudflare Access in front of an upstream IdP). (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>)</li>
+          <li><strong>Native ClickHouse TLS</strong> &mdash; Configure TLS directly in the source connection instead of relying on stunnel/sidecars. (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>)</li>
         </ul>
       </div>
 
@@ -125,11 +127,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Saved queries are source-scoped, not team-scoped.</strong> Team is an access path, not ownership. <code>created_from_team_id</code> is metadata for resolve preference, not ACL.</li>
-          <li><strong>Alerts de-teamed.</strong> New <code>/api/v1/alerts</code> route; <code>team_id</code> dropped, <code>created_by</code> added. Edit/delete = creator + admin.</li>
-          <li><strong>API endpoints restructured.</strong> New <code>/api/v1/saved-queries</code>, <code>/api/v1/alerts</code>, <code>/api/v1/collections</code>. Old team-scoped paths return 404.</li>
-          <li><strong>Alert notifications</strong> drop <code>team_id</code>/<code>team_name</code>. Recipients resolve to users directly.</li>
-          <li><strong>Explore UI polish</strong> &mdash; quieter top bar, concrete placeholders, Local|UTC timezone control.</li>
+          <li><strong>Save your own queries.</strong> The Save button is now visible to every team member (it was hidden from non-admins by mistake). Editing or deleting a saved query still requires the original creator or a global admin.</li>
+          <li><strong>Distinct icons for LogchefQL and SQL</strong> in the saved queries list, so you can tell them apart at a glance.</li>
+          <li><strong>Cleaner admin and settings pages</strong> &mdash; consistent header, sections, and empty-state styling across Users, Teams, Sources, System Settings, Profile, and Preferences.</li>
+          <li><strong>Saved queries belong to a source, not a team.</strong> Anyone with source access can see and run them. The team you saved from is just a hint used to pick the right access path.</li>
+          <li><strong>Explore UI polish</strong> &mdash; quieter top bar, concrete query placeholders, Local|UTC timezone toggle.</li>
         </ul>
       </div>
 
@@ -140,8 +142,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
         <ul class="change-list">
           <li><strong>Query Folders</strong> &mdash; replaced by Collections.</li>
-          <li><strong>Bookmarks</strong> (<code>is_bookmarked</code>) &mdash; replaced by personal collections.</li>
-          <li><strong><code>team_id</code></strong> on saved queries, alerts, query shares, and export jobs.</li>
+          <li><strong>Bookmarks</strong> &mdash; your starred queries automatically move to your personal collection.</li>
         </ul>
       </div>
 
@@ -151,10 +152,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Saved query loads wrong source</strong> &mdash; resolved query's <code>source_id</code> overrides stale URL params; source details must match before execution fires.</li>
-          <li><strong>Redirect spinner stuck</strong> &mdash; reactive <code>route.params</code> watch prevents stale state on route reuse.</li>
-          <li><strong>Migration cascade-delete</strong> &mdash; FK enforcement disabled during table rebuilds to preserve child rows.</li>
-          <li><strong>Query result OOM</strong>, raw SQL URL overflow, crash-safe export pruner, relative export URLs.</li>
+          <li><strong>Editors couldn't save queries or manage collections</strong> &mdash; the gates predated the new role. Reported by <a href="https://github.com/aswathsachin" target="_blank">@aswathsachin</a>. (<a href="https://github.com/mr-karan/logchef/pull/94" target="_blank">#94</a>)</li>
+          <li><strong>Team admins couldn't reach the Teams page.</strong> Restored access without giving up the global-admin gate on the rest of the admin pages.</li>
+          <li><strong>Opening a shared saved query</strong> no longer flashes the wrong source while the page hydrates.</li>
+          <li><strong>Loading a query via direct link</strong> no longer leaves a stuck spinner when you reuse the same URL.</li>
+          <li><strong>Very large query results</strong> are capped to prevent the browser from running out of memory.</li>
         </ul>
       </div>
 
