@@ -385,18 +385,20 @@ const createQueryShare = `-- name: CreateQueryShare :exec
 INSERT INTO query_shares (
     token,
     source_id,
+    team_id,
     created_by,
     payload_json,
     expires_at
-) VALUES (?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?)
 `
 
 type CreateQueryShareParams struct {
-	Token       string    `json:"token"`
-	SourceID    int64     `json:"source_id"`
-	CreatedBy   int64     `json:"created_by"`
-	PayloadJson string    `json:"payload_json"`
-	ExpiresAt   time.Time `json:"expires_at"`
+	Token       string        `json:"token"`
+	SourceID    int64         `json:"source_id"`
+	TeamID      sql.NullInt64 `json:"team_id"`
+	CreatedBy   int64         `json:"created_by"`
+	PayloadJson string        `json:"payload_json"`
+	ExpiresAt   time.Time     `json:"expires_at"`
 }
 
 // Query Shares
@@ -405,6 +407,7 @@ func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQuerySharePara
 	_, err := q.exec(ctx, q.createQueryShareStmt, createQueryShare,
 		arg.Token,
 		arg.SourceID,
+		arg.TeamID,
 		arg.CreatedBy,
 		arg.PayloadJson,
 		arg.ExpiresAt,
@@ -960,6 +963,7 @@ const getQueryShare = `-- name: GetQueryShare :one
 SELECT
     qs.token,
     qs.source_id,
+    qs.team_id,
     qs.created_by,
     qs.payload_json,
     qs.expires_at,
@@ -973,15 +977,16 @@ WHERE qs.token = ?
 `
 
 type GetQueryShareRow struct {
-	Token          string       `json:"token"`
-	SourceID       int64        `json:"source_id"`
-	CreatedBy      int64        `json:"created_by"`
-	PayloadJson    string       `json:"payload_json"`
-	ExpiresAt      time.Time    `json:"expires_at"`
-	LastAccessedAt sql.NullTime `json:"last_accessed_at"`
-	CreatedAt      time.Time    `json:"created_at"`
-	Email          string       `json:"email"`
-	FullName       string       `json:"full_name"`
+	Token          string        `json:"token"`
+	SourceID       int64         `json:"source_id"`
+	TeamID         sql.NullInt64 `json:"team_id"`
+	CreatedBy      int64         `json:"created_by"`
+	PayloadJson    string        `json:"payload_json"`
+	ExpiresAt      time.Time     `json:"expires_at"`
+	LastAccessedAt sql.NullTime  `json:"last_accessed_at"`
+	CreatedAt      time.Time     `json:"created_at"`
+	Email          string        `json:"email"`
+	FullName       string        `json:"full_name"`
 }
 
 // Retrieve an ad hoc query share by token with creator details
@@ -991,6 +996,7 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 	err := row.Scan(
 		&i.Token,
 		&i.SourceID,
+		&i.TeamID,
 		&i.CreatedBy,
 		&i.PayloadJson,
 		&i.ExpiresAt,
@@ -1283,6 +1289,26 @@ func (q *Queries) GetUserPreferences(ctx context.Context, userID int64) (UserPre
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getUserTeamForSource = `-- name: GetUserTeamForSource :one
+SELECT tm.team_id FROM team_members tm
+JOIN team_sources ts ON tm.team_id = ts.team_id
+WHERE tm.user_id = ? AND ts.source_id = ?
+LIMIT 1
+`
+
+type GetUserTeamForSourceParams struct {
+	UserID   int64 `json:"user_id"`
+	SourceID int64 `json:"source_id"`
+}
+
+// Get a team ID that the user belongs to and that has access to the source
+func (q *Queries) GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error) {
+	row := q.queryRow(ctx, q.getUserTeamForSourceStmt, getUserTeamForSource, arg.UserID, arg.SourceID)
+	var team_id int64
+	err := row.Scan(&team_id)
+	return team_id, err
 }
 
 const insertAlertHistory = `-- name: InsertAlertHistory :one

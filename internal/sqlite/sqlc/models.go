@@ -105,13 +105,14 @@ type ExportJob struct {
 }
 
 type QueryShare struct {
-	Token          string       `json:"token"`
-	SourceID       int64        `json:"source_id"`
-	CreatedBy      int64        `json:"created_by"`
-	PayloadJson    string       `json:"payload_json"`
-	ExpiresAt      time.Time    `json:"expires_at"`
-	LastAccessedAt sql.NullTime `json:"last_accessed_at"`
-	CreatedAt      time.Time    `json:"created_at"`
+	Token          string        `json:"token"`
+	SourceID       int64         `json:"source_id"`
+	CreatedBy      int64         `json:"created_by"`
+	PayloadJson    string        `json:"payload_json"`
+	ExpiresAt      time.Time     `json:"expires_at"`
+	LastAccessedAt sql.NullTime  `json:"last_accessed_at"`
+	CreatedAt      time.Time     `json:"created_at"`
+	TeamID         sql.NullInt64 `json:"team_id"`
 }
 
 type SavedQuery struct {

@@ -186,11 +186,15 @@ export function useUrlState(): UrlStateReturn {
         try {
           const response = await exploreApi.getQueryShare(params.share);
           if (response.data) {
-            const shareTeam = response.data.team_id.toString();
+            const resolvedTeamId = response.data.team_id ?? (params.team ? parseInt(params.team, 10) : null);
+            if (!resolvedTeamId) {
+              throw new Error("Share link has no team context");
+            }
+            const shareTeam = resolvedTeamId.toString();
             const shareSource = response.data.source_id.toString();
             params.team = shareTeam;
             params.source = shareSource;
-            contextStore.selectTeam(response.data.team_id);
+            contextStore.selectTeam(resolvedTeamId);
             exploreStore.suppressNextSourceReset(response.data.source_id);
             contextStore.selectSource(response.data.source_id);
 

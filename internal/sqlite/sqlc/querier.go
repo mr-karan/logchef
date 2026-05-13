@@ -123,6 +123,8 @@ type Querier interface {
 	// User Preferences
 	// Get user preferences by user ID
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
+	// Get a team ID that the user belongs to and that has access to the source
+	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Check if a source is managed

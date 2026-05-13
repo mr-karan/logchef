@@ -180,6 +180,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUserPreferencesStmt, err = db.PrepareContext(ctx, getUserPreferences); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUserPreferences: %w", err)
 	}
+	if q.getUserTeamForSourceStmt, err = db.PrepareContext(ctx, getUserTeamForSource); err != nil {
+		return nil, fmt.Errorf("error preparing query GetUserTeamForSource: %w", err)
+	}
 	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
 	}
@@ -616,6 +619,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUserPreferencesStmt: %w", cerr)
 		}
 	}
+	if q.getUserTeamForSourceStmt != nil {
+		if cerr := q.getUserTeamForSourceStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getUserTeamForSourceStmt: %w", cerr)
+		}
+	}
 	if q.insertAlertHistoryStmt != nil {
 		if cerr := q.insertAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
@@ -992,6 +1000,7 @@ type Queries struct {
 	getUserStmt                         *sql.Stmt
 	getUserByEmailStmt                  *sql.Stmt
 	getUserPreferencesStmt              *sql.Stmt
+	getUserTeamForSourceStmt            *sql.Stmt
 	insertAlertHistoryStmt              *sql.Stmt
 	isSourceManagedStmt                 *sql.Stmt
 	isTeamManagedStmt                   *sql.Stmt
@@ -1107,6 +1116,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserStmt:                         q.getUserStmt,
 		getUserByEmailStmt:                  q.getUserByEmailStmt,
 		getUserPreferencesStmt:              q.getUserPreferencesStmt,
+		getUserTeamForSourceStmt:            q.getUserTeamForSourceStmt,
 		insertAlertHistoryStmt:              q.insertAlertHistoryStmt,
 		isSourceManagedStmt:                 q.isSourceManagedStmt,
 		isTeamManagedStmt:                   q.isTeamManagedStmt,

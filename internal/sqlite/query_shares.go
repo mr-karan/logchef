@@ -12,9 +12,14 @@ import (
 
 // CreateQueryShare persists an ad hoc query share token.
 func (db *DB) CreateQueryShare(ctx context.Context, share *models.QueryShare) error {
+	teamID := sql.NullInt64{}
+	if share.TeamID != nil {
+		teamID = sql.NullInt64{Int64: int64(*share.TeamID), Valid: true}
+	}
 	err := db.writeQueries.CreateQueryShare(ctx, sqlc.CreateQueryShareParams{
 		Token:       share.Token,
 		SourceID:    int64(share.SourceID),
+		TeamID:      teamID,
 		CreatedBy:   int64(share.CreatedBy),
 		PayloadJson: string(share.Payload),
 		ExpiresAt:   share.ExpiresAt,
@@ -47,6 +52,10 @@ func (db *DB) GetQueryShare(ctx context.Context, token string) (*models.QuerySha
 		CreatedByEmail: row.Email,
 		CreatedByName:  row.FullName,
 	}
+	if row.TeamID.Valid {
+		tid := models.TeamID(row.TeamID.Int64)
+		share.TeamID = &tid
+	}
 	if row.LastAccessedAt.Valid {
 		share.LastAccessedAt = &row.LastAccessedAt.Time
 	}
@@ -76,6 +85,18 @@ func (db *DB) DeleteQueryShare(ctx context.Context, token string) error {
 		return fmt.Errorf("error deleting query share: %w", err)
 	}
 	return nil
+}
+
+// GetUserTeamForSource returns a team ID that the user belongs to and that has access to the source.
+func (db *DB) GetUserTeamForSource(ctx context.Context, userID models.UserID, sourceID models.SourceID) (models.TeamID, error) {
+	teamID, err := db.readQueries.GetUserTeamForSource(ctx, sqlc.GetUserTeamForSourceParams{
+		UserID:   int64(userID),
+		SourceID: int64(sourceID),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return models.TeamID(teamID), nil
 }
 
 // PruneExpiredQueryShares removes expired query shares.

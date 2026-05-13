@@ -303,16 +303,18 @@ ORDER BY sq.updated_at DESC;
 INSERT INTO query_shares (
     token,
     source_id,
+    team_id,
     created_by,
     payload_json,
     expires_at
-) VALUES (?, ?, ?, ?, ?);
+) VALUES (?, ?, ?, ?, ?, ?);
 
 -- name: GetQueryShare :one
 -- Retrieve an ad hoc query share by token with creator details
 SELECT
     qs.token,
     qs.source_id,
+    qs.team_id,
     qs.created_by,
     qs.payload_json,
     qs.expires_at,
@@ -440,6 +442,13 @@ WHERE team_id = ? AND source_id = ?;
 SELECT COUNT(*) FROM team_members tm
 JOIN team_sources ts ON tm.team_id = ts.team_id
 WHERE tm.user_id = ? AND ts.source_id = ?;
+
+-- name: GetUserTeamForSource :one
+-- Get a team ID that the user belongs to and that has access to the source
+SELECT tm.team_id FROM team_members tm
+JOIN team_sources ts ON tm.team_id = ts.team_id
+WHERE tm.user_id = ? AND ts.source_id = ?
+LIMIT 1;
 
 -- name: ListTeamsForUser :many
 -- List all teams a user is a member of

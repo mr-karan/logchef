@@ -224,6 +224,7 @@ type GenerateSQLResponse struct {
 type QueryShare struct {
 	Token          string          `json:"token" db:"token"`
 	SourceID       SourceID        `json:"source_id" db:"source_id"`
+	TeamID         *TeamID         `json:"team_id,omitempty" db:"team_id"`
 	CreatedBy      UserID          `json:"created_by" db:"created_by"`
 	Payload        json.RawMessage `json:"payload" db:"payload_json"`
 	ExpiresAt      time.Time       `json:"expires_at" db:"expires_at"`
@@ -255,6 +256,7 @@ type QueryShareResponse struct {
 	Token     string          `json:"token"`
 	ShareURL  string          `json:"share_url,omitempty"`
 	SourceID  SourceID        `json:"source_id"`
+	TeamID    *TeamID         `json:"team_id,omitempty"`
 	Payload   json.RawMessage `json:"payload"`
 	ExpiresAt time.Time       `json:"expires_at"`
 	CreatedAt time.Time       `json:"created_at"`
