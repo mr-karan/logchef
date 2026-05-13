@@ -109,36 +109,24 @@ new **Team Editor** role and restructures the admin URLs for consistency.
   via a single `resolveTo()` helper.
 
 ### Fixed
-- **Saved query loads wrong source** — resolved query's `source_id` now
-  overrides stale URL `?source=` param; URL updates via `router.replace`.
+- **Unbounded query result OOM** — `[query] max_limit` cap (default 100k
+  rows). A large unbounded result set previously exhausted the browser
+  renderer.
+- **Long raw SQL in the URL** no longer trips the HTTP header size limit
+  on the server.
 - **"No source selected" race** — explorer waits for
-  `currentSourceDetails.id === contextStore.sourceId` before executing.
-- **Redirect spinner stuck on param reuse** — `CollectionRedirect`
-  watches `route.params.queryId` reactively instead of `onMounted` only.
-- **Stale-request guard** in `sourcesStore.loadSourceDetails` prevents
-  a fast source switch from being overwritten by an older response.
-- **Collection item counts update live** after pin/unpin in the drawer.
-- **Migration cascade-delete prevention** — `PRAGMA foreign_keys = OFF`
-  around table rebuilds in 000018 and 000020 to preserve `alert_history`
-  and `collection_items`.
-- **Unbounded query result OOM** — `max_limit` (default 100k rows).
-- **Raw SQL in URL overflow**, crash-safe export pruner, query share TTL
-  validation, translate API error surfacing, relative export URLs.
-- **Team Editors couldn't create saved queries or manage collections.**
-  The frontend gates predated the Editor role; both layers now agree.
-  ([#94](https://github.com/mr-karan/logchef/pull/94))
-- **Team admins were locked out of `/admin/teams`** after the admin URL
-  restructure put `requiresAdmin: true` on the `/admin` parent. Per-route
-  gating now lets team admins reach the Teams pages they manage.
-- **Console 403 spam on Collection Detail** for non-team-admin owners —
-  the page was eagerly fetching `/api/v1/users` (admin-only) on every
-  load. Now lazy on the invite dialog, and the invite button is hidden
-  from owners who can't list users.
-- **Members section on Collection Detail** is hidden from non-team-admin
-  viewers — they don't need to see who else is in the collection.
-- **Collection Detail Items** now renders as a flat table (Type | Name |
-  Source | Updated | actions) matching the unified Saved Queries view,
-  instead of the previous three-card stack.
+  `currentSourceDetails.id === contextStore.sourceId` before executing,
+  so newly-selected sources don't run the previous source's query.
+- **Stale-request guard** in `sourcesStore.loadSourceDetails` — a fast
+  source switch is no longer overwritten by an older in-flight response.
+- **Saved query loads wrong source** — resolved query's `source_id` now
+  overrides stale URL `?source=` param.
+- **Crash-safe export pruner** — interrupted prunes no longer leave
+  orphaned download files behind.
+- **Translate API errors are surfaced to the editor** instead of failing
+  silently.
+- **Export download URLs are relative**, so downloads work behind reverse
+  proxies that rewrite hostnames.
 
 ### Removed
 - **Query Folders** (the team-scoped experiment from v1.6.0-dev).

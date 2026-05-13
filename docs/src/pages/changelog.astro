@@ -152,11 +152,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Editors couldn't save queries or manage collections</strong> &mdash; the gates predated the new role. (<a href="https://github.com/mr-karan/logchef/pull/94" target="_blank">#94</a>)</li>
-          <li><strong>Team admins couldn't reach the Teams page.</strong> Restored access without giving up the global-admin gate on the rest of the admin pages.</li>
-          <li><strong>Opening a shared saved query</strong> no longer flashes the wrong source while the page hydrates.</li>
-          <li><strong>Loading a query via direct link</strong> no longer leaves a stuck spinner when you reuse the same URL.</li>
-          <li><strong>Very large query results</strong> are capped to prevent the browser from running out of memory.</li>
+          <li><strong>Very large query results</strong> are now capped (<code>[query] max_limit</code>, default 100k rows) so the browser doesn't run out of memory.</li>
+          <li><strong>Long raw SQL in the URL</strong> no longer trips the server's HTTP header size limit.</li>
+          <li><strong>Switching sources is race-free</strong> &mdash; the explorer waits for the new source's schema before running a query, and a slower in-flight response can't overwrite a faster one.</li>
+          <li><strong>Saved queries open against the right source</strong> &mdash; the query's source overrides any stale source param in the URL.</li>
+          <li><strong>Export job pruner is crash-safe</strong> &mdash; interrupted prunes no longer leave orphaned download files.</li>
+          <li><strong>Translate API errors</strong> are surfaced to the editor instead of failing silently.</li>
+          <li><strong>Export download URLs are relative</strong>, so downloads work behind reverse proxies that rewrite hostnames.</li>
         </ul>
       </div>
 
