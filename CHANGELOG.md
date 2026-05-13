@@ -126,7 +126,6 @@ new **Team Editor** role and restructures the admin URLs for consistency.
   validation, translate API error surfacing, relative export URLs.
 - **Team Editors couldn't create saved queries or manage collections.**
   The frontend gates predated the Editor role; both layers now agree.
-  Reported by @aswathsachin.
   ([#94](https://github.com/mr-karan/logchef/pull/94))
 - **Team admins were locked out of `/admin/teams`** after the admin URL
   restructure put `requiresAdmin: true` on the `/admin` parent. Per-route
