@@ -31,6 +31,8 @@ export interface TokenScopeOption {
 
 export const READ_ONLY_SCOPES: TokenScope[] = [
   "profile:read",
+  "tokens:read",
+  "users:read",
   "teams:read",
   "sources:read",
   "logs:read",
@@ -38,6 +40,7 @@ export const READ_ONLY_SCOPES: TokenScope[] = [
   "collections:read",
   "alerts:read",
   "query_shares:read",
+  "settings:read",
 ];
 
 export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
