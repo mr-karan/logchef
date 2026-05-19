@@ -11,11 +11,13 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { EmptyState, LoadingState, PageHeader, PageSection } from "@/components/layout";
 import TokenScopePicker from "@/components/tokens/TokenScopePicker.vue";
 import { useServiceAccountsStore } from "@/stores/serviceAccounts";
+import { useTeamsStore } from "@/stores/teams";
 import { useToast } from "@/composables/useToast";
 import { formatDate } from "@/utils/format";
 import { formatScopes, READ_ONLY_SCOPES, type TokenScope } from "@/lib/tokenScopes";
-import { Bot, Calendar, Clock, Copy, KeyRound, Loader2, Plus, Trash2, Shield } from "lucide-vue-next";
+import { AlertTriangle, Bot, Calendar, Clock, Copy, KeyRound, Loader2, Plus, Trash2, Shield, Users, X } from "lucide-vue-next";
 import type { User } from "@/types";
+import type { UserTeamMembership } from "@/api/teams";
 
 interface CreatedTokenData {
   token: string;
@@ -28,6 +30,7 @@ interface CreatedTokenData {
 }
 
 const serviceAccountsStore = useServiceAccountsStore();
+const teamsStore = useTeamsStore();
 const { toast } = useToast();
 
 const showCreateAccountDialog = shallowRef(false);
@@ -41,6 +44,9 @@ const selectedAccount = shallowRef<User | null>(null);
 const createdTokenData = shallowRef<CreatedTokenData | null>(null);
 const accountToDelete = shallowRef<User | null>(null);
 const tokenToDelete = shallowRef<{ account: User; tokenId: number; tokenName: string } | null>(null);
+const teamsDialogAccount = shallowRef<User | null>(null);
+const newTeamId = shallowRef("");
+const newTeamRole = shallowRef<'admin' | 'member' | 'editor'>('member');
 
 const expiryOptions = [
   { value: "7d", label: "7 days", hours: 7 * 24 },
@@ -58,11 +64,59 @@ onMounted(async () => {
 async function loadAccountsAndTokens() {
   const result = await serviceAccountsStore.loadAccounts(true);
   if (!result.success) return;
-  await Promise.all(accounts.value.map((account) => serviceAccountsStore.loadTokens(account.id, true)));
+  await Promise.all(
+    accounts.value.flatMap((account) => [
+      serviceAccountsStore.loadTokens(account.id, true),
+      serviceAccountsStore.loadTeams(account.id, true),
+    ])
+  );
 }
 
 function tokensFor(account: User) {
   return serviceAccountsStore.tokensByAccount[account.id] || [];
+}
+
+function teamsFor(account: User): UserTeamMembership[] {
+  return serviceAccountsStore.teamsByAccount[account.id] || [];
+}
+
+const availableTeamsForAccount = computed(() => {
+  const account = teamsDialogAccount.value;
+  if (!account) return [];
+  const existing = new Set(teamsFor(account).map((t) => t.id));
+  return (teamsStore.adminTeams || []).filter((team) => !existing.has(team.id));
+});
+
+async function openTeamsDialog(account: User) {
+  teamsDialogAccount.value = account;
+  newTeamId.value = "";
+  newTeamRole.value = "member";
+  if (!teamsStore.adminTeams || teamsStore.adminTeams.length === 0) {
+    await teamsStore.loadAdminTeams();
+  }
+  await serviceAccountsStore.loadTeams(account.id, true);
+}
+
+function closeTeamsDialog() {
+  teamsDialogAccount.value = null;
+}
+
+async function addAccountToTeam() {
+  if (!teamsDialogAccount.value || !newTeamId.value) return;
+  const teamId = Number(newTeamId.value);
+  if (!Number.isFinite(teamId) || teamId <= 0) return;
+  const result = await serviceAccountsStore.addToTeam(teamsDialogAccount.value.id, {
+    team_id: teamId,
+    role: newTeamRole.value,
+  });
+  if (result.success) {
+    newTeamId.value = "";
+    newTeamRole.value = "member";
+  }
+}
+
+async function removeAccountFromTeam(account: User, teamId: number) {
+  await serviceAccountsStore.removeFromTeam(account.id, teamId);
 }
 
 function openTokenDialog(account: User) {
@@ -194,6 +248,10 @@ function closeTokenDisplay() {
               <p class="text-xs text-muted-foreground">Created {{ formatDate(account.created_at) }}</p>
             </div>
             <div class="flex gap-2">
+              <Button size="sm" variant="outline" class="gap-2" @click="openTeamsDialog(account)">
+                <Users class="h-4 w-4" />
+                Manage teams
+              </Button>
               <Button size="sm" variant="outline" class="gap-2" @click="openTokenDialog(account)">
                 <KeyRound class="h-4 w-4" />
                 Create token
@@ -201,6 +259,24 @@ function closeTokenDisplay() {
               <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="accountToDelete = account">
                 <Trash2 class="h-4 w-4" />
               </Button>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <h4 class="text-sm font-medium">Teams</h4>
+            <Alert v-if="teamsFor(account).length === 0" variant="destructive" class="py-2">
+              <AlertTriangle class="h-4 w-4" />
+              <AlertDescription>
+                Not in any team — tokens for this account can authenticate but won't reach any source.
+                <button type="button" class="ml-1 underline" @click="openTeamsDialog(account)">Manage teams</button>
+              </AlertDescription>
+            </Alert>
+            <div v-else class="flex flex-wrap gap-2">
+              <Badge v-for="team in teamsFor(account)" :key="team.id" variant="outline" class="gap-1.5">
+                <span>{{ team.name }}</span>
+                <span class="text-muted-foreground">·</span>
+                <span class="capitalize text-muted-foreground">{{ team.role }}</span>
+              </Badge>
             </div>
           </div>
 
@@ -292,6 +368,76 @@ function closeTokenDisplay() {
         </div>
         <DialogFooter>
           <Button class="w-full" @click="closeTokenDisplay">I've copied my token</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog :open="teamsDialogAccount !== null" @update:open="(open) => { if (!open) closeTeamsDialog() }">
+      <DialogContent class="sm:max-w-[560px]">
+        <DialogHeader>
+          <DialogTitle>Manage team membership</DialogTitle>
+          <DialogDescription>
+            {{ teamsDialogAccount?.full_name }} can only reach sources owned by teams it belongs to.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-4 py-2">
+          <div class="space-y-2">
+            <Label class="text-sm">Current teams</Label>
+            <div v-if="teamsDialogAccount && teamsFor(teamsDialogAccount).length === 0"
+              class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+              Not in any team yet.
+            </div>
+            <div v-else-if="teamsDialogAccount" class="space-y-2">
+              <div v-for="team in teamsFor(teamsDialogAccount)" :key="team.id"
+                class="flex items-center justify-between rounded-md border p-2.5">
+                <div class="flex flex-col">
+                  <span class="font-medium">{{ team.name }}</span>
+                  <span class="text-xs text-muted-foreground capitalize">{{ team.role }}</span>
+                </div>
+                <Button variant="ghost" size="icon" class="text-destructive hover:text-destructive"
+                  @click="removeAccountFromTeam(teamsDialogAccount, team.id)">
+                  <X class="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-2 border-t pt-4">
+            <Label class="text-sm">Add to team</Label>
+            <div class="grid grid-cols-[1fr_auto] gap-2">
+              <Select v-model="newTeamId">
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a team" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem v-if="availableTeamsForAccount.length === 0" :value="'__none__'" disabled>
+                    No teams available
+                  </SelectItem>
+                  <SelectItem v-for="team in availableTeamsForAccount" :key="team.id" :value="String(team.id)">
+                    {{ team.name }}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+              <Select v-model="newTeamRole">
+                <SelectTrigger class="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="member">Member</SelectItem>
+                  <SelectItem value="editor">Editor</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <Button type="button" class="w-full gap-2" :disabled="!newTeamId || newTeamId === '__none__'"
+              @click="addAccountToTeam">
+              <Plus class="h-4 w-4" />
+              Add to team
+            </Button>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="closeTeamsDialog">Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -185,7 +185,7 @@ ORDER BY tm.created_at;
 
 -- name: ListTeamMembersWithDetails :many
 -- List all members of a team with user details
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name
+SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
 FROM team_members tm
 JOIN users u ON tm.user_id = u.id
 WHERE tm.team_id = ?

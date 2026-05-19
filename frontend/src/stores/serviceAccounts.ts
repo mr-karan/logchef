@@ -2,22 +2,30 @@ import { defineStore } from "pinia";
 import { computed } from "vue";
 import type { User } from "@/types";
 import { useBaseStore } from "./base";
-import { serviceAccountsApi, type CreateServiceAccountRequest } from "@/api/serviceAccounts";
+import {
+  serviceAccountsApi,
+  type AddServiceAccountToTeamRequest,
+  type CreateServiceAccountRequest,
+} from "@/api/serviceAccounts";
 import type { APIToken, CreateAPITokenRequest } from "@/api/apiTokens";
+import type { UserTeamMembership } from "@/api/teams";
 
 interface ServiceAccountsState {
   accounts: User[];
   tokensByAccount: Record<string, APIToken[]>;
+  teamsByAccount: Record<string, UserTeamMembership[]>;
 }
 
 export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   const state = useBaseStore<ServiceAccountsState>({
     accounts: [],
     tokensByAccount: {},
+    teamsByAccount: {},
   });
 
   const accounts = computed(() => state.data.value.accounts || []);
   const tokensByAccount = computed(() => state.data.value.tokensByAccount || {});
+  const teamsByAccount = computed(() => state.data.value.teamsByAccount || {});
 
   async function loadAccounts(forceReload = false) {
     return await state.withLoading("loadServiceAccounts", async () => {
@@ -108,9 +116,54 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
     });
   }
 
+  async function loadTeams(accountId: string, forceReload = false) {
+    return await state.withLoading(`loadServiceAccountTeams-${accountId}`, async () => {
+      if (!forceReload && state.data.value.teamsByAccount[accountId]) {
+        return { success: true, data: state.data.value.teamsByAccount[accountId] };
+      }
+      return await state.callApi({
+        apiCall: () => serviceAccountsApi.listTeams(accountId),
+        operationKey: `loadServiceAccountTeams-${accountId}`,
+        showToast: false,
+        onSuccess: (response) => {
+          state.data.value.teamsByAccount[accountId] = (response as UserTeamMembership[]) || [];
+        },
+      });
+    });
+  }
+
+  async function addToTeam(accountId: string, data: AddServiceAccountToTeamRequest) {
+    return await state.withLoading(`addServiceAccountToTeam-${accountId}`, async () => {
+      const result = await state.callApi({
+        apiCall: () => serviceAccountsApi.addToTeam(accountId, data),
+        successMessage: "Service account added to team",
+        operationKey: `addServiceAccountToTeam-${accountId}`,
+      });
+      if (result.success) {
+        await loadTeams(accountId, true);
+      }
+      return result;
+    });
+  }
+
+  async function removeFromTeam(accountId: string, teamId: number) {
+    return await state.withLoading(`removeServiceAccountFromTeam-${accountId}-${teamId}`, async () => {
+      const result = await state.callApi({
+        apiCall: () => serviceAccountsApi.removeFromTeam(accountId, teamId),
+        successMessage: "Service account removed from team",
+        operationKey: `removeServiceAccountFromTeam-${accountId}-${teamId}`,
+      });
+      if (result.success) {
+        await loadTeams(accountId, true);
+      }
+      return result;
+    });
+  }
+
   return {
     accounts,
     tokensByAccount,
+    teamsByAccount,
     isLoading: state.isLoading,
     error: state.error,
     isLoadingOperation: state.isLoadingOperation,
@@ -120,5 +173,8 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
     loadTokens,
     createToken,
     deleteToken,
+    loadTeams,
+    addToTeam,
+    removeFromTeam,
   };
 });

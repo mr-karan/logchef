@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
 import { type Source } from '@/api/sources'
-import { Loader2, Plus, Trash2, UserPlus, Database } from 'lucide-vue-next'
+import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User } from 'lucide-vue-next'
+import { Badge } from '@/components/ui/badge'
 import {
     Table,
     TableBody,
@@ -81,6 +82,7 @@ const description = ref('')
 const activeTab = ref('members')
 const showAddMemberDialog = ref(false)
 const newMemberRole = ref('member')
+const newMemberType = ref<'human' | 'service'>('human')
 const selectedUserId = ref('')
 const showAddSourceDialog = ref(false)
 const selectedSourceId = ref('')
@@ -93,11 +95,14 @@ watch(() => team.value, (newTeam) => {
     }
 }, { immediate: true })
 
-// Compute available users (users not in team) sorted alphabetically by email
+// Compute available users (users not in team) sorted alphabetically by full_name/email
 const availableUsers = computed(() => {
     const teamMemberIds = members.value?.map(m => String(m.user_id)) || []
     const users = usersStore.getUsersNotInTeam(teamMemberIds)
-    return users.sort((a, b) => a.email.localeCompare(b.email))
+    const wantedType = newMemberType.value
+    return users
+        .filter(user => (user.account_type ?? 'human') === wantedType)
+        .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email))
 })
 
 // Compute available sources (sources not in team) sorted alphabetically by name
@@ -109,9 +114,18 @@ const availableSources = computed(() => {
 
 // Load users when dialog opens to prevent unnecessary API calls
 watch(showAddMemberDialog, async (isOpen) => {
-    if (isOpen && !usersStore.users.length) {
-        await usersStore.loadUsers()
+    if (isOpen) {
+        newMemberType.value = 'human'
+        selectedUserId.value = ''
+        if (!usersStore.users.length) {
+            await usersStore.loadUsers()
+        }
     }
+})
+
+// Reset selection when switching the account type filter
+watch(newMemberType, () => {
+    selectedUserId.value = ''
 })
 
 // Load sources when dialog opens to prevent unnecessary API calls
@@ -144,7 +158,7 @@ const handleSubmit = async () => {
 
 
 const handleAddMember = async () => {
-    if (!team.value || !selectedUserId.value) return
+    if (!team.value || !selectedUserId.value || selectedUserId.value === '__none__') return
 
     const result = await teamsStore.addTeamMember(team.value.id, {
         user_id: Number(selectedUserId.value),
@@ -318,20 +332,47 @@ onMounted(async () => {
                                         <DialogHeader>
                                             <DialogTitle>Add Team Member</DialogTitle>
                                             <DialogDescription>
-                                                Add a new member to the team
+                                                Add a human user or service account to the team
                                             </DialogDescription>
                                         </DialogHeader>
                                         <div class="space-y-4 py-4">
                                             <div class="space-y-2">
-                                                <Label>User</Label>
+                                                <Label>Account type</Label>
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <Button type="button" size="sm"
+                                                        :variant="newMemberType === 'human' ? 'default' : 'outline'"
+                                                        class="gap-2 justify-start"
+                                                        @click="newMemberType = 'human'">
+                                                        <User class="h-4 w-4" />
+                                                        Human user
+                                                    </Button>
+                                                    <Button type="button" size="sm"
+                                                        :variant="newMemberType === 'service' ? 'default' : 'outline'"
+                                                        class="gap-2 justify-start"
+                                                        @click="newMemberType = 'service'">
+                                                        <Bot class="h-4 w-4" />
+                                                        Service account
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            <div class="space-y-2">
+                                                <Label>{{ newMemberType === 'service' ? 'Service account' : 'User' }}</Label>
                                                 <Select v-model="selectedUserId">
                                                     <SelectTrigger>
-                                                        <SelectValue placeholder="Select a user" />
+                                                        <SelectValue :placeholder="newMemberType === 'service' ? 'Select a service account' : 'Select a user'" />
                                                     </SelectTrigger>
                                                     <SelectContent>
+                                                        <SelectItem v-if="availableUsers.length === 0" :value="'__none__'" disabled>
+                                                            {{ newMemberType === 'service' ? 'No service accounts available' : 'No users available' }}
+                                                        </SelectItem>
                                                         <SelectItem v-for="user in availableUsers" :key="user.id"
-                                                            :value="String(user.id)" :text-value="user.email">
-                                                            {{ user.email }}
+                                                            :value="String(user.id)"
+                                                            :text-value="user.full_name || user.email">
+                                                            <div class="flex flex-col">
+                                                                <span class="font-medium">{{ user.full_name || user.email }}</span>
+                                                                <span v-if="user.full_name && newMemberType === 'human'"
+                                                                    class="text-xs text-muted-foreground">{{ user.email }}</span>
+                                                            </div>
                                                         </SelectItem>
                                                     </SelectContent>
                                                 </Select>
@@ -386,10 +427,16 @@ onMounted(async () => {
                                     </TableRow>
                                     <TableRow v-for="member in members" :key="member.user_id">
                                         <TableCell>
-                                            <div class="flex flex-col">
-                                                <span>{{ member.email }}</span>
-                                                <span class="text-sm text-muted-foreground">{{ member.full_name
-                                                }}</span>
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex items-center gap-2">
+                                                    <Bot v-if="member.account_type === 'service'" class="h-4 w-4 text-muted-foreground" />
+                                                    <span class="font-medium">{{ member.full_name || member.email }}</span>
+                                                    <Badge v-if="member.account_type === 'service'" variant="secondary" class="text-xs">
+                                                        Service account
+                                                    </Badge>
+                                                </div>
+                                                <span v-if="member.account_type !== 'service' && member.full_name"
+                                                    class="text-sm text-muted-foreground">{{ member.email }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>

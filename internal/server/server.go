@@ -185,6 +185,9 @@ func (s *Server) setupRoutes() {
 	admin.Get("/service-accounts/:userID/tokens", s.requireTokenScope(models.TokenScopeTokensRead), s.handleListServiceAccountTokens)
 	admin.Post("/service-accounts/:userID/tokens", s.requireTokenScope(models.TokenScopeTokensWrite), s.handleCreateServiceAccountToken)
 	admin.Delete("/service-accounts/:userID/tokens/:tokenID", s.requireTokenScope(models.TokenScopeTokensWrite), s.handleDeleteServiceAccountToken)
+	admin.Get("/service-accounts/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListServiceAccountTeams)
+	admin.Post("/service-accounts/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleAddServiceAccountToTeam)
+	admin.Delete("/service-accounts/:userID/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleRemoveServiceAccountFromTeam)
 
 	// Global Team Management
 	admin.Get("/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeams)

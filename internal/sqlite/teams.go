@@ -278,13 +278,18 @@ func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.Team
 	// Map results including joined user fields.
 	members := make([]*models.TeamMember, 0, len(memberRows))
 	for _, row := range memberRows {
+		accountType := models.UserAccountType(row.AccountType)
+		if accountType == "" {
+			accountType = models.UserAccountTypeHuman
+		}
 		members = append(members, &models.TeamMember{
-			TeamID:    models.TeamID(row.TeamID),
-			UserID:    models.UserID(row.UserID),
-			Role:      models.TeamRole(row.Role),
-			Email:     row.Email,    // From joined users table
-			FullName:  row.FullName, // From joined users table
-			CreatedAt: row.CreatedAt,
+			TeamID:      models.TeamID(row.TeamID),
+			UserID:      models.UserID(row.UserID),
+			Role:        models.TeamRole(row.Role),
+			Email:       row.Email,
+			FullName:    row.FullName,
+			AccountType: accountType,
+			CreatedAt:   row.CreatedAt,
 		})
 	}
 

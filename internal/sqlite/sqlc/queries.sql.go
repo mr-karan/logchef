@@ -2449,7 +2449,7 @@ func (q *Queries) ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMemb
 }
 
 const listTeamMembersWithDetails = `-- name: ListTeamMembersWithDetails :many
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name
+SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
 FROM team_members tm
 JOIN users u ON tm.user_id = u.id
 WHERE tm.team_id = ?
@@ -2457,12 +2457,13 @@ ORDER BY tm.created_at ASC
 `
 
 type ListTeamMembersWithDetailsRow struct {
-	TeamID    int64     `json:"team_id"`
-	UserID    int64     `json:"user_id"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"created_at"`
-	Email     string    `json:"email"`
-	FullName  string    `json:"full_name"`
+	TeamID      int64     `json:"team_id"`
+	UserID      int64     `json:"user_id"`
+	Role        string    `json:"role"`
+	CreatedAt   time.Time `json:"created_at"`
+	Email       string    `json:"email"`
+	FullName    string    `json:"full_name"`
+	AccountType string    `json:"account_type"`
 }
 
 // List all members of a team with user details
@@ -2482,6 +2483,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 			&i.CreatedAt,
 			&i.Email,
 			&i.FullName,
+			&i.AccountType,
 		); err != nil {
 			return nil, err
 		}

@@ -405,6 +405,63 @@ func (s *Server) handleCreateServiceAccountToken(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusCreated, response)
 }
 
+func (s *Server) handleListServiceAccountTeams(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	teams, err := core.ListTeamsForUser(c.Context(), s.sqlite, account.ID)
+	if err != nil {
+		s.log.Error("failed to list service account teams", "error", err, "user_id", account.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing service account teams")
+	}
+	return SendSuccess(c, fiber.StatusOK, teams)
+}
+
+func (s *Server) handleAddServiceAccountToTeam(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	var req struct {
+		TeamID models.TeamID   `json:"team_id"`
+		Role   models.TeamRole `json:"role"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Role == "" {
+		req.Role = models.TeamRoleMember
+	}
+	if err := core.AddTeamMember(c.Context(), s.sqlite, s.log, req.TeamID, account.ID, req.Role); err != nil {
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+		if errors.Is(err, core.ErrTeamNotFound) {
+			return SendError(c, fiber.StatusNotFound, "Team not found")
+		}
+		s.log.Error("failed to add service account to team", "error", err, "user_id", account.ID, "team_id", req.TeamID)
+		return SendError(c, fiber.StatusInternalServerError, "Error adding service account to team")
+	}
+	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Service account added to team"})
+}
+
+func (s *Server) handleRemoveServiceAccountFromTeam(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	teamID, err := core.ParseTeamID(c.Params("teamID"))
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid team ID format")
+	}
+	if err := core.RemoveTeamMember(c.Context(), s.sqlite, s.log, teamID, account.ID); err != nil {
+		s.log.Error("failed to remove service account from team", "error", err, "user_id", account.ID, "team_id", teamID)
+		return SendError(c, fiber.StatusInternalServerError, "Error removing service account from team")
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account removed from team"})
+}
+
 func (s *Server) handleDeleteServiceAccountToken(c *fiber.Ctx) error {
 	account, err := s.loadServiceAccount(c)
 	if err != nil {

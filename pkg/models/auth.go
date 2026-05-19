@@ -126,12 +126,13 @@ type Team struct {
 
 // TeamMember represents a user's membership in a team
 type TeamMember struct {
-	TeamID    TeamID    `db:"team_id" json:"team_id"`
-	UserID    UserID    `db:"user_id" json:"user_id"`
-	Role      TeamRole  `db:"role" json:"role"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
-	Email     string    `db:"email" json:"email,omitempty"`
-	FullName  string    `db:"full_name" json:"full_name,omitempty"`
+	TeamID      TeamID          `db:"team_id" json:"team_id"`
+	UserID      UserID          `db:"user_id" json:"user_id"`
+	Role        TeamRole        `db:"role" json:"role"`
+	CreatedAt   time.Time       `db:"created_at" json:"created_at"`
+	Email       string          `db:"email" json:"email,omitempty"`
+	FullName    string          `db:"full_name" json:"full_name,omitempty"`
+	AccountType UserAccountType `db:"account_type" json:"account_type,omitempty"`
 }
 
 // UserTeamDetails represents the details of a team a user is part of, including their role.
