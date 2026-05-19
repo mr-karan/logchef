@@ -89,6 +89,35 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <li>No unreleased changes yet.</li>
       </ul>
     </article>
+    <!-- CLI v0.1.5 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.5</span>
+        <span class="version-date">May 19, 2026</span>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>CSV export & streaming SQL</strong> &mdash; New <code>--output csv</code> and <code>--stream</code> flags on <code>logchef sql</code>. Stream large result sets directly without timing out, or pipe them to a CSV file.</li>
+          <li><strong>v1.6.0 API compatibility</strong> &mdash; CLI now works with Logchef 1.6's de-teamed collections API. Saved queries resolve from your team membership automatically.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Product name standardized</strong> &mdash; "LogChef" &rarr; "Logchef" throughout all CLI help text, prompts, and auth pages.</li>
+        </ul>
+      </div>
+    </article>
+
 
     <!-- v1.6.0 -->
     <article class="version">
