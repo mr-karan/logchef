@@ -83,9 +83,9 @@ function handleScopeChecked(scope: TokenScope, checked: boolean | "indeterminate
             :class="{ 'opacity-50': isFullAccess }"
           >
             <Checkbox
-              :checked="isFullAccess || selectedSet.has(scope.value)"
+              :model-value="isFullAccess || selectedSet.has(scope.value)"
               :disabled="isFullAccess"
-              @update:checked="handleScopeChecked(scope.value, $event)"
+              @update:model-value="handleScopeChecked(scope.value, $event)"
             />
             <span class="space-y-1">
               <span class="block font-medium">{{ scope.label }}</span>
