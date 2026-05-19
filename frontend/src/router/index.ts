@@ -140,6 +140,12 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Users", requiresAdmin: true },
       },
       {
+        path: "service-tokens",
+        name: "ServiceTokens",
+        component: lazy("ServiceTokens", () => import("@/views/access/service-accounts/ServiceTokens.vue")),
+        meta: { title: "Service Tokens", requiresAdmin: true },
+      },
+      {
         path: "teams",
         name: "Teams",
         component: lazy("TeamsList", () => import("@/views/access/teams/TeamsList.vue")),

@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import TokenScopePicker from '@/components/tokens/TokenScopePicker.vue'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -15,6 +16,7 @@ import { useUsersStore } from '@/stores/users'
 import { useAPITokensStore } from '@/stores/apiTokens'
 import { Loader2, Plus, Trash2, Copy, Key, Calendar, Clock, Shield, AlertTriangle } from 'lucide-vue-next'
 import { formatDate } from '@/utils/format'
+import { formatScopes, READ_ONLY_SCOPES, type TokenScope } from '@/lib/tokenScopes'
 
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
@@ -28,6 +30,7 @@ const showCreateTokenDialog = ref(false)
 const newTokenName = ref('')
 const newTokenExpiry = ref('30d')
 const isCreatingToken = ref(false)
+const newTokenScopes = ref<TokenScope[]>([...READ_ONLY_SCOPES])
 const createdTokenData = ref<{ token: string; api_token: any } | null>(null)
 const showTokenDisplay = ref(false)
 const tokenToDelete = ref<{ id: number; name: string } | null>(null)
@@ -93,7 +96,8 @@ const handleCreateToken = async () => {
     
     const result = await apiTokensStore.createToken({
         name: newTokenName.value.trim(),
-        expires_at: expiresAt?.toISOString() ?? undefined
+        expires_at: expiresAt?.toISOString() ?? undefined,
+        scopes: newTokenScopes.value,
     })
     
     if (result.success && result.data) {
@@ -102,6 +106,7 @@ const handleCreateToken = async () => {
         showTokenDisplay.value = true
         newTokenName.value = ''
         newTokenExpiry.value = '30d' // Reset to default
+        newTokenScopes.value = [...READ_ONLY_SCOPES]
     }
     
     isCreatingToken.value = false
@@ -210,7 +215,7 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                     Generate Token
                                 </Button>
                             </DialogTrigger>
-                            <DialogContent class="sm:max-w-[425px]">
+                            <DialogContent class="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
                                 <DialogHeader>
                                     <DialogTitle>Create API Token</DialogTitle>
                                     <DialogDescription>
@@ -244,6 +249,10 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                    <div class="grid gap-2">
+                                        <Label>Scopes</Label>
+                                        <TokenScopePicker v-model="newTokenScopes" />
+                                    </div>
                                     <Alert>
                                         <Shield class="h-4 w-4" />
                                         <AlertDescription>
@@ -261,7 +270,7 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                     </Button>
                                     <Button 
                                         @click="handleCreateToken"
-                                        :disabled="isCreatingToken || !newTokenName.trim()"
+                                        :disabled="isCreatingToken || !newTokenName.trim() || newTokenScopes.length === 0"
                                     >
                                         <Loader2 v-if="isCreatingToken" class="mr-2 h-4 w-4 animate-spin" />
                                         Create Token
@@ -304,6 +313,9 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                     >
                                         <AlertTriangle v-if="getExpiryStatus(token.expires_at).isExpired" class="h-3 w-3 mr-1" />
                                         {{ getExpiryStatus(token.expires_at).text }}
+                                    </Badge>
+                                    <Badge variant="outline" class="text-xs">
+                                        {{ formatScopes(token.scopes) }}
                                     </Badge>
                                 </div>
                                 <div class="flex items-center gap-4 text-sm text-muted-foreground">

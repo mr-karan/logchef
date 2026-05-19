@@ -45,8 +45,8 @@ DELETE FROM sources WHERE id = ?;
 
 -- name: CreateUser :one
 -- Create a new user
-INSERT INTO users (email, full_name, role, status, last_login_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO users (email, full_name, role, status, last_login_at, account_type)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetUser :one
@@ -72,6 +72,10 @@ WHERE id = ?;
 -- name: ListUsers :many
 -- List all users
 SELECT * FROM users ORDER BY created_at ASC;
+
+-- name: ListServiceAccounts :many
+-- List service principals
+SELECT * FROM users WHERE account_type = 'service' ORDER BY created_at ASC;
 
 -- name: CountAdminUsers :one
 -- Count active admin users
@@ -485,8 +489,8 @@ ORDER BY s.created_at DESC;
 
 -- name: CreateAPIToken :one
 -- Create a new API token
-INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at, scopes)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetAPIToken :one

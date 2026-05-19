@@ -52,6 +52,7 @@ import {
   Bell,
   Wrench,
   FolderOpen,
+  KeyRound,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -175,6 +176,12 @@ const adminNavItems: NavItem[] = [
     title: "Users",
     icon: UsersRound,
     url: "/admin/users",
+    adminOnly: true,
+  },
+  {
+    title: "Service Tokens",
+    icon: KeyRound,
+    url: "/admin/service-tokens",
     adminOnly: true,
   },
   {

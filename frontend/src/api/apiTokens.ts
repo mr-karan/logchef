@@ -1,4 +1,5 @@
 import { apiClient } from "./apiUtils";
+import type { TokenScope } from "@/lib/tokenScopes";
 
 export interface APIToken {
   id: number;
@@ -8,12 +9,14 @@ export interface APIToken {
   last_used_at?: string;
   expires_at?: string;
   created_at: string;
+  scopes: TokenScope[];
   updated_at: string;
 }
 
 export interface CreateAPITokenRequest {
   name: string;
   expires_at?: string;
+  scopes?: TokenScope[];
 }
 
 export interface CreateAPITokenResponse {

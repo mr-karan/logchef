@@ -343,8 +343,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to look up user")
 	}
 
-	// Check if user is active
-	if user.Status == models.UserStatusInactive {
+	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
 		s.log.Warn("CLI token exchange: inactive user", "user_id", user.ID, "email", user.Email)
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User account is inactive", models.AuthenticationErrorType)
 	}
@@ -354,7 +353,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	// Set expiration to 30 days from now
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 
-	tokenResponse, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt)
+	tokenResponse, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt, []models.TokenScope{models.TokenScopeAll})
 	if err != nil {
 		s.log.Error("CLI token exchange: failed to create API token", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create API token")

@@ -145,6 +145,23 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		authMethod, _ := c.Locals("auth_method").(string)
+		if authMethod != "token" {
+			return c.Next()
+		}
+
+		apiToken, ok := c.Locals("api_token").(*models.APIToken)
+		if !ok || !core.TokenHasScope(apiToken, scope) {
+			user, _ := c.Locals("user").(*models.User)
+			metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
+			return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
+		}
+		return c.Next()
+	}
+}
+
 // requireSourceNotManaged rejects mutations on config-managed sources.
 func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")

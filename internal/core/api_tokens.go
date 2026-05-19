@@ -7,6 +7,7 @@ import (
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -58,26 +59,110 @@ func hashAPIToken(token, secret string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// validateAPITokenCreation validates parameters for creating a new API token
-func validateAPITokenCreation(name string) error {
+var validTokenScopes = map[models.TokenScope]struct{}{
+	models.TokenScopeAll:               {},
+	models.TokenScopeProfileRead:       {},
+	models.TokenScopeProfileWrite:      {},
+	models.TokenScopeTokensRead:        {},
+	models.TokenScopeTokensWrite:       {},
+	models.TokenScopeUsersRead:         {},
+	models.TokenScopeUsersWrite:        {},
+	models.TokenScopeTeamsRead:         {},
+	models.TokenScopeTeamsWrite:        {},
+	models.TokenScopeSourcesRead:       {},
+	models.TokenScopeSourcesWrite:      {},
+	models.TokenScopeLogsRead:          {},
+	models.TokenScopeSavedQueriesRead:  {},
+	models.TokenScopeSavedQueriesWrite: {},
+	models.TokenScopeCollectionsRead:   {},
+	models.TokenScopeCollectionsWrite:  {},
+	models.TokenScopeAlertsRead:        {},
+	models.TokenScopeAlertsWrite:       {},
+	models.TokenScopeQuerySharesRead:   {},
+	models.TokenScopeQuerySharesWrite:  {},
+	models.TokenScopeSettingsRead:      {},
+	models.TokenScopeSettingsWrite:     {},
+}
+
+var readOnlyTokenScopes = []models.TokenScope{
+	models.TokenScopeProfileRead,
+	models.TokenScopeTeamsRead,
+	models.TokenScopeSourcesRead,
+	models.TokenScopeLogsRead,
+	models.TokenScopeSavedQueriesRead,
+	models.TokenScopeCollectionsRead,
+	models.TokenScopeAlertsRead,
+	models.TokenScopeQuerySharesRead,
+}
+
+// ReadOnlyTokenScopes returns the common read-only preset used by service tokens.
+func ReadOnlyTokenScopes() []models.TokenScope {
+	scopes := make([]models.TokenScope, len(readOnlyTokenScopes))
+	copy(scopes, readOnlyTokenScopes)
+	return scopes
+}
+
+// validateAPITokenCreation validates parameters for creating a new API token.
+func validateAPITokenCreation(name string, scopes []models.TokenScope) ([]models.TokenScope, error) {
 	if name == "" {
-		return &ValidationError{Field: "name", Message: "token name is required"}
+		return nil, &ValidationError{Field: "name", Message: "token name is required"}
 	}
 	if len(name) < 2 || len(name) > 100 {
-		return &ValidationError{Field: "name", Message: "token name must be between 2 and 100 characters"}
+		return nil, &ValidationError{Field: "name", Message: "token name must be between 2 and 100 characters"}
 	}
-	return nil
+	if len(scopes) == 0 {
+		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
+	}
+
+	normalized := make([]models.TokenScope, 0, len(scopes))
+	seen := make(map[models.TokenScope]struct{}, len(scopes))
+	for _, scope := range scopes {
+		if _, ok := validTokenScopes[scope]; !ok {
+			return nil, &ValidationError{Field: "scopes", Message: "invalid token scope"}
+		}
+		if scope == models.TokenScopeAll {
+			return []models.TokenScope{models.TokenScopeAll}, nil
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		normalized = append(normalized, scope)
+	}
+	if len(normalized) == 0 {
+		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
+	}
+	return normalized, nil
+}
+
+func marshalTokenScopes(scopes []models.TokenScope) (string, error) {
+	b, err := json.Marshal(scopes)
+	if err != nil {
+		return "", fmt.Errorf("failed to encode token scopes: %w", err)
+	}
+	return string(b), nil
+}
+
+func unmarshalTokenScopes(raw string) []models.TokenScope {
+	if raw == "" {
+		return []models.TokenScope{}
+	}
+	var scopes []models.TokenScope
+	if err := json.Unmarshal([]byte(raw), &scopes); err != nil {
+		return []models.TokenScope{}
+	}
+	return scopes
 }
 
 // CreateAPIToken creates a new API token for a user
-func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, userID models.UserID, name string, expiresAt *time.Time) (*models.CreateAPITokenResponse, error) {
-	// Validate input
-	if err := validateAPITokenCreation(name); err != nil {
+func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, userID models.UserID, name string, expiresAt *time.Time, scopes []models.TokenScope) (*models.CreateAPITokenResponse, error) {
+	normalizedScopes, err := validateAPITokenCreation(name, scopes)
+	if err != nil {
 		return nil, err
 	}
 
 	// Verify user exists
-	_, err := GetUser(ctx, db, userID)
+	_, err = GetUser(ctx, db, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -104,6 +189,11 @@ func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCf
 		sqlExpiresAt = sql.NullTime{Time: *expiresAt, Valid: true}
 	}
 
+	scopesJSON, err := marshalTokenScopes(normalizedScopes)
+	if err != nil {
+		return nil, err
+	}
+
 	// Save to database
 	tokenID, err := db.CreateAPIToken(ctx, sqlc.CreateAPITokenParams{
 		UserID:    int64(userID),
@@ -111,6 +201,7 @@ func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCf
 		TokenHash: tokenHash,
 		Prefix:    prefix,
 		ExpiresAt: sqlExpiresAt,
+		Scopes:    scopesJSON,
 	})
 	if err != nil {
 		log.Error("failed to create API token in database", "error", err, "user_id", userID)
@@ -255,12 +346,26 @@ func hasTokenPrefix(token string) bool {
 	return subtle.ConstantTimeCompare([]byte(token[:len(TokenPrefix)]), []byte(TokenPrefix)) == 1
 }
 
+// TokenHasScope reports whether token grants the requested semantic scope.
+func TokenHasScope(token *models.APIToken, required models.TokenScope) bool {
+	if token == nil {
+		return false
+	}
+	for _, scope := range token.Scopes {
+		if scope == models.TokenScopeAll || scope == required {
+			return true
+		}
+	}
+	return false
+}
+
 func convertSQLCAPITokenToModel(sqlcToken sqlc.ApiToken) *models.APIToken {
 	token := &models.APIToken{
 		ID:     int(sqlcToken.ID),
 		UserID: models.UserID(sqlcToken.UserID),
 		Name:   sqlcToken.Name,
 		Prefix: sqlcToken.Prefix,
+		Scopes: unmarshalTokenScopes(sqlcToken.Scopes),
 		Timestamps: models.Timestamps{
 			CreatedAt: sqlcToken.CreatedAt,
 			UpdatedAt: sqlcToken.UpdatedAt,

@@ -237,6 +237,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSavedQueriesForUserBySourceStmt, err = db.PrepareContext(ctx, listSavedQueriesForUserBySource); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSavedQueriesForUserBySource: %w", err)
 	}
+	if q.listServiceAccountsStmt, err = db.PrepareContext(ctx, listServiceAccounts); err != nil {
+		return nil, fmt.Errorf("error preparing query ListServiceAccounts: %w", err)
+	}
 	if q.listSourceTeamsStmt, err = db.PrepareContext(ctx, listSourceTeams); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSourceTeams: %w", err)
 	}
@@ -714,6 +717,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSavedQueriesForUserBySourceStmt: %w", cerr)
 		}
 	}
+	if q.listServiceAccountsStmt != nil {
+		if cerr := q.listServiceAccountsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listServiceAccountsStmt: %w", cerr)
+		}
+	}
 	if q.listSourceTeamsStmt != nil {
 		if cerr := q.listSourceTeamsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listSourceTeamsStmt: %w", cerr)
@@ -1019,6 +1027,7 @@ type Queries struct {
 	listManagedUsersStmt                *sql.Stmt
 	listSavedQueriesForUserStmt         *sql.Stmt
 	listSavedQueriesForUserBySourceStmt *sql.Stmt
+	listServiceAccountsStmt             *sql.Stmt
 	listSourceTeamsStmt                 *sql.Stmt
 	listSourcesStmt                     *sql.Stmt
 	listSourcesForUserStmt              *sql.Stmt
@@ -1135,6 +1144,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listManagedUsersStmt:                q.listManagedUsersStmt,
 		listSavedQueriesForUserStmt:         q.listSavedQueriesForUserStmt,
 		listSavedQueriesForUserBySourceStmt: q.listSavedQueriesForUserBySourceStmt,
+		listServiceAccountsStmt:             q.listServiceAccountsStmt,
 		listSourceTeamsStmt:                 q.listSourceTeamsStmt,
 		listSourcesStmt:                     q.listSourcesStmt,
 		listSourcesForUserStmt:              q.listSourcesForUserStmt,

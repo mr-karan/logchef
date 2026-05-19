@@ -58,6 +58,7 @@ type ApiToken struct {
 	ExpiresAt  sql.NullTime `json:"expires_at"`
 	CreatedAt  time.Time    `json:"created_at"`
 	UpdatedAt  time.Time    `json:"updated_at"`
+	Scopes     string       `json:"scopes"`
 }
 
 type Collection struct {
@@ -199,6 +200,7 @@ type User struct {
 	CreatedAt    time.Time    `json:"created_at"`
 	UpdatedAt    time.Time    `json:"updated_at"`
 	Managed      int64        `json:"managed"`
+	AccountType  string       `json:"account_type"`
 }
 
 type UserPreference struct {

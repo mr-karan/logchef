@@ -195,8 +195,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db *sqlite.DB, log *s
 		p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
 		return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
 	}
-	// User exists, check status.
-	if user.Status == models.UserStatusInactive {
+	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
 		p.log.Warn("inactive user attempted login", "user_id", user.ID, "email", user.Email)
 		return nil, nil, ErrUserInactive
 	}

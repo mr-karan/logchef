@@ -51,10 +51,12 @@ const editForm = ref({
 
 const searchQuery = ref('')
 
+const humanUsers = computed(() => usersStore.users.filter(user => user.account_type !== 'service'))
+
 const filteredUsers = computed(() => {
-    if (!searchQuery.value) return usersStore.users;
+    if (!searchQuery.value) return humanUsers.value;
     const query = searchQuery.value.toLowerCase();
-    return usersStore.users.filter(user =>
+    return humanUsers.value.filter(user =>
         user?.full_name?.toLowerCase().includes(query) ||
         user?.email?.toLowerCase().includes(query)
     );
@@ -120,7 +122,7 @@ onMounted(() => {
         <LoadingState v-if="isLoading" label="Loading users…" />
 
         <EmptyState
-            v-else-if="usersStore.users.length === 0"
+            v-else-if="humanUsers.length === 0"
             :icon="Users"
             title="No users yet"
             description="Add your first user to get started."

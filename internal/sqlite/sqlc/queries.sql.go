@@ -175,8 +175,8 @@ func (q *Queries) CountUserSessions(ctx context.Context, arg CountUserSessionsPa
 
 const createAPIToken = `-- name: CreateAPIToken :one
 
-INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO api_tokens (user_id, name, token_hash, prefix, expires_at, scopes)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -186,6 +186,7 @@ type CreateAPITokenParams struct {
 	TokenHash string       `json:"token_hash"`
 	Prefix    string       `json:"prefix"`
 	ExpiresAt sql.NullTime `json:"expires_at"`
+	Scopes    string       `json:"scopes"`
 }
 
 // API Tokens
@@ -197,6 +198,7 @@ func (q *Queries) CreateAPIToken(ctx context.Context, arg CreateAPITokenParams) 
 		arg.TokenHash,
 		arg.Prefix,
 		arg.ExpiresAt,
+		arg.Scopes,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -542,8 +544,8 @@ func (q *Queries) CreateTeam(ctx context.Context, arg CreateTeamParams) (int64, 
 
 const createUser = `-- name: CreateUser :one
 
-INSERT INTO users (email, full_name, role, status, last_login_at)
-VALUES (?, ?, ?, ?, ?)
+INSERT INTO users (email, full_name, role, status, last_login_at, account_type)
+VALUES (?, ?, ?, ?, ?, ?)
 RETURNING id
 `
 
@@ -553,6 +555,7 @@ type CreateUserParams struct {
 	Role        string       `json:"role"`
 	Status      string       `json:"status"`
 	LastLoginAt sql.NullTime `json:"last_login_at"`
+	AccountType string       `json:"account_type"`
 }
 
 // Users
@@ -564,6 +567,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (int64, 
 		arg.Role,
 		arg.Status,
 		arg.LastLoginAt,
+		arg.AccountType,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -746,7 +750,7 @@ func (q *Queries) FailExportJob(ctx context.Context, arg FailExportJobParams) (s
 }
 
 const getAPIToken = `-- name: GetAPIToken :one
-SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at FROM api_tokens WHERE id = ?
+SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at, scopes FROM api_tokens WHERE id = ?
 `
 
 // Get an API token by ID
@@ -763,12 +767,13 @@ func (q *Queries) GetAPIToken(ctx context.Context, id int64) (ApiToken, error) {
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Scopes,
 	)
 	return i, err
 }
 
 const getAPITokenByHash = `-- name: GetAPITokenByHash :one
-SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at FROM api_tokens WHERE token_hash = ?
+SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at, scopes FROM api_tokens WHERE token_hash = ?
 `
 
 // Get an API token by its hash (for authentication)
@@ -785,6 +790,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 		&i.ExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Scopes,
 	)
 	return i, err
 }
@@ -1227,7 +1233,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users WHERE id = ?
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE id = ?
 `
 
 // Get a user by ID
@@ -1245,12 +1251,13 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Managed,
+		&i.AccountType,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users WHERE email = ?
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE email = ?
 `
 
 // Get a user by email
@@ -1268,6 +1275,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.Managed,
+		&i.AccountType,
 	)
 	return i, err
 }
@@ -1393,7 +1401,7 @@ func (q *Queries) IsUserManaged(ctx context.Context, id int64) (int64, error) {
 }
 
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
-SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC
+SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at, scopes FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC
 `
 
 // List all API tokens for a user
@@ -1416,6 +1424,7 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 			&i.ExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Scopes,
 		); err != nil {
 			return nil, err
 		}
@@ -1961,7 +1970,7 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 }
 
 const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users WHERE managed = 1 ORDER BY id
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE managed = 1 ORDER BY id
 `
 
 // Get all users managed by provisioning config
@@ -1985,6 +1994,7 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Managed,
+			&i.AccountType,
 		); err != nil {
 			return nil, err
 		}
@@ -2138,6 +2148,46 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 			&i.UpdatedAt,
 			&i.CreatedBy,
 			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listServiceAccounts = `-- name: ListServiceAccounts :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE account_type = 'service' ORDER BY created_at ASC
+`
+
+// List service principals
+func (q *Queries) ListServiceAccounts(ctx context.Context) ([]User, error) {
+	rows, err := q.query(ctx, q.listServiceAccountsStmt, listServiceAccounts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FullName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.LastActiveAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Managed,
+			&i.AccountType,
 		); err != nil {
 			return nil, err
 		}
@@ -2647,7 +2697,7 @@ func (q *Queries) ListUserTeams(ctx context.Context, userID int64) ([]Team, erro
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed FROM users ORDER BY created_at ASC
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users ORDER BY created_at ASC
 `
 
 // List all users
@@ -2671,6 +2721,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Managed,
+			&i.AccountType,
 		); err != nil {
 			return nil, err
 		}

@@ -22,6 +22,9 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 	if user.Status == "" {
 		user.Status = models.UserStatusActive
 	}
+	if user.AccountType == "" {
+		user.AccountType = models.UserAccountTypeHuman
+	}
 
 	// Map domain model fields to sqlc parameters, handling nullable times.
 	var lastLoginTime sql.NullTime
@@ -36,6 +39,7 @@ func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
 		Role:        string(user.Role),
 		Status:      string(user.Status),
 		LastLoginAt: lastLoginTime,
+		AccountType: string(user.AccountType),
 	}
 
 	id, err := db.writeQueries.CreateUser(ctx, params)
@@ -150,6 +154,25 @@ func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 	return users, nil
 }
 
+// ListServiceAccounts retrieves all service account records.
+func (db *DB) ListServiceAccounts(ctx context.Context) ([]*models.User, error) {
+	userRows, err := db.readQueries.ListServiceAccounts(ctx)
+	if err != nil {
+		db.log.Error("failed to list service accounts from db", "error", err)
+		return nil, fmt.Errorf("failed to list service accounts: %w", err)
+	}
+
+	users := make([]*models.User, 0, len(userRows))
+	for i := range userRows {
+		mappedUser := mapUserRowToModel(userRows[i])
+		if mappedUser != nil {
+			users = append(users, mappedUser)
+		}
+	}
+
+	return users, nil
+}
+
 // CountAdminUsers counts active users with the admin role.
 func (db *DB) CountAdminUsers(ctx context.Context) (int, error) {
 
@@ -188,12 +211,18 @@ func mapUserRowToModel(row sqlc.User) *models.User {
 		lastActiveAt = &row.LastActiveAt.Time
 	}
 
+	accountType := models.UserAccountType(row.AccountType)
+	if accountType == "" {
+		accountType = models.UserAccountTypeHuman
+	}
+
 	return &models.User{
 		ID:           models.UserID(row.ID),
 		Email:        row.Email,
 		FullName:     row.FullName,
 		Role:         models.UserRole(row.Role),
 		Status:       models.UserStatus(row.Status),
+		AccountType:  accountType,
 		LastLoginAt:  lastLoginAt,
 		LastActiveAt: lastActiveAt,
 		Timestamps: models.Timestamps{

@@ -13,6 +13,14 @@ const (
 	UserStatusInactive UserStatus = "inactive"
 )
 
+// UserAccountType differentiates interactive users from service principals.
+type UserAccountType string
+
+const (
+	UserAccountTypeHuman   UserAccountType = "human"
+	UserAccountTypeService UserAccountType = "service"
+)
+
 // UserRole represents the possible user roles
 type UserRole string
 
@@ -22,6 +30,34 @@ const (
 
 	// UserRoleMember represents a regular user with standard permissions
 	UserRoleMember UserRole = "member"
+)
+
+// TokenScope is a semantic permission attached to API tokens.
+type TokenScope string
+
+const (
+	TokenScopeAll               TokenScope = "*"
+	TokenScopeProfileRead       TokenScope = "profile:read"
+	TokenScopeProfileWrite      TokenScope = "profile:write"
+	TokenScopeTokensRead        TokenScope = "tokens:read"
+	TokenScopeTokensWrite       TokenScope = "tokens:write"
+	TokenScopeUsersRead         TokenScope = "users:read"
+	TokenScopeUsersWrite        TokenScope = "users:write"
+	TokenScopeTeamsRead         TokenScope = "teams:read"
+	TokenScopeTeamsWrite        TokenScope = "teams:write"
+	TokenScopeSourcesRead       TokenScope = "sources:read"
+	TokenScopeSourcesWrite      TokenScope = "sources:write"
+	TokenScopeLogsRead          TokenScope = "logs:read"
+	TokenScopeSavedQueriesRead  TokenScope = "saved_queries:read"
+	TokenScopeSavedQueriesWrite TokenScope = "saved_queries:write"
+	TokenScopeCollectionsRead   TokenScope = "collections:read"
+	TokenScopeCollectionsWrite  TokenScope = "collections:write"
+	TokenScopeAlertsRead        TokenScope = "alerts:read"
+	TokenScopeAlertsWrite       TokenScope = "alerts:write"
+	TokenScopeQuerySharesRead   TokenScope = "query_shares:read"
+	TokenScopeQuerySharesWrite  TokenScope = "query_shares:write"
+	TokenScopeSettingsRead      TokenScope = "settings:read"
+	TokenScopeSettingsWrite     TokenScope = "settings:write"
 )
 
 // TeamRole represents the possible team member roles
@@ -43,13 +79,14 @@ const (
 
 // User represents a user in the system
 type User struct {
-	ID           UserID     `json:"id" db:"id"`
-	Email        string     `json:"email" db:"email"`
-	FullName     string     `json:"full_name" db:"full_name"`
-	Role         UserRole   `json:"role" db:"role"`
-	Status       UserStatus `json:"status" db:"status"`
-	LastLoginAt  *time.Time `json:"last_login_at,omitempty" db:"last_login_at"`
-	LastActiveAt *time.Time `json:"last_active_at,omitempty" db:"last_active_at"`
+	ID           UserID          `json:"id" db:"id"`
+	Email        string          `json:"email" db:"email"`
+	FullName     string          `json:"full_name" db:"full_name"`
+	Role         UserRole        `json:"role" db:"role"`
+	Status       UserStatus      `json:"status" db:"status"`
+	AccountType  UserAccountType `json:"account_type" db:"account_type"`
+	LastLoginAt  *time.Time      `json:"last_login_at,omitempty" db:"last_login_at"`
+	LastActiveAt *time.Time      `json:"last_active_at,omitempty" db:"last_active_at"`
 	Timestamps
 	Managed bool `json:"managed" db:"managed"`
 }
@@ -110,20 +147,22 @@ type UserTeamDetails struct {
 
 // APIToken represents an API token for authentication
 type APIToken struct {
-	ID         int        `json:"id" db:"id"`
-	UserID     UserID     `json:"user_id" db:"user_id"`
-	Name       string     `json:"name" db:"name"`
-	TokenHash  string     `json:"-" db:"token_hash"` // Never expose in JSON
-	Prefix     string     `json:"prefix" db:"prefix"`
-	LastUsedAt *time.Time `json:"last_used_at,omitempty" db:"last_used_at"`
-	ExpiresAt  *time.Time `json:"expires_at,omitempty" db:"expires_at"`
+	ID         int          `json:"id" db:"id"`
+	UserID     UserID       `json:"user_id" db:"user_id"`
+	Name       string       `json:"name" db:"name"`
+	TokenHash  string       `json:"-" db:"token_hash"` // Never expose in JSON
+	Prefix     string       `json:"prefix" db:"prefix"`
+	Scopes     []TokenScope `json:"scopes" db:"scopes"`
+	LastUsedAt *time.Time   `json:"last_used_at,omitempty" db:"last_used_at"`
+	ExpiresAt  *time.Time   `json:"expires_at,omitempty" db:"expires_at"`
 	Timestamps
 }
 
 // CreateAPITokenRequest represents a request to create a new API token
 type CreateAPITokenRequest struct {
-	Name      string     `json:"name"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
+	Name      string       `json:"name"`
+	ExpiresAt *time.Time   `json:"expires_at,omitempty"`
+	Scopes    []TokenScope `json:"scopes,omitempty"`
 }
 
 // CreateAPITokenResponse represents the response when creating an API token

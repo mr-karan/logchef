@@ -160,6 +160,8 @@ type Querier interface {
 	ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error)
 	// List saved queries for a specific source, scoped to a user that has access to it
 	ListSavedQueriesForUserBySource(ctx context.Context, arg ListSavedQueriesForUserBySourceParams) ([]ListSavedQueriesForUserBySourceRow, error)
+	// List service principals
+	ListServiceAccounts(ctx context.Context) ([]User, error)
 	// List all teams a data source is a member of
 	ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, error)
 	// Get all sources ordered by creation date

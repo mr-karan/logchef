@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
@@ -97,9 +98,40 @@ func validateUserUpdate(updateData models.User) error {
 
 // --- User Management Functions ---
 
-// ListUsers returns all users from the database.
+// ListUsers returns all interactive users from the database.
 func ListUsers(ctx context.Context, db *sqlite.DB) ([]*models.User, error) {
 	return db.ListUsers(ctx)
+}
+
+// ListServiceAccounts returns all non-login service principals.
+func ListServiceAccounts(ctx context.Context, db *sqlite.DB) ([]*models.User, error) {
+	return db.ListServiceAccounts(ctx)
+}
+
+// CreateServiceAccount creates a service principal that can own scoped API tokens.
+func CreateServiceAccount(ctx context.Context, db *sqlite.DB, log *slog.Logger, name string) (*models.User, error) {
+	name = strings.TrimSpace(name)
+	if len(name) < 2 || len(name) > 100 {
+		return nil, &ValidationError{Field: "name", Message: "service account name must be between 2 and 100 characters"}
+	}
+
+	email := fmt.Sprintf("svc-%d@service.logchef.internal", time.Now().UTC().UnixNano())
+	user := &models.User{
+		Email:       email,
+		FullName:    name,
+		Role:        models.UserRoleMember,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeService,
+		Timestamps: models.Timestamps{
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	if err := db.CreateUser(ctx, user); err != nil {
+		log.Error("error creating service account in db", "error", err, "name", name)
+		return nil, fmt.Errorf("error creating service account: %w", err)
+	}
+	return user, nil
 }
 
 // GetUser retrieves a specific user by their ID.
@@ -313,6 +345,25 @@ func DeleteUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.
 	// if err := db.DeleteUserSessions(ctx, id); err != nil { ... }
 
 	log.Debug("user deleted", "user_id", id)
+	return nil
+}
+
+// DeleteServiceAccount deletes a service principal and its tokens/memberships.
+func DeleteServiceAccount(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.UserID) error {
+	existing, err := db.GetUser(ctx, id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("error checking existing service account: %w", err)
+	}
+	if existing.AccountType != models.UserAccountTypeService {
+		return ErrUserNotFound
+	}
+	if err := db.DeleteUser(ctx, id); err != nil {
+		log.Error("failed to delete service account from db", "error", err, "user_id", id)
+		return fmt.Errorf("error deleting service account: %w", err)
+	}
 	return nil
 }
 

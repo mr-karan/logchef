@@ -41,6 +41,7 @@ const baseUser = (overrides: Partial<User> = {}): User => ({
   full_name: "User",
   role: "member",
   status: "active",
+  account_type: "human",
   created_at: "",
   updated_at: "",
   ...overrides,
