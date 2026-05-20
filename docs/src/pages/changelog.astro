@@ -85,9 +85,48 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <span class="version-tag unreleased">Unreleased</span>
         <span class="version-date">In development</span>
       </div>
-      <ul class="change-list">
-        <li>No unreleased changes yet.</li>
-      </ul>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Adds <strong>Service accounts</strong> &mdash; non-login principals you can add to teams and issue scoped API tokens for. Every token now carries an explicit scope list (e.g. <code>logs:read</code>, <code>alerts:write</code>) enforced by middleware, with presets and an active-preset highlight in the picker. The team member dialog now distinguishes humans from service accounts, and service principals get a clear badge in team rosters.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Service accounts</strong> &mdash; Non-login principals managed at <strong>Administration &rarr; Service Tokens</strong>. Cannot authenticate via OIDC or CLI exchange; exist only to own tokens and team memberships. <a href="/features/service-tokens/">Learn more &rarr;</a></li>
+          <li><strong>Scoped API tokens</strong> &mdash; Tokens now carry an explicit list of scopes (<code>logs:read</code>, <code>alerts:write</code>, &hellip;). Presets in the picker: Read-only, Logs viewer, Logs analyst, Alerts manager, Source admin, Full access. The active preset stays highlighted while the selection matches.</li>
+          <li><strong>Account-type toggle in Add Team Member</strong> &mdash; Pick Human user or Service account; the dropdown filters to that type and shows the principal's name with email as a subtitle instead of the raw service-account email.</li>
+          <li><strong>Service account badge</strong> in team member tables &mdash; bot icon + "Service account" pill so automation principals are visually distinct from humans.</li>
+          <li><strong>Manage teams on each service account card</strong> &mdash; team chips, a destructive warning when an account is in zero teams (its tokens won't reach any source), and an in-place add/remove dialog.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>"Create API Token" defaults to the Read-only preset.</strong> Previously defaulted to Full access, which made the scope picker look entirely disabled out of the box.</li>
+          <li><strong>Read-only preset is now every <code>:read</code> scope.</strong> Adds <code>tokens:read</code>, <code>users:read</code>, <code>settings:read</code>. Admin-gated routes still enforce admin role separately.</li>
+          <li><strong><code>/admin/users/*</code> routes 404 on service accounts.</strong> Service principals are managed via the dedicated <code>/admin/service-accounts/*</code> path so they can't be promoted through the human-user CRUD path.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Scope picker checkboxes are interactive again.</strong> The component was bound to <code>:checked</code>; the underlying primitive uses <code>model-value</code>. The bug was hidden behind the old Full-access default.</li>
+          <li><strong>Token creation rejects empty scopes (HTTP 400).</strong> Requests with no scopes used to silently mint a full-access token.</li>
+          <li><strong>Corrupt or empty stored scopes fail closed.</strong> A token row with malformed scope JSON now grants no access instead of full access.</li>
+        </ul>
+      </div>
     </article>
     <!-- CLI v0.1.5 -->
     <article class="version">

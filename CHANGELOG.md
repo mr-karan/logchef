@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Service accounts** — Non-login principals you can add to teams and own API
+  tokens. Created from **Administration → Service Tokens**. Cannot
+  authenticate via OIDC or CLI exchange.
+- **Scoped API tokens** — Tokens now carry an explicit scope list
+  (`logs:read`, `alerts:write`, ...). New `requireTokenScope` middleware
+  enforces them on every route. Presets in the UI: Read-only, Logs viewer,
+  Logs analyst, Alerts manager, Source admin, Full access. Active preset is
+  highlighted while the selection matches.
+- **Account-type toggle in Add Team Member dialog** — Switch between Human
+  user and Service account; the dropdown filters to the selected type and
+  shows `full_name` with email as a subtitle.
+- **Service account badge** in team member tables, with a bot icon, so
+  automation principals are visually distinct from humans.
+- **Team chips and "Manage teams" button** on each service account card.
+  Surfaces zero-team state ("token reaches no source") and lets you add or
+  remove team memberships without leaving the page.
+- **New admin endpoints**:
+  - `GET/POST/DELETE /admin/service-accounts`
+  - `GET/POST/DELETE /admin/service-accounts/:id/tokens`
+  - `GET/POST/DELETE /admin/service-accounts/:id/teams`
+
+### Changed
+- **`UserProfile` "Create API Token" dialog defaults to the Read-only preset.**
+  Previously defaulted to Full access (`*`), which made every checkbox appear
+  disabled-but-checked and gave no choice unless the user manually clicked
+  away.
+- **Read-only preset includes every `:read` scope.** Now covers
+  `tokens:read`, `users:read`, and `settings:read` in addition to the
+  resource read scopes. Admin-gated routes still require admin role at the
+  auth layer, so the wider scope set only matters for admin-owned tokens.
+- **`/admin/users/*` now 404s on service accounts.** Service principals are
+  managed through the dedicated `/admin/service-accounts/*` path so admins
+  can't accidentally promote a service account to admin via the human-user
+  CRUD path.
+
+### Fixed
+- **`TokenScopePicker` checkboxes are now interactive.** The component was
+  binding to `:checked` / `@update:checked`, but the shadcn-vue Checkbox
+  forwards reka-ui's `CheckboxRootProps`, which uses `model-value` /
+  `update:model-value`. The bug was hidden behind the old Full-access
+  default; switching the default surfaced it.
+- **Token creation rejects empty scopes (HTTP 400).** Previously, a request
+  with no scopes silently defaulted to `["*"]`, minting a god-token.
+- **Corrupt or empty stored scopes fail closed.** A row with malformed JSON
+  in `api_tokens.scopes` now grants no access instead of `*`.
+
+### Migration notes
+| Migration | What it does |
+|-----------|-------------|
+| 000023 | Adds `users.account_type` (`human`/`service`) and `api_tokens.scopes` (JSON array). Existing users default to `human`; existing tokens default to `["*"]` to preserve behavior. Index on `users(account_type)`. |
+
 ## [1.6.0] - 2026-05-13
 
 LogChef 1.6 narrows the **Team** abstraction to access control only and adds

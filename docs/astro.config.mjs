@@ -69,6 +69,7 @@ export default defineConfig({
             { label: "Alerting", link: "/features/alerting" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "User Management", link: "/core/user-management" },
+            { label: "Service Tokens", link: "/features/service-tokens" },
             { label: "Provisioning", link: "/getting-started/provisioning" },
           ],
         },
