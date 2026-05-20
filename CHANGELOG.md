@@ -5,25 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [CLI v0.1.6] - 2026-05-20
+
+LogChef CLI 0.1.6 ships four new subcommands (`saved-queries`, `find`, `tail`,
+`whoami`, `auth current`), full time-range injection on raw SQL, agent-friendly
+output formats (`msg`, `json-flat`), a symmetric `--explain` / `--dry-run`
+split across `query` and `sql`, and TTY-aware highlighting so pipes don't need
+`--no-highlight`. Requires Logchef server v1.6.1+ for the saved-queries
+resolve endpoint and ClickHouse column descriptions.
 
 ### Added
-- **CLI `saved-queries` command** — List saved queries and run one by name,
-  numeric ID, or pasted explorer URL, with limit, variable, and output-format
-  overrides.
-- **CLI default team/source environment variables** —
-  `LOGCHEF_DEFAULT_TEAM` and `LOGCHEF_DEFAULT_SOURCE` can supply stateless
-  defaults when `--team` / `--source` are omitted.
-- **CLI `--output msg` mode** — `query`, `sql`, `collections`, and
-  `saved-queries` can print message text only, one row per line.
-- **CLI SQL time flags** — `logchef sql` now accepts `--since`, `--from`, and
-  `--to`. The predicate is injected before the first top-level
-  `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`; the
-  scanner skips string literals, quoted identifiers, comments, and
-  parenthesized subqueries, so `WHERE`/`LIMIT` inside literals or nested
-  selects no longer confuses injection. Use `__START__` / `__END__`
-  placeholders for full control (e.g. CTEs).
-- **CLI `find` command** — Discover sources with recent matches for a service,
+- **`saved-queries` command** — List saved queries and run one by name,
+  numeric ID, or pasted explorer URL, with `--limit`, `--var`, and
+  `--output` overrides.
+- **`find` command** — Discover sources with recent matches for a service,
   job, host, or message pattern. For each matched source, fires a small
   per-column sample query: label-shaped columns (service/host/job_name) get
   the top 3 values with counts; free-form text columns (msg) get a single
@@ -31,38 +26,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   timeout defaults to 30s. Sources that error out (permissions, schema
   fetch, query failure) are skipped and counted; rerun with `--debug` for
   per-source diagnostics.
-- **CLI `tail` command** — Follow matching LogChefQL rows with bounded polling
+- **`tail` command** — Follow matching LogChefQL rows with bounded polling
   and `text`, `jsonl`, or `msg` output. Dedup is stable across column-order
   changes between polls; when a poll returns at `--limit` a one-shot warning
   hints to raise `--limit` or shrink `--interval`.
-- **CLI `--output json-flat` mode** — `query`, `sql`, `collections`, and
-  `saved-queries` can hoist JSON-shaped `msg` fields to top-level JSON rows.
-- **CLI `whoami` command** — Print the authenticated user and accessible teams.
-- **CLI `auth current` subcommand** — Offline command that prints the active
+- **`whoami` command** — Print the authenticated user and accessible teams.
+- **`auth current` subcommand** — Offline command that prints the active
   context, server URL, and token source (env vs config) without hitting the
-  network. Useful for "is my `LOGCHEF_AUTH_TOKEN` even set?" diagnostics
+  network. When the token comes from saved config, also prints the expiry
+  timestamp. Useful for "is my `LOGCHEF_AUTH_TOKEN` even set?" diagnostics
   before any API call.
-- **CLI `query --explain` / `sql --explain` alias** — `--explain` is an alias
-  of `--show-sql` on both commands. Both print `Generated SQL: <sql>` to
-  stderr and continue executing, so the trace coexists cleanly with
-  `--output jsonl | jq` pipes. On `sql`, the printed SQL includes any
-  `--since` / `--from` / `--to` injection.
-- **CLI `--dry-run` on `query` and `sql`** — Prints the resolved SQL to
-  stdout (no prefix, pipes cleanly) and exits without keeping results.
+- **SQL time flags** — `logchef sql` now accepts `--since`, `--from`, and
+  `--to`. The predicate is injected before the first top-level
+  `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`; the
+  scanner skips string literals, quoted identifiers, comments, and
+  parenthesized subqueries, so `WHERE`/`LIMIT` inside literals or nested
+  selects no longer confuses injection. Use `__START__` / `__END__`
+  placeholders for full control (e.g. CTEs).
+- **`--explain` / `--show-sql` alias on `sql`** — `--explain` is now an alias
+  of `--show-sql` on both `query` and `sql`. Both print
+  `Generated SQL: <sql>` to stderr and continue executing, so the trace
+  coexists cleanly with `--output jsonl | jq` pipes. On `sql`, the printed
+  SQL includes any `--since` / `--from` / `--to` injection.
+- **`--dry-run` on `query` and `sql`** — Prints the resolved SQL to stdout
+  (no prefix, pipes cleanly) and exits without keeping results.
   `query --dry-run` still calls the server once for LogChefQL translation;
   `sql --dry-run` is fully offline.
-- **CLI `auth current` token expiry** — When the token came from the saved
-  config, the output now appends an `expires` timestamp:
-  `token: set (from config, expires 2026-06-03T07:00:00Z)`.
-- **CLI auto-disables highlighting on non-TTY output** — All five subcommands
-  (`query`, `sql`, `collections`, `saved-queries`, `tail`) skip ANSI
-  highlighting when stdout is piped, so `... | jq` and `... > file` produce
-  clean output without `--no-highlight`. The flag still works as an
-  explicit override.
-- **Schema column descriptions** — ClickHouse column comments are now surfaced
-  as optional schema descriptions.
-- **Service accounts** — Non-login principals you can add to teams and own API
-  tokens. Created from **Administration → Service Tokens**. Cannot
+- **`--output msg` mode** — `query`, `sql`, `collections`, and
+  `saved-queries` can print message text only, one row per line. Falls back
+  to the first selected column when `msg` isn't projected.
+- **`--output json-flat` mode** — `query`, `sql`, `collections`, and
+  `saved-queries` can hoist JSON-shaped `msg` fields to top-level JSON rows.
+- **`LOGCHEF_DEFAULT_TEAM` / `LOGCHEF_DEFAULT_SOURCE` env vars** — Supply
+  stateless defaults when `--team` / `--source` are omitted. Precedence:
+  flag > env > saved config.
+- **Schema column descriptions** — `schema --output text` shows an extra
+  DESCRIPTION column when the source's ClickHouse columns have comments;
+  `schema --output json` includes them inline.
+
+### Changed
+- **Auto-disables ANSI highlighting on non-TTY output** — All five subcommands
+  (`query`, `sql`, `collections`, `saved-queries`, `tail`) skip highlighting
+  when stdout is piped, so `... | jq` and `... > file` produce clean output
+  without `--no-highlight`. The flag still works as an explicit override.
+
+### Internal
+- Shared `session` module extracts `ResolvedContext` + auth check across the
+  nine subcommands (~250 LOC dedup).
+
+## [1.6.1] - 2026-05-20
+
+Patch release. Introduces **Service accounts** — non-login principals that
+own scoped API tokens — and reworks the API-token surface so every token
+carries an explicit scope list enforced by middleware. Also surfaces
+ClickHouse column comments through the schema API for the LogChef CLI v0.1.6
+to consume.
+
+### Added
+- **Service accounts** — Non-login principals you can add to teams and own
+  API tokens. Created from **Administration → Service Tokens**. Cannot
   authenticate via OIDC or CLI exchange.
 - **Scoped API tokens** — Tokens now carry an explicit scope list
   (`logs:read`, `alerts:write`, ...). New `requireTokenScope` middleware
@@ -81,6 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `GET/POST/DELETE /admin/service-accounts`
   - `GET/POST/DELETE /admin/service-accounts/:id/tokens`
   - `GET/POST/DELETE /admin/service-accounts/:id/teams`
+- **Schema column descriptions** — The schema API now surfaces ClickHouse
+  column comments as an optional `description` field. Consumed by LogChef
+  CLI v0.1.6's `schema` command.
 
 ### Changed
 - **`UserProfile` "Create API Token" dialog defaults to the Read-only preset.**
@@ -649,6 +674,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[1.6.1]: https://github.com/mr-karan/logchef/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mr-karan/logchef/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0

@@ -79,15 +79,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
-    <!-- Unreleased -->
+    <!-- v1.6.1 -->
     <article class="version">
       <div class="version-header">
-        <span class="version-tag unreleased">Unreleased</span>
-        <span class="version-date">In development</span>
+        <span class="version-tag">v1.6.1</span>
+        <span class="version-date">May 20, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        Adds <strong>Service accounts</strong> &mdash; non-login principals you can add to teams and issue scoped API tokens for. Every token now carries an explicit scope list (e.g. <code>logs:read</code>, <code>alerts:write</code>) enforced by middleware, with presets and an active-preset highlight in the picker. The team member dialog now distinguishes humans from service accounts, and service principals get a clear badge in team rosters.
+        Patch release. Adds <strong>Service accounts</strong> &mdash; non-login principals you can add to teams and issue scoped API tokens for. Every token now carries an explicit scope list (e.g. <code>logs:read</code>, <code>alerts:write</code>) enforced by middleware, with presets and an active-preset highlight in the picker. The team member dialog distinguishes humans from service accounts, and service principals get a clear badge in team rosters. Also surfaces ClickHouse column comments through the schema API for the new LogChef CLI v0.1.6 to consume.
       </p>
 
       <div class="change-section">
@@ -101,6 +103,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>Account-type toggle in Add Team Member</strong> &mdash; Pick Human user or Service account; the dropdown filters to that type and shows the principal's name with email as a subtitle instead of the raw service-account email.</li>
           <li><strong>Service account badge</strong> in team member tables &mdash; bot icon + "Service account" pill so automation principals are visually distinct from humans.</li>
           <li><strong>Manage teams on each service account card</strong> &mdash; team chips, a destructive warning when an account is in zero teams (its tokens won't reach any source), and an in-place add/remove dialog.</li>
+          <li><strong>Schema column descriptions</strong> &mdash; The schema API now surfaces ClickHouse column comments. Consumed by LogChef CLI v0.1.6's <code>schema</code> command.</li>
         </ul>
       </div>
 
@@ -128,6 +131,51 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </ul>
       </div>
     </article>
+
+    <!-- CLI v0.1.6 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.6</span>
+        <span class="version-date">May 20, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.6" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Major CLI release. Adds four new subcommands (<code>saved-queries</code>, <code>find</code>, <code>tail</code>, <code>whoami</code>, <code>auth current</code>), full time-range injection on raw SQL, agent-friendly output formats (<code>msg</code>, <code>json-flat</code>), a symmetric <code>--explain</code> / <code>--dry-run</code> split across <code>query</code> and <code>sql</code>, and TTY-aware highlighting so pipes don't need <code>--no-highlight</code>. Requires Logchef server v1.6.1+ for the saved-queries resolve endpoint and ClickHouse column descriptions.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong><code>saved-queries</code></strong> &mdash; List and run saved queries by name, numeric ID, or a pasted explorer URL. <code>--var</code>, <code>--limit</code>, <code>--show-sql</code>, and all output-format overrides supported.</li>
+          <li><strong><code>find &lt;pattern&gt;</code></strong> &mdash; Discover sources with recent matches for a service, job, host, or message pattern. Each match line is followed by per-column samples: label-shaped columns (service/host/job_name) get the top 3 values with counts; free-form text columns (msg) get one truncated sample row. Suppress with <code>--no-samples</code>. Per-source timeout defaults to 30s.</li>
+          <li><strong><code>tail &lt;query&gt;</code></strong> &mdash; Follow matching LogChefQL rows by polling. <code>text</code>, <code>jsonl</code>, or <code>msg</code> output; stable dedup across column-order changes; one-shot stderr warning when a poll returns at <code>--limit</code>.</li>
+          <li><strong><code>whoami</code></strong> &mdash; Print the authenticated user and accessible teams.</li>
+          <li><strong><code>auth current</code></strong> &mdash; Offline subcommand that prints the active context, server URL, and token source (config vs env), plus the token expiry when it came from saved config. No network call. Useful for "is my <code>LOGCHEF_AUTH_TOKEN</code> even set?" diagnostics.</li>
+          <li><strong>SQL time flags on <code>sql</code></strong> &mdash; <code>--since</code> / <code>--from</code> / <code>--to</code> inject a timestamp predicate before the first top-level <code>GROUP BY</code> / <code>ORDER BY</code> / <code>LIMIT</code> / <code>HAVING</code> / <code>SETTINGS</code> / <code>FORMAT</code>. The scanner skips string literals, quoted identifiers, comments, and parenthesized subqueries; use <code>__START__</code> / <code>__END__</code> placeholders for full control (e.g. CTEs).</li>
+          <li><strong><code>--explain</code> / <code>--show-sql</code> on <code>query</code> and <code>sql</code></strong> &mdash; Print <code>Generated SQL: &lt;sql&gt;</code> to stderr, then continue executing. Plays cleanly with <code>--output jsonl | jq</code> pipes.</li>
+          <li><strong><code>--dry-run</code> on <code>query</code> and <code>sql</code></strong> &mdash; Print the resolved SQL to stdout (no prefix) and exit without keeping results. <code>sql --dry-run</code> is fully offline; <code>query --dry-run</code> calls the server once for LogChefQL translation.</li>
+          <li><strong><code>--output msg</code></strong> &mdash; Print only the message column (one row per line) on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>. Falls back to the first selected column when <code>msg</code> isn't projected.</li>
+          <li><strong><code>--output json-flat</code></strong> &mdash; Hoist JSON-shaped <code>msg</code> fields to top-level JSON rows on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>.</li>
+          <li><strong><code>LOGCHEF_DEFAULT_TEAM</code> / <code>LOGCHEF_DEFAULT_SOURCE</code></strong> &mdash; Env defaults when <code>--team</code> / <code>--source</code> are omitted. Precedence: flag &rarr; env &rarr; saved config.</li>
+          <li><strong>Schema column descriptions</strong> &mdash; <code>schema --output text</code> shows a new DESCRIPTION column when the source's ClickHouse columns carry comments; <code>schema --output json</code> includes them inline.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Highlighting auto-disables on non-TTY output.</strong> All five subcommands (<code>query</code>, <code>sql</code>, <code>collections</code>, <code>saved-queries</code>, <code>tail</code>) skip ANSI escapes when stdout is piped, so <code>... | jq</code> and <code>... &gt; file</code> produce clean output without <code>--no-highlight</code>. The flag still works as an explicit override.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- CLI v0.1.5 -->
     <article class="version">
       <div class="version-header">
@@ -163,7 +211,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="version-header">
         <span class="version-tag">v1.6.0</span>
         <span class="version-date">May 13, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
