@@ -8,6 +8,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **CLI `saved-queries` command** — List saved queries and run one by name,
+  numeric ID, or pasted explorer URL, with limit, variable, and output-format
+  overrides.
+- **CLI default team/source environment variables** —
+  `LOGCHEF_DEFAULT_TEAM` and `LOGCHEF_DEFAULT_SOURCE` can supply stateless
+  defaults when `--team` / `--source` are omitted.
+- **CLI `--output msg` mode** — `query`, `sql`, `collections`, and
+  `saved-queries` can print message text only, one row per line.
+- **CLI SQL time flags** — `logchef sql` now accepts `--since`, `--from`, and
+  `--to`. The predicate is injected before the first top-level
+  `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`; the
+  scanner skips string literals, quoted identifiers, comments, and
+  parenthesized subqueries, so `WHERE`/`LIMIT` inside literals or nested
+  selects no longer confuses injection. Use `__START__` / `__END__`
+  placeholders for full control (e.g. CTEs).
+- **CLI `find` command** — Discover sources with recent matches for a service,
+  job, host, or message pattern. For each matched source, fires a small
+  per-column sample query: label-shaped columns (service/host/job_name) get
+  the top 3 values with counts; free-form text columns (msg) get a single
+  truncated sample row. Suppress with `--no-samples`. Per-source query
+  timeout defaults to 30s. Sources that error out (permissions, schema
+  fetch, query failure) are skipped and counted; rerun with `--debug` for
+  per-source diagnostics.
+- **CLI `tail` command** — Follow matching LogChefQL rows with bounded polling
+  and `text`, `jsonl`, or `msg` output. Dedup is stable across column-order
+  changes between polls; when a poll returns at `--limit` a one-shot warning
+  hints to raise `--limit` or shrink `--interval`.
+- **CLI `--output json-flat` mode** — `query`, `sql`, `collections`, and
+  `saved-queries` can hoist JSON-shaped `msg` fields to top-level JSON rows.
+- **CLI `whoami` command** — Print the authenticated user and accessible teams.
+- **CLI `auth current` subcommand** — Offline command that prints the active
+  context, server URL, and token source (env vs config) without hitting the
+  network. Useful for "is my `LOGCHEF_AUTH_TOKEN` even set?" diagnostics
+  before any API call.
+- **CLI `query --explain` / `sql --explain` alias** — `--explain` is an alias
+  of `--show-sql` on both commands. Both print `Generated SQL: <sql>` to
+  stderr and continue executing, so the trace coexists cleanly with
+  `--output jsonl | jq` pipes. On `sql`, the printed SQL includes any
+  `--since` / `--from` / `--to` injection.
+- **CLI `--dry-run` on `query` and `sql`** — Prints the resolved SQL to
+  stdout (no prefix, pipes cleanly) and exits without keeping results.
+  `query --dry-run` still calls the server once for LogChefQL translation;
+  `sql --dry-run` is fully offline.
+- **CLI `auth current` token expiry** — When the token came from the saved
+  config, the output now appends an `expires` timestamp:
+  `token: set (from config, expires 2026-06-03T07:00:00Z)`.
+- **CLI auto-disables highlighting on non-TTY output** — All five subcommands
+  (`query`, `sql`, `collections`, `saved-queries`, `tail`) skip ANSI
+  highlighting when stdout is piped, so `... | jq` and `... > file` produce
+  clean output without `--no-highlight`. The flag still works as an
+  explicit override.
+- **Schema column descriptions** — ClickHouse column comments are now surfaced
+  as optional schema descriptions.
 - **Service accounts** — Non-login principals you can add to teams and own API
   tokens. Created from **Administration → Service Tokens**. Cannot
   authenticate via OIDC or CLI exchange.

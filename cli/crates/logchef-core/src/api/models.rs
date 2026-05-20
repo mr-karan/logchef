@@ -73,6 +73,8 @@ pub struct Team {
 pub struct Source {
     pub id: i64,
     pub name: String,
+    #[serde(default, rename = "_meta_ts_field")]
+    pub meta_ts_field: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
@@ -108,6 +110,8 @@ pub struct Column {
     pub name: String,
     #[serde(rename = "type")]
     pub column_type: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -233,6 +237,8 @@ pub struct TokenUser {
 pub struct Collection {
     pub id: i64,
     pub source_id: i64,
+    #[serde(default)]
+    pub created_from_team_id: Option<i64>,
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
@@ -246,6 +252,15 @@ pub struct Collection {
     pub created_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub updated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub source_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedSavedQuery {
+    #[serde(flatten)]
+    pub query: Collection,
+    pub resolved_team_id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -288,5 +303,5 @@ pub struct CollectionVariable {
     #[serde(default, rename = "inputType")]
     pub input_type: Option<String>,
     #[serde(default)]
-    pub value: Option<String>,
+    pub value: Option<serde_json::Value>,
 }

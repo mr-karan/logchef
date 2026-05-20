@@ -308,4 +308,36 @@ impl Client {
             .await?;
         Ok(response.data)
     }
+
+    pub async fn list_saved_queries(&self, source_id: Option<i64>) -> Result<Vec<Collection>> {
+        let path = match source_id {
+            Some(source_id) => format!("/api/v1/saved-queries?source_id={}", source_id),
+            None => "/api/v1/saved-queries".to_string(),
+        };
+        let response: ApiResponse<Vec<Collection>> = self.get(&path).await?;
+        Ok(response.data)
+    }
+
+    pub async fn get_saved_query(&self, query_id: i64) -> Result<Collection> {
+        let response: ApiResponse<Collection> = self
+            .get(&format!("/api/v1/saved-queries/{}", query_id))
+            .await?;
+        Ok(response.data)
+    }
+
+    pub async fn resolve_saved_query(
+        &self,
+        query_id: i64,
+        team_id: Option<i64>,
+    ) -> Result<ResolvedSavedQuery> {
+        let path = match team_id {
+            Some(team_id) => format!(
+                "/api/v1/saved-queries/{}/resolve?team_id={}",
+                query_id, team_id
+            ),
+            None => format!("/api/v1/saved-queries/{}/resolve", query_id),
+        };
+        let response: ApiResponse<ResolvedSavedQuery> = self.get(&path).await?;
+        Ok(response.data)
+    }
 }

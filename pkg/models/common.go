@@ -74,8 +74,9 @@ type QueryStats struct {
 
 // ColumnInfo represents column metadata from ClickHouse
 type ColumnInfo struct {
-	Name string `json:"name"`
-	Type string `json:"type"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Description string `json:"description,omitempty"`
 }
 
 // QueryWarning represents a non-fatal query execution warning.

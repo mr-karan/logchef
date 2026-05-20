@@ -8,6 +8,7 @@ use serde::Serialize;
 use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
+use crate::session;
 
 #[derive(Args)]
 pub struct SourcesArgs {
@@ -41,44 +42,19 @@ struct SourceOut {
 
 pub async fn run(args: SourcesArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
-    let resolved = resolve_context(&config, &global)?;
-
-    let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) =
-        match &resolved {
-            ResolvedContext::Saved(ctx, name) => (*ctx, name.clone(), false),
-            ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
-        };
-
-    let client = if let Some(token) = &global.token {
-        Client::from_context(ctx)?.with_token(token.clone())
-    } else {
-        Client::from_context(ctx)?
-    };
-
-    if !ctx.is_authenticated() && global.token.is_none() {
-        if is_ephemeral {
-            anyhow::bail!(
-                "Token required for server '{}'. Use --token or run 'logchef auth --server {}'.",
-                ctx.server_url,
-                ctx.server_url
-            );
-        } else {
-            anyhow::bail!(
-                "Not authenticated for context '{}'. Run 'logchef auth' first.",
-                ctx_name
-            );
-        }
-    }
+    let s = session::authed(&config, &global)?;
+    let (client, ctx) = (&s.client, &s.ctx);
 
     let mut cache = Cache::new(&ctx.server_url);
+    let default_team = ctx.defaults.team_with_env();
 
     let is_interactive =
-        args.team.is_none() && ctx.defaults.team.is_none() && std::io::stdin().is_terminal();
+        args.team.is_none() && default_team.is_none() && std::io::stdin().is_terminal();
 
     let team_id = if is_interactive {
-        prompt_team_interactive(&client, &mut cache).await?
+        prompt_team_interactive(client, &mut cache).await?
     } else {
-        let team_input = args.team.or(ctx.defaults.team.clone()).ok_or_else(|| {
+        let team_input = args.team.or(default_team).ok_or_else(|| {
             anyhow::anyhow!(
                 "Team not specified. Use --team or set defaults.team. List teams with 'logchef teams'."
             )
@@ -166,37 +142,6 @@ pub async fn run(args: SourcesArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
-}
-
-enum ResolvedContext<'a> {
-    Saved(&'a logchef_core::config::Context, String),
-    Ephemeral(logchef_core::config::Context),
-}
-
-fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<ResolvedContext<'a>> {
-    if let Some(name) = &global.context {
-        let ctx = config
-            .get_context(name)
-            .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", name))?;
-        return Ok(ResolvedContext::Saved(ctx, name.clone()));
-    }
-
-    if let Some(url) = &global.server {
-        if let Some((name, ctx)) = config.find_context_by_url(url) {
-            return Ok(ResolvedContext::Saved(ctx, name.to_string()));
-        }
-        let ephemeral = logchef_core::config::Context::new(url.clone());
-        return Ok(ResolvedContext::Ephemeral(ephemeral));
-    }
-
-    let name = config
-        .current_context_name()
-        .ok_or_else(|| anyhow::anyhow!("No context configured. Run 'logchef auth' first."))?;
-    let ctx = config
-        .current_context()
-        .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
-
-    Ok(ResolvedContext::Saved(ctx, name.to_string()))
 }
 
 async fn prompt_team_interactive(client: &Client, cache: &mut Cache) -> Result<i64> {

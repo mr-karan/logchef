@@ -2,7 +2,10 @@ use anyhow::Result;
 use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
-use crate::commands::{auth, collections, config, query, schema, sources, sql, teams};
+use crate::commands::{
+    auth, collections, config, find, query, saved_queries, schema, sources, sql, tail, teams,
+    whoami,
+};
 
 #[derive(Parser)]
 #[command(name = "logchef")]
@@ -54,8 +57,20 @@ enum Commands {
     #[command(about = "List and run saved collections")]
     Collections(collections::CollectionsArgs),
 
+    #[command(name = "saved-queries", about = "List and run saved queries")]
+    SavedQueries(saved_queries::SavedQueriesArgs),
+
+    #[command(about = "Find sources that contain a service, job, host, or message pattern")]
+    Find(find::FindArgs),
+
+    #[command(about = "Follow matching LogChefQL results")]
+    Tail(tail::TailArgs),
+
     #[command(about = "List available teams")]
     Teams(teams::TeamsArgs),
+
+    #[command(about = "Show current user and accessible teams")]
+    Whoami(whoami::WhoamiArgs),
 
     #[command(about = "List sources for a team")]
     Sources(sources::SourcesArgs),
@@ -97,7 +112,11 @@ impl Cli {
             Some(Commands::Query(args)) => query::run(args, global).await,
             Some(Commands::Sql(args)) => sql::run(args, global).await,
             Some(Commands::Collections(args)) => collections::run(args, global).await,
+            Some(Commands::SavedQueries(args)) => saved_queries::run(args, global).await,
+            Some(Commands::Find(args)) => find::run(args, global).await,
+            Some(Commands::Tail(args)) => tail::run(args, global).await,
             Some(Commands::Teams(args)) => teams::run(args, global).await,
+            Some(Commands::Whoami(args)) => whoami::run(args, global).await,
             Some(Commands::Sources(args)) => sources::run(args, global).await,
             Some(Commands::Schema(args)) => schema::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,

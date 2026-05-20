@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use chrono::{Duration as ChronoDuration, Utc};
 use clap::Args;
 use inquire::{Select, Text};
 use logchef_core::Config;
@@ -12,6 +13,7 @@ use std::io::{IsTerminal, Read, Write};
 use tokio::time::{Duration, sleep};
 
 use crate::cli::GlobalArgs;
+use crate::session;
 
 const STREAMING_SQL_MIN_TIMEOUT_SECS: u32 = 120;
 const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
@@ -28,6 +30,18 @@ pub struct SqlArgs {
     /// Source ID or name
     #[arg(long, short = 'S')]
     source: Option<String>,
+
+    /// Apply a relative time range to SQL (e.g., 15m, 1h, 24h)
+    #[arg(long, short = 's')]
+    since: Option<String>,
+
+    /// Apply an absolute start time (YYYY-MM-DD HH:MM:SS)
+    #[arg(long)]
+    from: Option<String>,
+
+    /// Apply an absolute end time (YYYY-MM-DD HH:MM:SS)
+    #[arg(long)]
+    to: Option<String>,
 
     /// Query timeout in seconds
     #[arg(long, default_value = "30")]
@@ -60,6 +74,16 @@ pub struct SqlArgs {
     /// Disable specific highlight groups
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
+
+    /// Trace the resolved SQL on stderr before executing the query. Use
+    /// `--dry-run` instead to print the SQL and exit without running it.
+    #[arg(long, visible_alias = "explain")]
+    show_sql: bool,
+
+    /// Print the resolved SQL (after --since/--from/--to injection) to stdout
+    /// and exit without executing the query. Pipes cleanly to other tools.
+    #[arg(long)]
+    dry_run: bool,
 }
 
 #[derive(Clone, Debug, clap::ValueEnum)]
@@ -67,8 +91,10 @@ enum OutputFormat {
     Text,
     Json,
     Jsonl,
+    JsonFlat,
     Csv,
     Table,
+    Msg,
 }
 
 #[derive(Serialize)]
@@ -84,55 +110,34 @@ struct JsonOutput<'a> {
 pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
 
-    let resolved = resolve_context(&config, &global)?;
-
-    let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) =
-        match &resolved {
-            ResolvedContext::Saved(ctx, name) => (*ctx, name.clone(), false),
-            ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
-        };
-
     let effective_query_timeout_secs =
         effective_query_timeout_secs(args.timeout, &args.output, args.stream);
-    let client_timeout_secs =
-        sql_transport_timeout_secs(ctx.timeout_secs, effective_query_timeout_secs);
 
-    let client = if let Some(token) = &global.token {
-        Client::from_context_with_timeout(ctx, client_timeout_secs)?.with_token(token.clone())
-    } else {
-        Client::from_context_with_timeout(ctx, client_timeout_secs)?
-    };
-
-    if !ctx.is_authenticated() && global.token.is_none() {
-        if is_ephemeral {
-            anyhow::bail!(
-                "Token required for server '{}'. Use --token or run 'logchef auth --server {}'.",
-                ctx.server_url,
-                ctx.server_url
-            );
-        } else {
-            anyhow::bail!(
-                "Not authenticated for context '{}'. Run 'logchef auth' first.",
-                ctx_name
-            );
-        }
-    }
+    let s = session::authed_with_timeout(&config, &global, |ctx| {
+        sql_transport_timeout_secs(ctx.timeout_secs, effective_query_timeout_secs)
+    })?;
+    let (client, ctx) = (&s.client, &s.ctx);
 
     let mut cache = Cache::new(&ctx.server_url);
+    let default_team = ctx.defaults.team_with_env();
+    let default_source = ctx.defaults.source_with_env();
+    let arg_team = args.team.clone();
+    let arg_source = args.source.clone();
+    let arg_sql = args.sql.clone();
 
     // Detect interactive mode: no sql provided, no team/source args, and running in a TTY
-    let is_interactive = args.sql.is_none()
-        && args.team.is_none()
-        && args.source.is_none()
-        && ctx.defaults.team.is_none()
-        && ctx.defaults.source.is_none()
+    let is_interactive = arg_sql.is_none()
+        && arg_team.is_none()
+        && arg_source.is_none()
+        && default_team.is_none()
+        && default_source.is_none()
         && std::io::stdin().is_terminal();
 
     // Resolve team
     let team_id = if is_interactive {
-        prompt_team_interactive(&client, &mut cache).await?
+        prompt_team_interactive(client, &mut cache).await?
     } else {
-        let team_input = args.team.or(ctx.defaults.team.clone()).ok_or_else(|| {
+        let team_input = arg_team.or(default_team).ok_or_else(|| {
             anyhow::anyhow!(
                 "Team not specified. Use --team or set defaults.team. List teams with 'logchef teams'."
             )
@@ -163,9 +168,9 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
 
     // Resolve source
     let source_id = if is_interactive {
-        prompt_source_interactive(&client, team_id, &mut cache).await?
+        prompt_source_interactive(client, team_id, &mut cache).await?
     } else {
-        let source_input = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
+        let source_input = arg_source.or(default_source).ok_or_else(|| {
             anyhow::anyhow!(
                 "Source not specified. Use --source or set defaults.source. List sources with 'logchef sources --team <team>'."
             )
@@ -212,7 +217,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let sql = if is_interactive {
         prompt_sql_interactive()?
     } else {
-        match args.sql {
+        match arg_sql {
             Some(s) if s == "-" => {
                 let mut buffer = String::new();
                 std::io::stdin()
@@ -231,6 +236,20 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
 
     if sql.is_empty() {
         anyhow::bail!("SQL query cannot be empty");
+    }
+
+    let sql = apply_sql_time_range(client, team_id, source_id, sql, &args, ctx).await?;
+
+    // --dry-run: print resolved SQL to stdout (clean for piping) and exit.
+    if args.dry_run {
+        println!("{}", sql);
+        return Ok(());
+    }
+
+    // --explain / --show-sql: print to stderr with prefix, then continue
+    // executing the query (matches the LogChefQL `query` command).
+    if args.show_sql {
+        eprintln!("Generated SQL: {}\n", sql);
     }
 
     if matches!(args.output, OutputFormat::Csv) {
@@ -312,6 +331,16 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                     "--stream does not support --output table. Use --stream --output jsonl for live streaming or --output csv for a completed-file export."
                 );
             }
+            OutputFormat::JsonFlat => {
+                anyhow::bail!(
+                    "--stream does not support --output json-flat. Use --output json-flat without --stream for buffered flattened JSON output."
+                );
+            }
+            OutputFormat::Msg => {
+                anyhow::bail!(
+                    "--stream does not support --output msg. Use --output msg without --stream for buffered message output."
+                );
+            }
             OutputFormat::Csv => unreachable!("CSV output is handled by export jobs"),
         };
 
@@ -378,6 +407,9 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                 );
             }
         }
+        OutputFormat::JsonFlat => {
+            print_json_flat(entries)?;
+        }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
             if is_tty {
@@ -392,8 +424,11 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         OutputFormat::Csv => {
             anyhow::bail!("Use --stream --output csv for CSV output");
         }
+        OutputFormat::Msg => {
+            print_msg(entries, &response.columns, true);
+        }
         OutputFormat::Text => {
-            let highlighter = if args.no_highlight {
+            let highlighter = if args.no_highlight || !is_tty {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -427,6 +462,314 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+async fn apply_sql_time_range(
+    client: &Client,
+    team_id: i64,
+    source_id: i64,
+    sql: String,
+    args: &SqlArgs,
+    ctx: &logchef_core::config::Context,
+) -> Result<String> {
+    if args.since.is_none() && args.from.is_none() && args.to.is_none() {
+        return Ok(sql);
+    }
+
+    let (start_time, end_time) = parse_time_range(
+        args.since.as_deref(),
+        args.from.as_deref(),
+        args.to.as_deref(),
+    )?;
+    let condition = sql_time_condition(
+        &source_timestamp_field(client, team_id, source_id).await?,
+        &start_time,
+        &end_time,
+        ctx.defaults.timezone.as_deref(),
+    );
+
+    if sql.contains("__START__") || sql.contains("__END__") {
+        if !(sql.contains("__START__") && sql.contains("__END__")) {
+            anyhow::bail!("SQL time placeholders must include both __START__ and __END__");
+        }
+        let start_expr = sql_datetime_expr(&start_time, ctx.defaults.timezone.as_deref());
+        let end_expr = sql_datetime_expr(&end_time, ctx.defaults.timezone.as_deref());
+        return Ok(sql
+            .replace("__START__", &start_expr)
+            .replace("__END__", &end_expr));
+    }
+
+    Ok(inject_sql_condition(&sql, &condition))
+}
+
+async fn source_timestamp_field(client: &Client, team_id: i64, source_id: i64) -> Result<String> {
+    let sources = client
+        .list_sources(team_id)
+        .await
+        .context("Failed to list sources for timestamp field")?;
+    let source = sources
+        .iter()
+        .find(|source| source.id == source_id)
+        .ok_or_else(|| anyhow::anyhow!("Source {} not found for team {}", source_id, team_id))?;
+
+    Ok(source
+        .meta_ts_field
+        .as_deref()
+        .filter(|field| !field.trim().is_empty())
+        .unwrap_or("_timestamp")
+        .to_string())
+}
+
+fn parse_time_range(
+    since: Option<&str>,
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<(String, String)> {
+    match (from, to) {
+        (Some(from), Some(to)) => return Ok((from.to_string(), to.to_string())),
+        (Some(_), None) => anyhow::bail!("--from requires --to to be specified"),
+        (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
+        (None, None) => {}
+    }
+
+    let end = Utc::now();
+    let start = end - parse_duration(since.unwrap_or("15m"))?;
+    let format = "%Y-%m-%d %H:%M:%S";
+    Ok((
+        start.format(format).to_string(),
+        end.format(format).to_string(),
+    ))
+}
+
+fn parse_duration(s: &str) -> Result<ChronoDuration> {
+    let s = s.trim();
+    if s.is_empty() {
+        return Ok(ChronoDuration::minutes(15));
+    }
+
+    let (num, unit) = if s.ends_with('m') {
+        (s.trim_end_matches('m'), "m")
+    } else if s.ends_with('h') {
+        (s.trim_end_matches('h'), "h")
+    } else if s.ends_with('d') {
+        (s.trim_end_matches('d'), "d")
+    } else if s.ends_with('w') {
+        (s.trim_end_matches('w'), "w")
+    } else {
+        (s, "m")
+    };
+
+    let num: i64 = num.parse().context("Invalid duration number")?;
+
+    match unit {
+        "m" => Ok(ChronoDuration::minutes(num)),
+        "h" => Ok(ChronoDuration::hours(num)),
+        "d" => Ok(ChronoDuration::days(num)),
+        "w" => Ok(ChronoDuration::weeks(num)),
+        _ => Ok(ChronoDuration::minutes(num)),
+    }
+}
+
+fn sql_time_condition(
+    timestamp_field: &str,
+    start_time: &str,
+    end_time: &str,
+    timezone: Option<&str>,
+) -> String {
+    format!(
+        "{} BETWEEN {} AND {}",
+        sql_identifier(timestamp_field),
+        sql_datetime_expr(start_time, timezone),
+        sql_datetime_expr(end_time, timezone)
+    )
+}
+
+fn sql_datetime_expr(value: &str, timezone: Option<&str>) -> String {
+    match timezone.filter(|tz| !tz.trim().is_empty()) {
+        Some(tz) => format!("toDateTime('{}', '{}')", sql_string(value), sql_string(tz)),
+        None => format!("toDateTime('{}')", sql_string(value)),
+    }
+}
+
+fn sql_identifier(value: &str) -> String {
+    format!("`{}`", value.trim_matches('`').replace('`', "``"))
+}
+
+fn sql_string(value: &str) -> String {
+    value.replace('\\', "\\\\").replace('\'', "\\'")
+}
+
+fn inject_sql_condition(sql: &str, condition: &str) -> String {
+    let trimmed = sql.trim();
+    let has_semicolon = trimmed.ends_with(';');
+    let body = trimmed.trim_end_matches(';').trim_end();
+    let (where_pos, clause_pos) = scan_top_level_clauses(body);
+    let insert_at = clause_pos.unwrap_or(body.len());
+
+    let connector = if where_pos.map(|w| w < insert_at).unwrap_or(false) {
+        "AND"
+    } else {
+        "WHERE"
+    };
+
+    let (head, tail) = body.split_at(insert_at);
+    let separator = if tail.is_empty() { "" } else { " " };
+    format!(
+        "{} {} {}{}{}{}",
+        head.trim_end(),
+        connector,
+        condition,
+        separator,
+        tail.trim_start(),
+        if has_semicolon { ";" } else { "" }
+    )
+}
+
+/// Walks the SQL skipping string literals, backtick identifiers, and
+/// parenthesized groups (subqueries). Returns the byte offset of the first
+/// top-level WHERE keyword and the first top-level clause boundary among
+/// GROUP/ORDER/LIMIT/HAVING/SETTINGS/FORMAT.
+fn scan_top_level_clauses(sql: &str) -> (Option<usize>, Option<usize>) {
+    let bytes = sql.as_bytes();
+    let mut i = 0;
+    let mut paren_depth = 0i32;
+    let mut where_pos: Option<usize> = None;
+    let mut clause_pos: Option<usize> = None;
+
+    while i < bytes.len() {
+        let b = bytes[i];
+
+        // Block comment /* ... */
+        if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                i += 1;
+            }
+            i = (i + 2).min(bytes.len());
+            continue;
+        }
+        // Line comment -- ... \n
+        if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+            i += 2;
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+            continue;
+        }
+        // String literal '...'
+        if b == b'\'' {
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() {
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'\'' {
+                    i += 1;
+                    break;
+                }
+                i += 1;
+            }
+            continue;
+        }
+        // Backtick identifier `...`
+        if b == b'`' {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'`' {
+                i += 1;
+            }
+            i = (i + 1).min(bytes.len());
+            continue;
+        }
+        // Double-quoted identifier "..."
+        if b == b'"' {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'"' {
+                i += 1;
+            }
+            i = (i + 1).min(bytes.len());
+            continue;
+        }
+        if b == b'(' {
+            paren_depth += 1;
+            i += 1;
+            continue;
+        }
+        if b == b')' {
+            paren_depth = (paren_depth - 1).max(0);
+            i += 1;
+            continue;
+        }
+
+        if paren_depth == 0 && is_keyword_boundary(bytes, i) {
+            if where_pos.is_none() && matches_kw(bytes, i, b"WHERE") {
+                where_pos = Some(i);
+                i += 5;
+                continue;
+            }
+            if clause_pos.is_none() {
+                for kw in [
+                    &b"GROUP"[..],
+                    &b"ORDER"[..],
+                    &b"LIMIT"[..],
+                    &b"HAVING"[..],
+                    &b"SETTINGS"[..],
+                    &b"FORMAT"[..],
+                ] {
+                    if matches_kw(bytes, i, kw) {
+                        // Ensure GROUP/ORDER are followed by BY (with whitespace)
+                        let needs_by = kw == b"GROUP" || kw == b"ORDER";
+                        if needs_by {
+                            let after = i + kw.len();
+                            if !followed_by(bytes, after, b"BY") {
+                                continue;
+                            }
+                        }
+                        clause_pos = Some(i);
+                        break;
+                    }
+                }
+                if clause_pos.is_some() {
+                    return (where_pos, clause_pos);
+                }
+            }
+        }
+        i += 1;
+    }
+    (where_pos, clause_pos)
+}
+
+fn is_keyword_boundary(bytes: &[u8], pos: usize) -> bool {
+    if pos == 0 {
+        return true;
+    }
+    let prev = bytes[pos - 1];
+    !prev.is_ascii_alphanumeric() && prev != b'_'
+}
+
+fn matches_kw(bytes: &[u8], pos: usize, kw: &[u8]) -> bool {
+    if pos + kw.len() > bytes.len() {
+        return false;
+    }
+    for (i, &k) in kw.iter().enumerate() {
+        if bytes[pos + i].to_ascii_uppercase() != k {
+            return false;
+        }
+    }
+    let after = pos + kw.len();
+    if after == bytes.len() {
+        return true;
+    }
+    let next = bytes[after];
+    !next.is_ascii_alphanumeric() && next != b'_'
+}
+
+fn followed_by(bytes: &[u8], from: usize, kw: &[u8]) -> bool {
+    let mut i = from;
+    while i < bytes.len() && (bytes[i] == b' ' || bytes[i] == b'\t' || bytes[i] == b'\n') {
+        i += 1;
+    }
+    matches_kw(bytes, i, kw)
 }
 
 fn effective_query_timeout_secs(
@@ -478,37 +821,106 @@ mod tests {
         assert_eq!(sql_transport_timeout_secs(30, 120), 180);
         assert_eq!(sql_transport_timeout_secs(300, 120), 300);
     }
-}
 
-enum ResolvedContext<'a> {
-    Saved(&'a logchef_core::config::Context, String),
-    Ephemeral(logchef_core::config::Context),
-}
-
-fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<ResolvedContext<'a>> {
-    if let Some(name) = &global.context {
-        let ctx = config
-            .get_context(name)
-            .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", name))?;
-        return Ok(ResolvedContext::Saved(ctx, name.clone()));
+    #[test]
+    fn injects_time_condition_into_existing_where() {
+        let sql = "SELECT count() FROM logs.app WHERE service = 'api' GROUP BY service";
+        let out = inject_sql_condition(
+            sql,
+            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
+        );
+        assert_eq!(
+            out,
+            "SELECT count() FROM logs.app WHERE service = 'api' AND `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') GROUP BY service"
+        );
     }
 
-    if let Some(url) = &global.server {
-        if let Some((name, ctx)) = config.find_context_by_url(url) {
-            return Ok(ResolvedContext::Saved(ctx, name.to_string()));
-        }
-        let ephemeral = logchef_core::config::Context::new(url.clone());
-        return Ok(ResolvedContext::Ephemeral(ephemeral));
+    #[test]
+    fn injects_time_condition_without_where() {
+        let sql = "SELECT count() FROM logs.app ORDER BY count() DESC";
+        let out = inject_sql_condition(
+            sql,
+            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
+        );
+        assert_eq!(
+            out,
+            "SELECT count() FROM logs.app WHERE `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') ORDER BY count() DESC"
+        );
     }
 
-    let name = config
-        .current_context_name()
-        .ok_or_else(|| anyhow::anyhow!("No context configured. Run 'logchef auth' first."))?;
-    let ctx = config
-        .current_context()
-        .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
+    #[test]
+    fn formats_time_condition_with_timezone() {
+        let condition = sql_time_condition(
+            "_timestamp",
+            "2026-05-19 09:15:00",
+            "2026-05-19 09:30:00",
+            Some("UTC"),
+        );
+        assert_eq!(
+            condition,
+            "`_timestamp` BETWEEN toDateTime('2026-05-19 09:15:00', 'UTC') AND toDateTime('2026-05-19 09:30:00', 'UTC')"
+        );
+    }
 
-    Ok(ResolvedContext::Saved(ctx, name.to_string()))
+    #[test]
+    fn ignores_where_inside_string_literal() {
+        let sql = "SELECT msg FROM logs.app WHERE msg = 'request WHERE matters' GROUP BY msg";
+        let out = inject_sql_condition(
+            sql,
+            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
+        );
+        // Should detect the real WHERE (after msg =), not the WHERE inside the literal.
+        assert_eq!(
+            out,
+            "SELECT msg FROM logs.app WHERE msg = 'request WHERE matters' AND `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') GROUP BY msg"
+        );
+    }
+
+    #[test]
+    fn ignores_limit_inside_string_literal() {
+        let sql = "SELECT * FROM logs.app WHERE msg = 'LIMIT exceeded'";
+        let out = inject_sql_condition(sql, "X");
+        // The LIMIT inside the literal should not be treated as a clause boundary;
+        // the AND should be appended at end of body.
+        assert_eq!(
+            out,
+            "SELECT * FROM logs.app WHERE msg = 'LIMIT exceeded' AND X"
+        );
+    }
+
+    #[test]
+    fn ignores_where_inside_subquery() {
+        let sql = "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t WHERE x = 1) GROUP BY id";
+        let out = inject_sql_condition(sql, "X");
+        // Top-level WHERE found; inner WHERE inside the parenthesized subquery
+        // is ignored, so we append "AND X" before GROUP BY.
+        assert_eq!(
+            out,
+            "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t WHERE x = 1) AND X GROUP BY id"
+        );
+    }
+
+    #[test]
+    fn ignores_clause_keywords_in_subquery() {
+        let sql = "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s";
+        let out = inject_sql_condition(sql, "X");
+        // The inner LIMIT inside the subquery must not become the top-level
+        // clause boundary; injection appends WHERE at end of body.
+        assert_eq!(
+            out,
+            "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s WHERE X"
+        );
+    }
+
+    #[test]
+    fn skips_line_comment_when_scanning() {
+        let sql = "SELECT * FROM logs.app -- WHERE never\n WHERE level='error'";
+        let out = inject_sql_condition(sql, "X");
+        assert_eq!(
+            out,
+            "SELECT * FROM logs.app -- WHERE never\n WHERE level='error' AND X"
+        );
+    }
 }
 
 fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
@@ -525,6 +937,58 @@ fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
             }
         })
         .collect()
+}
+
+fn print_json_flat(entries: &[logchef_core::api::LogEntry]) -> Result<()> {
+    for entry in entries {
+        println!("{}", serde_json::to_string(&flatten_msg(entry))?);
+    }
+    Ok(())
+}
+
+fn flatten_msg(entry: &logchef_core::api::LogEntry) -> logchef_core::api::LogEntry {
+    let mut out = entry.clone();
+    if let Some(msg) = entry.get("msg").and_then(|value| value.as_str())
+        && let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(msg)
+    {
+        for (key, value) in obj {
+            out.entry(key).or_insert(value);
+        }
+    }
+    out
+}
+
+fn print_msg(
+    entries: &[logchef_core::api::LogEntry],
+    columns: &[logchef_core::api::Column],
+    fallback_to_first_column: bool,
+) {
+    let field = if entries.iter().any(|entry| entry.contains_key("msg")) {
+        Some("msg")
+    } else if fallback_to_first_column {
+        columns.first().map(|column| column.name.as_str())
+    } else {
+        None
+    };
+
+    let Some(field) = field else {
+        return;
+    };
+
+    for entry in entries {
+        println!(
+            "{}",
+            entry.get(field).map(json_value_to_line).unwrap_or_default()
+        );
+    }
+}
+
+fn json_value_to_line(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        _ => value.to_string(),
+    }
 }
 
 fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core::api::Column]) {

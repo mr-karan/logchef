@@ -12,6 +12,7 @@ use serde::Serialize;
 use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
+use crate::session;
 
 #[derive(Args)]
 pub struct QueryArgs {
@@ -44,8 +45,15 @@ pub struct QueryArgs {
     #[arg(long)]
     no_timestamp: bool,
 
-    #[arg(long)]
+    /// Trace the server-generated SQL on stderr after executing. Use
+    /// `--dry-run` to print the SQL and exit without keeping the results.
+    #[arg(long, visible_alias = "explain")]
     show_sql: bool,
+
+    /// Print the server-generated SQL to stdout and exit. (The server is
+    /// still called once to translate LogChefQL.)
+    #[arg(long)]
+    dry_run: bool,
 
     #[arg(long = "highlight", value_name = "COLOR:WORDS")]
     highlights: Vec<String>,
@@ -62,7 +70,9 @@ enum OutputFormat {
     Text,
     Json,
     Jsonl,
+    JsonFlat,
     Table,
+    Msg,
 }
 
 #[derive(Serialize)]
@@ -79,51 +89,26 @@ struct JsonOutput<'a> {
 
 pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
-
-    let resolved = resolve_context(&config, &global)?;
-
-    let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) =
-        match &resolved {
-            ResolvedContext::Saved(ctx, name) => (*ctx, name.clone(), false),
-            ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
-        };
-
-    let client = if let Some(token) = &global.token {
-        Client::from_context(ctx)?.with_token(token.clone())
-    } else {
-        Client::from_context(ctx)?
-    };
-
-    if !ctx.is_authenticated() && global.token.is_none() {
-        if is_ephemeral {
-            anyhow::bail!(
-                "Token required for server '{}'. Use --token or run 'logchef auth --server {}'.",
-                ctx.server_url,
-                ctx.server_url
-            );
-        } else {
-            anyhow::bail!(
-                "Not authenticated for context '{}'. Run 'logchef auth' first.",
-                ctx_name
-            );
-        }
-    }
+    let s = session::authed(&config, &global)?;
+    let (client, ctx) = (&s.client, &s.ctx);
 
     let mut cache = Cache::new(&ctx.server_url);
+    let default_team = ctx.defaults.team_with_env();
+    let default_source = ctx.defaults.source_with_env();
 
     // Detect interactive mode: no query provided, no team/source args, and running in a TTY
     let is_interactive = args.query.is_none()
         && args.team.is_none()
         && args.source.is_none()
-        && ctx.defaults.team.is_none()
-        && ctx.defaults.source.is_none()
+        && default_team.is_none()
+        && default_source.is_none()
         && std::io::stdin().is_terminal();
 
     // Resolve team
     let team_id = if is_interactive {
-        prompt_team_interactive(&client, &mut cache).await?
+        prompt_team_interactive(client, &mut cache).await?
     } else {
-        let team_input = args.team.or(ctx.defaults.team.clone()).ok_or_else(|| {
+        let team_input = args.team.or(default_team).ok_or_else(|| {
             anyhow::anyhow!(
                 "Team not specified. Use --team or set defaults.team. List teams with 'logchef teams'."
             )
@@ -154,9 +139,9 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
 
     // Resolve source
     let source_id = if is_interactive {
-        prompt_source_interactive(&client, team_id, &mut cache).await?
+        prompt_source_interactive(client, team_id, &mut cache).await?
     } else {
-        let source_input = args.source.or(ctx.defaults.source.clone()).ok_or_else(|| {
+        let source_input = args.source.or(default_source).ok_or_else(|| {
             anyhow::anyhow!(
                 "Source not specified. Use --source or set defaults.source. List sources with 'logchef sources --team <team>'."
             )
@@ -226,6 +211,15 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         .await
         .context("Query failed")?;
 
+    if args.dry_run {
+        if let Some(sql) = &response.generated_sql {
+            println!("{}", sql);
+        } else {
+            anyhow::bail!("Server did not return generated SQL; cannot --dry-run.");
+        }
+        return Ok(());
+    }
+
     if args.show_sql
         && let Some(sql) = &response.generated_sql
     {
@@ -260,6 +254,9 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                 );
             }
         }
+        OutputFormat::JsonFlat => {
+            print_json_flat(entries)?;
+        }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
             if is_tty {
@@ -271,8 +268,11 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                 );
             }
         }
+        OutputFormat::Msg => {
+            print_msg(entries, &response.columns, false);
+        }
         OutputFormat::Text => {
-            let highlighter = if args.no_highlight {
+            let highlighter = if args.no_highlight || !is_tty {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -306,37 +306,6 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
-}
-
-enum ResolvedContext<'a> {
-    Saved(&'a logchef_core::config::Context, String),
-    Ephemeral(logchef_core::config::Context),
-}
-
-fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<ResolvedContext<'a>> {
-    if let Some(name) = &global.context {
-        let ctx = config
-            .get_context(name)
-            .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", name))?;
-        return Ok(ResolvedContext::Saved(ctx, name.clone()));
-    }
-
-    if let Some(url) = &global.server {
-        if let Some((name, ctx)) = config.find_context_by_url(url) {
-            return Ok(ResolvedContext::Saved(ctx, name.to_string()));
-        }
-        let ephemeral = logchef_core::config::Context::new(url.clone());
-        return Ok(ResolvedContext::Ephemeral(ephemeral));
-    }
-
-    let name = config
-        .current_context_name()
-        .ok_or_else(|| anyhow::anyhow!("No context configured. Run 'logchef auth' first."))?;
-    let ctx = config
-        .current_context()
-        .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
-
-    Ok(ResolvedContext::Saved(ctx, name.to_string()))
 }
 
 fn parse_time_range(since: &str, from: Option<&str>, to: Option<&str>) -> Result<(String, String)> {
@@ -400,6 +369,58 @@ fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
             }
         })
         .collect()
+}
+
+fn print_json_flat(entries: &[logchef_core::api::LogEntry]) -> Result<()> {
+    for entry in entries {
+        println!("{}", serde_json::to_string(&flatten_msg(entry))?);
+    }
+    Ok(())
+}
+
+fn flatten_msg(entry: &logchef_core::api::LogEntry) -> logchef_core::api::LogEntry {
+    let mut out = entry.clone();
+    if let Some(msg) = entry.get("msg").and_then(|value| value.as_str())
+        && let Ok(serde_json::Value::Object(obj)) = serde_json::from_str::<serde_json::Value>(msg)
+    {
+        for (key, value) in obj {
+            out.entry(key).or_insert(value);
+        }
+    }
+    out
+}
+
+fn print_msg(
+    entries: &[logchef_core::api::LogEntry],
+    columns: &[logchef_core::api::Column],
+    fallback_to_first_column: bool,
+) {
+    let field = if entries.iter().any(|entry| entry.contains_key("msg")) {
+        Some("msg")
+    } else if fallback_to_first_column {
+        columns.first().map(|column| column.name.as_str())
+    } else {
+        None
+    };
+
+    let Some(field) = field else {
+        return;
+    };
+
+    for entry in entries {
+        println!(
+            "{}",
+            entry.get(field).map(json_value_to_line).unwrap_or_default()
+        );
+    }
+}
+
+fn json_value_to_line(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(s) => s.clone(),
+        serde_json::Value::Null => String::new(),
+        _ => value.to_string(),
+    }
 }
 
 fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core::api::Column]) {

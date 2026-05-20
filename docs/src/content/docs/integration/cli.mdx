@@ -139,12 +139,25 @@ logchef auth
 This opens your browser to complete the OIDC login flow. The token is automatically saved to your config file.
 
 ```bash
-# Check authentication status
+# Check authentication status (hits the server)
 logchef auth --status
+
+# Print the active context, server URL, and token source (offline — no API call)
+logchef auth current
 
 # Log out (clear stored token)
 logchef auth --logout
 ```
+
+`auth current` is the offline counterpart to `auth --status` and `whoami`. It tells you which server + token a subsequent command will use, without making a network call:
+
+```text
+context: prod
+server:  https://logs.example.com
+token:   set (from config, expires 2026-06-03T07:00:00Z)
+```
+
+When the token comes from `--token` / `LOGCHEF_AUTH_TOKEN`, the line reports the source but omits an expiry (the CLI doesn't validate or parse externally-supplied tokens). Useful for CI / bot debugging when an API call fails and you want to verify the credential is actually picked up before troubleshooting further.
 
 ### API Token Authentication
 
@@ -184,10 +197,11 @@ logchef query 'level="error" and service="api"' --since 1h
 | `--from` | | Absolute start time (ISO 8601) | |
 | `--to` | | Absolute end time (ISO 8601) | |
 | `--limit` | `-l` | Maximum number of results | 100 |
-| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
-| `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `msg`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
-| `--show-sql` | | Display the generated SQL query | `false` |
+| `--show-sql`, `--explain` | | Trace the server-generated SQL on stderr (continues executing) | `false` |
+| `--dry-run` | | Print the server-generated SQL to stdout and exit | `false` |
 
 #### Interactive Mode
 
@@ -212,7 +226,7 @@ This is useful for quick exploration without remembering exact team/source names
 logchef query "" --team "production" --source "nginx-logs"
 
 # Use database.table_name format (copy from UI)
-logchef query "" --team "production" --source "logs.nomad_apps"
+logchef query "" --team "production" --source "logs.app"
 
 # Filter by field value
 logchef query 'status=500' --team "production" --source "nginx-logs"
@@ -222,6 +236,12 @@ logchef query 'method="POST" and status=403' --team "production" --source "nginx
 
 # Search within a time range
 logchef query 'level="error"' --since 1h --limit 50
+
+# Print only the message column
+logchef query 'level="error"' --output msg --limit 5
+
+# Hoist JSON-shaped msg fields to top-level JSON rows
+logchef query 'level="error"' --output json-flat --limit 5
 
 # Hide timestamp from output
 logchef query 'level="error"' --no-timestamp
@@ -235,8 +255,11 @@ logchef query "" --output jsonl | jq '.msg'
 # JSON output is jq-friendly - stats are included in the object
 logchef query "" --output json | jq '{count: .count, time_ms: .stats.execution_time_ms}'
 
-# Show the SQL that will be executed
-logchef query 'method="GET"' --show-sql
+# Trace the generated SQL on stderr while still running
+logchef query 'method="GET"' --show-sql        # or: --explain
+
+# Print the generated SQL to stdout and exit (no results returned)
+logchef query 'method="GET"' --dry-run
 
 # Use absolute time range
 logchef query "" --from "2026-01-14T00:00:00Z" --to "2026-01-14T12:00:00Z"
@@ -256,10 +279,15 @@ logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name (or ID) | (from config) |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--since` | `-s` | Apply a relative time range (e.g., "15m", "1h", "24h") | |
+| `--from` | | Apply an absolute start time (`YYYY-MM-DD HH:MM:SS`) | |
+| `--to` | | Apply an absolute end time (`YYYY-MM-DD HH:MM:SS`) | |
 | `--timeout` | | Query timeout in seconds | 30 |
-| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
-| `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `csv`, `msg`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
+| `--show-sql`, `--explain` | | Trace the resolved SQL on stderr (continues executing) | `false` |
+| `--dry-run` | | Print the resolved SQL to stdout and exit without running it | `false` |
 
 #### Interactive Mode
 
@@ -284,6 +312,12 @@ logchef sql "SELECT * FROM logs.app WHERE _timestamp > now() - INTERVAL 1 HOUR L
 # Aggregation query
 logchef sql "SELECT level, count() as cnt FROM logs.app WHERE _timestamp > now() - INTERVAL 1 DAY GROUP BY level"
 
+# Let the CLI add the source timestamp range
+logchef sql "SELECT level, count() AS count FROM logs.app GROUP BY level" --since 1h
+
+# Place the time expressions explicitly
+logchef sql "SELECT * FROM logs.app WHERE _timestamp BETWEEN __START__ AND __END__" --since 1h
+
 # Read SQL from stdin (useful for complex queries)
 cat query.sql | logchef sql -
 
@@ -302,6 +336,15 @@ EOF
 # Output as JSON
 logchef sql "SELECT * FROM logs.app LIMIT 5" --output json
 
+# Print only msg, or the first selected column when msg is absent
+logchef sql "SELECT msg FROM logs.app LIMIT 5" --output msg
+
+# Trace the resolved SQL on stderr while still running the query
+logchef sql "SELECT count() FROM logs.app WHERE level='error'" --since 1h --explain
+
+# Print the resolved SQL and exit (useful for piping to another tool)
+logchef sql "SELECT count() FROM logs.app WHERE level='error'" --since 1h --dry-run
+
 # Pipe to jq for processing
 logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output jsonl | jq -s 'sort_by(.cnt) | reverse'
 ```
@@ -310,6 +353,70 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 - Use `query` (LogChefQL) for quick filtering with convenient time flags (`--since 1h`)
 - Use `sql` when you need aggregations, joins, CTEs, or full SQL control
 :::
+
+:::note[Auto-injected time predicate]
+`--since` / `--from` / `--to` work on the top-level SELECT. The CLI walks the SQL skipping string literals, quoted identifiers, and parenthesized subqueries, then injects the predicate before the first top-level `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`. For CTEs (`WITH ... AS (...)`) or any case where you want full control, use the `__START__` / `__END__` placeholders explicitly.
+:::
+
+### Source Discovery
+
+The `find` command searches accessible sources for a service, job, host, or message pattern and prints the sources with recent matches.
+
+```bash
+logchef find payments-api
+logchef find payments-api --team production --since 6h
+```
+
+#### Find Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Restrict discovery to one team | All accessible teams |
+| `--source` | `-S` | Restrict discovery to one source | All sources |
+| `--since` | `-s` | Lookback window | `24h` |
+| `--column` | | Candidate column to search; repeatable | Common service/job/host/message columns |
+| `--limit` | | Maximum matching sources to print | `10` |
+| `--timeout` | | Per-source query timeout in seconds | `30` |
+| `--no-samples` | | Skip the per-column sample fetch | `false` |
+| `--output` | | Output format (`text`, `json`, `jsonl`) | `text` |
+
+For each matched source, `find` fires a small follow-up query per matching column to surface sample values:
+
+```text
+team=8 source=11 (logs.app)  matches=1401245 in 30m columns=job_name,msg
+  ↳ job_name: "payments-api" (1400128), "payments-api-uat" (1117)
+  ↳ msg: "payments-api handled request 0a3f9b…" (sample)
+```
+
+Label-shaped columns (`service`, `host`, `job_name`, …) get the top 3 values with counts; free-form text columns (`msg`, `message`, `body`) get a single truncated sample row. Pass `--no-samples` to suppress and get just the summary line. In JSON / JSONL output, samples are included as a `samples: [{column, values: [{value, count?}]}]` field.
+
+Sources that fail to inspect (permissions, schema fetch, or query errors) are silently skipped. The text output reports the skip count on stderr; pass the global `--debug` flag to see per-source diagnostics. If a source consistently times out (e.g. very wide table over a long lookback), raise `--timeout` or narrow with `--since` / `--column`.
+
+### Tail
+
+The `tail` command follows matching LogChefQL results by polling for new rows and streaming them until Ctrl-C or `--max-lines` is reached.
+
+```bash
+logchef tail 'service="payments-api" and msg~"error"' -t production -S app-logs
+logchef tail 'level="error"' --output jsonl --max-lines 20
+```
+
+#### Tail Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name or ID | (from env/config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from env/config) |
+| `--since` | `-s` | Initial lookback window | `30s` |
+| `--interval` | | Poll interval in seconds | `2` |
+| `--limit` | | Maximum rows fetched per poll | `100` |
+| `--max-lines` | | Stop after printing this many rows | |
+| `--output` | | Output format (`text`, `jsonl`, `msg`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
+
+If a single poll returns at `--limit`, tail prints a one-shot stderr warning: between polls, more rows may have arrived than fit in one fetch. Raise `--limit` or shrink `--interval` to keep up.
+
+Highlighting is auto-disabled when stdout is not a TTY, so `logchef tail '...' | jq` and `... > log.txt` produce clean output without `--no-highlight`. The flag still works as an explicit override.
 
 #### Example Output
 
@@ -328,6 +435,53 @@ The highlighting includes:
 - **Key=value pairs** with dimmed keys
 - **Numbers** in cyan
 - **Log levels** color-coded (ERROR=red, WARN=yellow, INFO=green, DEBUG=blue)
+
+### Saved Queries
+
+The `saved-queries` command lists and runs saved queries from the LogChef web UI. You can pass a saved-query ID, exact name, or an explorer URL copied from the browser.
+
+```bash
+# List all saved queries visible to your account
+logchef saved-queries
+
+# Run by numeric ID
+logchef saved-queries 14
+
+# Run by pasted explorer URL
+logchef saved-queries "https://logs.example.com/logs/explore?team=8&source=11&id=14"
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name or ID | Query's resolved team |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | Query's source |
+| `--limit` | `-l` | Override maximum number of results | From saved query |
+| `--var` | `-V` | Set variable value (format: `name=value`) | |
+| `--show-sql` | | Print the resolved query without running it | `false` |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `msg`) | `text` |
+| `--no-highlight` | | Disable syntax highlighting | `false` |
+| `--no-timestamp` | | Hide timestamp from text output | `false` |
+
+#### Saved Query Examples
+
+```bash
+# List as JSON
+logchef saved-queries --output json | jq '.[] | {id, name, source_name}'
+
+# Run by name
+logchef saved-queries "Error Dashboard"
+
+# Substitute variables from the saved query envelope
+logchef saved-queries 14 --var service=api --var level=error
+
+# Print only message text
+logchef saved-queries 14 --output msg
+
+# Dry-run the stored query text
+logchef saved-queries 14 --show-sql
+```
 
 ### Collections
 
@@ -352,7 +506,7 @@ logchef collections "Error Dashboard" --team "production" --source "nginx-logs"
 | `--to` | | Override absolute end time (ISO 8601) | |
 | `--limit` | `-l` | Override maximum number of results | (from collection) |
 | `--var` | | Set variable value (format: `name=value`) | |
-| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `json-flat`, `table`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting | `false` |
 | `--no-timestamp` | | Hide timestamp from text output | `false` |
 | `--show-sql` | | Display the generated SQL query | `false` |
@@ -411,6 +565,15 @@ logchef teams
 | :--- | :--- | :--- |
 | `--output` | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
 
+### Whoami
+
+Show the authenticated user and accessible teams:
+
+```bash
+logchef whoami
+logchef whoami --output json
+```
+
 ### Sources
 
 List sources for a team:
@@ -428,7 +591,9 @@ logchef sources --team "production"
 
 ### Schema
 
-Show the schema (columns and types) for a source:
+Show the schema for a source. If the ClickHouse table has column comments,
+LogChef exposes them as `description` in JSON output and shows them in the text
+table.
 
 ```bash
 logchef schema --team "production" --source "nginx-logs"
@@ -511,8 +676,8 @@ logchef query 'level="error"'
 
 :::tip[Source Resolution]
 The `--source` flag accepts multiple formats:
-- **Friendly name**: `"Kite Nomad"` (case-insensitive)
-- **Table reference**: `logs.nomad_apps` (as shown in UI, case-insensitive)  
+- **Friendly name**: `"Application Logs"` (case-insensitive)
+- **Table reference**: `logs.app` (as shown in UI, case-insensitive)
 - **Numeric ID**: `11`
 
 Lookups are cached locally (`~/.cache/logchef/`) for 10 minutes.
@@ -646,10 +811,16 @@ Add custom regex patterns in your config file:
 
 ### Disable All Highlighting
 
-For piping to other tools or file output:
+The CLI auto-disables ANSI highlighting when stdout is not a TTY, so piping or redirecting just works:
 
 ```bash
-logchef query "" --no-highlight > logs.txt
+logchef query "" > logs.txt
+logchef tail '...' --output jsonl | jq -r .msg
+```
+
+Use `--no-highlight` to opt out explicitly even on an interactive terminal:
+
+```bash
 logchef query "" --no-highlight | grep "ERROR"
 ```
 
@@ -716,6 +887,8 @@ The following options can be used with any command:
 | `--context` / `-c` | `LOGCHEF_CONTEXT` | Use a specific context |
 | `--server` | `LOGCHEF_SERVER_URL` | Override server URL (ephemeral) |
 | `--token` | `LOGCHEF_AUTH_TOKEN` | Override API token |
+| | `LOGCHEF_DEFAULT_TEAM` | Default team when `--team` is omitted |
+| | `LOGCHEF_DEFAULT_SOURCE` | Default source when `--source` is omitted |
 | `--debug` / `-d` | | Enable detailed debug output |
 
 ## Environment Variables
@@ -731,6 +904,11 @@ logchef query 'level="error"' --team "production" --source "app-logs"
 export LOGCHEF_SERVER_URL="https://logs.example.com"
 export LOGCHEF_AUTH_TOKEN="logchef_1_abc123..."
 logchef query 'level="error"' --team "production" --source "app-logs"
+
+# Optional defaults for stateless automation
+export LOGCHEF_DEFAULT_TEAM="production"
+export LOGCHEF_DEFAULT_SOURCE="app-logs"
+logchef query 'level="error"'
 ```
 
 ## Scripting Examples
@@ -783,4 +961,3 @@ for source in "nginx-logs" "app-logs" "api-logs"; do
   logchef query 'level="error"' --source "$source" --limit 5
 done
 ```
-

@@ -1,10 +1,10 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use logchef_core::Config;
-use logchef_core::api::Client;
 use serde::Serialize;
 
 use crate::cli::GlobalArgs;
+use crate::session;
 
 #[derive(Args)]
 pub struct TeamsArgs {
@@ -35,36 +35,13 @@ struct TeamOut {
 
 pub async fn run(args: TeamsArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
-    let resolved = resolve_context(&config, &global)?;
+    let s = session::authed(&config, &global)?;
 
-    let (ctx, ctx_name, is_ephemeral): (&logchef_core::config::Context, String, bool) =
-        match &resolved {
-            ResolvedContext::Saved(ctx, name) => (*ctx, name.clone(), false),
-            ResolvedContext::Ephemeral(ctx) => (ctx, "(ephemeral)".to_string(), true),
-        };
-
-    let client = if let Some(token) = &global.token {
-        Client::from_context(ctx)?.with_token(token.clone())
-    } else {
-        Client::from_context(ctx)?
-    };
-
-    if !ctx.is_authenticated() && global.token.is_none() {
-        if is_ephemeral {
-            anyhow::bail!(
-                "Token required for server '{}'. Use --token or run 'logchef auth --server {}'.",
-                ctx.server_url,
-                ctx.server_url
-            );
-        } else {
-            anyhow::bail!(
-                "Not authenticated for context '{}'. Run 'logchef auth' first.",
-                ctx_name
-            );
-        }
-    }
-
-    let teams = client.list_teams().await.context("Failed to list teams")?;
+    let teams = s
+        .client
+        .list_teams()
+        .await
+        .context("Failed to list teams")?;
     if teams.is_empty() {
         println!("No teams available.");
         return Ok(());
@@ -119,37 +96,6 @@ pub async fn run(args: TeamsArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
-}
-
-enum ResolvedContext<'a> {
-    Saved(&'a logchef_core::config::Context, String),
-    Ephemeral(logchef_core::config::Context),
-}
-
-fn resolve_context<'a>(config: &'a Config, global: &GlobalArgs) -> Result<ResolvedContext<'a>> {
-    if let Some(name) = &global.context {
-        let ctx = config
-            .get_context(name)
-            .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", name))?;
-        return Ok(ResolvedContext::Saved(ctx, name.clone()));
-    }
-
-    if let Some(url) = &global.server {
-        if let Some((name, ctx)) = config.find_context_by_url(url) {
-            return Ok(ResolvedContext::Saved(ctx, name.to_string()));
-        }
-        let ephemeral = logchef_core::config::Context::new(url.clone());
-        return Ok(ResolvedContext::Ephemeral(ephemeral));
-    }
-
-    let name = config
-        .current_context_name()
-        .ok_or_else(|| anyhow::anyhow!("No context configured. Run 'logchef auth' first."))?;
-    let ctx = config
-        .current_context()
-        .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
-
-    Ok(ResolvedContext::Saved(ctx, name.to_string()))
 }
 
 fn truncate_str(s: &str, max_len: usize) -> String {

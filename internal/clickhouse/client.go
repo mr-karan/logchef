@@ -680,6 +680,7 @@ func (c *Client) getBaseTableInfo(ctx context.Context, database, table string) (
 		// Set to nil to indicate extended columns are not available
 		extColumns = nil
 	}
+	columns = withColumnDescriptions(columns, extColumns)
 
 	return &TableInfo{
 		Database:     database,
@@ -890,6 +891,28 @@ func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) *T
 		ExtColumns:   underlyingInfo.ExtColumns,
 		SortKeys:     underlyingInfo.SortKeys,
 	}
+}
+
+func withColumnDescriptions(columns []models.ColumnInfo, extColumns []ExtendedColumnInfo) []models.ColumnInfo {
+	if len(columns) == 0 || len(extColumns) == 0 {
+		return columns
+	}
+
+	commentsByName := make(map[string]string, len(extColumns))
+	for _, col := range extColumns {
+		if col.Comment != "" {
+			commentsByName[col.Name] = col.Comment
+		}
+	}
+
+	if len(commentsByName) == 0 {
+		return columns
+	}
+
+	for i := range columns {
+		columns[i].Description = commentsByName[columns[i].Name]
+	}
+	return columns
 }
 
 // parseEngineParams extracts parameters from engine constructor string.
