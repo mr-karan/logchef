@@ -318,6 +318,32 @@ new **Team Editor** role and restructures the admin URLs for consistency.
 - **Noisy logs reduced** — Session management logs downgraded to DEBUG; structured slog source shortened to `file:line`.
 - **Cursor pointer restored** — Added `cursor-pointer` base rule for all interactive elements (TW4 preflight removed it).
 
+## [1.4.1] - 2026-04-02
+
+Maintenance release on top of v1.4.0.
+
+### Added
+- **Canonical request logging** — Every API request emits a structured log
+  line with the method, path, status, latency, user, and team. Companion
+  activity log tracks user-visible state changes for audit.
+
+### Changed
+- **Product name standardized to "Logchef"** — Replaced lingering "LogChef"
+  casing across the UI, docs, and log lines.
+- **Session management logs dropped from INFO to DEBUG.** Only `user.login`
+  stays at INFO; the rest is audit-grade noise that doesn't belong in the
+  default log stream.
+- **`slog` source field flattened to `file:line`.** Easier to grep, fewer
+  bytes per line.
+
+### Fixed
+- **Team admins can manage members on provisioned (managed) teams** —
+  Previously the managed flag locked them out of all membership edits.
+- **Idle ClickHouse connection cleanup** — Added `IdleTimeout` and a periodic
+  `QueryTracker` sweep so leaked connections don't accumulate.
+- **Provisioning docs moved into the sidebar** with a clearer "Getting
+  started" sub-section so first-time admins actually find them.
+
 ## [1.4.0] - 2026-03-30
 
 ### Added
@@ -342,6 +368,19 @@ new **Team Editor** role and restructures the admin URLs for consistency.
 - **QueryEditor decomposed** — Extracted AiSqlDialog, VariableConfigSheet, and VariablesPanel into focused components (2645→1839 lines).
 - **Context store migrated** — Converted from Options API to Composition API setup function for consistency.
 - **QueryEditor props typed** — Replaced runtime prop definitions with TypeScript interface.
+
+## [CLI v0.1.5] - 2026-05-19
+
+### Added
+- **CSV export & streaming SQL** — New `--output csv` and `--stream` flags on
+  `logchef sql`. Stream large result sets directly without timing out, or
+  pipe them to a CSV file.
+- **v1.6.0 API compatibility** — CLI works with v1.6's de-teamed collections
+  API. Saved queries resolve from your team membership automatically.
+
+### Changed
+- **Product name standardized** — "LogChef" → "Logchef" across all CLI help
+  text, prompts, and the OIDC auth landing page.
 
 ## [CLI v0.1.4] - 2026-02-05
 
@@ -371,6 +410,37 @@ new **Team Editor** role and restructures the admin URLs for consistency.
 - Date picker Now button auto-applies and fixes initial date format issues.
 - JSON strings embedded in log fields now auto-parse for better readability.
 - Table auto-resizes when filter sidebar closes.
+
+## [1.2.2] - 2026-01-27
+
+Maintenance release on top of v1.2.1. Bundles the CLI v0.1.3 bump.
+
+### Changed
+- **`versionString` linker flag now reaches the UI sidebar**, so the version
+  badge matches the running binary instead of falling back to `unknown`.
+- **Alertmanager UI settings removed** — Obsolete after the SMTP / webhook
+  alert delivery work in v1.2.0.
+
+### Fixed
+- **Migration description for the TLS setting** was misleading; corrected.
+- **Changelog template syntax** is now escaped so `{{ ... }}` examples render
+  literally.
+
+## [CLI v0.1.3] - 2026-01-27
+
+### Added
+- **`--timeout` flag on `query`** — Override the server-side query timeout
+  from the CLI.
+- **Timezone auto-detection on `auth`** — `logchef auth` now records your
+  local IANA timezone in the saved context so subsequent queries use it by
+  default. Config gained a `version` field so future schema changes can
+  migrate.
+- **Pre-built binary install docs** — `docs/integration/cli` now lists
+  download URLs for Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows.
+
+### Fixed
+- **LogchefQL prompt example** in the interactive mode used outdated syntax
+  (`level=error` without quotes). Corrected to `level="error"`.
 
 ## [1.2.1] - 2026-01-21
 
@@ -676,9 +746,11 @@ Initial public release.
 
 [1.6.1]: https://github.com/mr-karan/logchef/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mr-karan/logchef/compare/v1.5.0...v1.6.0
-[1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.5.0
+[1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.1...v1.5.0
+[1.4.1]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0
+[1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.2...v1.3.0
+[1.2.2]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/mr-karan/logchef/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mr-karan/logchef/compare/v1.0.0...v1.1.0
