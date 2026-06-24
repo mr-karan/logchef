@@ -15,6 +15,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { useToast } from "@/composables/useToast";
 import { formatDate } from "@/utils/format";
 import { formatScopes, READ_ONLY_SCOPES, type TokenScope } from "@/lib/tokenScopes";
+import { getExpiryStatus, isTokenExpired } from "@/lib/tokenExpiry";
 import { AlertTriangle, Bot, Calendar, Clock, Copy, KeyRound, Loader2, Plus, Trash2, Shield, Users, X } from "lucide-vue-next";
 import type { User } from "@/types";
 import type { UserTeamMembership } from "@/api/teams";
@@ -289,8 +290,18 @@ function closeTokenDisplay() {
               <div v-for="token in tokensFor(account)" :key="token.id" class="flex items-center justify-between rounded-md border p-3">
                 <div class="space-y-1 min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
-                    <span class="font-medium">{{ token.name }}</span>
+                    <span class="font-medium" :class="{ 'text-muted-foreground line-through': isTokenExpired(token.expires_at) }">{{ token.name }}</span>
                     <Badge variant="outline" class="font-mono">{{ token.prefix }}</Badge>
+                    <Badge
+                      :variant="getExpiryStatus(token.expires_at).variant"
+                      :class="{
+                        'bg-destructive text-destructive-foreground': getExpiryStatus(token.expires_at).isExpired,
+                        'border-amber-500 text-amber-700': getExpiryStatus(token.expires_at).variant === 'outline'
+                      }"
+                    >
+                      <AlertTriangle v-if="getExpiryStatus(token.expires_at).isExpired" class="h-3 w-3 mr-1" />
+                      {{ getExpiryStatus(token.expires_at).text }}
+                    </Badge>
                     <Badge variant="secondary">{{ formatScopes(token.scopes) }}</Badge>
                   </div>
                   <div class="flex flex-wrap gap-3 text-xs text-muted-foreground">

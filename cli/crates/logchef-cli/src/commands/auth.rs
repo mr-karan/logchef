@@ -118,8 +118,12 @@ fn token_line(
     if saved_token {
         let mut s = "set (from config".to_string();
         if let Some(ts) = expires_at {
-            s.push_str(", expires ");
+            let expired = ts < chrono::Utc::now();
+            s.push_str(if expired { ", EXPIRED " } else { ", expires " });
             s.push_str(&ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            if expired {
+                s.push_str(" — run `logchef auth` to sign in again");
+            }
         }
         s.push(')');
         return s;

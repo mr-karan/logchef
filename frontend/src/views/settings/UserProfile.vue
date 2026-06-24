@@ -17,6 +17,7 @@ import { useAPITokensStore } from '@/stores/apiTokens'
 import { Loader2, Plus, Trash2, Copy, Key, Calendar, Clock, Shield, AlertTriangle } from 'lucide-vue-next'
 import { formatDate } from '@/utils/format'
 import { formatScopes, READ_ONLY_SCOPES, type TokenScope } from '@/lib/tokenScopes'
+import { getExpiryStatus, isTokenExpired } from '@/lib/tokenExpiry'
 
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
@@ -136,32 +137,6 @@ const closeTokenDisplay = () => {
     createdTokenData.value = null
 }
 
-const isTokenExpired = (expiresAt: string | null | undefined): boolean => {
-    if (!expiresAt) return false
-    return new Date(expiresAt) < new Date()
-}
-
-type BadgeVariant = "default" | "destructive" | "success" | "outline" | "secondary"
-
-const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; variant: BadgeVariant; isExpired: boolean } => {
-    if (!expiresAt) return { text: 'Never expires', variant: 'secondary', isExpired: false }
-    
-    const expiry = new Date(expiresAt)
-    const now = new Date()
-    const isExpired = expiry < now
-    
-    if (isExpired) {
-        return { text: `Expired ${formatDate(expiresAt)}`, variant: 'destructive', isExpired: true }
-    }
-    
-    // Check if expiring soon (within 7 days)
-    const daysUntilExpiry = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-    if (daysUntilExpiry <= 7) {
-        return { text: `Expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? '' : 's'}`, variant: 'outline', isExpired: false }
-    }
-    
-    return { text: `Expires ${formatDate(expiresAt)}`, variant: 'secondary', isExpired: false }
-}
 </script>
 
 <template>

@@ -381,6 +381,7 @@ func convertSQLCAPITokenToModel(sqlcToken sqlc.ApiToken) *models.APIToken {
 
 	if sqlcToken.ExpiresAt.Valid {
 		token.ExpiresAt = &sqlcToken.ExpiresAt.Time
+		token.Expired = time.Now().After(sqlcToken.ExpiresAt.Time)
 	}
 
 	return token

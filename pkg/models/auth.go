@@ -156,6 +156,9 @@ type APIToken struct {
 	Scopes     []TokenScope `json:"scopes" db:"scopes"`
 	LastUsedAt *time.Time   `json:"last_used_at,omitempty" db:"last_used_at"`
 	ExpiresAt  *time.Time   `json:"expires_at,omitempty" db:"expires_at"`
+	// Expired is a computed flag (not persisted) so API consumers don't have to
+	// re-derive expiry from ExpiresAt against the current clock.
+	Expired bool `json:"expired" db:"-"`
 	Timestamps
 }
 

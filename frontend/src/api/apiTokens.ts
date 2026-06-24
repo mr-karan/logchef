@@ -8,6 +8,7 @@ export interface APIToken {
   prefix: string;
   last_used_at?: string;
   expires_at?: string;
+  expired: boolean;
   created_at: string;
   scopes: TokenScope[];
   updated_at: string;
