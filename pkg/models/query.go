@@ -178,6 +178,11 @@ type SavedQuery struct {
 	CreatedAt         time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at" db:"updated_at"`
 	SourceName        string         `json:"source_name,omitempty"`
+	// CanEdit / CanDelete are per-request UI authorization hints for the calling
+	// user. Populated by the server (nil when not computed). CanEdit reflects
+	// delegated collection-editor access; CanDelete is creator/global-admin only.
+	CanEdit   *bool `json:"can_edit,omitempty" db:"-"`
+	CanDelete *bool `json:"can_delete,omitempty" db:"-"`
 }
 
 // ResolvedSavedQuery is the explorer-facing representation of a saved query.

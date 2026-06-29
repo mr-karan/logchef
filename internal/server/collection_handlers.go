@@ -196,6 +196,10 @@ func (s *Server) handleListCollectionItems(c *fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list items", models.GeneralErrorType)
 	}
+	// Per-item edit/delete hints for the Library UI.
+	for i := range items {
+		s.enrichSavedQueryPermissions(c, &items[i].Query, user)
+	}
 	return SendSuccess(c, fiber.StatusOK, items)
 }
 

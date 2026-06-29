@@ -53,6 +53,23 @@ func (s *Server) loadSavedQueryWithVisibility(c *fiber.Ctx) (*models.SavedQuery,
 	return query, user, nil
 }
 
+// enrichSavedQueryPermissions populates CanEdit/CanDelete on the query for the
+// calling user — UI affordance hints. Best-effort: on error it logs and leaves
+// CanEdit nil so the UI falls back to hiding the action.
+func (s *Server) enrichSavedQueryPermissions(c *fiber.Ctx, query *models.SavedQuery, user *models.User) {
+	if query == nil || user == nil {
+		return
+	}
+	canDelete := core.UserCanDeleteSavedQuery(query, user)
+	query.CanDelete = &canDelete
+	canEdit, err := core.UserCanEditSavedQuery(c.Context(), s.sqlite, query, user)
+	if err != nil {
+		s.log.Error("failed to compute can_edit for saved query", "error", err, "query_id", query.ID, "user_id", user.ID)
+		return
+	}
+	query.CanEdit = &canEdit
+}
+
 // handleListSavedQueries lists saved queries the caller can see. Optional ?source_id filter.
 func (s *Server) handleListSavedQueries(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
@@ -131,10 +148,11 @@ func (s *Server) handleCreateSavedQuery(c *fiber.Ctx) error {
 
 // handleGetSavedQuery returns a single saved query.
 func (s *Server) handleGetSavedQuery(c *fiber.Ctx) error {
-	query, _, err := s.loadSavedQueryWithVisibility(c)
+	query, user, err := s.loadSavedQueryWithVisibility(c)
 	if err != nil {
 		return err
 	}
+	s.enrichSavedQueryPermissions(c, query, user)
 	return SendSuccess(c, fiber.StatusOK, query)
 }
 

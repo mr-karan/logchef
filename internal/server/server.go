@@ -238,15 +238,17 @@ func (s *Server) setupRoutes() {
 	collections.Get("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleGetCollection)
 	collections.Get("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleListCollectionMembers)
 	collections.Get("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleListCollectionItems)
-	// Coarse gate: caller must be admin/editor in at least one team (or global admin).
-	// Per-collection ownership is enforced separately inside core/collections.go.
-	collections.Post("/", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleCreateCollection)
-	collections.Put("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleUpdateCollection)
-	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleDeleteCollection)
-	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleAddCollectionMember)
-	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleRemoveCollectionMember)
-	collections.Post("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleAddCollectionItem)
-	collections.Delete("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.requireAnyTeamCollectionMutator, s.handleRemoveCollectionItem)
+	// Ownership-based: any authenticated user can create a collection; all
+	// per-collection mutations are gated on the caller's collection role inside
+	// core/collections.go (owner manages members/items + delete; editor curates).
+	// Collection membership never grants source access — that stays the hard gate.
+	collections.Post("/", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleCreateCollection)
+	collections.Put("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleUpdateCollection)
+	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleDeleteCollection)
+	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionMember)
+	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionMember)
+	collections.Post("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionItem)
+	collections.Delete("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionItem)
 
 	// Saved Queries (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete: creator + global admin (legacy queries
