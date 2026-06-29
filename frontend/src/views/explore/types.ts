@@ -21,6 +21,8 @@ export interface SaveQueryFormData {
   created_from_team_id?: number | null;
   query_type: 'logchefql' | 'sql';
   query_content: string;
+  // Optional collection to pin the query to on save (new queries only).
+  collection_id?: number | null;
 }
 
 // Editor modes

@@ -2,6 +2,7 @@ import { ref, computed, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
+import { useCollectionsStore } from '@/stores/collections'
 import { useContextStore } from '@/stores/context'
 import { useVariableStore } from '@/stores/variables'
 import type { VariableState } from '@/stores/variables'
@@ -35,6 +36,7 @@ export function useSavedQueries(
   const route = useRoute()
   const exploreStore = useExploreStore()
   const savedQueriesStore = useSavedQueriesStore()
+  const collectionsStore = useCollectionsStore()
   const contextStore = useContextStore()
   const variableStore = useVariableStore();
   const { toast } = useToast()
@@ -198,6 +200,13 @@ export function useSavedQueries(
 
         if (formData.source_id) {
           await loadSourceQueries(formData.source_id);
+        }
+
+        // Pin the query to the chosen collection in the same step (inline save).
+        // Best-effort: the query is already saved, so a pin failure shouldn't
+        // surface as a save failure — addItem shows its own error toast.
+        if (formData.collection_id && response.data?.id) {
+          await collectionsStore.addItem(formData.collection_id, { saved_query_id: response.data.id });
         }
         return { success: true, data: response.data };
       } else if (response) {
