@@ -347,7 +347,7 @@ async function handleDeleteCollection() {
                 </td>
                 <td class="px-4 py-3 align-middle">
                   <Button
-                    v-if="isOwner || item.query.can_edit"
+                    v-if="isOwner"
                     variant="ghost"
                     size="icon"
                     class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"

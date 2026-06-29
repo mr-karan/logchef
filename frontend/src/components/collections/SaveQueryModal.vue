@@ -65,7 +65,9 @@ const saveTimestamp = ref(true);
 const selectedCollectionId = ref<string>('');
 const collectionOptions = computed(() => {
   const personal = collectionsStore.personalCollection;
-  const shared = collectionsStore.sharedCollections;
+  // Adding an item is owner-only on the backend, so only offer collections the
+  // caller actually owns — otherwise the save succeeds but the pin 403s silently.
+  const shared = collectionsStore.sharedCollections.filter((c) => c.caller_role === "owner");
   return personal ? [personal, ...shared] : shared;
 });
 const isSubmitting = ref(false);

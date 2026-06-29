@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Plus, Search, User, Users, Loader2 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
@@ -52,11 +52,11 @@ function roleClass(role?: CollectionRole): string {
 }
 
 onMounted(async () => {
+  // Bare /logs/library is the canonical landing — selectedId falls back to the
+  // personal collection, so no redirect is needed. (A redirect here ran only on
+  // fresh mount, which made reload normalize to /library/:id but in-app clicks
+  // stay on /library — a confusing flip. Don't redirect; keep one canonical URL.)
   await store.fetchCollections();
-  // Land on the personal collection when no specific one is requested.
-  if (!Number(route.params.collectionID) && personal.value) {
-    router.replace({ path: `/logs/library/${personal.value.id}`, query: {} });
-  }
 });
 
 // New collection
@@ -84,18 +84,11 @@ async function handleCreate() {
   }
 }
 
-// When the open collection is deleted, drop back to the personal collection.
+// When the open collection is deleted, drop back to the canonical Library URL
+// (which shows the personal collection via the selectedId fallback).
 function onDeleted() {
-  if (personal.value) router.replace({ path: `/logs/library/${personal.value.id}`, query: {} });
-  else router.replace({ path: "/logs/library", query: {} });
+  router.replace({ path: "/logs/library", query: {} });
 }
-
-// Keep landing logic correct if collections arrive after mount.
-watch(personal, (p) => {
-  if (p && !Number(route.params.collectionID)) {
-    router.replace({ path: `/logs/library/${p.id}`, query: {} });
-  }
-});
 </script>
 
 <template>
