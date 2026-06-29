@@ -8,9 +8,18 @@ type CollectionRole string
 const (
 	// CollectionRoleOwner can edit, invite, remove members, delete the collection.
 	CollectionRoleOwner CollectionRole = "owner"
+	// CollectionRoleEditor can edit the saved queries curated in the collection
+	// and add/remove items, but cannot manage members or delete the collection.
+	CollectionRoleEditor CollectionRole = "editor"
 	// CollectionRoleMember can read items and run queries they have source access to.
 	CollectionRoleMember CollectionRole = "member"
 )
+
+// CanCurateItems reports whether a collection role may add/remove items and edit
+// the queries curated in the collection (owners and editors; not plain members).
+func (r CollectionRole) CanCurateItems() bool {
+	return r == CollectionRoleOwner || r == CollectionRoleEditor
+}
 
 // Collection groups saved queries across teams. Each user has a single
 // auto-created personal collection (is_personal = true); other collections

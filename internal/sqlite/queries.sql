@@ -841,3 +841,16 @@ JOIN saved_queries sq ON sq.id = ci.saved_query_id
 JOIN sources s ON s.id = sq.source_id
 WHERE ci.collection_id = ?
 ORDER BY ci.sort_order ASC, ci.created_at ASC;
+
+-- name: CountSharedCollectionEditAccess :one
+-- Count shared (non-personal) collections that contain the given saved query and
+-- in which the user is an owner or editor. A non-zero count means the user has
+-- delegated edit rights on that query via collection membership.
+SELECT COUNT(*)
+FROM collection_items ci
+JOIN collections c ON c.id = ci.collection_id
+JOIN collection_members cm ON cm.collection_id = ci.collection_id
+WHERE ci.saved_query_id = ?
+  AND cm.user_id = ?
+  AND c.is_personal = 0
+  AND cm.role IN ('owner', 'editor');

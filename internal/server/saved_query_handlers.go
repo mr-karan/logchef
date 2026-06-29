@@ -145,8 +145,13 @@ func (s *Server) handleUpdateSavedQuery(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if !core.UserCanEditSavedQuery(query, user) {
-		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can edit this query", models.AuthorizationErrorType)
+	canEdit, editErr := core.UserCanEditSavedQuery(c.Context(), s.sqlite, query, user)
+	if editErr != nil {
+		s.log.Error("failed to check saved query edit access", "error", editErr, "query_id", query.ID, "user_id", user.ID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify edit access", models.GeneralErrorType)
+	}
+	if !canEdit {
+		return SendErrorWithType(c, fiber.StatusForbidden, "You don't have permission to edit this query. You must be its creator, a global admin, or an owner/editor of a collection it belongs to.", models.AuthorizationErrorType)
 	}
 
 	var req struct {
@@ -195,7 +200,7 @@ func (s *Server) handleDeleteSavedQuery(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	if !core.UserCanEditSavedQuery(query, user) {
+	if !core.UserCanDeleteSavedQuery(query, user) {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this query", models.AuthorizationErrorType)
 	}
 

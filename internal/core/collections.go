@@ -185,7 +185,10 @@ func DeleteCollection(ctx context.Context, db *sqlite.DB, log *slog.Logger, coll
 
 // AddCollectionMember invites a user. Owner-only.
 func AddCollectionMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, collectionID int, callerID models.UserID, targetUserID models.UserID, role models.CollectionRole) error {
-	if role != models.CollectionRoleOwner && role != models.CollectionRoleMember {
+	switch role {
+	case models.CollectionRoleOwner, models.CollectionRoleEditor, models.CollectionRoleMember:
+		// valid
+	default:
 		return ErrInvalidCollectionRole
 	}
 	collection, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)

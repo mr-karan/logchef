@@ -42,6 +42,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.countAdminUsersStmt, err = db.PrepareContext(ctx, countAdminUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAdminUsers: %w", err)
 	}
+	if q.countSharedCollectionEditAccessStmt, err = db.PrepareContext(ctx, countSharedCollectionEditAccess); err != nil {
+		return nil, fmt.Errorf("error preparing query CountSharedCollectionEditAccess: %w", err)
+	}
 	if q.countUserSessionsStmt, err = db.PrepareContext(ctx, countUserSessions); err != nil {
 		return nil, fmt.Errorf("error preparing query CountUserSessions: %w", err)
 	}
@@ -390,6 +393,11 @@ func (q *Queries) Close() error {
 	if q.countAdminUsersStmt != nil {
 		if cerr := q.countAdminUsersStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countAdminUsersStmt: %w", cerr)
+		}
+	}
+	if q.countSharedCollectionEditAccessStmt != nil {
+		if cerr := q.countSharedCollectionEditAccessStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countSharedCollectionEditAccessStmt: %w", cerr)
 		}
 	}
 	if q.countUserSessionsStmt != nil {
@@ -962,6 +970,7 @@ type Queries struct {
 	addTeamSourceStmt                   *sql.Stmt
 	completeExportJobStmt               *sql.Stmt
 	countAdminUsersStmt                 *sql.Stmt
+	countSharedCollectionEditAccessStmt *sql.Stmt
 	countUserSessionsStmt               *sql.Stmt
 	createAPITokenStmt                  *sql.Stmt
 	createAlertStmt                     *sql.Stmt
@@ -1079,6 +1088,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		addTeamSourceStmt:                   q.addTeamSourceStmt,
 		completeExportJobStmt:               q.completeExportJobStmt,
 		countAdminUsersStmt:                 q.countAdminUsersStmt,
+		countSharedCollectionEditAccessStmt: q.countSharedCollectionEditAccessStmt,
 		countUserSessionsStmt:               q.countUserSessionsStmt,
 		createAPITokenStmt:                  q.createAPITokenStmt,
 		createAlertStmt:                     q.createAlertStmt,

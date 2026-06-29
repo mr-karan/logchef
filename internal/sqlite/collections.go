@@ -265,3 +265,17 @@ func mapCollectionRow(row sqlc.Collection) *models.Collection {
 	}
 	return c
 }
+
+// UserCanEditSavedQueryViaSharedCollection reports whether the user is an owner
+// or editor of any shared (non-personal) collection that contains the saved
+// query — i.e. has delegated edit rights on it via collection membership.
+func (db *DB) UserCanEditSavedQueryViaSharedCollection(ctx context.Context, userID models.UserID, queryID int) (bool, error) {
+	n, err := db.readQueries.CountSharedCollectionEditAccess(ctx, sqlc.CountSharedCollectionEditAccessParams{
+		SavedQueryID: int64(queryID),
+		UserID:       int64(userID),
+	})
+	if err != nil {
+		return false, fmt.Errorf("error checking shared-collection edit access: %w", err)
+	}
+	return n > 0, nil
+}

@@ -25,6 +25,10 @@ type Querier interface {
 	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
+	// Count shared (non-personal) collections that contain the given saved query and
+	// in which the user is an owner or editor. A non-zero count means the user has
+	// delegated edit rights on that query via collection membership.
+	CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error)
 	// Count active sessions for a user
 	CountUserSessions(ctx context.Context, arg CountUserSessionsParams) (int64, error)
 	// API Tokens

@@ -6,7 +6,10 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func TestUserCanEditSavedQuery(t *testing.T) {
+// TestUserCanDeleteSavedQuery covers the base creator-or-admin authority shared
+// by delete (and the non-delegated part of edit). Delegated collection-editor
+// edit access requires a DB and is exercised by the integration/browser smoke test.
+func TestUserCanDeleteSavedQuery(t *testing.T) {
 	t.Parallel()
 
 	creator := models.UserID(42)
@@ -65,8 +68,8 @@ func TestUserCanEditSavedQuery(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := UserCanEditSavedQuery(tc.query, tc.user); got != tc.want {
-				t.Errorf("UserCanEditSavedQuery(%+v, %+v) = %v, want %v", tc.query, tc.user, got, tc.want)
+			if got := UserCanDeleteSavedQuery(tc.query, tc.user); got != tc.want {
+				t.Errorf("UserCanDeleteSavedQuery(%+v, %+v) = %v, want %v", tc.query, tc.user, got, tc.want)
 			}
 		})
 	}

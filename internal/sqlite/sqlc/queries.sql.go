@@ -156,6 +156,32 @@ func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams
 	return count, err
 }
 
+const countSharedCollectionEditAccess = `-- name: CountSharedCollectionEditAccess :one
+SELECT COUNT(*)
+FROM collection_items ci
+JOIN collections c ON c.id = ci.collection_id
+JOIN collection_members cm ON cm.collection_id = ci.collection_id
+WHERE ci.saved_query_id = ?
+  AND cm.user_id = ?
+  AND c.is_personal = 0
+  AND cm.role IN ('owner', 'editor')
+`
+
+type CountSharedCollectionEditAccessParams struct {
+	SavedQueryID int64 `json:"saved_query_id"`
+	UserID       int64 `json:"user_id"`
+}
+
+// Count shared (non-personal) collections that contain the given saved query and
+// in which the user is an owner or editor. A non-zero count means the user has
+// delegated edit rights on that query via collection membership.
+func (q *Queries) CountSharedCollectionEditAccess(ctx context.Context, arg CountSharedCollectionEditAccessParams) (int64, error) {
+	row := q.queryRow(ctx, q.countSharedCollectionEditAccessStmt, countSharedCollectionEditAccess, arg.SavedQueryID, arg.UserID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countUserSessions = `-- name: CountUserSessions :one
 SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at > ?
 `
