@@ -145,7 +145,7 @@ const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
 
 const navigateToCollectionsView = () => {
   router.push({
-    path: '/logs/saved',
+    path: '/logs/library',
     query: {},
   });
   isOpen.value = false;

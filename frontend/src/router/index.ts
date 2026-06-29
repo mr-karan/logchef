@@ -15,10 +15,9 @@ const lazy = (name: string, loader: () => Promise<unknown>) => () =>
   });
 
 const QUERYLESS_ROUTE_NAMES = new Set([
-  "SavedQueries",
+  "Library",
+  "LibraryCollection",
   "SavedQueryRedirect",
-  "CollectionsList",
-  "CollectionDetail",
 ]);
 
 const routes: RouteRecordRaw[] = [
@@ -75,10 +74,16 @@ const routes: RouteRecordRaw[] = [
         meta: { title: "Log Explorer" },
       },
       {
-        path: "saved",
-        name: "SavedQueries",
-        component: lazy("SavedQueriesView", () => import("@/views/collections/SavedQueriesView.vue")),
-        meta: { title: "Collections" },
+        path: "library",
+        name: "Library",
+        component: lazy("LibraryView", () => import("@/views/library/LibraryView.vue")),
+        meta: { title: "Library" },
+      },
+      {
+        path: "library/:collectionID",
+        name: "LibraryCollection",
+        component: lazy("LibraryView", () => import("@/views/library/LibraryView.vue")),
+        meta: { title: "Library" },
       },
       {
         path: "alerts",
@@ -103,18 +108,6 @@ const routes: RouteRecordRaw[] = [
         name: "SavedQueryRedirect",
         component: lazy("SavedQueryRedirect", () => import("@/views/collections/CollectionRedirect.vue")),
         meta: { title: "Loading Saved Query..." },
-      },
-      {
-        path: "collections",
-        name: "CollectionsList",
-        component: lazy("CollectionsListView", () => import("@/views/collections/CollectionsListView.vue")),
-        meta: { title: "Collections" },
-      },
-      {
-        path: "collections/:collectionID",
-        name: "CollectionDetail",
-        component: lazy("CollectionDetailView", () => import("@/views/collections/CollectionDetailView.vue")),
-        meta: { title: "Collection" },
       },
     ],
   },

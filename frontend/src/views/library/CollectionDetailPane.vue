@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import {
-  ArrowLeft,
   Lock,
   Pencil,
   Trash2,
@@ -56,7 +55,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-const route = useRoute();
+// The selected collection is supplied by the Library shell so this pane can be
+// swapped in place as the rail selection changes — no full-page navigation.
+const props = defineProps<{ collectionId: number }>();
+const emit = defineEmits<{ deleted: [id: number] }>();
+
 const router = useRouter();
 const { toast } = useToast();
 const store = useCollectionsStore();
@@ -65,7 +68,7 @@ const usersStore = useUsersStore();
 const { data } = storeToRefs(store);
 const { isAnyTeamAdmin, isGlobalAdmin, canManageCollection } = useTeamPermissions();
 
-const collectionID = computed(() => Number(route.params.collectionID));
+const collectionID = computed(() => props.collectionId);
 const collection = computed(() => store.collections.find((c) => c.id === collectionID.value) ?? null);
 const items = computed(() => data.value.items[collectionID.value] ?? []);
 const members = computed(() => data.value.members[collectionID.value] ?? []);
@@ -101,12 +104,12 @@ const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !
 
 const showAddMember = ref(false);
 const newMemberId = ref("");
-const newMemberRole = ref<"owner" | "member">("member");
+const newMemberRole = ref<"owner" | "editor" | "member">("member");
 
 // Users available for invite: all users minus current members
 const availableUsers = computed(() => {
-  const memberIds = new Set(members.value.map(m => String(m.user_id)));
-  return (usersStore.users ?? []).filter(u => !memberIds.has(String(u.id)));
+  const memberIds = new Set(members.value.map((m) => String(m.user_id)));
+  return (usersStore.users ?? []).filter((u) => !memberIds.has(String(u.id)));
 });
 
 const showRename = ref(false);
@@ -116,7 +119,7 @@ const renameDescription = ref("");
 const showDeleteDialog = ref(false);
 
 // Confirm-dialog state — populated by handleRemove* and consumed by the
-// ConfirmDialog instance at the bottom of the template.
+// ConfirmDialog instances at the bottom of the template.
 const pendingMemberRemoval = ref<number | null>(null);
 const pendingItemRemoval = ref<number | null>(null);
 
@@ -138,8 +141,7 @@ onMounted(load);
 watch(collectionID, load);
 
 // Load users only when the invite dialog opens, and only if the caller can
-// list users. Guards against 403 spam on collection detail pages when a
-// non-team-admin owner views the page.
+// list users. Guards against 403 spam when a non-team-admin owner opens it.
 watch(showAddMember, async (isOpen) => {
   if (!isOpen || !canListUsers.value) return;
   if (!usersStore.users.length) {
@@ -205,24 +207,15 @@ function openQuery(queryId: number) {
 
 async function handleDeleteCollection() {
   if (!collection.value) return;
-  await store.deleteCollection(collection.value.id);
+  const id = collection.value.id;
+  await store.deleteCollection(id);
   showDeleteDialog.value = false;
-  router.push({ path: '/logs/collections', query: {} });
+  emit("deleted", id);
 }
 </script>
 
 <template>
   <div class="space-y-6">
-    <Button
-      variant="ghost"
-      size="sm"
-      class="-ml-2"
-      @click="router.push({ path: '/logs/collections', query: {} })"
-    >
-      <ArrowLeft class="mr-2 h-4 w-4" />
-      Back to Collections
-    </Button>
-
     <EmptyState
       v-if="!collection && !store.isLoading"
       title="Collection not found"
@@ -288,7 +281,7 @@ async function handleDeleteCollection() {
       </Alert>
 
       <PageSection
-        title="Items"
+        title="Queries"
         description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
         flush
       >
@@ -297,81 +290,83 @@ async function handleDeleteCollection() {
           v-else-if="items.length === 0"
           :icon="FileSearch"
           title="No queries pinned"
-          description="From a saved query you can edit, add it to this collection."
+          description="Open a query in the explorer and use Save to add it here."
         />
-        <table v-else class="w-full text-sm">
-          <thead>
-            <tr class="border-b bg-muted/30">
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">Type</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5">Name</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">Source</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">Updated</th>
-              <th class="w-[40px]"></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr
-              v-for="item in items"
-              :key="item.query.id"
-              class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
-              :class="!item.runnable && 'opacity-60'"
-            >
-              <td class="px-4 py-3 align-middle">
-                <Lock
-                  v-if="!item.runnable"
-                  class="h-4 w-4 text-muted-foreground"
-                  title="You cannot run this query (no source access)."
-                />
-                <Search
-                  v-else-if="item.query.query_type === 'logchefql'"
-                  class="h-4 w-4 text-muted-foreground"
-                  title="LogchefQL"
-                />
-                <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
-              </td>
-              <td class="px-4 py-3 align-middle">
-                <button
-                  type="button"
-                  class="font-medium text-foreground text-left hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
-                  :class="!item.runnable && 'text-muted-foreground'"
-                  :disabled="!item.runnable"
-                  @click="openQuery(item.query.id)"
-                >
-                  {{ item.query.name }}
-                </button>
-                <p v-if="item.query.description" class="text-xs text-muted-foreground mt-0.5 truncate max-w-[400px]">
-                  {{ item.query.description }}
-                </p>
-              </td>
-              <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
-                <span class="inline-block max-w-[130px] truncate align-bottom">
-                  {{ item.query.source_name || `source ${item.query.source_id}` }}
-                </span>
-              </td>
-              <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">
-                {{ formatDate(item.query.updated_at) }}
-              </td>
-              <td class="px-4 py-3 align-middle">
-                <Button
-                  v-if="isOwner"
-                  variant="ghost"
-                  size="icon"
-                  class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                  @click="handleRemoveItem(item.query.id)"
-                  title="Remove from collection"
-                >
-                  <Trash2 class="h-4 w-4 text-destructive" />
-                </Button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+        <div v-else class="overflow-x-auto">
+          <table class="w-full text-sm min-w-[640px]">
+            <thead>
+              <tr class="border-b bg-muted/30">
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">Type</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5">Name</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">Source</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">Updated</th>
+                <th class="w-[60px]"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr
+                v-for="item in items"
+                :key="item.query.id"
+                class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
+                :class="!item.runnable && 'opacity-60'"
+              >
+                <td class="px-4 py-3 align-middle">
+                  <Lock
+                    v-if="!item.runnable"
+                    class="h-4 w-4 text-muted-foreground"
+                    title="You cannot run this query (no source access)."
+                  />
+                  <Search
+                    v-else-if="item.query.query_type === 'logchefql'"
+                    class="h-4 w-4 text-muted-foreground"
+                    title="LogchefQL"
+                  />
+                  <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
+                </td>
+                <td class="px-4 py-3 align-middle">
+                  <button
+                    type="button"
+                    class="font-medium text-foreground text-left hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
+                    :class="!item.runnable && 'text-muted-foreground'"
+                    :disabled="!item.runnable"
+                    @click="openQuery(item.query.id)"
+                  >
+                    {{ item.query.name }}
+                  </button>
+                  <p v-if="item.query.description" class="text-xs text-muted-foreground mt-0.5 truncate max-w-[400px]">
+                    {{ item.query.description }}
+                  </p>
+                </td>
+                <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
+                  <span class="inline-block max-w-[130px] truncate align-bottom">
+                    {{ item.query.source_name || `source ${item.query.source_id}` }}
+                  </span>
+                </td>
+                <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">
+                  {{ formatDate(item.query.updated_at) }}
+                </td>
+                <td class="px-4 py-3 align-middle">
+                  <Button
+                    v-if="isOwner || item.query.can_edit"
+                    variant="ghost"
+                    size="icon"
+                    class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
+                    @click="handleRemoveItem(item.query.id)"
+                    title="Remove from collection"
+                  >
+                    <Trash2 class="h-4 w-4 text-destructive" />
+                  </Button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </PageSection>
 
       <PageSection
         v-if="!collection.is_personal && canListUsers"
         title="Members"
-        description="Owners can invite new members and adjust roles. Members can read items they have source access to."
+        description="Owners manage members and roles; editors can edit the queries inside; members read and run items they have source access to."
         flush
       >
         <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
@@ -418,7 +413,8 @@ async function handleDeleteCollection() {
         <DialogHeader>
           <DialogTitle>Invite member</DialogTitle>
           <DialogDescription>
-            Select a user by email. Owners can fully manage the collection; members can read and run items they have source access to.
+            Owners manage the collection; editors can edit its queries; members read and run items
+            they have source access to. Inviting someone never grants them source access.
           </DialogDescription>
         </DialogHeader>
         <form @submit.prevent="handleAddMember" class="space-y-4">
@@ -448,8 +444,9 @@ async function handleDeleteCollection() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="member">Member</SelectItem>
-                <SelectItem value="owner">Owner</SelectItem>
+                <SelectItem value="member">Member — read &amp; run</SelectItem>
+                <SelectItem value="editor">Editor — edit the queries</SelectItem>
+                <SelectItem value="owner">Owner — manage the collection</SelectItem>
               </SelectContent>
             </Select>
           </div>

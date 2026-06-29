@@ -1,7 +1,7 @@
 import { apiClient } from "./apiUtils";
 import type { SavedQuery } from "./savedQueries";
 
-export type CollectionRole = "owner" | "member";
+export type CollectionRole = "owner" | "editor" | "member";
 
 export interface Collection {
   id: number;

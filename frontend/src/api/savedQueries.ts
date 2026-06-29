@@ -35,6 +35,11 @@ export interface SavedQuery {
   created_at: string;
   updated_at: string;
   source_name?: string;
+  // Per-request authorization hints from the server for the calling user.
+  // can_edit reflects delegated collection-editor access; can_delete is
+  // creator/global-admin only. Absent when the server didn't compute them.
+  can_edit?: boolean;
+  can_delete?: boolean;
 }
 
 export interface ResolvedSavedQuery extends SavedQuery {

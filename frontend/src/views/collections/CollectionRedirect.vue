@@ -73,7 +73,7 @@ watch(
 );
 
 function goToCollections() {
-  router.push('/logs/saved');
+  router.push('/logs/library');
 }
 </script>
 

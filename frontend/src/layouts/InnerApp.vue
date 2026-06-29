@@ -42,7 +42,6 @@ import {
   Users,
   Search,
   Database,
-  ClipboardList,
   UserCircle2,
   UsersRound,
   ChevronsUpDown,
@@ -149,14 +148,9 @@ const mainNavItems: NavItem[] = [
     url: "/logs/explore",
   },
   {
-    title: "Saved Queries",
-    icon: ClipboardList,
-    url: "/logs/saved",
-  },
-  {
-    title: "Collections",
+    title: "Library",
     icon: FolderOpen,
-    url: "/logs/collections",
+    url: "/logs/library",
   },
   {
     title: "Alerts",
