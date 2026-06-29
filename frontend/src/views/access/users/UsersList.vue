@@ -178,8 +178,8 @@ onMounted(() => {
                             </TableCell>
                             <TableCell>
                                 <div class="flex items-center space-x-2">
-                                    <Switch :checked="user.status === 'active'"
-                                        @update:checked="toggleUserStatus(user)" />
+                                    <Switch :model-value="user.status === 'active'"
+                                        @update:model-value="toggleUserStatus(user)" />
                                     <span class="capitalize">{{ user.status }}</span>
                                 </div>
                             </TableCell>

@@ -314,8 +314,8 @@ onMounted(async () => {
                 <!-- Active Toggle -->
                 <TableCell class="py-3">
                   <Switch 
-                    :checked="alert.is_active" 
-                    @update:checked="toggleAlert(alert)"
+                    :model-value="alert.is_active"
+                    @update:model-value="toggleAlert(alert)"
                     :title="alert.is_active ? 'Disable alert' : 'Enable alert'"
                   />
                 </TableCell>

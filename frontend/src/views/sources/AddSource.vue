@@ -456,7 +456,7 @@ const submitForm = async () => {
                                         Use TLS encryption for the ClickHouse native protocol connection
                                     </p>
                                 </div>
-                                <Switch id="tls-toggle" v-model:checked="enableTLS" />
+                                <Switch id="tls-toggle" v-model="enableTLS" />
                             </div>
 
                             <!-- Database and Table Name side by side -->
@@ -484,7 +484,7 @@ const submitForm = async () => {
                                             Enable if your ClickHouse server requires authentication
                                         </p>
                                     </div>
-                                    <Switch :checked="enableAuth" @update:checked="handleAuthToggle" />
+                                    <Switch :model-value="enableAuth" @update:model-value="handleAuthToggle" />
                                 </div>
 
                                 <!-- Auth Fields - Only shown when authentication is enabled -->

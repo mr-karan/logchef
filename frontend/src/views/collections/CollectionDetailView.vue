@@ -13,6 +13,7 @@ import {
   FileSearch,
   Search,
   Database,
+  Users,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import { PageHeader, PageSection, EmptyState, LoadingState } from "@/components/layout";
@@ -68,6 +69,28 @@ const collectionID = computed(() => Number(route.params.collectionID));
 const collection = computed(() => store.collections.find((c) => c.id === collectionID.value) ?? null);
 const items = computed(() => data.value.items[collectionID.value] ?? []);
 const members = computed(() => data.value.members[collectionID.value] ?? []);
+
+const itemCount = computed(() => items.value.length);
+const memberCount = computed(() => members.value.length);
+
+// Initials for the member avatar — first + last initial, falling back to the
+// first character of whatever identifier we have.
+function memberInitials(m: { full_name?: string | null; email?: string | null }): string {
+  const source = (m.full_name || m.email || "").trim();
+  if (!source) return "?";
+  const parts = source.split(/\s+/);
+  const first = parts[0]?.[0] ?? "";
+  const last = parts.length > 1 ? parts[parts.length - 1][0] : "";
+  return (first + last).toUpperCase() || source[0]!.toUpperCase();
+}
+
+// Member user_id is numeric while the auth store user id can be typed/serialized
+// as a string — compare as strings so the "(you)" marker and self-removal guard
+// work regardless.
+function isCurrentUser(userId: number): boolean {
+  const me = authStore.user?.id;
+  return me != null && String(userId) === String(me);
+}
 
 const isOwner = computed(() => canManageCollection(collection.value));
 // Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
@@ -209,8 +232,6 @@ async function handleDeleteCollection() {
     <template v-else-if="collection">
       <PageHeader :title="collection.name" :description="collection.description || undefined">
         <template #actions>
-          <Badge v-if="collection.is_personal" variant="secondary">personal</Badge>
-          <Badge v-else-if="collection.caller_role" variant="outline">{{ collection.caller_role }}</Badge>
           <Button v-if="isOwner && !collection.is_personal" variant="outline" size="sm" @click="openRename">
             <Pencil class="mr-2 h-4 w-4" />
             Rename
@@ -225,6 +246,41 @@ async function handleDeleteCollection() {
           </Button>
         </template>
       </PageHeader>
+
+      <!-- Metadata strip: visibility, caller's role, and at-a-glance counts. -->
+      <div class="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-sm text-muted-foreground">
+        <Badge
+          :variant="collection.is_personal ? 'secondary' : 'outline'"
+          class="inline-flex items-center gap-1 font-medium"
+        >
+          <Lock v-if="collection.is_personal" class="h-3 w-3" />
+          <Users v-else class="h-3 w-3" />
+          {{ collection.is_personal ? "Personal" : "Shared" }}
+        </Badge>
+        <template v-if="collection.caller_role">
+          <span class="text-muted-foreground/40">•</span>
+          <span>
+            Your role
+            <span class="font-medium text-foreground capitalize">{{ collection.caller_role }}</span>
+          </span>
+        </template>
+        <span class="text-muted-foreground/40">•</span>
+        <span>
+          <span class="font-medium text-foreground tabular-nums">{{ itemCount }}</span>
+          {{ itemCount === 1 ? "query" : "queries" }}
+        </span>
+        <template v-if="!collection.is_personal && canListUsers">
+          <span class="text-muted-foreground/40">•</span>
+          <span>
+            <span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span>
+            {{ memberCount === 1 ? "member" : "members" }}
+          </span>
+        </template>
+        <template v-if="collection.created_at">
+          <span class="text-muted-foreground/40">•</span>
+          <span>Created {{ formatDate(collection.created_at) }}</span>
+        </template>
+      </div>
 
       <Alert v-if="store.error" variant="destructive">
         <AlertCircle class="h-4 w-4" />
@@ -260,7 +316,7 @@ async function handleDeleteCollection() {
               class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
               :class="!item.runnable && 'opacity-60'"
             >
-              <td class="px-4 py-3">
+              <td class="px-4 py-3 align-middle">
                 <Lock
                   v-if="!item.runnable"
                   class="h-4 w-4 text-muted-foreground"
@@ -273,7 +329,7 @@ async function handleDeleteCollection() {
                 />
                 <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
               </td>
-              <td class="px-4 py-3">
+              <td class="px-4 py-3 align-middle">
                 <button
                   type="button"
                   class="font-medium text-foreground text-left hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
@@ -287,13 +343,15 @@ async function handleDeleteCollection() {
                   {{ item.query.description }}
                 </p>
               </td>
-              <td class="px-4 py-3 text-muted-foreground text-xs">
-                {{ item.query.source_name || `source ${item.query.source_id}` }}
+              <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
+                <span class="inline-block max-w-[130px] truncate align-bottom">
+                  {{ item.query.source_name || `source ${item.query.source_id}` }}
+                </span>
               </td>
-              <td class="px-4 py-3 text-muted-foreground text-xs">
+              <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">
                 {{ formatDate(item.query.updated_at) }}
               </td>
-              <td class="px-4 py-3">
+              <td class="px-4 py-3 align-middle">
                 <Button
                   v-if="isOwner"
                   variant="ghost"
@@ -318,17 +376,33 @@ async function handleDeleteCollection() {
       >
         <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
         <ul v-else class="divide-y">
-          <li v-for="m in members" :key="m.user_id" class="flex items-center justify-between gap-3 px-4 py-3">
-            <div class="min-w-0">
-              <p class="truncate text-sm font-medium">{{ m.full_name || m.email || `User ${m.user_id}` }}</p>
+          <li v-for="m in members" :key="m.user_id" class="flex items-center gap-3 px-4 py-3">
+            <div
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-xs font-medium text-muted-foreground"
+              aria-hidden="true"
+            >
+              {{ memberInitials(m) }}
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="truncate text-sm font-medium">
+                {{ m.full_name || m.email || `User ${m.user_id}` }}
+                <span v-if="isCurrentUser(m.user_id)" class="ml-1 text-xs font-normal text-muted-foreground">(you)</span>
+              </p>
               <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
             </div>
-            <div class="flex items-center gap-2">
-              <Badge variant="outline">{{ m.role }}</Badge>
+            <Badge
+              :variant="m.role === 'owner' ? 'secondary' : 'outline'"
+              class="w-16 shrink-0 justify-center capitalize"
+            >
+              {{ m.role }}
+            </Badge>
+            <div class="flex w-8 shrink-0 justify-center">
               <Button
-                v-if="isOwner && m.user_id !== authStore.user?.id"
+                v-if="isOwner && !isCurrentUser(m.user_id)"
                 variant="ghost"
                 size="icon"
+                class="h-7 w-7"
+                title="Remove member"
                 @click="handleRemoveMember(m.user_id)"
               >
                 <X class="h-4 w-4 text-destructive" />

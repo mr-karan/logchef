@@ -129,7 +129,17 @@ api.interceptors.response.use(
         error_type: "AuthorizationError",
       };
       showErrorToast(forbiddenError);
-      router.push({ name: "Forbidden" });
+
+      // Only a navigation/page-load (GET) 403 should switch to the full-page
+      // Forbidden view. Inline mutations (PUT/POST/PATCH/DELETE) are recoverable
+      // user actions — e.g. updating a saved query you don't own — and must not
+      // hijack the whole page; the toast is enough. Page-level access is enforced
+      // independently by the router navigation guard (meta.requiresAdmin etc).
+      const method = (error.config?.method || "get").toLowerCase();
+      const isMutation = ["post", "put", "patch", "delete"].includes(method);
+      if (!isMutation) {
+        router.push({ name: "Forbidden" });
+      }
       return Promise.reject(forbiddenError);
     }
 

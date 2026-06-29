@@ -533,7 +533,7 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
 
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
-          <Checkbox id="save_timestamp" v-model:checked="saveTimestamp" />
+          <Checkbox id="save_timestamp" v-model="saveTimestamp" />
           <div class="space-y-1 leading-none">
             <Label for="save_timestamp">Save current timestamp</Label>
             <p class="text-sm text-muted-foreground">

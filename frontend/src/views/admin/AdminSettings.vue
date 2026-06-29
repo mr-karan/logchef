@@ -467,8 +467,8 @@ onMounted(() => {
           <div class="flex items-center space-x-2">
             <Switch
               id="sensitive"
-              :checked="editForm.is_sensitive"
-              @update:checked="editForm.is_sensitive = $event"
+              :model-value="editForm.is_sensitive"
+              @update:model-value="editForm.is_sensitive = $event"
             />
             <Label for="sensitive" class="text-sm font-normal">
               Mark as sensitive (will be masked in responses)

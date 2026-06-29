@@ -59,8 +59,8 @@ const toggleAll = (checked: boolean) => {
             <div class="flex items-center space-x-2 py-1 border-b border-border mb-2">
               <Checkbox
                 id="select-all"
-                :checked="isAllSelected"
-                @update:checked="toggleAll"
+                :model-value="isAllSelected"
+                @update:model-value="toggleAll"
               />
               <Label for="select-all" class="flex-1 cursor-pointer font-medium">
                 Select All
@@ -74,8 +74,8 @@ const toggleAll = (checked: boolean) => {
             >
               <Checkbox
                 :id="column.id"
-                :checked="column.getIsVisible()"
-                @update:checked="(checked) => column.toggleVisibility(!!checked)"
+                :model-value="column.getIsVisible()"
+                @update:model-value="(checked) => column.toggleVisibility(!!checked)"
               />
               <Label :for="column.id" class="flex-1 cursor-pointer">
                 {{ column.id }}

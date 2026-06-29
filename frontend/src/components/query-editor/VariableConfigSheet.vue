@@ -295,10 +295,11 @@ watch(
                     <div v-for="opt in variable.options" :key="opt.value"
                       class="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-muted cursor-pointer"
                       @click="toggleDefaultMultiSelectValue(variable, opt.value)">
+                      <!-- Display-only: the enclosing row's @click drives the toggle.
+                           Binding @update here too would double-toggle on checkbox clicks. -->
                       <Checkbox
-                        :checked="isDefaultMultiSelectValueSelected(variable, opt.value)"
-                        @update:checked="toggleDefaultMultiSelectValue(variable, opt.value)"
-                        class="h-3.5 w-3.5"
+                        :model-value="isDefaultMultiSelectValueSelected(variable, opt.value)"
+                        class="h-3.5 w-3.5 pointer-events-none"
                       />
                       <span class="text-xs">{{ opt.label || opt.value }}</span>
                     </div>
