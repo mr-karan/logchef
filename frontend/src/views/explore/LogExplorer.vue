@@ -1120,6 +1120,17 @@ watch(
           const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
 
           if (loadResult) {
+            // Wait for the source SCHEMA (currentSourceDetails), not just the source
+            // id, before executing — prepareQueryForExecution throws "No source
+            // selected" until the schema loads. The fresh-load path gates on this in
+            // useUrlState.checkReadiness(); this KeepAlive watcher path must too,
+            // otherwise opening a saved query for an un-warmed source races and fails
+            // on first open (works on retry once the schema is cached).
+            for (let i = 0; i < 30; i++) {
+              if (sourcesStore.currentSourceDetails?.id === currentSourceId.value) break;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+
             await handleQueryExecution("query-from-url");
 
             nextTick(() => {
