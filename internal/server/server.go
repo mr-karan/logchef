@@ -12,7 +12,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/metrics"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -28,7 +28,7 @@ import (
 // This structure reflects the refactored approach using direct dependencies instead of services.
 type ServerOptions struct {
 	Config        *config.Config
-	SQLite        *sqlite.DB
+	SQLite        store.Store
 	ClickHouse    *clickhouse.Manager
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
@@ -43,7 +43,7 @@ type ServerOptions struct {
 type Server struct {
 	app           *fiber.App
 	config        *config.Config
-	sqlite        *sqlite.DB
+	sqlite        store.Store
 	clickhouse    *clickhouse.Manager
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
@@ -272,34 +272,31 @@ func (s *Server) setupRoutes() {
 	// --- Team Source Operations (requires team membership) ---
 	// These endpoints allow team members to interact with a specific source linked to their team
 	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamHasSource)
-	{
-		// Get detailed source info including connection status and schema
-		teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
-		teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
+	// Get detailed source info including connection status and schema
+	teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
+	teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
 
-		// Query and explore logs
-		teamSourceOps.Post("/logs/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
-		teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
-		teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
-		teamSourceOps.Post("/exports", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCreateExportJob)
-		teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
-		teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
-		teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
-		teamSourceOps.Post("/logs/histogram", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
-		teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
-		teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
-		teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
+	// Query and explore logs
+	teamSourceOps.Post("/logs/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
+	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
+	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
+	teamSourceOps.Post("/exports", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCreateExportJob)
+	teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
+	teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
+	teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
+	teamSourceOps.Post("/logs/histogram", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
+	teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
+	teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
+	teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
 
-		// LogchefQL endpoints - query language parsing and translation
-		teamSourceOps.Post("/logchefql/translate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
-		teamSourceOps.Post("/logchefql/validate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax
-		teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
+	// LogchefQL endpoints - query language parsing and translation
+	teamSourceOps.Post("/logchefql/translate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
+	teamSourceOps.Post("/logchefql/validate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax
+	teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
-		// Field value exploration for sidebar
-		teamSourceOps.Get("/fields/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
-		teamSourceOps.Get("/fields/:fieldName/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
-
-	}
+	// Field value exploration for sidebar
+	teamSourceOps.Get("/fields/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
+	teamSourceOps.Get("/fields/:fieldName/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin

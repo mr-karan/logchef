@@ -488,18 +488,30 @@ func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sou
 	return count > 0, nil
 }
 
-// ListTeamsForUser retrieves all teams a specific user is a member of, along with their role and team member count.
-// This function now returns the raw sqlc-generated rows, and mapping is handled in the core layer.
-func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]sqlc.ListTeamsForUserRow, error) {
-
-	// This calls the sqlc generated function for the modified "ListTeamsForUser" query
+// ListTeamsForUser retrieves all teams a specific user is a member of, along
+// with their role and the team's member count.
+func (db *DB) ListTeamsForUser(ctx context.Context, userID models.UserID) ([]*models.UserTeamDetails, error) {
 	teamRows, err := db.readQueries.ListTeamsForUser(ctx, int64(userID))
 	if err != nil {
 		db.log.Error("failed to list teams for user (with role and count) from db", "error", err, "user_id", userID)
 		return nil, fmt.Errorf("error listing teams for user (with role and count): %w", err)
 	}
 
-	// No mapping here; return the direct sqlc result.
-	// The core layer (core.ListTeamsForUser) will handle mapping to models.UserTeamDetails.
-	return teamRows, nil
+	userTeams := make([]*models.UserTeamDetails, 0, len(teamRows))
+	for _, row := range teamRows {
+		desc := ""
+		if row.Description.Valid {
+			desc = row.Description.String
+		}
+		userTeams = append(userTeams, &models.UserTeamDetails{
+			ID:          models.TeamID(row.ID),
+			Name:        row.Name,
+			Description: desc,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+			MemberCount: int(row.MemberCount),
+			Role:        models.TeamRole(row.Role),
+		})
+	}
+	return userTeams, nil
 }

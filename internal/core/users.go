@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -99,17 +100,17 @@ func validateUserUpdate(updateData models.User) error {
 // --- User Management Functions ---
 
 // ListUsers returns all interactive users from the database.
-func ListUsers(ctx context.Context, db *sqlite.DB) ([]*models.User, error) {
+func ListUsers(ctx context.Context, db store.StoreOps) ([]*models.User, error) {
 	return db.ListUsers(ctx)
 }
 
 // ListServiceAccounts returns all non-login service principals.
-func ListServiceAccounts(ctx context.Context, db *sqlite.DB) ([]*models.User, error) {
+func ListServiceAccounts(ctx context.Context, db store.StoreOps) ([]*models.User, error) {
 	return db.ListServiceAccounts(ctx)
 }
 
 // CreateServiceAccount creates a service principal that can own scoped API tokens.
-func CreateServiceAccount(ctx context.Context, db *sqlite.DB, log *slog.Logger, name string) (*models.User, error) {
+func CreateServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, name string) (*models.User, error) {
 	name = strings.TrimSpace(name)
 	if len(name) < 2 || len(name) > 100 {
 		return nil, &ValidationError{Field: "name", Message: "service account name must be between 2 and 100 characters"}
@@ -135,7 +136,7 @@ func CreateServiceAccount(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 }
 
 // GetUser retrieves a specific user by their ID.
-func GetUser(ctx context.Context, db *sqlite.DB, id models.UserID) (*models.User, error) {
+func GetUser(ctx context.Context, db store.StoreOps, id models.UserID) (*models.User, error) {
 	user, err := db.GetUser(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
@@ -147,7 +148,7 @@ func GetUser(ctx context.Context, db *sqlite.DB, id models.UserID) (*models.User
 }
 
 // GetUserByEmail retrieves a specific user by their email address.
-func GetUserByEmail(ctx context.Context, db *sqlite.DB, email string) (*models.User, error) {
+func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*models.User, error) {
 	user, err := db.GetUserByEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
@@ -159,7 +160,7 @@ func GetUserByEmail(ctx context.Context, db *sqlite.DB, email string) (*models.U
 }
 
 // CreateUser creates a new user in the database.
-func CreateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
 	// Default role if empty
 	if role == "" {
 		role = models.UserRoleMember
@@ -215,7 +216,7 @@ func CreateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, email, ful
 }
 
 // UpdateUser updates an existing user's information.
-func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, updateData models.User) error {
+func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
 	}
@@ -248,7 +249,7 @@ func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID mod
 	return nil
 }
 
-func applyUserUpdates(ctx context.Context, db *sqlite.DB, existing *models.User, updateData models.User) (bool, error) {
+func applyUserUpdates(ctx context.Context, db store.StoreOps, existing *models.User, updateData models.User) (bool, error) {
 	updated := false
 
 	if updateData.FullName != "" && updateData.FullName != existing.FullName {
@@ -290,7 +291,7 @@ func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error
 	return true, nil
 }
 
-func applyStatusUpdate(ctx context.Context, db *sqlite.DB, existing *models.User, updateData models.User) (bool, error) {
+func applyStatusUpdate(ctx context.Context, db store.StoreOps, existing *models.User, updateData models.User) (bool, error) {
 	if updateData.Status == "" || updateData.Status == existing.Status {
 		return false, nil
 	}
@@ -312,7 +313,7 @@ func applyStatusUpdate(ctx context.Context, db *sqlite.DB, existing *models.User
 }
 
 // DeleteUser deletes a user from the database.
-func DeleteUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.UserID) error {
+func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
 	// Validate user exists
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
@@ -349,7 +350,7 @@ func DeleteUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.
 }
 
 // DeleteServiceAccount deletes a service principal and its tokens/memberships.
-func DeleteServiceAccount(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.UserID) error {
+func DeleteServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
@@ -368,7 +369,7 @@ func DeleteServiceAccount(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 }
 
 // InitAdminUsers ensures that specified admin users exist and are configured correctly.
-func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminEmails []string) error {
+func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, adminEmails []string) error {
 	if len(adminEmails) == 0 {
 		log.Warn("no admin emails configured, skipping admin user initialization")
 		return nil

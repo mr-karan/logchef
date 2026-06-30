@@ -286,7 +286,7 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 
 	// Trigger an immediate check for the newly added source in the background
 	// nolint:contextcheck // Background goroutine intentionally uses its own context
-	go m.checkSource(context.Background(), source.ID)
+	go m.checkSource(context.Background(), source.ID) //nolint:gosec // G118: detached background source check, must outlive request
 
 	return nil
 }
@@ -340,8 +340,8 @@ func (m *Manager) GetClient(sourceID models.SourceID) (*Client, error) {
 }
 
 // GetHealth performs a LIVE health check on a specific source and updates the cache.
-// Deprecated: Use GetCachedHealth for regular status checks.
-// Use this only if an immediate, live check is explicitly required.
+// Prefer GetCachedHealth for regular status checks; use this only when an
+// immediate, live check is explicitly required.
 func (m *Manager) GetHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
 	m.logger.Debug("GetHealth called (performs live check)", "source_id", sourceID)
 	m.checkSource(ctx, sourceID)

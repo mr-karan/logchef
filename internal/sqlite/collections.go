@@ -19,6 +19,10 @@ func (db *DB) CreateCollection(ctx context.Context, name, description string, is
 		CreatedBy:   sql.NullInt64{Int64: int64(createdBy), Valid: true},
 	})
 	if err != nil {
+		if IsUniqueConstraintError(err) {
+			// Hit the one-personal-collection-per-user partial unique index.
+			return nil, fmt.Errorf("%w: personal collection already exists for user %d", ErrUniqueConstraint, createdBy)
+		}
 		db.log.Error("failed to create collection", "error", err, "name", name, "is_personal", isPersonal)
 		return nil, fmt.Errorf("error creating collection: %w", err)
 	}
@@ -84,7 +88,8 @@ func (db *DB) ListCollectionsForUser(ctx context.Context, userID models.UserID) 
 		return nil, fmt.Errorf("error listing collections: %w", err)
 	}
 	out := make([]*models.Collection, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := rows[i]
 		c := &models.Collection{
 			ID:          int(r.ID),
 			Name:        r.Name,
@@ -219,7 +224,8 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 		return nil, fmt.Errorf("error listing collection items: %w", err)
 	}
 	out := make([]*models.CollectionItem, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := rows[i]
 		query := models.SavedQuery{
 			ID:           int(r.QueryID),
 			SourceID:     models.SourceID(r.SourceID),

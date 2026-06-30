@@ -1,6 +1,9 @@
 package models
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 // ErrorType represents the type of error that occurred
 type ErrorType string
@@ -54,12 +57,19 @@ func NewErrorResponse(message string, errorType ErrorType, details any) ErrorRes
 	}
 }
 
-// Error definitions
+// Error definitions. These are the canonical, backend-neutral sentinels that
+// every store implementation (SQLite, Postgres) translates its driver errors
+// into, so callers branch with errors.Is without importing a backend package.
 var (
-	// ErrUserNotFound is returned when a user is not found
-	ErrUserNotFound = errors.New("user not found")
-	// ErrTeamNotFound is returned when a team is not found
-	ErrTeamNotFound = errors.New("team not found")
-	// ErrNotFound is returned when a resource is not found
+	// ErrNotFound is returned when a resource is not found.
 	ErrNotFound = errors.New("not found")
+	// ErrConflict is returned when a write violates a uniqueness or other
+	// constraint (e.g. a duplicate key, or the one-personal-collection-per-user
+	// partial index).
+	ErrConflict = errors.New("conflict")
+	// ErrUserNotFound is a not-found specialized for users; it wraps ErrNotFound
+	// so errors.Is(err, ErrNotFound) holds.
+	ErrUserNotFound = fmt.Errorf("%w: user", ErrNotFound)
+	// ErrTeamNotFound is a not-found specialized for teams; it wraps ErrNotFound.
+	ErrTeamNotFound = fmt.Errorf("%w: team", ErrNotFound)
 )

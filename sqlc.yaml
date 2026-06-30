@@ -36,3 +36,16 @@ sql:
         emit_interface: true
         emit_exact_table_names: false
         emit_empty_slices: true
+  - engine: "postgresql"
+    queries: "internal/store/postgres/queries.sql"
+    schema:
+      - "internal/store/postgres/migrations/000001_init.up.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/store/postgres/sqlc"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true

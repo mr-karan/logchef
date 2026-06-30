@@ -15,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -22,7 +23,7 @@ import (
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config     config.AlertsConfig
-	DB         *sqlite.DB
+	DB         store.Store
 	ClickHouse *clickhouse.Manager
 	Logger     *slog.Logger
 	Sender     AlertSender
@@ -31,7 +32,7 @@ type Options struct {
 // Manager coordinates alert evaluation and dispatches notifications when thresholds are met.
 type Manager struct {
 	cfg        config.AlertsConfig
-	db         *sqlite.DB
+	db         store.Store
 	clickhouse *clickhouse.Manager
 	log        *slog.Logger
 	sender     AlertSender
@@ -388,7 +389,7 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 }
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
-	recipientEmails, missingRecipients, resolutionErr := m.resolveRecipientEmails(ctx, alert)
+	recipientEmails, missingRecipients := m.resolveRecipientEmails(ctx, alert)
 	sourceName := labels["source"]
 
 	return AlertNotification{
@@ -415,14 +416,13 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
 		RecipientEmails:         recipientEmails,
 		MissingRecipientUserIDs: missingRecipients,
-		RecipientResolutionErr:  resolutionErr,
 		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
 }
 
-func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, resolutionErr string) {
+func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID) {
 	if alert == nil || len(alert.RecipientUserIDs) == 0 {
-		return nil, nil, ""
+		return nil, nil
 	}
 
 	// Recipients are users (not team-scoped). Resolve each by id directly.
@@ -447,7 +447,7 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 		emails = append(emails, email)
 	}
 
-	return emails, missing, ""
+	return emails, missing
 }
 
 func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {

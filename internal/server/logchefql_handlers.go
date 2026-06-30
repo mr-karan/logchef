@@ -164,7 +164,7 @@ func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
 // The backend handles the full translation and execution.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/query
-func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
+func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {

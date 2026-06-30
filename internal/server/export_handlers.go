@@ -28,7 +28,7 @@ type exportLogsRequest struct {
 	Variables    []models.TemplateVariable `json:"variables,omitempty"`
 }
 
-func (s *Server) handleExportLogs(c *fiber.Ctx) error {
+func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
@@ -161,7 +161,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error {
 	filename := fmt.Sprintf("logchef-%s.%s", time.Now().UTC().Format("20060102-150405"), extension)
 	c.Status(fiber.StatusOK)
 	c.Set("Content-Type", contentType)
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	c.Set("X-LogChef-Query-ID", queryID)
 	c.Set("X-LogChef-Limit-Applied", strconv.Itoa(buildResult.AppliedLimit))
 
@@ -226,7 +226,7 @@ func isExportFormatAllowed(format string, allowed []string) bool {
 	return false
 }
 
-func exportContentType(format string) (contentType string, extension string) {
+func exportContentType(format string) (contentType, extension string) {
 	if format == "csv" {
 		return "text/csv; charset=utf-8", "csv"
 	}

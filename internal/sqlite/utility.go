@@ -12,10 +12,14 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// Define standard error types
+// Define standard error types. ErrNotFound and ErrUniqueConstraint are aliases
+// of the canonical backend-neutral sentinels in pkg/models, so an error from
+// this package satisfies errors.Is(err, models.ErrNotFound) / models.ErrConflict
+// and the Postgres backend (which returns the models sentinels directly) is
+// classified identically by the helpers below.
 var (
 	// ErrNotFound is returned when a resource is not found
-	ErrNotFound = errors.New("resource not found")
+	ErrNotFound = models.ErrNotFound
 
 	// ErrUserNotFound is returned when a user is not found
 	ErrUserNotFound = fmt.Errorf("%w: user", ErrNotFound)
@@ -33,7 +37,7 @@ var (
 	ErrQueryNotFound = fmt.Errorf("%w: query", ErrNotFound)
 
 	// ErrUniqueConstraint is returned when a unique constraint is violated
-	ErrUniqueConstraint = errors.New("unique constraint violation")
+	ErrUniqueConstraint = models.ErrConflict
 
 	// ErrUserExists is returned when a user with the same email already exists
 	ErrUserExists = fmt.Errorf("%w: user with this email already exists", ErrUniqueConstraint)

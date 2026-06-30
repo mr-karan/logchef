@@ -13,6 +13,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -107,7 +108,7 @@ func sanitizeWebhookURLs(in []string) []string {
 	return out
 }
 
-func validateRecipientUserIDs(ctx context.Context, db *sqlite.DB, recipientIDs []models.UserID) error {
+func validateRecipientUserIDs(ctx context.Context, db store.StoreOps, recipientIDs []models.UserID) error {
 	if len(recipientIDs) == 0 {
 		return nil
 	}
@@ -171,7 +172,7 @@ func validateAlertRequest(req *models.CreateAlertRequest) error {
 }
 
 // CreateAlert creates a new alert rule for the specified source, owned by createdBy.
-func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
+func CreateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -222,7 +223,7 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID 
 }
 
 // GetAlert retrieves a single alert by ID.
-func GetAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
+func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
 	alert, err := db.GetAlert(ctx, alertID)
 	if err != nil {
 		if errors.Is(err, sqlite.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
@@ -235,7 +236,7 @@ func GetAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID mode
 }
 
 // UpdateAlert updates an existing alert rule.
-func UpdateAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+func UpdateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -380,7 +381,7 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 }
 
 // DeleteAlert removes an alert rule.
-func DeleteAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID) error {
+func DeleteAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) error {
 	if err := db.DeleteAlert(ctx, alertID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
 			return ErrAlertNotFound
@@ -393,7 +394,7 @@ func DeleteAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID m
 }
 
 // ListAlertsBySource returns all alerts for a source.
-func ListAlertsBySource(ctx context.Context, db *sqlite.DB, sourceID models.SourceID) ([]*models.Alert, error) {
+func ListAlertsBySource(ctx context.Context, db store.StoreOps, sourceID models.SourceID) ([]*models.Alert, error) {
 	alerts, err := db.ListAlertsBySource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
@@ -402,7 +403,7 @@ func ListAlertsBySource(ctx context.Context, db *sqlite.DB, sourceID models.Sour
 }
 
 // ListAlertsForUser returns alerts the user can see (cross-source).
-func ListAlertsForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.Alert, error) {
+func ListAlertsForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.Alert, error) {
 	alerts, err := db.ListAlertsForUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
@@ -423,7 +424,7 @@ func UserCanEditAlert(alert *models.Alert, user *models.User) bool {
 }
 
 // ListAlertHistory retrieves a limited set of alert history entries.
-func ListAlertHistory(ctx context.Context, db *sqlite.DB, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
+func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
 	history, err := db.ListAlertHistory(ctx, alertID, limit)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
@@ -435,7 +436,7 @@ func ListAlertHistory(ctx context.Context, db *sqlite.DB, alertID models.AlertID
 }
 
 // ResolveAlert manually resolves the most recent triggered history entry.
-func ResolveAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID, message string) error {
+func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, message string) error {
 	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
@@ -454,7 +455,7 @@ func ResolveAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID 
 }
 
 // TestAlertQuery executes a test query to validate alert configuration and show performance metrics.
-func TestAlertQuery(ctx context.Context, db *sqlite.DB, ch *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
+func TestAlertQuery(ctx context.Context, db store.StoreOps, ch *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
 	}

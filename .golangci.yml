@@ -62,6 +62,10 @@ linters:
           - gosec
         text: 'G107: Potential HTTP request made with variable url'
       - linters:
+          - gosec
+        path: pkg/models/auth.go
+        text: 'G101'
+      - linters:
           - gocritic
           - revive
         text: 'TODO:'

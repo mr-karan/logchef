@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // GetSetting retrieves a setting value from the database.
@@ -85,21 +86,41 @@ func (db *DB) GetDurationSetting(ctx context.Context, key string, defaultValue t
 }
 
 // ListSettings retrieves all settings.
-func (db *DB) ListSettings(ctx context.Context) ([]sqlc.SystemSetting, error) {
+func (db *DB) ListSettings(ctx context.Context) ([]*models.SystemSetting, error) {
 	settings, err := db.readQueries.ListSystemSettings(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list settings: %w", err)
 	}
-	return settings, nil
+	return mapSystemSettings(settings), nil
 }
 
 // ListSettingsByCategory retrieves settings for a specific category.
-func (db *DB) ListSettingsByCategory(ctx context.Context, category string) ([]sqlc.SystemSetting, error) {
+func (db *DB) ListSettingsByCategory(ctx context.Context, category string) ([]*models.SystemSetting, error) {
 	settings, err := db.readQueries.ListSystemSettingsByCategory(ctx, category)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list settings for category %s: %w", category, err)
 	}
-	return settings, nil
+	return mapSystemSettings(settings), nil
+}
+
+// mapSystemSettings normalizes sqlc rows into backend-neutral models, folding
+// nullable Description and SQLite's 0/1 IsSensitive into Go-native types.
+func mapSystemSettings(rows []sqlc.SystemSetting) []*models.SystemSetting {
+	out := make([]*models.SystemSetting, 0, len(rows))
+	for i := range rows {
+		r := rows[i]
+		out = append(out, &models.SystemSetting{
+			Key:         r.Key,
+			Value:       r.Value,
+			ValueType:   r.ValueType,
+			Category:    r.Category,
+			Description: r.Description.String,
+			IsSensitive: r.IsSensitive == 1,
+			CreatedAt:   r.CreatedAt,
+			UpdatedAt:   r.UpdatedAt,
+		})
+	}
+	return out
 }
 
 // UpsertSetting inserts or updates a setting.

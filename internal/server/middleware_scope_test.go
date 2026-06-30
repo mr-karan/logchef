@@ -25,7 +25,7 @@ func TestRequireTokenScopeRejectsMissingScope(t *testing.T) {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 
-	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/saved", nil))
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/saved", http.NoBody))
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -47,7 +47,7 @@ func TestRequireTokenScopeAllowsMatchingScope(t *testing.T) {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 
-	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/logs", nil))
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/logs", http.NoBody))
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
@@ -68,7 +68,7 @@ func TestRequireTokenScopeSkipsSessions(t *testing.T) {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 
-	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/saved", nil))
+	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/saved", http.NoBody))
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}

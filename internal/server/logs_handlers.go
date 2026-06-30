@@ -285,7 +285,7 @@ func (qt *QueryTracker) Cleanup() {
 
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
+func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {

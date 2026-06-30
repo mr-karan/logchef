@@ -38,7 +38,7 @@ func TestCheckEmailVerified(t *testing.T) {
 			wantErr:   true,
 		},
 
-		// skip_email_verified_check = true
+		// Cases with skip_email_verified_check enabled.
 		{
 			name:      "skip: email_verified true allows login",
 			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: boolPtr(true)},

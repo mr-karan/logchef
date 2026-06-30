@@ -10,6 +10,7 @@ import (
 	"regexp"
 
 	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -98,7 +99,7 @@ func validateSavedQueryFields(queryType, queryContentJSON string, requireType bo
 }
 
 // CreateSavedQuery persists a new saved query owned by the supplied creator.
-func CreateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryContentJSON, queryType string, createdBy models.UserID) (*models.SavedQuery, error) {
+func CreateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryContentJSON, queryType string, createdBy models.UserID) (*models.SavedQuery, error) {
 	if err := validateSavedQueryFields(queryType, queryContentJSON, true); err != nil {
 		log.Warn("invalid saved query create payload", "error", err, "source_id", sourceID, "name", name)
 		return nil, err
@@ -116,7 +117,7 @@ func CreateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, sour
 }
 
 // GetSavedQuery retrieves a saved query by id.
-func GetSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
+func GetSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
 	q, err := db.GetSavedQuery(ctx, queryID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
@@ -129,7 +130,7 @@ func GetSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID
 }
 
 // UpdateSavedQuery applies new field values to an existing saved query.
-func UpdateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int, name, description, queryContentJSON, queryType string) (*models.SavedQuery, error) {
+func UpdateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int, name, description, queryContentJSON, queryType string) (*models.SavedQuery, error) {
 	if err := validateSavedQueryFields(queryType, queryContentJSON, false); err != nil {
 		log.Warn("invalid saved query update payload", "error", err, "query_id", queryID)
 		return nil, err
@@ -151,7 +152,7 @@ func UpdateSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, quer
 }
 
 // DeleteSavedQuery removes a saved query.
-func DeleteSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, queryID int) error {
+func DeleteSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int) error {
 	if err := db.DeleteSavedQuery(ctx, queryID); err != nil {
 		log.Error("failed to delete saved query", "error", err, "query_id", queryID)
 		return fmt.Errorf("error deleting saved query: %w", err)
@@ -160,7 +161,7 @@ func DeleteSavedQuery(ctx context.Context, db *sqlite.DB, log *slog.Logger, quer
 }
 
 // ListSavedQueriesForUser returns every saved query the user can see (cross-team, source-mediated).
-func ListSavedQueriesForUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID) ([]*models.SavedQuery, error) {
+func ListSavedQueriesForUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID) ([]*models.SavedQuery, error) {
 	queries, err := db.ListSavedQueriesForUser(ctx, userID)
 	if err != nil {
 		log.Error("failed to list saved queries for user", "error", err, "user_id", userID)
@@ -170,7 +171,7 @@ func ListSavedQueriesForUser(ctx context.Context, db *sqlite.DB, log *slog.Logge
 }
 
 // ListSavedQueriesForUserBySource returns saved queries for one source, gated by user access.
-func ListSavedQueriesForUserBySource(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error) {
+func ListSavedQueriesForUserBySource(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error) {
 	queries, err := db.ListSavedQueriesForUserBySource(ctx, userID, sourceID)
 	if err != nil {
 		log.Error("failed to list saved queries for user+source", "error", err, "user_id", userID, "source_id", sourceID)
@@ -195,7 +196,7 @@ func userIsCreatorOrAdmin(query *models.SavedQuery, user *models.User) bool {
 // a global admin, or an owner/editor of a shared collection that contains the
 // query (delegated edit). Source access is enforced separately by the caller
 // (loadSavedQueryWithVisibility), so this only decides edit authority.
-func UserCanEditSavedQuery(ctx context.Context, db *sqlite.DB, query *models.SavedQuery, user *models.User) (bool, error) {
+func UserCanEditSavedQuery(ctx context.Context, db store.StoreOps, query *models.SavedQuery, user *models.User) (bool, error) {
 	if userIsCreatorOrAdmin(query, user) {
 		return true, nil
 	}

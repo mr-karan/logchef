@@ -201,7 +201,7 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 
 	job, err := s.sqlite.GetExportJob(c.Context(), exportID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
 			return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get export job", "error", err, "job_id", exportID)
@@ -224,8 +224,12 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 	defer cancel()
 	defer queryTracker.RemoveQuery(jobID)
 
+	// Job-state writes must record the outcome even if the query context is
+	// canceled, so derive a detached context that still carries request values.
+	bgCtx := context.WithoutCancel(queryCtx)
+
 	now := time.Now().UTC()
-	if err := s.sqlite.UpdateExportJobRunning(context.Background(), jobID, now); err != nil {
+	if err := s.sqlite.UpdateExportJobRunning(bgCtx, jobID, now); err != nil {
 		s.log.Error("failed to mark export job running", "error", err, "job_id", jobID)
 		return
 	}
@@ -242,21 +246,21 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 		}
 		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
 		if err != nil {
-			s.failExportJob(jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
+			s.failExportJob(bgCtx, jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
 			return
 		}
 		processedSQL = substituted
 	}
 
-	source, err := s.sqlite.GetSource(context.Background(), sourceID)
+	source, err := s.sqlite.GetSource(bgCtx, sourceID)
 	if err != nil {
-		s.failExportJob(jobID, "", "Source not found")
+		s.failExportJob(bgCtx, jobID, "", "Source not found")
 		return
 	}
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
 		s.log.Error("failed to get clickhouse client for export job", "source_id", sourceID, "error", err, "job_id", jobID)
-		s.failExportJob(jobID, "", "Failed to get source connection")
+		s.failExportJob(bgCtx, jobID, "", "Failed to get source connection")
 		return
 	}
 
@@ -271,7 +275,7 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
 	if err != nil {
-		s.failExportJob(jobID, "", fmt.Sprintf("Invalid request: %v", err))
+		s.failExportJob(bgCtx, jobID, "", fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
 
@@ -291,7 +295,7 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 	tmpFile, err := os.CreateTemp("", fmt.Sprintf("logchef-export-%s-*."+extension, jobID))
 	if err != nil {
 		s.log.Error("failed to create export artifact", "error", err, "job_id", jobID)
-		s.failExportJob(jobID, "", "Failed to create export artifact")
+		s.failExportJob(bgCtx, jobID, "", "Failed to create export artifact")
 		return
 	}
 	filePath := tmpFile.Name()
@@ -301,26 +305,26 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 	if err != nil {
 		s.log.Error("failed to execute export job", "error", err, "source_id", sourceID, "job_id", jobID)
 		_ = tmpFile.Close()
-		s.failExportJob(jobID, filePath, exportFailureMessage(err))
+		s.failExportJob(bgCtx, jobID, filePath, exportFailureMessage(err))
 		return
 	}
 	if err := tmpFile.Close(); err != nil {
 		s.log.Error("failed to close export artifact", "error", err, "job_id", jobID)
-		s.failExportJob(jobID, filePath, "Failed to finalize export artifact")
+		s.failExportJob(bgCtx, jobID, filePath, "Failed to finalize export artifact")
 		return
 	}
 
 	info, err := os.Stat(filePath)
 	if err != nil {
 		s.log.Error("failed to stat export artifact", "error", err, "job_id", jobID, "path", filePath)
-		s.failExportJob(jobID, filePath, "Failed to finalize export artifact")
+		s.failExportJob(bgCtx, jobID, filePath, "Failed to finalize export artifact")
 		return
 	}
 
 	completedAt := time.Now().UTC()
-	if err := s.sqlite.CompleteExportJob(context.Background(), jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
+	if err := s.sqlite.CompleteExportJob(bgCtx, jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
 		s.log.Error("failed to complete export job", "error", err, "job_id", jobID)
-		s.failExportJob(jobID, filePath, "Failed to persist export metadata")
+		s.failExportJob(bgCtx, jobID, filePath, "Failed to persist export metadata")
 		return
 	}
 
@@ -337,13 +341,13 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 	)
 }
 
-func (s *Server) failExportJob(jobID, filePath, message string) {
+func (s *Server) failExportJob(ctx context.Context, jobID, filePath, message string) {
 	if filePath != "" {
 		if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			s.log.Warn("failed to remove partial export artifact", "error", err, "job_id", jobID, "path", filePath)
 		}
 	}
-	if err := s.sqlite.FailExportJob(context.Background(), jobID, message, time.Now().UTC()); err != nil {
+	if err := s.sqlite.FailExportJob(ctx, jobID, message, time.Now().UTC()); err != nil {
 		s.log.Error("failed to mark export job failed", "error", err, "job_id", jobID)
 	}
 }

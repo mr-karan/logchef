@@ -23,11 +23,30 @@ secure_cookie = false
 # For first boot with a separate frontend origin, set LOGCHEF_SERVER__FRONTEND_URL.
 
 # -----------------------------------------------------------------------------
-# SQLite (required)
+# Metadata backend (optional) — selects where application metadata is stored
+# -----------------------------------------------------------------------------
+[database]
+# "sqlite" (default, single binary, zero-config) or "postgres" (multi-replica/HA).
+# Logs always live in ClickHouse regardless of this setting.
+driver = "sqlite"
+
+# -----------------------------------------------------------------------------
+# SQLite (used when database.driver = "sqlite")
 # -----------------------------------------------------------------------------
 [sqlite]
 # Path to the SQLite database file (relative to the working directory).
 path = "local.db"
+
+# -----------------------------------------------------------------------------
+# Postgres (used when database.driver = "postgres")
+# -----------------------------------------------------------------------------
+# [postgres]
+# Full connection string (required when driver = "postgres").
+# dsn = "postgres://logchef:logchef@localhost:5432/logchef?sslmode=disable"
+# Connection pool tuning (optional; sane defaults applied).
+# max_open_conns = 25
+# max_idle_conns = 5
+# conn_max_lifetime = "30m"
 
 # -----------------------------------------------------------------------------
 # OpenID Connect (OIDC) (required)

@@ -29,7 +29,8 @@ func validateSources(cfg *config.ProvisioningConfig) []string {
 	var errs []string
 	seen := make(map[string]bool)
 
-	for i, src := range cfg.Sources {
+	for i := range cfg.Sources {
+		src := cfg.Sources[i]
 		prefix := fmt.Sprintf("sources[%d] (%q)", i, src.Name)
 
 		if src.Name == "" {
@@ -68,7 +69,8 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 
 	// Build source name set for reference validation
 	sourceNames := make(map[string]bool)
-	for _, src := range cfg.Sources {
+	for i := range cfg.Sources {
+		src := cfg.Sources[i]
 		sourceNames[src.Name] = true
 	}
 

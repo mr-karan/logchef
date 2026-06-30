@@ -70,11 +70,12 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		}
 
 		// Single canonical log line per request
-		if status >= 500 {
+		switch {
+		case status >= 500:
 			log.Error("http", args...)
-		} else if status >= 400 {
+		case status >= 400:
 			log.Warn("http", args...)
-		} else {
+		default:
 			log.Info("http", args...)
 		}
 

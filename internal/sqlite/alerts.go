@@ -272,7 +272,8 @@ func (db *DB) ListAlertHistory(ctx context.Context, alertID models.AlertID, limi
 	}
 
 	history := make([]*models.AlertHistoryEntry, 0, len(rows))
-	for _, row := range rows {
+	for i := range rows {
+		row := rows[i]
 		entry, err := alertHistoryFromSQLC(row)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode alert history: %w", err)
@@ -368,7 +369,8 @@ func alertUpdateParams(alert *models.Alert) (sqlc.UpdateAlertParams, error) {
 
 func alertsFromSQLC(rows []sqlc.Alert) ([]*models.Alert, error) {
 	alerts := make([]*models.Alert, 0, len(rows))
-	for _, row := range rows {
+	for i := range rows {
+		row := rows[i]
 		alert, err := alertFromSQLC(row)
 		if err != nil {
 			return nil, fmt.Errorf("failed to decode alert: %w", err)

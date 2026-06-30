@@ -435,7 +435,7 @@ func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions
 	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
 }
 
-func prepareRowScan(rows driver.Rows) ([]models.ColumnInfo, []interface{}) {
+func prepareRowScan(rows driver.Rows) (columns []models.ColumnInfo, dests []interface{}) {
 	columnTypes := rows.ColumnTypes()
 	columnsInfo := make([]models.ColumnInfo, len(columnTypes))
 	scanDest := make([]interface{}, len(columnTypes))
@@ -453,7 +453,7 @@ func scanRowMap(scanDest []interface{}, columnsInfo []models.ColumnInfo) map[str
 	rowMap := make(map[string]interface{}, len(columnsInfo))
 	for i, col := range columnsInfo {
 		value := reflect.ValueOf(scanDest[i])
-		if !value.IsValid() || (value.Kind() == reflect.Ptr && value.IsNil()) {
+		if !value.IsValid() || (value.Kind() == reflect.Pointer && value.IsNil()) {
 			rowMap[col.Name] = nil
 			continue
 		}

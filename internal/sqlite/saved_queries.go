@@ -105,7 +105,8 @@ func (db *DB) ListSavedQueriesForUser(ctx context.Context, userID models.UserID)
 	}
 
 	queries := make([]*models.SavedQuery, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := rows[i]
 		q := &models.SavedQuery{
 			ID:                int(r.ID),
 			SourceID:          models.SourceID(r.SourceID),
@@ -139,7 +140,8 @@ func (db *DB) ListSavedQueriesForUserBySource(ctx context.Context, userID models
 	}
 
 	queries := make([]*models.SavedQuery, 0, len(rows))
-	for _, r := range rows {
+	for i := range rows {
+		r := rows[i]
 		q := &models.SavedQuery{
 			ID:                int(r.ID),
 			SourceID:          models.SourceID(r.SourceID),

@@ -340,7 +340,7 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 	if translateResult.SelectClause != "" {
 		timestampInSelect := strings.Contains(translateResult.SelectClause, "`"+params.TimestampField+"`")
 		if params.TimestampField != "" && !timestampInSelect {
-			query.WriteString(fmt.Sprintf("`%s`, ", params.TimestampField))
+			fmt.Fprintf(&query, "`%s`, ", params.TimestampField)
 		}
 		query.WriteString(translateResult.SelectClause)
 	} else {
@@ -381,7 +381,7 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 
 	// LIMIT clause
 	if params.Limit > 0 {
-		query.WriteString(fmt.Sprintf("LIMIT %d", params.Limit))
+		fmt.Fprintf(&query, "LIMIT %d", params.Limit)
 	}
 
 	return query.String(), nil
