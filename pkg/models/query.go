@@ -183,6 +183,11 @@ type SavedQuery struct {
 	// delegated collection-editor access; CanDelete is creator/global-admin only.
 	CanEdit   *bool `json:"can_edit,omitempty" db:"-"`
 	CanDelete *bool `json:"can_delete,omitempty" db:"-"`
+	// Runnable indicates the calling user has source access to actually run this
+	// query. Populated on browse lists (esp. the admin "all queries" surface,
+	// where rows for sources the admin can't reach are shown locked). nil when
+	// not computed.
+	Runnable *bool `json:"runnable,omitempty" db:"-"`
 }
 
 // ResolvedSavedQuery is the explorer-facing representation of a saved query.

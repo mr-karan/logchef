@@ -300,6 +300,34 @@ WHERE sq.source_id = ?
   )
 ORDER BY sq.updated_at DESC;
 
+-- name: ListAllSavedQueries :many
+-- List every saved query with no source-access gate: the global-admin browse
+-- surface only. The handler MUST authorize the caller as a global admin before
+-- calling this. Rows the caller cannot run are marked non-runnable in Go.
+SELECT
+    sq.id,
+    sq.source_id,
+    sq.created_from_team_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+ORDER BY sq.updated_at DESC;
+
+-- name: ListAccessibleSourceIDsForUser :many
+-- Source IDs the user can reach via any team, used to mark runnable on browse
+-- lists without an N+1 access check per row.
+SELECT DISTINCT ts.source_id
+FROM team_sources ts
+JOIN team_members tm ON tm.team_id = ts.team_id
+WHERE tm.user_id = ?;
+
 -- Query Shares
 
 -- name: CreateQueryShare :exec

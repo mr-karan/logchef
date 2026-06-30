@@ -127,6 +127,54 @@ func (db *DB) ListSavedQueriesForUser(ctx context.Context, userID models.UserID)
 	return queries, nil
 }
 
+// ListAllSavedQueries returns every saved query with no source-access gate. This
+// is the global-admin browse surface only; callers MUST authorize the admin role
+// before invoking it. Rows the caller can't run are marked non-runnable upstream.
+func (db *DB) ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, error) {
+	rows, err := db.readQueries.ListAllSavedQueries(ctx)
+	if err != nil {
+		db.log.Error("failed to list all saved queries", "error", err)
+		return nil, fmt.Errorf("error listing all saved queries: %w", err)
+	}
+
+	queries := make([]*models.SavedQuery, 0, len(rows))
+	for _, r := range rows {
+		q := &models.SavedQuery{
+			ID:                int(r.ID),
+			SourceID:          models.SourceID(r.SourceID),
+			CreatedFromTeamID: nullableTeamID(r.CreatedFromTeamID),
+			Name:              r.Name,
+			Description:       r.Description.String,
+			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryContent:      r.QueryContent,
+			CreatedAt:         r.CreatedAt,
+			UpdatedAt:         r.UpdatedAt,
+			SourceName:        r.SourceName,
+		}
+		if r.CreatedBy.Valid {
+			uid := models.UserID(r.CreatedBy.Int64)
+			q.CreatedBy = &uid
+		}
+		queries = append(queries, q)
+	}
+	return queries, nil
+}
+
+// ListAccessibleSourceIDsForUser returns the set of source IDs the user can reach
+// via any team, for marking `runnable` on browse lists without an N+1 check.
+func (db *DB) ListAccessibleSourceIDsForUser(ctx context.Context, userID models.UserID) (map[models.SourceID]bool, error) {
+	rows, err := db.readQueries.ListAccessibleSourceIDsForUser(ctx, int64(userID))
+	if err != nil {
+		db.log.Error("failed to list accessible source ids", "error", err, "user_id", userID)
+		return nil, fmt.Errorf("error listing accessible source ids: %w", err)
+	}
+	set := make(map[models.SourceID]bool, len(rows))
+	for _, id := range rows {
+		set[models.SourceID(id)] = true
+	}
+	return set, nil
+}
+
 // ListSavedQueriesForUserBySource returns saved queries for one source, scoped to a user's access.
 func (db *DB) ListSavedQueriesForUserBySource(ctx context.Context, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error) {
 	rows, err := db.readQueries.ListSavedQueriesForUserBySource(ctx, sqlc.ListSavedQueriesForUserBySourceParams{

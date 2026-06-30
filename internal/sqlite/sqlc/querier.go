@@ -139,12 +139,19 @@ type Querier interface {
 	IsUserManaged(ctx context.Context, id int64) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
+	// Source IDs the user can reach via any team, used to mark runnable on browse
+	// lists without an N+1 access check per row.
+	ListAccessibleSourceIDsForUser(ctx context.Context, userID int64) ([]int64, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	// List alerts for one source
 	ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error)
 	// List every alert the user can see (any source attached to any of their teams)
 	ListAlertsForUser(ctx context.Context, userID int64) ([]Alert, error)
+	// List every saved query with no source-access gate: the global-admin browse
+	// surface only. The handler MUST authorize the caller as a global admin before
+	// calling this. Rows the caller cannot run are marked non-runnable in Go.
+	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
 	// List items in a collection with saved-query details
 	ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error)
 	// List members of a collection with user details

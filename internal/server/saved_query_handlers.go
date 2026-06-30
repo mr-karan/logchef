@@ -70,9 +70,29 @@ func (s *Server) enrichSavedQueryPermissions(c *fiber.Ctx, query *models.SavedQu
 	query.CanEdit = &canEdit
 }
 
-// handleListSavedQueries lists saved queries the caller can see. Optional ?source_id filter.
+// handleListSavedQueries lists saved queries the caller can see. Optional
+// ?source_id filter. Optional ?scope=all (global-admin only) returns every saved
+// query across all sources, with each row marked runnable for the caller — the
+// Library "All queries" browse surface. The default response (no scope) is
+// unchanged, since the explorer dropdown and the CLI also consume this endpoint.
 func (s *Server) handleListSavedQueries(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
+
+	if c.Query("scope") == "all" {
+		if user.Role != models.UserRoleAdmin {
+			return SendErrorWithType(c, fiber.StatusForbidden, "Only global admins can list all saved queries", models.AuthorizationErrorType)
+		}
+		queries, err := core.ListAllSavedQueries(c.Context(), s.sqlite, s.log)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list saved queries", models.GeneralErrorType)
+		}
+		// Mark which rows this admin can actually run (source access); the rest are
+		// shown locked. Best-effort — a failure just leaves runnable unset.
+		if err := core.MarkSavedQueriesRunnable(c.Context(), s.sqlite, user.ID, queries); err != nil {
+			s.log.Error("failed to mark saved queries runnable", "error", err, "user_id", user.ID)
+		}
+		return SendSuccess(c, fiber.StatusOK, queries)
+	}
 
 	if sourceParam := c.Query("source_id"); sourceParam != "" {
 		sourceID, err := core.ParseSourceID(sourceParam)

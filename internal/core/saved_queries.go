@@ -179,6 +179,36 @@ func ListSavedQueriesForUserBySource(ctx context.Context, db *sqlite.DB, log *sl
 	return queries, nil
 }
 
+// ListAllSavedQueries returns every saved query with no source-access gate — the
+// global-admin browse surface. The caller MUST be authorized as a global admin
+// by the handler before this is invoked.
+func ListAllSavedQueries(ctx context.Context, db *sqlite.DB, log *slog.Logger) ([]*models.SavedQuery, error) {
+	queries, err := db.ListAllSavedQueries(ctx)
+	if err != nil {
+		log.Error("failed to list all saved queries", "error", err)
+		return nil, fmt.Errorf("error listing all saved queries: %w", err)
+	}
+	return queries, nil
+}
+
+// MarkSavedQueriesRunnable sets Runnable on each query based on whether the user
+// has source access to it, fetching the user's accessible source set once (no
+// per-row access check). Used by browse lists to lock rows the user can't run.
+func MarkSavedQueriesRunnable(ctx context.Context, db *sqlite.DB, userID models.UserID, queries []*models.SavedQuery) error {
+	if len(queries) == 0 {
+		return nil
+	}
+	accessible, err := db.ListAccessibleSourceIDsForUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("error loading accessible sources: %w", err)
+	}
+	for _, q := range queries {
+		runnable := accessible[q.SourceID]
+		q.Runnable = &runnable
+	}
+	return nil
+}
+
 // userIsCreatorOrAdmin is the base edit/delete authority: the query's creator or
 // a global admin. Legacy queries (CreatedBy == nil) qualify only for admins.
 func userIsCreatorOrAdmin(query *models.SavedQuery, user *models.User) bool {
