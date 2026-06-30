@@ -1800,30 +1800,35 @@ SELECT
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
     sq.updated_at AS query_updated_at,
-    s.name AS source_name
+    s.name AS source_name,
+    cu.email AS query_created_by_email,
+    cu.full_name AS query_created_by_name
 FROM collection_items ci
 JOIN saved_queries sq ON sq.id = ci.saved_query_id
 JOIN sources s ON s.id = sq.source_id
+LEFT JOIN users cu ON cu.id = sq.created_by
 WHERE ci.collection_id = ?
 ORDER BY ci.sort_order ASC, ci.created_at ASC
 `
 
 type ListCollectionItemsRow struct {
-	CollectionID     int64          `json:"collection_id"`
-	SavedQueryID     int64          `json:"saved_query_id"`
-	SortOrder        int64          `json:"sort_order"`
-	AddedBy          sql.NullInt64  `json:"added_by"`
-	ItemAddedAt      time.Time      `json:"item_added_at"`
-	QueryID          int64          `json:"query_id"`
-	SourceID         int64          `json:"source_id"`
-	QueryName        string         `json:"query_name"`
-	QueryDescription sql.NullString `json:"query_description"`
-	QueryType        string         `json:"query_type"`
-	QueryContent     string         `json:"query_content"`
-	QueryCreatedBy   sql.NullInt64  `json:"query_created_by"`
-	QueryCreatedAt   time.Time      `json:"query_created_at"`
-	QueryUpdatedAt   time.Time      `json:"query_updated_at"`
-	SourceName       string         `json:"source_name"`
+	CollectionID        int64          `json:"collection_id"`
+	SavedQueryID        int64          `json:"saved_query_id"`
+	SortOrder           int64          `json:"sort_order"`
+	AddedBy             sql.NullInt64  `json:"added_by"`
+	ItemAddedAt         time.Time      `json:"item_added_at"`
+	QueryID             int64          `json:"query_id"`
+	SourceID            int64          `json:"source_id"`
+	QueryName           string         `json:"query_name"`
+	QueryDescription    sql.NullString `json:"query_description"`
+	QueryType           string         `json:"query_type"`
+	QueryContent        string         `json:"query_content"`
+	QueryCreatedBy      sql.NullInt64  `json:"query_created_by"`
+	QueryCreatedAt      time.Time      `json:"query_created_at"`
+	QueryUpdatedAt      time.Time      `json:"query_updated_at"`
+	SourceName          string         `json:"source_name"`
+	QueryCreatedByEmail sql.NullString `json:"query_created_by_email"`
+	QueryCreatedByName  sql.NullString `json:"query_created_by_name"`
 }
 
 // List items in a collection with saved-query details
@@ -1852,6 +1857,8 @@ func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) (
 			&i.QueryCreatedAt,
 			&i.QueryUpdatedAt,
 			&i.SourceName,
+			&i.QueryCreatedByEmail,
+			&i.QueryCreatedByName,
 		); err != nil {
 			return nil, err
 		}

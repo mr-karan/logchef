@@ -32,6 +32,10 @@ export interface SavedQuery {
   query_type: string;
   query_content: string; // JSON string of SavedQueryContent
   created_by?: number | null;
+  // Creator identity for display. Populated where the server joins users
+  // (e.g. collection items); absent for legacy queries with no creator.
+  created_by_name?: string;
+  created_by_email?: string;
   created_at: string;
   updated_at: string;
   source_name?: string;

@@ -863,10 +863,13 @@ SELECT
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
     sq.updated_at AS query_updated_at,
-    s.name AS source_name
+    s.name AS source_name,
+    cu.email AS query_created_by_email,
+    cu.full_name AS query_created_by_name
 FROM collection_items ci
 JOIN saved_queries sq ON sq.id = ci.saved_query_id
 JOIN sources s ON s.id = sq.source_id
+LEFT JOIN users cu ON cu.id = sq.created_by
 WHERE ci.collection_id = ?
 ORDER BY ci.sort_order ASC, ci.created_at ASC;
 

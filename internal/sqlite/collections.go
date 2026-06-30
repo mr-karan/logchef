@@ -235,6 +235,8 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 			uid := models.UserID(r.QueryCreatedBy.Int64)
 			query.CreatedBy = &uid
 		}
+		query.CreatedByName = r.QueryCreatedByName.String
+		query.CreatedByEmail = r.QueryCreatedByEmail.String
 		item := &models.CollectionItem{
 			CollectionID: int(r.CollectionID),
 			SortOrder:    int(r.SortOrder),
