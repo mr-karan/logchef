@@ -336,6 +336,9 @@ func reconcileTeamMembers(ctx context.Context, qtx *sqlc.Queries, teamID int64, 
 				FullName: email, // Placeholder — updated on first OIDC login
 				Role:     globalRole,
 				Status:   "active",
+				// account_type has a CHECK ('human','service'); provisioned
+				// members are always human. Omitting it fails the constraint.
+				AccountType: string(models.UserAccountTypeHuman),
 			})
 			if err != nil {
 				return fmt.Errorf("failed to create user %q: %w", email, err)
