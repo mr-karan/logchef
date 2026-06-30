@@ -583,7 +583,7 @@ async function handleDeleteCollection() {
             Pin an existing saved query to this collection. Only queries you can see are listed.
           </DialogDescription>
         </DialogHeader>
-        <div class="space-y-3">
+        <div class="space-y-3 min-w-0">
           <div class="relative">
             <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
             <Input v-model="addQuerySearch" placeholder="Search queries…" class="pl-8 h-9" />
