@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Plus, Search, User, Users, Loader2 } from "lucide-vue-next";
+import { Plus, Search, User, Users, Loader2, LayoutList } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,6 +17,7 @@ import {
 import { useCollectionsStore } from "@/stores/collections";
 import type { Collection, CollectionRole } from "@/api/collections";
 import CollectionDetailPane from "./CollectionDetailPane.vue";
+import AllQueriesPane from "./AllQueriesPane.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -33,8 +34,13 @@ const filteredShared = computed(() => {
   return shared.value.filter((c) => c.name.toLowerCase().includes(q));
 });
 
+// "All queries" browse mode (?view=all) vs a selected collection.
+const isAllView = computed(() => route.query.view === "all");
+
 // Selected collection = route param, falling back to the personal collection.
+// Null in All-queries mode so the collection pane doesn't render.
 const selectedId = computed(() => {
+  if (isAllView.value) return null;
   const param = Number(route.params.collectionID);
   if (param) return param;
   return personal.value?.id ?? null;
@@ -42,6 +48,9 @@ const selectedId = computed(() => {
 
 function select(id: number) {
   router.push({ path: `/logs/library/${id}`, query: {} });
+}
+function selectAll() {
+  router.push({ path: "/logs/library", query: { view: "all" } });
 }
 
 // Role accent — owner=amber, editor=teal, member=muted. Encodes capability at a glance.
@@ -113,6 +122,17 @@ function onDeleted() {
       </div>
 
       <nav v-else class="space-y-4">
+        <!-- All queries (flat browse — admins see every query, others see theirs) -->
+        <button
+          type="button"
+          class="flex w-full items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors"
+          :class="isAllView ? 'border-primary/40 bg-primary/10' : 'border-transparent hover:bg-muted/60'"
+          @click="selectAll"
+        >
+          <LayoutList class="h-4 w-4 text-muted-foreground shrink-0" />
+          <span class="flex-1 truncate text-sm font-medium">All queries</span>
+        </button>
+
         <!-- Personal -->
         <div v-if="personal">
           <p class="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Yours</p>
@@ -159,10 +179,11 @@ function onDeleted() {
       </nav>
     </aside>
 
-    <!-- Selected collection detail -->
+    <!-- All-queries browse, or the selected collection detail -->
     <section class="min-w-0">
+      <AllQueriesPane v-if="isAllView" />
       <CollectionDetailPane
-        v-if="selectedId"
+        v-else-if="selectedId"
         :key="selectedId"
         :collection-id="selectedId"
         @deleted="onDeleted"

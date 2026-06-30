@@ -189,6 +189,11 @@ func (s *Server) setupRoutes() {
 	admin.Post("/service-accounts/:userID/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleAddServiceAccountToTeam)
 	admin.Delete("/service-accounts/:userID/teams/:teamID", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleRemoveServiceAccountFromTeam)
 
+	// Saved Queries (admin browse): every saved query across all sources, each
+	// marked runnable for the caller. The user-facing /saved-queries stays
+	// source-access-gated and is untouched.
+	admin.Get("/saved-queries", s.requireTokenScope(models.TokenScopeSavedQueriesRead), s.handleAdminListSavedQueries)
+
 	// Global Team Management
 	admin.Get("/teams", s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListTeams)
 	admin.Post("/teams", s.requireTokenScope(models.TokenScopeTeamsWrite), s.handleCreateTeam)

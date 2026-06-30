@@ -40,6 +40,10 @@ export interface SavedQuery {
   // creator/global-admin only. Absent when the server didn't compute them.
   can_edit?: boolean;
   can_delete?: boolean;
+  // runnable = caller has source access to run it. Set on the admin "all queries"
+  // browse list; rows for unreachable sources are shown locked. Absent elsewhere
+  // (treat absent as runnable — those lists are already source-access-gated).
+  runnable?: boolean;
 }
 
 export interface ResolvedSavedQuery extends SavedQuery {
@@ -66,6 +70,12 @@ export const savedQueriesApi = {
         : "/saved-queries";
     return apiClient.get<SavedQuery[]>(url);
   },
+
+  // listAll returns every saved query across all sources (global-admin only),
+  // each marked .runnable for the caller. Backs the Library "All queries" view.
+  // Admin-scoped endpoint (route-level requireAdmin), separate from the
+  // source-gated /saved-queries used by the explorer dropdown + CLI.
+  listAll: () => apiClient.get<SavedQuery[]>("/admin/saved-queries"),
 
   get: (queryId: number | string) =>
     apiClient.get<SavedQuery>(`/saved-queries/${queryId}`),
