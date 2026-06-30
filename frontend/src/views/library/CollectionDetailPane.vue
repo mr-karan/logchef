@@ -100,6 +100,9 @@ function isCurrentUser(userId: number): boolean {
 }
 
 const isOwner = computed(() => canManageCollection(collection.value));
+// Curating the query list (pin/unpin/move) is open to any participant
+// (owner/editor/member), not just owners. Membership is implied by caller_role.
+const canCurate = computed(() => isGlobalAdmin.value || !!collection.value?.caller_role);
 // Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
 // invite UI from owners who lack that role since the dropdown can't be
 // populated without it.
@@ -224,7 +227,9 @@ const addableQueries = computed(() => {
 });
 
 watch(showAddQuery, async (isOpen) => {
-  if (isOpen && savedQueriesStore.queries.length === 0) {
+  // Always fetch the unscoped list on open: the store may hold a source-scoped
+  // result from the explorer, which would hide queries from other sources.
+  if (isOpen) {
     await savedQueriesStore.list();
   }
 });
@@ -239,12 +244,10 @@ async function handleAddQuery(queryId: number) {
 // --- Move a query to a different collection (fix 1) ---
 const pendingMoveQueryId = ref<number | null>(null);
 const moveTargetId = ref("");
-// Collections the caller can move into: any they own (or all, for global admins),
-// excluding the current one.
+// Collections the caller can move into: any they participate in (the store only
+// holds collections they own or are a member of), excluding the current one.
 const moveTargets = computed(() =>
-  store.collections.filter(
-    (c) => c.id !== collectionID.value && (isGlobalAdmin.value || c.caller_role === "owner")
-  )
+  store.collections.filter((c) => c.id !== collectionID.value)
 );
 
 function openMove(queryId: number) {
@@ -345,7 +348,7 @@ async function handleDeleteCollection() {
         description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
         flush
       >
-        <template v-if="isOwner" #actions>
+        <template v-if="canCurate" #actions>
           <Button variant="outline" size="sm" @click="showAddQuery = true">
             <Plus class="mr-2 h-4 w-4" />
             Add query
@@ -424,11 +427,11 @@ async function handleDeleteCollection() {
                 </td>
                 <td class="px-4 py-3 align-middle">
                   <div
-                    v-if="isOwner"
+                    v-if="canCurate"
                     class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Button
-                      v-if="moveTargets.length"
+                      v-if="moveTargets.length && item.runnable"
                       variant="ghost"
                       size="icon"
                       class="h-7 w-7"
