@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -53,7 +53,7 @@ func (db *DB) GetCollection(ctx context.Context, collectionID int) (*models.Coll
 func (db *DB) GetPersonalCollection(ctx context.Context, userID models.UserID) (*models.Collection, error) {
 	row, err := db.readQueries.GetPersonalCollection(ctx, sql.NullInt64{Int64: int64(userID), Valid: true})
 	if err != nil {
-		return nil, err
+		return nil, translateNotFound(err)
 	}
 	return mapCollectionRow(row), nil
 }
@@ -136,7 +136,7 @@ func (db *DB) GetCollectionMember(ctx context.Context, collectionID int, userID 
 		UserID:       int64(userID),
 	})
 	if err != nil {
-		return nil, err
+		return nil, translateNotFound(err)
 	}
 	member := &models.CollectionMember{
 		CollectionID: int(row.CollectionID),

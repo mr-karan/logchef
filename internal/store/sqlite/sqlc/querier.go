@@ -210,7 +210,7 @@ type Querier interface {
 	SetUserManaged(ctx context.Context, arg SetUserManagedParams) error
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
-	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error)
+	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token
@@ -235,7 +235,7 @@ type Querier interface {
 	// Insert or update user preferences
 	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error
 	// Check if a user has access to a source through any team
-	UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (int64, error)
+	UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (bool, error)
 }
 
 var _ Querier = (*Queries)(nil)

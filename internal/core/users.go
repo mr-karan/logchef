@@ -2,14 +2,12 @@ package core
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -35,12 +33,6 @@ var (
 	// Ideally, these would live in teams.go and source.go respectively.
 	ErrTeamNotFound = errors.New("team not found")
 )
-
-// IsNotFoundError checks if the error is a known not found error.
-// TODO: Refactor to check errors defined in respective packages (users, teams, source) if errors are split.
-func IsNotFoundError(err error) bool {
-	return errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrTeamNotFound) || errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) || errors.Is(err, models.ErrUserNotFound) || errors.Is(err, models.ErrTeamNotFound)
-}
 
 // --- User Validation Functions ---
 
@@ -139,7 +131,7 @@ func CreateServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logg
 func GetUser(ctx context.Context, db store.StoreOps, id models.UserID) (*models.User, error) {
 	user, err := db.GetUser(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("error getting user from db: %w", err)
@@ -151,7 +143,7 @@ func GetUser(ctx context.Context, db store.StoreOps, id models.UserID) (*models.
 func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*models.User, error) {
 	user, err := db.GetUserByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("error getting user by email from db: %w", err)
@@ -186,7 +178,7 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 	}
 
 	// Only proceed if it's a "not found" error, which is expected
-	if !sqlite.IsNotFoundError(err) && !sqlite.IsUserNotFoundError(err) {
+	if !models.IsNotFound(err) {
 		log.Error("error checking if user exists", "error", err, "email", email)
 		return nil, fmt.Errorf("error checking if user exists: %w", err)
 	}
@@ -223,7 +215,7 @@ func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID
 
 	existing, err := db.GetUser(ctx, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return ErrUserNotFound
 		}
 		log.Error("failed to get existing user for update", "error", err, "user_id", userID)
@@ -317,7 +309,7 @@ func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id mod
 	// Validate user exists
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return ErrUserNotFound
 		}
 		log.Error("failed to get user for deletion check", "error", err, "user_id", id)
@@ -353,7 +345,7 @@ func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id mod
 func DeleteServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return ErrUserNotFound
 		}
 		return fmt.Errorf("error checking existing service account: %w", err)
@@ -384,7 +376,7 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 			// Log the error type for debugging
 
 			// Check if it's a "not found" error, which means we need to create the user
-			if sqlite.IsNotFoundError(err) || sqlite.IsUserNotFoundError(err) {
+			if models.IsNotFound(err) {
 				// User doesn't exist, create a new admin user
 				log.Debug("creating admin user", "email", email)
 				_, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)

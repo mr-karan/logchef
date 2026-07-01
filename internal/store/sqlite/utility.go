@@ -6,9 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	_ "github.com/mattn/go-sqlite3" // Import the SQLite driver
-
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -49,31 +47,14 @@ var (
 	ErrSourceExists = fmt.Errorf("%w: source with this database/table already exists", ErrUniqueConstraint)
 )
 
-// IsNotFoundError checks if an error is any type of not found error
-func IsNotFoundError(err error) bool {
-	return errors.Is(err, ErrNotFound) ||
-		errors.Is(err, sql.ErrNoRows) ||
-		errors.Is(err, models.ErrNotFound) ||
-		errors.Is(err, models.ErrUserNotFound) ||
-		errors.Is(err, models.ErrTeamNotFound)
-}
-
-// IsUserNotFoundError checks if an error is specifically a user not found error
-func IsUserNotFoundError(err error) bool {
-	return errors.Is(err, ErrUserNotFound) ||
-		(errors.Is(err, ErrNotFound) && strings.Contains(err.Error(), "user"))
-}
-
-// IsTeamNotFoundError checks if an error is specifically a team not found error
-func IsTeamNotFoundError(err error) bool {
-	return errors.Is(err, ErrTeamNotFound) ||
-		(errors.Is(err, ErrNotFound) && strings.Contains(err.Error(), "team"))
-}
-
-// IsSourceNotFoundError checks if an error is specifically a source not found error
-func IsSourceNotFoundError(err error) bool {
-	return errors.Is(err, ErrSourceNotFound) ||
-		(errors.Is(err, ErrNotFound) && strings.Contains(err.Error(), "source"))
+// translateNotFound maps the driver's no-rows error to the backend-neutral
+// models.ErrNotFound sentinel (so callers see the same error as the Postgres
+// backend); any other error passes through unchanged.
+func translateNotFound(err error) error {
+	if errors.Is(err, sql.ErrNoRows) {
+		return models.ErrNotFound
+	}
+	return err
 }
 
 // IsUniqueConstraintError checks if an error is a unique constraint violation

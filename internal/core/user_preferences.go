@@ -3,11 +3,9 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -25,7 +23,7 @@ var DefaultUserPreferences = models.UserPreferences{
 func GetUserPreferences(ctx context.Context, db store.StoreOps, userID models.UserID) (models.UserPreferences, bool, error) {
 	prefsJSON, err := db.GetUserPreferencesJSON(ctx, userID)
 	if err != nil {
-		if errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return DefaultUserPreferences, true, nil
 		}
 		return DefaultUserPreferences, false, fmt.Errorf("failed to load user preferences: %w", err)

@@ -1,13 +1,11 @@
 package server
 
 import (
-	"database/sql"
 	"errors"
 	"strconv"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -34,7 +32,7 @@ func (s *Server) loadAlertWithVisibility(c *fiber.Ctx) (*models.Alert, *models.U
 
 	alert, err := core.GetAlert(c.Context(), s.sqlite, s.log, alertID)
 	if err != nil {
-		if errors.Is(err, core.ErrAlertNotFound) || errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if errors.Is(err, core.ErrAlertNotFound) || models.IsNotFound(err) {
 			return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to load alert", "error", err, "alert_id", alertID)

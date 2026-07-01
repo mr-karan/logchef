@@ -2,11 +2,11 @@ package postgres
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mr-karan/logchef/internal/store/alertjson"
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -361,84 +361,38 @@ func alertHistoryFromSQLC(row sqlc.AlertHistory) (*models.AlertHistoryEntry, err
 	return entry, nil
 }
 
+// Alert JSON columns are (un)marshalled via the shared alertjson codec; only the
+// NULL extraction (pgtype.Text via textStr) is backend-specific.
 func marshalStringMap(m map[string]string) (string, error) {
-	if len(m) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(m)
-	return string(buf), err
+	return alertjson.Encode(m, len(m) == 0)
 }
 
 func unmarshalStringMap(raw pgtype.Text) (map[string]string, error) {
-	s := textStr(raw)
-	if s == "" {
-		return nil, nil
-	}
-	var out map[string]string
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[map[string]string](textStr(raw))
 }
 
 func marshalUserIDs(ids []models.UserID) (string, error) {
-	if len(ids) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(ids)
-	return string(buf), err
+	return alertjson.Encode(ids, len(ids) == 0)
 }
 
 func unmarshalUserIDs(raw pgtype.Text) ([]models.UserID, error) {
-	s := textStr(raw)
-	if s == "" {
-		return nil, nil
-	}
-	var out []models.UserID
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[[]models.UserID](textStr(raw))
 }
 
 func marshalStringSlice(values []string) (string, error) {
-	if len(values) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(values)
-	return string(buf), err
+	return alertjson.Encode(values, len(values) == 0)
 }
 
 func unmarshalStringSlice(raw pgtype.Text) ([]string, error) {
-	s := textStr(raw)
-	if s == "" {
-		return nil, nil
-	}
-	var out []string
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[[]string](textStr(raw))
 }
 
 func marshalPayload(payload map[string]any) (string, error) {
-	if len(payload) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(payload)
-	return string(buf), err
+	return alertjson.Encode(payload, len(payload) == 0)
 }
 
 func unmarshalPayload(raw pgtype.Text) (map[string]any, error) {
-	s := textStr(raw)
-	if s == "" {
-		return nil, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(s), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[map[string]any](textStr(raw))
 }
 
 func float8FromPtr(v *float64) pgtype.Float8 {

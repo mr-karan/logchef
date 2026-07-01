@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -85,7 +84,7 @@ func ListTeams(ctx context.Context, db store.StoreOps) ([]*models.Team, error) {
 func GetTeam(ctx context.Context, db store.StoreOps, id models.TeamID) (*models.Team, error) {
 	team, err := db.GetTeam(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrTeamNotFound
 		}
 		return nil, fmt.Errorf("error getting team from db: %w", err)
@@ -97,7 +96,7 @@ func GetTeam(ctx context.Context, db store.StoreOps, id models.TeamID) (*models.
 func GetTeamByName(ctx context.Context, db store.StoreOps, name string) (*models.Team, error) {
 	team, err := db.GetTeamByName(ctx, name)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrTeamNotFound
 		}
 		return nil, fmt.Errorf("error getting team by name from db: %w", err)
@@ -119,7 +118,7 @@ func CreateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, name, 
 	}
 
 	// Only proceed if it's a "not found" error, which is expected
-	if !sqlite.IsNotFoundError(err) && !sqlite.IsTeamNotFoundError(err) {
+	if !models.IsNotFound(err) {
 		log.Error("error checking if team exists by name", "error", err, "name", name)
 		return nil, fmt.Errorf("error checking if team exists: %w", err)
 	}
@@ -155,7 +154,7 @@ func UpdateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID
 	// Get existing team
 	existing, err := db.GetTeam(ctx, teamID)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrTeamNotFound
 		}
 		log.Error("failed to get existing team for update", "error", err, "team_id", teamID)
@@ -170,7 +169,7 @@ func UpdateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID
 		if err == nil && conflictingTeam.ID != existing.ID {
 			return fmt.Errorf("%w: team with name '%s' already exists", ErrTeamAlreadyExists, updateData.Name) // Use error from users.go
 		}
-		if err != nil && !sqlite.IsNotFoundError(err) && !sqlite.IsTeamNotFoundError(err) {
+		if err != nil && !models.IsNotFound(err) {
 			log.Error("error checking conflicting team name during update", "error", err, "new_name", updateData.Name)
 			return fmt.Errorf("error checking for conflicting name: %w", err)
 		}
@@ -203,7 +202,7 @@ func DeleteTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID
 	// Validate team exists
 	_, err := db.GetTeam(ctx, teamID)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrTeamNotFound
 		}
 		log.Error("failed to get team for deletion check", "error", err, "team_id", teamID)
@@ -383,7 +382,7 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, chDB *clickhouse.Ma
 	if err != nil {
 		// If the error is sql.ErrNoRows (or equivalent), it means no sources are linked.
 		// Return an empty slice and no error in this case.
-		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || sqlite.IsNotFoundError(err) { // Check for standard and custom not found
+		if models.IsNotFound(err) { // Check for standard and custom not found
 			return []*models.Source{}, nil
 		}
 		// Return other database errors

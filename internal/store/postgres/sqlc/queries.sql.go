@@ -2874,8 +2874,10 @@ func (q *Queries) SetUserManaged(ctx context.Context, arg SetUserManagedParams) 
 
 const teamHasSource = `-- name: TeamHasSource :one
 
-SELECT COUNT(*) FROM team_sources
-WHERE team_id = $1 AND source_id = $2
+SELECT EXISTS(
+    SELECT 1 FROM team_sources
+    WHERE team_id = $1 AND source_id = $2
+)
 `
 
 type TeamHasSourceParams struct {
@@ -2885,11 +2887,11 @@ type TeamHasSourceParams struct {
 
 // Additional queries for user-source and team-source access
 // Check if a team has access to a source
-func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (int64, error) {
+func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error) {
 	row := q.db.QueryRow(ctx, teamHasSource, arg.TeamID, arg.SourceID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const touchQueryShare = `-- name: TouchQueryShare :exec
@@ -3271,9 +3273,11 @@ func (q *Queries) UpsertUserPreferences(ctx context.Context, arg UpsertUserPrefe
 }
 
 const userHasSourceAccess = `-- name: UserHasSourceAccess :one
-SELECT COUNT(*) FROM team_members tm
-JOIN team_sources ts ON tm.team_id = ts.team_id
-WHERE tm.user_id = $1 AND ts.source_id = $2
+SELECT EXISTS(
+    SELECT 1 FROM team_members tm
+    JOIN team_sources ts ON tm.team_id = ts.team_id
+    WHERE tm.user_id = $1 AND ts.source_id = $2
+)
 `
 
 type UserHasSourceAccessParams struct {
@@ -3282,9 +3286,9 @@ type UserHasSourceAccessParams struct {
 }
 
 // Check if a user has access to a source through any team
-func (q *Queries) UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (int64, error) {
+func (q *Queries) UserHasSourceAccess(ctx context.Context, arg UserHasSourceAccessParams) (bool, error) {
 	row := q.db.QueryRow(ctx, userHasSourceAccess, arg.UserID, arg.SourceID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }

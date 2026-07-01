@@ -2,14 +2,11 @@ package core
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"regexp"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -120,7 +117,7 @@ func CreateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 func GetSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
 	q, err := db.GetSavedQuery(ctx, queryID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrQueryNotFound
 		}
 		log.Error("failed to get saved query", "error", err, "query_id", queryID)
@@ -137,7 +134,7 @@ func UpdateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 	}
 
 	if err := db.UpdateSavedQuery(ctx, queryID, name, description, queryType, queryContentJSON); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrQueryNotFound
 		}
 		log.Error("failed to update saved query", "error", err, "query_id", queryID)

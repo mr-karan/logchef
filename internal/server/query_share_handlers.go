@@ -2,10 +2,8 @@ package server
 
 import (
 	"crypto/rand"
-	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/url"
 	"strings"
@@ -114,7 +112,7 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 
 	share, err := s.sqlite.GetQueryShare(c.Context(), token)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get query share", "error", err, "token", token)
@@ -165,7 +163,7 @@ func (s *Server) handleDeleteQueryShare(c *fiber.Ctx) error {
 
 	share, err := s.sqlite.GetQueryShare(c.Context(), token)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get share link", models.GeneralErrorType)
@@ -174,7 +172,7 @@ func (s *Server) handleDeleteQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or an admin can delete this share link", models.AuthorizationErrorType)
 	}
 	if err := s.sqlite.DeleteQueryShare(c.Context(), token); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete share link", models.GeneralErrorType)

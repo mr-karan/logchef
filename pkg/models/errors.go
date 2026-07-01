@@ -73,3 +73,12 @@ var (
 	// ErrTeamNotFound is a not-found specialized for teams; it wraps ErrNotFound.
 	ErrTeamNotFound = fmt.Errorf("%w: team", ErrNotFound)
 )
+
+// IsNotFound reports whether err is (or wraps) ErrNotFound. Use this instead of
+// importing a backend package: every store translates its driver's no-rows
+// error into ErrNotFound, so this is the one backend-neutral not-found check.
+func IsNotFound(err error) bool { return errors.Is(err, ErrNotFound) }
+
+// IsConflict reports whether err is (or wraps) ErrConflict — a uniqueness or
+// other constraint violation, translated identically by every store backend.
+func IsConflict(err error) bool { return errors.Is(err, ErrConflict) }

@@ -25,9 +25,11 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
+	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
 	t.Run("Provisioning", func(t *testing.T) { testProvisioning(t, ctx, s) })
 	t.Run("WithTxCommit", func(t *testing.T) { testWithTxCommit(t, ctx, s) })
 	t.Run("WithTxRollback", func(t *testing.T) { testWithTxRollback(t, ctx, s) })
+	t.Run("WithTxNoNesting", func(t *testing.T) { testWithTxNoNesting(t, ctx, s) })
 }
 
 // --- helpers ---
@@ -44,8 +46,9 @@ func mkUser(t *testing.T, ctx context.Context, s store.StoreOps, email string) *
 	return u
 }
 
-func mkSource(t *testing.T, ctx context.Context, s store.StoreOps, db, table string) *models.Source {
+func mkSource(t *testing.T, ctx context.Context, s store.StoreOps, table string) *models.Source {
 	t.Helper()
+	const db = "logs"
 	src := &models.Source{
 		Name:        db + "." + table,
 		MetaTSField: "timestamp",
@@ -55,6 +58,18 @@ func mkSource(t *testing.T, ctx context.Context, s store.StoreOps, db, table str
 		t.Fatalf("CreateSource: %v", err)
 	}
 	return src
+}
+
+// assertSourceAccess checks both source access-check queries report want (with
+// no error) on whichever backend s is — exercising the EXISTS true/false paths.
+func assertSourceAccess(t *testing.T, ctx context.Context, s store.Store, teamID models.TeamID, userID models.UserID, sourceID models.SourceID, want bool) {
+	t.Helper()
+	if ok, err := s.TeamHasSource(ctx, teamID, sourceID); err != nil || ok != want {
+		t.Errorf("TeamHasSource = %v / %v, want %v", ok, err, want)
+	}
+	if ok, err := s.UserHasSourceAccess(ctx, userID, sourceID); err != nil || ok != want {
+		t.Errorf("UserHasSourceAccess = %v / %v, want %v", ok, err, want)
+	}
 }
 
 // --- domains ---
@@ -130,16 +145,15 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListTeamsForUser: %v / %+v", err, teams)
 	}
 
-	src := mkSource(t, ctx, s, "logs", "events")
+	src := mkSource(t, ctx, s, "events")
 	if err := s.AddTeamSource(ctx, team.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
-	if ok, err := s.TeamHasSource(ctx, team.ID, src.ID); err != nil || !ok {
-		t.Errorf("TeamHasSource = %v / %v", ok, err)
-	}
-	if ok, err := s.UserHasSourceAccess(ctx, alice.ID, src.ID); err != nil || !ok {
-		t.Errorf("UserHasSourceAccess = %v / %v", ok, err)
-	}
+	assertSourceAccess(t, ctx, s, team.ID, alice.ID, src.ID, true)
+	// Negative case: an unlinked source must report no access (no error).
+	other := mkSource(t, ctx, s, "unlinked")
+	assertSourceAccess(t, ctx, s, team.ID, alice.ID, other.ID, false)
+
 	srcs, err := s.ListTeamSources(ctx, team.ID)
 	if err != nil || len(srcs) != 1 {
 		t.Fatalf("ListTeamSources: %v / %d", err, len(srcs))
@@ -191,7 +205,7 @@ func testSettings(t *testing.T, ctx context.Context, s store.Store) {
 
 func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Store) {
 	owner := mkUser(t, ctx, s, "sq-owner@test.dev")
-	src := mkSource(t, ctx, s, "logs", "sq")
+	src := mkSource(t, ctx, s, "sq")
 
 	sq, err := s.CreateSavedQuery(ctx, src.ID, nil, "errors", "5xx errors", "logchef", `{"content":"status>=500"}`, &owner.ID)
 	if err != nil || sq.ID == 0 {
@@ -220,10 +234,20 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	if err != nil || len(items) != 1 {
 		t.Fatalf("ListCollectionItems: %v / %d", err, len(items))
 	}
+
+	// Not-found neutrality: both backends return models.ErrNotFound (never a raw
+	// driver error) when a personal collection or membership is absent.
+	stranger := mkUser(t, ctx, s, "sq-stranger@test.dev")
+	if _, err := s.GetPersonalCollection(ctx, stranger.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetPersonalCollection(none) err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.GetCollectionMember(ctx, pc.ID, stranger.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetCollectionMember(non-member) err = %v, want ErrNotFound", err)
+	}
 }
 
 func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
-	src := mkSource(t, ctx, s, "logs", "alerts")
+	src := mkSource(t, ctx, s, "alerts")
 	a := &models.Alert{
 		SourceID:          src.ID,
 		Name:              "5xx spike",
@@ -280,6 +304,31 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
 		t.Fatalf("DeleteAlert: %v", err)
 	}
+
+	// Not-found neutrality: both backends surface models.ErrNotFound (never a
+	// raw driver error) for a missing alert, on read and on mutation.
+	if _, err := s.GetAlert(ctx, a.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetAlert(deleted) err = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteAlert(ctx, a.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("DeleteAlert(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+// testQuerySharesExportJobsNotFound guards backend-neutral not-found on the
+// query-share and export-job read/delete paths — both backends must return
+// models.ErrNotFound for a missing token/id (SQLite previously leaked raw
+// sql.ErrNoRows here while Postgres translated it).
+func testQuerySharesExportJobsNotFound(t *testing.T, ctx context.Context, s store.Store) {
+	if _, err := s.GetQueryShare(ctx, "nonexistent-token"); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetQueryShare(missing) err = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteQueryShare(ctx, "nonexistent-token"); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("DeleteQueryShare(missing) err = %v, want ErrNotFound", err)
+	}
+	if _, err := s.GetExportJob(ctx, "nonexistent-id"); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetExportJob(missing) err = %v, want ErrNotFound", err)
+	}
 }
 
 func testUserPreferences(t *testing.T, ctx context.Context, s store.Store) {
@@ -335,5 +384,25 @@ func testWithTxRollback(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if _, err := s.GetUserByEmail(ctx, email); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("user should not exist after rollback: %v", err)
+	}
+}
+
+// testWithTxNoNesting asserts that re-entering WithTx from inside a transaction
+// is rejected rather than deadlocking (SQLite's single write connection) or
+// nil-panicking (Postgres's nil tx-scoped pool). The tx handle is StoreOps,
+// which has no WithTx; a caller can only nest by asserting it back to TxRunner.
+func testWithTxNoNesting(t *testing.T, ctx context.Context, s store.Store) {
+	err := s.WithTx(ctx, func(tx store.StoreOps) error {
+		txr, ok := tx.(store.TxRunner)
+		if !ok {
+			t.Fatal("tx handle does not expose TxRunner")
+		}
+		if nestErr := txr.WithTx(ctx, func(store.StoreOps) error { return nil }); nestErr == nil {
+			t.Error("nested WithTx should return an error, got nil")
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("outer WithTx: %v", err)
 	}
 }

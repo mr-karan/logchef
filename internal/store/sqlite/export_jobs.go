@@ -3,10 +3,11 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -32,8 +33,8 @@ func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error 
 func (db *DB) GetExportJob(ctx context.Context, id string) (*models.ExportJob, error) {
 	row, err := db.readQueries.GetExportJob(ctx, id)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, models.ErrNotFound
 		}
 		db.log.Error("failed to get export job", "error", err, "job_id", id)
 		return nil, fmt.Errorf("error getting export job: %w", err)
@@ -48,8 +49,8 @@ func (db *DB) UpdateExportJobRunning(ctx context.Context, id string, updatedAt t
 		ID:        id,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		db.log.Error("failed to mark export job running", "error", err, "job_id", id)
 		return fmt.Errorf("error updating export job status: %w", err)
@@ -69,8 +70,8 @@ func (db *DB) CompleteExportJob(ctx context.Context, id, fileName, filePath stri
 		ID:           id,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		db.log.Error("failed to complete export job", "error", err, "job_id", id)
 		return fmt.Errorf("error completing export job: %w", err)
@@ -86,8 +87,8 @@ func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, update
 		ID:           id,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		db.log.Error("failed to mark export job failed", "error", err, "job_id", id)
 		return fmt.Errorf("error failing export job: %w", err)

@@ -3,7 +3,6 @@ package server
 import (
 	"bufio"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -201,7 +200,7 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 
 	job, err := s.sqlite.GetExportJob(c.Context(), exportID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
 		}
 		s.log.Error("failed to get export job", "error", err, "job_id", exportID)

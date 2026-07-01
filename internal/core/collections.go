@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -59,7 +58,7 @@ func EnsurePersonalCollection(ctx context.Context, db store.StoreOps, log *slog.
 		// Race: another goroutine wrote the row between our GetPersonalCollection
 		// check and our INSERT. The unique partial index turns the second insert
 		// into a unique-constraint failure; recover by reading the winner's row.
-		if sqlite.IsUniqueConstraintError(err) {
+		if models.IsConflict(err) {
 			personal, getErr := db.GetPersonalCollection(ctx, user.ID)
 			if getErr == nil {
 				return personal, nil
@@ -118,7 +117,7 @@ func CreateCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 func GetCollectionForUser(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, userID models.UserID) (*models.Collection, models.CollectionRole, error) {
 	collection, err := db.GetCollection(ctx, collectionID)
 	if err != nil {
-		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || sqlite.IsNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, "", ErrCollectionNotFound
 		}
 		log.Error("failed to load collection", "error", err, "collection_id", collectionID)
@@ -271,7 +270,7 @@ func AddCollectionItem(ctx context.Context, db store.StoreOps, log *slog.Logger,
 
 	query, err := db.GetSavedQuery(ctx, savedQueryID)
 	if err != nil {
-		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || sqlite.IsNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrQueryNotFound
 		}
 		return err

@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -176,7 +175,7 @@ func validateSourceConfig(ctx context.Context, db store.StoreOps, log *slog.Logg
 	existingSource, err := db.GetSourceByName(ctx, database, tableName)
 	if err != nil {
 		// If source doesn't exist, that's the desired state for creation.
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil
 		}
 		// Log unexpected DB errors.
@@ -295,7 +294,7 @@ func GetSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager,
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
 		// Handle specific not found error from DB layer if possible, otherwise wrap
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrSourceNotFound
 		}
 		return nil, fmt.Errorf("error getting source from db: %w", err)
@@ -531,7 +530,7 @@ func refreshSourceConnectionPool(ctx context.Context, chDB *clickhouse.Manager, 
 func UpdateSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID, req *models.UpdateSourceRequest) (*models.Source, error) {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrSourceNotFound
 		}
 		return nil, fmt.Errorf("error getting source: %w", err)
@@ -591,7 +590,7 @@ func DeleteSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manag
 	// 1. Validate source exists in SQLite first
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrSourceNotFound
 		}
 		return fmt.Errorf("error getting source: %w", err)
@@ -641,7 +640,7 @@ func GetSourceHealth(ctx context.Context, db store.StoreOps, chDB *clickhouse.Ma
 	// 1. Check if source exists in SQLite first to ensure it's a valid source ID
 	_, err := db.GetSource(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return models.SourceHealth{}, ErrSourceNotFound
 		}
 		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)

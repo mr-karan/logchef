@@ -438,14 +438,18 @@ WHERE expires_at < ?;
 
 -- name: TeamHasSource :one
 -- Check if a team has access to a source
-SELECT COUNT(*) FROM team_sources
-WHERE team_id = ? AND source_id = ?;
+SELECT EXISTS(
+    SELECT 1 FROM team_sources
+    WHERE team_id = ? AND source_id = ?
+);
 
 -- name: UserHasSourceAccess :one
 -- Check if a user has access to a source through any team
-SELECT COUNT(*) FROM team_members tm
-JOIN team_sources ts ON tm.team_id = ts.team_id
-WHERE tm.user_id = ? AND ts.source_id = ?;
+SELECT EXISTS(
+    SELECT 1 FROM team_members tm
+    JOIN team_sources ts ON tm.team_id = ts.team_id
+    WHERE tm.user_id = ? AND ts.source_id = ?
+);
 
 -- name: GetUserTeamForSource :one
 -- Get a team ID that the user belongs to and that has access to the source

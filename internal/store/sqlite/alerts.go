@@ -3,88 +3,42 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
+	"errors"
 	"fmt"
 
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store/alertjson"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// Alert JSON columns are (un)marshalled via the shared alertjson codec; only the
+// NULL extraction (sql.NullString.String is "" when NULL) is backend-specific.
 func marshalStringMap(m map[string]string) (string, error) {
-	if len(m) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(m)
-	if err != nil {
-		return "", err
-	}
-	return string(buf), nil
+	return alertjson.Encode(m, len(m) == 0)
 }
 
 func unmarshalStringMap(raw sql.NullString) (map[string]string, error) {
-	if !raw.Valid || raw.String == "" {
-		return nil, nil
-	}
-	var out map[string]string
-	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[map[string]string](raw.String)
 }
 
 func marshalUserIDs(ids []models.UserID) (string, error) {
-	if len(ids) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(ids)
-	if err != nil {
-		return "", err
-	}
-	return string(buf), nil
+	return alertjson.Encode(ids, len(ids) == 0)
 }
 
 func unmarshalUserIDs(raw sql.NullString) ([]models.UserID, error) {
-	if !raw.Valid || raw.String == "" {
-		return nil, nil
-	}
-	var out []models.UserID
-	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[[]models.UserID](raw.String)
 }
 
 func marshalStringSlice(values []string) (string, error) {
-	if len(values) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(values)
-	if err != nil {
-		return "", err
-	}
-	return string(buf), nil
+	return alertjson.Encode(values, len(values) == 0)
 }
 
 func unmarshalStringSlice(raw sql.NullString) ([]string, error) {
-	if !raw.Valid || raw.String == "" {
-		return nil, nil
-	}
-	var out []string
-	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[[]string](raw.String)
 }
 
 func unmarshalPayload(raw sql.NullString) (map[string]any, error) {
-	if !raw.Valid || raw.String == "" {
-		return nil, nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal([]byte(raw.String), &out); err != nil {
-		return nil, err
-	}
-	return out, nil
+	return alertjson.Decode[map[string]any](raw.String)
 }
 
 // CreateAlert inserts a new alert definition. Alerts are scoped to a single
@@ -122,8 +76,8 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 		return err
 	}
 	if _, err := db.writeQueries.UpdateAlert(ctx, params); err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert: %w", err)
 	}
@@ -133,8 +87,8 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 // DeleteAlert removes an alert definition.
 func (db *DB) DeleteAlert(ctx context.Context, alertID models.AlertID) error {
 	if _, err := db.writeQueries.DeleteAlert(ctx, int64(alertID)); err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to delete alert: %w", err)
 	}
@@ -145,8 +99,8 @@ func (db *DB) DeleteAlert(ctx context.Context, alertID models.AlertID) error {
 func (db *DB) GetAlert(ctx context.Context, alertID models.AlertID) (*models.Alert, error) {
 	row, err := db.readQueries.GetAlert(ctx, int64(alertID))
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, models.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get alert: %w", err)
 	}
@@ -220,8 +174,8 @@ func (db *DB) InsertAlertHistory(ctx context.Context, alertID models.AlertID, st
 func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error) {
 	row, err := db.readQueries.GetLatestUnresolvedAlertHistory(ctx, int64(alertID))
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, models.ErrNotFound
 		}
 		return nil, fmt.Errorf("failed to get alert history: %w", err)
 	}
@@ -234,8 +188,8 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 		Message: nullString(message),
 		ID:      historyID,
 	}); err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
@@ -253,8 +207,8 @@ func (db *DB) UpdateAlertHistoryPayload(ctx context.Context, historyID int64, pa
 		PayloadJson: nullString(payloadJSON),
 		ID:          historyID,
 	}); err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert history payload: %w", err)
 	}
@@ -460,14 +414,7 @@ func alertHistoryFromSQLC(row sqlc.AlertHistory) (*models.AlertHistoryEntry, err
 }
 
 func marshalPayload(payload map[string]any) (string, error) {
-	if len(payload) == 0 {
-		return "", nil
-	}
-	buf, err := json.Marshal(payload)
-	if err != nil {
-		return "", err
-	}
-	return string(buf), nil
+	return alertjson.Encode(payload, len(payload) == 0)
 }
 
 func nullFloat64(value *float64) sql.NullFloat64 {

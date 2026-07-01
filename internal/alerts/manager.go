@@ -2,8 +2,6 @@ package alerts
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -14,7 +12,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -199,7 +196,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 
 func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, value float64) error {
 	prevHistory, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, sqlite.ErrNotFound) {
+	if err != nil && !models.IsNotFound(err) {
 		m.log.Warn("failed to check existing alert history", "alert_id", alert.ID, "error", err)
 	}
 	alreadyActive := err == nil && prevHistory != nil
@@ -296,7 +293,7 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to fetch unresolved alert history: %w", err)
@@ -310,7 +307,7 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 
 	message := fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, value)
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
@@ -481,7 +478,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return fmt.Errorf("no active alert to resolve")
 		}
 		return fmt.Errorf("failed to find unresolved alert history: %w", err)
@@ -489,7 +486,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 
 	// Update the history entry in the database
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return fmt.Errorf("alert history entry not found")
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)

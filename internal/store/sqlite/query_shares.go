@@ -3,10 +3,11 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -35,8 +36,8 @@ func (db *DB) CreateQueryShare(ctx context.Context, share *models.QueryShare) er
 func (db *DB) GetQueryShare(ctx context.Context, token string) (*models.QueryShare, error) {
 	row, err := db.readQueries.GetQueryShare(ctx, token)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, err
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, models.ErrNotFound
 		}
 		db.log.Error("failed to get query share", "error", err, "token", token)
 		return nil, fmt.Errorf("error getting query share: %w", err)
@@ -78,8 +79,8 @@ func (db *DB) TouchQueryShare(ctx context.Context, token string, accessedAt time
 // DeleteQueryShare removes a query share by token.
 func (db *DB) DeleteQueryShare(ctx context.Context, token string) error {
 	if _, err := db.writeQueries.DeleteQueryShare(ctx, token); err != nil {
-		if err == sql.ErrNoRows {
-			return err
+		if errors.Is(err, sql.ErrNoRows) {
+			return models.ErrNotFound
 		}
 		db.log.Error("failed to delete query share", "error", err, "token", token)
 		return fmt.Errorf("error deleting query share: %w", err)
@@ -94,7 +95,7 @@ func (db *DB) GetUserTeamForSource(ctx context.Context, userID models.UserID, so
 		SourceID: int64(sourceID),
 	})
 	if err != nil {
-		return 0, err
+		return 0, translateNotFound(err)
 	}
 	return models.TeamID(teamID), nil
 }

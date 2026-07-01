@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,7 +11,6 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -226,7 +224,7 @@ func CreateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, sourc
 func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
 	alert, err := db.GetAlert(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sqlite.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to get alert", "alert_id", alertID, "error", err)
@@ -243,7 +241,7 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alert
 
 	existing, err := db.GetAlert(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to load alert for update", "alert_id", alertID, "error", err)
@@ -265,7 +263,7 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alert
 	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to update alert", "alert_id", alertID, "error", err)
@@ -383,7 +381,7 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 // DeleteAlert removes an alert rule.
 func DeleteAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) error {
 	if err := db.DeleteAlert(ctx, alertID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		log.Error("failed to delete alert", "alert_id", alertID, "error", err)
@@ -427,7 +425,7 @@ func UserCanEditAlert(alert *models.Alert, user *models.User) bool {
 func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
 	history, err := db.ListAlertHistory(ctx, alertID, limit)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return []*models.AlertHistoryEntry{}, nil
 		}
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
@@ -439,13 +437,13 @@ func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.Ale
 func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, message string) error {
 	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		return fmt.Errorf("failed to find unresolved alert history: %w", err)
 	}
 	if err := db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
@@ -480,7 +478,7 @@ func TestAlertQuery(ctx context.Context, db store.StoreOps, ch *clickhouse.Manag
 	// Load source to verify access
 	_, err := db.GetSource(ctx, sourceID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil, fmt.Errorf("source not found")
 		}
 		return nil, fmt.Errorf("failed to load source: %w", err)

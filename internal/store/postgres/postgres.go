@@ -105,6 +105,12 @@ func (s *Store) Close() error {
 // transaction. It commits when fn returns nil and rolls back on any error or
 // panic (re-panicking after rollback). Nested transactions are unsupported.
 func (s *Store) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (err error) {
+	// A tx-scoped Store carries a nil pool (q is bound to the transaction);
+	// starting another transaction from it is unsupported. Reject nesting.
+	if s.pool == nil {
+		return fmt.Errorf("nested transactions are not supported")
+	}
+
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -134,11 +140,12 @@ func (s *Store) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (e
 
 // --- error translation -------------------------------------------------------
 
-// mapError converts pgx driver errors into backend-neutral sentinels: no rows
-// becomes models.ErrNotFound, a unique-violation becomes models.ErrConflict.
-// Callers wrap the result with context as needed.
+// notFound reports whether err is pgx's no-rows error; callers translate it to
+// models.ErrNotFound.
 func notFound(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
 
+// isUniqueViolation reports whether err is a Postgres unique-constraint
+// violation (SQLSTATE 23505); callers translate it to models.ErrConflict.
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"

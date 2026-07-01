@@ -321,7 +321,7 @@ func (s *Store) ListSourcesForUser(ctx context.Context, userID models.UserID) ([
 
 // TeamHasSource reports whether a team has been granted access to a source.
 func (s *Store) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
-	count, err := s.q.TeamHasSource(ctx, sqlc.TeamHasSourceParams{
+	hasAccess, err := s.q.TeamHasSource(ctx, sqlc.TeamHasSourceParams{
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	})
@@ -329,12 +329,12 @@ func (s *Store) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceI
 		s.log.Error("failed to check team source access in db", "error", err, "team_id", teamID, "source_id", sourceID)
 		return false, fmt.Errorf("error checking team source access: %w", err)
 	}
-	return count > 0, nil
+	return hasAccess, nil
 }
 
 // UserHasSourceAccess reports whether a user can reach a source via any team.
 func (s *Store) UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceID models.SourceID) (bool, error) {
-	count, err := s.q.UserHasSourceAccess(ctx, sqlc.UserHasSourceAccessParams{
+	hasAccess, err := s.q.UserHasSourceAccess(ctx, sqlc.UserHasSourceAccessParams{
 		UserID:   int64(userID),
 		SourceID: int64(sourceID),
 	})
@@ -342,7 +342,7 @@ func (s *Store) UserHasSourceAccess(ctx context.Context, userID models.UserID, s
 		s.log.Error("failed to check user source access in db", "error", err, "user_id", userID, "source_id", sourceID)
 		return false, fmt.Errorf("error checking user source access: %w", err)
 	}
-	return count > 0, nil
+	return hasAccess, nil
 }
 
 // ListTeamsForUser retrieves a user's teams with their role and member count.

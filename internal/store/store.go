@@ -8,7 +8,8 @@
 // and are selected at startup from config. Implementations keep their query
 // generator (sqlc) and driver types internal: every method here speaks in
 // pkg/models types and primitives, and translates driver errors into the
-// sentinels declared in errors.go.
+// canonical backend-neutral sentinels in pkg/models (models.ErrNotFound,
+// models.ErrConflict).
 //
 // Callers should depend on the narrowest interface they need (e.g. SessionStore)
 // rather than the full Store, which is assembled here for wiring.

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 )
 
 // WithTx runs fn inside a single write transaction and satisfies
@@ -19,6 +19,12 @@ import (
 // Nested transactions are unsupported: the handle given to fn shares this DB's
 // type but is tx-scoped and must not be used to start another transaction.
 func (db *DB) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (err error) {
+	// A tx-scoped handle already holds the single write connection; starting
+	// another transaction on it would deadlock. Reject nesting explicitly.
+	if db.inTx {
+		return fmt.Errorf("nested transactions are not supported")
+	}
+
 	tx, err := db.writeDB.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -31,6 +37,7 @@ func (db *DB) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (err
 	txDB := *db
 	txDB.readQueries = q
 	txDB.writeQueries = q
+	txDB.inTx = true
 
 	defer func() {
 		if p := recover(); p != nil {

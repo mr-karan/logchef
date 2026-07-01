@@ -17,7 +17,6 @@ require (
 	github.com/knadh/koanf/providers/env v1.1.0
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.3.5
-	github.com/mattn/go-sqlite3 v1.14.47
 	github.com/sashabaranov/go-openai v1.41.2
 	github.com/swaggo/swag v1.16.6
 	golang.org/x/oauth2 v0.36.0

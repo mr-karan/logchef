@@ -131,8 +131,8 @@ just vet
 
 ### Working with Database Changes
 
-1. Modify migrations in `internal/sqlite/migrations/`
-2. Update queries in `internal/sqlite/queries.sql`
+1. Modify migrations in `internal/store/sqlite/migrations/`
+2. Update queries in `internal/store/sqlite/queries.sql`
 3. Regenerate code:
    ```bash
    just sqlc-generate

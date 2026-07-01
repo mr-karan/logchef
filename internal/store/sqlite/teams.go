@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -460,8 +460,7 @@ func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, err
 
 // TeamHasSource checks if a specific team has been granted access to a specific source.
 func (db *DB) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
-
-	count, err := db.readQueries.TeamHasSource(ctx, sqlc.TeamHasSourceParams{
+	hasAccess, err := db.readQueries.TeamHasSource(ctx, sqlc.TeamHasSourceParams{
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	})
@@ -469,14 +468,12 @@ func (db *DB) TeamHasSource(ctx context.Context, teamID models.TeamID, sourceID 
 		db.log.Error("failed to check team source access in db", "error", err, "team_id", teamID, "source_id", sourceID)
 		return false, fmt.Errorf("error checking team source access: %w", err)
 	}
-
-	return count > 0, nil
+	return hasAccess, nil
 }
 
 // UserHasSourceAccess checks if a user can access a specific source through any of their team memberships.
 func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceID models.SourceID) (bool, error) {
-
-	count, err := db.readQueries.UserHasSourceAccess(ctx, sqlc.UserHasSourceAccessParams{
+	hasAccess, err := db.readQueries.UserHasSourceAccess(ctx, sqlc.UserHasSourceAccessParams{
 		UserID:   int64(userID),
 		SourceID: int64(sourceID),
 	})
@@ -484,8 +481,7 @@ func (db *DB) UserHasSourceAccess(ctx context.Context, userID models.UserID, sou
 		db.log.Error("failed to check user source access in db", "error", err, "user_id", userID, "source_id", sourceID)
 		return false, fmt.Errorf("error checking user source access: %w", err)
 	}
-
-	return count > 0, nil
+	return hasAccess, nil
 }
 
 // ListTeamsForUser retrieves all teams a specific user is a member of, along
