@@ -202,7 +202,7 @@ func convertComparison(cmp *PComparison) ASTNode {
 	}
 }
 
-func convertFieldPath(fp *PFieldPath) interface{} {
+func convertFieldPath(fp *PFieldPath) any {
 	if fp == nil || fp.First == nil {
 		return ""
 	}
@@ -238,7 +238,7 @@ func getSegmentValue(seg *PPathSegment) string {
 	return ""
 }
 
-func convertValue(v *PValue) (interface{}, bool) {
+func convertValue(v *PValue) (any, bool) {
 	if v == nil {
 		return nil, false
 	}

@@ -280,7 +280,7 @@ func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel con
 
 	opts := clickhouse.QueryOptions{
 		TimeoutSeconds: req.QueryTimeout,
-		Settings: map[string]interface{}{
+		Settings: map[string]any{
 			"max_execution_time":   *req.QueryTimeout,
 			"max_result_rows":      buildResult.AppliedLimit,
 			"result_overflow_mode": "break",

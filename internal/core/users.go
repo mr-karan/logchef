@@ -437,11 +437,12 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 
 	if len(setupErrors) > 0 {
 		// Combine errors into a single error message
-		combinedError := "errors during admin user initialization:"
+		var combinedError strings.Builder
+		combinedError.WriteString("errors during admin user initialization:")
 		for _, e := range setupErrors {
-			combinedError += "\n - " + e.Error()
+			combinedError.WriteString("\n - " + e.Error())
 		}
-		return errors.New(combinedError)
+		return errors.New(combinedError.String())
 	}
 
 	log.Info("admin user initialization complete")

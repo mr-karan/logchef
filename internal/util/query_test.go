@@ -17,7 +17,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "float64 value",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": float64(42.5)}},
+				Logs:    []map[string]any{{"count": float64(42.5)}},
 			},
 			expected:    42.5,
 			shouldError: false,
@@ -26,7 +26,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "float64 pointer",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": ptrFloat64(24.576875029)}},
+				Logs:    []map[string]any{{"count": ptrFloat64(24.576875029)}},
 			},
 			expected:    24.576875029,
 			shouldError: false,
@@ -35,7 +35,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "int64 value",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": int64(100)}},
+				Logs:    []map[string]any{{"count": int64(100)}},
 			},
 			expected:    100.0,
 			shouldError: false,
@@ -44,7 +44,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "int64 pointer",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": ptrInt64(200)}},
+				Logs:    []map[string]any{{"count": ptrInt64(200)}},
 			},
 			expected:    200.0,
 			shouldError: false,
@@ -53,7 +53,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "string numeric value",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": "123.45"}},
+				Logs:    []map[string]any{{"count": "123.45"}},
 			},
 			expected:    123.45,
 			shouldError: false,
@@ -62,7 +62,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "uint64 value",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": uint64(999)}},
+				Logs:    []map[string]any{{"count": uint64(999)}},
 			},
 			expected:    999.0,
 			shouldError: false,
@@ -71,7 +71,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "nil float64 pointer",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": (*float64)(nil)}},
+				Logs:    []map[string]any{{"count": (*float64)(nil)}},
 			},
 			shouldError: true,
 		},
@@ -85,7 +85,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "empty logs returns 0",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{},
+				Logs:    []map[string]any{},
 			},
 			expected:    0,
 			shouldError: false,
@@ -94,7 +94,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "no columns",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{},
-				Logs:    []map[string]interface{}{{"count": float64(42)}},
+				Logs:    []map[string]any{{"count": float64(42)}},
 			},
 			shouldError: true,
 		},
@@ -102,7 +102,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "invalid string value",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": "not-a-number"}},
+				Logs:    []map[string]any{{"count": "not-a-number"}},
 			},
 			shouldError: true,
 		},
@@ -110,7 +110,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "unsupported type",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]interface{}{{"count": []byte("hello")}},
+				Logs:    []map[string]any{{"count": []byte("hello")}},
 			},
 			shouldError: true,
 		},

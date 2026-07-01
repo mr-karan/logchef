@@ -18,7 +18,7 @@ import (
 func newTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
-	db, err := sqlite.New(sqlite.Options{
+	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Config: config.SQLiteConfig{Path: dbPath},
 	})

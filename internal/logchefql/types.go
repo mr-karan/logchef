@@ -60,8 +60,8 @@ type NestedField struct {
 
 // SelectField represents a field selection with optional alias
 type SelectField struct {
-	Field interface{} `json:"field"` // string or NestedField
-	Alias string      `json:"alias,omitempty"`
+	Field any    `json:"field"` // string or NestedField
+	Alias string `json:"alias,omitempty"`
 }
 
 // ASTNode is the interface for all AST node types
@@ -71,10 +71,10 @@ type ASTNode interface {
 
 // ExpressionNode represents a single comparison expression (e.g., field="value")
 type ExpressionNode struct {
-	Key      interface{} `json:"key"` // string or NestedField
-	Operator Operator    `json:"operator"`
-	Value    interface{} `json:"value"` // string, number, bool, or nil
-	Quoted   bool        `json:"quoted,omitempty"`
+	Key      any      `json:"key"` // string or NestedField
+	Operator Operator `json:"operator"`
+	Value    any      `json:"value"` // string, number, bool, or nil
+	Quoted   bool     `json:"quoted,omitempty"`
 }
 
 func (e *ExpressionNode) nodeType() string { return "expression" }

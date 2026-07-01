@@ -19,7 +19,7 @@ func quietLogger() *slog.Logger {
 
 func newReconcileTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
-	db, err := sqlite.New(sqlite.Options{
+	db, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: quietLogger(),
 		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "prov.db")},
 	})

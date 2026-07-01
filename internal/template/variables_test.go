@@ -220,7 +220,7 @@ func TestSubstituteVariablesMultiSelect(t *testing.T) {
 			name: "multi-select string array with IN clause",
 			sql:  "SELECT * FROM logs WHERE host IN ({{hosts}})",
 			variables: []Variable{
-				{Name: "hosts", Type: TypeString, Value: []interface{}{"server-1", "server-2", "server-3"}},
+				{Name: "hosts", Type: TypeString, Value: []any{"server-1", "server-2", "server-3"}},
 			},
 			want: "SELECT * FROM logs WHERE host IN ('server-1', 'server-2', 'server-3')",
 		},
@@ -228,7 +228,7 @@ func TestSubstituteVariablesMultiSelect(t *testing.T) {
 			name: "multi-select number array",
 			sql:  "SELECT * FROM logs WHERE status IN ({{codes}})",
 			variables: []Variable{
-				{Name: "codes", Type: TypeNumber, Value: []interface{}{float64(200), float64(201), float64(204)}},
+				{Name: "codes", Type: TypeNumber, Value: []any{float64(200), float64(201), float64(204)}},
 			},
 			want: "SELECT * FROM logs WHERE status IN (200, 201, 204)",
 		},
@@ -236,7 +236,7 @@ func TestSubstituteVariablesMultiSelect(t *testing.T) {
 			name: "multi-select string array with escaping",
 			sql:  "SELECT * FROM logs WHERE msg IN ({{messages}})",
 			variables: []Variable{
-				{Name: "messages", Type: TypeString, Value: []interface{}{"hello", "it's working", "test"}},
+				{Name: "messages", Type: TypeString, Value: []any{"hello", "it's working", "test"}},
 			},
 			want: "SELECT * FROM logs WHERE msg IN ('hello', 'it''s working', 'test')",
 		},
@@ -244,7 +244,7 @@ func TestSubstituteVariablesMultiSelect(t *testing.T) {
 			name: "multi-select with single value",
 			sql:  "SELECT * FROM logs WHERE host IN ({{hosts}})",
 			variables: []Variable{
-				{Name: "hosts", Type: TypeString, Value: []interface{}{"server-1"}},
+				{Name: "hosts", Type: TypeString, Value: []any{"server-1"}},
 			},
 			want: "SELECT * FROM logs WHERE host IN ('server-1')",
 		},
@@ -260,7 +260,7 @@ func TestSubstituteVariablesMultiSelect(t *testing.T) {
 			name: "empty array fails",
 			sql:  "SELECT * FROM logs WHERE host IN ({{hosts}})",
 			variables: []Variable{
-				{Name: "hosts", Type: TypeString, Value: []interface{}{}},
+				{Name: "hosts", Type: TypeString, Value: []any{}},
 			},
 			wantErr:     true,
 			errContains: "requires a value",
@@ -269,7 +269,7 @@ func TestSubstituteVariablesMultiSelect(t *testing.T) {
 			name: "multi-select in optional clause - provided",
 			sql:  "SELECT * FROM logs WHERE 1=1 [[ AND host IN ({{hosts}}) ]]",
 			variables: []Variable{
-				{Name: "hosts", Type: TypeString, Value: []interface{}{"server-1", "server-2"}},
+				{Name: "hosts", Type: TypeString, Value: []any{"server-1", "server-2"}},
 			},
 			want: "SELECT * FROM logs WHERE 1=1  AND host IN ('server-1', 'server-2') ",
 		},
@@ -498,7 +498,7 @@ func TestSubstituteVariablesWithOptionalClauses(t *testing.T) {
 func TestIsValueProvided(t *testing.T) {
 	tests := []struct {
 		name  string
-		value interface{}
+		value any
 		want  bool
 	}{
 		{name: "nil", value: nil, want: false},

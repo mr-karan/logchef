@@ -129,7 +129,7 @@ func isUniqueConstraintSQLiteError(err error, table, column string) bool {
 }
 
 // wrapError wraps an error with additional context
-func wrapError(err error, format string, args ...interface{}) error {
+func wrapError(err error, format string, args ...any) error {
 	if err == nil {
 		return nil
 	}

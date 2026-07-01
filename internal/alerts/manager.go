@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -66,9 +67,7 @@ func (m *Manager) Start(ctx context.Context) {
 	}
 	m.log.Debug("starting alert manager", "interval", interval)
 
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -87,7 +86,7 @@ func (m *Manager) Start(ctx context.Context) {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // Stop signals the manager to stop evaluating alerts.
@@ -524,9 +523,7 @@ func copyStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 func compareThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {

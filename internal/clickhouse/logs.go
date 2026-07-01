@@ -24,9 +24,9 @@ type LogQueryParams struct {
 
 // LogQueryResult represents the structured result of a log query.
 type LogQueryResult struct {
-	Data    []map[string]interface{} `json:"data"`
-	Stats   models.QueryStats        `json:"stats"`
-	Columns []models.ColumnInfo      `json:"columns"`
+	Data    []map[string]any    `json:"data"`
+	Stats   models.QueryStats   `json:"stats"`
+	Columns []models.ColumnInfo `json:"columns"`
 }
 
 // TimeWindow represents the desired granularity for time-based aggregations.
@@ -68,9 +68,9 @@ type LogContextParams struct {
 
 // LogContextResult holds the logs retrieved before, at, and after the target time.
 type LogContextResult struct {
-	BeforeLogs []map[string]interface{}
-	TargetLogs []map[string]interface{} // Logs exactly at the target time.
-	AfterLogs  []map[string]interface{}
+	BeforeLogs []map[string]any
+	TargetLogs []map[string]any // Logs exactly at the target time.
+	AfterLogs  []map[string]any
 	Stats      models.QueryStats
 }
 
@@ -283,6 +283,13 @@ func extractGroupValue(row map[string]any) (string, bool) {
 	}
 }
 
+// Compiled once: histogram query rewriting matches "SELECT *" and a leading
+// "SELECT" to inject the (possibly MATERIALIZED) timestamp field.
+var (
+	selectStarRe = regexp.MustCompile(`(?i)SELECT\s+\*`)
+	selectLeadRe = regexp.MustCompile(`(?i)^SELECT\s+`)
+)
+
 // ensureTimestampInQuery ensures the timestamp field is available for histogram bucketing.
 // IMPORTANT: In ClickHouse, MATERIALIZED columns are NOT included in SELECT *.
 // When we wrap a query in a subquery for histogram, we must explicitly select the timestamp field.
@@ -308,9 +315,8 @@ func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, e
 	// For SELECT * queries, we need to explicitly add the timestamp field
 	// because MATERIALIZED columns are NOT included in SELECT *
 	// Replace "SELECT *" with "SELECT *, `timestamp_field`"
-	selectStarRegex := regexp.MustCompile(`(?i)SELECT\s+\*`)
-	if selectStarRegex.MatchString(query) {
-		modifiedQuery := selectStarRegex.ReplaceAllString(query, fmt.Sprintf("SELECT *, %s", escapedTsField))
+	if selectStarRe.MatchString(query) {
+		modifiedQuery := selectStarRe.ReplaceAllString(query, fmt.Sprintf("SELECT *, %s", escapedTsField))
 		if c.logger != nil {
 			c.logger.Debug("Added timestamp field to SELECT * for histogram",
 				"timestamp_field", timestampField,
@@ -321,9 +327,8 @@ func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, e
 
 	// For any other case, try to add the timestamp field after SELECT
 	// This handles cases like "SELECT col1, col2 FROM ..."
-	selectRegex := regexp.MustCompile(`(?i)^SELECT\s+`)
-	if selectRegex.MatchString(query) {
-		modifiedQuery := selectRegex.ReplaceAllString(query, fmt.Sprintf("SELECT %s, ", escapedTsField))
+	if selectLeadRe.MatchString(query) {
+		modifiedQuery := selectLeadRe.ReplaceAllString(query, fmt.Sprintf("SELECT %s, ", escapedTsField))
 		if c.logger != nil {
 			c.logger.Debug("Prepended timestamp field to SELECT for histogram",
 				"timestamp_field", timestampField)
@@ -424,7 +429,7 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 	totalExecutionMs += afterResult.Stats.ExecutionTimeMs
 
 	// TargetLogs is kept empty - target timestamp logs are included in BeforeLogs
-	result.TargetLogs = []map[string]interface{}{}
+	result.TargetLogs = []map[string]any{}
 
 	// Aggregate stats
 	result.Stats = models.QueryStats{
@@ -441,7 +446,7 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 }
 
 // reverseLogSlice reverses a slice of log maps in place and returns it.
-func reverseLogSlice(logs []map[string]interface{}) []map[string]interface{} {
+func reverseLogSlice(logs []map[string]any) []map[string]any {
 	for i, j := 0, len(logs)-1; i < j; i, j = i+1, j-1 {
 		logs[i], logs[j] = logs[j], logs[i]
 	}

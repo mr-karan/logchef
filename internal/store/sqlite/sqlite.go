@@ -9,6 +9,7 @@
 package sqlite
 
 import (
+	"context"
 	"database/sql"
 	"embed"
 	"errors"
@@ -41,10 +42,10 @@ var migrationsFS embed.FS
 // It uses separate connections for reads and writes to optimize for SQLite's
 // WAL mode which allows concurrent reads but only one writer at a time.
 type DB struct {
-	readDB       *sql.DB      // Connection pool for read operations (multiple concurrent readers)
-	writeDB      *sql.DB      // Single connection for write operations (serialized writes)
-	readQueries  sqlc.Querier // Querier bound to read connection pool
-	writeQueries sqlc.Querier // Querier bound to write connection
+	readDB       *sql.DB       // Connection pool for read operations (multiple concurrent readers)
+	writeDB      *sql.DB       // Single connection for write operations (serialized writes)
+	readQueries  *sqlc.Queries // Prepared queries bound to the read connection pool
+	writeQueries *sqlc.Queries // Prepared queries bound to the write connection
 	log          *slog.Logger
 	inTx         bool // true on a tx-scoped handle; guards against nested WithTx
 }
@@ -57,7 +58,7 @@ type Options struct {
 
 // New establishes a connection to the SQLite database, configures it,
 // runs migrations, and returns a DB instance ready for use.
-func New(opts Options) (*DB, error) {
+func New(ctx context.Context, opts Options) (*DB, error) {
 	log := opts.Logger.With("component", "sqlite")
 
 	// Run migrations first using a temporary connection.
@@ -95,13 +96,29 @@ func New(opts Options) (*DB, error) {
 	writeDB.SetMaxIdleConns(1)
 	writeDB.SetConnMaxLifetime(0)
 
+	// Prepare all statements once so hot read/write queries reuse cached
+	// *sql.Stmt handles instead of re-parsing SQL on every call.
+	readQueries, err := sqlc.Prepare(ctx, readDB)
+	if err != nil {
+		readDB.Close()
+		writeDB.Close()
+		return nil, fmt.Errorf("preparing read statements: %w", err)
+	}
+	writeQueries, err := sqlc.Prepare(ctx, writeDB)
+	if err != nil {
+		_ = readQueries.Close()
+		readDB.Close()
+		writeDB.Close()
+		return nil, fmt.Errorf("preparing write statements: %w", err)
+	}
+
 	log.Debug("sqlite initialized with read/write separation", "path", opts.Config.Path)
 
 	return &DB{
 		readDB:       readDB,
 		writeDB:      writeDB,
-		readQueries:  sqlc.New(readDB),
-		writeQueries: sqlc.New(writeDB),
+		readQueries:  readQueries,
+		writeQueries: writeQueries,
 		log:          log,
 	}, nil
 }
@@ -246,6 +263,13 @@ func runMigrations(db *sql.DB, log *slog.Logger) error {
 func (db *DB) Close() error {
 	db.log.Debug("closing database connections")
 	var errs []error
+	// Close prepared statements before their underlying connections.
+	if err := db.writeQueries.Close(); err != nil {
+		errs = append(errs, err)
+	}
+	if err := db.readQueries.Close(); err != nil {
+		errs = append(errs, err)
+	}
 	if err := db.writeDB.Close(); err != nil {
 		db.log.Error("error closing write database", "error", err)
 		errs = append(errs, err)

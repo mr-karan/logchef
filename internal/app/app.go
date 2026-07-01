@@ -78,7 +78,7 @@ func (a *App) Initialize(ctx context.Context) error {
 			return fmt.Errorf("failed to initialize postgres: %w", err)
 		}
 	default: // "sqlite" (config validation guarantees one of these two)
-		a.SQLite, err = sqlite.New(sqlite.Options{
+		a.SQLite, err = sqlite.New(ctx, sqlite.Options{
 			Config: a.Config.SQLite,
 			Logger: a.Logger,
 		})

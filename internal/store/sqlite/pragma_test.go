@@ -20,10 +20,8 @@ func TestConnectionPragmasOnEveryConnection(t *testing.T) {
 	start := make(chan struct{})
 	errs := make(chan error, n)
 
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			// Grab a dedicated connection and hold it until all n are open, so
 			// the pool is forced to create n distinct connections.
 			conn, err := db.readDB.Conn(ctx)
@@ -49,7 +47,7 @@ func TestConnectionPragmasOnEveryConnection(t *testing.T) {
 			if busy != 5000 {
 				errs <- fmt.Errorf("busy_timeout = %d, want 5000", busy)
 			}
-		}()
+		})
 	}
 
 	close(start)

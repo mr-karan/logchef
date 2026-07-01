@@ -220,14 +220,12 @@ func ListSources(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manage
 		source.EngineParams = nil
 		source.SortKeys = nil
 
-		wg.Add(1)
-		go func(s *models.Source) {
-			defer wg.Done()
-			client, err := chDB.GetConnection(s.ID)
+		wg.Go(func() {
+			client, err := chDB.GetConnection(source.ID)
 			if err == nil {
-				s.IsConnected = client.Ping(ctx, s.Connection.Database, s.Connection.TableName) == nil
+				source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
 			}
-		}(source)
+		})
 	}
 	wg.Wait()
 
@@ -235,19 +233,34 @@ func ListSources(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manage
 }
 
 // GetSource retrieves a source by ID including connection status and schema
-func GetSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) (*models.Source, error) {
+// GetSource returns a source's stored metadata (connection info, timestamp
+// field, TTL, etc.) straight from the metadata store. It does NOT touch
+// ClickHouse, so it is cheap enough for hot query-setup paths. Callers that need
+// live connection status can consult chDB.GetCachedHealth; callers that need the
+// table schema (columns, engine, sort keys) should use GetSourceWithSchema.
+func GetSource(ctx context.Context, db store.StoreOps, id models.SourceID) (*models.Source, error) {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		// Handle specific not found error from DB layer if possible, otherwise wrap
 		if models.IsNotFound(err) {
 			return nil, ErrSourceNotFound
 		}
 		return nil, fmt.Errorf("error getting source from db: %w", err)
 	}
-
 	if source == nil {
-		// This case might be handled by the DB layer returning ErrNotFound
 		return nil, ErrSourceNotFound
+	}
+	return source, nil
+}
+
+// GetSourceWithSchema returns a source enriched with a live ClickHouse round
+// trip: connection status (Ping) plus the table schema (columns, CREATE
+// statement, engine, sort keys) via GetTableInfo. Use it only where the schema
+// is actually needed (source detail view, LogchefQL type-aware translation) —
+// it costs several ClickHouse metadata queries per call.
+func GetSourceWithSchema(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) (*models.Source, error) {
+	source, err := GetSource(ctx, db, id)
+	if err != nil {
+		return nil, err
 	}
 
 	// Attempt to get the client. If this fails, the source is not connected.

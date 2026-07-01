@@ -148,7 +148,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 
 	opts := clickhouse.QueryOptions{
 		TimeoutSeconds: req.QueryTimeout,
-		Settings: map[string]interface{}{
+		Settings: map[string]any{
 			"max_execution_time":   *req.QueryTimeout,
 			"max_result_rows":      buildResult.AppliedLimit,
 			"result_overflow_mode": "break",
@@ -269,7 +269,7 @@ func (w *exportRowWriter) Begin(columns []models.ColumnInfo) error {
 		w.csv.Flush()
 		return w.csv.Error()
 	}
-	return w.writeNDJSON(map[string]interface{}{
+	return w.writeNDJSON(map[string]any{
 		"type":          "meta",
 		"query_id":      w.queryID,
 		"columns":       columns,
@@ -277,7 +277,7 @@ func (w *exportRowWriter) Begin(columns []models.ColumnInfo) error {
 	})
 }
 
-func (w *exportRowWriter) WriteRow(row map[string]interface{}) error {
+func (w *exportRowWriter) WriteRow(row map[string]any) error {
 	w.rowsWritten++
 	if w.format == "csv" {
 		record := make([]string, len(w.columns))
@@ -296,7 +296,7 @@ func (w *exportRowWriter) WriteRow(row map[string]interface{}) error {
 		}
 		return nil
 	}
-	err := w.writeNDJSON(map[string]interface{}{
+	err := w.writeNDJSON(map[string]any{
 		"type": "row",
 		"row":  row,
 	})
@@ -314,7 +314,7 @@ func (w *exportRowWriter) Finish(stats models.QueryStats) error {
 		}
 		return w.out.Flush()
 	}
-	if err := w.writeNDJSON(map[string]interface{}{
+	if err := w.writeNDJSON(map[string]any{
 		"type":  "stats",
 		"stats": stats,
 	}); err != nil {
@@ -327,13 +327,13 @@ func (w *exportRowWriter) WriteError(err error) error {
 	if w.format == "csv" {
 		return fmt.Errorf("streaming csv export failed: %w", err)
 	}
-	return w.writeNDJSON(map[string]interface{}{
+	return w.writeNDJSON(map[string]any{
 		"type":  "error",
 		"error": err.Error(),
 	})
 }
 
-func (w *exportRowWriter) writeNDJSON(v interface{}) error {
+func (w *exportRowWriter) writeNDJSON(v any) error {
 	payload, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -344,7 +344,7 @@ func (w *exportRowWriter) writeNDJSON(v interface{}) error {
 	return w.out.WriteByte('\n')
 }
 
-func csvValue(value interface{}) string {
+func csvValue(value any) string {
 	switch v := value.(type) {
 	case nil:
 		return ""

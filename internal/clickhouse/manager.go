@@ -98,12 +98,10 @@ func (m *Manager) checkAllSourcesHealth() {
 
 	var wg sync.WaitGroup
 	for _, id := range idsToCheck {
-		wg.Add(1)
-		go func(sourceID models.SourceID) {
-			defer wg.Done()
+		wg.Go(func() {
 			//nolint:contextcheck // Background health check uses its own context
-			m.checkSource(context.Background(), sourceID)
-		}(id)
+			m.checkSource(context.Background(), id)
+		})
 	}
 	wg.Wait()
 }
@@ -371,12 +369,9 @@ func (m *Manager) Close() error {
 
 	for _, id := range clientIDs {
 		client := m.clients[id]
-		wg.Add(1)
 
 		// Close each client in a separate goroutine to allow parallel shutdown
-		go func(sourceID models.SourceID, cl *Client) {
-			defer wg.Done()
-
+		wg.Go(func() {
 			// Use a timeout context for each client close operation
 			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer closeCancel()
@@ -386,7 +381,7 @@ func (m *Manager) Close() error {
 
 			go func() {
 				// Each client.Close() already has its own timeout
-				done <- cl.Close()
+				done <- client.Close()
 			}()
 
 			// Wait for client to close or timeout
@@ -394,16 +389,16 @@ func (m *Manager) Close() error {
 			case err := <-done:
 				if err != nil {
 					mu.Lock()
-					m.logger.Error("error closing client", "source_id", sourceID, "error", err)
+					m.logger.Error("error closing client", "source_id", id, "error", err)
 					lastErr = err // Keep track of the last error
 					mu.Unlock()
 				}
 			case <-closeCtx.Done():
 				mu.Lock()
-				m.logger.Warn("timeout closing client", "source_id", sourceID)
+				m.logger.Warn("timeout closing client", "source_id", id)
 				mu.Unlock()
 			}
-		}(id, client)
+		})
 	}
 
 	// Wait for all clients to be closed or timeout

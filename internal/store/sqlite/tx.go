@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store"
-	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 )
 
 // WithTx runs fn inside a single write transaction and satisfies
@@ -33,7 +32,9 @@ func (db *DB) WithTx(ctx context.Context, fn func(tx store.StoreOps) error) (err
 	// Point both queriers at the transaction connection. SQLite uses a separate
 	// read pool that cannot see this tx's uncommitted writes, so a tx-scoped
 	// store must never touch it — routing reads through the tx fixes that.
-	q := sqlc.New(tx)
+	// WithTx rebinds the write handle's prepared statements onto this tx so the
+	// transaction reuses them instead of re-parsing SQL.
+	q := db.writeQueries.WithTx(tx)
 	txDB := *db
 	txDB.readQueries = q
 	txDB.writeQueries = q

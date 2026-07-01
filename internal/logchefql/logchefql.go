@@ -94,24 +94,24 @@ func convertParticipleError(err error) *ParseError {
 }
 
 func extractPositionFromError(msg string) *Position {
-	idx := strings.Index(msg, ":")
-	if idx == -1 {
+	before, after, ok := strings.Cut(msg, ":")
+	if !ok {
 		return nil
 	}
 
-	lineStr := msg[:idx]
+	lineStr := before
 	line, err := strconv.Atoi(lineStr)
 	if err != nil {
 		return nil
 	}
 
-	rest := msg[idx+1:]
-	idx2 := strings.Index(rest, ":")
-	if idx2 == -1 {
+	rest := after
+	before0, _, ok0 := strings.Cut(rest, ":")
+	if !ok0 {
 		return nil
 	}
 
-	colStr := rest[:idx2]
+	colStr := before0
 	col, err := strconv.Atoi(colStr)
 	if err != nil {
 		return nil
@@ -194,7 +194,7 @@ func extractConditionsFromAST(node ASTNode) []FilterCondition {
 	return conditions
 }
 
-func getFieldName(key interface{}) string {
+func getFieldName(key any) string {
 	switch k := key.(type) {
 	case string:
 		return k
@@ -208,7 +208,7 @@ func getFieldName(key interface{}) string {
 	}
 }
 
-func formatConditionValue(v interface{}) string {
+func formatConditionValue(v any) string {
 	if v == nil {
 		return ""
 	}

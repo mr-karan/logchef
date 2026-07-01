@@ -73,7 +73,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
 	// Get source information for schema
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSourceWithSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -216,7 +216,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 	}
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSourceWithSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -346,7 +346,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 
 	// Add query_id and generated SQL to response
 	columns := normalizeResultColumns(source, result)
-	responseData := map[string]interface{}{
+	responseData := map[string]any{
 		"logs":          result.Logs,
 		"columns":       columns,
 		"stats":         result.Stats,

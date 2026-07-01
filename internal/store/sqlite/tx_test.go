@@ -15,7 +15,7 @@ import (
 
 func newTxTestDB(t *testing.T) *DB {
 	t.Helper()
-	db, err := New(Options{
+	db, err := New(context.Background(), Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "tx.db")},
 	})

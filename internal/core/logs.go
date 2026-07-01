@@ -62,7 +62,7 @@ func QueryLogs(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager,
 	warnings := queryWarningsForBuildResult(buildResult)
 	queryResult, err := client.QueryWithOptions(ctx, buildResult.SQL, clickhouse.QueryOptions{
 		TimeoutSeconds: params.QueryTimeout,
-		Settings: map[string]interface{}{
+		Settings: map[string]any{
 			"max_execution_time":   *params.QueryTimeout,
 			"max_result_rows":      buildResult.AppliedLimit,
 			"result_overflow_mode": "break",
@@ -230,11 +230,11 @@ type LogContextParams struct {
 
 // LogContextResponse structures the response for log context data.
 type LogContextResponse struct {
-	TargetTimestamp int64                    `json:"target_timestamp"`
-	BeforeLogs      []map[string]interface{} `json:"before_logs"`
-	TargetLogs      []map[string]interface{} `json:"target_logs"`
-	AfterLogs       []map[string]interface{} `json:"after_logs"`
-	Stats           models.QueryStats        `json:"stats"`
+	TargetTimestamp int64             `json:"target_timestamp"`
+	BeforeLogs      []map[string]any  `json:"before_logs"`
+	TargetLogs      []map[string]any  `json:"target_logs"`
+	AfterLogs       []map[string]any  `json:"after_logs"`
+	Stats           models.QueryStats `json:"stats"`
 }
 
 // GetLogContext retrieves surrounding logs around a specific timestamp for contextual analysis.

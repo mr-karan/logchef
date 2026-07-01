@@ -1,6 +1,7 @@
 package sqlite_test
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -14,7 +15,7 @@ import (
 // TestConformance runs the shared store.Store conformance suite against a fresh,
 // migrated SQLite database in a temp dir.
 func TestConformance(t *testing.T) {
-	s, err := sqlite.New(sqlite.Options{
+	s, err := sqlite.New(context.Background(), sqlite.Options{
 		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "conformance.db")},
 	})
