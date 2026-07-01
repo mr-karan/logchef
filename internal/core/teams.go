@@ -92,18 +92,6 @@ func GetTeam(ctx context.Context, db store.StoreOps, id models.TeamID) (*models.
 	return team, nil
 }
 
-// GetTeamByName retrieves a specific team by its name.
-func GetTeamByName(ctx context.Context, db store.StoreOps, name string) (*models.Team, error) {
-	team, err := db.GetTeamByName(ctx, name)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return nil, ErrTeamNotFound
-		}
-		return nil, fmt.Errorf("error getting team by name from db: %w", err)
-	}
-	return team, nil
-}
-
 // CreateTeam creates a new team in the database.
 func CreateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, name, description string) (*models.Team, error) {
 	// Validate input parameters
@@ -236,19 +224,6 @@ func ListTeamMembers(ctx context.Context, db store.StoreOps, teamID models.TeamI
 	return members, nil
 }
 
-// GetTeamMember retrieves a specific member's details within a team.
-func GetTeamMember(ctx context.Context, db store.StoreOps, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
-	member, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
-			// Standard practice: return nil, nil if not found, let caller decide if it's an error
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error getting team member from db: %w", err)
-	}
-	return member, nil
-}
-
 // AddTeamMember adds a user to a team with a specified role.
 // If the user is already a member, it updates their role.
 func AddTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
@@ -293,40 +268,6 @@ func AddTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, tea
 	if err := db.AddTeamMember(ctx, teamID, userID, role); err != nil {
 		log.Error("failed to add team member to db", "error", err, "team_id", teamID, "user_id", userID)
 		return fmt.Errorf("error adding team member: %w", err)
-	}
-
-	return nil
-}
-
-// UpdateTeamMemberRole changes the role of an existing team member.
-func UpdateTeamMemberRole(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, userID models.UserID, newRole models.TeamRole) error {
-	// Validate Role
-	if err := validateTeamMember(teamID, userID, newRole); err != nil {
-		// Adjust error message slightly if needed
-		return err
-	}
-
-	// Check if the member exists first
-	existingMember, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
-			return fmt.Errorf("user %d is not a member of team %d", userID, teamID) // Specific error
-		}
-		log.Error("failed to get team member for role update check", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error checking team member: %w", err)
-	}
-
-	// If role is the same, do nothing
-	if existingMember.Role == newRole {
-		log.Debug("team member role already correct", "team_id", teamID, "user_id", userID, "role", newRole)
-		return nil
-	}
-
-	// Update role in the database
-	log.Info("updating team member role", "team_id", teamID, "user_id", userID, "old_role", existingMember.Role, "new_role", newRole)
-	if err := db.UpdateTeamMemberRole(ctx, teamID, userID, newRole); err != nil {
-		log.Error("failed to update team member role in db", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error updating team member role: %w", err)
 	}
 
 	return nil
@@ -458,19 +399,6 @@ func RemoveTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 }
 
 // --- Authorization/Access Check Functions ---
-
-// ListSourcesForUser returns all unique sources a user has access to across all teams.
-func ListSourcesForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.Source, error) {
-	// Optional: Validate user exists first
-	// _, err := GetUser(ctx, db, userID)
-	// if err != nil { return nil, err }
-
-	sources, err := db.ListSourcesForUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing sources for user: %w", err)
-	}
-	return sources, nil
-}
 
 // ListSourceTeams returns all teams that have access to a specific source.
 func ListSourceTeams(ctx context.Context, db store.StoreOps, sourceID models.SourceID) ([]*models.Team, error) {

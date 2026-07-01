@@ -89,28 +89,6 @@ func RecordQueryError(source *models.Source, errorType string) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
-// RecordHistogram records histogram generation metrics
-func RecordHistogram(source *models.Source, success bool, duration time.Duration, user *models.User) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_histogram_total{source_id="%d",source_name=%q,database=%q,table=%q,result=%q,user_email=%q,user_role=%q}`,
-			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, result, user.Email, string(user.Role))
-	} else {
-		labels = fmt.Sprintf(`logchef_histogram_total{source_id="%d",source_name=%q,database=%q,table=%q,result=%q,user_email="",user_role=""}`,
-			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, result)
-	}
-	metrics.GetOrCreateCounter(labels).Inc()
-
-	durationLabels := fmt.Sprintf(`logchef_histogram_duration_seconds{source_name=%q,database=%q,table=%q}`,
-		source.Name, source.Connection.Database, source.Connection.TableName)
-	metrics.GetOrCreateHistogram(durationLabels).Update(duration.Seconds())
-}
-
 // RecordClickHouseConnectionStatus sets connection status for a source
 func RecordClickHouseConnectionStatus(source *models.Source, healthy bool) {
 	status := 0.0
@@ -183,24 +161,6 @@ func RecordSessionOperation(operation string, success bool, user *models.User) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
-// RecordAPITokenOperation records API token operation metrics
-func RecordAPITokenOperation(operation string, success bool, user *models.User, tokenName string) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_api_token_operations_total{operation=%q,result=%q,user_email=%q,user_role=%q,token_name=%q}`,
-			operation, result, user.Email, string(user.Role), tokenName)
-	} else {
-		labels = fmt.Sprintf(`logchef_api_token_operations_total{operation=%q,result=%q,user_email="",user_role="",token_name=%q}`,
-			operation, result, tokenName)
-	}
-	metrics.GetOrCreateCounter(labels).Inc()
-}
-
 // RecordAuthorizationFailure records authorization failure metrics
 func RecordAuthorizationFailure(endpoint string, user *models.User, reason string) {
 	var labels string
@@ -212,91 +172,6 @@ func RecordAuthorizationFailure(endpoint string, user *models.User, reason strin
 			endpoint, reason)
 	}
 	metrics.GetOrCreateCounter(labels).Inc()
-}
-
-// RecordTeamOperation records team operation metrics
-func RecordTeamOperation(team *models.Team, operation string, success bool, user *models.User) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_team_operations_total{team_id="%d",team_name=%q,operation=%q,result=%q,user_email=%q,user_role=%q}`,
-			team.ID, team.Name, operation, result, user.Email, string(user.Role))
-	} else {
-		labels = fmt.Sprintf(`logchef_team_operations_total{team_id="%d",team_name=%q,operation=%q,result=%q,user_email="",user_role=""}`,
-			team.ID, team.Name, operation, result)
-	}
-	metrics.GetOrCreateCounter(labels).Inc()
-
-}
-
-// RecordSourceOperation records source lifecycle operation metrics
-func RecordSourceOperation(source *models.Source, operation string, success bool, user *models.User) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_source_operations_total{source_id="%d",source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email=%q,user_role=%q}`,
-			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, operation, result, user.Email, string(user.Role))
-	} else {
-		labels = fmt.Sprintf(`logchef_source_operations_total{source_id="%d",source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email="",user_role=""}`,
-			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, operation, result)
-	}
-	metrics.GetOrCreateCounter(labels).Inc()
-}
-
-// RecordCollectionOperation records saved query collection operations
-func RecordCollectionOperation(source *models.Source, team *models.Team, operation string, success bool, user *models.User, collectionName string) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_collection_operations_total{source_name=%q,team_name=%q,operation=%q,result=%q,collection_name=%q,user_email=%q,user_role=%q}`,
-			source.Name, team.Name, operation, result, collectionName, user.Email, string(user.Role))
-	} else {
-		labels = fmt.Sprintf(`logchef_collection_operations_total{source_name=%q,team_name=%q,operation=%q,result=%q,collection_name=%q,user_email="",user_role=""}`,
-			source.Name, team.Name, operation, result, collectionName)
-	}
-	metrics.GetOrCreateCounter(labels).Inc()
-}
-
-// RecordAIOperation records AI operation metrics
-func RecordAIOperation(source *models.Source, operation string, success bool, duration time.Duration, user *models.User) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_ai_operations_total{source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email=%q,user_role=%q}`,
-			source.Name, source.Connection.Database, source.Connection.TableName, operation, result, user.Email, string(user.Role))
-	} else {
-		labels = fmt.Sprintf(`logchef_ai_operations_total{source_name=%q,database=%q,table=%q,operation=%q,result=%q,user_email="",user_role=""}`,
-			source.Name, source.Connection.Database, source.Connection.TableName, operation, result)
-	}
-	metrics.GetOrCreateCounter(labels).Inc()
-
-	durationLabels := fmt.Sprintf(`logchef_ai_duration_seconds{source_name=%q,operation=%q}`, source.Name, operation)
-	metrics.GetOrCreateHistogram(durationLabels).Update(duration.Seconds())
-}
-
-// Gauge metrics for active counts
-func UpdateActiveUsers(count int) {
-	metrics.GetOrCreateGauge("logchef_active_users", nil).Set(float64(count))
-}
-
-func UpdateActiveSessions(count int) {
-	metrics.GetOrCreateGauge("logchef_active_sessions", nil).Set(float64(count))
 }
 
 func IncrementActiveRequests() {

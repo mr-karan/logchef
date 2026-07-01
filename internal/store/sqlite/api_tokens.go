@@ -105,15 +105,6 @@ func (db *DB) DeleteAPIToken(ctx context.Context, id int, userID models.UserID) 
 	return nil
 }
 
-// DeleteExpiredAPITokens removes all expired API tokens.
-func (db *DB) DeleteExpiredAPITokens(ctx context.Context) error {
-	if err := db.writeQueries.DeleteExpiredAPITokens(ctx); err != nil {
-		db.log.Error("failed to delete expired API tokens from db", "error", err)
-		return fmt.Errorf("failed to delete expired API tokens: %w", err)
-	}
-	return nil
-}
-
 // apiTokenToModel maps a stored row to the backend-neutral model, decoding the
 // scopes JSON and computing the Expired flag from the current clock.
 func apiTokenToModel(row sqlc.ApiToken) *models.APIToken {

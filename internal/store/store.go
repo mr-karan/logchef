@@ -216,7 +216,6 @@ type TokenStore interface {
 	ListAPITokensForUser(ctx context.Context, userID models.UserID) ([]*models.APIToken, error)
 	UpdateAPITokenLastUsed(ctx context.Context, id int) error
 	DeleteAPIToken(ctx context.Context, id int, userID models.UserID) error
-	DeleteExpiredAPITokens(ctx context.Context) error
 }
 
 // StoreOps is the full set of data operations across every domain, with no

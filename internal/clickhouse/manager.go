@@ -334,20 +334,6 @@ func (m *Manager) GetConnection(sourceID models.SourceID) (*Client, error) {
 	return client, nil
 }
 
-// GetClient is an alias for GetConnection for potential backward compatibility.
-func (m *Manager) GetClient(sourceID models.SourceID) (*Client, error) {
-	return m.GetConnection(sourceID)
-}
-
-// GetHealth performs a LIVE health check on a specific source and updates the cache.
-// Prefer GetCachedHealth for regular status checks; use this only when an
-// immediate, live check is explicitly required.
-func (m *Manager) GetHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
-	m.logger.Debug("GetHealth called (performs live check)", "source_id", sourceID)
-	m.checkSource(ctx, sourceID)
-	return m.GetCachedHealth(sourceID)
-}
-
 // Close iterates through all managed client connections and closes them,
 // with a timeout for each client to prevent hanging on unhealthy connections.
 // It also stops the background health checker and waits for it to complete.

@@ -190,15 +190,3 @@ func ParseOperator(s string) (Operator, bool) {
 		return "", false
 	}
 }
-
-// ParseBoolOperator converts a string to a BoolOperator, returning ok=false if invalid
-func ParseBoolOperator(s string) (BoolOperator, bool) {
-	switch s {
-	case "and", "AND":
-		return BoolAnd, true
-	case "or", "OR":
-		return BoolOr, true
-	default:
-		return "", false
-	}
-}

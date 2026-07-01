@@ -285,16 +285,6 @@ func UpdateAPITokenLastUsed(ctx context.Context, db store.StoreOps, tokenID int)
 	return db.UpdateAPITokenLastUsed(ctx, tokenID)
 }
 
-// CleanupExpiredTokens removes all expired API tokens
-func CleanupExpiredTokens(ctx context.Context, db store.StoreOps, log *slog.Logger) error {
-	if err := db.DeleteExpiredAPITokens(ctx); err != nil {
-		log.Error("failed to cleanup expired API tokens", "error", err)
-		return fmt.Errorf("failed to cleanup expired tokens: %w", err)
-	}
-
-	return nil
-}
-
 // Helper functions
 
 func hasTokenPrefix(token string) bool {

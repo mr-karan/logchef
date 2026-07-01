@@ -65,8 +65,6 @@ type Querier interface {
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
 	DeleteCollection(ctx context.Context, id int64) error
-	// Delete all expired API tokens
-	DeleteExpiredAPITokens(ctx context.Context) error
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
 	// Delete a query share and return its token

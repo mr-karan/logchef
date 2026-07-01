@@ -50,11 +50,6 @@ func (m *ClickHouseMetrics) RecordQueryMetrics(
 	}
 }
 
-// RecordHistogramMetrics records histogram generation metrics
-func (m *ClickHouseMetrics) RecordHistogramMetrics(success bool, duration time.Duration, user *models.User) {
-	RecordHistogram(m.source, success, duration, user)
-}
-
 // RecordConnectionValidation records connection validation metrics
 func (m *ClickHouseMetrics) RecordConnectionValidation(success bool) {
 	RecordClickHouseValidation(m.source, success)

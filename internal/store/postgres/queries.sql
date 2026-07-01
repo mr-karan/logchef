@@ -520,10 +520,6 @@ WHERE id = $1;
 -- Delete an API token by ID and user ID (ensure user owns the token)
 DELETE FROM api_tokens WHERE id = $1 AND user_id = $2;
 
--- name: DeleteExpiredAPITokens :exec
--- Delete all expired API tokens
-DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < now();
-
 -- Alerts
 
 -- name: CreateAlert :one

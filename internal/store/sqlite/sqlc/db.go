@@ -87,9 +87,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteCollectionStmt, err = db.PrepareContext(ctx, deleteCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteCollection: %w", err)
 	}
-	if q.deleteExpiredAPITokensStmt, err = db.PrepareContext(ctx, deleteExpiredAPITokens); err != nil {
-		return nil, fmt.Errorf("error preparing query DeleteExpiredAPITokens: %w", err)
-	}
 	if q.deleteExpiredExportJobsStmt, err = db.PrepareContext(ctx, deleteExpiredExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredExportJobs: %w", err)
 	}
@@ -468,11 +465,6 @@ func (q *Queries) Close() error {
 	if q.deleteCollectionStmt != nil {
 		if cerr := q.deleteCollectionStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteCollectionStmt: %w", cerr)
-		}
-	}
-	if q.deleteExpiredAPITokensStmt != nil {
-		if cerr := q.deleteExpiredAPITokensStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing deleteExpiredAPITokensStmt: %w", cerr)
 		}
 	}
 	if q.deleteExpiredExportJobsStmt != nil {
@@ -985,7 +977,6 @@ type Queries struct {
 	deleteAPITokenStmt                  *sql.Stmt
 	deleteAlertStmt                     *sql.Stmt
 	deleteCollectionStmt                *sql.Stmt
-	deleteExpiredAPITokensStmt          *sql.Stmt
 	deleteExpiredExportJobsStmt         *sql.Stmt
 	deleteQueryShareStmt                *sql.Stmt
 	deleteSavedQueryStmt                *sql.Stmt
@@ -1103,7 +1094,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteAPITokenStmt:                  q.deleteAPITokenStmt,
 		deleteAlertStmt:                     q.deleteAlertStmt,
 		deleteCollectionStmt:                q.deleteCollectionStmt,
-		deleteExpiredAPITokensStmt:          q.deleteExpiredAPITokensStmt,
 		deleteExpiredExportJobsStmt:         q.deleteExpiredExportJobsStmt,
 		deleteQueryShareStmt:                q.deleteQueryShareStmt,
 		deleteSavedQueryStmt:                q.deleteSavedQueryStmt,

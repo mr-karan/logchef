@@ -69,11 +69,6 @@ func Validate(query string) *ValidateResult {
 	return result
 }
 
-// ValidateWithDetails is an alias for Validate that returns detailed error information.
-func ValidateWithDetails(query string) *ValidateResult {
-	return Validate(query)
-}
-
 func convertParticipleError(err error) *ParseError {
 	if err == nil {
 		return nil
@@ -228,16 +223,6 @@ func formatConditionValue(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
-}
-
-// TranslateToSQLConditions is a convenience function that returns just the SQL string.
-// Returns empty string on error.
-func TranslateToSQLConditions(query string, schema *Schema) string {
-	result := Translate(query, schema)
-	if !result.Valid {
-		return ""
-	}
-	return result.SQL
 }
 
 var (
@@ -397,14 +382,4 @@ type QueryBuildParams struct {
 	EndTime        string  // End time in format "2006-01-02 15:04:05"
 	Timezone       string  // Timezone for time conversion
 	Limit          int     // Result limit
-}
-
-// GetConditionsFromQuery extracts filter conditions from a LogchefQL query.
-// This is useful for the field sidebar feature.
-func GetConditionsFromQuery(query string) []FilterCondition {
-	result := Translate(query, nil)
-	if !result.Valid {
-		return nil
-	}
-	return result.Conditions
 }

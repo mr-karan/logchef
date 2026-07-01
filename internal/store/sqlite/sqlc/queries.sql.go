@@ -637,16 +637,6 @@ func (q *Queries) DeleteCollection(ctx context.Context, id int64) error {
 	return err
 }
 
-const deleteExpiredAPITokens = `-- name: DeleteExpiredAPITokens :exec
-DELETE FROM api_tokens WHERE expires_at IS NOT NULL AND expires_at < strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-`
-
-// Delete all expired API tokens
-func (q *Queries) DeleteExpiredAPITokens(ctx context.Context) error {
-	_, err := q.exec(ctx, q.deleteExpiredAPITokensStmt, deleteExpiredAPITokens)
-	return err
-}
-
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
 WHERE expires_at < ?

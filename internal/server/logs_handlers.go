@@ -254,21 +254,6 @@ func (qt *QueryTracker) CancelQuery(queryID string, userID models.UserID) bool {
 	return true
 }
 
-// GetUserQueries returns all active queries for a user
-func (qt *QueryTracker) GetUserQueries(userID models.UserID) []*ActiveQuery {
-	qt.mu.RLock()
-	defer qt.mu.RUnlock()
-
-	var userQueries []*ActiveQuery
-	for _, query := range qt.queries {
-		if query.UserID == userID {
-			userQueries = append(userQueries, query)
-		}
-	}
-
-	return userQueries
-}
-
 // Cleanup removes queries that have been running for too long (over 1 hour)
 func (qt *QueryTracker) Cleanup() {
 	qt.mu.Lock()

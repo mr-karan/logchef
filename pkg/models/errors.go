@@ -48,15 +48,6 @@ type ErrorResponse struct {
 	Details any       `json:"details,omitempty"`
 }
 
-// NewErrorResponse creates a new error response
-func NewErrorResponse(message string, errorType ErrorType, details any) ErrorResponse {
-	return ErrorResponse{
-		Message: message,
-		Type:    errorType,
-		Details: details,
-	}
-}
-
 // Error definitions. These are the canonical, backend-neutral sentinels that
 // every store implementation (SQLite, Postgres) translates its driver errors
 // into, so callers branch with errors.Is without importing a backend package.
