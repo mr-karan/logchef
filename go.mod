@@ -1,6 +1,10 @@
 module github.com/mr-karan/logchef
 
-go 1.26.0
+// Module minimum is 1.25 (sync.WaitGroup.Go); toolchain pins the build to 1.26
+// so CI/releases run on it without requiring lint tooling to be 1.26-built.
+go 1.25.0
+
+toolchain go1.26.0
 
 require (
 	github.com/AfterShip/clickhouse-sql-parser v0.5.1
