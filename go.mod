@@ -1,6 +1,6 @@
 module github.com/mr-karan/logchef
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/AfterShip/clickhouse-sql-parser v0.5.1
