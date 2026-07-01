@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -49,7 +48,7 @@ func EnsurePersonalCollection(ctx context.Context, db store.StoreOps, log *slog.
 	if err == nil {
 		return personal, nil
 	}
-	if !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, models.ErrNotFound) {
+	if !models.IsNotFound(err) {
 		return nil, fmt.Errorf("error fetching personal collection: %w", err)
 	}
 
@@ -125,12 +124,12 @@ func GetCollectionForUser(ctx context.Context, db store.StoreOps, log *slog.Logg
 	}
 
 	member, memberErr := db.GetCollectionMember(ctx, collectionID, userID)
-	if memberErr != nil && !errors.Is(memberErr, sql.ErrNoRows) && !errors.Is(memberErr, models.ErrNotFound) {
+	if memberErr != nil && !models.IsNotFound(memberErr) {
 		log.Error("failed to load collection membership", "error", memberErr, "collection_id", collectionID, "user_id", userID)
 		return nil, "", memberErr
 	}
 
-	if member == nil || (errors.Is(memberErr, sql.ErrNoRows) || errors.Is(memberErr, models.ErrNotFound)) {
+	if member == nil || models.IsNotFound(memberErr) {
 		return nil, "", ErrCollectionNotFound
 	}
 	collection.CallerRole = member.Role

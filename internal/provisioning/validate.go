@@ -3,10 +3,17 @@ package provisioning
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
 )
+
+// sqlIdentifierRe matches a ClickHouse identifier (database, table, column):
+// starts with a letter or underscore, then letters/digits/underscores. Provisioned
+// sources are admin config-as-code, but these values are interpolated into raw
+// ClickHouse SQL, so validate them here too (defense-in-depth, matching the API).
+var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ValidateConfig checks the provisioning config for internal consistency.
 func ValidateConfig(cfg *config.ProvisioningConfig) error {
@@ -47,9 +54,19 @@ func validateSources(cfg *config.ProvisioningConfig) []string {
 		}
 		if src.Database == "" {
 			errs = append(errs, fmt.Sprintf("%s: database is required", prefix))
+		} else if !sqlIdentifierRe.MatchString(src.Database) {
+			errs = append(errs, fmt.Sprintf("%s: database %q is not a valid identifier", prefix, src.Database))
 		}
 		if src.TableName == "" {
 			errs = append(errs, fmt.Sprintf("%s: table_name is required", prefix))
+		} else if !sqlIdentifierRe.MatchString(src.TableName) {
+			errs = append(errs, fmt.Sprintf("%s: table_name %q is not a valid identifier", prefix, src.TableName))
+		}
+		if src.MetaTSField != "" && !sqlIdentifierRe.MatchString(src.MetaTSField) {
+			errs = append(errs, fmt.Sprintf("%s: meta_ts_field %q is not a valid identifier", prefix, src.MetaTSField))
+		}
+		if src.MetaSeverityField != "" && !sqlIdentifierRe.MatchString(src.MetaSeverityField) {
+			errs = append(errs, fmt.Sprintf("%s: meta_severity_field %q is not a valid identifier", prefix, src.MetaSeverityField))
 		}
 
 		// Resolve password from secret_ref if needed

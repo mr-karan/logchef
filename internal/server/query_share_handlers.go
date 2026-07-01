@@ -143,6 +143,12 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 	// (the creator's stored team may differ from the recipient's team).
 	recipientTeam, err := s.sqlite.GetUserTeamForSource(c.Context(), user.ID, share.SourceID)
 	if err != nil {
+		if models.IsNotFound(err) {
+			// The recipient belongs to no team with access to this source, so they
+			// can't act on the shared query — an authorization outcome, not a 500.
+			return SendErrorWithType(c, fiber.StatusForbidden,
+				"You don't have access to this source through any team", models.AuthorizationErrorType)
+		}
 		s.log.Error("failed to resolve team for share recipient", "error", err, "token", token, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve team context", models.GeneralErrorType)
 	}

@@ -232,7 +232,6 @@ func ListSources(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manage
 	return sources, nil
 }
 
-// GetSource retrieves a source by ID including connection status and schema
 // GetSource returns a source's stored metadata (connection info, timestamp
 // field, TTL, etc.) straight from the metadata store. It does NOT touch
 // ClickHouse, so it is cheap enough for hot query-setup paths. Callers that need

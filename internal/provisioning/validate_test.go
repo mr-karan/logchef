@@ -25,6 +25,26 @@ func TestValidateConfig_ValidSources(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
+	cases := []struct {
+		name string
+		src  config.ProvisionSource
+	}{
+		{"bad database", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db; DROP TABLE x", TableName: "tbl", Password: "p"}},
+		{"bad table", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db", TableName: "tbl`)--", Password: "p"}},
+		{"bad ts field", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db", TableName: "tbl", MetaTSField: "ts field", Password: "p"}},
+		{"bad severity field", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db", TableName: "tbl", MetaSeverityField: "sev-field", Password: "p"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{tc.src}}
+			if err := ValidateConfig(cfg); err == nil {
+				t.Errorf("%s should fail identifier validation", tc.name)
+			}
+		})
+	}
+}
+
 func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,

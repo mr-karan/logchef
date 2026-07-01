@@ -515,14 +515,33 @@ func approxJSONSize(row map[string]any) int {
 	return size
 }
 
+// jsonStringSize returns the JSON-encoded byte size of s (including surrounding
+// quotes) without allocating, accounting for escaping so the response byte
+// budget can't be materially under-counted by escape-heavy payloads. It counts
+// conservatively (>= the real encoded size for standard/HTML-escaping encoders).
+func jsonStringSize(s string) int {
+	n := 2 // surrounding quotes
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"', c == '\\', c == '\n', c == '\r', c == '\t', c == '\b', c == '\f':
+			n += 2 // short escape, e.g. \n
+		case c < 0x20, c == '<', c == '>', c == '&':
+			n += 6 // \u00XX (control) or HTML-escaped form
+		default:
+			n++
+		}
+	}
+	return n
+}
+
 func approxValueSize(v any) int {
 	switch val := v.(type) {
 	case nil:
 		return 4 // null
 	case string:
-		return len(val) + 2
+		return jsonStringSize(val)
 	case []byte:
-		return len(val) + 2
+		return jsonStringSize(string(val))
 	case bool:
 		return 5
 	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
@@ -1466,7 +1485,17 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 			LogchefQL:      params.LogchefQL, // Pass through user's LogchefQL query
 		}
 
-		sem <- struct{}{}
+		// Acquire a slot, but honor cancellation while all slots are busy
+		// (otherwise a cancelled request keeps launching fields up to the
+		// per-field timeout).
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			c.logger.Debug("context cancelled while awaiting field-value slot", "error", ctx.Err())
+		}
+		if ctx.Err() != nil {
+			break // exit the loop; wg.Wait below drains in-flight queries
+		}
 		wg.Go(func() {
 			defer func() { <-sem }()
 

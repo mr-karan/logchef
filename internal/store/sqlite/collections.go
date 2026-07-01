@@ -48,8 +48,8 @@ func (db *DB) GetCollection(ctx context.Context, collectionID int) (*models.Coll
 	return mapCollectionRow(row), nil
 }
 
-// GetPersonalCollection returns the user's personal collection, or sql.ErrNoRows
-// if one has not been created yet.
+// GetPersonalCollection returns the user's personal collection, or
+// models.ErrNotFound if one has not been created yet.
 func (db *DB) GetPersonalCollection(ctx context.Context, userID models.UserID) (*models.Collection, error) {
 	row, err := db.readQueries.GetPersonalCollection(ctx, sql.NullInt64{Int64: int64(userID), Valid: true})
 	if err != nil {
@@ -129,7 +129,7 @@ func (db *DB) AddCollectionMember(ctx context.Context, collectionID int, userID 
 	return nil
 }
 
-// GetCollectionMember returns a single membership row, or sql.ErrNoRows if absent.
+// GetCollectionMember returns a single membership row, or models.ErrNotFound if absent.
 func (db *DB) GetCollectionMember(ctx context.Context, collectionID int, userID models.UserID) (*models.CollectionMember, error) {
 	row, err := db.readQueries.GetCollectionMember(ctx, sqlc.GetCollectionMemberParams{
 		CollectionID: int64(collectionID),

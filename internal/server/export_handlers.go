@@ -103,7 +103,11 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 
 	source, err := s.sqlite.GetSource(c.Context(), sourceID)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		if models.IsNotFound(err) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source for export", "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
