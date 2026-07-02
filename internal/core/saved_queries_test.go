@@ -1,10 +1,33 @@
 package core
 
 import (
+	"context"
+	"errors"
+	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+type savedQueryGetterFunc func(context.Context, int) (*models.SavedQuery, error)
+
+func (f savedQueryGetterFunc) GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQuery, error) {
+	return f(ctx, queryID)
+}
+
+func TestGetSavedQueryTreatsNilStoreResultAsNotFound(t *testing.T) {
+	t.Parallel()
+
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	_, err := GetSavedQuery(context.Background(), savedQueryGetterFunc(func(context.Context, int) (*models.SavedQuery, error) {
+		return nil, nil
+	}), log, 123)
+
+	if !errors.Is(err, ErrQueryNotFound) {
+		t.Fatalf("GetSavedQuery nil result error = %v, want %v", err, ErrQueryNotFound)
+	}
+}
 
 // TestUserCanDeleteSavedQuery covers the base creator-or-admin authority shared
 // by delete (and the non-delegated part of edit). Delegated collection-editor

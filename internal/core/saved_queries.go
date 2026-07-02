@@ -113,8 +113,12 @@ func CreateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 	return created, nil
 }
 
+type savedQueryGetter interface {
+	GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQuery, error)
+}
+
 // GetSavedQuery retrieves a saved query by id.
-func GetSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
+func GetSavedQuery(ctx context.Context, db savedQueryGetter, log *slog.Logger, queryID int) (*models.SavedQuery, error) {
 	q, err := db.GetSavedQuery(ctx, queryID)
 	if err != nil {
 		if models.IsNotFound(err) {
@@ -122,6 +126,10 @@ func GetSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, que
 		}
 		log.Error("failed to get saved query", "error", err, "query_id", queryID)
 		return nil, fmt.Errorf("error getting saved query: %w", err)
+	}
+	if q == nil {
+		log.Error("store returned nil saved query without error", "query_id", queryID)
+		return nil, ErrQueryNotFound
 	}
 	return q, nil
 }

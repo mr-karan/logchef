@@ -235,6 +235,10 @@ func (s *Server) handleResolveSavedQuery(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
+	if query == nil || user == nil {
+		s.log.Error("saved query resolver loaded invalid context", "query_nil", query == nil, "user_nil", user == nil)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve saved query context", models.GeneralErrorType)
+	}
 
 	teams, err := core.ListTeamsWithAccessToSource(c.Context(), s.sqlite, s.log, query.SourceID, user.ID)
 	if err != nil {
