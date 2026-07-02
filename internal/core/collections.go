@@ -247,24 +247,33 @@ func RemoveCollectionMember(ctx context.Context, db store.StoreOps, log *slog.Lo
 	return db.RemoveCollectionMember(ctx, collectionID, targetUserID)
 }
 
-// ListCollectionMembers returns members visible to anyone in the collection.
 func ListCollectionMembers(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, callerID models.UserID) ([]*models.CollectionMember, error) {
-	if _, _, err := GetCollectionForUser(ctx, db, log, collectionID, callerID); err != nil {
+	_, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
+	if err != nil {
 		return nil, err
+	}
+	// The member roster (with emails) is visible only to the collection owner or
+	// a global admin — not to editors/members who merely participate.
+	if callerRole != models.CollectionRoleOwner {
+		caller, err := GetUser(ctx, db, callerID)
+		if err != nil {
+			return nil, err
+		}
+		if caller.Role != models.UserRoleAdmin {
+			return nil, ErrCollectionForbidden
+		}
 	}
 	return db.ListCollectionMembers(ctx, collectionID)
 }
 
-// AddCollectionItem references a saved query in a collection. Owner-only.
-// The caller must also have visibility to the saved query (source access via
-// any team) so they can't pin queries that they themselves can't see.
+// AddCollectionItem references a saved query in a collection. Any participant
+// (owner/editor/member) may curate the query list — pinning is participation,
+// not ownership. The caller must also have visibility to the saved query
+// (source access via any team) so they can't pin queries they can't see.
 func AddCollectionItem(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, callerID models.UserID, savedQueryID, sortOrder int) error {
-	_, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
-	if err != nil {
+	// GetCollectionForUser rejects non-participants (404), which is the gate.
+	if _, _, err := GetCollectionForUser(ctx, db, log, collectionID, callerID); err != nil {
 		return err
-	}
-	if callerRole != models.CollectionRoleOwner {
-		return ErrCollectionForbidden
 	}
 
 	query, err := db.GetSavedQuery(ctx, savedQueryID)
@@ -285,14 +294,11 @@ func AddCollectionItem(ctx context.Context, db store.StoreOps, log *slog.Logger,
 	return db.AddCollectionItem(ctx, collectionID, savedQueryID, sortOrder, &added)
 }
 
-// RemoveCollectionItem unlinks a saved query. Owner-only.
+// RemoveCollectionItem unlinks a saved query. Any participant may curate the
+// query list (symmetric with AddCollectionItem).
 func RemoveCollectionItem(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, callerID models.UserID, savedQueryID int) error {
-	_, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
-	if err != nil {
+	if _, _, err := GetCollectionForUser(ctx, db, log, collectionID, callerID); err != nil {
 		return err
-	}
-	if callerRole != models.CollectionRoleOwner {
-		return ErrCollectionForbidden
 	}
 	return db.RemoveCollectionItem(ctx, collectionID, savedQueryID)
 }

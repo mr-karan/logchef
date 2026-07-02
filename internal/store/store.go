@@ -83,6 +83,7 @@ type SavedQueryStore interface {
 	DeleteSavedQuery(ctx context.Context, queryID int) error
 	ListSavedQueriesForUser(ctx context.Context, userID models.UserID) ([]*models.SavedQuery, error)
 	ListSavedQueriesForUserBySource(ctx context.Context, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error)
+	ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, error)
 }
 
 // CollectionStore persists collections (curated groups of saved queries) plus

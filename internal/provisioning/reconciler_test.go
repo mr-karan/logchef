@@ -83,6 +83,9 @@ func TestReconcile_TeamsMembersLinks(t *testing.T) {
 	if managed, err := db.IsUserManaged(ctx, user.ID); err != nil || !managed {
 		t.Fatalf("member user should be managed (managed=%v err=%v)", managed, err)
 	}
+	if user.AccountType != models.UserAccountTypeHuman {
+		t.Fatalf("member user account_type = %q, want %q", user.AccountType, models.UserAccountTypeHuman)
+	}
 	member, err := db.GetTeamMember(ctx, team.ID, user.ID)
 	if err != nil {
 		t.Fatalf("membership should exist: %v", err)

@@ -1455,6 +1455,38 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 	return items, nil
 }
 
+const listAccessibleSourceIDsForUser = `-- name: ListAccessibleSourceIDsForUser :many
+SELECT DISTINCT ts.source_id
+FROM team_sources ts
+JOIN team_members tm ON tm.team_id = ts.team_id
+WHERE tm.user_id = ?
+`
+
+// Source IDs the user can reach via any team, used to mark runnable on browse
+// lists without an N+1 access check per row.
+func (q *Queries) ListAccessibleSourceIDsForUser(ctx context.Context, userID int64) ([]int64, error) {
+	rows, err := q.query(ctx, q.listAccessibleSourceIDsForUserStmt, listAccessibleSourceIDsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var source_id int64
+		if err := rows.Scan(&source_id); err != nil {
+			return nil, err
+		}
+		items = append(items, source_id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
 SELECT id, source_id, name, description, query_type, "query", condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
 WHERE is_active = 1
@@ -1672,6 +1704,76 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 	return items, nil
 }
 
+const listAllSavedQueries = `-- name: ListAllSavedQueries :many
+SELECT
+    sq.id,
+    sq.source_id,
+    sq.created_from_team_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+ORDER BY sq.updated_at DESC
+`
+
+type ListAllSavedQueriesRow struct {
+	ID                int64          `json:"id"`
+	SourceID          int64          `json:"source_id"`
+	CreatedFromTeamID sql.NullInt64  `json:"created_from_team_id"`
+	Name              string         `json:"name"`
+	Description       sql.NullString `json:"description"`
+	QueryType         string         `json:"query_type"`
+	QueryContent      string         `json:"query_content"`
+	CreatedAt         time.Time      `json:"created_at"`
+	UpdatedAt         time.Time      `json:"updated_at"`
+	CreatedBy         sql.NullInt64  `json:"created_by"`
+	SourceName        string         `json:"source_name"`
+}
+
+// List every saved query with no source-access gate: the global-admin browse
+// surface only. The handler MUST authorize the caller as a global admin before
+// calling this. Rows the caller cannot run are marked non-runnable in Go.
+func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error) {
+	rows, err := q.query(ctx, q.listAllSavedQueriesStmt, listAllSavedQueries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllSavedQueriesRow{}
+	for rows.Next() {
+		var i ListAllSavedQueriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.CreatedFromTeamID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedBy,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollectionItems = `-- name: ListCollectionItems :many
 SELECT
     ci.collection_id,
@@ -1688,30 +1790,35 @@ SELECT
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
     sq.updated_at AS query_updated_at,
-    s.name AS source_name
+    s.name AS source_name,
+    cu.email AS query_created_by_email,
+    cu.full_name AS query_created_by_name
 FROM collection_items ci
 JOIN saved_queries sq ON sq.id = ci.saved_query_id
 JOIN sources s ON s.id = sq.source_id
+LEFT JOIN users cu ON cu.id = sq.created_by
 WHERE ci.collection_id = ?
 ORDER BY ci.sort_order ASC, ci.created_at ASC
 `
 
 type ListCollectionItemsRow struct {
-	CollectionID     int64          `json:"collection_id"`
-	SavedQueryID     int64          `json:"saved_query_id"`
-	SortOrder        int64          `json:"sort_order"`
-	AddedBy          sql.NullInt64  `json:"added_by"`
-	ItemAddedAt      time.Time      `json:"item_added_at"`
-	QueryID          int64          `json:"query_id"`
-	SourceID         int64          `json:"source_id"`
-	QueryName        string         `json:"query_name"`
-	QueryDescription sql.NullString `json:"query_description"`
-	QueryType        string         `json:"query_type"`
-	QueryContent     string         `json:"query_content"`
-	QueryCreatedBy   sql.NullInt64  `json:"query_created_by"`
-	QueryCreatedAt   time.Time      `json:"query_created_at"`
-	QueryUpdatedAt   time.Time      `json:"query_updated_at"`
-	SourceName       string         `json:"source_name"`
+	CollectionID        int64          `json:"collection_id"`
+	SavedQueryID        int64          `json:"saved_query_id"`
+	SortOrder           int64          `json:"sort_order"`
+	AddedBy             sql.NullInt64  `json:"added_by"`
+	ItemAddedAt         time.Time      `json:"item_added_at"`
+	QueryID             int64          `json:"query_id"`
+	SourceID            int64          `json:"source_id"`
+	QueryName           string         `json:"query_name"`
+	QueryDescription    sql.NullString `json:"query_description"`
+	QueryType           string         `json:"query_type"`
+	QueryContent        string         `json:"query_content"`
+	QueryCreatedBy      sql.NullInt64  `json:"query_created_by"`
+	QueryCreatedAt      time.Time      `json:"query_created_at"`
+	QueryUpdatedAt      time.Time      `json:"query_updated_at"`
+	SourceName          string         `json:"source_name"`
+	QueryCreatedByEmail sql.NullString `json:"query_created_by_email"`
+	QueryCreatedByName  sql.NullString `json:"query_created_by_name"`
 }
 
 // List items in a collection with saved-query details
@@ -1740,6 +1847,8 @@ func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) (
 			&i.QueryCreatedAt,
 			&i.QueryUpdatedAt,
 			&i.SourceName,
+			&i.QueryCreatedByEmail,
+			&i.QueryCreatedByName,
 		); err != nil {
 			return nil, err
 		}

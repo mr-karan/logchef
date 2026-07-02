@@ -300,6 +300,25 @@ WHERE sq.source_id = $1
   )
 ORDER BY sq.updated_at DESC;
 
+-- name: ListAllSavedQueries :many
+-- List every saved query without a source-access gate. This is only for the
+-- global-admin browse surface; callers must authorize before invoking it.
+SELECT
+    sq.id,
+    sq.source_id,
+    sq.created_from_team_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+ORDER BY sq.updated_at DESC;
+
 -- Query Shares
 
 -- name: CreateQueryShare :exec

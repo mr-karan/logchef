@@ -209,3 +209,50 @@ func TestAddCollectionItemSourceAccessGate(t *testing.T) {
 		t.Error("expected AddCollectionItem to fail without source access, got nil")
 	}
 }
+
+// Curating a collection's query list is open to any participant, but the member
+// roster stays visible to owners only.
+func TestCollectionItemParticipationAndRosterVisibility(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "co-owner@example.com", "Owner")
+	member := newTestUser(t, db, "co-member@example.com", "Member")
+
+	coll, err := CreateCollection(ctx, db, log, "Team Queries", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("AddCollectionMember: %v", err)
+	}
+
+	// Seed an item directly (bypassing the source-access gate, which is exercised
+	// separately) so we can test the removal authorization.
+	src := &models.Source{Name: "curate-src", Connection: models.ConnectionInfo{Host: "h:9000", Database: "default", TableName: "logs"}}
+	if err := db.CreateSource(ctx, src); err != nil {
+		t.Fatalf("CreateSource: %v", err)
+	}
+	sq, err := db.CreateSavedQuery(ctx, src.ID, nil, "q", "", "sql", "{}", &owner.ID)
+	if err != nil {
+		t.Fatalf("CreateSavedQuery: %v", err)
+	}
+	if err := db.AddCollectionItem(ctx, coll.ID, sq.ID, 0, &owner.ID); err != nil {
+		t.Fatalf("seed item: %v", err)
+	}
+
+	// A plain member can remove an item (participation, not ownership).
+	if err := RemoveCollectionItem(ctx, db, log, coll.ID, member.ID, sq.ID); err != nil {
+		t.Errorf("member should be able to remove a collection item, got %v", err)
+	}
+
+	// The member roster is forbidden to a non-owner member, allowed to the owner.
+	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, member.ID); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("member listing roster should be forbidden, got %v", err)
+	}
+	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, owner.ID); err != nil {
+		t.Errorf("owner should be able to list members, got %v", err)
+	}
+}

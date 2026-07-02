@@ -1657,6 +1657,72 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 	return items, nil
 }
 
+const listAllSavedQueries = `-- name: ListAllSavedQueries :many
+SELECT
+    sq.id,
+    sq.source_id,
+    sq.created_from_team_id,
+    sq.name,
+    sq.description,
+    sq.query_type,
+    sq.query_content,
+    sq.created_at,
+    sq.updated_at,
+    sq.created_by,
+    s.name AS source_name
+FROM saved_queries sq
+JOIN sources s ON s.id = sq.source_id
+ORDER BY sq.updated_at DESC
+`
+
+type ListAllSavedQueriesRow struct {
+	ID                int64              `json:"id"`
+	SourceID          int64              `json:"source_id"`
+	CreatedFromTeamID pgtype.Int8        `json:"created_from_team_id"`
+	Name              string             `json:"name"`
+	Description       pgtype.Text        `json:"description"`
+	QueryType         string             `json:"query_type"`
+	QueryContent      string             `json:"query_content"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CreatedBy         pgtype.Int8        `json:"created_by"`
+	SourceName        string             `json:"source_name"`
+}
+
+// List every saved query without a source-access gate. This is only for the
+// global-admin browse surface; callers must authorize before invoking it.
+func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error) {
+	rows, err := q.db.Query(ctx, listAllSavedQueries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllSavedQueriesRow{}
+	for rows.Next() {
+		var i ListAllSavedQueriesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.CreatedFromTeamID,
+			&i.Name,
+			&i.Description,
+			&i.QueryType,
+			&i.QueryContent,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedBy,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollectionItems = `-- name: ListCollectionItems :many
 SELECT
     ci.collection_id,

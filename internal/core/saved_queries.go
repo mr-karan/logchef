@@ -185,6 +185,54 @@ func ListSavedQueriesForUserBySource(ctx context.Context, db store.StoreOps, log
 	return queries, nil
 }
 
+type allSavedQueriesLister interface {
+	ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, error)
+}
+
+// ListAllSavedQueries returns every saved query with no source-access gate — the
+// global-admin browse surface. The caller MUST be authorized as a global admin
+// by the handler before this is invoked.
+func ListAllSavedQueries(ctx context.Context, db allSavedQueriesLister, log *slog.Logger) ([]*models.SavedQuery, error) {
+	queries, err := db.ListAllSavedQueries(ctx)
+	if err != nil {
+		log.Error("failed to list all saved queries", "error", err)
+		return nil, fmt.Errorf("error listing all saved queries: %w", err)
+	}
+	return queries, nil
+}
+
+type userSourcesLister interface {
+	ListSourcesForUser(ctx context.Context, userID models.UserID) ([]*models.Source, error)
+}
+
+// MarkSavedQueriesRunnable sets Runnable on each query based on whether the user
+// has source access to it, fetching the user's accessible source set once (no
+// per-row access check). Used by browse lists to lock rows the user can't run.
+func MarkSavedQueriesRunnable(ctx context.Context, db userSourcesLister, userID models.UserID, queries []*models.SavedQuery) error {
+	if len(queries) == 0 {
+		return nil
+	}
+	sources, err := db.ListSourcesForUser(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("error loading accessible sources: %w", err)
+	}
+	accessible := make(map[models.SourceID]bool, len(sources))
+	for _, source := range sources {
+		if source == nil {
+			continue
+		}
+		accessible[source.ID] = true
+	}
+	for _, q := range queries {
+		if q == nil {
+			continue
+		}
+		runnable := accessible[q.SourceID]
+		q.Runnable = &runnable
+	}
+	return nil
+}
+
 // userIsCreatorOrAdmin is the base edit/delete authority: the query's creator or
 // a global admin. Legacy queries (CreatedBy == nil) qualify only for admins.
 func userIsCreatorOrAdmin(query *models.SavedQuery, user *models.User) bool {

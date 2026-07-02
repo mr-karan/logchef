@@ -158,3 +158,30 @@ func (s *Store) ListSavedQueriesForUserBySource(ctx context.Context, userID mode
 	}
 	return queries, nil
 }
+
+// ListAllSavedQueries returns every saved query without applying source-access gates.
+func (s *Store) ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, error) {
+	rows, err := s.q.ListAllSavedQueries(ctx)
+	if err != nil {
+		s.log.Error("failed to list all saved queries", "error", err)
+		return nil, fmt.Errorf("error listing all saved queries: %w", err)
+	}
+	queries := make([]*models.SavedQuery, 0, len(rows))
+	for i := range rows {
+		r := rows[i]
+		queries = append(queries, &models.SavedQuery{
+			ID:                int(r.ID),
+			SourceID:          models.SourceID(r.SourceID),
+			CreatedFromTeamID: teamIDPtr(r.CreatedFromTeamID),
+			Name:              r.Name,
+			Description:       textStr(r.Description),
+			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryContent:      r.QueryContent,
+			CreatedBy:         userIDPtr(r.CreatedBy),
+			CreatedAt:         r.CreatedAt.Time,
+			UpdatedAt:         r.UpdatedAt.Time,
+			SourceName:        r.SourceName,
+		})
+	}
+	return queries, nil
+}

@@ -143,6 +143,9 @@ type Querier interface {
 	ListAlertsBySource(ctx context.Context, sourceID int64) ([]Alert, error)
 	// List every alert the user can see (any source attached to any of their teams)
 	ListAlertsForUser(ctx context.Context, userID int64) ([]Alert, error)
+	// List every saved query without a source-access gate. This is only for the
+	// global-admin browse surface; callers must authorize before invoking it.
+	ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQueriesRow, error)
 	// List items in a collection with saved-query details
 	ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error)
 	// List members of a collection with user details

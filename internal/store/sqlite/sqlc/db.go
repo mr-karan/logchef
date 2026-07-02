@@ -198,6 +198,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
 	}
+	if q.listAccessibleSourceIDsForUserStmt, err = db.PrepareContext(ctx, listAccessibleSourceIDsForUser); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAccessibleSourceIDsForUser: %w", err)
+	}
 	if q.listActiveAlertsDueStmt, err = db.PrepareContext(ctx, listActiveAlertsDue); err != nil {
 		return nil, fmt.Errorf("error preparing query ListActiveAlertsDue: %w", err)
 	}
@@ -209,6 +212,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listAlertsForUserStmt, err = db.PrepareContext(ctx, listAlertsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAlertsForUser: %w", err)
+	}
+	if q.listAllSavedQueriesStmt, err = db.PrepareContext(ctx, listAllSavedQueries); err != nil {
+		return nil, fmt.Errorf("error preparing query ListAllSavedQueries: %w", err)
 	}
 	if q.listCollectionItemsStmt, err = db.PrepareContext(ctx, listCollectionItems); err != nil {
 		return nil, fmt.Errorf("error preparing query ListCollectionItems: %w", err)
@@ -652,6 +658,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listAPITokensForUserStmt: %w", cerr)
 		}
 	}
+	if q.listAccessibleSourceIDsForUserStmt != nil {
+		if cerr := q.listAccessibleSourceIDsForUserStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAccessibleSourceIDsForUserStmt: %w", cerr)
+		}
+	}
 	if q.listActiveAlertsDueStmt != nil {
 		if cerr := q.listActiveAlertsDueStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listActiveAlertsDueStmt: %w", cerr)
@@ -670,6 +681,11 @@ func (q *Queries) Close() error {
 	if q.listAlertsForUserStmt != nil {
 		if cerr := q.listAlertsForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAlertsForUserStmt: %w", cerr)
+		}
+	}
+	if q.listAllSavedQueriesStmt != nil {
+		if cerr := q.listAllSavedQueriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listAllSavedQueriesStmt: %w", cerr)
 		}
 	}
 	if q.listCollectionItemsStmt != nil {
@@ -1014,10 +1030,12 @@ type Queries struct {
 	isTeamManagedStmt                   *sql.Stmt
 	isUserManagedStmt                   *sql.Stmt
 	listAPITokensForUserStmt            *sql.Stmt
+	listAccessibleSourceIDsForUserStmt  *sql.Stmt
 	listActiveAlertsDueStmt             *sql.Stmt
 	listAlertHistoryStmt                *sql.Stmt
 	listAlertsBySourceStmt              *sql.Stmt
 	listAlertsForUserStmt               *sql.Stmt
+	listAllSavedQueriesStmt             *sql.Stmt
 	listCollectionItemsStmt             *sql.Stmt
 	listCollectionMembersStmt           *sql.Stmt
 	listCollectionsForUserStmt          *sql.Stmt
@@ -1131,10 +1149,12 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		isTeamManagedStmt:                   q.isTeamManagedStmt,
 		isUserManagedStmt:                   q.isUserManagedStmt,
 		listAPITokensForUserStmt:            q.listAPITokensForUserStmt,
+		listAccessibleSourceIDsForUserStmt:  q.listAccessibleSourceIDsForUserStmt,
 		listActiveAlertsDueStmt:             q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                q.listAlertHistoryStmt,
 		listAlertsBySourceStmt:              q.listAlertsBySourceStmt,
 		listAlertsForUserStmt:               q.listAlertsForUserStmt,
+		listAllSavedQueriesStmt:             q.listAllSavedQueriesStmt,
 		listCollectionItemsStmt:             q.listCollectionItemsStmt,
 		listCollectionMembersStmt:           q.listCollectionMembersStmt,
 		listCollectionsForUserStmt:          q.listCollectionsForUserStmt,

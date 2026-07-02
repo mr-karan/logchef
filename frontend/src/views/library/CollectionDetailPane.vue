@@ -13,6 +13,8 @@ import {
   Search,
   Database,
   Users,
+  Plus,
+  FolderInput,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
 import { PageHeader, PageSection, EmptyState, LoadingState } from "@/components/layout";
@@ -44,6 +46,7 @@ import {
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
+import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useAuthStore } from "@/stores/auth";
 import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useUsersStore } from "@/stores/users";
@@ -63,6 +66,7 @@ const emit = defineEmits<{ deleted: [id: number] }>();
 const router = useRouter();
 const { toast } = useToast();
 const store = useCollectionsStore();
+const savedQueriesStore = useSavedQueriesStore();
 const authStore = useAuthStore();
 const usersStore = useUsersStore();
 const { data } = storeToRefs(store);
@@ -96,6 +100,9 @@ function isCurrentUser(userId: number): boolean {
 }
 
 const isOwner = computed(() => canManageCollection(collection.value));
+// Curating the query list (pin/unpin/move) is open to any participant
+// (owner/editor/member), not just owners. Membership is implied by caller_role.
+const canCurate = computed(() => isGlobalAdmin.value || !!collection.value?.caller_role);
 // Listing users (`/api/v1/users`) requires admin or any-team-admin. Hide the
 // invite UI from owners who lack that role since the dropdown can't be
 // populated without it.
@@ -130,8 +137,9 @@ async function load() {
   }
   const tasks: Promise<unknown>[] = [store.fetchItems(collectionID.value)];
   // Skip member fetch when the section won't render — personal collections
-  // hide it, and non-team-admins can't see it (canListUsers is false).
-  if (collection.value && !collection.value.is_personal && canListUsers.value) {
+  // hide it, and only the collection owner (or a global admin) may view the
+  // member roster.
+  if (collection.value && !collection.value.is_personal && isOwner.value) {
     tasks.push(store.fetchMembers(collectionID.value));
   }
   await Promise.all(tasks);
@@ -205,6 +213,61 @@ function openQuery(queryId: number) {
   router.push(`/logs/saved/${queryId}`);
 }
 
+// --- Add an existing saved query to this collection (fix 4) ---
+const showAddQuery = ref(false);
+const addQuerySearch = ref("");
+
+const pinnedIds = computed(() => new Set(items.value.map((i) => i.query.id)));
+// Saved queries the caller can pin here, minus ones already in the collection.
+const addableQueries = computed(() => {
+  const q = addQuerySearch.value.trim().toLowerCase();
+  return (savedQueriesStore.queries ?? [])
+    .filter((sq) => !pinnedIds.value.has(sq.id))
+    .filter((sq) => !q || sq.name.toLowerCase().includes(q) || (sq.source_name ?? "").toLowerCase().includes(q));
+});
+
+watch(showAddQuery, async (isOpen) => {
+  // Always fetch the unscoped list on open: the store may hold a source-scoped
+  // result from the explorer, which would hide queries from other sources.
+  if (isOpen) {
+    await savedQueriesStore.list();
+  }
+});
+
+async function handleAddQuery(queryId: number) {
+  const result = await store.addItem(collectionID.value, { saved_query_id: queryId });
+  if (result.success) {
+    toast({ title: "Query added to collection", duration: TOAST_DURATION.SUCCESS });
+  }
+}
+
+// --- Move a query to a different collection (fix 1) ---
+const pendingMoveQueryId = ref<number | null>(null);
+const moveTargetId = ref("");
+// Collections the caller can move into: any they participate in (the store only
+// holds collections they own or are a member of), excluding the current one.
+const moveTargets = computed(() =>
+  store.collections.filter((c) => c.id !== collectionID.value)
+);
+
+function openMove(queryId: number) {
+  pendingMoveQueryId.value = queryId;
+  moveTargetId.value = "";
+}
+
+async function handleMove() {
+  const queryId = pendingMoveQueryId.value;
+  const target = Number(moveTargetId.value);
+  if (queryId == null || !target) return;
+  // Move = pin to the target, then unpin from the current collection. If the add
+  // fails we keep it where it is rather than orphan it.
+  const added = await store.addItem(target, { saved_query_id: queryId });
+  if (!added.success) return;
+  await store.removeItem(collectionID.value, queryId);
+  pendingMoveQueryId.value = null;
+  toast({ title: "Query moved", duration: TOAST_DURATION.SUCCESS });
+}
+
 async function handleDeleteCollection() {
   if (!collection.value) return;
   const id = collection.value.id;
@@ -262,7 +325,7 @@ async function handleDeleteCollection() {
           <span class="font-medium text-foreground tabular-nums">{{ itemCount }}</span>
           {{ itemCount === 1 ? "query" : "queries" }}
         </span>
-        <template v-if="!collection.is_personal && canListUsers">
+        <template v-if="!collection.is_personal && isOwner">
           <span class="text-muted-foreground/40">•</span>
           <span>
             <span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span>
@@ -285,6 +348,12 @@ async function handleDeleteCollection() {
         description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
         flush
       >
+        <template v-if="canCurate" #actions>
+          <Button variant="outline" size="sm" @click="showAddQuery = true">
+            <Plus class="mr-2 h-4 w-4" />
+            Add query
+          </Button>
+        </template>
         <LoadingState v-if="store.isLoadingOperation(`listItems-${collectionID}`)" />
         <EmptyState
           v-else-if="items.length === 0"
@@ -299,8 +368,9 @@ async function handleDeleteCollection() {
                 <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">Type</th>
                 <th class="text-left font-medium text-muted-foreground px-4 py-2.5">Name</th>
                 <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">Source</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[170px]">Created by</th>
                 <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">Updated</th>
-                <th class="w-[60px]"></th>
+                <th class="w-[90px]"></th>
               </tr>
             </thead>
             <tbody>
@@ -342,20 +412,44 @@ async function handleDeleteCollection() {
                     {{ item.query.source_name || `source ${item.query.source_id}` }}
                   </span>
                 </td>
+                <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
+                  <span
+                    v-if="item.query.created_by_name || item.query.created_by_email"
+                    class="inline-block max-w-[150px] truncate align-bottom"
+                    :title="item.query.created_by_email"
+                  >
+                    {{ item.query.created_by_name || item.query.created_by_email }}
+                  </span>
+                  <span v-else class="text-muted-foreground/50">Unknown</span>
+                </td>
                 <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">
                   {{ formatDate(item.query.updated_at) }}
                 </td>
                 <td class="px-4 py-3 align-middle">
-                  <Button
-                    v-if="isOwner"
-                    variant="ghost"
-                    size="icon"
-                    class="h-7 w-7 opacity-0 group-hover:opacity-100 transition-opacity"
-                    @click="handleRemoveItem(item.query.id)"
-                    title="Remove from collection"
+                  <div
+                    v-if="canCurate"
+                    class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
-                    <Trash2 class="h-4 w-4 text-destructive" />
-                  </Button>
+                    <Button
+                      v-if="moveTargets.length && item.runnable"
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7"
+                      @click="openMove(item.query.id)"
+                      title="Move to another collection"
+                    >
+                      <FolderInput class="h-4 w-4 text-muted-foreground" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      class="h-7 w-7"
+                      @click="handleRemoveItem(item.query.id)"
+                      title="Remove from collection"
+                    >
+                      <Trash2 class="h-4 w-4 text-destructive" />
+                    </Button>
+                  </div>
                 </td>
               </tr>
             </tbody>
@@ -364,7 +458,7 @@ async function handleDeleteCollection() {
       </PageSection>
 
       <PageSection
-        v-if="!collection.is_personal && canListUsers"
+        v-if="!collection.is_personal && isOwner"
         title="Members"
         description="Owners manage members and roles; editors can edit the queries inside; members read and run items they have source access to."
         flush
@@ -477,6 +571,76 @@ async function handleDeleteCollection() {
             <Button type="submit" :disabled="!renameName.trim()">Save</Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Add an existing saved query to this collection (fix 4) -->
+    <Dialog :open="showAddQuery" @update:open="(val) => !val && (showAddQuery = false)">
+      <DialogContent class="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Add a query</DialogTitle>
+          <DialogDescription>
+            Pin an existing saved query to this collection. Only queries you can see are listed.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="space-y-3 min-w-0">
+          <div class="relative">
+            <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+            <Input v-model="addQuerySearch" placeholder="Search queries…" class="pl-8 h-9" />
+          </div>
+          <LoadingState v-if="savedQueriesStore.isLoading" />
+          <p v-else-if="addableQueries.length === 0" class="px-1 py-6 text-center text-sm text-muted-foreground">
+            {{ addQuerySearch ? "No queries match." : "No saved queries available to add." }}
+          </p>
+          <ul v-else class="max-h-72 overflow-y-auto divide-y rounded-md border">
+            <li v-for="sq in addableQueries" :key="sq.id" class="flex items-center gap-3 px-3 py-2">
+              <div class="min-w-0 flex-1">
+                <p class="truncate text-sm font-medium">{{ sq.name }}</p>
+                <p class="truncate text-xs text-muted-foreground">
+                  {{ sq.source_name || `source ${sq.source_id}` }}
+                </p>
+              </div>
+              <Button size="sm" variant="outline" @click="handleAddQuery(sq.id)">Add</Button>
+            </li>
+          </ul>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="showAddQuery = false">Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Move a query to a different collection (fix 1) -->
+    <Dialog :open="pendingMoveQueryId !== null" @update:open="(val) => !val && (pendingMoveQueryId = null)">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Move to another collection</DialogTitle>
+          <DialogDescription>
+            The query is pinned to the selected collection and removed from this one.
+          </DialogDescription>
+        </DialogHeader>
+        <div class="grid gap-2">
+          <Label>Destination collection</Label>
+          <Select v-model="moveTargetId">
+            <SelectTrigger>
+              <SelectValue placeholder="Select a collection" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem
+                v-for="c in moveTargets"
+                :key="c.id"
+                :value="String(c.id)"
+                :text-value="c.name"
+              >
+                {{ c.name }}
+              </SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" @click="pendingMoveQueryId = null">Cancel</Button>
+          <Button type="button" :disabled="!moveTargetId" @click="handleMove">Move</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 

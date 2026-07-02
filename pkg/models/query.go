@@ -178,11 +178,21 @@ type SavedQuery struct {
 	CreatedAt         time.Time      `json:"created_at" db:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at" db:"updated_at"`
 	SourceName        string         `json:"source_name,omitempty"`
+	// CreatedByName / CreatedByEmail identify the query's creator for display.
+	// Populated where the server joins the users table (e.g. collection items);
+	// empty for legacy queries with a NULL created_by.
+	CreatedByName  string `json:"created_by_name,omitempty" db:"-"`
+	CreatedByEmail string `json:"created_by_email,omitempty" db:"-"`
 	// CanEdit / CanDelete are per-request UI authorization hints for the calling
 	// user. Populated by the server (nil when not computed). CanEdit reflects
 	// delegated collection-editor access; CanDelete is creator/global-admin only.
 	CanEdit   *bool `json:"can_edit,omitempty" db:"-"`
 	CanDelete *bool `json:"can_delete,omitempty" db:"-"`
+	// Runnable indicates the calling user has source access to actually run this
+	// query. Populated on browse lists (esp. the admin "all queries" surface,
+	// where rows for sources the admin can't reach are shown locked). nil when
+	// not computed.
+	Runnable *bool `json:"runnable,omitempty" db:"-"`
 }
 
 // ResolvedSavedQuery is the explorer-facing representation of a saved query.

@@ -14,9 +14,10 @@ const lazy = (name: string, loader: () => Promise<unknown>) => () =>
     return { default: ComponentLoadError } as { default: typeof ComponentLoadError };
   });
 
+// Routes whose stale query params should be stripped on navigation. The Library
+// routes are intentionally NOT here: they use ?view=all for the All-queries
+// browse mode, and collection navigation already pushes query:{} explicitly.
 const QUERYLESS_ROUTE_NAMES = new Set([
-  "Library",
-  "LibraryCollection",
   "SavedQueryRedirect",
 ]);
 
