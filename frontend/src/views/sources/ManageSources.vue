@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
-import { Plus, Trash2, Copy, Pencil, Database } from 'lucide-vue-next'
+import { Plus, Trash2, Copy, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { type Source } from '@/api/sources'
 import {
@@ -16,8 +16,10 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
+import { useTableSearchSort } from '@/composables/useTableSearchSort'
 import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
 
 const router = useRouter()
@@ -37,6 +39,29 @@ const loadingError = computed(() => {
             : null
     }
     return null
+})
+
+// Client-side search + sort over the fully-loaded sources list.
+const {
+    search: sourceSearch,
+    rows: sortedSources,
+    sortKey: sourceSortKey,
+    sortDir: sourceSortDir,
+    toggleSort: toggleSourceSort,
+} = useTableSearchSort(() => sourcesStore.sources, {
+    searchKeys: [
+        'name',
+        (s) => s.description,
+        (s) => s.connection.host,
+        (s) => s.connection.database,
+        (s) => s.connection.table_name,
+    ],
+    sortAccessors: {
+        name: (s) => (s.name || '').toLowerCase(),
+        status: (s) => (s.is_connected ? 1 : 0),
+        created: (s) => new Date(s.created_at),
+    },
+    initialSort: { key: 'name', dir: 'asc' },
 })
 
 const handleDelete = (source: Source) => {
@@ -124,21 +149,45 @@ import { formatDate } from '@/utils/format'
             </template>
         </EmptyState>
         <div v-else class="space-y-4">
+                    <div class="relative max-w-sm">
+                        <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input v-model="sourceSearch" placeholder="Search sources…" class="pl-8" />
+                    </div>
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead class="w-[200px]">Source Name</TableHead>
+                                <TableHead class="w-[200px]">
+                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('name')">
+                                        Source Name
+                                        <component :is="sourceSortKey === 'name' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                    </button>
+                                </TableHead>
                                 <TableHead class="w-[200px]">Ingestion (24h)</TableHead>
                                 <TableHead class="w-[150px]">Table Auto Created</TableHead>
                                 <TableHead class="w-[150px]">Timestamp Column</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
-                                <TableHead class="w-[100px]">Status</TableHead>
-                                <TableHead class="w-[100px]">Created At</TableHead>
+                                <TableHead class="w-[100px]">
+                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('status')">
+                                        Status
+                                        <component :is="sourceSortKey === 'status' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                    </button>
+                                </TableHead>
+                                <TableHead class="w-[100px]">
+                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('created')">
+                                        Created At
+                                        <component :is="sourceSortKey === 'created' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                    </button>
+                                </TableHead>
                                 <TableHead class="w-[120px] text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow v-for="source in sourcesStore.sources" :key="source.id">
+                            <TableRow v-if="sortedSources.length === 0">
+                                <TableCell colspan="8" class="text-center text-muted-foreground py-6">
+                                    No sources match your search
+                                </TableCell>
+                            </TableRow>
+                            <TableRow v-for="source in sortedSources" :key="source.id">
                                 <TableCell class="font-medium">
                                     <a @click="router.push({ name: 'SourceStats', query: { sourceId: source.id } })"
                                         class="hover:underline cursor-pointer">

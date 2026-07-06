@@ -57,6 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect, type SearchableItem } from "@/components/ui/searchable-select";
 
 // The selected collection is supplied by the Library shell so this pane can be
 // swapped in place as the rail selection changes — no full-page navigation.
@@ -118,6 +119,13 @@ const availableUsers = computed(() => {
   const memberIds = new Set(members.value.map((m) => String(m.user_id)));
   return (usersStore.users ?? []).filter((u) => !memberIds.has(String(u.id)));
 });
+const availableUserItems = computed<SearchableItem[]>(() =>
+  availableUsers.value.map((u) => ({
+    value: String(u.id),
+    label: u.email,
+    sublabel: u.full_name || undefined,
+  }))
+);
 
 const showRename = ref(false);
 const renameName = ref("");
@@ -248,6 +256,9 @@ const moveTargetId = ref("");
 // holds collections they own or are a member of), excluding the current one.
 const moveTargets = computed(() =>
   store.collections.filter((c) => c.id !== collectionID.value)
+);
+const moveTargetItems = computed<SearchableItem[]>(() =>
+  moveTargets.value.map((c) => ({ value: String(c.id), label: c.name }))
 );
 
 function openMove(queryId: number) {
@@ -514,22 +525,12 @@ async function handleDeleteCollection() {
         <form @submit.prevent="handleAddMember" class="space-y-4">
           <div class="grid gap-2">
             <Label>User</Label>
-            <Select v-model="newMemberId">
-              <SelectTrigger>
-                <SelectValue placeholder="Select a user to invite" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem
-                  v-for="user in availableUsers"
-                  :key="user.id"
-                  :value="String(user.id)"
-                  :text-value="user.email"
-                >
-                  {{ user.email }}
-                  <span v-if="user.full_name" class="ml-2 text-muted-foreground text-xs">({{ user.full_name }})</span>
-                </SelectItem>
-              </SelectContent>
-            </Select>
+            <SearchableSelect
+              v-model="newMemberId"
+              :items="availableUserItems"
+              placeholder="Select a user to invite"
+              search-placeholder="Search users…"
+              empty-text="No users available." />
           </div>
           <div class="grid gap-2">
             <Label>Role</Label>
@@ -621,21 +622,12 @@ async function handleDeleteCollection() {
         </DialogHeader>
         <div class="grid gap-2">
           <Label>Destination collection</Label>
-          <Select v-model="moveTargetId">
-            <SelectTrigger>
-              <SelectValue placeholder="Select a collection" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem
-                v-for="c in moveTargets"
-                :key="c.id"
-                :value="String(c.id)"
-                :text-value="c.name"
-              >
-                {{ c.name }}
-              </SelectItem>
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            v-model="moveTargetId"
+            :items="moveTargetItems"
+            placeholder="Select a collection"
+            search-placeholder="Search collections…"
+            empty-text="No collections available." />
         </div>
         <DialogFooter>
           <Button type="button" variant="outline" @click="pendingMoveQueryId = null">Cancel</Button>
