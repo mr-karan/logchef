@@ -24,6 +24,7 @@ Logchef is a lightweight, powerful log analytics platform designed for efficient
 - **OIDC + RBAC included**: SSO and team-based access out of the box.
 - **Schema-agnostic**: Point at any ClickHouse table without migrations.
 - **Single binary**: One executable, no runtime dependencies.
+- **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
 - **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
 - **CLI**: Query logs from your terminal with syntax highlighting and multi-context support.
