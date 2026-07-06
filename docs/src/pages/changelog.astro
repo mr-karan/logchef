@@ -101,9 +101,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>Opt-in Postgres metadata backend</strong> &mdash; Store users, teams, sources, saved queries, collections, alerts, tokens, and settings in Postgres instead of SQLite, so several Logchef replicas can serve any request off shared state. Set <code>database.driver = "postgres"</code> with a <code>[postgres]</code> DSN (or the matching env vars). SQLite remains the default and the single-binary start is unchanged; your logs always stay in ClickHouse. <a href="/operations/database-backends/">Database backends &amp; HA &rarr;</a></li>
           <li><strong>Turn alerting off server-wide</strong> &mdash; Set <code>alerts.enabled = false</code> and the UI hides alerting entirely while every alert endpoint returns a clean <code>503</code>. Useful when you run Logchef purely for exploration, or want a single alert-evaluating instance.</li>
           <li><strong>"All Queries" browse for admins</strong> &mdash; Global admins can now see every saved query, including ones not pinned to any collection. Queries on sources you can't reach show as locked.</li>
+          <li><strong>Redesigned Library</strong> &mdash; Saved queries and collections merge into a single <code>/logs/library</code> (collections rail + detail pane). Collections gain an <strong>editor</strong> role, and editing a saved query is delegated to its creator, a global admin, or an owner/editor of a shared collection that contains it. The Save dialog gets an inline collection picker, and the UI only offers Edit/Delete actions you're actually allowed to take.</li>
           <li><strong>Curate shared collections as a member</strong> &mdash; Any participant (owner, editor, or member) can pin, move, and remove queries in a shared collection. Renaming, deleting, and managing members stays owner-only.</li>
           <li><strong>Collection detail upgrades</strong> &mdash; Pin an existing saved query with an "Add query" search picker, move a query to another collection, and see each query's author in a new "Created by" column.</li>
           <li><strong>Searchable pickers &amp; tables</strong> &mdash; Type-to-filter dropdowns for inviting collection members and adding service accounts to teams, plus a search box and sortable columns on Manage Sources and team-member lists.</li>
+          <li><strong>Token expiry everywhere</strong> &mdash; The service-tokens admin page now shows the same expiry status as the profile API-token list (never expires / expires / expiring soon / expired), and the CLI flags an expired saved token in <code>logchef auth current</code>.</li>
         </ul>
       </div>
 
@@ -125,6 +127,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
+          <li><strong>Inline permission errors show a toast</strong> instead of bouncing you to a full-page Forbidden view &mdash; toggles, saves, and deletes stay put on a 403.</li>
+          <li><strong>Dead toggles work again</strong> &mdash; several Switch/Checkbox controls (admin Active toggle, alert enable/disable, source TLS/auth, column selector, variable multi-selects) were silently no-op'd by a binding mismatch and now respond.</li>
           <li><strong>Saved-query resolver no longer crashes</strong> on certain resolve paths &mdash; it returns a clean error instead.</li>
           <li><strong>Accurate access errors</strong> for exports and shared queries &mdash; <code>404</code> only when something's missing, <code>403</code> when you lack team access.</li>
           <li><strong>Tighter memory accounting</strong> on large responses (fixes an under-count from the performance pass), cancellable field-value loading, and identifier validation on provisioned sources.</li>

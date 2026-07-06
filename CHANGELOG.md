@@ -9,13 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Logchef 1.7 makes the **metadata store pluggable**: alongside the default
 single-binary SQLite, you can now run an **opt-in Postgres backend** so multiple
-Logchef replicas share state behind a load balancer for high availability. The
-release also lets you **turn alerting off** server-wide, opens **collection
-curation** to any participant, adds an admin **"All Queries"** browse view, and
-threads **type-to-filter pickers and searchable/sortable tables** through the
-member and resource pages. Under the hood: Go 1.26, a backend-agnostic store
-contract validated by a conformance suite that runs against both databases, and
-a round of audit-driven hardening.
+replicas share state behind a load balancer for high availability. It also ships
+a **redesigned Library** for saved queries and collections with a real
+permission model (`owner` / `editor` / `member` + delegated edit), turns
+**`alerts.enabled`** into a proper server-wide switch, surfaces **token expiry**
+across UI / API / CLI, adds an admin **"All Queries"** browse, and clears a wave
+of UX bugs. Under the hood: Go 1.26, a backend-agnostic store contract validated
+by a conformance suite that runs against both databases, and audit-driven
+hardening. **Breaking:** the Library URL consolidation — see below.
 
 ### Added
 - **Pluggable Postgres metadata backend (opt-in).** Application metadata —
@@ -39,6 +40,13 @@ a round of audit-driven hardening.
   any collection, each marked `runnable` for the caller (sources you can't reach
   show locked). Closes a gap where such queries had no browse surface. The
   default (source-gated) response used by the explorer and CLI is unchanged.
+- **Redesigned Library.** The three saved-query / collection views collapse
+  into a single `/logs/library` (collections rail + detail pane). Collections
+  gain an **editor** role (`owner` / `editor` / `member`), and saved-query edit
+  is **delegated**: creator, global admin, or an owner/editor of a shared
+  collection containing the query can edit it (delete stays creator/admin-only).
+  The Save dialog gains an inline collection picker, and the server sends
+  `can_edit` / `can_delete` hints so the UI only offers actions that will work.
 - **Curate collections without owning them.** Adding, moving, and removing
   queries in a shared collection is now open to any participant
   (owner / editor / member). Managing the collection itself — rename, delete,
@@ -50,6 +58,11 @@ a round of audit-driven hardening.
   resource management. A reusable searchable picker replaces plain dropdowns
   (invite a collection member, add a service account to a team), and the Manage
   Sources and team-member tables gain a search box and sortable columns.
+- **Token expiry surfaced everywhere** — the service-tokens admin page shows the
+  same expiry status as the profile API-token list (never expires / expires /
+  expiring soon / expired) via a shared helper; the API-token model gains a
+  computed `expired` flag; and the CLI flags an expired saved token in
+  `logchef auth current`.
 
 ### Changed
 - **Backend-agnostic store layer.** The metadata layer was reorganized behind a
@@ -58,12 +71,27 @@ a round of audit-driven hardening.
   symmetric implementations, validated by a shared conformance suite that runs
   against both in CI. `internal/sqlite` moved under `internal/store/sqlite`.
 - **Upgraded to Go 1.26**, with hot-path optimizations and idiom modernization.
+- **Anyone can create collections.** The old team-admin gate is dropped;
+  per-collection roles (`owner` / `editor` / `member`) are the authority.
 - **Collection member roster is owner-only** — previously visible to any
   team-admin who could list users; now enforced server-side.
 
 ### Fixed
+- **Inline 403s no longer bounce to a full-page Forbidden view** — an access
+  error on an inline action (toggle, save, delete) shows a toast and stays put;
+  page-level access is still enforced by the router.
+- **Dead toggles across the app work again** — Switch/Checkbox controls were
+  bound to `:checked`/`@update:checked`, but the reka-ui primitives only expose
+  `model-value`, so the admin Active toggle, alert enable/disable, source
+  TLS/auth switches, the column selector, and variable multi-selects silently
+  no-op'd. Rebound to `model-value`.
 - **Saved-query resolver no longer panics** on certain resolve paths — it
   recovers and returns a clean error.
+- **Saved queries wait for the source schema** before running, so opening one
+  no longer races the previously selected source.
+- **Save dialog only offers collections you own** (adding an item is owner-only,
+  so it no longer saves the query then 403s on the pin), and the item Remove
+  button gates on the current collection's ownership.
 - **Correct HTTP status codes** for export / query-share access: `404` only on
   not-found, `403` when the recipient has no team access.
 - **Escape-aware response byte-budget** — fixes an under-count memory regression
@@ -76,11 +104,20 @@ a round of audit-driven hardening.
   `@internationalized/date` (reka-ui date-picker type drift) and cleared the
   assorted `vue-tsc` issues that had accumulated behind a disabled check.
 
+### Breaking changes
+- **Library URL consolidation.** `/logs/saved`, `/logs/collections`, and
+  `/logs/collections/:id` collapse into a single `/logs/library` with **no
+  redirects** from the old paths. `/logs/saved/:queryId` is kept as the
+  canonical share / explorer-hydration link. Update bookmarked or documented
+  old collection URLs.
+- **Collection creation is no longer team-admin-gated** — any authenticated
+  user can create a collection.
+
 ### Migration notes
-| Migration | What it does |
-|-----------|-------------|
-| SQLite 000024 | Adds the **collection editor** role. Applied automatically on upgrade from 1.6.1; no other new SQLite migrations. |
-| Postgres 000001_init | Fresh Postgres backends create the full schema in a single advisory-lock–guarded init migration. |
+| Backend | Migration | What it does |
+|---------|-----------|-------------|
+| SQLite | 000024 | Rebuilds the `collection_members` role CHECK to `owner \| editor \| member` (adds the collection **editor** role). Existing rows preserved. Applied automatically on upgrade from 1.6.1; no other new SQLite migrations. |
+| Postgres | 000001_init | Fresh Postgres backends create the full schema in a single advisory-lock–guarded init migration. |
 
 ### Internal
 - Backend-parity end-to-end suite (agent-browser) covering login, sources,
