@@ -149,7 +149,7 @@ const clearMultiSelectValues = (variable: VariableState) => {
           <!-- Single-select dropdown -->
           <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
             :model-value="String(variable.value ?? '')"
-            @update:model-value="(val) => variable.value = val">
+            @update:model-value="(val) => variable.value = val as string">
             <SelectTrigger :id="`var-${variable.name}`"
               class="h-7 text-xs w-full transition-colors focus:ring-1 focus:ring-primary/50"
               :class="{

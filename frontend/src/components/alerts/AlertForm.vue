@@ -31,6 +31,7 @@ import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import { X, Plus, User, Bell } from "lucide-vue-next";
 import { Badge } from "@/components/ui/badge";
+import type { AcceptableValue } from "reka-ui";
 
 // Extended types for local usage until API types are updated
 // The form doesn't include source_id — the parent adds it from context.
@@ -340,8 +341,8 @@ function removeAnnotation(id: number) {
 }
 
 // Recipient management
-function addRecipient(userIdStr: string) {
-  const userId = parseInt(userIdStr);
+function addRecipient(value: AcceptableValue) {
+  const userId = parseInt(String(value ?? ""));
   if (userId && !form.recipient_user_ids.includes(userId)) {
     form.recipient_user_ids.push(userId);
   }
