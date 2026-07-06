@@ -4,6 +4,7 @@ import {
   type RouteRecordRaw,
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useMetaStore } from "@/stores/meta";
 import { error } from "@/utils/debug";
 import { contextRouterGuard } from "./contextGuard";
 import ComponentLoadError from "@/views/error/ComponentLoadError.vue";
@@ -267,6 +268,14 @@ router.beforeEach(async (to) => {
       query: {},
       replace: true,
     };
+  }
+
+  // If the server has alerting disabled, redirect any /logs/alerts* deep link
+  // to the explorer. The layered defenses in each alert view and the alert
+  // stores handle bookmarked URLs that arrive before meta has loaded.
+  const metaStore = useMetaStore();
+  if (!metaStore.alertsEnabled && to.path.startsWith("/logs/alerts")) {
+    return { path: "/logs/explore" };
   }
 
   if (to.matched.some((record) => record.meta.requiresAdmin) && !isAdmin) {

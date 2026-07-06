@@ -232,8 +232,8 @@ func (s *Server) setupRoutes() {
 	admin.Get("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleGetSetting)
 	admin.Put("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleUpdateSetting)
 	admin.Delete("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleDeleteSetting)
-	admin.Post("/settings/test-email", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleTestEmail)
-	admin.Post("/settings/test-webhook", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleTestWebhook)
+	admin.Post("/settings/test-email", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestEmail)
+	admin.Post("/settings/test-webhook", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestWebhook)
 
 	// --- Team Routes (Access controlled by team membership) ---
 	// Regular users can view teams they belong to, team admins can manage membership and linked sources
@@ -322,7 +322,7 @@ func (s *Server) setupRoutes() {
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin
 	// (legacy alerts without created_by are global-admin-only).
-	alertRoutes := api.Group("/alerts", s.requireAuth)
+	alertRoutes := api.Group("/alerts", s.requireAuth, s.requireAlertsEnabled)
 	alertRoutes.Get("/", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlerts)
 	alertRoutes.Post("/", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleCreateAlert)
 	alertRoutes.Post("/test", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleTestAlertQuery)

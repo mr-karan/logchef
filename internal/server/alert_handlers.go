@@ -2,6 +2,7 @@ package server
 
 import (
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -10,6 +11,21 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// requireAlertsEnabled is route-group middleware that short-circuits with 503
+// when the alerts subsystem is disabled in config, and otherwise passes the
+// request through. The flag is read from the config snapshot at request time;
+// toggling alerts.enabled requires a server restart. Mounted once on the
+// /alerts group so every alert endpoint is gated in a single place rather than
+// each handler re-checking the flag.
+func (s *Server) requireAlertsEnabled(c *fiber.Ctx) error {
+	if !s.config.Alerts.Enabled {
+		return SendErrorWithType(c, http.StatusServiceUnavailable,
+			"Alerting is disabled on this server. Set alerts.enabled = true (or LOGCHEF_ALERTS__ENABLED=true) and restart to enable.",
+			models.GeneralErrorType)
+	}
+	return c.Next()
+}
 
 func parseAlertID(c *fiber.Ctx) (models.AlertID, error) {
 	id, err := parsePositiveIntParam(c, "alertID")

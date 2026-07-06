@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import {
+  Bell,
   BellRing,
   Clock3,
   Copy,
@@ -43,9 +44,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ui/ErrorAlert.vue";
+import EmptyState from "@/components/layout/EmptyState.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
+import { useMetaStore } from "@/stores/meta";
 import { useContextSync } from "@/composables/useContextSync";
 import type { Alert } from "@/api/alerts";
 
@@ -54,6 +57,7 @@ const route = useRoute();
 
 const alertsStore = useAlertsStore();
 const contextStore = useContextStore();
+const metaStore = useMetaStore();
 
 const { initialize: initializeContext } = useContextSync({ basePath: '/logs/alerts' });
 
@@ -246,7 +250,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <EmptyState
+    v-if="!metaStore.alertsEnabled"
+    :icon="Bell"
+    title="Alerting is disabled"
+    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+  />
+  <div v-else class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold tracking-tight">Alert Rules</h1>
