@@ -12,6 +12,7 @@ interface MetaState {
   defaultPreviewLimit: number;
   maxPreviewLimit: number;
   maxExportRows: number;
+  alertsEnabled: boolean;
   isInitialized: boolean;
 }
 
@@ -24,6 +25,9 @@ export const useMetaStore = defineStore("meta", () => {
     defaultPreviewLimit: 1000,
     maxPreviewLimit: 100000,
     maxExportRows: 1000000,
+    // Default true so an older server that doesn't advertise the field
+    // keeps working; disabling is an opt-in signalled by the server.
+    alertsEnabled: true,
     isInitialized: false,
   });
 
@@ -35,6 +39,7 @@ export const useMetaStore = defineStore("meta", () => {
   const defaultPreviewLimit = computed(() => state.data.value.defaultPreviewLimit);
   const maxPreviewLimit = computed(() => state.data.value.maxPreviewLimit);
   const maxExportRows = computed(() => state.data.value.maxExportRows);
+  const alertsEnabled = computed(() => state.data.value.alertsEnabled);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
@@ -59,6 +64,7 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.defaultPreviewLimit = response.default_preview_limit ?? response.max_query_limit;
               state.data.value.maxPreviewLimit = response.max_preview_limit ?? response.max_query_limit;
               state.data.value.maxExportRows = response.max_export_rows ?? 1000000;
+              state.data.value.alertsEnabled = response.alerts_enabled ?? true;
               state.data.value.isInitialized = true;
             }
           },
@@ -83,6 +89,7 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.defaultPreviewLimit = 1000;
     state.data.value.maxPreviewLimit = 100000;
     state.data.value.maxExportRows = 1000000;
+    state.data.value.alertsEnabled = true;
     state.data.value.isInitialized = false;
   }
 
@@ -94,6 +101,7 @@ export const useMetaStore = defineStore("meta", () => {
     defaultPreviewLimit,
     maxPreviewLimit,
     maxExportRows,
+    alertsEnabled,
     isInitialized,
     error,
     loadMeta,

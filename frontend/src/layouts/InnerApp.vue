@@ -59,7 +59,7 @@ import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
-import { ref, watch, onMounted } from "vue";
+import { ref, watch, onMounted, computed } from "vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
 
@@ -140,8 +140,9 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
-// Group navigation items by category
-const mainNavItems: NavItem[] = [
+// Group navigation items by category. Filtered so the Alerts entry drops out
+// when the server advertises `alerts_enabled: false` via /api/v1/meta.
+const allMainNavItems: NavItem[] = [
   {
     title: "Explorer",
     icon: Search,
@@ -158,6 +159,10 @@ const mainNavItems: NavItem[] = [
     url: "/logs/alerts",
   },
 ];
+
+const mainNavItems = computed(() =>
+  allMainNavItems.filter((item) => item.url !== "/logs/alerts" || metaStore.alertsEnabled)
+);
 
 const adminNavItems: NavItem[] = [
   {

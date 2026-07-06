@@ -340,6 +340,9 @@ func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 // handleTestEmail sends a test email to verify SMTP configuration.
 // POST /api/v1/admin/settings/test-email
 func (s *Server) handleTestEmail(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	// Get current user for default recipient and audit log
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
@@ -409,6 +412,9 @@ func (s *Server) handleTestEmail(c *fiber.Ctx) error {
 // handleTestWebhook sends a test webhook to verify webhook configuration.
 // POST /api/v1/admin/settings/test-webhook
 func (s *Server) handleTestWebhook(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	// Get current user for audit log
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {

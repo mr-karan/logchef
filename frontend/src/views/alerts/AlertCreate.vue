@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { Bell } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import AlertForm from "@/components/alerts/AlertForm.vue";
+import EmptyState from "@/components/layout/EmptyState.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
+import { useMetaStore } from "@/stores/meta";
 import { useSourcesStore } from "@/stores/sources";
 import type { Alert, CreateAlertRequest } from "@/api/alerts";
 
@@ -14,6 +17,7 @@ const router = useRouter();
 const route = useRoute();
 const alertsStore = useAlertsStore();
 const contextStore = useContextStore();
+const metaStore = useMetaStore();
 const sourcesStore = useSourcesStore();
 
 const currentTeamId = computed(() => contextStore.teamId);
@@ -94,7 +98,13 @@ function handleCancel() {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <EmptyState
+    v-if="!metaStore.alertsEnabled"
+    :icon="Bell"
+    title="Alerting is disabled"
+    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+  />
+  <div v-else class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold tracking-tight">
