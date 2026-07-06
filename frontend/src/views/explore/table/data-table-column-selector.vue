@@ -27,9 +27,10 @@ const isAllSelected = computed(() => {
   return hideable > 0 && hideable === visible
 })
 
-const toggleAll = (checked: boolean) => {
+const toggleAll = (checked: boolean | 'indeterminate') => {
+  const visible = checked === true
   columns.value.forEach(column => {
-    column.toggleVisibility(checked)
+    column.toggleVisibility(visible)
   })
 }
 </script>

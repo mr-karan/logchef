@@ -16,7 +16,7 @@ const props = withDefaults(defineProps<{
 
 const { id, config } = useChart()
 
-const payload = computed(() => Object.entries(config.value).map(([key, value]) => {
+const payload = computed(() => Object.entries(config.value).map(([key]) => {
   return {
     key: props.nameKey || key,
     itemConfig: config.value[key],

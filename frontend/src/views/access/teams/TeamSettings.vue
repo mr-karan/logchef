@@ -9,7 +9,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
 import { type Source } from '@/api/sources'
-import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User } from 'lucide-vue-next'
+import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
 import {
     Table,
@@ -35,6 +35,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { SearchableSelect } from '@/components/ui/searchable-select'
+import { useTableSearchSort } from '@/composables/useTableSearchSort'
 import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
 import { useTeamsStore } from "@/stores/teams"
@@ -110,6 +112,33 @@ const availableSources = computed(() => {
     const teamSourceIds = teamSources.value?.map((s: Source) => s.id) || []
     const sources = sourcesStore.getSourcesNotInTeam(teamSourceIds)
     return sources.sort((a, b) => a.name.localeCompare(b.name))
+})
+
+// Items for the searchable pickers (add-member and add-source dialogs).
+const userItems = computed(() =>
+    availableUsers.value.map(u => ({
+        value: String(u.id),
+        label: u.full_name || u.email,
+        sublabel: (u.full_name && newMemberType.value === 'human') ? u.email : undefined,
+    })))
+const sourceItems = computed(() =>
+    availableSources.value.map(s => ({ value: String(s.id), label: formatSourceName(s) })))
+
+// Search + sort for the members table.
+const {
+    search: memberSearch,
+    rows: sortedMembers,
+    sortKey: memberSortKey,
+    sortDir: memberSortDir,
+    toggleSort: toggleMemberSort,
+} = useTableSearchSort(members, {
+    searchKeys: ['email', (m) => m.full_name, (m) => m.role],
+    sortAccessors: {
+        name: (m) => (m.full_name || m.email || '').toLowerCase(),
+        role: (m) => m.role || '',
+        added: (m) => new Date(m.created_at),
+    },
+    initialSort: { key: 'added', dir: 'desc' },
 })
 
 // Load users when dialog opens to prevent unnecessary API calls
@@ -357,25 +386,12 @@ onMounted(async () => {
                                             </div>
                                             <div class="space-y-2">
                                                 <Label>{{ newMemberType === 'service' ? 'Service account' : 'User' }}</Label>
-                                                <Select v-model="selectedUserId">
-                                                    <SelectTrigger>
-                                                        <SelectValue :placeholder="newMemberType === 'service' ? 'Select a service account' : 'Select a user'" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem v-if="availableUsers.length === 0" :value="'__none__'" disabled>
-                                                            {{ newMemberType === 'service' ? 'No service accounts available' : 'No users available' }}
-                                                        </SelectItem>
-                                                        <SelectItem v-for="user in availableUsers" :key="user.id"
-                                                            :value="String(user.id)"
-                                                            :text-value="user.full_name || user.email">
-                                                            <div class="flex flex-col">
-                                                                <span class="font-medium">{{ user.full_name || user.email }}</span>
-                                                                <span v-if="user.full_name && newMemberType === 'human'"
-                                                                    class="text-xs text-muted-foreground">{{ user.email }}</span>
-                                                            </div>
-                                                        </SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <SearchableSelect
+                                                    v-model="selectedUserId"
+                                                    :items="userItems"
+                                                    :placeholder="newMemberType === 'service' ? 'Select a service account' : 'Select a user'"
+                                                    :search-placeholder="newMemberType === 'service' ? 'Search service accounts…' : 'Search users…'"
+                                                    :empty-text="newMemberType === 'service' ? 'No service accounts available.' : 'No users available.'" />
                                             </div>
                                             <div class="space-y-2">
                                                 <Label>Role</Label>
@@ -410,22 +426,42 @@ onMounted(async () => {
                                 <Loader2 class="h-6 w-6 animate-spin mx-auto mb-2" />
                                 <p class="text-sm text-muted-foreground">Loading members...</p>
                             </div>
-                            <Table v-else>
+                            <template v-else>
+                                <div v-if="members.length > 0" class="relative mb-3 max-w-sm">
+                                    <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                    <Input v-model="memberSearch" placeholder="Search members…" class="pl-8" />
+                                </div>
+                            <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Email</TableHead>
-                                        <TableHead>Role</TableHead>
-                                        <TableHead>Added</TableHead>
+                                        <TableHead>
+                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('name')">
+                                                Email
+                                                <component :is="memberSortKey === 'name' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                            </button>
+                                        </TableHead>
+                                        <TableHead>
+                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('role')">
+                                                Role
+                                                <component :is="memberSortKey === 'role' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                            </button>
+                                        </TableHead>
+                                        <TableHead>
+                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('added')">
+                                                Added
+                                                <component :is="memberSortKey === 'added' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                            </button>
+                                        </TableHead>
                                         <TableHead class="text-right">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    <TableRow v-if="members.length === 0">
+                                    <TableRow v-if="sortedMembers.length === 0">
                                         <TableCell colspan="4" class="text-center py-4 text-muted-foreground">
-                                            No members found
+                                            {{ memberSearch ? 'No members match your search' : 'No members found' }}
                                         </TableCell>
                                     </TableRow>
-                                    <TableRow v-for="member in members" :key="member.user_id">
+                                    <TableRow v-for="member in sortedMembers" :key="member.user_id">
                                         <TableCell>
                                             <div class="flex flex-col gap-1">
                                                 <div class="flex items-center gap-2">
@@ -451,6 +487,7 @@ onMounted(async () => {
                                     </TableRow>
                                 </TableBody>
                             </Table>
+                            </template>
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -483,18 +520,12 @@ onMounted(async () => {
                                         <div class="space-y-4 py-4">
                                             <div class="space-y-2">
                                                 <Label>Source</Label>
-                                                <Select v-model="selectedSourceId">
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Select a source" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem v-for="source in availableSources" :key="source.id"
-                                                            :value="String(source.id)"
-                                                            :text-value="formatSourceName(source)">
-                                                            {{ formatSourceName(source) }}
-                                                        </SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <SearchableSelect
+                                                    v-model="selectedSourceId"
+                                                    :items="sourceItems"
+                                                    placeholder="Select a source"
+                                                    search-placeholder="Search sources…"
+                                                    empty-text="No sources available." />
                                             </div>
                                         </div>
                                         <DialogFooter>

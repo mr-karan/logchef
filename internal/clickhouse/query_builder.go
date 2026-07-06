@@ -129,7 +129,7 @@ func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLim
 		return QueryBuildResult{}, fmt.Errorf("LIMIT must be a numeric literal")
 	}
 
-	result.SQL = stmt.String()
+	result.SQL = formatSQL(stmt)
 	result.SQL = strings.ReplaceAll(result.SQL, placeholder, "''")
 
 	return result, nil
@@ -182,15 +182,23 @@ func (qb *QueryBuilder) validateTableReference(stmt *clickhouseparser.SelectQuer
 	return qb.validateTableIdentifier(tableID, expectedDB, expectedTable)
 }
 
+// formatSQL renders a parsed AST node back to SQL text. clickhouse-sql-parser
+// v0.5 removed the node.String() methods in favor of a Formatter.
+func formatSQL(node clickhouseparser.Expr) string {
+	f := clickhouseparser.NewFormatter()
+	f.WriteExpr(node)
+	return f.String()
+}
+
 // validateTableIdentifier checks if a TableIdentifier matches the expected database/table.
 func (qb *QueryBuilder) validateTableIdentifier(tableID *clickhouseparser.TableIdentifier, expectedDB, expectedTable string) error {
 	if tableID.Table == nil {
 		return fmt.Errorf("query validation failed: invalid table identifier")
 	}
-	tableName := tableID.Table.String()
+	tableName := tableID.Table.Name
 
 	if tableID.Database != nil {
-		dbName := tableID.Database.String()
+		dbName := tableID.Database.Name
 		if expectedDB != "" && dbName != expectedDB {
 			return fmt.Errorf("query validation failed: invalid database reference '%s' (expected '%s')",
 				dbName, expectedDB)
@@ -217,12 +225,6 @@ func (qb *QueryBuilder) checkDangerousOperations(stmt *clickhouseparser.SelectQu
 	return nil
 }
 
-// ensureLimit handles LIMIT clause based on legacy query builder behavior.
-func (qb *QueryBuilder) ensureLimit(stmt *clickhouseparser.SelectQuery, requestedLimit int) {
-	result := QueryBuildResult{}
-	qb.ensureLimitWithPolicy(stmt, requestedLimit, qb.defaultLimit, qb.maxLimit, &result)
-}
-
 // ensureLimitWithPolicy handles LIMIT clauses:
 // - requestedLimit > 0: force requested limit, capped at maxLimit.
 // - requestedLimit == 0 and SQL has LIMIT: respect it, capped at maxLimit.
@@ -242,7 +244,7 @@ func (qb *QueryBuilder) ensureLimitWithPolicy(stmt *clickhouseparser.SelectQuery
 	}
 
 	if stmt.Limit != nil && stmt.Limit.Limit != nil {
-		existing, err := strconv.Atoi(stmt.Limit.Limit.String())
+		existing, err := strconv.Atoi(formatSQL(stmt.Limit.Limit))
 		if err != nil {
 			result.UnparseableLimit = true
 			return
@@ -309,7 +311,7 @@ func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
 
 	selectQuery.Limit = nil
 
-	result := stmt.String()
+	result := formatSQL(stmt)
 	result = strings.ReplaceAll(result, placeholder, "''")
 
 	return result, nil

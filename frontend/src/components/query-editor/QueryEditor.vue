@@ -348,16 +348,16 @@
 
 <script setup lang="ts">
 import {
-  type Component,
   computed,
   nextTick,
   onBeforeUnmount,
   onMounted,
-  markRaw,
   ref,
   shallowRef,
   watch,
+  type Component,
   type ComponentPublicInstance,
+  type ShallowRef,
 } from "vue";
 import { useDark } from "@vueuse/core";
 import {
@@ -411,6 +411,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
 import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
+import type { AcceptableValue } from "reka-ui";
 
 type EditorMode = "logchefql" | "clickhouse-sql";
 type EditorChangeEvent = {
@@ -491,7 +492,10 @@ const pendingSqlFocus = ref<boolean | null>(null);
 const isSqlEditorLoading = ref(false);
 const sqlEditorLoadError = ref<string | null>(null);
 const sqlEditorRef = ref<SqlEditorPublicInstance | null>(null);
-const SqlMonacoEditorComponent = shallowRef<Component | null>(null);
+// vue-tsc -b drops the explicit type argument on shallowRef in this file
+// (the byte-identical line works in the sibling SqlMonacoEditor.vue), which
+// otherwise infers ShallowRef<null>. Cast to pin the ref's element type.
+const SqlMonacoEditorComponent = shallowRef(null) as ShallowRef<Component | null>;
 
 const { allVariables } = storeToRefs(variableStore);
 const showVariablesConfig = ref(false);
@@ -553,8 +557,8 @@ const editorHeight = computed(() => {
   return Math.min(maxHeight, Math.max(minHeight, calculatedHeight));
 });
 
-const handleTimeoutChange = (value: string) => {
-  const parsed = parseInt(value, 10);
+const handleTimeoutChange = (value: AcceptableValue) => {
+  const parsed = parseInt(String(value ?? ""), 10);
   if (!Number.isNaN(parsed)) {
     emit("update:query-timeout", parsed);
   }
@@ -766,7 +770,7 @@ async function ensureSqlEditorLoaded() {
 
   try {
     const module = (await loadSqlEditor()) as { default: Component };
-    SqlMonacoEditorComponent.value = markRaw(module.default);
+    SqlMonacoEditorComponent.value = module.default;
   } catch (error) {
     sqlEditorLoadError.value =
       error instanceof Error

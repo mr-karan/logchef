@@ -85,7 +85,7 @@ func init() {
 	}()
 }
 
-func inferResponseColumnType(value interface{}) string {
+func inferResponseColumnType(value any) string {
 	switch v := value.(type) {
 	case nil:
 		return "String"
@@ -102,7 +102,7 @@ func inferResponseColumnType(value interface{}) string {
 			return "DateTime64"
 		}
 		return "String"
-	case []interface{}:
+	case []any:
 		return "Array"
 	default:
 		return "JSON"
@@ -254,21 +254,6 @@ func (qt *QueryTracker) CancelQuery(queryID string, userID models.UserID) bool {
 	return true
 }
 
-// GetUserQueries returns all active queries for a user
-func (qt *QueryTracker) GetUserQueries(userID models.UserID) []*ActiveQuery {
-	qt.mu.RLock()
-	defer qt.mu.RUnlock()
-
-	var userQueries []*ActiveQuery
-	for _, query := range qt.queries {
-		if query.UserID == userID {
-			userQueries = append(userQueries, query)
-		}
-	}
-
-	return userQueries
-}
-
 // Cleanup removes queries that have been running for too long (over 1 hour)
 func (qt *QueryTracker) Cleanup() {
 	qt.mu.Lock()
@@ -285,7 +270,7 @@ func (qt *QueryTracker) Cleanup() {
 
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
+func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -424,7 +409,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error {
 	if result != nil {
 		columns := normalizeResultColumns(nil, result)
 		// Create a map to include the query ID with the result
-		responseWithQueryID := map[string]interface{}{
+		responseWithQueryID := map[string]any{
 			"query_id": queryID,
 			"data":     result.Logs,
 			"stats":    result.Stats,
@@ -459,7 +444,7 @@ func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
 
 	s.log.Debug("query cancelled", "query_id", queryID, "user_id", user.ID)
 
-	return SendSuccess(c, fiber.StatusOK, map[string]interface{}{
+	return SendSuccess(c, fiber.StatusOK, map[string]any{
 		"message":  "Query cancelled successfully",
 		"query_id": queryID,
 	})
@@ -674,7 +659,7 @@ func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamI
 }
 
 func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err = core.GetSource(c.Context(), s.sqlite, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -711,12 +696,12 @@ func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (s
 }
 
 func formatSchemaForAI(tableInfo *clickhouse.TableInfo) string {
-	columns := make([]map[string]interface{}, 0, len(tableInfo.Columns))
+	columns := make([]map[string]any, 0, len(tableInfo.Columns))
 	for _, col := range tableInfo.Columns {
-		columns = append(columns, map[string]interface{}{"name": col.Name, "type": col.Type})
+		columns = append(columns, map[string]any{"name": col.Name, "type": col.Type})
 	}
 	if len(tableInfo.SortKeys) > 0 {
-		columns = append(columns, map[string]interface{}{
+		columns = append(columns, map[string]any{
 			"name": "_sort_keys", "keys": tableInfo.SortKeys,
 			"note": "The columns above are sort keys. Queries filtered by these columns will be faster.",
 		})
@@ -879,7 +864,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	logchefqlQuery := c.Query("logchefql", "")
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -983,7 +968,7 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	logchefqlQuery := c.Query("logchefql", "")
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSource(c.Context(), s.sqlite, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)

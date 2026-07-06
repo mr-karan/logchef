@@ -92,6 +92,7 @@ export default defineConfig({
         {
           label: "Operations",
           items: [
+            { label: "Database & High Availability", link: "/operations/database-backends" },
             { label: "Metrics Reference", link: "/operations/metrics" },
             { label: "Contributing", link: "/contributing/setup" },
           ],

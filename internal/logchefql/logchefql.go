@@ -69,11 +69,6 @@ func Validate(query string) *ValidateResult {
 	return result
 }
 
-// ValidateWithDetails is an alias for Validate that returns detailed error information.
-func ValidateWithDetails(query string) *ValidateResult {
-	return Validate(query)
-}
-
 func convertParticipleError(err error) *ParseError {
 	if err == nil {
 		return nil
@@ -99,24 +94,24 @@ func convertParticipleError(err error) *ParseError {
 }
 
 func extractPositionFromError(msg string) *Position {
-	idx := strings.Index(msg, ":")
-	if idx == -1 {
+	before, after, ok := strings.Cut(msg, ":")
+	if !ok {
 		return nil
 	}
 
-	lineStr := msg[:idx]
+	lineStr := before
 	line, err := strconv.Atoi(lineStr)
 	if err != nil {
 		return nil
 	}
 
-	rest := msg[idx+1:]
-	idx2 := strings.Index(rest, ":")
-	if idx2 == -1 {
+	rest := after
+	before0, _, ok0 := strings.Cut(rest, ":")
+	if !ok0 {
 		return nil
 	}
 
-	colStr := rest[:idx2]
+	colStr := before0
 	col, err := strconv.Atoi(colStr)
 	if err != nil {
 		return nil
@@ -199,7 +194,7 @@ func extractConditionsFromAST(node ASTNode) []FilterCondition {
 	return conditions
 }
 
-func getFieldName(key interface{}) string {
+func getFieldName(key any) string {
 	switch k := key.(type) {
 	case string:
 		return k
@@ -213,7 +208,7 @@ func getFieldName(key interface{}) string {
 	}
 }
 
-func formatConditionValue(v interface{}) string {
+func formatConditionValue(v any) string {
 	if v == nil {
 		return ""
 	}
@@ -228,16 +223,6 @@ func formatConditionValue(v interface{}) string {
 	default:
 		return fmt.Sprintf("%v", val)
 	}
-}
-
-// TranslateToSQLConditions is a convenience function that returns just the SQL string.
-// Returns empty string on error.
-func TranslateToSQLConditions(query string, schema *Schema) string {
-	result := Translate(query, schema)
-	if !result.Valid {
-		return ""
-	}
-	return result.SQL
 }
 
 var (
@@ -340,7 +325,7 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 	if translateResult.SelectClause != "" {
 		timestampInSelect := strings.Contains(translateResult.SelectClause, "`"+params.TimestampField+"`")
 		if params.TimestampField != "" && !timestampInSelect {
-			query.WriteString(fmt.Sprintf("`%s`, ", params.TimestampField))
+			fmt.Fprintf(&query, "`%s`, ", params.TimestampField)
 		}
 		query.WriteString(translateResult.SelectClause)
 	} else {
@@ -381,7 +366,7 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 
 	// LIMIT clause
 	if params.Limit > 0 {
-		query.WriteString(fmt.Sprintf("LIMIT %d", params.Limit))
+		fmt.Fprintf(&query, "LIMIT %d", params.Limit)
 	}
 
 	return query.String(), nil
@@ -397,14 +382,4 @@ type QueryBuildParams struct {
 	EndTime        string  // End time in format "2006-01-02 15:04:05"
 	Timezone       string  // Timezone for time conversion
 	Limit          int     // Result limit
-}
-
-// GetConditionsFromQuery extracts filter conditions from a LogchefQL query.
-// This is useful for the field sidebar feature.
-func GetConditionsFromQuery(query string) []FilterCondition {
-	result := Translate(query, nil)
-	if !result.Valid {
-		return nil
-	}
-	return result.Conditions
 }

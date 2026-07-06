@@ -2,7 +2,6 @@ import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
-import { useContextStore } from "./context";
 import { useMetaStore } from "./meta";
 import type { APIErrorResponse } from "@/api/types";
 
@@ -18,8 +17,6 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     currentAlertId: null,
     limit: 100,
   });
-
-  const contextStore = useContextStore();
 
   const entries = computed(() => state.data.value.entries);
   const currentAlertId = computed(() => state.data.value.currentAlertId);

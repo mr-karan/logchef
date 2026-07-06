@@ -70,7 +70,31 @@ func (s *Server) enrichSavedQueryPermissions(c *fiber.Ctx, query *models.SavedQu
 	query.CanEdit = &canEdit
 }
 
-// handleListSavedQueries lists saved queries the caller can see. Optional ?source_id filter.
+// handleAdminListSavedQueries returns every saved query across all sources — the
+// Library "All queries" admin browse surface. Admin authorization is enforced at
+// the route (the /admin group's requireAdmin), so no in-handler role check. Each
+// row is marked .runnable for the caller; rows for sources the admin can't reach
+// are shown locked client-side. The user-facing handleListSavedQueries below is
+// deliberately untouched (still source-access-gated; consumed by the explorer
+// dropdown and the CLI).
+func (s *Server) handleAdminListSavedQueries(c *fiber.Ctx) error {
+	user := c.Locals("user").(*models.User)
+
+	queries, err := core.ListAllSavedQueries(c.Context(), s.sqlite, s.log)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list saved queries", models.GeneralErrorType)
+	}
+	// Mark which rows this admin can actually run (source access); the rest are
+	// shown locked. Best-effort — a failure just leaves runnable unset.
+	if err := core.MarkSavedQueriesRunnable(c.Context(), s.sqlite, user.ID, queries); err != nil {
+		s.log.Error("failed to mark saved queries runnable", "error", err, "user_id", user.ID)
+	}
+	return SendSuccess(c, fiber.StatusOK, queries)
+}
+
+// handleListSavedQueries lists saved queries the caller can see. Optional
+// ?source_id filter. Source-access-gated; consumed by the explorer dropdown and
+// the CLI, so its response shape stays stable.
 func (s *Server) handleListSavedQueries(c *fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 
@@ -234,6 +258,10 @@ func (s *Server) handleResolveSavedQuery(c *fiber.Ctx) error {
 	query, user, err := s.loadSavedQueryWithVisibility(c)
 	if err != nil {
 		return err
+	}
+	if query == nil || user == nil {
+		s.log.Error("saved query resolver loaded invalid context", "query_nil", query == nil, "user_nil", user == nil)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve saved query context", models.GeneralErrorType)
 	}
 
 	teams, err := core.ListTeamsWithAccessToSource(c.Context(), s.sqlite, s.log, query.SourceID, user.ID)

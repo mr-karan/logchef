@@ -160,8 +160,8 @@ export const useAlertsStore = defineStore("alerts", () => {
   }
 
   async function toggleAlertActivity(
-    teamId: number,
-    sourceId: number,
+    teamId: number | undefined,
+    sourceId: number | undefined,
     alertId: number,
     isActive: boolean
   ) {

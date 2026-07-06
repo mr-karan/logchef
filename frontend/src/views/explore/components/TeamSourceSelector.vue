@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import type { AcceptableValue } from 'reka-ui'
 
 const router = useRouter()
 const contextStore = useContextStore()
@@ -41,14 +42,14 @@ function updateQuery(partial: Record<string, string | undefined>) {
   })
 }
 
-function handleTeamChange(teamIdStr: string) {
-  const teamId = parseInt(teamIdStr, 10)
+function handleTeamChange(value: AcceptableValue) {
+  const teamId = parseInt(String(value ?? ''), 10)
   if (Number.isNaN(teamId)) return
   updateQuery({ team: String(teamId), source: undefined })
 }
 
-function handleSourceChange(sourceIdStr: string) {
-  const sourceId = parseInt(sourceIdStr, 10)
+function handleSourceChange(value: AcceptableValue) {
+  const sourceId = parseInt(String(value ?? ''), 10)
   if (Number.isNaN(sourceId)) return
   updateQuery({ source: String(sourceId) })
 }

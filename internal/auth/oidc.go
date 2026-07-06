@@ -9,7 +9,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -45,22 +45,22 @@ type OIDCClaims struct {
 //   - claim is true: always allowed.
 //   - claim is missing/null (nil): allowed only when skipCheck is true.
 //   - claim is explicitly false: always rejected, even when skipCheck is true.
-func CheckEmailVerified(claims OIDCClaims, skipCheck bool, log *slog.Logger, context string) error {
+func CheckEmailVerified(claims OIDCClaims, skipCheck bool, log *slog.Logger, logCtx string) error {
 	switch {
 	case claims.EmailVerified != nil && *claims.EmailVerified:
 		// Email is verified, nothing to do.
 		return nil
 	case claims.EmailVerified != nil && !*claims.EmailVerified:
 		// Provider explicitly says email is NOT verified — always reject.
-		log.Warn(context+": email_verified is explicitly false", "email", claims.Email)
+		log.Warn(logCtx+": email_verified is explicitly false", "email", claims.Email)
 		return ErrOIDCEmailNotVerified
 	default:
 		// Claim is missing/null.
 		if skipCheck {
-			log.Warn(context+": email_verified claim is missing, proceeding anyway (skip_email_verified_check=true)", "email", claims.Email)
+			log.Warn(logCtx+": email_verified claim is missing, proceeding anyway (skip_email_verified_check=true)", "email", claims.Email)
 			return nil
 		}
-		log.Warn(context+": email_verified claim is missing", "email", claims.Email)
+		log.Warn(logCtx+": email_verified claim is missing", "email", claims.Email)
 		return ErrOIDCEmailNotVerified
 	}
 }
@@ -151,7 +151,7 @@ func (p *OIDCProvider) GetIssuer() string {
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
-func (p *OIDCProvider) HandleCallback(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
+func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.StoreOps, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
 	// Exchange authorization code for OAuth2 tokens.
 	oauth2Token, err := p.oauthConf.Exchange(ctx, code)
 	if err != nil {

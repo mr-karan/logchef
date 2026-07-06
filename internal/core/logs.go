@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -15,7 +15,7 @@ import (
 
 // QueryLogs retrieves logs from a specific source based on the provided parameters.
 // Timeout is always applied - either from params or default value.
-func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params clickhouse.LogQueryParams) (*models.QueryResult, error) {
+func QueryLogs(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params clickhouse.LogQueryParams) (*models.QueryResult, error) {
 	// 1. Get source details from SQLite to validate existence and get table name
 	source, err := db.GetSource(ctx, sourceID)
 	if err != nil {
@@ -62,7 +62,7 @@ func QueryLogs(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 	warnings := queryWarningsForBuildResult(buildResult)
 	queryResult, err := client.QueryWithOptions(ctx, buildResult.SQL, clickhouse.QueryOptions{
 		TimeoutSeconds: params.QueryTimeout,
-		Settings: map[string]interface{}{
+		Settings: map[string]any{
 			"max_execution_time":   *params.QueryTimeout,
 			"max_result_rows":      buildResult.AppliedLimit,
 			"result_overflow_mode": "break",
@@ -99,7 +99,7 @@ func queryWarningsForBuildResult(result clickhouse.QueryBuildResult) []models.Qu
 }
 
 // GetSourceSchema retrieves the schema (column information) for a specific source from ClickHouse.
-func GetSourceSchema(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID) ([]models.ColumnInfo, error) {
+func GetSourceSchema(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID) ([]models.ColumnInfo, error) {
 	// 1. Get source details from SQLite
 	source, err := db.GetSource(ctx, sourceID)
 	if err != nil {
@@ -147,7 +147,7 @@ type HistogramResponse struct {
 }
 
 // GetHistogramData fetches histogram data for a specific source and time range.
-func GetHistogramData(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params HistogramParams) (*HistogramResponse, error) {
+func GetHistogramData(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params HistogramParams) (*HistogramResponse, error) {
 	source, err := db.GetSource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("error getting source details: %w", err)
@@ -230,16 +230,16 @@ type LogContextParams struct {
 
 // LogContextResponse structures the response for log context data.
 type LogContextResponse struct {
-	TargetTimestamp int64                    `json:"target_timestamp"`
-	BeforeLogs      []map[string]interface{} `json:"before_logs"`
-	TargetLogs      []map[string]interface{} `json:"target_logs"`
-	AfterLogs       []map[string]interface{} `json:"after_logs"`
-	Stats           models.QueryStats        `json:"stats"`
+	TargetTimestamp int64             `json:"target_timestamp"`
+	BeforeLogs      []map[string]any  `json:"before_logs"`
+	TargetLogs      []map[string]any  `json:"target_logs"`
+	AfterLogs       []map[string]any  `json:"after_logs"`
+	Stats           models.QueryStats `json:"stats"`
 }
 
 // GetLogContext retrieves surrounding logs around a specific timestamp for contextual analysis.
 // This is similar to grep -C, showing N logs before and M logs after the target time.
-func GetLogContext(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params LogContextParams) (*LogContextResponse, error) {
+func GetLogContext(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, params LogContextParams) (*LogContextResponse, error) {
 	// 1. Get source details (especially the timestamp field)
 	source, err := db.GetSource(ctx, sourceID)
 	if err != nil {

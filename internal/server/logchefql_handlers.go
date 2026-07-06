@@ -73,7 +73,7 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
 	// Get source information for schema
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSourceWithSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -164,7 +164,7 @@ func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
 // The backend handles the full translation and execution.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/query
-func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
+func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -216,7 +216,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	}
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
+	source, err := core.GetSourceWithSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -346,7 +346,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Add query_id and generated SQL to response
 	columns := normalizeResultColumns(source, result)
-	responseData := map[string]interface{}{
+	responseData := map[string]any{
 		"logs":          result.Logs,
 		"columns":       columns,
 		"stats":         result.Stats,

@@ -5,6 +5,96 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-07-06
+
+Logchef 1.7 makes the **metadata store pluggable**: alongside the default
+single-binary SQLite, you can now run an **opt-in Postgres backend** so multiple
+Logchef replicas share state behind a load balancer for high availability. The
+release also lets you **turn alerting off** server-wide, opens **collection
+curation** to any participant, adds an admin **"All Queries"** browse view, and
+threads **type-to-filter pickers and searchable/sortable tables** through the
+member and resource pages. Under the hood: Go 1.26, a backend-agnostic store
+contract validated by a conformance suite that runs against both databases, and
+a round of audit-driven hardening.
+
+### Added
+- **Pluggable Postgres metadata backend (opt-in).** Application metadata —
+  users, teams, sources, saved queries, collections, alerts, API tokens,
+  settings, sessions, export jobs, query shares — can now live in Postgres
+  instead of SQLite, so multiple replicas can serve any request off shared
+  state. **SQLite remains the default**; the zero-config single-binary start is
+  unchanged. Select with `database.driver = "postgres"` and a `[postgres]` DSN
+  (or `LOGCHEF_DATABASE__DRIVER` / `LOGCHEF_POSTGRES__DSN`). Startup migrations
+  take a PostgreSQL advisory lock so concurrent replica boots don't race. Your
+  logs always stay in ClickHouse and are unaffected.
+  ([#96](https://github.com/mr-karan/logchef/pull/96)) See the
+  [Database Backends & HA guide](https://logchef.app/operations/database-backends/).
+- **`alerts.enabled` server switch.** Alerting can be disabled globally
+  (`alerts.enabled = false` / `LOGCHEF_ALERTS__ENABLED=false`). When off, every
+  alert endpoint returns a clear `503`, and `/api/v1/meta` exposes
+  `alerts_enabled` so the UI hides alerting entirely.
+  ([#98](https://github.com/mr-karan/logchef/pull/98))
+- **"All Queries" browse view for admins** — `GET /api/v1/saved-queries?scope=all`
+  (global-admin only) lists every saved query, including ones not reachable via
+  any collection, each marked `runnable` for the caller (sources you can't reach
+  show locked). Closes a gap where such queries had no browse surface. The
+  default (source-gated) response used by the explorer and CLI is unchanged.
+- **Curate collections without owning them.** Adding, moving, and removing
+  queries in a shared collection is now open to any participant
+  (owner / editor / member). Managing the collection itself — rename, delete,
+  members — stays owner-only.
+- **Collection detail upgrades** — pin an existing saved query via an "Add query"
+  searchable picker, "Move to another collection" per query, and a "Created by"
+  column showing each query's author.
+- **Type-to-filter pickers + searchable, sortable tables** across member and
+  resource management. A reusable searchable picker replaces plain dropdowns
+  (invite a collection member, add a service account to a team), and the Manage
+  Sources and team-member tables gain a search box and sortable columns.
+
+### Changed
+- **Backend-agnostic store layer.** The metadata layer was reorganized behind a
+  per-domain store contract with canonical sentinel errors (`ErrNotFound` /
+  `ErrConflict`) and a `WithTx` transaction abstraction; SQLite and Postgres are
+  symmetric implementations, validated by a shared conformance suite that runs
+  against both in CI. `internal/sqlite` moved under `internal/store/sqlite`.
+- **Upgraded to Go 1.26**, with hot-path optimizations and idiom modernization.
+- **Collection member roster is owner-only** — previously visible to any
+  team-admin who could list users; now enforced server-side.
+
+### Fixed
+- **Saved-query resolver no longer panics** on certain resolve paths — it
+  recovers and returns a clean error.
+- **Correct HTTP status codes** for export / query-share access: `404` only on
+  not-found, `403` when the recipient has no team access.
+- **Escape-aware response byte-budget** — fixes an under-count memory regression
+  from the perf pass — plus a cancellable field-value fan-out and identifier
+  validation on provisioned source database/table/field names.
+- **Provisioned member users get `account_type` set** correctly.
+- **Add-query dialog width** no longer overflows its grid; **`?view=all`** is
+  preserved on the Library route.
+- **Frontend typecheck is green again and re-enabled in CI** — deduped
+  `@internationalized/date` (reka-ui date-picker type drift) and cleared the
+  assorted `vue-tsc` issues that had accumulated behind a disabled check.
+
+### Migration notes
+| Migration | What it does |
+|-----------|-------------|
+| SQLite 000024 | Adds the **collection editor** role. Applied automatically on upgrade from 1.6.1; no other new SQLite migrations. |
+| Postgres 000001_init | Fresh Postgres backends create the full schema in a single advisory-lock–guarded init migration. |
+
+### Internal
+- Backend-parity end-to-end suite (agent-browser) covering login, sources,
+  query, field values, the time-range picker, histogram, collections, and admin.
+- Dead-code sweep, a dev Postgres 17 service, and Postgres CI (service +
+  sqlc-drift + golangci-lint to zero across the module).
+
+### Upgrading
+Drop-in for existing SQLite deployments — no config changes required (one small
+SQLite migration, `000024`, applies automatically). To adopt Postgres for HA,
+read the [Database Backends & HA guide](https://logchef.app/operations/database-backends/)
+first — note the current caveat that alert evaluation must run on **exactly one**
+replica until leader election lands.
+
 ## [CLI v0.1.6] - 2026-05-20
 
 LogChef CLI 0.1.6 ships four new subcommands (`saved-queries`, `find`, `tail`,
@@ -744,6 +834,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[1.7.0]: https://github.com/mr-karan/logchef/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/mr-karan/logchef/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mr-karan/logchef/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.1...v1.5.0

@@ -311,7 +311,7 @@ watch(
                 <!-- Single-select dropdown default -->
                 <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
                   :model-value="String(variable.defaultValue ?? '')"
-                  @update:model-value="(val) => { variable.defaultValue = val; variableStore.upsertVariable(variable); }">
+                  @update:model-value="(val) => { variable.defaultValue = val as string; variableStore.upsertVariable(variable); }">
                   <SelectTrigger class="h-9">
                     <SelectValue placeholder="No default" />
                   </SelectTrigger>

@@ -28,7 +28,7 @@ type exportLogsRequest struct {
 	Variables    []models.TemplateVariable `json:"variables,omitempty"`
 }
 
-func (s *Server) handleExportLogs(c *fiber.Ctx) error {
+func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
@@ -103,7 +103,11 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error {
 
 	source, err := s.sqlite.GetSource(c.Context(), sourceID)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		if models.IsNotFound(err) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source for export", "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
@@ -148,7 +152,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error {
 
 	opts := clickhouse.QueryOptions{
 		TimeoutSeconds: req.QueryTimeout,
-		Settings: map[string]interface{}{
+		Settings: map[string]any{
 			"max_execution_time":   *req.QueryTimeout,
 			"max_result_rows":      buildResult.AppliedLimit,
 			"result_overflow_mode": "break",
@@ -161,7 +165,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error {
 	filename := fmt.Sprintf("logchef-%s.%s", time.Now().UTC().Format("20060102-150405"), extension)
 	c.Status(fiber.StatusOK)
 	c.Set("Content-Type", contentType)
-	c.Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
 	c.Set("X-LogChef-Query-ID", queryID)
 	c.Set("X-LogChef-Limit-Applied", strconv.Itoa(buildResult.AppliedLimit))
 
@@ -226,7 +230,7 @@ func isExportFormatAllowed(format string, allowed []string) bool {
 	return false
 }
 
-func exportContentType(format string) (contentType string, extension string) {
+func exportContentType(format string) (contentType, extension string) {
 	if format == "csv" {
 		return "text/csv; charset=utf-8", "csv"
 	}
@@ -269,7 +273,7 @@ func (w *exportRowWriter) Begin(columns []models.ColumnInfo) error {
 		w.csv.Flush()
 		return w.csv.Error()
 	}
-	return w.writeNDJSON(map[string]interface{}{
+	return w.writeNDJSON(map[string]any{
 		"type":          "meta",
 		"query_id":      w.queryID,
 		"columns":       columns,
@@ -277,7 +281,7 @@ func (w *exportRowWriter) Begin(columns []models.ColumnInfo) error {
 	})
 }
 
-func (w *exportRowWriter) WriteRow(row map[string]interface{}) error {
+func (w *exportRowWriter) WriteRow(row map[string]any) error {
 	w.rowsWritten++
 	if w.format == "csv" {
 		record := make([]string, len(w.columns))
@@ -296,7 +300,7 @@ func (w *exportRowWriter) WriteRow(row map[string]interface{}) error {
 		}
 		return nil
 	}
-	err := w.writeNDJSON(map[string]interface{}{
+	err := w.writeNDJSON(map[string]any{
 		"type": "row",
 		"row":  row,
 	})
@@ -314,7 +318,7 @@ func (w *exportRowWriter) Finish(stats models.QueryStats) error {
 		}
 		return w.out.Flush()
 	}
-	if err := w.writeNDJSON(map[string]interface{}{
+	if err := w.writeNDJSON(map[string]any{
 		"type":  "stats",
 		"stats": stats,
 	}); err != nil {
@@ -327,13 +331,13 @@ func (w *exportRowWriter) WriteError(err error) error {
 	if w.format == "csv" {
 		return fmt.Errorf("streaming csv export failed: %w", err)
 	}
-	return w.writeNDJSON(map[string]interface{}{
+	return w.writeNDJSON(map[string]any{
 		"type":  "error",
 		"error": err.Error(),
 	})
 }
 
-func (w *exportRowWriter) writeNDJSON(v interface{}) error {
+func (w *exportRowWriter) writeNDJSON(v any) error {
 	payload, err := json.Marshal(v)
 	if err != nil {
 		return err
@@ -344,7 +348,7 @@ func (w *exportRowWriter) writeNDJSON(v interface{}) error {
 	return w.out.WriteByte('\n')
 }
 
-func csvValue(value interface{}) string {
+func csvValue(value any) string {
 	switch v := value.(type) {
 	case nil:
 		return ""

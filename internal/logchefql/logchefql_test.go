@@ -1,6 +1,7 @@
 package logchefql
 
 import (
+	"slices"
 	"strings"
 	"testing"
 )
@@ -349,7 +350,7 @@ func TestConvertToAST(t *testing.T) {
 	t.Run("converts boolean values", func(t *testing.T) {
 		tests := []struct {
 			query string
-			want  interface{}
+			want  any
 		}{
 			{`field = true`, true},
 			{`field = false`, false},
@@ -1298,13 +1299,7 @@ func TestFieldsUsedExtraction(t *testing.T) {
 			}
 		}
 
-		found := false
-		for _, field := range result.FieldsUsed {
-			if field == "severity_text" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(result.FieldsUsed, "severity_text")
 		if !found {
 			t.Error("severity_text should be in FieldsUsed")
 		}
@@ -1329,11 +1324,11 @@ func TestDuplicateTimestampAvoidance(t *testing.T) {
 			t.Fatalf("expected no error, got: %v", err)
 		}
 
-		fromIdx := strings.Index(sql, "\nFROM")
-		if fromIdx == -1 {
+		before, _, ok := strings.Cut(sql, "\nFROM")
+		if !ok {
 			t.Fatalf("expected FROM clause in SQL:\n%s", sql)
 		}
-		selectClause := sql[:fromIdx]
+		selectClause := before
 		timestampCount := strings.Count(selectClause, "`timestamp`")
 		if timestampCount != 1 {
 			t.Errorf("timestamp appears %d times in SELECT clause, expected 1:\n%s", timestampCount, selectClause)

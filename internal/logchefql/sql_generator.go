@@ -8,11 +8,29 @@ import (
 // SQLGenerator converts an AST into ClickHouse SQL
 type SQLGenerator struct {
 	schema *Schema
+	// colTypes and defaultMapCol are derived from schema once at construction so
+	// column lookups during generation are O(1) instead of a linear scan per
+	// expression/select field.
+	colTypes      map[string]string
+	defaultMapCol string
 }
 
 // NewSQLGenerator creates a new SQL generator with optional schema
 func NewSQLGenerator(schema *Schema) *SQLGenerator {
-	return &SQLGenerator{schema: schema}
+	g := &SQLGenerator{schema: schema}
+	if schema != nil {
+		g.colTypes = make(map[string]string, len(schema.Columns))
+		for _, col := range schema.Columns {
+			if _, ok := g.colTypes[col.Name]; !ok {
+				g.colTypes[col.Name] = col.Type
+			}
+			// First Map(...) column in schema order is the default map column.
+			if g.defaultMapCol == "" && g.isMapType(col.Type) {
+				g.defaultMapCol = col.Name
+			}
+		}
+	}
+	return g
 }
 
 // Generate converts an AST node to SQL WHERE clause conditions
@@ -190,7 +208,7 @@ func (g *SQLGenerator) escapeSQLString(value string) string {
 	return result
 }
 
-func (g *SQLGenerator) formatValue(value interface{}, _ Operator) string {
+func (g *SQLGenerator) formatValue(value any, _ Operator) string {
 	if value == nil {
 		return "NULL"
 	}
@@ -213,40 +231,16 @@ func (g *SQLGenerator) formatValue(value interface{}, _ Operator) string {
 }
 
 func (g *SQLGenerator) getColumnType(columnName string) string {
-	if g.schema == nil {
-		return ""
-	}
-
-	for _, col := range g.schema.Columns {
-		if col.Name == columnName {
-			return col.Type
-		}
-	}
-	return ""
+	return g.colTypes[columnName]
 }
 
 func (g *SQLGenerator) columnExists(columnName string) bool {
-	if g.schema == nil {
-		return false
-	}
-	for _, col := range g.schema.Columns {
-		if col.Name == columnName {
-			return true
-		}
-	}
-	return false
+	_, ok := g.colTypes[columnName]
+	return ok
 }
 
 func (g *SQLGenerator) findDefaultMapColumn() string {
-	if g.schema == nil {
-		return ""
-	}
-	for _, col := range g.schema.Columns {
-		if g.isMapType(col.Type) {
-			return col.Name
-		}
-	}
-	return ""
+	return g.defaultMapCol
 }
 
 func (g *SQLGenerator) isMapType(columnType string) bool {
@@ -267,7 +261,7 @@ func (g *SQLGenerator) isStringType(columnType string) bool {
 		strings.HasPrefix(lower, "lowcardinality(string)")
 }
 
-func (g *SQLGenerator) generateNestedFieldAccess(baseColumn string, path []string, columnType string, operator Operator, value interface{}) string {
+func (g *SQLGenerator) generateNestedFieldAccess(baseColumn string, path []string, columnType string, operator Operator, value any) string {
 	formattedValue := g.formatValue(value, operator)
 
 	// If no schema info, fallback to JSON extraction

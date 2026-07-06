@@ -6,12 +6,12 @@ import (
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 )
 
 // ExportConfig reads the current database state and produces a ProvisioningConfig.
 // Passwords are replaced with secret_ref placeholders (never exported).
-func ExportConfig(ctx context.Context, db *sqlite.DB) (*config.ProvisioningConfig, error) {
+func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningConfig, error) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		ManageTeams:   true,

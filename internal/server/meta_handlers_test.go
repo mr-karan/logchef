@@ -40,7 +40,7 @@ func TestHandleGetMetaAlertsEnabled(t *testing.T) {
 			app := fiber.New()
 			app.Get("/api/v1/meta", s.handleGetMeta)
 
-			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/meta", nil))
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/meta", http.NoBody))
 			if err != nil {
 				t.Fatalf("app.Test: %v", err)
 			}

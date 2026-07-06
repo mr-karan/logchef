@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd frontend && bun run build
 
 # --- Backend builder stage (Go) ---
-FROM golang:1.24.2-bullseye AS builder
+FROM golang:1.26-bullseye AS builder
 
 # Declare build arguments
 ARG APP_VERSION=unknown

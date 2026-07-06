@@ -59,6 +59,33 @@ Running `just dev-seed` creates:
 | Webhook Receiver | 8888 | Test webhook endpoint |
 | Mailpit UI | 8025 | Email inbox UI |
 | Mailpit SMTP | 1025 | SMTP server |
+| Postgres | 5432 | Opt-in metadata backend (default is SQLite) |
+
+## Postgres backend (opt-in)
+
+logchef defaults to per-pod **SQLite**. To exercise the **Postgres** metadata
+backend (for multi-replica / HA), the dev stack ships a Postgres 17 instance:
+
+```
+DSN: postgres://logchef:logchef@localhost:5432/logchef?sslmode=disable
+```
+
+It comes up with the rest of the stack (`just dev-docker`). Point logchef at it
+via config or env:
+
+```bash
+LOGCHEF_DATABASE__DRIVER=postgres \
+LOGCHEF_POSTGRES__DSN='postgres://logchef:logchef@localhost:5432/logchef?sslmode=disable' \
+  just run-backend
+```
+
+Connect a psql shell for inspection:
+
+```bash
+docker exec -it dev-postgres-1 psql -U logchef -d logchef
+```
+
+The data lives in the `postgres-data` volume; `just dev-clean` removes it.
 
 ## Useful Commands
 

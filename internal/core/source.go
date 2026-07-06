@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -171,11 +171,11 @@ func validateColumnTypes(ctx context.Context, client *clickhouse.Client, log *sl
 
 // validateSourceConfig checks if a source with the same database and table name already exists.
 // This is used during source creation to prevent duplicates.
-func validateSourceConfig(ctx context.Context, db *sqlite.DB, log *slog.Logger, database, tableName string) error {
+func validateSourceConfig(ctx context.Context, db store.StoreOps, log *slog.Logger, database, tableName string) error {
 	existingSource, err := db.GetSourceByName(ctx, database, tableName)
 	if err != nil {
 		// If source doesn't exist, that's the desired state for creation.
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil
 		}
 		// Log unexpected DB errors.
@@ -193,64 +193,9 @@ func validateSourceConfig(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 
 // --- Source Management Functions ---
 
-// GetSourcesWithDetails retrieves multiple sources with their full details including schema
-// This is more efficient than calling GetSource multiple times for a list of sources
-func GetSourcesWithDetails(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, sourceIDs []models.SourceID) ([]*models.Source, error) {
-	sources := make([]*models.Source, 0, len(sourceIDs))
-
-	for _, id := range sourceIDs {
-		source, err := db.GetSource(ctx, id)
-		if err != nil {
-			log.Warn("failed to get source", "source_id", id, "error", err)
-			continue // Skip this source but continue processing others
-		}
-
-		if source == nil {
-			log.Warn("source not found", "source_id", id)
-			continue
-		}
-
-		// Attempt to get the client. If this fails, the source is not connected.
-		client, err := chDB.GetConnection(source.ID) // Use GetConnection
-		if err != nil {
-			source.IsConnected = false
-		} else {
-			// Use integrated Ping method to check both connection and table existence
-			source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
-
-			// Only fetch schema details if source is connected
-			if source.IsConnected {
-				// Get the comprehensive table schema information
-				tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
-				if err != nil {
-					log.Warn("failed to get table schema",
-						"source_id", source.ID,
-						"error", err,
-					)
-				} else {
-					// Store basic column information
-					source.Columns = tableInfo.Columns
-
-					// Store CREATE statement
-					source.Schema = tableInfo.CreateQuery
-
-					// Store enhanced schema information
-					source.Engine = tableInfo.Engine
-					source.EngineParams = tableInfo.EngineParams
-					source.SortKeys = tableInfo.SortKeys
-				}
-			}
-		}
-
-		sources = append(sources, source)
-	}
-
-	return sources, nil
-}
-
 // ListSources returns all sources with basic connection status but without schema details.
 // This is optimized for performance in list views where the schema isn't needed.
-func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger) ([]*models.Source, error) {
+func ListSources(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger) ([]*models.Source, error) {
 	// Get the basic source records from the database
 	sources, err := db.ListSources(ctx)
 	if err != nil {
@@ -275,34 +220,46 @@ func ListSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, l
 		source.EngineParams = nil
 		source.SortKeys = nil
 
-		wg.Add(1)
-		go func(s *models.Source) {
-			defer wg.Done()
-			client, err := chDB.GetConnection(s.ID)
+		wg.Go(func() {
+			client, err := chDB.GetConnection(source.ID)
 			if err == nil {
-				s.IsConnected = client.Ping(ctx, s.Connection.Database, s.Connection.TableName) == nil
+				source.IsConnected = client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
 			}
-		}(source)
+		})
 	}
 	wg.Wait()
 
 	return sources, nil
 }
 
-// GetSource retrieves a source by ID including connection status and schema
-func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) (*models.Source, error) {
+// GetSource returns a source's stored metadata (connection info, timestamp
+// field, TTL, etc.) straight from the metadata store. It does NOT touch
+// ClickHouse, so it is cheap enough for hot query-setup paths. Callers that need
+// live connection status can consult chDB.GetCachedHealth; callers that need the
+// table schema (columns, engine, sort keys) should use GetSourceWithSchema.
+func GetSource(ctx context.Context, db store.StoreOps, id models.SourceID) (*models.Source, error) {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		// Handle specific not found error from DB layer if possible, otherwise wrap
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrSourceNotFound
 		}
 		return nil, fmt.Errorf("error getting source from db: %w", err)
 	}
-
 	if source == nil {
-		// This case might be handled by the DB layer returning ErrNotFound
 		return nil, ErrSourceNotFound
+	}
+	return source, nil
+}
+
+// GetSourceWithSchema returns a source enriched with a live ClickHouse round
+// trip: connection status (Ping) plus the table schema (columns, CREATE
+// statement, engine, sort keys) via GetTableInfo. Use it only where the schema
+// is actually needed (source detail view, LogchefQL type-aware translation) —
+// it costs several ClickHouse metadata queries per call.
+func GetSourceWithSchema(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) (*models.Source, error) {
+	source, err := GetSource(ctx, db, id)
+	if err != nil {
+		return nil, err
 	}
 
 	// Attempt to get the client. If this fails, the source is not connected.
@@ -339,7 +296,7 @@ func GetSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log
 }
 
 // CreateSource creates a new source, validates connection, and optionally creates the table.
-func CreateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField, metaSeverityField, customSchema string) (*models.Source, error) {
+func CreateSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, name string, autoCreateTable bool, conn models.ConnectionInfo, description string, ttlDays int, metaTSField, metaSeverityField, customSchema string) (*models.Source, error) {
 	// 1. Validate input parameters
 	if err := validateSourceCreation(name, conn, description, ttlDays, metaTSField, metaSeverityField); err != nil {
 		return nil, err
@@ -527,10 +484,10 @@ func refreshSourceConnectionPool(ctx context.Context, chDB *clickhouse.Manager, 
 
 // UpdateSource updates an existing source's mutable fields using partial update semantics.
 // Connection changes trigger re-validation and pool refresh.
-func UpdateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID, req *models.UpdateSourceRequest) (*models.Source, error) {
+func UpdateSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID, req *models.UpdateSourceRequest) (*models.Source, error) {
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrSourceNotFound
 		}
 		return nil, fmt.Errorf("error getting source: %w", err)
@@ -585,12 +542,12 @@ func UpdateSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 }
 
 // DeleteSource deletes a source from SQLite and removes its connection from the manager
-func DeleteSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) error {
+func DeleteSource(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, id models.SourceID) error {
 	// No input validation needed for ID
 	// 1. Validate source exists in SQLite first
 	source, err := db.GetSource(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrSourceNotFound
 		}
 		return fmt.Errorf("error getting source: %w", err)
@@ -617,43 +574,6 @@ func DeleteSource(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, 
 
 	log.Info("source deleted successfully", "source_id", id)
 	return nil
-}
-
-// CheckSourceConnectionStatus checks the connection status for a given source.
-// It returns true if the source is connected and the table is queryable, false otherwise.
-func CheckSourceConnectionStatus(ctx context.Context, chDB *clickhouse.Manager, log *slog.Logger, source *models.Source) bool {
-	// No input validation needed
-	if source == nil {
-		return false
-	}
-	client, err := chDB.GetConnection(source.ID) // Use GetConnection
-	if err != nil {
-		return false
-	}
-	// Use the integrated Ping method
-	return client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
-}
-
-// GetSourceHealth retrieves the health status of a source from the ClickHouse manager
-func GetSourceHealth(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, id models.SourceID) (models.SourceHealth, error) {
-	// No input validation needed for ID
-	// 1. Check if source exists in SQLite first to ensure it's a valid source ID
-	_, err := db.GetSource(ctx, id)
-	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsSourceNotFoundError(err) {
-			return models.SourceHealth{}, ErrSourceNotFound
-		}
-		return models.SourceHealth{}, fmt.Errorf("error getting source: %w", err)
-	}
-	// 2. Get health from ClickHouse manager and return it
-	health := chDB.GetHealth(ctx, id)
-	return health, nil
-}
-
-// InitializeSource adds a source connection to the ClickHouse manager.
-// It assumes the source object contains valid connection details.
-func InitializeSource(ctx context.Context, chDB *clickhouse.Manager, source *models.Source) error {
-	return chDB.AddSource(ctx, source)
 }
 
 // ValidateConnection validates a connection to a ClickHouse database using temporary client

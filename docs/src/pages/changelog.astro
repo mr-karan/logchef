@@ -79,12 +79,65 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- v1.7.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.7.0</span>
+        <span class="version-date">Jul 6, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.7.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Logchef 1.7 makes the metadata store <strong>pluggable</strong>. Alongside the default single-binary SQLite, you can now run an <strong>opt-in Postgres backend</strong> so multiple Logchef replicas share state behind a load balancer &mdash; the groundwork for high availability. SQLite stays the default, so single-instance setups are unchanged. The release also lets you <strong>switch alerting off</strong> server-wide, opens <strong>collection curation</strong> to any participant, adds an admin <strong>"All Queries"</strong> browse view, and brings <strong>type-to-filter pickers and searchable, sortable tables</strong> to the member and resource pages.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Opt-in Postgres metadata backend</strong> &mdash; Store users, teams, sources, saved queries, collections, alerts, tokens, and settings in Postgres instead of SQLite, so several Logchef replicas can serve any request off shared state. Set <code>database.driver = "postgres"</code> with a <code>[postgres]</code> DSN (or the matching env vars). SQLite remains the default and the single-binary start is unchanged; your logs always stay in ClickHouse. <a href="/operations/database-backends/">Database backends &amp; HA &rarr;</a></li>
+          <li><strong>Turn alerting off server-wide</strong> &mdash; Set <code>alerts.enabled = false</code> and the UI hides alerting entirely while every alert endpoint returns a clean <code>503</code>. Useful when you run Logchef purely for exploration, or want a single alert-evaluating instance.</li>
+          <li><strong>"All Queries" browse for admins</strong> &mdash; Global admins can now see every saved query, including ones not pinned to any collection. Queries on sources you can't reach show as locked.</li>
+          <li><strong>Curate shared collections as a member</strong> &mdash; Any participant (owner, editor, or member) can pin, move, and remove queries in a shared collection. Renaming, deleting, and managing members stays owner-only.</li>
+          <li><strong>Collection detail upgrades</strong> &mdash; Pin an existing saved query with an "Add query" search picker, move a query to another collection, and see each query's author in a new "Created by" column.</li>
+          <li><strong>Searchable pickers &amp; tables</strong> &mdash; Type-to-filter dropdowns for inviting collection members and adding service accounts to teams, plus a search box and sortable columns on Manage Sources and team-member lists.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Pluggable store architecture</strong> &mdash; The metadata layer now sits behind a backend-agnostic contract with a shared conformance suite that runs against both SQLite and Postgres in CI, so the two backends stay in lockstep.</li>
+          <li><strong>Upgraded to Go 1.26</strong> with hot-path optimizations across query handling.</li>
+          <li><strong>Collection member list is owner-only</strong> &mdash; now enforced on the server, not just hidden in the UI.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Saved-query resolver no longer crashes</strong> on certain resolve paths &mdash; it returns a clean error instead.</li>
+          <li><strong>Accurate access errors</strong> for exports and shared queries &mdash; <code>404</code> only when something's missing, <code>403</code> when you lack team access.</li>
+          <li><strong>Tighter memory accounting</strong> on large responses (fixes an under-count from the performance pass), cancellable field-value loading, and identifier validation on provisioned sources.</li>
+          <li><strong>UI polish</strong> &mdash; the add-query dialog no longer overflows, the Library "All queries" view survives navigation, and the date picker's type drift is fixed (TypeScript checks are green and enforced in CI again).</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.6.1 -->
     <article class="version">
       <div class="version-header">
         <span class="version-tag">v1.6.1</span>
         <span class="version-date">May 20, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

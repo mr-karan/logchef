@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect, type SearchableItem } from "@/components/ui/searchable-select";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { EmptyState, LoadingState, PageHeader, PageSection } from "@/components/layout";
 import TokenScopePicker from "@/components/tokens/TokenScopePicker.vue";
@@ -87,6 +88,9 @@ const availableTeamsForAccount = computed(() => {
   const existing = new Set(teamsFor(account).map((t) => t.id));
   return (teamsStore.adminTeams || []).filter((team) => !existing.has(team.id));
 });
+const availableTeamItemsForAccount = computed<SearchableItem[]>(() =>
+  availableTeamsForAccount.value.map((team) => ({ value: String(team.id), label: team.name }))
+);
 
 async function openTeamsDialog(account: User) {
   teamsDialogAccount.value = account;
@@ -416,19 +420,12 @@ function closeTokenDisplay() {
           <div class="space-y-2 border-t pt-4">
             <Label class="text-sm">Add to team</Label>
             <div class="grid grid-cols-[1fr_auto] gap-2">
-              <Select v-model="newTeamId">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select a team" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem v-if="availableTeamsForAccount.length === 0" :value="'__none__'" disabled>
-                    No teams available
-                  </SelectItem>
-                  <SelectItem v-for="team in availableTeamsForAccount" :key="team.id" :value="String(team.id)">
-                    {{ team.name }}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                v-model="newTeamId"
+                :items="availableTeamItemsForAccount"
+                placeholder="Select a team"
+                search-placeholder="Search teams…"
+                empty-text="No teams available." />
               <Select v-model="newTeamRole">
                 <SelectTrigger class="w-[140px]">
                   <SelectValue />
@@ -440,7 +437,7 @@ function closeTokenDisplay() {
                 </SelectContent>
               </Select>
             </div>
-            <Button type="button" class="w-full gap-2" :disabled="!newTeamId || newTeamId === '__none__'"
+            <Button type="button" class="w-full gap-2" :disabled="!newTeamId"
               @click="addAccountToTeam">
               <Plus class="h-4 w-4" />
               Add to team

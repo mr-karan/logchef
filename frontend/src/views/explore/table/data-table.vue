@@ -523,7 +523,6 @@ onMounted(() => {
 
 // Add refs for DOM elements
 const tableContainerRef = ref<HTMLElement | null>(null)
-const tableRef = ref<HTMLElement | null>(null)
 
 onMounted(() => {
     if (!tableContainerRef.value) return
@@ -693,7 +692,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
                     class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;">
-                    <table ref="tableRef" class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
+                    <table class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
                             <!-- Check table.getHeaderGroups() exists -->

@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -72,7 +72,7 @@ func validateTeamMember(teamID models.TeamID, userID models.UserID, role models.
 // --- Team Management Functions ---
 
 // ListTeams returns all teams from the database.
-func ListTeams(ctx context.Context, db *sqlite.DB) ([]*models.Team, error) {
+func ListTeams(ctx context.Context, db store.StoreOps) ([]*models.Team, error) {
 	teams, err := db.ListTeams(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error listing teams: %w", err)
@@ -81,10 +81,10 @@ func ListTeams(ctx context.Context, db *sqlite.DB) ([]*models.Team, error) {
 }
 
 // GetTeam retrieves a specific team by its ID.
-func GetTeam(ctx context.Context, db *sqlite.DB, id models.TeamID) (*models.Team, error) {
+func GetTeam(ctx context.Context, db store.StoreOps, id models.TeamID) (*models.Team, error) {
 	team, err := db.GetTeam(ctx, id)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return nil, ErrTeamNotFound
 		}
 		return nil, fmt.Errorf("error getting team from db: %w", err)
@@ -92,20 +92,8 @@ func GetTeam(ctx context.Context, db *sqlite.DB, id models.TeamID) (*models.Team
 	return team, nil
 }
 
-// GetTeamByName retrieves a specific team by its name.
-func GetTeamByName(ctx context.Context, db *sqlite.DB, name string) (*models.Team, error) {
-	team, err := db.GetTeamByName(ctx, name)
-	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
-			return nil, ErrTeamNotFound
-		}
-		return nil, fmt.Errorf("error getting team by name from db: %w", err)
-	}
-	return team, nil
-}
-
 // CreateTeam creates a new team in the database.
-func CreateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, name, description string) (*models.Team, error) {
+func CreateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, name, description string) (*models.Team, error) {
 	// Validate input parameters
 	if err := validateTeamCreation(name, description); err != nil {
 		return nil, err
@@ -118,7 +106,7 @@ func CreateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, name, desc
 	}
 
 	// Only proceed if it's a "not found" error, which is expected
-	if !sqlite.IsNotFoundError(err) && !sqlite.IsTeamNotFoundError(err) {
+	if !models.IsNotFound(err) {
 		log.Error("error checking if team exists by name", "error", err, "name", name)
 		return nil, fmt.Errorf("error checking if team exists: %w", err)
 	}
@@ -145,7 +133,7 @@ func CreateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, name, desc
 }
 
 // UpdateTeam updates an existing team's mutable fields (name, description).
-func UpdateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, updateData models.Team) error {
+func UpdateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, updateData models.Team) error {
 	// Validate the fields provided for update
 	if err := validateTeamUpdate(updateData); err != nil {
 		return err
@@ -154,7 +142,7 @@ func UpdateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mod
 	// Get existing team
 	existing, err := db.GetTeam(ctx, teamID)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrTeamNotFound
 		}
 		log.Error("failed to get existing team for update", "error", err, "team_id", teamID)
@@ -169,7 +157,7 @@ func UpdateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mod
 		if err == nil && conflictingTeam.ID != existing.ID {
 			return fmt.Errorf("%w: team with name '%s' already exists", ErrTeamAlreadyExists, updateData.Name) // Use error from users.go
 		}
-		if err != nil && !sqlite.IsNotFoundError(err) && !sqlite.IsTeamNotFoundError(err) {
+		if err != nil && !models.IsNotFound(err) {
 			log.Error("error checking conflicting team name during update", "error", err, "new_name", updateData.Name)
 			return fmt.Errorf("error checking for conflicting name: %w", err)
 		}
@@ -198,11 +186,11 @@ func UpdateTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mod
 }
 
 // DeleteTeam deletes a team and its associations (members, sources, queries).
-func DeleteTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID) error {
+func DeleteTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID) error {
 	// Validate team exists
 	_, err := db.GetTeam(ctx, teamID)
 	if err != nil {
-		if sqlite.IsNotFoundError(err) || sqlite.IsTeamNotFoundError(err) {
+		if models.IsNotFound(err) {
 			return ErrTeamNotFound
 		}
 		log.Error("failed to get team for deletion check", "error", err, "team_id", teamID)
@@ -224,7 +212,7 @@ func DeleteTeam(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID mod
 // --- Team Member Functions ---
 
 // ListTeamMembers returns all members of a specific team.
-func ListTeamMembers(ctx context.Context, db *sqlite.DB, teamID models.TeamID) ([]*models.TeamMember, error) {
+func ListTeamMembers(ctx context.Context, db store.StoreOps, teamID models.TeamID) ([]*models.TeamMember, error) {
 	// Optional: Validate team exists first
 	// _, err := GetTeam(ctx, db, teamID)
 	// if err != nil { return nil, err }
@@ -236,22 +224,9 @@ func ListTeamMembers(ctx context.Context, db *sqlite.DB, teamID models.TeamID) (
 	return members, nil
 }
 
-// GetTeamMember retrieves a specific member's details within a team.
-func GetTeamMember(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error) {
-	member, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			// Standard practice: return nil, nil if not found, let caller decide if it's an error
-			return nil, nil
-		}
-		return nil, fmt.Errorf("error getting team member from db: %w", err)
-	}
-	return member, nil
-}
-
 // AddTeamMember adds a user to a team with a specified role.
 // If the user is already a member, it updates their role.
-func AddTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
+func AddTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, userID models.UserID, role models.TeamRole) error {
 	// Validate parameters
 	if err := validateTeamMember(teamID, userID, role); err != nil {
 		return err
@@ -269,7 +244,7 @@ func AddTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID 
 
 	// Check if user is already a member
 	existingMember, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, models.ErrNotFound) {
 		log.Error("failed to check existing team member", "error", err, "team_id", teamID, "user_id", userID)
 		return fmt.Errorf("error checking team member: %w", err)
 	}
@@ -298,42 +273,8 @@ func AddTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID 
 	return nil
 }
 
-// UpdateTeamMemberRole changes the role of an existing team member.
-func UpdateTeamMemberRole(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, userID models.UserID, newRole models.TeamRole) error {
-	// Validate Role
-	if err := validateTeamMember(teamID, userID, newRole); err != nil {
-		// Adjust error message slightly if needed
-		return err
-	}
-
-	// Check if the member exists first
-	existingMember, err := db.GetTeamMember(ctx, teamID, userID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("user %d is not a member of team %d", userID, teamID) // Specific error
-		}
-		log.Error("failed to get team member for role update check", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error checking team member: %w", err)
-	}
-
-	// If role is the same, do nothing
-	if existingMember.Role == newRole {
-		log.Debug("team member role already correct", "team_id", teamID, "user_id", userID, "role", newRole)
-		return nil
-	}
-
-	// Update role in the database
-	log.Info("updating team member role", "team_id", teamID, "user_id", userID, "old_role", existingMember.Role, "new_role", newRole)
-	if err := db.UpdateTeamMemberRole(ctx, teamID, userID, newRole); err != nil {
-		log.Error("failed to update team member role in db", "error", err, "team_id", teamID, "user_id", userID)
-		return fmt.Errorf("error updating team member role: %w", err)
-	}
-
-	return nil
-}
-
 // RemoveTeamMember removes a user from a team.
-func RemoveTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, userID models.UserID) error {
+func RemoveTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, userID models.UserID) error {
 	// Optional: Validate team and user exist first
 	// _, err := GetTeam(ctx, db, teamID)
 	// if err != nil { return err }
@@ -343,7 +284,7 @@ func RemoveTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, team
 	// Check if user is actually a member before attempting delete
 	_, err := db.GetTeamMember(ctx, teamID, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
 			log.Debug("user not a member of team, nothing to remove", "team_id", teamID, "user_id", userID)
 			return nil // Not an error, just nothing to do
 		}
@@ -365,7 +306,7 @@ func RemoveTeamMember(ctx context.Context, db *sqlite.DB, log *slog.Logger, team
 
 // ListTeamSources returns basic information for all sources associated with a specific team,
 // including their connection status fetched from the ClickHouse manager's cache.
-func ListTeamSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manager, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
+func ListTeamSources(ctx context.Context, db store.StoreOps, chDB *clickhouse.Manager, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
 	// First, validate the team exists
 	_, err := GetTeam(ctx, db, teamID) // Use existing GetTeam function
 	if err != nil {
@@ -382,7 +323,7 @@ func ListTeamSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 	if err != nil {
 		// If the error is sql.ErrNoRows (or equivalent), it means no sources are linked.
 		// Return an empty slice and no error in this case.
-		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) { // Check for standard and custom not found
+		if models.IsNotFound(err) { // Check for standard and custom not found
 			return []*models.Source{}, nil
 		}
 		// Return other database errors
@@ -415,7 +356,7 @@ func ListTeamSources(ctx context.Context, db *sqlite.DB, chDB *clickhouse.Manage
 }
 
 // AddTeamSource associates a source with a team.
-func AddTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
+func AddTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
 	// Validate team exists
 	if _, err := GetTeam(ctx, db, teamID); err != nil {
 		return err // Propagate ErrTeamNotFound or other DB errors
@@ -423,7 +364,7 @@ func AddTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID 
 
 	// Validate source exists
 	if _, err := db.GetSource(ctx, sourceID); err != nil { // Check DB directly for now
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
+		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || errors.Is(err, models.ErrNotFound) {
 			return ErrSourceNotFound // Use error from source.go
 		}
 		return fmt.Errorf("error getting source: %w", err)
@@ -440,7 +381,7 @@ func AddTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID 
 }
 
 // RemoveTeamSource removes the association between a source and a team.
-func RemoveTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
+func RemoveTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
 	// Optional: Validate team and source exist first
 	// _, err := GetTeam(ctx, db, teamID)
 	// if err != nil { return err }
@@ -459,21 +400,8 @@ func RemoveTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, team
 
 // --- Authorization/Access Check Functions ---
 
-// ListSourcesForUser returns all unique sources a user has access to across all teams.
-func ListSourcesForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.Source, error) {
-	// Optional: Validate user exists first
-	// _, err := GetUser(ctx, db, userID)
-	// if err != nil { return nil, err }
-
-	sources, err := db.ListSourcesForUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing sources for user: %w", err)
-	}
-	return sources, nil
-}
-
 // ListSourceTeams returns all teams that have access to a specific source.
-func ListSourceTeams(ctx context.Context, db *sqlite.DB, sourceID models.SourceID) ([]*models.Team, error) {
+func ListSourceTeams(ctx context.Context, db store.StoreOps, sourceID models.SourceID) ([]*models.Team, error) {
 	// Optional: Validate source exists first
 	// _, err := db.GetSource(ctx, sourceID)
 	// if err != nil { ... handle ErrSourceNotFound ... }
@@ -486,10 +414,10 @@ func ListSourceTeams(ctx context.Context, db *sqlite.DB, sourceID models.SourceI
 }
 
 // IsTeamMember checks if a user is a member of a specific team.
-func IsTeamMember(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userID models.UserID) (bool, error) {
+func IsTeamMember(ctx context.Context, db store.StoreOps, teamID models.TeamID, userID models.UserID) (bool, error) {
 	member, err := db.GetTeamMember(ctx, teamID, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
 			return false, nil // Not found is not an error for a check
 		}
 		return false, fmt.Errorf("error checking team membership: %w", err)
@@ -498,10 +426,10 @@ func IsTeamMember(ctx context.Context, db *sqlite.DB, teamID models.TeamID, user
 }
 
 // IsTeamAdmin checks if a user is an admin of a specific team.
-func IsTeamAdmin(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userID models.UserID) (bool, error) {
+func IsTeamAdmin(ctx context.Context, db store.StoreOps, teamID models.TeamID, userID models.UserID) (bool, error) {
 	member, err := db.GetTeamMember(ctx, teamID, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
 			return false, nil // Not found is not an error for a check
 		}
 		return false, fmt.Errorf("error checking team admin status: %w", err)
@@ -511,13 +439,13 @@ func IsTeamAdmin(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userI
 
 // IsAnyTeamAdmin checks if a user is an admin of ANY team.
 // This is used to determine if a user should have access to team management features.
-func IsAnyTeamAdmin(ctx context.Context, db *sqlite.DB, userID models.UserID) (bool, error) {
+func IsAnyTeamAdmin(ctx context.Context, db store.StoreOps, userID models.UserID) (bool, error) {
 	teams, err := db.ListTeamsForUser(ctx, userID)
 	if err != nil {
 		return false, fmt.Errorf("error listing teams for user: %w", err)
 	}
 	for _, team := range teams {
-		if team.Role == string(models.TeamRoleAdmin) {
+		if team.Role == models.TeamRoleAdmin {
 			return true, nil
 		}
 	}
@@ -528,10 +456,10 @@ func IsAnyTeamAdmin(ctx context.Context, db *sqlite.DB, userID models.UserID) (b
 // mutate shared resources (collections) in a specific team. Both team admins
 // and team editors qualify. The per-collection ownership check happens
 // separately in core/collections.go and is unaffected by this role gate.
-func IsTeamCollectionMutator(ctx context.Context, db *sqlite.DB, teamID models.TeamID, userID models.UserID) (bool, error) {
+func IsTeamCollectionMutator(ctx context.Context, db store.StoreOps, teamID models.TeamID, userID models.UserID) (bool, error) {
 	member, err := db.GetTeamMember(ctx, teamID, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) {
 			return false, nil
 		}
 		return false, fmt.Errorf("error checking team collection mutator status: %w", err)
@@ -545,13 +473,13 @@ func IsTeamCollectionMutator(ctx context.Context, db *sqlite.DB, teamID models.T
 // IsAnyTeamCollectionMutator reports whether the user is an admin or editor
 // in at least one team. Used as the coarse gate on collection mutation
 // endpoints — the per-collection owner check is enforced inside core.
-func IsAnyTeamCollectionMutator(ctx context.Context, db *sqlite.DB, userID models.UserID) (bool, error) {
+func IsAnyTeamCollectionMutator(ctx context.Context, db store.StoreOps, userID models.UserID) (bool, error) {
 	teams, err := db.ListTeamsForUser(ctx, userID)
 	if err != nil {
 		return false, fmt.Errorf("error listing teams for user: %w", err)
 	}
 	for _, team := range teams {
-		if team.Role == string(models.TeamRoleAdmin) || team.Role == string(models.TeamRoleEditor) {
+		if team.Role == models.TeamRoleAdmin || team.Role == models.TeamRoleEditor {
 			return true, nil
 		}
 	}
@@ -559,7 +487,7 @@ func IsAnyTeamCollectionMutator(ctx context.Context, db *sqlite.DB, userID model
 }
 
 // TeamHasSourceAccess checks if a specific team has access to a specific source.
-func TeamHasSourceAccess(ctx context.Context, db *sqlite.DB, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
+func TeamHasSourceAccess(ctx context.Context, db store.StoreOps, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
 	hasAccess, err := db.TeamHasSource(ctx, teamID, sourceID)
 	if err != nil {
 		return false, fmt.Errorf("error checking team source access: %w", err)
@@ -568,46 +496,17 @@ func TeamHasSourceAccess(ctx context.Context, db *sqlite.DB, teamID models.TeamI
 }
 
 // ListTeamsForUser returns all teams a user is a member of, including their role and team member count.
-func ListTeamsForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.UserTeamDetails, error) {
-	// Optional: Validate user exists first
-	// _, err := GetUser(ctx, db, userID) // Assuming GetUser exists and is appropriate here
-	// if err != nil { return nil, err }
-
-	// After sqlc generate, db.ListTeamsForUser returns the new sqlc-generated row struct.
-	// Let's assume it's []sqlc.ListTeamsForUserRow (the actual name might vary based on sqlc config/version)
-	teamRows, err := db.ListTeamsForUser(ctx, userID)
-	if err != nil {
-		return nil, fmt.Errorf("error listing teams for user from db: %w", err)
-	}
-
-	userTeams := make([]*models.UserTeamDetails, 0, len(teamRows))
-	for _, row := range teamRows {
-		// The fields of 'row' are now directly from the SQL query via sqlc's generated struct.
-		// e.g., row.ID, row.Name, row.Description, row.CreatedAt, row.UpdatedAt, row.Role, row.MemberCount
-		desc := ""
-		if row.Description.Valid { // Check if sql.NullString is valid
-			desc = row.Description.String
-		}
-
-		userTeams = append(userTeams, &models.UserTeamDetails{
-			ID:          models.TeamID(row.ID),
-			Name:        row.Name,
-			Description: desc,
-			CreatedAt:   row.CreatedAt,
-			UpdatedAt:   row.UpdatedAt,
-			MemberCount: int(row.MemberCount),      // MemberCount from SQL query
-			Role:        models.TeamRole(row.Role), // Role from SQL query
-		})
-	}
-
-	return userTeams, nil
+func ListTeamsForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.UserTeamDetails, error) {
+	// The adapter maps to models.UserTeamDetails (role + member count); this
+	// wrapper exists so callers depend on core, not the store directly.
+	return db.ListTeamsForUser(ctx, userID)
 }
 
 // --- Utility Functions ---
 
 // UserHasAccessToTeamSource checks if a user has access to a specific source through a specific team.
 // This is the proper way to check access - requiring both team membership and team-source linkage.
-func UserHasAccessToTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
+func UserHasAccessToTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, teamID models.TeamID, sourceID models.SourceID) (bool, error) {
 	// First check if user is a team member
 	isMember, err := IsTeamMember(ctx, db, teamID, userID)
 	if err != nil {
@@ -633,7 +532,7 @@ func UserHasAccessToTeamSource(ctx context.Context, db *sqlite.DB, log *slog.Log
 
 // ListTeamsWithAccessToSource returns teams accessible by a user for a given source.
 // This involves multiple DB calls and might be better placed closer to the handler.
-func ListTeamsWithAccessToSource(ctx context.Context, db *sqlite.DB, log *slog.Logger, sourceID models.SourceID, userID models.UserID) ([]*models.Team, error) {
+func ListTeamsWithAccessToSource(ctx context.Context, db store.StoreOps, log *slog.Logger, sourceID models.SourceID, userID models.UserID) ([]*models.Team, error) {
 	// Get all teams for the source
 	sourceTeams, err := ListSourceTeams(ctx, db, sourceID)
 	if err != nil {

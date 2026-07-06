@@ -25,7 +25,7 @@ func TestRequireAlertsEnabled(t *testing.T) {
 			return c.SendString("reached")
 		})
 
-		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil))
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe", http.NoBody))
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}
@@ -54,7 +54,7 @@ func TestRequireAlertsEnabled(t *testing.T) {
 			return c.SendString("reached")
 		})
 
-		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil))
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe", http.NoBody))
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}

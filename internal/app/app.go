@@ -15,14 +15,16 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/internal/store/postgres"
+	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/logger"
 )
 
 // App represents the core application context, holding dependencies and configuration.
 type App struct {
 	Config     *config.Config
-	SQLite     *sqlite.DB
+	SQLite     store.Store
 	ClickHouse *clickhouse.Manager
 	Logger     *slog.Logger
 	server     *server.Server
@@ -63,14 +65,26 @@ func New(opts Options) (*App, error) {
 func (a *App) Initialize(ctx context.Context) error {
 	var err error
 
-	// Initialize SQLite database.
-	sqliteOpts := sqlite.Options{
-		Config: a.Config.SQLite,
-		Logger: a.Logger,
-	}
-	a.SQLite, err = sqlite.New(sqliteOpts)
-	if err != nil {
-		return fmt.Errorf("failed to initialize sqlite: %w", err)
+	// Initialize the metadata backend selected by config. SQLite is the default
+	// single-binary backend; Postgres is opt-in for multi-replica deployments.
+	// The field is named SQLite for historical reasons but holds a store.Store.
+	switch a.Config.Database.Driver {
+	case "postgres":
+		a.SQLite, err = postgres.New(ctx, postgres.Options{
+			Config: a.Config.Postgres,
+			Logger: a.Logger,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to initialize postgres: %w", err)
+		}
+	default: // "sqlite" (config validation guarantees one of these two)
+		a.SQLite, err = sqlite.New(ctx, sqlite.Options{
+			Config: a.Config.SQLite,
+			Logger: a.Logger,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to initialize sqlite: %w", err)
+		}
 	}
 
 	// Initialize admin users based on configuration.
@@ -166,7 +180,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		BuildInfo:     a.BuildInfo,
 		Version:       a.Version,
 	}
-	a.server = server.New(serverOpts)
+	a.server = server.New(serverOpts) //nolint:contextcheck // starts an app-lifetime cleanup janitor with its own timeout context; no request ctx to propagate
 
 	// Start the alerts evaluation loop.
 	a.Alerts.Start(ctx)

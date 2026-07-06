@@ -11,6 +11,9 @@ import { useContextStore } from "./context";
 
 export interface SavedQueriesState {
   queries: SavedQuery[];
+  // allQueries backs the admin "All queries" browse surface. Kept separate from
+  // `queries` so it doesn't clobber the explorer dropdown's per-source list.
+  allQueries: SavedQuery[];
   selectedQuery: SavedQuery | null;
   teams: Team[];
 }
@@ -18,6 +21,7 @@ export interface SavedQueriesState {
 export const useSavedQueriesStore = defineStore("savedQueries", () => {
   const state = useBaseStore<SavedQueriesState>({
     queries: [],
+    allQueries: [],
     selectedQuery: null,
     teams: [],
   });
@@ -107,6 +111,25 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         operationKey: key,
         onSuccess: (responseData) => {
           state.data.value.queries = responseData ?? [];
+        },
+        defaultData: [],
+        showToast: false,
+      });
+    });
+  }
+
+  const allQueries = computed(() => state.data.value.allQueries);
+
+  // listAll fetches every saved query (global-admin only) for the Library
+  // "All queries" browse surface. Rows the caller can't run come back with
+  // runnable=false so the UI can lock them.
+  async function listAll() {
+    return await state.withLoading('listAllSavedQueries', async () => {
+      return await state.callApi<SavedQuery[]>({
+        apiCall: () => savedQueriesApi.listAll(),
+        operationKey: 'listAllSavedQueries',
+        onSuccess: (responseData) => {
+          state.data.value.allQueries = responseData ?? [];
         },
         defaultData: [],
         showToast: false,
@@ -220,6 +243,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   function resetState() {
     state.data.value = {
       queries: [],
+      allQueries: [],
       selectedQuery: null,
       teams: [],
     };
@@ -232,6 +256,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     data: state.data.value,
 
     queries,
+    allQueries,
     selectedQuery,
     teams,
     selectedTeamId,
@@ -243,6 +268,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     fetchUserTeams,
     setSelectedTeam,
     list,
+    listAll,
     fetchById,
     create,
     update,

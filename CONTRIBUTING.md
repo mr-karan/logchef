@@ -65,8 +65,8 @@ just lint
 
 If your changes involve database modifications:
 
-1. Create migration files in `internal/sqlite/migrations/`
-2. Update queries in `internal/sqlite/queries.sql`
+1. Create migration files in `internal/store/sqlite/migrations/`
+2. Update queries in `internal/store/sqlite/queries.sql`
 3. Regenerate SQLC code: `just sqlc-generate`
 4. Update models in `pkg/models/` if needed
 
@@ -152,7 +152,7 @@ just test-short
 - `internal/server/` - HTTP handlers, middleware, routing
 - `internal/core/` - Business logic (users, teams, sources, logs)
 - `internal/clickhouse/` - ClickHouse client and connection management
-- `internal/sqlite/` - SQLite metadata storage with SQLC
+- `internal/store/sqlite/` - SQLite metadata storage with SQLC
 - `internal/auth/` - OIDC authentication
 - `internal/config/` - Configuration management
 
