@@ -13,28 +13,16 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 )
 
-func TestValidateAlertsEnabled(t *testing.T) {
+func TestRequireAlertsEnabled(t *testing.T) {
 	t.Parallel()
 
-	t.Run("enabled returns nil", func(t *testing.T) {
+	t.Run("enabled calls next", func(t *testing.T) {
 		t.Parallel()
 		s := &Server{config: &config.Config{Alerts: config.AlertsConfig{Enabled: true}}}
-		if got := s.validateAlertsEnabled(); got != nil {
-			t.Fatalf("validateAlertsEnabled() = non-nil (%T), want nil", got)
-		}
-	})
-
-	t.Run("disabled returns 503 responder", func(t *testing.T) {
-		t.Parallel()
-		s := &Server{config: &config.Config{Alerts: config.AlertsConfig{Enabled: false}}}
-		responder := s.validateAlertsEnabled()
-		if responder == nil {
-			t.Fatalf("validateAlertsEnabled() = nil, want non-nil responder")
-		}
 
 		app := fiber.New()
-		app.Get("/probe", func(c *fiber.Ctx) error {
-			return responder(c)
+		app.Get("/probe", s.requireAlertsEnabled, func(c *fiber.Ctx) error {
+			return c.SendString("reached")
 		})
 
 		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil))
@@ -43,6 +31,38 @@ func TestValidateAlertsEnabled(t *testing.T) {
 		}
 		defer resp.Body.Close()
 
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+		}
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		if string(body) != "reached" {
+			t.Fatalf("body = %q, want the downstream handler to run", body)
+		}
+	})
+
+	t.Run("disabled short-circuits with 503", func(t *testing.T) {
+		t.Parallel()
+		s := &Server{config: &config.Config{Alerts: config.AlertsConfig{Enabled: false}}}
+
+		reached := false
+		app := fiber.New()
+		app.Get("/probe", s.requireAlertsEnabled, func(c *fiber.Ctx) error {
+			reached = true
+			return c.SendString("reached")
+		})
+
+		resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/probe", nil))
+		if err != nil {
+			t.Fatalf("app.Test: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if reached {
+			t.Fatal("downstream handler ran, want it short-circuited by the middleware")
+		}
 		if resp.StatusCode != http.StatusServiceUnavailable {
 			t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusServiceUnavailable)
 		}
