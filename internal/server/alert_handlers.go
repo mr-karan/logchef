@@ -3,6 +3,7 @@ package server
 import (
 	"database/sql"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -12,6 +13,22 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// validateAlertsEnabled returns a handler-shaped error responder when the
+// alerts subsystem is disabled in config, or nil when it is enabled.
+// Mirrors validateAIConfig in logs_handlers.go. The flag is read once from
+// the config snapshot at request time; enabling or disabling alerts requires
+// a server restart.
+func (s *Server) validateAlertsEnabled() func(*fiber.Ctx) error {
+	if !s.config.Alerts.Enabled {
+		return func(c *fiber.Ctx) error {
+			return SendErrorWithType(c, http.StatusServiceUnavailable,
+				"Alerting is disabled on this server. Set alerts.enabled = true (or LOGCHEF_ALERTS__ENABLED=true) and restart to enable.",
+				models.GeneralErrorType)
+		}
+	}
+	return nil
+}
 
 func parseAlertID(c *fiber.Ctx) (models.AlertID, error) {
 	id, err := parsePositiveIntParam(c, "alertID")
@@ -58,6 +75,9 @@ func (s *Server) loadAlertWithVisibility(c *fiber.Ctx) (*models.Alert, *models.U
 
 // handleListAlerts lists alerts the caller can see. Optional ?source_id filter.
 func (s *Server) handleListAlerts(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	user := c.Locals("user").(*models.User)
 
 	if sourceParam := c.Query("source_id"); sourceParam != "" {
@@ -89,6 +109,9 @@ func (s *Server) handleListAlerts(c *fiber.Ctx) error {
 // handleCreateAlert creates a new alert against the source in the request body.
 // The caller must have source access; the resulting alert is owned by the caller.
 func (s *Server) handleCreateAlert(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	user := c.Locals("user").(*models.User)
 
 	var req models.CreateAlertRequest
@@ -127,6 +150,9 @@ func (s *Server) handleCreateAlert(c *fiber.Ctx) error {
 
 // handleGetAlert returns a single alert.
 func (s *Server) handleGetAlert(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	alert, _, err := s.loadAlertWithVisibility(c)
 	if err != nil {
 		return err
@@ -136,6 +162,9 @@ func (s *Server) handleGetAlert(c *fiber.Ctx) error {
 
 // handleUpdateAlert updates an alert. Allowed only for the creator or a global admin.
 func (s *Server) handleUpdateAlert(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	alert, user, err := s.loadAlertWithVisibility(c)
 	if err != nil {
 		return err
@@ -166,6 +195,9 @@ func (s *Server) handleUpdateAlert(c *fiber.Ctx) error {
 
 // handleDeleteAlert removes an alert (creator + global admin only).
 func (s *Server) handleDeleteAlert(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	alert, user, err := s.loadAlertWithVisibility(c)
 	if err != nil {
 		return err
@@ -185,6 +217,9 @@ func (s *Server) handleDeleteAlert(c *fiber.Ctx) error {
 
 // handleResolveAlert manually resolves the most recent triggered history entry.
 func (s *Server) handleResolveAlert(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	alert, user, err := s.loadAlertWithVisibility(c)
 	if err != nil {
 		return err
@@ -219,6 +254,9 @@ func (s *Server) handleResolveAlert(c *fiber.Ctx) error {
 
 // handleListAlertHistory returns recent history entries for an alert.
 func (s *Server) handleListAlertHistory(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	alert, _, err := s.loadAlertWithVisibility(c)
 	if err != nil {
 		return err
@@ -246,6 +284,9 @@ func (s *Server) handleListAlertHistory(c *fiber.Ctx) error {
 
 // handleTestAlertQuery executes a test query against the source in the request body.
 func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
+	if err := s.validateAlertsEnabled(); err != nil {
+		return err(c)
+	}
 	user := c.Locals("user").(*models.User)
 
 	var req struct {

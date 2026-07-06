@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History } from "lucide-vue-next";
+import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,7 +19,9 @@ import {
 import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useContextStore } from "@/stores/context";
+import { useMetaStore } from "@/stores/meta";
 import AlertForm from "@/components/alerts/AlertForm.vue";
+import EmptyState from "@/components/layout/EmptyState.vue";
 import type { Alert, UpdateAlertRequest } from "@/api/alerts";
 
 const route = useRoute();
@@ -28,6 +30,7 @@ const router = useRouter();
 const alertsStore = useAlertsStore();
 const alertHistoryStore = useAlertHistoryStore();
 const contextStore = useContextStore();
+const metaStore = useMetaStore();
 
 const alertId = computed(() => Number(route.params.alertID));
 const currentTab = ref<"edit" | "history">("edit");
@@ -125,7 +128,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <EmptyState
+    v-if="!metaStore.alertsEnabled"
+    :icon="Bell"
+    title="Alerting is disabled"
+    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+  />
+  <div v-else class="space-y-6">
     <!-- Header Section -->
     <div class="flex items-start justify-between gap-4">
       <div class="flex items-start gap-3">

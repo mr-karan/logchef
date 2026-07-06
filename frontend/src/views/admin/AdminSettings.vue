@@ -33,12 +33,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
+import { useMetaStore } from '@/stores/meta'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 
 const { toast } = useToast()
 
 const authStore = useAuthStore()
+const metaStore = useMetaStore()
 
 const settingsStore = useSettingsStore()
 const { isLoading } = storeToRefs(settingsStore)
@@ -50,7 +52,9 @@ const showTestWebhookDialog = ref(false)
 const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
-const currentTab = ref('alerts')
+// Default to Alerts unless the server has disabled alerting; in that case
+// fall back to AI so an admin isn't landed on a hidden tab.
+const currentTab = ref(metaStore.alertsEnabled ? 'alerts' : 'ai')
 const testEmailRecipient = ref('')
 const testWebhookUrl = ref('')
 const isTestingEmail = ref(false)
@@ -197,14 +201,14 @@ onMounted(() => {
     <LoadingState v-if="isLoading" label="Loading settings…" />
     <Tabs v-else v-model="currentTab" class="w-full">
           <TabsList>
-            <TabsTrigger value="alerts">Alerts</TabsTrigger>
+            <TabsTrigger v-if="metaStore.alertsEnabled" value="alerts">Alerts</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
             <TabsTrigger value="auth">Authentication</TabsTrigger>
             <TabsTrigger value="server">Server</TabsTrigger>
           </TabsList>
 
           <!-- Alerts Tab -->
-          <TabsContent value="alerts" class="space-y-4">
+          <TabsContent v-if="metaStore.alertsEnabled" value="alerts" class="space-y-4">
             <div class="flex items-center justify-between">
               <div class="text-sm text-muted-foreground">
                 {{ getCategoryDescription('alerts') }}
