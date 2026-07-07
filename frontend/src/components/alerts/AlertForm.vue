@@ -83,6 +83,22 @@ const currentSource = computed(() => {
 });
 const sourceType = computed(() => currentSource.value?.source_type || "clickhouse");
 const supportsConditionEditor = computed(() => supportsAlertEditorMode(currentSource.value, "condition"));
+
+// Column suggestions for the aggregate field. ClickHouse schemas narrow to
+// numeric types; VictoriaLogs fields are untyped so all names are offered.
+const aggregateFieldSuggestions = computed(() => {
+  const columns = currentSource.value?.columns || [];
+  if (sourceType.value === "victorialogs") {
+    return columns.map((c) => c.name);
+  }
+  return columns
+    .filter((c) => /Int|Float|Decimal/i.test(c.type || ""))
+    .map((c) => c.name);
+});
+
+function logsqlFieldRef(field: string): string {
+  return /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(field) ? field : JSON.stringify(field);
+}
 const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
 const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
 const nativeQueryLabel = computed(() => `${nativeEditorLabel.value} Query`);
@@ -111,6 +127,7 @@ const form = reactive({
   query: "",
   condition_json: "", // LogChefQL condition string
   aggregate_function: "count" as "count" | "sum" | "avg" | "min" | "max",
+  aggregate_field: "",
   lookback_seconds: 300,
   threshold_operator: "gt" as Alert["threshold_operator"],
   threshold_value: 1,
@@ -209,14 +226,20 @@ async function translateCondition() {
       const translatedQuery = response.data.generated_query || response.data.sql || "";
       const translatedLanguage = response.data.generated_query_language || nativeQueryLanguage.value;
 
+      if (form.aggregate_function !== "count" && !form.aggregate_field.trim()) {
+        conditionError.value = `Select the numeric field to ${form.aggregate_function}() over`;
+        generatedQuery.value = "";
+        return;
+      }
+      const aggregateField = form.aggregate_field.trim();
       if (translatedLanguage === "logsql") {
         const filterQuery = translatedQuery.trim() || "*";
         const statsExpression = form.aggregate_function === "count"
           ? "count()"
-          : `${form.aggregate_function}(value)`;
+          : `${form.aggregate_function}(${logsqlFieldRef(aggregateField)})`;
         generatedQuery.value = `${filterQuery} | stats ${statsExpression} as value`;
       } else {
-        const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(value)`;
+        const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(\`${aggregateField}\`)`;
         const tableName = currentTableName.value;
         const tsField = timestampField.value;
 
@@ -243,7 +266,7 @@ async function translateCondition() {
 // Watch for changes that should trigger translation with debounce
 let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 watch(
-  () => [form.condition_json, form.aggregate_function, form.lookback_seconds],
+  () => [form.condition_json, form.aggregate_function, form.aggregate_field, form.lookback_seconds],
   () => {
     if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
     translateDebounceTimer = setTimeout(() => {
@@ -489,6 +512,7 @@ function resetForm(alert: Alert | null) {
     form.query = "";
     form.condition_json = "";
     form.aggregate_function = "count";
+    form.aggregate_field = "";
     form.lookback_seconds = 300;
     form.threshold_operator = "gt";
     form.threshold_value = 1;
@@ -513,6 +537,14 @@ function resetForm(alert: Alert | null) {
   form.query = alert.query;
   form.condition_json = alert.condition_json ?? "";
   form.aggregate_function = "count";
+  form.aggregate_field = "";
+  const aggMatch = (alert.query || "").match(/(count|sum|avg|min|max)\(\s*[`"]?([^`")]*)[`"]?\s*\)/);
+  if (aggMatch) {
+    form.aggregate_function = aggMatch[1] as typeof form.aggregate_function;
+    if (aggMatch[1] !== "count") {
+      form.aggregate_field = aggMatch[2].trim();
+    }
+  }
   form.lookback_seconds = alert.lookback_seconds;
   form.threshold_operator = alert.threshold_operator;
   form.threshold_value = alert.threshold_value;
@@ -749,12 +781,24 @@ function handleSubmit() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="count">count(*) - Count matching logs</SelectItem>
-                    <SelectItem value="sum">sum(value) - Sum of values</SelectItem>
-                    <SelectItem value="avg">avg(value) - Average value</SelectItem>
-                    <SelectItem value="min">min(value) - Minimum value</SelectItem>
-                    <SelectItem value="max">max(value) - Maximum value</SelectItem>
+                    <SelectItem value="sum">sum(field) - Sum of a field</SelectItem>
+                    <SelectItem value="avg">avg(field) - Average of a field</SelectItem>
+                    <SelectItem value="min">min(field) - Minimum of a field</SelectItem>
+                    <SelectItem value="max">max(field) - Maximum of a field</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div v-if="form.aggregate_function !== 'count'" class="space-y-2">
+                <Label for="aggregate-field" class="required">Field to aggregate</Label>
+                <Input
+                  id="aggregate-field"
+                  v-model="form.aggregate_field"
+                  list="aggregate-field-suggestions"
+                  placeholder="numeric field, e.g. duration_ms"
+                />
+                <datalist id="aggregate-field-suggestions">
+                  <option v-for="name in aggregateFieldSuggestions" :key="name" :value="name" />
+                </datalist>
               </div>
             </div>
 
@@ -1159,12 +1203,24 @@ function handleSubmit() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="count">count(*) - Count matching logs</SelectItem>
-                    <SelectItem value="sum">sum(value) - Sum of values</SelectItem>
-                    <SelectItem value="avg">avg(value) - Average value</SelectItem>
-                    <SelectItem value="min">min(value) - Minimum value</SelectItem>
-                    <SelectItem value="max">max(value) - Maximum value</SelectItem>
+                    <SelectItem value="sum">sum(field) - Sum of a field</SelectItem>
+                    <SelectItem value="avg">avg(field) - Average of a field</SelectItem>
+                    <SelectItem value="min">min(field) - Minimum of a field</SelectItem>
+                    <SelectItem value="max">max(field) - Maximum of a field</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div v-if="form.aggregate_function !== 'count'" class="space-y-2">
+                <Label for="aggregate-field" class="required">Field to aggregate</Label>
+                <Input
+                  id="aggregate-field"
+                  v-model="form.aggregate_field"
+                  list="aggregate-field-suggestions"
+                  placeholder="numeric field, e.g. duration_ms"
+                />
+                <datalist id="aggregate-field-suggestions">
+                  <option v-for="name in aggregateFieldSuggestions" :key="name" :value="name" />
+                </datalist>
               </div>
             </div>
 
