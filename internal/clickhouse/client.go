@@ -306,7 +306,11 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			}
 		}()
 
-		columnsInfo, scanDest, scanPtrs := prepareRowScan(rows)
+		var scanDest []any
+		var scanPtrs []reflect.Value
+		// Assign (not :=) so the outer columnsInfo makes it into the result —
+		// a := here would shadow it and the response would carry no columns.
+		columnsInfo, scanDest, scanPtrs = prepareRowScan(rows)
 
 		// Preallocate to the applied row bound (capped) to avoid repeated slice
 		// regrowth on large result sets, without over-committing on huge limits.
