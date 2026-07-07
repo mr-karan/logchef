@@ -318,6 +318,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.setUserManagedStmt, err = db.PrepareContext(ctx, setUserManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query SetUserManaged: %w", err)
 	}
+	if q.setUserPasswordHashStmt, err = db.PrepareContext(ctx, setUserPasswordHash); err != nil {
+		return nil, fmt.Errorf("error preparing query SetUserPasswordHash: %w", err)
+	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
 	}
@@ -858,6 +861,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing setUserManagedStmt: %w", cerr)
 		}
 	}
+	if q.setUserPasswordHashStmt != nil {
+		if cerr := q.setUserPasswordHashStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing setUserPasswordHashStmt: %w", cerr)
+		}
+	}
 	if q.teamHasSourceStmt != nil {
 		if cerr := q.teamHasSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing teamHasSourceStmt: %w", cerr)
@@ -1070,6 +1078,7 @@ type Queries struct {
 	setSourceManagedStmt                *sql.Stmt
 	setTeamManagedStmt                  *sql.Stmt
 	setUserManagedStmt                  *sql.Stmt
+	setUserPasswordHashStmt             *sql.Stmt
 	teamHasSourceStmt                   *sql.Stmt
 	touchQueryShareStmt                 *sql.Stmt
 	updateAPITokenLastUsedStmt          *sql.Stmt
@@ -1189,6 +1198,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		setSourceManagedStmt:                q.setSourceManagedStmt,
 		setTeamManagedStmt:                  q.setTeamManagedStmt,
 		setUserManagedStmt:                  q.setUserManagedStmt,
+		setUserPasswordHashStmt:             q.setUserPasswordHashStmt,
 		teamHasSourceStmt:                   q.teamHasSourceStmt,
 		touchQueryShareStmt:                 q.touchQueryShareStmt,
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,

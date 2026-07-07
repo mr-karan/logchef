@@ -13,6 +13,8 @@ interface MetaState {
   maxPreviewLimit: number;
   maxExportRows: number;
   alertsEnabled: boolean;
+  localAuthEnabled: boolean;
+  oidcEnabled: boolean;
   isInitialized: boolean;
 }
 
@@ -28,6 +30,8 @@ export const useMetaStore = defineStore("meta", () => {
     // Default true so an older server that doesn't advertise the field
     // keeps working; disabling is an opt-in signalled by the server.
     alertsEnabled: true,
+    localAuthEnabled: false,
+    oidcEnabled: true,
     isInitialized: false,
   });
 
@@ -40,6 +44,8 @@ export const useMetaStore = defineStore("meta", () => {
   const maxPreviewLimit = computed(() => state.data.value.maxPreviewLimit);
   const maxExportRows = computed(() => state.data.value.maxExportRows);
   const alertsEnabled = computed(() => state.data.value.alertsEnabled);
+  const localAuthEnabled = computed(() => state.data.value.localAuthEnabled);
+  const oidcEnabled = computed(() => state.data.value.oidcEnabled);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
@@ -65,6 +71,8 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.maxPreviewLimit = response.max_preview_limit ?? response.max_query_limit;
               state.data.value.maxExportRows = response.max_export_rows ?? 1000000;
               state.data.value.alertsEnabled = response.alerts_enabled ?? true;
+              state.data.value.localAuthEnabled = response.local_auth_enabled ?? false;
+              state.data.value.oidcEnabled = response.oidc_enabled ?? true;
               state.data.value.isInitialized = true;
             }
           },
@@ -90,6 +98,8 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.maxPreviewLimit = 100000;
     state.data.value.maxExportRows = 1000000;
     state.data.value.alertsEnabled = true;
+    state.data.value.localAuthEnabled = false;
+    state.data.value.oidcEnabled = true;
     state.data.value.isInitialized = false;
   }
 
@@ -102,6 +112,8 @@ export const useMetaStore = defineStore("meta", () => {
     maxPreviewLimit,
     maxExportRows,
     alertsEnabled,
+    localAuthEnabled,
+    oidcEnabled,
     isInitialized,
     error,
     loadMeta,

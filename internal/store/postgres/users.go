@@ -18,6 +18,7 @@ func userToModel(r sqlc.User) *models.User {
 		AccountType:  models.UserAccountType(r.AccountType),
 		LastLoginAt:  tsPtr(r.LastLoginAt),
 		LastActiveAt: tsPtr(r.LastActiveAt),
+		PasswordHash: r.PasswordHash.String,
 		Managed:      r.Managed,
 		Timestamps: models.Timestamps{
 			CreatedAt: r.CreatedAt.Time,
@@ -154,6 +155,17 @@ func (s *Store) DeleteUser(ctx context.Context, id models.UserID) error {
 	if err := s.q.DeleteUser(ctx, int64(id)); err != nil {
 		s.log.Error("failed to delete user record from db", "error", err, "user_id", id)
 		return fmt.Errorf("failed to delete user: %w", err)
+	}
+	return nil
+}
+
+// SetUserPasswordHash stores (or clears, with "") the local-auth bcrypt hash.
+func (s *Store) SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error {
+	if err := s.q.SetUserPasswordHash(ctx, sqlc.SetUserPasswordHashParams{
+		PasswordHash: text(hash),
+		ID:           int64(id),
+	}); err != nil {
+		return fmt.Errorf("error setting user password hash: %w", err)
 	}
 	return nil
 }

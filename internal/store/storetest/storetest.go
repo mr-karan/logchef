@@ -19,6 +19,7 @@ func Run(t *testing.T, s store.Store) {
 	ctx := context.Background()
 
 	t.Run("Users", func(t *testing.T) { testUsers(t, ctx, s) })
+	t.Run("UserPasswordHash", func(t *testing.T) { testUserPasswordHash(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
@@ -33,6 +34,26 @@ func Run(t *testing.T, s store.Store) {
 }
 
 // --- helpers ---
+
+func testUserPasswordHash(t *testing.T, ctx context.Context, s store.Store) {
+	u := mkUser(t, ctx, s, "local-auth@test.dev")
+	if u.PasswordHash != "" {
+		t.Fatalf("new user has non-empty password hash")
+	}
+	if err := s.SetUserPasswordHash(ctx, u.ID, "$2a$10$fakehashfortesting0000000000000000000000000000000000"); err != nil {
+		t.Fatalf("SetUserPasswordHash: %v", err)
+	}
+	got, err := s.GetUserByEmail(ctx, u.Email)
+	if err != nil || got.PasswordHash == "" {
+		t.Fatalf("password hash did not round-trip: %v / %+v", err, got)
+	}
+	if err := s.SetUserPasswordHash(ctx, u.ID, ""); err != nil {
+		t.Fatalf("clear password hash: %v", err)
+	}
+	if got, err = s.GetUserByEmail(ctx, u.Email); err != nil || got.PasswordHash != "" {
+		t.Fatalf("password hash not cleared: %v / %q", err, got.PasswordHash)
+	}
+}
 
 func mkUser(t *testing.T, ctx context.Context, s store.StoreOps, email string) *models.User {
 	t.Helper()

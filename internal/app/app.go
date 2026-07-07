@@ -21,6 +21,7 @@ import (
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // App represents the core application context, holding dependencies and configuration.
@@ -123,6 +124,11 @@ func (a *App) Initialize(ctx context.Context) error {
 		} else {
 			return fmt.Errorf("failed to initialize OIDC provider: %w", err)
 		}
+	}
+
+	// Bootstrap the local-auth admin when configured (idempotent).
+	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Logger); err != nil {
+		return fmt.Errorf("failed to bootstrap local auth admin: %w", err)
 	}
 
 	// Run declarative provisioning reconciliation if configured.
@@ -492,5 +498,45 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 	}
 
 	a.Logger.Info("system settings seeded from config.toml successfully")
+	return nil
+}
+
+// ensureLocalAdmin creates or updates the bootstrap admin for local
+// email+password auth. Idempotent: safe to run on every startup.
+func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, log *slog.Logger) error {
+	local := cfg.Auth.Local
+	if !local.Enabled || local.AdminEmail == "" {
+		return nil
+	}
+
+	user, err := db.GetUserByEmail(ctx, local.AdminEmail)
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
+		return fmt.Errorf("looking up local admin: %w", err)
+	}
+	if user == nil || errors.Is(err, models.ErrNotFound) {
+		user = &models.User{
+			Email:       local.AdminEmail,
+			FullName:    "Local Admin",
+			Role:        models.UserRoleAdmin,
+			Status:      models.UserStatusActive,
+			AccountType: models.UserAccountTypeHuman,
+		}
+		if err := db.CreateUser(ctx, user); err != nil {
+			return fmt.Errorf("creating local admin: %w", err)
+		}
+	}
+
+	// Only re-hash when the stored hash doesn't already match the configured
+	// password — bcrypt hashing on every boot is wasted work.
+	if !auth.VerifyLocalPassword(user.PasswordHash, local.AdminPassword) {
+		hash, err := auth.HashLocalPassword(local.AdminPassword)
+		if err != nil {
+			return fmt.Errorf("hashing local admin password: %w", err)
+		}
+		if err := db.SetUserPasswordHash(ctx, user.ID, hash); err != nil {
+			return err
+		}
+	}
+	log.Info("local auth admin ensured", "email", local.AdminEmail)
 	return nil
 }

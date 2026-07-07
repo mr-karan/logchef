@@ -102,6 +102,34 @@ If you plan to use the CLI, create a public OIDC client with loopback redirect U
 `oidc.skip_email_verified_check` is useful for providers such as Cloudflare Access that do not emit
 the `email_verified` claim. It does not bypass an explicit `email_verified=false` response.
 
+### Local authentication (run without OIDC)
+
+Logchef can run without an external identity provider. Enable built-in
+email+password authentication and bootstrap an admin at startup:
+
+```toml
+[auth.local]
+enabled = true
+admin_email = "admin@example.com"
+# Prefer the environment variable below over committing a password to a file.
+# Minimum 10 characters. Stored as a bcrypt hash; the plaintext is never logged.
+admin_password = "change-me-please"
+```
+
+Or via environment variables:
+
+```bash
+LOGCHEF_AUTH__LOCAL__ENABLED=true
+LOGCHEF_AUTH__LOCAL__ADMIN_EMAIL=admin@example.com
+LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD=change-me-please
+```
+
+When local auth is enabled the whole `[oidc]` section becomes optional — the
+login page shows an email/password form (and the SSO button too, if OIDC is
+also configured). The bootstrap admin is created (or its password updated)
+on every startup, so rotating the password is just a config change + restart.
+The login endpoint is rate limited per IP and per email.
+
 ### Auth Settings
 
 Configure authentication behavior:

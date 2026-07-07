@@ -1241,7 +1241,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE id = ?
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE id = ?
 `
 
 // Get a user by ID
@@ -1260,12 +1260,13 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.UpdatedAt,
 		&i.Managed,
 		&i.AccountType,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE email = ?
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE email = ?
 `
 
 // Get a user by email
@@ -1284,6 +1285,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.UpdatedAt,
 		&i.Managed,
 		&i.AccountType,
+		&i.PasswordHash,
 	)
 	return i, err
 }
@@ -2093,7 +2095,7 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 }
 
 const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE managed = 1 ORDER BY id
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE managed = 1 ORDER BY id
 `
 
 // Get all users managed by provisioning config
@@ -2118,6 +2120,7 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.AccountType,
+			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -2292,7 +2295,7 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 }
 
 const listServiceAccounts = `-- name: ListServiceAccounts :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users WHERE account_type = 'service' ORDER BY created_at ASC
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE account_type = 'service' ORDER BY created_at ASC
 `
 
 // List service principals
@@ -2317,6 +2320,7 @@ func (q *Queries) ListServiceAccounts(ctx context.Context) ([]User, error) {
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.AccountType,
+			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -2819,7 +2823,7 @@ func (q *Queries) ListUserTeams(ctx context.Context, userID int64) ([]Team, erro
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type FROM users ORDER BY created_at ASC
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users ORDER BY created_at ASC
 `
 
 // List all users
@@ -2844,6 +2848,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.UpdatedAt,
 			&i.Managed,
 			&i.AccountType,
+			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -3044,6 +3049,21 @@ type SetUserManagedParams struct {
 // Mark a user as managed/unmanaged
 func (q *Queries) SetUserManaged(ctx context.Context, arg SetUserManagedParams) error {
 	_, err := q.exec(ctx, q.setUserManagedStmt, setUserManaged, arg.Managed, arg.ID)
+	return err
+}
+
+const setUserPasswordHash = `-- name: SetUserPasswordHash :exec
+UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+type SetUserPasswordHashParams struct {
+	PasswordHash sql.NullString `json:"password_hash"`
+	ID           int64          `json:"id"`
+}
+
+// Set (or clear) a user's local-auth bcrypt hash
+func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
+	_, err := q.exec(ctx, q.setUserPasswordHashStmt, setUserPasswordHash, arg.PasswordHash, arg.ID)
 	return err
 }
 

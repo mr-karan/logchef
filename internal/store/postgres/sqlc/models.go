@@ -199,6 +199,7 @@ type User struct {
 	AccountType  string             `json:"account_type"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	PasswordHash pgtype.Text        `json:"password_hash"`
 }
 
 type UserPreference struct {

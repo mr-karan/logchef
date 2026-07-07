@@ -60,6 +60,9 @@ type UserStore interface {
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
 	CountAdminUsers(ctx context.Context) (int, error)
+	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
+	// local email+password authentication.
+	SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error
 	DeleteUser(ctx context.Context, id models.UserID) error
 }
 

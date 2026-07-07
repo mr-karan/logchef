@@ -23,6 +23,13 @@ export const authApi = {
   },
 
   /**
+   * Local (email + password) login. Only available when the server has
+   * [auth.local] enabled — see /api/v1/meta local_auth_enabled.
+   */
+  localLogin: (email: string, password: string) =>
+    apiClient.post<{ user: User }>("/auth/local/login", { email, password }),
+
+  /**
    * Secure logout
    */
   async logout(): Promise<APIResponse<void>> {

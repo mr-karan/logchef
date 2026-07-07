@@ -56,6 +56,10 @@ SELECT * FROM users WHERE id = $1;
 -- Get a user by email
 SELECT * FROM users WHERE email = $1;
 
+-- name: SetUserPasswordHash :exec
+-- Set (or clear) a user's local-auth bcrypt hash
+UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2;
+
 -- name: UpdateUser :exec
 -- Update a user
 UPDATE users

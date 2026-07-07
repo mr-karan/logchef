@@ -56,6 +56,10 @@ SELECT * FROM users WHERE id = ?;
 -- Get a user by email
 SELECT * FROM users WHERE email = ?;
 
+-- name: SetUserPasswordHash :exec
+-- Set (or clear) a user's local-auth bcrypt hash
+UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+
 -- name: UpdateUser :exec
 -- Update a user
 UPDATE users

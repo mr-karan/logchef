@@ -149,6 +149,19 @@ type AuthConfig struct {
 	MaxConcurrentSessions int           `koanf:"max_concurrent_sessions"`
 	APITokenSecret        string        `koanf:"api_token_secret"`
 	DefaultTokenExpiry    time.Duration `koanf:"default_token_expiry"`
+	// Local enables email+password authentication alongside (or instead of)
+	// OIDC — so Logchef can run without an external identity provider.
+	Local LocalAuthConfig `koanf:"local"`
+}
+
+// LocalAuthConfig configures built-in email+password authentication.
+type LocalAuthConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// AdminEmail/AdminPassword bootstrap a local admin at startup (idempotent).
+	// Typically supplied via LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD rather than
+	// checked into a config file.
+	AdminEmail    string `koanf:"admin_email"`
+	AdminPassword string `koanf:"admin_password"`
 }
 
 // LoggingConfig contains logging settings
@@ -316,9 +329,19 @@ func Load(path string) (*Config, error) {
 		return nil, fmt.Errorf("api_token_secret must be at least 32 characters long for security")
 	}
 
-	// Validate OIDC configuration
+	// Validate local auth configuration
+	if cfg.Auth.Local.Enabled && cfg.Auth.Local.AdminEmail != "" && len(cfg.Auth.Local.AdminPassword) < 10 {
+		return nil, fmt.Errorf("auth.local.admin_password must be at least 10 characters (set it via %sAUTH__LOCAL__ADMIN_PASSWORD)", envPrefix)
+	}
+
+	// Validate OIDC configuration. When local auth is enabled, OIDC becomes
+	// optional: skip these checks entirely if no provider_url is set, so
+	// Logchef can run without an external identity provider.
+	if cfg.Auth.Local.Enabled && cfg.OIDC.ProviderURL == "" {
+		return &cfg, nil
+	}
 	if cfg.OIDC.ProviderURL == "" {
-		return nil, fmt.Errorf("provider_url is required in OIDC configuration (either in file or %sOIDC__PROVIDER_URL)", envPrefix)
+		return nil, fmt.Errorf("provider_url is required in OIDC configuration (either in file or %sOIDC__PROVIDER_URL; alternatively enable [auth.local] to run without OIDC)", envPrefix)
 	}
 	if cfg.OIDC.AuthURL == "" {
 		return nil, fmt.Errorf("auth_url is required in OIDC configuration (either in file or %sOIDC__AUTH_URL)", envPrefix)

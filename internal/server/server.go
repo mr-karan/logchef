@@ -163,6 +163,7 @@ func (s *Server) setupRoutes() {
 
 	// --- Authentication Routes ---
 	api.Get("/auth/login", s.handleLogin)
+	api.Post("/auth/local/login", s.handleLocalLogin)
 	api.Get("/auth/callback", s.handleCallback)
 	api.Post("/auth/logout", s.handleLogout)
 

@@ -225,10 +225,22 @@ func mapUserRowToModel(row sqlc.User) *models.User {
 		AccountType:  accountType,
 		LastLoginAt:  lastLoginAt,
 		LastActiveAt: lastActiveAt,
+		PasswordHash: row.PasswordHash.String,
 		Timestamps: models.Timestamps{
 			CreatedAt: row.CreatedAt,
 			UpdatedAt: row.UpdatedAt,
 		},
 		Managed: row.Managed == 1,
 	}
+}
+
+// SetUserPasswordHash stores (or clears, with "") the local-auth bcrypt hash.
+func (db *DB) SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error {
+	if err := db.writeQueries.SetUserPasswordHash(ctx, sqlc.SetUserPasswordHashParams{
+		PasswordHash: sql.NullString{String: hash, Valid: hash != ""},
+		ID:           int64(id),
+	}); err != nil {
+		return fmt.Errorf("error setting user password hash: %w", err)
+	}
+	return nil
 }

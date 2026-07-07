@@ -209,6 +209,8 @@ type Querier interface {
 	SetTeamManaged(ctx context.Context, arg SetTeamManagedParams) error
 	// Mark a user as managed/unmanaged
 	SetUserManaged(ctx context.Context, arg SetUserManagedParams) error
+	// Set (or clear) a user's local-auth bcrypt hash
+	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)

@@ -11,6 +11,8 @@ export interface MetaResponse {
   // Optional so a stale server without the field is treated as "enabled" by
   // the store default — preserves backwards compatibility.
   alerts_enabled?: boolean;
+  local_auth_enabled?: boolean;
+  oidc_enabled?: boolean;
 }
 
 export const metaApi = {

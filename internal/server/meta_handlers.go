@@ -18,6 +18,8 @@ type MetaResponse struct {
 	MaxPreviewLimit     int    `json:"max_preview_limit"`
 	MaxExportRows       int    `json:"max_export_rows"`
 	AlertsEnabled       bool   `json:"alerts_enabled"`
+	LocalAuthEnabled    bool   `json:"local_auth_enabled"`
+	OIDCEnabled         bool   `json:"oidc_enabled"`
 }
 
 // handleGetMeta returns server metadata including version and configuration
@@ -40,6 +42,8 @@ func (s *Server) handleGetMeta(c *fiber.Ctx) error {
 		MaxPreviewLimit:     s.config.Query.MaxPreviewLimit,
 		MaxExportRows:       s.config.Export.MaxRows,
 		AlertsEnabled:       s.config.Alerts.Enabled,
+		LocalAuthEnabled:    s.config.Auth.Local.Enabled,
+		OIDCEnabled:         s.oidcProvider != nil,
 	}
 
 	if s.oidcProvider != nil {

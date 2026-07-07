@@ -87,6 +87,9 @@ type User struct {
 	AccountType  UserAccountType `json:"account_type" db:"account_type"`
 	LastLoginAt  *time.Time      `json:"last_login_at,omitempty" db:"last_login_at"`
 	LastActiveAt *time.Time      `json:"last_active_at,omitempty" db:"last_active_at"`
+	// PasswordHash holds the bcrypt hash for local (email+password) auth.
+	// Empty for OIDC-only users. Never serialized.
+	PasswordHash string `json:"-" db:"password_hash"`
 	Timestamps
 	Managed bool `json:"managed" db:"managed"`
 }

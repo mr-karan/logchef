@@ -189,17 +189,18 @@ type TeamSource struct {
 }
 
 type User struct {
-	ID           int64        `json:"id"`
-	Email        string       `json:"email"`
-	FullName     string       `json:"full_name"`
-	Role         string       `json:"role"`
-	Status       string       `json:"status"`
-	LastLoginAt  sql.NullTime `json:"last_login_at"`
-	LastActiveAt sql.NullTime `json:"last_active_at"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	Managed      int64        `json:"managed"`
-	AccountType  string       `json:"account_type"`
+	ID           int64          `json:"id"`
+	Email        string         `json:"email"`
+	FullName     string         `json:"full_name"`
+	Role         string         `json:"role"`
+	Status       string         `json:"status"`
+	LastLoginAt  sql.NullTime   `json:"last_login_at"`
+	LastActiveAt sql.NullTime   `json:"last_active_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	Managed      int64          `json:"managed"`
+	AccountType  string         `json:"account_type"`
+	PasswordHash sql.NullString `json:"password_hash"`
 }
 
 type UserPreference struct {

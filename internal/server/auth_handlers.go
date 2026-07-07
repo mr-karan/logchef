@@ -409,3 +409,70 @@ func (s *Server) handleGetCurrentUser(c *fiber.Ctx) error {
 
 	return SendSuccess(c, fiber.StatusOK, response)
 }
+
+// localLoginLimiter guards the local login endpoint against brute force:
+// 10 attempts/min per IP, 5 attempts/min per email.
+var localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
+
+// handleLocalLogin authenticates a user with email+password (local auth).
+// Failures are indistinguishable (unknown email, wrong password, inactive,
+// service account) and the endpoint 404s when local auth is disabled.
+func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
+	if !s.config.Auth.Local.Enabled {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Local authentication is not enabled", models.NotFoundErrorType)
+	}
+
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.BodyParser(&req); err != nil || req.Email == "" || req.Password == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "email and password are required", models.ValidationErrorType)
+	}
+
+	if !localLoginLimiter.Allow(c.IP(), req.Email) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many login attempts, try again shortly", models.ValidationErrorType)
+	}
+
+	invalid := func() error {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
+	}
+
+	user, err := s.sqlite.GetUserByEmail(c.Context(), req.Email)
+	if err != nil || user == nil {
+		// Burn a bcrypt comparison so unknown emails aren't timing-distinguishable.
+		auth.VerifyLocalPassword("", req.Password)
+		return invalid()
+	}
+	if user.Status != models.UserStatusActive || user.AccountType != models.UserAccountTypeHuman {
+		auth.VerifyLocalPassword("", req.Password)
+		return invalid()
+	}
+	if !auth.VerifyLocalPassword(user.PasswordHash, req.Password) {
+		return invalid()
+	}
+
+	session, err := core.CreateSession(c.Context(), s.sqlite, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
+	if err != nil {
+		s.log.Error("failed to create session for local login", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to create session")
+	}
+
+	s.log.Info("user.login", "email", user.Email, "user_id", user.ID, "method", "local")
+
+	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, user); err != nil {
+		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", user.ID)
+	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:     sessionCookieName,
+		Value:    string(session.ID),
+		Expires:  session.ExpiresAt,
+		HTTPOnly: true,
+		Secure:   s.config.Server.IsSecureCookie(),
+		SameSite: fiber.CookieSameSiteLaxMode,
+		Path:     "/",
+	})
+
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"user": user})
+}
