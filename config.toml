@@ -107,6 +107,18 @@ max_concurrent_global = 5
 artifact_ttl = "24h"
 formats = ["csv", "ndjson"]
 
+[tail]
+# Live tail (SSE) streams. ClickHouse polls on poll_interval; VictoriaLogs
+# streams natively. Guardrails are mandatory: admission limits, a hard session
+# TTL, and a per-stream row-rate ceiling (excess rows are dropped, not buffered).
+poll_interval = "2s"
+max_per_user = 2
+max_global = 20
+# Kept under [server] http_server_timeout (15m default) — fasthttp write
+# deadline caps any single response, tails included. Clients re-arm on end.
+session_ttl = "14m"
+max_rows_per_sec = 100
+
 [shares]
 default_ttl = "720h"
 max_query_text_bytes = 1048576

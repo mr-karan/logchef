@@ -39,6 +39,7 @@ func (p *ClickHouseProvider) Capabilities() []Capability {
 		CapabilityAISQLGeneration,
 		CapabilityLogContext,
 		CapabilityExports,
+		CapabilityLiveTail,
 	}
 }
 

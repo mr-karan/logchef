@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
@@ -50,6 +51,7 @@ const (
 	CapabilityAISQLGeneration  Capability = "ai_sql_generation"
 	CapabilityLogContext       Capability = "log_context"
 	CapabilityExports          Capability = "exports"
+	CapabilityLiveTail         Capability = "live_tail"
 )
 
 func NewService(db store.Store, log *slog.Logger) *Service {
@@ -228,6 +230,39 @@ func (s *Service) GetLogContext(ctx context.Context, sourceID models.SourceID, r
 		return nil, ErrOperationNotSupported
 	}
 	return lcp.GetLogContext(ctx, source, req)
+}
+
+// TailRequest carries the native query for a live tail stream. Query is the
+// provider's native tail input: a LogsQL query for VictoriaLogs, or a
+// ClickHouse SQL WHERE-fragment (conditions only) for ClickHouse. PollInterval
+// is the ClickHouse poll cadence; VictoriaLogs streams natively and ignores it.
+type TailRequest struct {
+	Query        string
+	Language     models.QueryLanguage
+	PollInterval time.Duration
+}
+
+// TailEmitter receives a batch of freshly observed rows. Returning an error
+// stops the tail (e.g. the client disconnected).
+type TailEmitter func(rows []map[string]any) error
+
+// LogTailer is an optional interface for providers that can stream logs as they
+// are ingested. Providers that don't implement it are reported via
+// ErrOperationNotSupported (same pattern as LogContextProvider).
+type LogTailer interface {
+	TailLogs(ctx context.Context, source *models.Source, req TailRequest, emit TailEmitter) error
+}
+
+func (s *Service) TailLogs(ctx context.Context, sourceID models.SourceID, req TailRequest, emit TailEmitter) error {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return err
+	}
+	tailer, ok := provider.(LogTailer)
+	if !ok {
+		return ErrOperationNotSupported
+	}
+	return tailer.TailLogs(ctx, source, req, emit)
 }
 
 // LogchefQLCompileRequest carries the raw LogchefQL query and the transport

@@ -27,6 +27,7 @@ type Config struct {
 	Alerts       AlertsConfig       `koanf:"alerts"`
 	Query        QueryConfig        `koanf:"query"`
 	Export       ExportConfig       `koanf:"export"`
+	Tail         TailConfig         `koanf:"tail"`
 	Shares       SharesConfig       `koanf:"shares"`
 	Provisioning ProvisioningConfig `koanf:"provisioning"`
 }
@@ -60,6 +61,20 @@ type ExportConfig struct {
 	MaxConcurrentGlobal   int           `koanf:"max_concurrent_global"`
 	ArtifactTTL           time.Duration `koanf:"artifact_ttl"`
 	Formats               []string      `koanf:"formats"`
+}
+
+// TailConfig contains settings for live log tailing (SSE streams).
+type TailConfig struct {
+	// PollInterval is the ClickHouse poll cadence; VictoriaLogs streams natively.
+	PollInterval time.Duration `koanf:"poll_interval"`
+	// MaxPerUser limits concurrent active tail streams per user.
+	MaxPerUser int `koanf:"max_per_user"`
+	// MaxGlobal limits concurrent active tail streams globally.
+	MaxGlobal int `koanf:"max_global"`
+	// SessionTTL is the hard lifetime of a tail stream before it is closed.
+	SessionTTL time.Duration `koanf:"session_ttl"`
+	// MaxRowsPerSec is the per-stream row-rate ceiling; excess rows are dropped.
+	MaxRowsPerSec int `koanf:"max_rows_per_sec"`
 }
 
 // SharesConfig contains settings for ad hoc query share links.
@@ -239,6 +254,12 @@ const (
 	defaultExportMaxConcurrentPerUser = 1
 	defaultExportMaxConcurrentGlobal  = 5
 	defaultExportArtifactTTL          = 24 * time.Hour
+
+	defaultTailPollInterval  = 2 * time.Second
+	defaultTailMaxPerUser    = 2
+	defaultTailMaxGlobal     = 20
+	defaultTailSessionTTL    = 14 * time.Minute
+	defaultTailMaxRowsPerSec = 100
 
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
@@ -520,6 +541,37 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if len(cfg.Export.Formats) == 0 {
 		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
+	}
+
+	if !k.Exists("tail.poll_interval") {
+		cfg.Tail.PollInterval = defaultTailPollInterval
+	}
+	if !k.Exists("tail.max_per_user") {
+		cfg.Tail.MaxPerUser = defaultTailMaxPerUser
+	}
+	if !k.Exists("tail.max_global") {
+		cfg.Tail.MaxGlobal = defaultTailMaxGlobal
+	}
+	if !k.Exists("tail.session_ttl") {
+		cfg.Tail.SessionTTL = defaultTailSessionTTL
+	}
+	if !k.Exists("tail.max_rows_per_sec") {
+		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
+	}
+	if cfg.Tail.PollInterval <= 0 {
+		cfg.Tail.PollInterval = defaultTailPollInterval
+	}
+	if cfg.Tail.MaxPerUser <= 0 {
+		cfg.Tail.MaxPerUser = defaultTailMaxPerUser
+	}
+	if cfg.Tail.MaxGlobal <= 0 {
+		cfg.Tail.MaxGlobal = defaultTailMaxGlobal
+	}
+	if cfg.Tail.SessionTTL <= 0 {
+		cfg.Tail.SessionTTL = defaultTailSessionTTL
+	}
+	if cfg.Tail.MaxRowsPerSec <= 0 {
+		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
 	}
 
 	if !k.Exists("shares.default_ttl") {

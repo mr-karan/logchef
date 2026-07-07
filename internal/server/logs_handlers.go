@@ -48,6 +48,7 @@ type QueryClass string
 const (
 	QueryClassPreview QueryClass = "preview"
 	QueryClassExport  QueryClass = "export"
+	QueryClassTail    QueryClass = "tail"
 )
 
 type QueryAdmissionError struct {

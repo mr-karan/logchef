@@ -57,9 +57,12 @@ func Middleware(config ...MetricsConfig) fiber.Handler {
 		method := c.Method()
 		statusCode := c.Response().StatusCode()
 
-		// Calculate response size if enabled
+		// Calculate response size if enabled. Skip streaming responses (SSE live
+		// tail, streamed exports): calling Body() would materialize the whole
+		// stream into memory — for an open-ended tail it never returns, so the
+		// response would never reach the client.
 		var responseSize int64
-		if cfg.EnableResponseSizeMetrics {
+		if cfg.EnableResponseSizeMetrics && !c.Response().IsBodyStream() {
 			responseSize = int64(len(c.Response().Body()))
 		}
 

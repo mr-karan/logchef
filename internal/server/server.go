@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
@@ -102,6 +103,11 @@ func New(opts ServerOptions) *Server {
 	// Add essential middleware.
 	app.Use(recoverMiddleware(log))
 	app.Use(compress.New(compress.Config{
+		// SSE streams (live tail) must not be buffered/compressed: the compressor
+		// holds the whole body, which never completes for an open stream.
+		Next: func(c *fiber.Ctx) bool {
+			return strings.HasSuffix(c.Path(), "/logs/tail")
+		},
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
 	})) // Compress responses
 
@@ -304,6 +310,7 @@ func (s *Server) setupRoutes() {
 
 	// Query and explore logs
 	teamSourceOps.Post("/logs/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
+	teamSourceOps.Get("/logs/tail", s.requireTokenScope(models.TokenScopeLogsRead), s.handleTailLogs)
 	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
 	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
 	teamSourceOps.Post("/exports", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCreateExportJob)

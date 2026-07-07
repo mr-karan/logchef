@@ -394,4 +394,58 @@ func TestIntegrationVictoriaLogs(t *testing.T) {
 			t.Fatalf("expected alert value %d, got %q", len(rows), got)
 		}
 	})
+
+	// ---- Subtest 8: live tail streams a newly-ingested row and honors cancel. ----
+	t.Run("TailLogsStreamsNewRows", func(t *testing.T) {
+		tailCtx, cancelTail := context.WithCancel(context.Background())
+		defer cancelTail()
+
+		rowCh := make(chan map[string]any, 64)
+		tailErr := make(chan error, 1)
+		go func() {
+			emit := func(batch []map[string]any) error {
+				for _, row := range batch {
+					select {
+					case rowCh <- row:
+					default:
+					}
+				}
+				return nil
+			}
+			tailErr <- provider.TailLogs(tailCtx, source, datasource.TailRequest{
+				Query:    scopeFilter, // native LogsQL, scoped to this run.
+				Language: models.QueryLanguageLogsQL,
+			}, emit)
+		}()
+
+		// Let the upstream tail stream establish before ingesting, so the probe
+		// row lands after the tail's live cutoff.
+		time.Sleep(time.Second)
+
+		marker := "tail probe " + runID
+		ingestFixtures(t, baseURL, runID, time.Now().UTC(), []fixtureRow{
+			{msg: marker, level: "info", service: "tail", durationMs: 1, offset: 0},
+		})
+
+		deadline := time.After(20 * time.Second)
+		found := false
+		for !found {
+			select {
+			case row := <-rowCh:
+				if row["_msg"] == marker {
+					found = true
+				}
+			case <-deadline:
+				t.Fatalf("tail did not deliver the probe row within the window")
+			}
+		}
+
+		// Cancelling the context must terminate the provider tail promptly.
+		cancelTail()
+		select {
+		case <-tailErr:
+		case <-time.After(10 * time.Second):
+			t.Fatalf("tail did not terminate after context cancel")
+		}
+	})
 }
