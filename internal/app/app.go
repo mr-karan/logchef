@@ -165,6 +165,7 @@ func (a *App) Initialize(ctx context.Context) error {
 	serverOpts := server.ServerOptions{
 		Config:        a.Config,
 		SQLite:        a.SQLite,
+		ClickHouse:    a.ClickHouse,
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
 		OIDCProvider:  oidcProvider,

@@ -116,6 +116,7 @@ func New(opts ServerOptions) *Server {
 		app:           app,
 		config:        opts.Config,
 		sqlite:        opts.SQLite,
+		clickhouse:    opts.ClickHouse,
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
 		oidcProvider:  opts.OIDCProvider,
