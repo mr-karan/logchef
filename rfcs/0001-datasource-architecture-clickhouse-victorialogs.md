@@ -1,6 +1,6 @@
 # RFC 0001: Datasource Architecture for ClickHouse and VictoriaLogs
 
-Status: Draft
+Status: Accepted (implemented)
 Date: 2026-04-08
 Authors: Codex
 
@@ -17,6 +17,24 @@ This RFC proposes:
 - shipping VictoriaLogs support in phases without regressing existing ClickHouse behavior
 
 The key decision is to stop treating SQL as LogChef's universal internal query representation. SQL remains native only for ClickHouse. VictoriaLogs will use native LogsQL.
+
+## As Built (July 2026)
+
+This RFC has been implemented and is now the shipped architecture. The core decisions held: a generic datasource model with provider-specific `connection_config` JSON keyed by `identity_key`, a provider interface and registry in `internal/datasource`, per-provider native query languages, and a preserved shared control plane (RBAC, saved queries, alerting, exploration).
+
+The following deviations from the original proposal were made during implementation. Each affected section below is annotated in place; this table is the summary.
+
+| Area | Proposed in RFC | As built |
+|---|---|---|
+| Capability/metadata discovery | Standalone endpoints `GET /api/v1/source-types`, `/source-types/:type/schema`, per-source `/capabilities` and `/describe` (§9, §10) | **Not built.** Capabilities are embedded in each source response: `query_languages`, `saved_query_editor_modes`, `alert_editor_modes`, and `capabilities` (`pkg/models/source.go` `SourceResponse`, populated by `internal/datasource/service.go` `ApplySourceMetadata`). |
+| Log context | Provider-neutral `row_locator` metadata in every query response (§6) | **Not built as specified.** Log context ships as an optional `LogContextProvider` interface plus a `log_context` capability string (`internal/datasource/service.go`). ClickHouse implements it; VictoriaLogs reports it unsupported; the UI hides the affordance via the capability. |
+| VictoriaLogs LogchefQL | Deferred — LogchefQL stays ClickHouse-only (§Non-goals, Decision) | **Exceeded.** LogchefQL works for VictoriaLogs via a LogsQL translator (`internal/logchefql/logsql_generator.go`), unified behind the `LogchefQLCompiler` provider interface (`internal/datasource/service.go`). |
+| VictoriaLogs condition-builder alerts | Deferred to a later phase; MVP is native LogsQL only (§8) | **Exceeded.** Condition-builder alerts work for VictoriaLogs, compiled to `\| stats <fn>(<field>) as value`. |
+| Migrations | Abstract "Migration 1/2/3"; language fields added to `team_queries` (§2, §7) | SQLite **000025–000027** plus Postgres **000002_datasource_multibackend**. They operate on `saved_queries` (the v1.6 de-teamed table, which replaced `team_queries`), adding `query_language` + `editor_mode`. Both store backends satisfy one contract (`internal/store/store.go`), validated by a shared conformance suite. |
+| Store backend | SQLite only | ClickHouse still stores logs; metadata is stored behind a single store contract (`internal/store/store.go`) with SQLite and Postgres adapters, each with its own migration set. |
+| Credentials | Not detailed | Connection configs are stored server-side but redacted in API responses: ClickHouse returns `has_password` (never the password), VictoriaLogs clears `password`/`token`. A blank credential on update means "keep existing". |
+
+Sections describing the endpoints, `row_locator`, and the `team_queries` migration path below are retained for historical context and marked as not implemented / superseded where they would otherwise mislead. Note that `raw_sql`/`query_type` appear in the Motivation and Current State sections as descriptions of the pre-RFC state that motivated this work — they are not current contract names. The current contract uses `query_language`, `editor_mode`, and `query_text`.
 
 ## Motivation
 
@@ -116,6 +134,8 @@ Native query languages will remain provider-specific:
   - `logsql`
 
 `LogchefQL` remains ClickHouse-only until a later RFC expands it into a backend-neutral subset.
+
+> As built: superseded. LogchefQL was extended to VictoriaLogs during implementation via a LogsQL translator (`internal/logchefql/logsql_generator.go`) behind the `LogchefQLCompiler` provider interface, so VictoriaLogs also accepts `logchefql` in addition to `logsql`.
 
 ## Proposed Architecture
 
@@ -220,6 +240,10 @@ If an operator needs to switch backends, they should create a new source and reb
 
 ### 2. SQLite Migration Strategy
 
+> As built: the incremental strategy below held, but the concrete migrations are SQLite **000025_datasource_sources**, **000026_query_languages**, and **000027_remove_legacy_query_type**, plus Postgres **000002_datasource_multibackend** for the second store backend. The language/editor fields were added to `saved_queries` (the v1.6 de-teamed table that replaced `team_queries`), not to `team_queries`. Both store backends satisfy the single contract in `internal/store/store.go` and are validated by a shared conformance suite.
+>
+> Down-migration caveat: rolling back the sources migration (`000025_datasource_sources.down.sql`) keeps only ClickHouse sources. VictoriaLogs sources cannot be represented in the legacy column layout and are dropped, along with their saved queries and alerts via foreign-key cascade. Roll back only if you have no VictoriaLogs sources or have exported them first.
+
 This RFC chooses an incremental migration, not a flag day.
 
 #### Migration 1
@@ -266,9 +290,11 @@ Compatibility with existing ClickHouse code should live in Go mapping and JSON t
 
 #### Migration 2
 
+> As built: the saved-query field landed on `saved_queries.query_language` (v1.6 de-teamed table), not `team_queries.query_language`. See migration 000026_query_languages.
+
 Add alert and saved-query language fields:
 
-- `team_queries.query_language`
+- `team_queries.query_language` (as built: `saved_queries.query_language`)
 - `alerts.query_language`
 
 Backfill:
@@ -463,6 +489,8 @@ Notes:
 
 #### Query response additions
 
+> As built: not implemented as specified. The provider-neutral `row_locator` metadata below was not built. Log context instead ships as an optional `LogContextProvider` interface plus a `log_context` capability string (`internal/datasource/service.go`): ClickHouse implements it, VictoriaLogs reports it unsupported, and the UI hides the log-context affordance when the capability is absent. Query responses do not carry a `row_locator` envelope.
+
 Add provider-neutral row locator metadata for log context:
 
 ```json
@@ -546,6 +574,8 @@ VictoriaLogs alerting ships as native LogsQL only.
 
 Condition-builder parity for VictoriaLogs is intentionally deferred, because the current condition-builder pipeline is SQL-shaped and should not block initial backend support.
 
+> As built: superseded. The deferral was lifted during implementation. Condition-builder alerts work for VictoriaLogs too, compiling to a `| stats <fn>(<field>) as value` LogsQL query. Both native LogsQL and condition-builder alert modes are supported for VictoriaLogs.
+
 Concrete migration rule:
 
 - add `alerts.query_language TEXT NOT NULL DEFAULT 'clickhouse-sql'`
@@ -553,6 +583,8 @@ Concrete migration rule:
 - keep `query_type` temporarily as the editor intent field until the alert UI is migrated to `editor_mode`
 
 ### 9. Source Description and Capabilities
+
+> As built: capabilities are not exposed via a separate `describe` sub-object or dedicated endpoints. Instead, each source response carries the capability contract inline as top-level fields: `query_languages`, `saved_query_editor_modes`, `alert_editor_modes`, and `capabilities` (a list of capability strings such as `histogram`, `field_values`, `schema_inspection`, `source_inspection`, `ai_sql_generation`, `log_context`). These are defined on `SourceResponse` in `pkg/models/source.go` and populated per provider by `ApplySourceMetadata` in `internal/datasource/service.go`. This is the public capabilities contract; the generic `describe` response sketched below was not built as a distinct shape.
 
 Replace the current ClickHouse-only source detail response with a generic source description.
 
@@ -652,7 +684,9 @@ But change payload semantics to provider-neutral query envelopes.
 
 #### New metadata endpoints
 
-Add:
+> As built: not implemented. None of the four endpoints below were built. Capability and type metadata is carried inline on the source response (`query_languages`, `saved_query_editor_modes`, `alert_editor_modes`, `capabilities` — see §9), so clients read it from the source object rather than calling separate discovery endpoints.
+
+Add (proposed, not built):
 
 - `GET /api/v1/source-types`
 - `GET /api/v1/source-types/:type/schema`
@@ -832,6 +866,8 @@ Before merging VictoriaLogs work, ensure ClickHouse behavior is unchanged for:
 - alert evaluation
 
 ### 14. Rollout Plan
+
+> As built: this is the originally proposed PR sequence, retained for historical context. The work shipped along these lines but file paths and names below reflect the pre-implementation plan — e.g. PR 8 names `team_queries`, which had become `saved_queries` by the time the language field landed (migration 000026). See the As Built section near the top for the authoritative deltas.
 
 This RFC proposes the following PR sequence.
 

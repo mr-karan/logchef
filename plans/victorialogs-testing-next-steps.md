@@ -1,5 +1,15 @@
 # VictoriaLogs Datasource: Testing and Next Steps
 
+## Completion Note (July 2026)
+
+The merge bar defined at the bottom of this document has been met, and the VictoriaLogs datasource work has shipped. This plan is retained for historical context only.
+
+- SQLite upgrade smoke test: automated at `internal/store/sqlite/upgrade_test.go`, which exercises the datasource/query-language migrations against a pre-cleanup database (the "run a real SQLite upgrade smoke test" item). Note the legacy-query-type migration shipped as `000027_remove_legacy_query_type`, not the `000014_remove_legacy_query_type` name referenced below.
+- ClickHouse regression and VictoriaLogs end-to-end coverage: automated at the API level in `dev/smoke_api.py` and at the browser level in `dev/e2e/` (`run.sh`, `lib.sh`, `scenarios.sh`), replacing the manual smoke passes described below.
+- Full frontend build/typecheck: now runs in CI, so the previously blocking local frontend environment issue no longer gates the merge bar.
+
+Everything below is preserved as-is for the record.
+
 ## Scope Completed
 
 This branch has already landed the architectural cleanup required to treat datasources as first-class:
