@@ -89,6 +89,10 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	if query == "" {
 		query = "*"
 	}
+	// Sort explore results newest-first, matching the ClickHouse provider's
+	// ORDER BY timestamp DESC. Only this path sorts — alert/stats and
+	// field-values queries must not carry a sort pipe.
+	query = appendDefaultSort(query)
 
 	form := url.Values{}
 	form.Set("query", query)
@@ -851,6 +855,68 @@ func statsFromHeaders(resp *http.Response, rowCount int) models.QueryStats {
 	}
 	stats.ExecutionTimeMs = durationSeconds * 1000
 	return stats
+}
+
+// appendDefaultSort makes explore results newest-first. A pipe-free query
+// (including the bare `*` default and plain filters — which is what
+// LogchefQL-translated queries without projection look like) gets
+// `| sort by (_time desc)` appended. A query whose only pipe stages are
+// `fields` projections (LogchefQL's pipe operator) gets the sort inserted
+// BEFORE the first projection, since projecting away `_time` first would
+// break the sort. Anything with other pipe stages (stats, existing sort,
+// limit, ...) is power-user territory and passes through untouched.
+func appendDefaultSort(query string) string {
+	stages := splitTopLevelPipes(query)
+	for _, stage := range stages[1:] {
+		if !strings.HasPrefix(strings.TrimSpace(stage), "fields ") {
+			return query
+		}
+	}
+	out := strings.TrimSpace(stages[0]) + " | sort by (_time desc)"
+	for _, stage := range stages[1:] {
+		out += " | " + strings.TrimSpace(stage)
+	}
+	return out
+}
+
+// splitTopLevelPipes splits a LogsQL query on `|` pipe stages. The scan is
+// quote-aware: a `|` inside a double-quoted string literal (e.g. `_msg:"a|b"`)
+// is not a stage boundary. Single-/backtick-quoted literals are not tracked,
+// so a pipe inside one conservatively splits — the query then merely stays
+// unsorted, which is harmless.
+func splitTopLevelPipes(query string) []string {
+	var stages []string
+	var current strings.Builder
+	inQuote := false
+	escaped := false
+	for _, r := range query {
+		if escaped {
+			escaped = false
+			current.WriteRune(r)
+			continue
+		}
+		switch r {
+		case '\\':
+			if inQuote {
+				escaped = true
+			}
+			current.WriteRune(r)
+		case '"':
+			inQuote = !inQuote
+			current.WriteRune(r)
+		case '|':
+			if inQuote {
+				current.WriteRune(r)
+			} else {
+				stages = append(stages, current.String())
+				current.Reset()
+			}
+		default:
+			current.WriteRune(r)
+		}
+	}
+	stages = append(stages, current.String())
+	return stages
 }
 
 func effectiveQueryLimit(limit, maxLimit int) int {

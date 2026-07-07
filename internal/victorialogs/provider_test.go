@@ -159,7 +159,7 @@ func TestQueryLogsAppliesHeadersScopeAndLimit(t *testing.T) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
 		}
-		if got := r.Form.Get("query"); got != "level:error" {
+		if got := r.Form.Get("query"); got != "level:error | sort by (_time desc)" {
 			t.Fatalf("unexpected query: %q", got)
 		}
 		if got := r.Form.Get("limit"); got != "100" {
@@ -516,6 +516,65 @@ func mustSource(t *testing.T, conn models.VictoriaLogsConnectionInfo, metaTSFiel
 		t.Fatalf("sync connection config: %v", err)
 	}
 	return source
+}
+
+func TestAppendDefaultSort(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		query string
+		want  string
+	}{
+		{
+			name:  "bare star gets sort",
+			query: "*",
+			want:  "* | sort by (_time desc)",
+		},
+		{
+			name:  "pipe-free filter gets sort",
+			query: `level:="error"`,
+			want:  `level:="error" | sort by (_time desc)`,
+		},
+		{
+			name:  "already piped query is left alone",
+			query: `* | stats count()`,
+			want:  `* | stats count()`,
+		},
+		{
+			name:  "translated query with sort pipe is left alone",
+			query: `level:="error" | sort by (_time desc)`,
+			want:  `level:="error" | sort by (_time desc)`,
+		},
+		{
+			name:  "fields projection gets sort inserted before it",
+			query: `level:="error" | fields _time, _msg, level`,
+			want:  `level:="error" | sort by (_time desc) | fields _time, _msg, level`,
+		},
+		{
+			name:  "stats pipeline is left alone",
+			query: `level:="error" | stats count() as value`,
+			want:  `level:="error" | stats count() as value`,
+		},
+		{
+			name:  "pipe inside quoted literal is not a pipe stage",
+			query: `_msg:"a|b"`,
+			want:  `_msg:"a|b" | sort by (_time desc)`,
+		},
+		{
+			name:  "escaped quote inside literal keeps quote state",
+			query: `_msg:"a\"|b"`,
+			want:  `_msg:"a\"|b" | sort by (_time desc)`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appendDefaultSort(tc.query); got != tc.want {
+				t.Fatalf("appendDefaultSort(%q) = %q, want %q", tc.query, got, tc.want)
+			}
+		})
+	}
 }
 
 func TestOrderFieldNamesPrioritizesMetadata(t *testing.T) {

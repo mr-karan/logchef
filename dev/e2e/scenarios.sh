@@ -127,10 +127,12 @@ scn_victorialogs() {
     return
   fi
   assert_control "VictoriaLogs source selected" 'combobox.*VictoriaLogs'
-  # Keep the window NARROW (15m): the fixtures are ingested moments ago, and VL
-  # results are currently unsorted (see tracker: VL explore sort), so a wide
-  # window on a data-rich instance may render other rows instead. In a 15m
-  # window the fixtures are the only matches on dev/CI stacks.
+  # Keep the window NARROW (15m): the fixtures are ingested moments ago. VL
+  # explore results now sort newest-first for LogchefQL-translated and pipe-free
+  # raw queries (the provider appends `| sort by (_time desc)`), but a wide
+  # window on a data-rich instance could still render unrelated recent rows
+  # ahead of the fixtures. In a 15m window the fixtures are the only matches on
+  # dev/CI stacks, so this stays the right isolation.
   set_recent_time_range
   run_query
   assert_present "VictoriaLogs query returned fixture rows" 'payments worker boot completed|retrying gateway request|gateway request failed|billing cycle finished'
