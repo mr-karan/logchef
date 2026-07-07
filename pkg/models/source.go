@@ -256,12 +256,12 @@ func (s *Source) RedactedConnectionConfig() json.RawMessage {
 	switch NormalizeSourceType(s.SourceType) {
 	case SourceTypeClickHouse:
 		payload, err := json.Marshal(ConnectionInfoResponse{
-			Host:      s.Connection.Host,
-			Username:  s.Connection.Username,
-			Password:  s.Connection.Password,
-			Database:  s.Connection.Database,
-			TableName: s.Connection.TableName,
-			TLSEnable: s.Connection.TLSEnable,
+			Host:        s.Connection.Host,
+			Username:    s.Connection.Username,
+			Database:    s.Connection.Database,
+			TableName:   s.Connection.TableName,
+			TLSEnable:   s.Connection.TLSEnable,
+			HasPassword: s.Connection.Password != "",
 		})
 		if err != nil {
 			return json.RawMessage(`{}`)
@@ -402,11 +402,13 @@ type ConnectionValidationResult struct {
 }
 
 // ConnectionInfoResponse represents the connection details for API responses.
+// Credentials are never serialized; HasPassword lets the UI show whether one
+// is set (edit forms treat a blank password as "keep existing").
 type ConnectionInfoResponse struct {
-	Host      string `json:"host"`
-	Username  string `json:"username,omitempty"`
-	Password  string `json:"password,omitempty"`
-	Database  string `json:"database"`
-	TableName string `json:"table_name"`
-	TLSEnable bool   `json:"tls_enable"`
+	Host        string `json:"host"`
+	Username    string `json:"username,omitempty"`
+	Database    string `json:"database"`
+	TableName   string `json:"table_name"`
+	TLSEnable   bool   `json:"tls_enable"`
+	HasPassword bool   `json:"has_password,omitempty"`
 }

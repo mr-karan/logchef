@@ -168,6 +168,16 @@ func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req 
 		if err != nil {
 			return nil, err
 		}
+		// API responses redact credentials, so edit flows send them blank to
+		// mean "keep the existing ones".
+		if prev, prevErr := source.VictoriaLogsConnection(); prevErr == nil {
+			if conn.Auth.Password == "" {
+				conn.Auth.Password = prev.Auth.Password
+			}
+			if conn.Auth.Token == "" {
+				conn.Auth.Token = prev.Auth.Token
+			}
+		}
 		if err := validateVictoriaLogsConnectionConfig("connection.", conn); err != nil {
 			return nil, err
 		}
@@ -175,7 +185,11 @@ func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req 
 			return nil, err
 		}
 
-		source.ConnectionConfig = req.Connection
+		merged, err := json.Marshal(conn)
+		if err != nil {
+			return nil, fmt.Errorf("marshal victorialogs connection config: %w", err)
+		}
+		source.ConnectionConfig = merged
 		changed = true
 	}
 

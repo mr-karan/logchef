@@ -216,6 +216,12 @@ func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.So
 		if err != nil {
 			return nil, err
 		}
+		// API responses never include the password, so edit flows send it blank
+		// to mean "keep the existing one". A blank username means auth was
+		// turned off, so the stored password is dropped too.
+		if conn.Password == "" && conn.Username != "" {
+			conn.Password = source.Connection.Password
+		}
 		if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Username, conn.Password, conn.Database, conn.TableName); err != nil {
 			return nil, err
 		}

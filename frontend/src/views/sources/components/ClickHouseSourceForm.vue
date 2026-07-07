@@ -143,11 +143,12 @@ function resetSchema() {
           </div>
 
           <div class="grid gap-2">
-            <Label for="password" class="required">Password</Label>
+            <Label for="password" :class="{ required: !isEditMode }">Password</Label>
             <Input
               id="password"
               :model-value="modelValue.password"
               type="password"
+              :placeholder="isEditMode ? 'Leave blank to keep current password' : ''"
               @update:model-value="(value) => updateForm({ password: String(value) })"
             />
           </div>

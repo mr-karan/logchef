@@ -247,17 +247,6 @@ async function submitForm() {
     }
   }
 
-  if (isEditMode.value && sourceType.value === "victorialogs" && hasConnectionChanges.value) {
-    const authMode = victoriaLogsForm.value.authMode;
-    if (authMode === "basic" && !victoriaLogsForm.value.password) {
-      formError.value = "Re-enter the VictoriaLogs password before saving connection changes.";
-      return;
-    }
-    if (authMode === "bearer" && !victoriaLogsForm.value.token) {
-      formError.value = "Re-enter the VictoriaLogs bearer token before saving connection changes.";
-      return;
-    }
-  }
 
   isSubmitting.value = true;
   formError.value = null;
