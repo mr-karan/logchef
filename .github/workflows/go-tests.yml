@@ -56,6 +56,42 @@ jobs:
       - name: Test (SQLite + Postgres conformance)
         run: go test -race ./...
 
+  # Dedicated job for the VictoriaLogs provider integration tests. Kept separate
+  # from the main `test` job so VL image/startup flakiness can never slow or
+  # redden unrelated PRs — the main job runs no VL env, so those tests skip there.
+  # The VictoriaLogs image is minimal (no shell for a service `--health-cmd`), so
+  # we run it via `docker run` and poll /health from the runner instead of using a
+  # services: block. The tag is pinned (not :latest) to keep runs reproducible.
+  victorialogs-integration:
+    runs-on: ubuntu-latest
+    env:
+      LOGCHEF_TEST_VICTORIALOGS_URL: http://localhost:9428
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Start VictoriaLogs
+        run: |
+          docker run -d --name victorialogs -p 9428:9428 \
+            victoriametrics/victoria-logs:v1.51.0
+      - name: Wait for VictoriaLogs health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf "${LOGCHEF_TEST_VICTORIALOGS_URL}/health" >/dev/null; then
+              echo "VictoriaLogs is healthy"
+              exit 0
+            fi
+            echo "Waiting for VictoriaLogs ($i/30)..."
+            sleep 1
+          done
+          echo "::error::VictoriaLogs did not become healthy in time"
+          docker logs victorialogs || true
+          exit 1
+      - name: Integration tests (VictoriaLogs)
+        run: go test ./internal/victorialogs/ -run Integration -v
+
   lint:
     runs-on: ubuntu-latest
     steps:
