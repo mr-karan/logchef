@@ -22,7 +22,7 @@ source "$HERE/lib.sh"
 source "$HERE/scenarios.sh"
 
 # Ordered scenario list. Add new ones here after defining scn_<name>.
-ALL_SCENARIOS=(login sources query field_values time_range histogram collections admin_users)
+ALL_SCENARIOS=(login sources query field_values time_range histogram collections victorialogs admin_users)
 
 SELECTED=("$@")
 [ "${#SELECTED[@]}" -eq 0 ] && SELECTED=("${ALL_SCENARIOS[@]}")

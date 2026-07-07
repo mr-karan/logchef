@@ -109,3 +109,34 @@ scn_admin_users() {
   shot admin-users
   ab open "$BASE_URL/logs/explore" >/dev/null; settle 1
 }
+
+# VictoriaLogs source: select it, run a LogsQL-backed query, and verify field
+# discovery — the multi-datasource path end to end. Self-seeding: ingests the
+# stable fixture set via dev/ingest-victorialogs.sh (idempotent, ~4 rows) so
+# the assertions don't depend on ad-hoc data. Skips (passes with a note) when
+# no VictoriaLogs source is linked to the team.
+scn_victorialogs() {
+  if ! "$(dirname "${BASH_SOURCE[0]}")/../ingest-victorialogs.sh" >/dev/null 2>&1; then
+    fail "victorialogs: fixture ingest failed (is VictoriaLogs running on :9428?)"
+    return
+  fi
+  # open the source picker to see whether a VL source exists at all
+  select_team_source "Dev Team" "VictoriaLogs"
+  if ! snapi | grep -qiE 'combobox.*VictoriaLogs'; then
+    pass "victorialogs: no VictoriaLogs source linked — scenario skipped"
+    return
+  fi
+  assert_control "VictoriaLogs source selected" 'combobox.*VictoriaLogs'
+  # Keep the window NARROW (15m): the fixtures are ingested moments ago, and VL
+  # results are currently unsorted (see tracker: VL explore sort), so a wide
+  # window on a data-rich instance may render other rows instead. In a 15m
+  # window the fixtures are the only matches on dev/CI stacks.
+  set_recent_time_range
+  run_query
+  assert_present "VictoriaLogs query returned fixture rows" 'payments worker boot completed|retrying gateway request|gateway request failed|billing cycle finished'
+  assert_present "VictoriaLogs field discovery (sidebar)" 'button "(level|service)'
+  shot victorialogs
+  # hand the explorer back to the ClickHouse source for any following scenario
+  select_team_source "Dev Team" "http"
+  settle 1
+}

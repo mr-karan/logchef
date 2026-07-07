@@ -162,6 +162,18 @@ set_wide_time_range() {
   settle 2
 }
 
+# set_recent_time_range — narrow the window to Last 15 minutes (for scenarios
+# that ingest their own fixtures at run time and assert on exactly those rows).
+set_recent_time_range() {
+  snapi | grep -qiE 'button "Last 15m"' && return 0
+  local tr; tr="$(ref 'button "Last ')"
+  [ -n "$tr" ] || return 1
+  ab click "$tr" >/dev/null
+  wait_for 'button "Last 15 minutes"' 8 || return 1
+  click_by 'button "Last 15 minutes"'
+  settle 2
+}
+
 # run_query — run the query and wait for the results grid to actually populate
 # (the query is an async XHR; networkidle alone can fire before React renders).
 run_query() {
