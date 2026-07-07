@@ -97,7 +97,7 @@ for src in (existing.get("data") or []):
 code, r = call("POST", "/admin/sources", {
     "name": "VL Smoke", "source_type": "victorialogs",
     "meta_ts_field": "_time", "meta_severity_field": "level",
-    "connection": {"base_url": "http://localhost:9428", "auth": {"mode": "none"}},
+    "connection": {"base_url": "http://localhost:9428", "auth": {"mode": "none"}, "tenant": {"account_id": "0", "project_id": "0"}},
 })
 check("VL source create", code in (200, 201), str(r)[:400])
 vl_id = r["data"]["id"] if code in (200, 201) else None
@@ -168,7 +168,7 @@ if vl_id:
     # VL source update with blank credentials keeps working (inherit path)
     code, r = call("PUT", f"/admin/sources/{vl_id}", {
         "description": "updated by smoke",
-        "connection": {"base_url": "http://localhost:9428", "auth": {"mode": "none"}},
+        "connection": {"base_url": "http://localhost:9428", "auth": {"mode": "none"}, "tenant": {"account_id": "0", "project_id": "0"}},
     })
     check("VL source update", code == 200, str(r)[:300])
 

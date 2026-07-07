@@ -140,7 +140,12 @@ select_team_source() {
     [ -n "$tr" ] && ab click "$tr" >/dev/null && sleep 1 && click_by "option \"${team}\"" && settle 1
   fi
   if ! snapi | grep -qiE "combobox.*: *[A-Za-z0-9_]*${src}"; then
+    # Prefer the db.table-shaped value; fall back to any non-team combobox so
+    # this still works when a non-ClickHouse source (no dot) is selected.
     local sr; sr="$(cbox_ref '[A-Za-z0-9_]+\.[A-Za-z0-9_]+')"  # db.table value
+    if [ -z "$sr" ]; then
+      sr="$(snapi | grep -iE 'combobox' | grep -viE ': *([A-Za-z ]*Team|Select team)' | grep -m1 -oE 'ref=e[0-9]+' | sed 's/ref=/@/')"
+    fi
     [ -n "$sr" ] && ab click "$sr" >/dev/null && sleep 1 && click_by "option \"[^\"]*${src}" && settle 2
   fi
 }
