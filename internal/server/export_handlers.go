@@ -16,6 +16,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -40,6 +41,21 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 	user := c.Locals("user").(*models.User)
 	if user == nil {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+	}
+
+	// Gate exports behind the source capability before doing any work or
+	// touching the ClickHouse connection. Non-supporting sources (e.g.
+	// VictoriaLogs) get a clean 400 instead of an opaque connection error.
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source for export", "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if !source.HasCapability(string(datasource.CapabilityExports)) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Exports are not supported for this source type yet", models.ValidationErrorType)
 	}
 
 	var req exportLogsRequest
@@ -101,14 +117,6 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 		processedSQL = substituted
 	}
 
-	source, err := s.sqlite.GetSource(c.Context(), sourceID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source for export", "source_id", sourceID, "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
-	}
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
 		s.log.Error("failed to get clickhouse client for export", "source_id", sourceID, "error", err)

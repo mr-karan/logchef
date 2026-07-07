@@ -27,7 +27,7 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
-import { supportsQueryLanguage } from "@/lib/queryMetadata";
+import { supportsQueryLanguage, hasSourceCapability } from "@/lib/queryMetadata";
 import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
@@ -86,6 +86,7 @@ const contextStore = useContextStore();
 const availableSources = computed(() => sourcesStore.teamSources);
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
 const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDetails.value, 'logchefql'));
+const supportsExports = computed(() => hasSourceCapability(sourceDetails.value, 'exports'));
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
 
@@ -1472,6 +1473,7 @@ onMounted(async () => {
                 :logsCount="exploreStore.logs?.length || 0"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
                 :isExporting="isExporting"
+                :canExport="supportsExports"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"

@@ -87,7 +87,8 @@ export function hasSourceCapability(source: SourceDescriptor, capability: string
       capability === "field_values" ||
       capability === "schema_inspection" ||
       capability === "source_inspection" ||
-      capability === "ai_sql_generation"
+      capability === "ai_sql_generation" ||
+      capability === "exports"
     );
   }
   return false;

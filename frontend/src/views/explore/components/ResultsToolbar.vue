@@ -26,6 +26,7 @@ interface Props {
   queryTimeMs?: number
   isLoading?: boolean
   isExporting?: boolean
+  canExport?: boolean
 }
 
 defineProps<Props>()
@@ -149,8 +150,8 @@ const warningText = computed(() => {
         </Tooltip>
       </TooltipProvider>
 
-      <!-- Download Button -->
-      <TooltipProvider>
+      <!-- Download Button (only for sources advertising the exports capability) -->
+      <TooltipProvider v-if="canExport">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

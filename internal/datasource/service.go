@@ -49,6 +49,7 @@ const (
 	CapabilitySourceInspection Capability = "source_inspection"
 	CapabilityAISQLGeneration  Capability = "ai_sql_generation"
 	CapabilityLogContext       Capability = "log_context"
+	CapabilityExports          Capability = "exports"
 )
 
 func NewService(db store.Store, log *slog.Logger) *Service {
