@@ -1,0 +1,67 @@
+# Host-network variant of the dev stack for machines where Docker cannot
+# create veth pairs (e.g. Arch after a kernel upgrade without a reboot —
+# bridge networking fails with "operation not supported" until reboot).
+#
+#   docker compose -f dev/docker-compose.hostnet.yml up -d
+#
+# Same services and ports as dev/docker-compose.yml, minus port mappings
+# (host networking exposes container ports directly). The webhook receiver
+# listens on 8888 directly since there is no 8888->8080 mapping here.
+services:
+    clickhouse-local:
+        image: clickhouse/clickhouse-server:latest
+        user: '101:101'
+        network_mode: host
+        restart: on-failure
+        volumes:
+            - ./config.xml:/etc/clickhouse-server/config.d/logchef.xml
+            - ./users.xml:/etc/clickhouse-server/users.d/logchef.xml
+            - ./init-clickhouse.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+            - clickhouse-data:/var/lib/clickhouse
+            - clickhouse-logs:/var/log/clickhouse-server
+        ulimits:
+            nproc: 65535
+            nofile:
+                soft: 262144
+                hard: 262144
+        cap_add:
+            - SYS_NICE
+            - IPC_LOCK
+
+    victorialogs-local:
+        image: victoriametrics/victoria-logs:latest
+        network_mode: host
+        restart: on-failure
+        command:
+            - -storageDataPath=/victoria-logs-data
+            - -retentionPeriod=7d
+        volumes:
+            - victorialogs-data:/victoria-logs-data
+
+    dex-local:
+        image: dexidp/dex:v2.35.3
+        network_mode: host
+        volumes:
+            - ./dex/config.yaml:/etc/dex/config.yaml
+        command: [ "dex", "serve", "/etc/dex/config.yaml" ]
+
+    webhook-receiver:
+        image: mendhak/http-https-echo:31
+        network_mode: host
+        restart: on-failure
+        environment:
+            - HTTP_PORT=8888
+            - LOG_WITHOUT_NEWLINE=true
+            - LOG_IGNORE_PATH=/ping
+
+    mailpit:
+        image: axllent/mailpit:latest
+        network_mode: host
+        restart: on-failure
+        environment:
+            - MP_MAX_MESSAGES=20
+
+volumes:
+    clickhouse-data:
+    clickhouse-logs:
+    victorialogs-data:
