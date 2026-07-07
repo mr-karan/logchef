@@ -1,4 +1,5 @@
 import { apiClient } from "./apiUtils";
+import { createSSEParser } from "@/lib/sse";
 
 // Keep these for the UI filter builder
 export interface FilterCondition {
@@ -309,3 +310,161 @@ export const exploreApi = {
     return apiClient.get<QueryShareResponse>(`/query-shares/${encodeURIComponent(token)}`);
   }
 };
+
+// ---------------------------------------------------------------------------
+// Live tail (SSE)
+//
+// The tail endpoint streams Server-Sent Events over a plain GET (session-cookie
+// auth is automatic). Axios can't consume a streaming body, so live tail uses
+// the fetch + ReadableStream API directly with the dependency-free SSE parser.
+// ---------------------------------------------------------------------------
+
+// query_language values accepted by the tail endpoint. clickhouse-sql is
+// rejected server-side (400) by design, so it is intentionally excluded here.
+export type TailQueryLanguage = "logchefql" | "logsql";
+
+export interface TailNotice {
+  code?: string;
+  message?: string;
+}
+
+export interface TailEnd {
+  reason?: string;
+  message?: string;
+}
+
+export interface TailCallbacks {
+  /** Fired once the stream is open (initial `: ok` received / headers flushed). */
+  onOpen?: () => void;
+  /** A batch of new rows (oldest-first, as the backend emits them). */
+  onRows?: (rows: Record<string, any>[]) => void;
+  /** A `notice` event (e.g. rate-limited drop). */
+  onNotice?: (notice: TailNotice) => void;
+  /** An `end` event (TTL expiry, error, or normal completion). */
+  onEnd?: (end: TailEnd) => void;
+  /** A heartbeat comment (`: hb`), useful for liveness UI. */
+  onHeartbeat?: () => void;
+}
+
+export interface TailErrorLike extends Error {
+  status?: number;
+}
+
+/**
+ * Build the live-tail SSE URL. query may be empty (an unfiltered tail).
+ */
+export function buildTailUrl(
+  teamId: number,
+  sourceId: number,
+  query: string,
+  queryLanguage: TailQueryLanguage
+): string {
+  if (!teamId) throw new Error("Team ID is required for live tail");
+  if (!sourceId) throw new Error("Source ID is required for live tail");
+  const params = new URLSearchParams({
+    query: query ?? "",
+    query_language: queryLanguage,
+  });
+  return `/api/v1/teams/${teamId}/sources/${sourceId}/logs/tail?${params.toString()}`;
+}
+
+function parseJsonSafe<T>(data: string): T | null {
+  try {
+    return JSON.parse(data) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open an abortable live-tail SSE stream and dispatch parsed frames to the
+ * provided callbacks. Resolves when the stream closes (server `end`, reader
+ * done, or abort). Rejects on connection/HTTP errors (e.g. 429 over cap); the
+ * rejected error carries `.status` when available. Aborting via `signal`
+ * resolves silently rather than rejecting.
+ */
+export async function subscribeToTail(
+  url: string,
+  signal: AbortSignal,
+  callbacks: TailCallbacks
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "text/event-stream" },
+      credentials: "same-origin",
+      cache: "no-store",
+      signal,
+    });
+  } catch (err) {
+    if (signal.aborted) return;
+    throw err;
+  }
+
+  if (!response.ok) {
+    let message = `Live tail request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body?.message) message = body.message;
+    } catch {
+      // non-JSON error body; keep the default message
+    }
+    const error: TailErrorLike = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  if (!response.body) {
+    throw new Error("Live tail stream did not return a readable body");
+  }
+
+  callbacks.onOpen?.();
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parser = createSSEParser();
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const events = parser.push(decoder.decode(value, { stream: true }));
+      for (const event of events) {
+        if (event.type === "comment") {
+          if (event.text === "hb") callbacks.onHeartbeat?.();
+          continue;
+        }
+        switch (event.event) {
+          case "rows": {
+            const rows = parseJsonSafe<Record<string, any>[]>(event.data);
+            if (Array.isArray(rows) && rows.length) callbacks.onRows?.(rows);
+            break;
+          }
+          case "notice": {
+            const notice = parseJsonSafe<TailNotice>(event.data) ?? {};
+            callbacks.onNotice?.(notice);
+            break;
+          }
+          case "end": {
+            const end = parseJsonSafe<TailEnd>(event.data) ?? {};
+            callbacks.onEnd?.(end);
+            return;
+          }
+          default:
+            // Unknown event types are ignored.
+            break;
+        }
+      }
+    }
+  } catch (err) {
+    if (signal.aborted) return;
+    throw err;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // reader may already be released on abort
+    }
+  }
+}

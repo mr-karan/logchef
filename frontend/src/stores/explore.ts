@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, watch } from "vue";
-import { exploreApi } from "@/api/explore";
+import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
 import { logchefqlApi } from "@/api/logchefql";
 import { isCanceledError } from "@/api/error-handler";
 import type {
@@ -36,6 +36,7 @@ import { asClickHouseConnection } from '@/api/sources';
 import {
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
+  hasSourceCapability,
   normalizeExploreMode,
   resolveSavedQueryMetadata,
   supportsQueryLanguage,
@@ -105,7 +106,24 @@ export interface ExploreState {
   currentQueryAbortController: AbortController | null;
   currentQueryId: string | null;
   isCancellingQuery: boolean;
+
+  // Live tail (SSE). Kept separate from the normal query-result state above so
+  // that stopping live tail restores the last static results untouched.
+  isLive: boolean;
+  liveRows: Record<string, any>[];
+  liveStatus: LiveTailStatus;
+  liveError: string | null;
+  liveEndReason: string | null;
+  liveNotice: string | null;
+  liveDroppedCount: number;
+  liveTailAbortController: AbortController | null;
 }
+
+export type LiveTailStatus = "idle" | "connecting" | "streaming" | "ended" | "error";
+
+// In-memory tail buffer cap (oldest rows dropped) until explore virtualization
+// lands. Matches the ceiling documented in the live-tail spec (#69).
+const MAX_LIVE_ROWS = 500;
 
 const DEFAULT_QUERY_STATS: QueryStats = {
   execution_time_ms: 0,
@@ -215,6 +233,14 @@ export const useExploreStore = defineStore("explore", () => {
     currentQueryAbortController: null,
     currentQueryId: null,
     isCancellingQuery: false,
+    isLive: false,
+    liveRows: [],
+    liveStatus: "idle",
+    liveError: null,
+    liveEndReason: null,
+    liveNotice: null,
+    liveDroppedCount: 0,
+    liveTailAbortController: null,
   });
 
   let suppressedSourceResetId: number | null = null;
@@ -260,6 +286,17 @@ export const useExploreStore = defineStore("explore", () => {
     source = getCurrentSource(),
   ): "logchefql" | "native" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "native" : mode);
   const isNativeHistogramSource = (source = getCurrentSource()) => getNativeQueryLanguageForSource(source) === "logsql";
+
+  // Live tail: the current source must advertise the capability, and the tail
+  // endpoint only accepts LogchefQL (either backend) or native logsql
+  // (VictoriaLogs). Native clickhouse-sql is rejected 400 server-side, so the
+  // toggle stays disabled there.
+  const supportsLiveTail = computed(() => hasSourceCapability(getCurrentSource(), "live_tail"));
+  const canArmLiveTail = computed(() => {
+    if (!supportsLiveTail.value || !hasValidSource.value) return false;
+    if (state.data.value.activeMode === "logchefql") return true;
+    return getNativeQueryLanguageForSource(getCurrentSource()) === "logsql";
+  });
 
   const isHistogramEligible = computed(() => {
     const source = getCurrentSource();
@@ -1381,6 +1418,110 @@ export const useExploreStore = defineStore("explore", () => {
     }
   }
 
+  // --- Live tail ----------------------------------------------------------
+
+  function appendLiveRows(rows: Record<string, any>[]) {
+    if (!rows?.length) return;
+    // Backend batches are oldest-first; the tail view shows newest-at-top, so
+    // reverse each batch before prepending. Cap the buffer, dropping the oldest.
+    const reversed = [...rows].reverse();
+    const merged = [...reversed, ...state.data.value.liveRows];
+    state.data.value.liveRows =
+      merged.length > MAX_LIVE_ROWS ? merged.slice(0, MAX_LIVE_ROWS) : merged;
+  }
+
+  /**
+   * Abort any in-flight tail stream and leave live mode. Idempotent. Does not
+   * touch the static query results (logs/columns), so the last static view is
+   * restored when the tail view is hidden.
+   */
+  function stopLiveTail() {
+    if (state.data.value.liveTailAbortController) {
+      state.data.value.liveTailAbortController.abort();
+      state.data.value.liveTailAbortController = null;
+    }
+    state.data.value.isLive = false;
+    state.data.value.liveStatus = "idle";
+  }
+
+  function startLiveTail() {
+    const source = getCurrentSource();
+    if (!canArmLiveTail.value || !source) return;
+
+    const currentTeamId = useTeamsStore().currentTeamId;
+    const sid = sourceId.value;
+    if (!currentTeamId || !sid) return;
+
+    let queryLanguage: "logchefql" | "logsql";
+    let queryText: string;
+    if (state.data.value.activeMode === "logchefql") {
+      queryLanguage = "logchefql";
+      queryText = state.data.value.logchefqlCode || "";
+    } else {
+      // canArmLiveTail already guaranteed native === logsql here.
+      queryLanguage = "logsql";
+      queryText = state.data.value.nativeQuery || "";
+    }
+
+    // Abort any prior stream and reset the buffer for a fresh session.
+    stopLiveTail();
+    state.data.value.liveRows = [];
+    state.data.value.liveNotice = null;
+    state.data.value.liveDroppedCount = 0;
+    state.data.value.liveEndReason = null;
+    state.data.value.liveError = null;
+    state.data.value.isLive = true;
+    state.data.value.liveStatus = "connecting";
+
+    const controller = new AbortController();
+    state.data.value.liveTailAbortController = controller;
+    const url = buildTailUrl(currentTeamId, sid, queryText, queryLanguage);
+
+    const isActive = () => state.data.value.liveTailAbortController === controller;
+
+    subscribeToTail(url, controller.signal, {
+      onOpen: () => {
+        if (isActive()) state.data.value.liveStatus = "streaming";
+      },
+      onRows: (rows) => {
+        if (isActive()) appendLiveRows(rows);
+      },
+      onNotice: (notice) => {
+        if (!isActive()) return;
+        state.data.value.liveNotice = notice.message || "Live tail rate-limited";
+        const match = /(\d+)/.exec(notice.message || "");
+        if (match) state.data.value.liveDroppedCount += parseInt(match[1], 10);
+      },
+      onEnd: (end) => {
+        if (!isActive()) return;
+        // TTL / completion: keep isLive true so the view can offer "resume",
+        // but the stream itself is finished — release the controller.
+        state.data.value.liveStatus = "ended";
+        state.data.value.liveEndReason = end.reason || "ended";
+        state.data.value.liveTailAbortController = null;
+      },
+    })
+      .then(() => {
+        if (isActive()) state.data.value.liveTailAbortController = null;
+      })
+      .catch((err) => {
+        // Aborts (toggle off, source/query change, unmount) resolve silently;
+        // guard against stale controllers finishing after a restart.
+        if (controller.signal.aborted || !isActive()) return;
+        state.data.value.liveStatus = "error";
+        state.data.value.liveError = err instanceof Error ? err.message : String(err);
+        state.data.value.liveTailAbortController = null;
+      });
+  }
+
+  function toggleLiveTail() {
+    if (state.data.value.isLive) {
+      stopLiveTail();
+    } else {
+      startLiveTail();
+    }
+  }
+
   function setRelativeTimeRange(relativeTimeString: string | null) {
     if (!relativeTimeString) {
       state.data.value.selectedRelativeTime = null;
@@ -1625,6 +1766,27 @@ export const useExploreStore = defineStore("explore", () => {
     }
   );
 
+  // Exit paths that MUST abort an in-flight tail. Toggle-off, route change and
+  // unmount are handled by the caller (they invoke stopLiveTail directly); these
+  // watchers cover source change and any query/mode edit while live.
+  watch(
+    () => sourceId.value,
+    () => {
+      if (state.data.value.isLive) stopLiveTail();
+    }
+  );
+  watch(
+    () =>
+      [
+        state.data.value.activeMode,
+        state.data.value.logchefqlCode,
+        state.data.value.nativeQuery,
+      ] as const,
+    () => {
+      if (state.data.value.isLive) stopLiveTail();
+    }
+  );
+
   return {
     // State
     logs: computed(() => state.data.value.logs),
@@ -1703,6 +1865,22 @@ export const useExploreStore = defineStore("explore", () => {
     generateAiSql,
     clearAiSqlState,
     fetchHistogramData,
+
+    // Live tail state
+    isLive: computed(() => state.data.value.isLive),
+    liveRows: computed(() => state.data.value.liveRows),
+    liveStatus: computed(() => state.data.value.liveStatus),
+    liveError: computed(() => state.data.value.liveError),
+    liveEndReason: computed(() => state.data.value.liveEndReason),
+    liveNotice: computed(() => state.data.value.liveNotice),
+    liveDroppedCount: computed(() => state.data.value.liveDroppedCount),
+    supportsLiveTail,
+    canArmLiveTail,
+
+    // Live tail actions
+    startLiveTail,
+    stopLiveTail,
+    toggleLiveTail,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,

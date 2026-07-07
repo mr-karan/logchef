@@ -107,8 +107,37 @@
           @select-saved-query="(query: SavedQuery) => $emit('select-saved-query', query)"
           @save="$emit('save-query')" class="h-8" />
 
+        <!-- Live Tail Toggle - gated by the live_tail capability -->
+        <TooltipProvider v-if="props.showRunButton && liveTailSupported">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                :variant="isLive ? 'default' : 'outline'"
+                size="sm"
+                class="h-7 gap-1.5"
+                :class="isLive ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''"
+                :disabled="!isLive && !canGoLive"
+                aria-label="Live tail"
+                @click="toggleLive"
+              >
+                <Radio class="h-3.5 w-3.5" :class="isLive ? 'animate-pulse' : ''" />
+                <span class="text-xs font-medium hidden sm:inline">Live</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p class="text-xs">
+                {{ isLive
+                  ? 'Stop live tail'
+                  : (canGoLive
+                    ? 'Stream new logs as they arrive'
+                    : 'Live tail needs LogchefQL (or LogsQL for VictoriaLogs)') }}
+              </p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
         <Select
-          v-if="props.showRunButton"
+          v-if="props.showRunButton && !isLive"
           :model-value="selectedTimeout"
           :disabled="props.isExecuting"
           @update:model-value="handleTimeoutChange"
@@ -130,13 +159,33 @@
           </SelectContent>
         </Select>
 
-        <!-- Run Query Button - Integrated -->
-        <TooltipProvider v-if="props.showRunButton && !props.isExecuting">
+        <!-- Stop Live Tail Button - replaces Run while live -->
+        <TooltipProvider v-if="props.showRunButton && isLive">
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button 
-                variant="default" 
-                size="sm" 
+              <Button
+                variant="destructive"
+                size="sm"
+                class="h-7 gap-1.5 px-3 shadow-sm"
+                @click="toggleLive"
+              >
+                <Square class="h-3.5 w-3.5" />
+                <span class="font-medium">Stop</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p class="text-xs">Stop live tail</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <!-- Run Query Button - Integrated -->
+        <TooltipProvider v-else-if="props.showRunButton && !props.isExecuting">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="default"
+                size="sm"
                 class="h-7 gap-1.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm"
                 :disabled="!props.canExecute"
                 @click="$emit('execute')"
@@ -153,7 +202,7 @@
         </TooltipProvider>
 
         <!-- Cancel Query Button - Shows when executing -->
-        <TooltipProvider v-if="props.showRunButton && props.isExecuting">
+        <TooltipProvider v-if="props.showRunButton && !isLive && props.isExecuting">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button 
@@ -400,6 +449,7 @@ import {
   Clock3,
   RefreshCw,
   Square,
+  Radio,
 } from "lucide-vue-next";
 import {
   HoverCard,
@@ -535,6 +585,15 @@ const showAiDialog = ref(false);
 const isGeneratingAi = computed(() => exploreStore.isGeneratingAISQL);
 const aiError = computed(() => exploreStore.aiSqlError);
 const generatedSql = computed(() => exploreStore.generatedAiSql);
+
+// Live tail. The store owns the tail lifecycle and the arm/capability logic;
+// this component just surfaces the toggle next to Run.
+const liveTailSupported = computed(() => exploreStore.supportsLiveTail);
+const canGoLive = computed(() => exploreStore.canArmLiveTail);
+const isLive = computed(() => exploreStore.isLive);
+function toggleLive() {
+  exploreStore.toggleLiveTail();
+}
 
 const theme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 const isEditorEmpty = computed(() => !editorContent.value?.trim());

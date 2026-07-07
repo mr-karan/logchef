@@ -8,7 +8,7 @@ import {
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
-import { useRoute, useRouter } from "vue-router";
+import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
@@ -49,6 +49,7 @@ import EmptyResultsState from "./components/EmptyResultsState.vue";
 import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
+import LiveTailPanel from "./components/LiveTailPanel.vue";
 
 // Router and stores
 const route = useRoute();
@@ -708,6 +709,14 @@ const handleExport = async () => {
 onBeforeUnmount(() => {
   exportAbortController?.abort();
   exportAbortController = null;
+  // Abort any in-flight live tail stream when the explorer unmounts.
+  exploreStore.stopLiveTail();
+});
+
+// Leaving the explore route must also abort the tail (unmount may lag a
+// keep-alive transition, and this guarantees the fetch is cancelled).
+onBeforeRouteLeave(() => {
+  exploreStore.stopLiveTail();
 });
 
 const calendarDatePartToDate = (value: any) => {
@@ -1481,8 +1490,8 @@ onMounted(async () => {
                 @copy-cli="handleCopyCliCommand"
               />
 
-              <!-- Histogram visualization -->
-              <div v-if="isHistogramVisible" class="px-4 py-2 border-b">
+              <!-- Histogram visualization - paused during live tail -->
+              <div v-if="isHistogramVisible && !exploreStore.isLive" class="px-4 py-2 border-b">
                 <HistogramVisualization @zoom-time-range="onHistogramTimeRangeZoom" />
               </div>
             </div>
@@ -1496,8 +1505,22 @@ onMounted(async () => {
             ">
               <!-- Results Area -->
               <div class="flex-1 overflow-hidden relative bg-background">
+                <!-- Live Tail Panel - takes over the results area while live -->
+                <LiveTailPanel
+                  v-if="exploreStore.isLive"
+                  :rows="exploreStore.liveRows"
+                  :status="exploreStore.liveStatus"
+                  :notice="exploreStore.liveNotice"
+                  :dropped-count="exploreStore.liveDroppedCount"
+                  :end-reason="exploreStore.liveEndReason"
+                  :error="exploreStore.liveError"
+                  :timestamp-field="sourceDetails?._meta_ts_field"
+                  @stop="exploreStore.stopLiveTail()"
+                  @resume="exploreStore.startLiveTail()"
+                />
+
                 <!-- Results Table -->
-                <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
+                <template v-else-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
                   <ExploreJsonResults
                     v-if="displayMode === 'json'"
                     :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"

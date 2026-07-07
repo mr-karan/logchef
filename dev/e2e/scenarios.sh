@@ -102,6 +102,113 @@ scn_time_range() {
   fi
 }
 
+# Live tail (SSE): enable Live on the ClickHouse source, ingest a fresh row via
+# clickhouse-client, and assert it streams into the tail view within ~10s; then
+# toggle off. Repeats on the VictoriaLogs source when one is linked. Self-seeding
+# and re-runnable. The tail cursor starts at connection time, so fixtures are
+# ingested AFTER the stream opens (a row inserted earlier would not replay).
+#
+# Requires the ClickHouse dev container reachable via `docker exec`; skips (with
+# a note) if it isn't. clickhouse-client prints a harmless DNS warning about its
+# own hostname to stderr on this image — stderr is discarded; the INSERT lands.
+CH_CONTAINER="${CH_CONTAINER:-dev-clickhouse-local-1}"
+VICTORIALOGS_URL="${VICTORIALOGS_URL:-http://localhost:9428}"
+
+# ch_insert SQL — run an INSERT inside the ClickHouse dev container. Returns
+# non-zero if the container isn't reachable.
+ch_insert() {
+  docker exec "$CH_CONTAINER" clickhouse-client --query "$1" >/dev/null 2>&1
+}
+
+# assert_tail NAME REGEX [tries] — like assert_present but with a longer poll
+# window (default ~14 tries ≈ 14s) to cover the ClickHouse tail poll interval.
+assert_tail() {
+  local out i tries="${3:-14}"
+  for ((i = 0; i < tries; i++)); do
+    out="$(snap)"
+    if grep -qiE "$2" <<<"$out"; then pass "$1"; return; fi
+    sleep 1
+  done
+  fail "$1 (not streamed: $2)"
+}
+
+# go_live — ensure LogchefQL (Search) mode, then click the Live toggle. Returns
+# non-zero if the toggle isn't available/armable.
+go_live() {
+  click_by 'tab "Search"' >/dev/null 2>&1  # LogchefQL mode arms the toggle
+  settle 1
+  click_by 'button "Live tail"' || return 1
+  settle 1
+  return 0
+}
+
+scn_livetail() {
+  if ! docker ps >/dev/null 2>&1 || ! docker inspect "$CH_CONTAINER" >/dev/null 2>&1; then
+    pass "livetail: ClickHouse dev container not reachable — scenario skipped"
+    return
+  fi
+
+  # --- ClickHouse source ---
+  select_team_source "Dev Team" "http"
+  assert_control "livetail: ClickHouse source selected" 'combobox.*(default\.http|http)'
+
+  if ! go_live; then
+    fail "livetail: Live toggle not available on ClickHouse source"
+    return
+  fi
+  assert_control "livetail: Stop control present (live armed)" 'button "Stop"'
+
+  # Ingest a fresh row AFTER the stream is open, with a unique marker.
+  local marker="/livetail-e2e-$$"
+  if ! ch_insert "INSERT INTO default.http VALUES (now(),'api.logchef.dev','GET','HTTP/1.1','-','${marker}',200,'admin',7)"; then
+    fail "livetail: ClickHouse INSERT failed"
+    click_by 'button "Stop"' >/dev/null 2>&1
+    return
+  fi
+  assert_tail "livetail: ingested row streamed into tail view" "$marker"
+  shot livetail-clickhouse
+
+  # Toggle off — the Run button returns and the tail view is gone.
+  click_by 'button "Stop"' >/dev/null 2>&1
+  settle 1
+  assert_control "livetail: Run control restored after stop" 'button "Run'
+
+  # --- VictoriaLogs source (only if one is linked) ---
+  select_team_source "Dev Team" "VictoriaLogs"
+  if ! snapi | grep -qiE 'combobox.*VictoriaLogs'; then
+    pass "livetail: no VictoriaLogs source linked — VL leg skipped"
+    select_team_source "Dev Team" "http"
+    settle 1
+    return
+  fi
+  assert_control "livetail: VictoriaLogs source selected" 'combobox.*VictoriaLogs'
+
+  if ! go_live; then
+    fail "livetail: Live toggle not available on VictoriaLogs source"
+    select_team_source "Dev Team" "http"
+    return
+  fi
+
+  # Ingest a fresh jsonline row after the VL tail stream opens.
+  local vl_marker="livetail-e2e-vl-$$"
+  local now_ts; now_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+  if curl --fail --silent --show-error -X POST \
+      -H 'Content-Type: application/stream+json' \
+      --data-binary "{\"timestamp\":\"${now_ts}\",\"service\":\"livetail-e2e\",\"level\":\"info\",\"message\":\"${vl_marker}\"}" \
+      "${VICTORIALOGS_URL}/insert/jsonline?_stream_fields=service&_time_field=timestamp&_msg_field=message" >/dev/null 2>&1; then
+    assert_tail "livetail: VictoriaLogs row streamed into tail view" "$vl_marker"
+    shot livetail-victorialogs
+  else
+    fail "livetail: VictoriaLogs ingest failed (is VictoriaLogs on :9428?)"
+  fi
+
+  click_by 'button "Stop"' >/dev/null 2>&1
+  settle 1
+  # hand the explorer back to the ClickHouse source for any following scenario
+  select_team_source "Dev Team" "http"
+  settle 1
+}
+
 # The admin users page lists the seeded admin user.
 scn_admin_users() {
   ab open "$BASE_URL/admin/users" >/dev/null; settle 1

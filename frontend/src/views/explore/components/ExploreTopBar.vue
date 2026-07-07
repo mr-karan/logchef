@@ -88,6 +88,16 @@ const isNativeSqlMode = computed(() =>
   exploreStore.activeMode === 'native' && getNativeQueryLanguageForSource(props.selectedSource) === 'clickhouse-sql'
 )
 
+// Live tail pins the stream to "now"; time range and limit don't apply.
+const isLive = computed(() => exploreStore.isLive)
+const timeControlsDisabled = computed(() => isNativeSqlMode.value || isLive.value)
+const timeControlsDisabledReason = computed(() =>
+  isLive.value ? 'Paused during live tail' : 'Time range is controlled in your SQL query'
+)
+const limitControlsDisabledReason = computed(() =>
+  isLive.value ? 'Paused during live tail' : 'Limit is controlled by LIMIT clause in your SQL query'
+)
+
 // Query timeout
 const timeoutOptions = [
   { label: '10s', value: 10 },
@@ -228,14 +238,14 @@ defineExpose({
       <div class="h-5 w-px bg-border" />
 
       <!-- Date/Time Picker -->
-      <!-- Disabled only for ClickHouse native SQL mode -->
-      <TooltipProvider v-if="isNativeSqlMode">
+      <!-- Disabled for ClickHouse native SQL mode and during live tail -->
+      <TooltipProvider v-if="timeControlsDisabled">
         <Tooltip>
           <TooltipTrigger asChild>
             <div class="cursor-not-allowed">
-              <DateTimePicker 
-                ref="dateTimePickerRef" 
-                :model-value="timeRange" 
+              <DateTimePicker
+                ref="dateTimePickerRef"
+                :model-value="timeRange"
                 :selectedQuickRange="exploreStore.selectedRelativeTime ? quickRangeLabelFromRelativeTime(exploreStore.selectedRelativeTime) : null"
                 :disabled="true"
                 class="opacity-50 pointer-events-none"
@@ -243,11 +253,11 @@ defineExpose({
             </div>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Time range is controlled in your SQL query</p>
+            <p class="text-xs">{{ timeControlsDisabledReason }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
-      <DateTimePicker 
+      <DateTimePicker
         v-else
         ref="dateTimePickerRef" 
         :model-value="timeRange" 
@@ -257,17 +267,17 @@ defineExpose({
       />
 
       <!-- Limit Dropdown -->
-      <!-- Disabled only for ClickHouse native SQL mode -->
-      <TooltipProvider v-if="isNativeSqlMode">
+      <!-- Disabled for ClickHouse native SQL mode and during live tail -->
+      <TooltipProvider v-if="timeControlsDisabled">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" class="h-7 text-xs px-2 gap-1 opacity-50 cursor-not-allowed" disabled>
               <span class="text-muted-foreground">Limit:</span>
-              <span class="font-medium">SQL</span>
+              <span class="font-medium">{{ isLive ? 'Live' : 'SQL' }}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Limit is controlled by LIMIT clause in your SQL query</p>
+            <p class="text-xs">{{ limitControlsDisabledReason }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
