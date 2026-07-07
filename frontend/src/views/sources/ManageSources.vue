@@ -3,20 +3,11 @@ import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { Plus, Trash2, Copy, Pencil } from 'lucide-vue-next'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
+import { Plus, Trash2, Copy, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
-import { type Source } from '@/api/sources'
+import { type Source, type VictoriaLogsConnectionInfo, asClickHouseConnection } from '@/api/sources'
 import {
     Table,
     TableBody,
@@ -25,8 +16,10 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
+import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
+import { useTableSearchSort } from '@/composables/useTableSearchSort'
 import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
 import { getSourceTypeLabel } from '@/lib/queryMetadata'
 import { formatDate, getSourceConnectionDetails } from '@/utils/format'
@@ -36,6 +29,15 @@ const router = useRouter()
 const sourcesStore = useSourcesStore()
 
 const { error } = storeToRefs(sourcesStore)
+
+// Build a searchable string from a source's connection, handling both
+// ClickHouse (database.table @ host) and VictoriaLogs (base_url) shapes.
+const connectionSearchText = (s: Source): string => {
+    const ch = asClickHouseConnection(s.connection)
+    if (ch) return `${ch.database}.${ch.table_name} ${ch.host}`
+    const vl = s.connection as VictoriaLogsConnectionInfo
+    return vl?.base_url ?? ''
+}
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
 
@@ -48,6 +50,27 @@ const loadingError = computed(() => {
             : null
     }
     return null
+})
+
+// Client-side search + sort over the fully-loaded sources list.
+const {
+    search: sourceSearch,
+    rows: sortedSources,
+    sortKey: sourceSortKey,
+    sortDir: sourceSortDir,
+    toggleSort: toggleSourceSort,
+} = useTableSearchSort(() => sourcesStore.sources, {
+    searchKeys: [
+        'name',
+        (s) => s.description,
+        (s) => connectionSearchText(s),
+    ],
+    sortAccessors: {
+        name: (s) => (s.name || '').toLowerCase(),
+        status: (s) => (s.is_connected ? 1 : 0),
+        created: (s) => new Date(s.created_at),
+    },
+    initialSort: { key: 'name', dir: 'asc' },
 })
 
 const handleDelete = (source: Source) => {
@@ -103,51 +126,75 @@ onMounted(async () => {
 
 <template>
     <div class="space-y-6">
-        <Card>
-            <CardHeader>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <CardTitle>Manage Sources</CardTitle>
-                        <CardDescription>
-                            View and manage all log sources
-                        </CardDescription>
+        <PageHeader title="Sources" description="View and manage all log sources.">
+            <template #actions>
+                <Button size="sm" @click="router.push({ name: 'NewSource' })">
+                    <Plus class="mr-2 h-4 w-4" />
+                    Add source
+                </Button>
+            </template>
+        </PageHeader>
+
+        <LoadingState
+            v-if="sourcesStore.isLoadingOperation('loadAllSourcesForAdmin')"
+            label="Loading sources…"
+        />
+        <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
+            @retry="retryLoading" />
+        <EmptyState
+            v-else-if="sourcesStore.sources.length === 0"
+            :icon="Database"
+            title="No sources configured"
+            description="Connect your first ClickHouse log source to get started."
+        >
+            <template #action>
+                <Button size="sm" @click="router.push({ name: 'NewSource' })">
+                    <Plus class="mr-2 h-4 w-4" />
+                    Add source
+                </Button>
+            </template>
+        </EmptyState>
+        <div v-else class="space-y-4">
+                    <div class="relative max-w-sm">
+                        <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input v-model="sourceSearch" placeholder="Search sources…" class="pl-8" />
                     </div>
-                    <Button @click="router.push({ name: 'NewSource' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add Source
-                    </Button>
-                </div>
-            </CardHeader>
-            <CardContent>
-                <div v-if="sourcesStore.isLoadingOperation('loadAllSourcesForAdmin')" class="text-center py-4">
-                    Loading sources...
-                </div>
-                <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
-                    @retry="retryLoading" />
-                <div v-else-if="sourcesStore.sources.length === 0" class="rounded-lg border p-4 text-center">
-                    <p class="text-muted-foreground mb-4">No sources configured yet</p>
-                    <Button @click="router.push({ name: 'NewSource' })">
-                        <Plus class="mr-2 h-4 w-4" />
-                        Add Your First Source
-                    </Button>
-                </div>
-                <div v-else class="space-y-4">
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead class="w-[220px]">Source</TableHead>
+                                <TableHead class="w-[220px]">
+                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('name')">
+                                        Source
+                                        <component :is="sourceSortKey === 'name' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                    </button>
+                                </TableHead>
                                 <TableHead class="w-[120px]">Type</TableHead>
                                 <TableHead class="w-[200px]">Activity (24h)</TableHead>
                                 <TableHead class="w-[150px]">Auto Created</TableHead>
                                 <TableHead class="w-[150px]">Timestamp Field</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
-                                <TableHead class="w-[100px]">Status</TableHead>
-                                <TableHead class="w-[100px]">Created At</TableHead>
+                                <TableHead class="w-[100px]">
+                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('status')">
+                                        Status
+                                        <component :is="sourceSortKey === 'status' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                    </button>
+                                </TableHead>
+                                <TableHead class="w-[100px]">
+                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('created')">
+                                        Created At
+                                        <component :is="sourceSortKey === 'created' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                    </button>
+                                </TableHead>
                                 <TableHead class="w-[120px] text-right">Actions</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow v-for="source in sourcesStore.sources" :key="source.id">
+                            <TableRow v-if="sortedSources.length === 0">
+                                <TableCell colspan="8" class="text-center text-muted-foreground py-6">
+                                    No sources match your search
+                                </TableCell>
+                            </TableRow>
+                            <TableRow v-for="source in sortedSources" :key="source.id">
                                 <TableCell class="font-medium">
                                     <a @click="router.push({ name: 'SourceInspection', query: { sourceId: source.id } })"
                                         class="hover:underline cursor-pointer">
@@ -223,33 +270,16 @@ onMounted(async () => {
                             </TableRow>
                         </TableBody>
                     </Table>
-                </div>
-            </CardContent>
-        </Card>
+        </div>
 
-        <!-- Delete Confirmation Dialog -->
-        <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = false">
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Delete Source</AlertDialogTitle>
-                    <AlertDialogDescription class="space-y-2">
-                        <p>Are you sure you want to delete source "{{ sourceToDelete?.name }}"?</p>
-                        <p class="font-medium text-muted-foreground">
-                            Note: This only removes the source configuration from LogChef. The underlying data stays
-                            in the configured backend and must be managed there separately.
-                        </p>
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel @click="showDeleteDialog = false">
-                        Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction @click="confirmDelete"
-                        class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        Delete
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+        <ConfirmDialog
+            :open="showDeleteDialog"
+            title="Delete source?"
+            :description="sourceToDelete ? `Delete source &quot;${sourceToDelete.name}&quot;? This only removes the source from LogChef — the underlying data stays in the configured backend and must be managed there separately.` : undefined"
+            confirm-text="Delete"
+            destructive
+            @update:open="(v) => { if (!v) { showDeleteDialog = false; sourceToDelete = null } }"
+            @confirm="confirmDelete"
+        />
     </div>
 </template>

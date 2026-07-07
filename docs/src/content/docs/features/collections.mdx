@@ -1,0 +1,77 @@
+---
+title: Collections & Saved Queries
+description: Save queries to your Library and share them with teammates through collections.
+---
+
+Your **Library** holds saved queries; **collections** are shared playlists for organizing
+them. Members run queries, editors change the shared query, owners manage the collection —
+but a collection never grants access to log data.
+
+Open the Library from the sidebar. Collections sit in the left rail; selecting one shows its
+queries and members on the right.
+
+## Saved queries
+
+A saved query is a named, reusable query bound to a single source. It stores the query text
+(LogchefQL or SQL), and optionally the time range, limit, and variables.
+
+Save one from the explorer with **Save**. The dialog asks for a name and lets you pick a
+collection in the same step (defaulting to your personal collection) — so saving and
+organizing are one action.
+
+Visibility follows **source access**: anyone who can reach the query's source (through any
+team they belong to) can see and run it. Editing is more restricted — see
+[Who can edit](#who-can-edit-a-query).
+
+## Collections
+
+A collection is a curated list of saved queries with its own members.
+
+- **Personal collection** — every user has one, created automatically. It's private and can't
+  be shared, renamed, or deleted. Think of it as your bookmarks.
+- **Shared collections** — anyone can create one. You become its owner and can invite
+  teammates. Use them for on-call runbooks, incident playbooks, or a team's go-to queries.
+
+Create a collection with **New** in the Library rail, then **Invite** teammates and pin
+queries to it.
+
+## Roles
+
+Shared collections have three roles:
+
+| Role | Read &amp; run | Edit the queries | Add/remove items | Manage members | Delete collection |
+|------|:----------:|:----------------:|:----------------:|:--------------:|:-----------------:|
+| **Member** | ✓ | — | — | — | — |
+| **Editor** | ✓ | ✓ | — | — | — |
+| **Owner**  | ✓ | ✓ | ✓ | ✓ | ✓ |
+
+Running and editing always also require **source access** — a role in a collection never
+grants access to the underlying logs. A query you can't run shows with a lock icon.
+
+## Who can edit a query
+
+A saved query can be edited by:
+
+1. its **creator**,
+2. a **global admin**, or
+3. an **owner or editor** of a shared collection that contains it (still requiring source access).
+
+Because a saved query is a single shared row, **editing it changes it everywhere it
+appears** — in every collection and for every viewer. To make a variant instead of changing
+the shared one, save a new query rather than editing.
+
+Deleting a query is more restricted than editing: only the **creator** or a **global admin**
+can delete it, since deletion removes it from every collection at once.
+
+## Common workflows
+
+**Share a team's go-to queries**
+
+1. **New** → name the collection (e.g. "Payments on-call").
+2. **Invite** teammates as Members (read & run) or Editors (can also refine the queries).
+3. Open each query in the explorer and **Save** it into the collection.
+
+**Hand a query to a teammate to maintain**
+
+Add them to a shared collection containing the query as an **Editor**. They can now open it,
+change it, and re-save — no global-admin rights needed.

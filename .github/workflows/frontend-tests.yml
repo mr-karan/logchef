@@ -29,10 +29,9 @@ jobs:
         working-directory: frontend
         run: bun install --frozen-lockfile
 
-      # FIXME: Re-enable TypeScript checks after fixing pending local type errors
-      # - name: Run TypeScript checks
-      #   working-directory: frontend
-      #   run: bun run typecheck
+      - name: Run TypeScript checks
+        working-directory: frontend
+        run: bun run typecheck
 
       - name: Run tests
         working-directory: frontend

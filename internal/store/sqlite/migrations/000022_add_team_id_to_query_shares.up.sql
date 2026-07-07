@@ -1,0 +1,1 @@
+ALTER TABLE query_shares ADD COLUMN team_id INTEGER REFERENCES teams(id) ON DELETE SET NULL;

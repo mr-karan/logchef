@@ -11,7 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -23,11 +23,11 @@ var (
 
 // ValidateSession checks if a session ID is valid and not expired.
 // It returns the session details if valid, or an appropriate error.
-func ValidateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, sessionID models.SessionID) (*models.Session, error) {
+func ValidateSession(ctx context.Context, db store.StoreOps, log *slog.Logger, sessionID models.SessionID) (*models.Session, error) {
 	session, err := db.GetSession(ctx, sessionID)
 	if err != nil {
 		// Check if the specific DB error indicates not found
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) { // Assuming db might return models.ErrNotFound too
+		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || errors.Is(err, models.ErrNotFound) { // Assuming db might return models.ErrNotFound too
 			log.Debug("session not found in db", "session_id", sessionID)
 			return nil, ErrSessionNotFound
 		}
@@ -56,7 +56,7 @@ func ValidateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, sessi
 }
 
 // CreateSession creates a new session for a user, respecting concurrent session limits.
-func CreateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, duration time.Duration, maxConcurrent int) (*models.Session, error) {
+func CreateSession(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, duration time.Duration, maxConcurrent int) (*models.Session, error) {
 
 	// Check concurrent sessions before creating a new one
 	sessionCount, err := db.CountUserSessions(ctx, userID)
@@ -98,11 +98,11 @@ func CreateSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID 
 }
 
 // RevokeSession deletes a specific session by its ID.
-func RevokeSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, sessionID models.SessionID) error {
+func RevokeSession(ctx context.Context, db store.StoreOps, log *slog.Logger, sessionID models.SessionID) error {
 	log.Info("revoking session", "session_id", sessionID)
 	if err := db.DeleteSession(ctx, sessionID); err != nil {
 		// Check if it was already not found
-		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "session not found") { // Adapt based on actual DB error
+		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || strings.Contains(err.Error(), "session not found") { // Adapt based on actual DB error
 			log.Warn("attempted to revoke session that was not found", "session_id", sessionID)
 			return nil // Not an error if it didn't exist
 		}
@@ -114,7 +114,7 @@ func RevokeSession(ctx context.Context, db *sqlite.DB, log *slog.Logger, session
 }
 
 // RevokeUserSessions deletes all sessions for a specific user.
-func RevokeUserSessions(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID) error {
+func RevokeUserSessions(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID) error {
 	log.Debug("revoking all sessions for user", "user_id", userID)
 	if err := db.DeleteUserSessions(ctx, userID); err != nil {
 		log.Error("failed to delete user sessions from db", "error", err, "user_id", userID)

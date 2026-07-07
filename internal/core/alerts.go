@@ -2,7 +2,6 @@ package core
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -12,7 +11,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -102,21 +101,15 @@ func sanitizeWebhookURLs(in []string) []string {
 	return out
 }
 
-func validateRecipientUserIDs(ctx context.Context, db *sqlite.DB, teamID models.TeamID, recipientIDs []models.UserID) error {
+func validateRecipientUserIDs(ctx context.Context, db store.StoreOps, recipientIDs []models.UserID) error {
 	if len(recipientIDs) == 0 {
 		return nil
 	}
-	members, err := db.ListTeamMembers(ctx, teamID)
-	if err != nil {
-		return fmt.Errorf("failed to load team members: %w", err)
-	}
-	memberIDs := make(map[models.UserID]struct{}, len(members))
-	for _, member := range members {
-		memberIDs[member.UserID] = struct{}{}
-	}
+	// Recipients are users, not team members. Make sure each id resolves.
 	for _, id := range recipientIDs {
-		if _, ok := memberIDs[id]; !ok {
-			return fmt.Errorf("user %d is not a member of the team", id)
+		user, err := db.GetUser(ctx, id)
+		if err != nil || user == nil {
+			return fmt.Errorf("user %d not found", id)
 		}
 	}
 	return nil
@@ -189,21 +182,21 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	return nil
 }
 
-// CreateAlert creates a new alert rule for the specified team and source.
-func CreateAlert(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, req *models.CreateAlertRequest) (*models.Alert, error) {
+// CreateAlert creates a new alert rule for the specified source, owned by createdBy.
+func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
 	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
-	if err := validateRecipientUserIDs(ctx, db, teamID, recipientUserIDs); err != nil {
+	if err := validateRecipientUserIDs(ctx, db, recipientUserIDs); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
 	webhookURLs := sanitizeWebhookURLs(req.WebhookURLs)
 	if err := validateWebhookURLs(webhookURLs); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
+	owner := createdBy
 	alert := &models.Alert{
-		TeamID:            teamID,
 		SourceID:          sourceID,
 		Name:              req.Name,
 		Description:       req.Description,
@@ -222,24 +215,25 @@ func CreateAlert(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log
 		WebhookURLs:       webhookURLs,
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		IsActive:          req.IsActive,
+		CreatedBy:         &owner,
 	}
 	if err := validateAlertModel(ctx, ds, sourceID, alert); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
 
 	if err := db.CreateAlert(ctx, alert); err != nil {
-		log.Error("failed to create alert", "team_id", teamID, "source_id", sourceID, "error", err)
+		log.Error("failed to create alert", "source_id", sourceID, "error", err)
 		return nil, fmt.Errorf("failed to create alert: %w", err)
 	}
-	log.Info("alert created", "alert_id", alert.ID, "team_id", teamID, "source_id", sourceID)
+	log.Info("alert created", "alert_id", alert.ID, "source_id", sourceID, "created_by", createdBy)
 	return alert, nil
 }
 
 // GetAlert retrieves a single alert by ID.
-func GetAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
+func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) (*models.Alert, error) {
 	alert, err := db.GetAlert(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sqlite.ErrNotFound) || errors.Is(err, sql.ErrNoRows) {
+		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to get alert", "alert_id", alertID, "error", err)
@@ -249,14 +243,14 @@ func GetAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID mode
 }
 
 // UpdateAlert updates an existing alert rule.
-func UpdateAlert(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
 
-	existing, err := db.GetAlertForTeamSource(ctx, teamID, sourceID, alertID)
+	existing, err := db.GetAlert(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to load alert for update", "alert_id", alertID, "error", err)
@@ -267,7 +261,7 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log
 		return nil, err
 	}
 	if req.RecipientUserIDs != nil {
-		if err := validateRecipientUserIDs(ctx, db, teamID, existing.RecipientUserIDs); err != nil {
+		if err := validateRecipientUserIDs(ctx, db, existing.RecipientUserIDs); err != nil {
 			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 		}
 	}
@@ -276,19 +270,19 @@ func UpdateAlert(ctx context.Context, db *sqlite.DB, ds *datasource.Service, log
 			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 		}
 	}
-	if err := validateAlertModel(ctx, ds, sourceID, existing); err != nil {
+	if err := validateAlertModel(ctx, ds, existing.SourceID, existing); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrAlertNotFound
 		}
 		log.Error("failed to update alert", "alert_id", alertID, "error", err)
 		return nil, fmt.Errorf("failed to update alert: %w", err)
 	}
 
-	updated, err := db.GetAlertForTeamSource(ctx, teamID, sourceID, alertID)
+	updated, err := db.GetAlert(ctx, alertID)
 	if err != nil {
 		log.Warn("alert updated but fetching updated record failed", "alert_id", alertID, "error", err)
 		return existing, nil
@@ -384,38 +378,53 @@ func applyMetadataUpdates(alert *models.Alert, req *models.UpdateAlertRequest) {
 }
 
 // DeleteAlert removes an alert rule.
-func DeleteAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID, alertID models.AlertID) error {
-	if _, err := db.GetAlertForTeamSource(ctx, teamID, sourceID, alertID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
-			return ErrAlertNotFound
-		}
-		return fmt.Errorf("failed to validate alert ownership: %w", err)
-	}
+func DeleteAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID) error {
 	if err := db.DeleteAlert(ctx, alertID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		log.Error("failed to delete alert", "alert_id", alertID, "error", err)
 		return fmt.Errorf("failed to delete alert: %w", err)
 	}
-	log.Info("alert deleted", "alert_id", alertID, "team_id", teamID, "source_id", sourceID)
+	log.Info("alert deleted", "alert_id", alertID)
 	return nil
 }
 
-// ListAlertsByTeamSource returns all alerts for a team/source pair.
-func ListAlertsByTeamSource(ctx context.Context, db *sqlite.DB, teamID models.TeamID, sourceID models.SourceID) ([]*models.Alert, error) {
-	alerts, err := db.ListAlertsByTeamAndSource(ctx, teamID, sourceID)
+// ListAlertsBySource returns all alerts for a source.
+func ListAlertsBySource(ctx context.Context, db store.StoreOps, sourceID models.SourceID) ([]*models.Alert, error) {
+	alerts, err := db.ListAlertsBySource(ctx, sourceID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list alerts: %w", err)
 	}
 	return alerts, nil
 }
 
+// ListAlertsForUser returns alerts the user can see (cross-source).
+func ListAlertsForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.Alert, error) {
+	alerts, err := db.ListAlertsForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list alerts: %w", err)
+	}
+	return alerts, nil
+}
+
+// UserCanEditAlert returns true if the user is the creator or a global admin.
+// Legacy alerts (CreatedBy == nil) are editable only by global admins.
+func UserCanEditAlert(alert *models.Alert, user *models.User) bool {
+	if alert == nil || user == nil {
+		return false
+	}
+	if user.Role == models.UserRoleAdmin {
+		return true
+	}
+	return alert.CreatedBy != nil && *alert.CreatedBy == user.ID
+}
+
 // ListAlertHistory retrieves a limited set of alert history entries.
-func ListAlertHistory(ctx context.Context, db *sqlite.DB, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
+func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error) {
 	history, err := db.ListAlertHistory(ctx, alertID, limit)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return []*models.AlertHistoryEntry{}, nil
 		}
 		return nil, fmt.Errorf("failed to list alert history: %w", err)
@@ -424,16 +433,16 @@ func ListAlertHistory(ctx context.Context, db *sqlite.DB, alertID models.AlertID
 }
 
 // ResolveAlert manually resolves the most recent triggered history entry.
-func ResolveAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID models.AlertID, message string) error {
+func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, message string) error {
 	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		return fmt.Errorf("failed to find unresolved alert history: %w", err)
 	}
 	if err := db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return ErrAlertNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
@@ -443,7 +452,7 @@ func ResolveAlert(ctx context.Context, db *sqlite.DB, log *slog.Logger, alertID 
 }
 
 // TestAlertQuery executes a test query to validate alert configuration and show performance metrics.
-func TestAlertQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Service, teamID models.TeamID, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
+func TestAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
 	}
@@ -456,6 +465,14 @@ func TestAlertQuery(ctx context.Context, db *sqlite.DB, ds *datasource.Service, 
 
 	if ds == nil {
 		return nil, fmt.Errorf("datasource service is required")
+	}
+
+	// Load source to verify access
+	if _, err := db.GetSource(ctx, sourceID); err != nil {
+		if models.IsNotFound(err) {
+			return nil, fmt.Errorf("source not found")
+		}
+		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
 
 	tempAlert := &models.Alert{

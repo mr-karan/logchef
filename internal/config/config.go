@@ -15,22 +15,57 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server     ServerConfig     `koanf:"server"`
-	SQLite     SQLiteConfig     `koanf:"sqlite"`
-	Clickhouse ClickhouseConfig `koanf:"clickhouse"`
-	OIDC       OIDCConfig       `koanf:"oidc"`
-	Auth       AuthConfig       `koanf:"auth"`
-	Logging    LoggingConfig    `koanf:"logging"`
-	AI         AIConfig         `koanf:"ai"`
-	Alerts     AlertsConfig     `koanf:"alerts"`
+	Server       ServerConfig       `koanf:"server"`
+	Database     DatabaseConfig     `koanf:"database"`
+	SQLite       SQLiteConfig       `koanf:"sqlite"`
+	Postgres     PostgresConfig     `koanf:"postgres"`
+	Clickhouse   ClickhouseConfig   `koanf:"clickhouse"`
+	OIDC         OIDCConfig         `koanf:"oidc"`
+	Auth         AuthConfig         `koanf:"auth"`
+	Logging      LoggingConfig      `koanf:"logging"`
+	AI           AIConfig           `koanf:"ai"`
+	Alerts       AlertsConfig       `koanf:"alerts"`
 	Query        QueryConfig        `koanf:"query"`
+	Export       ExportConfig       `koanf:"export"`
+	Shares       SharesConfig       `koanf:"shares"`
 	Provisioning ProvisioningConfig `koanf:"provisioning"`
 }
 
 // QueryConfig contains settings for query execution
 type QueryConfig struct {
-	// MaxLimit caps any LIMIT clause to prevent excessive result sets (default: 1000000)
+	// MaxLimit is a deprecated alias for MaxPreviewLimit.
 	MaxLimit int `koanf:"max_limit"`
+	// DefaultPreviewLimit is applied when a preview query does not specify LIMIT.
+	DefaultPreviewLimit int `koanf:"default_preview_limit"`
+	// MaxPreviewLimit caps browser preview query results.
+	MaxPreviewLimit int `koanf:"max_preview_limit"`
+	// MaxResponseBytes caps approximate preview response payload size.
+	MaxResponseBytes int `koanf:"max_response_bytes"`
+	// DefaultTimeoutSeconds is the default ClickHouse max_execution_time for preview queries.
+	DefaultTimeoutSeconds int `koanf:"default_timeout_seconds"`
+	// MaxTimeoutSeconds caps preview query timeout requests.
+	MaxTimeoutSeconds int `koanf:"max_timeout_seconds"`
+	// MaxConcurrentPerUser limits active preview queries per user.
+	MaxConcurrentPerUser int `koanf:"max_concurrent_per_user"`
+	// MaxConcurrentGlobal limits active preview queries globally.
+	MaxConcurrentGlobal int `koanf:"max_concurrent_global"`
+}
+
+// ExportConfig contains settings for streaming result exports.
+type ExportConfig struct {
+	MaxRows               int           `koanf:"max_rows"`
+	DefaultTimeoutSeconds int           `koanf:"default_timeout_seconds"`
+	MaxTimeoutSeconds     int           `koanf:"max_timeout_seconds"`
+	MaxConcurrentPerUser  int           `koanf:"max_concurrent_per_user"`
+	MaxConcurrentGlobal   int           `koanf:"max_concurrent_global"`
+	ArtifactTTL           time.Duration `koanf:"artifact_ttl"`
+	Formats               []string      `koanf:"formats"`
+}
+
+// SharesConfig contains settings for ad hoc query share links.
+type SharesConfig struct {
+	DefaultTTL        time.Duration `koanf:"default_ttl"`
+	MaxQueryTextBytes int           `koanf:"max_query_text_bytes"`
 }
 
 // ServerConfig contains HTTP server settings
@@ -52,9 +87,27 @@ func (s *ServerConfig) IsSecureCookie() bool {
 	return *s.SecureCookie
 }
 
+// DatabaseConfig selects which metadata backend logchef uses.
+type DatabaseConfig struct {
+	// Driver is "sqlite" (default, single-binary) or "postgres" (multi-replica).
+	Driver string `koanf:"driver"`
+}
+
 // SQLiteConfig contains SQLite database settings
 type SQLiteConfig struct {
 	Path string `koanf:"path"`
+}
+
+// PostgresConfig contains settings for the Postgres metadata backend. Only used
+// when database.driver = "postgres".
+type PostgresConfig struct {
+	// DSN is the full connection string, e.g.
+	// postgres://user:pass@host:5432/db?sslmode=disable. Required when the
+	// postgres driver is selected.
+	DSN             string        `koanf:"dsn"`
+	MaxOpenConns    int           `koanf:"max_open_conns"`
+	MaxIdleConns    int           `koanf:"max_idle_conns"`
+	ConnMaxLifetime time.Duration `koanf:"conn_max_lifetime"`
 }
 
 // ClickhouseConfig contains Clickhouse database settings
@@ -80,6 +133,13 @@ type OIDCConfig struct {
 	Scopes       []string `koanf:"scopes"`
 
 	CLIClientID string `koanf:"cli_client_id"`
+
+	// SkipEmailVerifiedCheck disables the email_verified claim check during
+	// OIDC authentication. Set to true only if your OIDC provider does not
+	// include the email_verified claim but the email address is verified by
+	// other means (e.g. Cloudflare Access, corporate SSO).
+	// Default: false
+	SkipEmailVerifiedCheck bool `koanf:"skip_email_verified_check"`
 }
 
 // AuthConfig contains authentication settings
@@ -127,10 +187,15 @@ const (
 
 	defaultServerPort         = 8125
 	defaultServerHost         = "0.0.0.0"
-	defaultHTTPServerTimeout  = 30 * time.Second
+	defaultHTTPServerTimeout  = 15 * time.Minute
 	defaultServerSecureCookie = true
+	defaultDatabaseDriver     = "sqlite"
 	defaultSQLitePath         = "local.db"
 	defaultLoggingLevel       = "info"
+
+	defaultPostgresMaxOpenConns    = 25
+	defaultPostgresMaxIdleConns    = 5
+	defaultPostgresConnMaxLifetime = 30 * time.Minute
 
 	defaultAlertsEnabled            = true
 	defaultAlertsEvaluationInterval = time.Minute
@@ -147,8 +212,26 @@ const (
 	defaultAuthMaxConcurrentSessions = 1
 	defaultAuthDefaultTokenExpiry    = 2160 * time.Hour
 
-	defaultQueryMaxLimit = 1000000
+	defaultQueryDefaultPreviewLimit  = 1000
+	defaultQueryMaxPreviewLimit      = 100000
+	defaultQueryMaxResponseBytes     = 64 * 1024 * 1024
+	defaultQueryDefaultTimeoutSecs   = 30
+	defaultQueryMaxTimeoutSecs       = 300
+	defaultQueryMaxConcurrentPerUser = 3
+	defaultQueryMaxConcurrentGlobal  = 30
+
+	defaultExportMaxRows              = 1000000
+	defaultExportDefaultTimeoutSecs   = 120
+	defaultExportMaxTimeoutSecs       = 600
+	defaultExportMaxConcurrentPerUser = 1
+	defaultExportMaxConcurrentGlobal  = 5
+	defaultExportArtifactTTL          = 24 * time.Hour
+
+	defaultSharesDefaultTTL        = 720 * time.Hour
+	defaultSharesMaxQueryTextBytes = 1024 * 1024
 )
+
+var defaultExportFormats = []string{"csv", "ndjson"}
 
 var defaultOIDCScopes = []string{"openid", "email", "profile"}
 
@@ -208,6 +291,18 @@ func Load(path string) (*Config, error) {
 		cfg.Provisioning.File = provPath
 	}
 
+	// Validate the metadata backend selection.
+	switch cfg.Database.Driver {
+	case "sqlite":
+		// SQLite path defaults are always applied; nothing further required.
+	case "postgres":
+		if cfg.Postgres.DSN == "" {
+			return nil, fmt.Errorf("postgres.dsn is required when database.driver is \"postgres\" (set it in file or %sPOSTGRES__DSN)", envPrefix)
+		}
+	default:
+		return nil, fmt.Errorf("database.driver must be \"sqlite\" or \"postgres\", got %q", cfg.Database.Driver)
+	}
+
 	// Validate required configurations
 	if len(cfg.Auth.AdminEmails) == 0 {
 		return nil, fmt.Errorf("admin_emails is required in auth configuration (either in file or %sAUTH__ADMIN_EMAILS)", envPrefix)
@@ -241,7 +336,7 @@ func Load(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func applyDefaults(k *koanf.Koanf, cfg *Config) {
+func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config defaults are a flat per-key table
 	if !k.Exists("server.port") {
 		cfg.Server.Port = defaultServerPort
 	}
@@ -255,8 +350,21 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) {
 		defaultVal := defaultServerSecureCookie
 		cfg.Server.SecureCookie = &defaultVal
 	}
+	if !k.Exists("database.driver") {
+		cfg.Database.Driver = defaultDatabaseDriver
+	}
+	cfg.Database.Driver = strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
 	if !k.Exists("sqlite.path") {
 		cfg.SQLite.Path = defaultSQLitePath
+	}
+	if !k.Exists("postgres.max_open_conns") {
+		cfg.Postgres.MaxOpenConns = defaultPostgresMaxOpenConns
+	}
+	if !k.Exists("postgres.max_idle_conns") {
+		cfg.Postgres.MaxIdleConns = defaultPostgresMaxIdleConns
+	}
+	if !k.Exists("postgres.conn_max_lifetime") {
+		cfg.Postgres.ConnMaxLifetime = defaultPostgresConnMaxLifetime
 	}
 	if !k.Exists("logging.level") {
 		cfg.Logging.Level = defaultLoggingLevel
@@ -304,7 +412,103 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) {
 		cfg.Auth.DefaultTokenExpiry = defaultAuthDefaultTokenExpiry
 	}
 
-	if !k.Exists("query.max_limit") {
-		cfg.Query.MaxLimit = defaultQueryMaxLimit
+	if !k.Exists("query.default_preview_limit") {
+		cfg.Query.DefaultPreviewLimit = defaultQueryDefaultPreviewLimit
+	}
+	if !k.Exists("query.max_preview_limit") {
+		if k.Exists("query.max_limit") && cfg.Query.MaxLimit > 0 {
+			cfg.Query.MaxPreviewLimit = cfg.Query.MaxLimit
+		} else {
+			cfg.Query.MaxPreviewLimit = defaultQueryMaxPreviewLimit
+		}
+	}
+	if !k.Exists("query.max_response_bytes") {
+		cfg.Query.MaxResponseBytes = defaultQueryMaxResponseBytes
+	}
+	if !k.Exists("query.default_timeout_seconds") {
+		cfg.Query.DefaultTimeoutSeconds = defaultQueryDefaultTimeoutSecs
+	}
+	if !k.Exists("query.max_timeout_seconds") {
+		cfg.Query.MaxTimeoutSeconds = defaultQueryMaxTimeoutSecs
+	}
+	if !k.Exists("query.max_concurrent_per_user") {
+		cfg.Query.MaxConcurrentPerUser = defaultQueryMaxConcurrentPerUser
+	}
+	if !k.Exists("query.max_concurrent_global") {
+		cfg.Query.MaxConcurrentGlobal = defaultQueryMaxConcurrentGlobal
+	}
+	if cfg.Query.MaxLimit == 0 {
+		cfg.Query.MaxLimit = cfg.Query.MaxPreviewLimit
+	}
+	if cfg.Query.DefaultPreviewLimit <= 0 {
+		cfg.Query.DefaultPreviewLimit = defaultQueryDefaultPreviewLimit
+	}
+	if cfg.Query.MaxPreviewLimit <= 0 {
+		cfg.Query.MaxPreviewLimit = defaultQueryMaxPreviewLimit
+	}
+	if cfg.Query.DefaultPreviewLimit > cfg.Query.MaxPreviewLimit {
+		cfg.Query.DefaultPreviewLimit = cfg.Query.MaxPreviewLimit
+	}
+	if cfg.Query.MaxTimeoutSeconds <= 0 {
+		cfg.Query.MaxTimeoutSeconds = defaultQueryMaxTimeoutSecs
+	}
+	if cfg.Query.DefaultTimeoutSeconds <= 0 {
+		cfg.Query.DefaultTimeoutSeconds = defaultQueryDefaultTimeoutSecs
+	}
+	if cfg.Query.DefaultTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
+		cfg.Query.DefaultTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
+	}
+
+	if !k.Exists("export.max_rows") {
+		cfg.Export.MaxRows = defaultExportMaxRows
+	}
+	if !k.Exists("export.default_timeout_seconds") {
+		cfg.Export.DefaultTimeoutSeconds = defaultExportDefaultTimeoutSecs
+	}
+	if !k.Exists("export.max_timeout_seconds") {
+		cfg.Export.MaxTimeoutSeconds = defaultExportMaxTimeoutSecs
+	}
+	if !k.Exists("export.max_concurrent_per_user") {
+		cfg.Export.MaxConcurrentPerUser = defaultExportMaxConcurrentPerUser
+	}
+	if !k.Exists("export.max_concurrent_global") {
+		cfg.Export.MaxConcurrentGlobal = defaultExportMaxConcurrentGlobal
+	}
+	if !k.Exists("export.artifact_ttl") {
+		cfg.Export.ArtifactTTL = defaultExportArtifactTTL
+	}
+	if !k.Exists("export.formats") {
+		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
+	}
+	if cfg.Export.MaxRows <= 0 {
+		cfg.Export.MaxRows = defaultExportMaxRows
+	}
+	if cfg.Export.MaxTimeoutSeconds <= 0 {
+		cfg.Export.MaxTimeoutSeconds = defaultExportMaxTimeoutSecs
+	}
+	if cfg.Export.DefaultTimeoutSeconds <= 0 {
+		cfg.Export.DefaultTimeoutSeconds = defaultExportDefaultTimeoutSecs
+	}
+	if cfg.Export.DefaultTimeoutSeconds > cfg.Export.MaxTimeoutSeconds {
+		cfg.Export.DefaultTimeoutSeconds = cfg.Export.MaxTimeoutSeconds
+	}
+	if cfg.Export.ArtifactTTL <= 0 {
+		cfg.Export.ArtifactTTL = defaultExportArtifactTTL
+	}
+	if len(cfg.Export.Formats) == 0 {
+		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
+	}
+
+	if !k.Exists("shares.default_ttl") {
+		cfg.Shares.DefaultTTL = defaultSharesDefaultTTL
+	}
+	if !k.Exists("shares.max_query_text_bytes") {
+		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+	if cfg.Shares.DefaultTTL <= 0 {
+		cfg.Shares.DefaultTTL = defaultSharesDefaultTTL
+	}
+	if cfg.Shares.MaxQueryTextBytes <= 0 {
+		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
 	}
 }

@@ -6,18 +6,13 @@ Thank you for your interest in contributing to Logchef! We welcome contributions
 
 ### Development Setup
 
-The easiest way to get started is using our Nix flake:
-
 ```bash
 # Clone the repository
 git clone https://github.com/mr-karan/logchef.git
 cd logchef
-
-# Enter the development environment
-nix develop
 ```
 
-For detailed setup instructions including manual installation options, see our [Development Setup Guide](https://logchef.app/contributing/setup).
+For detailed setup instructions, see our [Development Setup Guide](https://logchef.app/contributing/setup).
 
 ### Quick Start
 
@@ -70,8 +65,8 @@ just lint
 
 If your changes involve database modifications:
 
-1. Create migration files in `internal/sqlite/migrations/`
-2. Update queries in `internal/sqlite/queries.sql`
+1. Create migration files in `internal/store/sqlite/migrations/`
+2. Update queries in `internal/store/sqlite/queries.sql`
 3. Regenerate SQLC code: `just sqlc-generate`
 4. Update models in `pkg/models/` if needed
 
@@ -121,7 +116,7 @@ Examples:
 ```
 feat: add AI-powered query suggestions
 fix: resolve race condition in connection pooling
-docs: update Nix setup instructions
+docs: update development setup instructions
 refactor: simplify user authentication flow
 ```
 
@@ -157,7 +152,7 @@ just test-short
 - `internal/server/` - HTTP handlers, middleware, routing
 - `internal/core/` - Business logic (users, teams, sources, logs)
 - `internal/clickhouse/` - ClickHouse client and connection management
-- `internal/sqlite/` - SQLite metadata storage with SQLC
+- `internal/store/sqlite/` - SQLite metadata storage with SQLC
 - `internal/auth/` - OIDC authentication
 - `internal/config/` - Configuration management
 

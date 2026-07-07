@@ -15,13 +15,15 @@ func unsupportedOperationError(sourceType models.SourceType, operation string) e
 }
 
 type QueryRequest struct {
-	RawQuery     string
-	StartTime    *time.Time
-	EndTime      *time.Time
-	Timezone     string
-	Limit        int
-	MaxLimit     int
-	QueryTimeout *int
+	RawQuery         string
+	StartTime        *time.Time
+	EndTime          *time.Time
+	Timezone         string
+	Limit            int
+	DefaultLimit     int
+	MaxLimit         int
+	MaxResponseBytes int
+	QueryTimeout     *int
 }
 
 type HistogramRequest struct {
@@ -49,5 +51,16 @@ type AlertQueryRequest struct {
 	Language        models.QueryLanguage
 	Query           string
 	LookbackSeconds int
+	QueryTimeout    *int
+}
+
+// LogContextRequest asks for logs surrounding a specific timestamp.
+type LogContextRequest struct {
+	TargetTimestamp int64 // Unix timestamp in milliseconds
+	BeforeLimit     int
+	AfterLimit      int
+	BeforeOffset    int
+	AfterOffset     int
+	ExcludeBoundary bool
 	QueryTimeout    *int
 }

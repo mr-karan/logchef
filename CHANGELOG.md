@@ -5,7 +5,416 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.7.0] - 2026-07-06
+
+Logchef 1.7 makes the **metadata store pluggable**: alongside the default
+single-binary SQLite, you can now run an **opt-in Postgres backend** so multiple
+replicas share state behind a load balancer for high availability. It also ships
+a **redesigned Library** for saved queries and collections with a real
+permission model (`owner` / `editor` / `member` + delegated edit), turns
+**`alerts.enabled`** into a proper server-wide switch, surfaces **token expiry**
+across UI / API / CLI, adds an admin **"All Queries"** browse, and clears a wave
+of UX bugs. Under the hood: Go 1.26, a backend-agnostic store contract validated
+by a conformance suite that runs against both databases, and audit-driven
+hardening. **Breaking:** the Library URL consolidation — see below.
+
+### Added
+- **Pluggable Postgres metadata backend (opt-in).** Application metadata —
+  users, teams, sources, saved queries, collections, alerts, API tokens,
+  settings, sessions, export jobs, query shares — can now live in Postgres
+  instead of SQLite, so multiple replicas can serve any request off shared
+  state. **SQLite remains the default**; the zero-config single-binary start is
+  unchanged. Select with `database.driver = "postgres"` and a `[postgres]` DSN
+  (or `LOGCHEF_DATABASE__DRIVER` / `LOGCHEF_POSTGRES__DSN`). Startup migrations
+  take a PostgreSQL advisory lock so concurrent replica boots don't race. Your
+  logs always stay in ClickHouse and are unaffected.
+  ([#96](https://github.com/mr-karan/logchef/pull/96)) See the
+  [Database Backends & HA guide](https://logchef.app/operations/database-backends/).
+- **`alerts.enabled` server switch.** Alerting can be disabled globally
+  (`alerts.enabled = false` / `LOGCHEF_ALERTS__ENABLED=false`). When off, every
+  alert endpoint returns a clear `503`, and `/api/v1/meta` exposes
+  `alerts_enabled` so the UI hides alerting entirely.
+  ([#98](https://github.com/mr-karan/logchef/pull/98))
+- **"All Queries" browse view for admins** — `GET /api/v1/saved-queries?scope=all`
+  (global-admin only) lists every saved query, including ones not reachable via
+  any collection, each marked `runnable` for the caller (sources you can't reach
+  show locked). Closes a gap where such queries had no browse surface. The
+  default (source-gated) response used by the explorer and CLI is unchanged.
+- **Redesigned Library.** The three saved-query / collection views collapse
+  into a single `/logs/library` (collections rail + detail pane). Collections
+  gain an **editor** role (`owner` / `editor` / `member`), and saved-query edit
+  is **delegated**: creator, global admin, or an owner/editor of a shared
+  collection containing the query can edit it (delete stays creator/admin-only).
+  The Save dialog gains an inline collection picker, and the server sends
+  `can_edit` / `can_delete` hints so the UI only offers actions that will work.
+- **Curate collections without owning them.** Adding, moving, and removing
+  queries in a shared collection is now open to any participant
+  (owner / editor / member). Managing the collection itself — rename, delete,
+  members — stays owner-only.
+- **Collection detail upgrades** — pin an existing saved query via an "Add query"
+  searchable picker, "Move to another collection" per query, and a "Created by"
+  column showing each query's author.
+- **Type-to-filter pickers + searchable, sortable tables** across member and
+  resource management. A reusable searchable picker replaces plain dropdowns
+  (invite a collection member, add a service account to a team), and the Manage
+  Sources and team-member tables gain a search box and sortable columns.
+- **Token expiry surfaced everywhere** — the service-tokens admin page shows the
+  same expiry status as the profile API-token list (never expires / expires /
+  expiring soon / expired) via a shared helper; the API-token model gains a
+  computed `expired` flag; and the CLI flags an expired saved token in
+  `logchef auth current`.
+
+### Changed
+- **Backend-agnostic store layer.** The metadata layer was reorganized behind a
+  per-domain store contract with canonical sentinel errors (`ErrNotFound` /
+  `ErrConflict`) and a `WithTx` transaction abstraction; SQLite and Postgres are
+  symmetric implementations, validated by a shared conformance suite that runs
+  against both in CI. `internal/sqlite` moved under `internal/store/sqlite`.
+- **Upgraded to Go 1.26**, with hot-path optimizations and idiom modernization.
+- **Anyone can create collections.** The old team-admin gate is dropped;
+  per-collection roles (`owner` / `editor` / `member`) are the authority.
+- **Collection member roster is owner-only** — previously visible to any
+  team-admin who could list users; now enforced server-side.
+
+### Fixed
+- **Inline 403s no longer bounce to a full-page Forbidden view** — an access
+  error on an inline action (toggle, save, delete) shows a toast and stays put;
+  page-level access is still enforced by the router.
+- **Dead toggles across the app work again** — Switch/Checkbox controls were
+  bound to `:checked`/`@update:checked`, but the reka-ui primitives only expose
+  `model-value`, so the admin Active toggle, alert enable/disable, source
+  TLS/auth switches, the column selector, and variable multi-selects silently
+  no-op'd. Rebound to `model-value`.
+- **Saved-query resolver no longer panics** on certain resolve paths — it
+  recovers and returns a clean error.
+- **Saved queries wait for the source schema** before running, so opening one
+  no longer races the previously selected source.
+- **Save dialog only offers collections you own** (adding an item is owner-only,
+  so it no longer saves the query then 403s on the pin), and the item Remove
+  button gates on the current collection's ownership.
+- **Correct HTTP status codes** for export / query-share access: `404` only on
+  not-found, `403` when the recipient has no team access.
+- **Escape-aware response byte-budget** — fixes an under-count memory regression
+  from the perf pass — plus a cancellable field-value fan-out and identifier
+  validation on provisioned source database/table/field names.
+- **Provisioned member users get `account_type` set** correctly.
+- **Add-query dialog width** no longer overflows its grid; **`?view=all`** is
+  preserved on the Library route.
+- **Frontend typecheck is green again and re-enabled in CI** — deduped
+  `@internationalized/date` (reka-ui date-picker type drift) and cleared the
+  assorted `vue-tsc` issues that had accumulated behind a disabled check.
+
+### Breaking changes
+- **Library URL consolidation.** `/logs/saved`, `/logs/collections`, and
+  `/logs/collections/:id` collapse into a single `/logs/library` with **no
+  redirects** from the old paths. `/logs/saved/:queryId` is kept as the
+  canonical share / explorer-hydration link. Update bookmarked or documented
+  old collection URLs.
+- **Collection creation is no longer team-admin-gated** — any authenticated
+  user can create a collection.
+
+### Migration notes
+| Backend | Migration | What it does |
+|---------|-----------|-------------|
+| SQLite | 000024 | Rebuilds the `collection_members` role CHECK to `owner \| editor \| member` (adds the collection **editor** role). Existing rows preserved. Applied automatically on upgrade from 1.6.1; no other new SQLite migrations. |
+| Postgres | 000001_init | Fresh Postgres backends create the full schema in a single advisory-lock–guarded init migration. |
+
+### Internal
+- Backend-parity end-to-end suite (agent-browser) covering login, sources,
+  query, field values, the time-range picker, histogram, collections, and admin.
+- Dead-code sweep, a dev Postgres 17 service, and Postgres CI (service +
+  sqlc-drift + golangci-lint to zero across the module).
+
+### Upgrading
+Drop-in for existing SQLite deployments — no config changes required (one small
+SQLite migration, `000024`, applies automatically). To adopt Postgres for HA,
+read the [Database Backends & HA guide](https://logchef.app/operations/database-backends/)
+first — note the current caveat that alert evaluation must run on **exactly one**
+replica until leader election lands.
+
+## [CLI v0.1.6] - 2026-05-20
+
+LogChef CLI 0.1.6 ships four new subcommands (`saved-queries`, `find`, `tail`,
+`whoami`, `auth current`), full time-range injection on raw SQL, agent-friendly
+output formats (`msg`, `json-flat`), a symmetric `--explain` / `--dry-run`
+split across `query` and `sql`, and TTY-aware highlighting so pipes don't need
+`--no-highlight`. Requires Logchef server v1.6.1+ for the saved-queries
+resolve endpoint and ClickHouse column descriptions.
+
+### Added
+- **`saved-queries` command** — List saved queries and run one by name,
+  numeric ID, or pasted explorer URL, with `--limit`, `--var`, and
+  `--output` overrides.
+- **`find` command** — Discover sources with recent matches for a service,
+  job, host, or message pattern. For each matched source, fires a small
+  per-column sample query: label-shaped columns (service/host/job_name) get
+  the top 3 values with counts; free-form text columns (msg) get a single
+  truncated sample row. Suppress with `--no-samples`. Per-source query
+  timeout defaults to 30s. Sources that error out (permissions, schema
+  fetch, query failure) are skipped and counted; rerun with `--debug` for
+  per-source diagnostics.
+- **`tail` command** — Follow matching LogChefQL rows with bounded polling
+  and `text`, `jsonl`, or `msg` output. Dedup is stable across column-order
+  changes between polls; when a poll returns at `--limit` a one-shot warning
+  hints to raise `--limit` or shrink `--interval`.
+- **`whoami` command** — Print the authenticated user and accessible teams.
+- **`auth current` subcommand** — Offline command that prints the active
+  context, server URL, and token source (env vs config) without hitting the
+  network. When the token comes from saved config, also prints the expiry
+  timestamp. Useful for "is my `LOGCHEF_AUTH_TOKEN` even set?" diagnostics
+  before any API call.
+- **SQL time flags** — `logchef sql` now accepts `--since`, `--from`, and
+  `--to`. The predicate is injected before the first top-level
+  `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`; the
+  scanner skips string literals, quoted identifiers, comments, and
+  parenthesized subqueries, so `WHERE`/`LIMIT` inside literals or nested
+  selects no longer confuses injection. Use `__START__` / `__END__`
+  placeholders for full control (e.g. CTEs).
+- **`--explain` / `--show-sql` alias on `sql`** — `--explain` is now an alias
+  of `--show-sql` on both `query` and `sql`. Both print
+  `Generated SQL: <sql>` to stderr and continue executing, so the trace
+  coexists cleanly with `--output jsonl | jq` pipes. On `sql`, the printed
+  SQL includes any `--since` / `--from` / `--to` injection.
+- **`--dry-run` on `query` and `sql`** — Prints the resolved SQL to stdout
+  (no prefix, pipes cleanly) and exits without keeping results.
+  `query --dry-run` still calls the server once for LogChefQL translation;
+  `sql --dry-run` is fully offline.
+- **`--output msg` mode** — `query`, `sql`, `collections`, and
+  `saved-queries` can print message text only, one row per line. Falls back
+  to the first selected column when `msg` isn't projected.
+- **`--output json-flat` mode** — `query`, `sql`, `collections`, and
+  `saved-queries` can hoist JSON-shaped `msg` fields to top-level JSON rows.
+- **`LOGCHEF_DEFAULT_TEAM` / `LOGCHEF_DEFAULT_SOURCE` env vars** — Supply
+  stateless defaults when `--team` / `--source` are omitted. Precedence:
+  flag > env > saved config.
+- **Schema column descriptions** — `schema --output text` shows an extra
+  DESCRIPTION column when the source's ClickHouse columns have comments;
+  `schema --output json` includes them inline.
+
+### Changed
+- **Auto-disables ANSI highlighting on non-TTY output** — All five subcommands
+  (`query`, `sql`, `collections`, `saved-queries`, `tail`) skip highlighting
+  when stdout is piped, so `... | jq` and `... > file` produce clean output
+  without `--no-highlight`. The flag still works as an explicit override.
+
+### Internal
+- Shared `session` module extracts `ResolvedContext` + auth check across the
+  nine subcommands (~250 LOC dedup).
+
+## [1.6.1] - 2026-05-20
+
+Patch release. Introduces **Service accounts** — non-login principals that
+own scoped API tokens — and reworks the API-token surface so every token
+carries an explicit scope list enforced by middleware. Also surfaces
+ClickHouse column comments through the schema API for the LogChef CLI v0.1.6
+to consume.
+
+### Added
+- **Service accounts** — Non-login principals you can add to teams and own
+  API tokens. Created from **Administration → Service Tokens**. Cannot
+  authenticate via OIDC or CLI exchange.
+- **Scoped API tokens** — Tokens now carry an explicit scope list
+  (`logs:read`, `alerts:write`, ...). New `requireTokenScope` middleware
+  enforces them on every route. Presets in the UI: Read-only, Logs viewer,
+  Logs analyst, Alerts manager, Source admin, Full access. Active preset is
+  highlighted while the selection matches.
+- **Account-type toggle in Add Team Member dialog** — Switch between Human
+  user and Service account; the dropdown filters to the selected type and
+  shows `full_name` with email as a subtitle.
+- **Service account badge** in team member tables, with a bot icon, so
+  automation principals are visually distinct from humans.
+- **Team chips and "Manage teams" button** on each service account card.
+  Surfaces zero-team state ("token reaches no source") and lets you add or
+  remove team memberships without leaving the page.
+- **New admin endpoints**:
+  - `GET/POST/DELETE /admin/service-accounts`
+  - `GET/POST/DELETE /admin/service-accounts/:id/tokens`
+  - `GET/POST/DELETE /admin/service-accounts/:id/teams`
+- **Schema column descriptions** — The schema API now surfaces ClickHouse
+  column comments as an optional `description` field. Consumed by LogChef
+  CLI v0.1.6's `schema` command.
+
+### Changed
+- **`UserProfile` "Create API Token" dialog defaults to the Read-only preset.**
+  Previously defaulted to Full access (`*`), which made every checkbox appear
+  disabled-but-checked and gave no choice unless the user manually clicked
+  away.
+- **Read-only preset includes every `:read` scope.** Now covers
+  `tokens:read`, `users:read`, and `settings:read` in addition to the
+  resource read scopes. Admin-gated routes still require admin role at the
+  auth layer, so the wider scope set only matters for admin-owned tokens.
+- **`/admin/users/*` now 404s on service accounts.** Service principals are
+  managed through the dedicated `/admin/service-accounts/*` path so admins
+  can't accidentally promote a service account to admin via the human-user
+  CRUD path.
+
+### Fixed
+- **`TokenScopePicker` checkboxes are now interactive.** The component was
+  binding to `:checked` / `@update:checked`, but the shadcn-vue Checkbox
+  forwards reka-ui's `CheckboxRootProps`, which uses `model-value` /
+  `update:model-value`. The bug was hidden behind the old Full-access
+  default; switching the default surfaced it.
+- **Token creation rejects empty scopes (HTTP 400).** Previously, a request
+  with no scopes silently defaulted to `["*"]`, minting a god-token.
+- **Corrupt or empty stored scopes fail closed.** A row with malformed JSON
+  in `api_tokens.scopes` now grants no access instead of `*`.
+
+### Migration notes
+| Migration | What it does |
+|-----------|-------------|
+| 000023 | Adds `users.account_type` (`human`/`service`) and `api_tokens.scopes` (JSON array). Existing users default to `human`; existing tokens default to `["*"]` to preserve behavior. Index on `users(account_type)`. |
+
+## [1.6.0] - 2026-05-13
+
+LogChef 1.6 narrows the **Team** abstraction to access control only and adds
+**Collections** — cross-team curation lists for saved queries. The unified
+Saved Queries view replaces the old team-scoped collections page with a flat,
+searchable table and a collection-picker dropdown. The release also adds a
+new **Team Editor** role and restructures the admin URLs for consistency.
+
+### API & URL changes
+- **Saved queries are source-scoped, not team-scoped.** `team_queries` is
+  rebuilt as `saved_queries(source_id, created_from_team_id, created_by, …)`.
+  Visibility: any user with source access via any team. Edit: creator +
+  global admin.
+- **`/api/v1/saved-queries/:id/resolve`** returns a transient
+  `resolved_team_id` computed from the user's access paths — no team
+  ownership stored on the query itself.
+- **Alerts de-teamed.** New `/api/v1/alerts` route group; `alerts.team_id`
+  dropped, `alerts.created_by` added.
+- **`query_shares` and `export_jobs` lose `team_id`.**
+- **New `/api/v1/collections`** — CRUD for collections + members + items.
+- **Collection mutation routes use `requireAnyTeamCollectionMutator`**
+  (admin or editor in any team). Team admin–only routes (membership
+  management, source linking, `/api/v1/users`) stay strict on
+  `requireAnyTeamAdmin`.
+- **Admin frontend URLs restructured.** `/management/*` → `/admin/*`,
+  `/profile` → `/settings/profile`, `/admin/sources/list` → `/admin/sources`,
+  `/admin/sources/edit/:id` → `/admin/sources/:id/edit`. No redirects from
+  old paths.
+- **Old team-scoped paths return 404.** No shims, no redirects.
+- **Frontend URL:** `/logs/saved/:queryId` is the canonical share link.
+
+### Added
+- **Collections** — Cross-team curation lists. Personal collection
+  auto-created per user ("My Collection"). Shared collections are
+  invite-only with `owner` + `member` roles. Items a member can't run
+  show with a `runnable: false` flag (lock icon in UI).
+- **Unified Saved Queries view** — Single page at `/logs/saved` with a
+  collection-picker dropdown (All Queries / My Collection / shared
+  collections), inline search, and a Metabase-style flat table.
+- **"Add to Collection" drawer** — Per-row action on saved queries.
+  Slide-out panel shows all collections as checkboxes for quick
+  pin/unpin. Create new collections inline.
+- **"Remove from collection" action** — When viewing a specific
+  collection, each row's menu gains a destructive remove action.
+- **Saved query resolve with `resolved_team_id`** — The `/resolve`
+  endpoint deterministically picks the correct team for execution using
+  priority: explicit `?team_id` hint → `created_from_team_id` →
+  first accessible team fallback.
+- **`created_from_team_id`** on saved queries — nullable metadata
+  recording which team context the query was saved from. Used as a
+  preference hint during resolve; not an ACL gate.
+- **Invite members by email** — Collection member invite uses an email
+  dropdown (same UX as team member management), not a raw user ID.
+- **Shareable saved-query links** with configurable TTL.
+- **Backend-streamed result downloads** with synchronous admission
+  control (HTTP 429 at capacity).
+- **Calendar month/year drill-down** in the date picker.
+- **OIDC `skip_email_verified_check`** option.
+  ([#85](https://github.com/mr-karan/logchef/issues/85),
+  [#86](https://github.com/mr-karan/logchef/pull/86))
+- **Native ClickHouse TLS.**
+  ([#88](https://github.com/mr-karan/logchef/pull/88))
+- **Team Editor role** — new team role between Member and Admin. Editors
+  can manage collections (create, rename, invite, pin items) and save
+  queries. They cannot invite team members or link sources — those stay
+  admin-only. ([#94](https://github.com/mr-karan/logchef/pull/94))
+- **Shared UI primitives** — `PageHeader`, `PageSection`, `EmptyState`,
+  `LoadingState` under `components/layout/`. Replace the ad-hoc empty/
+  loading/header markup across admin and settings pages with one
+  consistent visual language.
+- **`useTeamPermissions()` composable** — central frontend role-check
+  API: `isGlobalAdmin`, `isAnyTeamAdmin`, `isAnyTeamCollectionMutator`,
+  `isTeamAdmin(teamId)`, `isTeamCollectionMutator(teamId)`,
+  `canSaveQuery`, `canEditSavedQuery(query)`, `canManageCollection(c)`.
+- **Tests** — 18 backend cases for the new role helpers (cross-team
+  negatives + regression guards that editors stay distinct from admins),
+  28 frontend Vitest cases for `useTeamPermissions`.
+
+### Changed
+- **Saved Queries view is now the unified entry point.** The old two-page
+  layout (separate /logs/saved + /logs/collections list) is replaced by
+  a single flat table with the collection picker. `/logs/collections`
+  is a standalone management page (create, delete, navigate to detail).
+- **Alert notifications** drop `team_id` / `team_name` fields.
+  Recipients resolve to users directly.
+- **Explore UI polish** — quieter top bar, concrete query placeholders,
+  tighter histogram styling, Local|UTC segmented timezone control.
+- **Export → Download** rename; backend-streamed pipe is the only path.
+- **AI SQL insert** clears saved-query state and switches to SQL mode.
+- **Save button** in the query editor is now visible to all team members
+  (it was previously gated to admins by mistake; backend always allowed
+  it). Edit/delete of a saved query still requires the creator or a
+  global admin.
+- **Distinct icons** for LogchefQL vs SQL saved queries (`Search` and
+  `Database`); the previous near-identical file icons were hard to tell
+  apart at small sizes.
+- **Admin/settings pages** migrated to the shared `PageHeader` +
+  `PageSection` layout. The whole-page Card wrapper pattern is gone.
+- **Sidebar links** carry team + source context into Explorer and Alerts
+  via a single `resolveTo()` helper.
+
+### Fixed
+- **Unbounded query result OOM** — `[query] max_limit` cap (default 100k
+  rows). A large unbounded result set previously exhausted the browser
+  renderer.
+- **Long raw SQL in the URL** no longer trips the HTTP header size limit
+  on the server.
+- **"No source selected" race** — explorer waits for
+  `currentSourceDetails.id === contextStore.sourceId` before executing,
+  so newly-selected sources don't run the previous source's query.
+- **Stale-request guard** in `sourcesStore.loadSourceDetails` — a fast
+  source switch is no longer overwritten by an older in-flight response.
+- **Saved query loads wrong source** — resolved query's `source_id` now
+  overrides stale URL `?source=` param.
+- **Crash-safe export pruner** — interrupted prunes no longer leave
+  orphaned download files behind.
+- **Translate API errors are surfaced to the editor** instead of failing
+  silently.
+- **Export download URLs are relative**, so downloads work behind reverse
+  proxies that rewrite hostnames.
+
+### Removed
+- **Query Folders** (the team-scoped experiment from v1.6.0-dev).
+- **Bookmarks** (`is_bookmarked` column) — replaced by personal
+  collections.
+- **`team_id` on saved queries, alerts, query shares, export jobs.**
+- Dead frontend code paths (`loadTeamSourceQueries`,
+  `createTeamSourceQuery`, `useQueryFoldersStore`, etc.).
+
+### Migration notes (000016 → 000021)
+| Migration | What it does |
+|-----------|-------------|
+| 000016 | Drops `query_folders` + `query_folder_items` |
+| 000017 | Rebuilds `team_queries` → `saved_queries`, drops `team_id`, adds `created_by` |
+| 000018 | Drops `team_id` from `alerts`, `query_shares`, `export_jobs`; adds `alerts.created_by` |
+| 000019 | Creates `collections`, `collection_members`, `collection_items` |
+| 000020 | Drops `is_bookmarked`; seeds personal collections; migrates bookmarks to collection items |
+| 000021 | Adds `created_from_team_id` to `saved_queries`; backfills from `team_sources` |
+
+### Follow-ups
+- `logchef-mcp` (separate repo) needs rewiring to `/api/v1/saved-queries`.
+- Provisionable collections out of scope for 1.6.
+
+### Contributors
+- [@m0nikasingh](https://github.com/m0nikasingh) — OIDC email
+  verification skip
+  ([#86](https://github.com/mr-karan/logchef/pull/86)), native ClickHouse
+  TLS ([#88](https://github.com/mr-karan/logchef/pull/88)), AI SQL
+  insert mode fix ([#89](https://github.com/mr-karan/logchef/pull/89))
+
+## [1.5.0] - 2026-04-08
 
 ### Added
 - **Rich value autocomplete in LogchefQL editor** — After typing `host=`, the editor instantly suggests top field values with occurrence counts (e.g., `cdn.logchef.dev (1.7K)`). Suggestions come from the sidebar's cached field data — no additional network calls during typing. Supports partial matching inside quotes, auto-quoting string values, and proper escaping of special characters.
@@ -36,6 +445,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Noisy logs reduced** — Session management logs downgraded to DEBUG; structured slog source shortened to `file:line`.
 - **Cursor pointer restored** — Added `cursor-pointer` base rule for all interactive elements (TW4 preflight removed it).
 
+## [1.4.1] - 2026-04-02
+
+Maintenance release on top of v1.4.0.
+
+### Added
+- **Canonical request logging** — Every API request emits a structured log
+  line with the method, path, status, latency, user, and team. Companion
+  activity log tracks user-visible state changes for audit.
+
+### Changed
+- **Product name standardized to "Logchef"** — Replaced lingering "LogChef"
+  casing across the UI, docs, and log lines.
+- **Session management logs dropped from INFO to DEBUG.** Only `user.login`
+  stays at INFO; the rest is audit-grade noise that doesn't belong in the
+  default log stream.
+- **`slog` source field flattened to `file:line`.** Easier to grep, fewer
+  bytes per line.
+
+### Fixed
+- **Team admins can manage members on provisioned (managed) teams** —
+  Previously the managed flag locked them out of all membership edits.
+- **Idle ClickHouse connection cleanup** — Added `IdleTimeout` and a periodic
+  `QueryTracker` sweep so leaked connections don't accumulate.
+- **Provisioning docs moved into the sidebar** with a clearer "Getting
+  started" sub-section so first-time admins actually find them.
+
 ## [1.4.0] - 2026-03-30
 
 ### Added
@@ -60,6 +495,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **QueryEditor decomposed** — Extracted AiSqlDialog, VariableConfigSheet, and VariablesPanel into focused components (2645→1839 lines).
 - **Context store migrated** — Converted from Options API to Composition API setup function for consistency.
 - **QueryEditor props typed** — Replaced runtime prop definitions with TypeScript interface.
+
+## [CLI v0.1.5] - 2026-05-19
+
+### Added
+- **CSV export & streaming SQL** — New `--output csv` and `--stream` flags on
+  `logchef sql`. Stream large result sets directly without timing out, or
+  pipe them to a CSV file.
+- **v1.6.0 API compatibility** — CLI works with v1.6's de-teamed collections
+  API. Saved queries resolve from your team membership automatically.
+
+### Changed
+- **Product name standardized** — "LogChef" → "Logchef" across all CLI help
+  text, prompts, and the OIDC auth landing page.
 
 ## [CLI v0.1.4] - 2026-02-05
 
@@ -89,6 +537,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Date picker Now button auto-applies and fixes initial date format issues.
 - JSON strings embedded in log fields now auto-parse for better readability.
 - Table auto-resizes when filter sidebar closes.
+
+## [1.2.2] - 2026-01-27
+
+Maintenance release on top of v1.2.1. Bundles the CLI v0.1.3 bump.
+
+### Changed
+- **`versionString` linker flag now reaches the UI sidebar**, so the version
+  badge matches the running binary instead of falling back to `unknown`.
+- **Alertmanager UI settings removed** — Obsolete after the SMTP / webhook
+  alert delivery work in v1.2.0.
+
+### Fixed
+- **Migration description for the TLS setting** was misleading; corrected.
+- **Changelog template syntax** is now escaped so `{{ ... }}` examples render
+  literally.
+
+## [CLI v0.1.3] - 2026-01-27
+
+### Added
+- **`--timeout` flag on `query`** — Override the server-side query timeout
+  from the CLI.
+- **Timezone auto-detection on `auth`** — `logchef auth` now records your
+  local IANA timezone in the saved context so subsequent queries use it by
+  default. Config gained a `version` field so future schema changes can
+  migrate.
+- **Pre-built binary install docs** — `docs/integration/cli` now lists
+  download URLs for Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows.
+
+### Fixed
+- **LogchefQL prompt example** in the interactive mode used outdated syntax
+  (`level=error` without quotes). Corrected to `level="error"`.
 
 ## [1.2.1] - 2026-01-21
 
@@ -392,10 +871,14 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v1.4.1...HEAD
+[1.7.0]: https://github.com/mr-karan/logchef/compare/v1.6.1...v1.7.0
+[1.6.1]: https://github.com/mr-karan/logchef/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/mr-karan/logchef/compare/v1.5.0...v1.6.0
+[1.5.0]: https://github.com/mr-karan/logchef/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/mr-karan/logchef/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/mr-karan/logchef/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.3.0
+[1.3.0]: https://github.com/mr-karan/logchef/compare/v1.2.2...v1.3.0
+[1.2.2]: https://github.com/mr-karan/logchef/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/mr-karan/logchef/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/mr-karan/logchef/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/mr-karan/logchef/compare/v1.0.0...v1.1.0

@@ -18,7 +18,8 @@ import {
 import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
+import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
@@ -74,6 +75,18 @@ const tableColumns = ref<CustomColumnDef[]>([])
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
+// Context modal state (ClickHouse-backed sources only until other providers
+// expose a log-context capability)
+const supportsLogContext = computed(() => props.source?.source_type !== 'victorialogs')
+const showContextModal = ref(false)
+const contextLog = ref<Record<string, any> | null>(null)
+
+// Open context modal for a log
+const openContextModal = (log: Record<string, any>) => {
+    contextLog.value = log
+    showContextModal.value = true
+}
+
 const columnVisibility = ref<VisibilityState>({})
 const pagination = ref<PaginationState>({
     pageIndex: 0,
@@ -802,6 +815,16 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     <ChevronUp class="h-3 w-3" />
                                                     <span>Collapse</span>
                                                 </button>
+                                                <Button 
+                                                    v-if="supportsLogContext"
+                                                    variant="outline" 
+                                                    size="sm" 
+                                                    class="h-7 text-xs"
+                                                    @click.stop="openContextModal(row.original)"
+                                                >
+                                                    <Clock class="h-3 w-3 mr-1" />
+                                                    Show Context
+                                                </Button>
                                             </div>
                                             <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
                                         </div>
@@ -822,6 +845,17 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             </div>
         </div>
     </div>
+
+    <!-- Log Context Modal -->
+    <LogTimelineModal
+        v-if="contextLog"
+        :is-open="showContextModal"
+        :source-id="props.sourceId"
+        :team-id="props.teamId ?? 0"
+        :log="contextLog"
+        :timestamp-field="timestampFieldName"
+        @update:is-open="showContextModal = $event"
+    />
 </template>
 
 <style scoped>
@@ -1087,15 +1121,18 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 /* Base HTTP Method Tag Style */
 :deep(.http-method) {
     display: inline-block;
+    min-width: 52px;
+    text-align: center;
     padding: 1px 6px;
     border-radius: 4px;
-    font-weight: 400;
+    font-weight: 500;
     font-size: 0.6875rem;
     /* 11px */
     line-height: 1.4;
     margin: 0 2px;
     border: 1px solid transparent;
     white-space: nowrap;
+    font-variant-numeric: tabular-nums;
 }
 
 /* Utility HTTP Methods (PATCH, OPTIONS) */
@@ -1349,12 +1386,6 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 }
 
 /* HTTP Method Colors */
-:deep(.http-method) {
-    padding: 1px 4px;
-    border-radius: 3px;
-    font-weight: 500;
-}
-
 :deep(.http-method-utility) {
     background-color: #f3f4f6;
     /* gray-100 */

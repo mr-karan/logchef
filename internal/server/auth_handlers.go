@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -236,6 +237,12 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		"role", loginUser.Role,
 	)
 
+	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
+	// a transient failure here must not block login.
+	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, loginUser); err != nil {
+		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", loginUser.ID)
+	}
+
 	// Set the application session cookie.
 	c.Cookie(&fiber.Cookie{
 		Name:     sessionCookieName,
@@ -314,19 +321,14 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	}
 
 	// Extract claims from the ID token
-	var claims struct {
-		Email         string `json:"email"`
-		EmailVerified bool   `json:"email_verified"`
-		Name          string `json:"name"`
-	}
+	var claims auth.OIDCClaims
 	if err := idToken.Claims(&claims); err != nil {
 		s.log.Error("CLI token exchange: failed to parse ID token claims", "error", err)
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Failed to parse token claims", models.AuthenticationErrorType)
 	}
 
-	// Ensure email is verified
-	if !claims.EmailVerified {
-		s.log.Warn("CLI token exchange: unverified email", "email", claims.Email)
+	// Verify email_verified claim.
+	if err := auth.CheckEmailVerified(claims, s.config.OIDC.SkipEmailVerifiedCheck, s.log, "CLI token exchange"); err != nil {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Email not verified", models.AuthenticationErrorType)
 	}
 
@@ -341,8 +343,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Failed to look up user")
 	}
 
-	// Check if user is active
-	if user.Status == models.UserStatusInactive {
+	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
 		s.log.Warn("CLI token exchange: inactive user", "user_id", user.ID, "email", user.Email)
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User account is inactive", models.AuthenticationErrorType)
 	}
@@ -352,7 +353,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	// Set expiration to 30 days from now
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 
-	tokenResponse, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt)
+	tokenResponse, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt, []models.TokenScope{models.TokenScopeAll})
 	if err != nil {
 		s.log.Error("CLI token exchange: failed to create API token", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create API token")

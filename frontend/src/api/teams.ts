@@ -29,6 +29,7 @@ export interface TeamMember {
   updated_at: string;
   email: string;
   full_name: string;
+  account_type?: "human" | "service";
 }
 
 export interface CreateTeamRequest {

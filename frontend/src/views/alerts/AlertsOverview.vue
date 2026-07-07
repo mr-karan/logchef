@@ -3,6 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
 import {
+  Bell,
   BellRing,
   Clock3,
   Copy,
@@ -43,11 +44,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ui/ErrorAlert.vue";
+import EmptyState from "@/components/layout/EmptyState.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
+import { useMetaStore } from "@/stores/meta";
 import { useContextSync } from "@/composables/useContextSync";
 import type { Alert } from "@/api/alerts";
 
@@ -58,6 +61,7 @@ const alertsStore = useAlertsStore();
 const contextStore = useContextStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
+const metaStore = useMetaStore();
 
 const {
   initialize: initializeContext,
@@ -77,8 +81,8 @@ const availableTeams = computed(() => teamsStore.teams || []);
 const availableSources = computed(() => sourcesStore.teamSources || []);
 
 const isLoadingAlerts = computed(() => {
-  if (!currentTeamId.value || !currentSourceId.value) return false;
-  return alertsStore.isLoadingOperation(`fetchAlerts-${currentTeamId.value}-${currentSourceId.value}`);
+  if (!currentSourceId.value) return false;
+  return alertsStore.isLoadingOperation(`fetchAlerts-${currentSourceId.value}`);
 });
 
 const loadError = computed((): { message: string; operation?: string } | null => {
@@ -122,8 +126,9 @@ function confirmDelete(alert: Alert) {
 }
 
 async function handleDelete() {
-  if (!alertToDelete.value || !currentTeamId.value || !currentSourceId.value) return;
-  await alertsStore.deleteAlert(currentTeamId.value, currentSourceId.value, alertToDelete.value.id);
+  if (!alertToDelete.value) return;
+  // Alerts are no longer team-scoped — the API ignores teamId/sourceId.
+  await alertsStore.deleteAlert(undefined, undefined, alertToDelete.value.id);
   showDeleteDialog.value = false;
   alertToDelete.value = null;
 }
@@ -134,8 +139,7 @@ function cancelDelete() {
 }
 
 async function toggleAlert(alert: Alert) {
-  if (!currentTeamId.value || !currentSourceId.value) return;
-  await alertsStore.toggleAlertActivity(currentTeamId.value, currentSourceId.value, alert.id, !alert.is_active);
+  await alertsStore.toggleAlertActivity(undefined, undefined, alert.id, !alert.is_active);
 }
 
 function openHistory(alert: Alert) {
@@ -147,8 +151,9 @@ function duplicateAlert(alert: Alert) {
 }
 
 async function retryLoad() {
-  if (!currentTeamId.value || !currentSourceId.value) return;
-  await alertsStore.fetchAlerts(currentTeamId.value, currentSourceId.value);
+  // sourceId is optional — without one the API returns every alert the
+  // caller can see across all their team-mediated sources.
+  await alertsStore.fetchAlerts(undefined, currentSourceId.value ?? undefined);
 }
 
 function refreshAlerts() {
@@ -255,7 +260,13 @@ onMounted(async () => {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <EmptyState
+    v-if="!metaStore.alertsEnabled"
+    :icon="Bell"
+    title="Alerting is disabled"
+    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+  />
+  <div v-else class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold tracking-tight">Alert Rules</h1>
@@ -330,8 +341,8 @@ onMounted(async () => {
                 <!-- Active Toggle -->
                 <TableCell class="py-3">
                   <Switch 
-                    :checked="alert.is_active" 
-                    @update:checked="toggleAlert(alert)"
+                    :model-value="alert.is_active"
+                    @update:model-value="toggleAlert(alert)"
                     :title="alert.is_active ? 'Disable alert' : 'Enable alert'"
                   />
                 </TableCell>

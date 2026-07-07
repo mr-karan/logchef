@@ -89,6 +89,23 @@ pub struct ContextDefaults {
     pub timezone: Option<String>,
 }
 
+impl ContextDefaults {
+    pub fn team_with_env(&self) -> Option<String> {
+        env_default("LOGCHEF_DEFAULT_TEAM").or_else(|| self.team.clone())
+    }
+
+    pub fn source_with_env(&self) -> Option<String> {
+        env_default("LOGCHEF_DEFAULT_SOURCE").or_else(|| self.source.clone())
+    }
+}
+
+fn env_default(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
 fn default_limit() -> u32 {
     100
 }

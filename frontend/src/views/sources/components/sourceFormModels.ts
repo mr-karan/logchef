@@ -11,6 +11,7 @@ export type VictoriaLogsAuthMode = "none" | "basic" | "bearer";
 
 export interface ClickHouseSourceFormState {
   host: string;
+  tlsEnable: boolean;
   enableAuth: boolean;
   username: string;
   password: string;
@@ -64,6 +65,7 @@ SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;`;
 export function createDefaultClickHouseFormState(): ClickHouseSourceFormState {
   return {
     host: "",
+    tlsEnable: false,
     enableAuth: false,
     username: "",
     password: "",
@@ -178,6 +180,7 @@ export function clickHouseFormStateFromSource(source: Source): ClickHouseSourceF
 
   return {
     host: connection.host || "",
+    tlsEnable: Boolean(connection.tls_enable),
     enableAuth,
     username: connection.username || "",
     password: connection.password || "",

@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Button } from '@/components/ui/button'
 import TableControls from './TableControls.vue'
+import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
+import { Clock } from 'lucide-vue-next'
 import { 
   useVueTable, 
   getCoreRowModel, 
@@ -376,6 +379,19 @@ const renderedRows = computed(() => {
 // Handle row click interactions
 const expandedRowId = ref<string | null>(null)
 
+// Context modal state (ClickHouse-backed sources only until other providers
+// expose a log-context capability)
+const supportsLogContext = computed(() => props.source?.source_type !== 'victorialogs')
+const showContextModal = ref(false)
+const contextLog = ref<Record<string, any> | null>(null)
+
+// Open context modal for a log
+const openContextModal = (log: Record<string, any>, event: Event) => {
+  event.stopPropagation()
+  contextLog.value = log
+  showContextModal.value = true
+}
+
 // Simple click to expand/collapse (only if not selecting text)
 const handleClick = (event: MouseEvent, rowId: string) => {
   // Don't toggle if user is selecting text
@@ -443,6 +459,18 @@ const handleClick = (event: MouseEvent, rowId: string) => {
               v-html="highlightText(row.message, 'message')"
               :title="expandedRowId === row.id ? '' : row.rawMessage"
             ></span>
+            <!-- Show Context button when expanded -->
+            <div v-if="expandedRowId === row.id && supportsLogContext" class="flex items-center gap-2 mt-1">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                class="h-6 text-xs px-2"
+                @click="openContextModal(row.raw, $event)"
+              >
+                <Clock class="h-3 w-3 mr-1" />
+                Show Context
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -457,6 +485,17 @@ const handleClick = (event: MouseEvent, rowId: string) => {
         </template>
       </div>
     </ScrollArea>
+
+    <!-- Log Context Modal -->
+    <LogTimelineModal
+      v-if="contextLog"
+      :is-open="showContextModal"
+      :source-id="String(props.sourceId)"
+      :team-id="Number(props.teamId) || 0"
+      :log="contextLog"
+      :timestamp-field="props.timestampField"
+      @update:is-open="showContextModal = $event"
+    />
   </div>
 </template>
 

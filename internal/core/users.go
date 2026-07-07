@@ -2,13 +2,13 @@ package core
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -33,12 +33,6 @@ var (
 	// Ideally, these would live in teams.go and source.go respectively.
 	ErrTeamNotFound = errors.New("team not found")
 )
-
-// IsNotFoundError checks if the error is a known not found error.
-// TODO: Refactor to check errors defined in respective packages (users, teams, source) if errors are split.
-func IsNotFoundError(err error) bool {
-	return errors.Is(err, ErrUserNotFound) || errors.Is(err, ErrTeamNotFound) || errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound) || errors.Is(err, models.ErrUserNotFound) || errors.Is(err, models.ErrTeamNotFound)
-}
 
 // --- User Validation Functions ---
 
@@ -97,16 +91,47 @@ func validateUserUpdate(updateData models.User) error {
 
 // --- User Management Functions ---
 
-// ListUsers returns all users from the database.
-func ListUsers(ctx context.Context, db *sqlite.DB) ([]*models.User, error) {
+// ListUsers returns all interactive users from the database.
+func ListUsers(ctx context.Context, db store.StoreOps) ([]*models.User, error) {
 	return db.ListUsers(ctx)
 }
 
+// ListServiceAccounts returns all non-login service principals.
+func ListServiceAccounts(ctx context.Context, db store.StoreOps) ([]*models.User, error) {
+	return db.ListServiceAccounts(ctx)
+}
+
+// CreateServiceAccount creates a service principal that can own scoped API tokens.
+func CreateServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, name string) (*models.User, error) {
+	name = strings.TrimSpace(name)
+	if len(name) < 2 || len(name) > 100 {
+		return nil, &ValidationError{Field: "name", Message: "service account name must be between 2 and 100 characters"}
+	}
+
+	email := fmt.Sprintf("svc-%d@service.logchef.internal", time.Now().UTC().UnixNano())
+	user := &models.User{
+		Email:       email,
+		FullName:    name,
+		Role:        models.UserRoleMember,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeService,
+		Timestamps: models.Timestamps{
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	if err := db.CreateUser(ctx, user); err != nil {
+		log.Error("error creating service account in db", "error", err, "name", name)
+		return nil, fmt.Errorf("error creating service account: %w", err)
+	}
+	return user, nil
+}
+
 // GetUser retrieves a specific user by their ID.
-func GetUser(ctx context.Context, db *sqlite.DB, id models.UserID) (*models.User, error) {
+func GetUser(ctx context.Context, db store.StoreOps, id models.UserID) (*models.User, error) {
 	user, err := db.GetUser(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("error getting user from db: %w", err)
@@ -115,10 +140,10 @@ func GetUser(ctx context.Context, db *sqlite.DB, id models.UserID) (*models.User
 }
 
 // GetUserByEmail retrieves a specific user by their email address.
-func GetUserByEmail(ctx context.Context, db *sqlite.DB, email string) (*models.User, error) {
+func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*models.User, error) {
 	user, err := db.GetUserByEmail(ctx, email)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return nil, ErrUserNotFound
 		}
 		return nil, fmt.Errorf("error getting user by email from db: %w", err)
@@ -127,7 +152,7 @@ func GetUserByEmail(ctx context.Context, db *sqlite.DB, email string) (*models.U
 }
 
 // CreateUser creates a new user in the database.
-func CreateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
 	// Default role if empty
 	if role == "" {
 		role = models.UserRoleMember
@@ -153,7 +178,7 @@ func CreateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, email, ful
 	}
 
 	// Only proceed if it's a "not found" error, which is expected
-	if !sqlite.IsNotFoundError(err) && !sqlite.IsUserNotFoundError(err) {
+	if !models.IsNotFound(err) {
 		log.Error("error checking if user exists", "error", err, "email", email)
 		return nil, fmt.Errorf("error checking if user exists: %w", err)
 	}
@@ -183,14 +208,14 @@ func CreateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, email, ful
 }
 
 // UpdateUser updates an existing user's information.
-func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, updateData models.User) error {
+func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
 	}
 
 	existing, err := db.GetUser(ctx, userID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return ErrUserNotFound
 		}
 		log.Error("failed to get existing user for update", "error", err, "user_id", userID)
@@ -216,7 +241,7 @@ func UpdateUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID mod
 	return nil
 }
 
-func applyUserUpdates(ctx context.Context, db *sqlite.DB, existing *models.User, updateData models.User) (bool, error) {
+func applyUserUpdates(ctx context.Context, db store.StoreOps, existing *models.User, updateData models.User) (bool, error) {
 	updated := false
 
 	if updateData.FullName != "" && updateData.FullName != existing.FullName {
@@ -258,7 +283,7 @@ func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error
 	return true, nil
 }
 
-func applyStatusUpdate(ctx context.Context, db *sqlite.DB, existing *models.User, updateData models.User) (bool, error) {
+func applyStatusUpdate(ctx context.Context, db store.StoreOps, existing *models.User, updateData models.User) (bool, error) {
 	if updateData.Status == "" || updateData.Status == existing.Status {
 		return false, nil
 	}
@@ -280,11 +305,11 @@ func applyStatusUpdate(ctx context.Context, db *sqlite.DB, existing *models.User
 }
 
 // DeleteUser deletes a user from the database.
-func DeleteUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.UserID) error {
+func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
 	// Validate user exists
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrUserNotFound) {
+		if models.IsNotFound(err) {
 			return ErrUserNotFound
 		}
 		log.Error("failed to get user for deletion check", "error", err, "user_id", id)
@@ -316,8 +341,27 @@ func DeleteUser(ctx context.Context, db *sqlite.DB, log *slog.Logger, id models.
 	return nil
 }
 
+// DeleteServiceAccount deletes a service principal and its tokens/memberships.
+func DeleteServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
+	existing, err := db.GetUser(ctx, id)
+	if err != nil {
+		if models.IsNotFound(err) {
+			return ErrUserNotFound
+		}
+		return fmt.Errorf("error checking existing service account: %w", err)
+	}
+	if existing.AccountType != models.UserAccountTypeService {
+		return ErrUserNotFound
+	}
+	if err := db.DeleteUser(ctx, id); err != nil {
+		log.Error("failed to delete service account from db", "error", err, "user_id", id)
+		return fmt.Errorf("error deleting service account: %w", err)
+	}
+	return nil
+}
+
 // InitAdminUsers ensures that specified admin users exist and are configured correctly.
-func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminEmails []string) error {
+func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, adminEmails []string) error {
 	if len(adminEmails) == 0 {
 		log.Warn("no admin emails configured, skipping admin user initialization")
 		return nil
@@ -332,7 +376,7 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 			// Log the error type for debugging
 
 			// Check if it's a "not found" error, which means we need to create the user
-			if sqlite.IsNotFoundError(err) || sqlite.IsUserNotFoundError(err) {
+			if models.IsNotFound(err) {
 				// User doesn't exist, create a new admin user
 				log.Debug("creating admin user", "email", email)
 				_, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
@@ -393,11 +437,12 @@ func InitAdminUsers(ctx context.Context, db *sqlite.DB, log *slog.Logger, adminE
 
 	if len(setupErrors) > 0 {
 		// Combine errors into a single error message
-		combinedError := "errors during admin user initialization:"
+		var combinedError strings.Builder
+		combinedError.WriteString("errors during admin user initialization:")
 		for _, e := range setupErrors {
-			combinedError += "\n - " + e.Error()
+			combinedError.WriteString("\n - " + e.Error())
 		}
-		return errors.New(combinedError)
+		return errors.New(combinedError.String())
 	}
 
 	log.Info("admin user initialization complete")

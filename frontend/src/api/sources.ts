@@ -1,5 +1,5 @@
 import { apiClient } from "./apiUtils";
-import type { SavedTeamQuery, Team } from "./types";
+import type { Team } from "./types";
 import type { QueryLanguage } from "@/lib/queryMetadata";
 
 export interface ClickHouseConnectionInfo {
@@ -8,6 +8,7 @@ export interface ClickHouseConnectionInfo {
   password?: string;
   database: string;
   table_name: string;
+  tls_enable?: boolean;
 }
 
 export interface VictoriaLogsConnectionInfo {
@@ -32,6 +33,18 @@ export type SourceConnectionInfo =
   | ClickHouseConnectionInfo
   | VictoriaLogsConnectionInfo
   | Record<string, unknown>;
+
+// Narrow a source's connection to the ClickHouse shape. Returns null for
+// non-ClickHouse sources so callers can gate table-coordinate UI.
+export function asClickHouseConnection(
+  connection: SourceConnectionInfo | undefined | null,
+): ClickHouseConnectionInfo | null {
+  if (!connection || typeof connection !== "object") return null;
+  if ("table_name" in connection && "database" in connection) {
+    return connection as ClickHouseConnectionInfo;
+  }
+  return null;
+}
 
 export interface ValidateConnectionRequestInfo {
   source_type?: string;
@@ -79,12 +92,6 @@ export interface SourceWithTeams extends Source {
   teams: Team[];
 }
 
-export interface TeamGroupedQuery {
-  team_id: number;
-  team_name: string;
-  queries: SavedTeamQuery[];
-}
-
 export interface CreateSourcePayload {
   name: string;
   source_type?: string;
@@ -104,13 +111,6 @@ export interface UpdateSourcePayload {
   meta_ts_field?: string;
   meta_severity_field?: string;
   connection?: SourceConnectionInfo;
-}
-
-export interface CreateTeamQueryRequest {
-  team_id: number;
-  name: string;
-  description?: string;
-  query_content: string;
 }
 
 export interface InspectionDetail {
@@ -203,15 +203,6 @@ export const sourcesApi = {
     apiClient.get<SourceInspection>(`/teams/${teamId}/sources/${sourceId}/stats`),
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
-
-  // Team-scoped source queries
-  listTeamSourceQueries: (teamId: number, sourceId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/queries`),
-  createTeamSourceQuery: (teamId: number, sourceId: number, payload: Omit<CreateTeamQueryRequest, "team_id">) =>
-    apiClient.post<SavedTeamQuery>(
-      `/teams/${teamId}/sources/${sourceId}/queries`,
-      { ...payload, team_id: teamId }
-    ),
 
   // Validation
   validateSourceConnection: (connectionInfo: ValidateConnectionRequestInfo) =>

@@ -4,6 +4,7 @@ export interface User {
   full_name: string;
   role: "admin" | "member";
   status: "active" | "inactive";
+  account_type: "human" | "service";
   avatar?: string;
   last_login_at?: string;
   last_active_at?: string;

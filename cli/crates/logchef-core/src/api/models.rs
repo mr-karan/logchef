@@ -73,6 +73,8 @@ pub struct Team {
 pub struct Source {
     pub id: i64,
     pub name: String,
+    #[serde(default, rename = "_meta_ts_field")]
+    pub meta_ts_field: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default = "default_source_type")]
@@ -146,6 +148,8 @@ pub struct Column {
     pub name: String,
     #[serde(rename = "type")]
     pub column_type: String,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -174,6 +178,34 @@ pub struct SqlQueryRequest {
     pub end_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query_timeout: Option<u32>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportSqlRequest {
+    pub raw_sql: String,
+    pub format: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_timeout: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExportJobResponse {
+    pub id: String,
+    pub status: String,
+    #[serde(default)]
+    pub format: Option<String>,
+    #[serde(default)]
+    pub file_name: Option<String>,
+    #[serde(default)]
+    pub error_message: Option<String>,
+    #[serde(default)]
+    pub rows_exported: Option<i64>,
+    #[serde(default)]
+    pub bytes_written: Option<i64>,
+    #[serde(default)]
+    pub download_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -258,8 +290,9 @@ pub struct TokenUser {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
     pub id: i64,
-    pub team_id: i64,
     pub source_id: i64,
+    #[serde(default)]
+    pub created_from_team_id: Option<i64>,
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
@@ -269,9 +302,20 @@ pub struct Collection {
     #[serde(default)]
     pub is_bookmarked: bool,
     #[serde(default)]
+    pub created_by: Option<i64>,
+    #[serde(default)]
     pub created_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub updated_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub source_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResolvedSavedQuery {
+    #[serde(flatten)]
+    pub query: Collection,
+    pub resolved_team_id: i64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -314,5 +358,5 @@ pub struct CollectionVariable {
     #[serde(default, rename = "inputType")]
     pub input_type: Option<String>,
     #[serde(default)]
-    pub value: Option<String>,
+    pub value: Option<serde_json::Value>,
 }

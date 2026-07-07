@@ -127,10 +127,11 @@ const clearMultiSelectValues = (variable: VariableState) => {
                   <div v-for="opt in variable.options" :key="opt.value"
                     class="flex items-center gap-2 px-2 py-1.5 rounded-sm hover:bg-muted cursor-pointer"
                     @click="toggleMultiSelectValue(variable, opt.value)">
+                    <!-- Display-only: the enclosing row's @click drives the toggle.
+                         Binding @update here too would double-toggle on checkbox clicks. -->
                     <Checkbox
-                      :checked="isMultiSelectValueSelected(variable, opt.value)"
-                      @update:checked="toggleMultiSelectValue(variable, opt.value)"
-                      class="h-4 w-4"
+                      :model-value="isMultiSelectValueSelected(variable, opt.value)"
+                      class="h-4 w-4 pointer-events-none"
                     />
                     <span class="text-xs">{{ opt.label || opt.value }}</span>
                   </div>
@@ -148,7 +149,7 @@ const clearMultiSelectValues = (variable: VariableState) => {
           <!-- Single-select dropdown -->
           <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
             :model-value="String(variable.value ?? '')"
-            @update:model-value="(val) => variable.value = val">
+            @update:model-value="(val) => variable.value = val as string">
             <SelectTrigger :id="`var-${variable.name}`"
               class="h-7 text-xs w-full transition-colors focus:ring-1 focus:ring-primary/50"
               :class="{

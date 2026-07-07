@@ -119,6 +119,12 @@ smtp_from = "alerts@example.com"
 smtp_security = "starttls"
 ```
 
+`enabled` is the **server-wide** alerting switch. With `alerts.enabled = false`
+(or `LOGCHEF_ALERTS__ENABLED=false`) Logchef hides all alerting UI and every
+alert endpoint returns `503` — useful for exploration-only deployments, or to
+keep alert evaluation on a single instance when running multiple replicas
+against a shared [Postgres backend](/operations/database-backends/).
+
 ## Troubleshooting
 
 **Alerts not firing:** Check the alert is enabled, test the query manually, verify the threshold makes sense for your data volume, and confirm the selected query language matches the source type.

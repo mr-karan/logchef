@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use clap::Args;
+use clap::{Args, Subcommand};
 use inquire::Text;
 use logchef_core::Config;
 use logchef_core::api::Client;
@@ -10,6 +10,9 @@ use crate::cli::GlobalArgs;
 
 #[derive(Args)]
 pub struct AuthArgs {
+    #[command(subcommand)]
+    command: Option<AuthCmd>,
+
     #[arg(long, short)]
     logout: bool,
 
@@ -17,8 +20,19 @@ pub struct AuthArgs {
     status: bool,
 }
 
+#[derive(Subcommand)]
+enum AuthCmd {
+    /// Print the active context, server URL, and token source without
+    /// hitting the network. Use `whoami` to fetch the user identity.
+    Current,
+}
+
 pub async fn run(args: AuthArgs, global: GlobalArgs) -> Result<()> {
     let mut config = Config::load().context("Failed to load config")?;
+
+    if let Some(AuthCmd::Current) = args.command {
+        return current(&config, &global);
+    }
 
     if args.logout {
         return logout(&mut config, &global);
@@ -29,6 +43,96 @@ pub async fn run(args: AuthArgs, global: GlobalArgs) -> Result<()> {
     }
 
     login(&mut config, global).await
+}
+
+fn current(config: &Config, global: &GlobalArgs) -> Result<()> {
+    // Resolve context without hitting the network. Prefers --context, then
+    // --server (matched against saved contexts), then the active context.
+    let (ctx_name, server_url, token_line) = if let Some(name) = &global.context {
+        let ctx = config
+            .get_context(name)
+            .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", name))?;
+        let line = token_line(
+            ctx.token.is_some(),
+            global.token.is_some(),
+            false,
+            ctx.token_expires_at,
+        );
+        (name.clone(), ctx.server_url.clone(), line)
+    } else if let Some(url) = &global.server {
+        if let Some((name, ctx)) = config.find_context_by_url(url) {
+            let line = token_line(
+                ctx.token.is_some(),
+                global.token.is_some(),
+                false,
+                ctx.token_expires_at,
+            );
+            (name.to_string(), ctx.server_url.clone(), line)
+        } else {
+            let line = token_line(false, global.token.is_some(), true, None);
+            ("(ephemeral)".to_string(), url.clone(), line)
+        }
+    } else if let Some(name) = config.current_context_name() {
+        let ctx = config
+            .current_context()
+            .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
+        let line = token_line(
+            ctx.token.is_some(),
+            global.token.is_some(),
+            false,
+            ctx.token_expires_at,
+        );
+        (name.to_string(), ctx.server_url.clone(), line)
+    } else if let Ok(env_url) = std::env::var("LOGCHEF_SERVER_URL") {
+        let line = token_line(false, global.token.is_some(), true, None);
+        ("(ephemeral)".to_string(), env_url, line)
+    } else {
+        anyhow::bail!("No context configured and no --server/LOGCHEF_SERVER_URL provided.");
+    };
+
+    println!("context: {}", ctx_name);
+    println!("server:  {}", server_url);
+    println!("token:   {}", token_line);
+
+    if let Ok(team) = std::env::var("LOGCHEF_DEFAULT_TEAM") {
+        println!("team:    {} (from LOGCHEF_DEFAULT_TEAM)", team);
+    }
+    if let Ok(source) = std::env::var("LOGCHEF_DEFAULT_SOURCE") {
+        println!("source:  {} (from LOGCHEF_DEFAULT_SOURCE)", source);
+    }
+
+    Ok(())
+}
+
+fn token_line(
+    saved_token: bool,
+    env_token: bool,
+    is_ephemeral: bool,
+    expires_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> String {
+    // --token / LOGCHEF_AUTH_TOKEN takes precedence over the saved token, and
+    // we don't know the env-supplied token's expiry, so skip it there.
+    if env_token {
+        return "set (from --token/LOGCHEF_AUTH_TOKEN)".to_string();
+    }
+    if saved_token {
+        let mut s = "set (from config".to_string();
+        if let Some(ts) = expires_at {
+            let expired = ts < chrono::Utc::now();
+            s.push_str(if expired { ", EXPIRED " } else { ", expires " });
+            s.push_str(&ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+            if expired {
+                s.push_str(" — run `logchef auth` to sign in again");
+            }
+        }
+        s.push(')');
+        return s;
+    }
+    if is_ephemeral {
+        "not set (ephemeral context; pass --token or run `logchef auth`)".to_string()
+    } else {
+        "not set (run `logchef auth` to sign in)".to_string()
+    }
 }
 
 fn logout(config: &mut Config, global: &GlobalArgs) -> Result<()> {

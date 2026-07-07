@@ -26,7 +26,7 @@ const (
 type Variable struct {
 	Name  string       `json:"name"`
 	Type  VariableType `json:"type"`
-	Value interface{}  `json:"value"`
+	Value any          `json:"value"`
 }
 
 var (
@@ -37,14 +37,14 @@ var (
 	optionalPattern  = regexp.MustCompile(`\[\[(.+?)\]\]`)
 )
 
-func isValueProvided(value interface{}) bool {
+func isValueProvided(value any) bool {
 	if value == nil {
 		return false
 	}
 	switch v := value.(type) {
 	case string:
 		return strings.TrimSpace(v) != ""
-	case []interface{}:
+	case []any:
 		return len(v) > 0
 	case []string:
 		return len(v) > 0
@@ -164,20 +164,20 @@ func formatValue(v Variable) (string, error) {
 	}
 }
 
-func isArrayValue(value interface{}) bool {
+func isArrayValue(value any) bool {
 	switch value.(type) {
-	case []interface{}, []string:
+	case []any, []string:
 		return true
 	default:
 		return false
 	}
 }
 
-func formatArray(value interface{}, varType VariableType) (string, error) {
+func formatArray(value any, varType VariableType) (string, error) {
 	var items []string
 
 	switch arr := value.(type) {
-	case []interface{}:
+	case []any:
 		for _, item := range arr {
 			formatted, err := formatSingleValue(item, varType)
 			if err != nil {
@@ -204,7 +204,7 @@ func formatArray(value interface{}, varType VariableType) (string, error) {
 	return strings.Join(items, ", "), nil
 }
 
-func formatSingleValue(value interface{}, varType VariableType) (string, error) {
+func formatSingleValue(value any, varType VariableType) (string, error) {
 	switch varType {
 	case TypeString, TypeText:
 		return formatString(value)
@@ -218,7 +218,7 @@ func formatSingleValue(value interface{}, varType VariableType) (string, error) 
 }
 
 // formatString escapes and quotes a string value.
-func formatString(value interface{}) (string, error) {
+func formatString(value any) (string, error) {
 	var s string
 	switch val := value.(type) {
 	case string:
@@ -238,7 +238,7 @@ func formatString(value interface{}) (string, error) {
 }
 
 // formatNumber validates and returns a numeric value.
-func formatNumber(value interface{}) (string, error) {
+func formatNumber(value any) (string, error) {
 	switch val := value.(type) {
 	case float64:
 		// Check if it's actually an integer.
@@ -262,7 +262,7 @@ func formatNumber(value interface{}) (string, error) {
 }
 
 // formatDate parses and formats a date value as ClickHouse datetime.
-func formatDate(value interface{}) (string, error) {
+func formatDate(value any) (string, error) {
 	switch val := value.(type) {
 	case string:
 		// Try various date formats, including those from HTML datetime-local inputs.

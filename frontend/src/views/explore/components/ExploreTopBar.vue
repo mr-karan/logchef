@@ -19,16 +19,23 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '@/components/ui/popover'
-import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/queryMetadata'
 import TeamSourceSelector from './TeamSourceSelector.vue'
 import type { Source } from '@/api/sources'
@@ -266,9 +273,8 @@ defineExpose({
       </TooltipProvider>
       <DropdownMenu v-else>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 gap-1">
-            <span class="text-muted-foreground">Limit:</span>
-            <span class="font-medium">{{ currentLimit.toLocaleString() }}</span>
+          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal" title="Result limit">
+            {{ currentLimit.toLocaleString() }} rows
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="w-32">
@@ -350,5 +356,6 @@ defineExpose({
         </PopoverContent>
       </Popover>
     </div>
+
   </div>
 </template>

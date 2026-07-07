@@ -1,12 +1,15 @@
-import { ref, computed, watch, type Ref } from 'vue';
+import { ref, computed, nextTick, watch, type Ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { useExploreStore } from '@/stores/explore';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { useContextStore } from '@/stores/context';
+import { useToast } from '@/composables/useToast';
+import { TOAST_DURATION } from '@/lib/constants';
 import { savedQueriesApi } from '@/api/savedQueries';
 import { useTeamSourceContext } from '@/composables/useTeamSourceContext';
 import { useTeamSourceRouteSync } from '@/composables/useTeamSourceRouteSync';
+import { exploreApi } from '@/api/explore';
 
 export type UrlSyncState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -15,7 +18,7 @@ interface UrlStateReturn {
   error: Ref<string | null>;
   isReady: Ref<boolean>;
   initialize: () => Promise<void>;
-  pushHistoryEntry: () => void;
+  pushHistoryEntry: () => Promise<void>;
   selectTeam: (teamId: number) => Promise<void>;
   selectSource: (sourceId: number) => Promise<void>;
 }
@@ -29,6 +32,7 @@ export function useUrlState(): UrlStateReturn {
   const contextStore = useContextStore();
   const teamSourceContext = useTeamSourceContext();
   const routeSync = useTeamSourceRouteSync();
+  const { toast } = useToast();
 
   const state = ref<UrlSyncState>('idle');
   const error = ref<string | null>(null);
@@ -38,6 +42,10 @@ export function useUrlState(): UrlStateReturn {
   let skipNextSync = false;
   let pendingRouteSyncKey: string | null = null;
   let syncPaused = false;
+
+  function isExploreRoute(): boolean {
+    return route.path === '/logs/explore';
+  }
 
   function getRouteQueryParams(): Record<string, string> {
     const fullPath = route.fullPath || '';
@@ -97,6 +105,9 @@ export function useUrlState(): UrlStateReturn {
     const id = getValue('id');
     if (id) normalized.id = id;
 
+    const share = getValue('share');
+    if (share) normalized.share = share;
+
     return normalized;
   }
 
@@ -121,6 +132,13 @@ export function useUrlState(): UrlStateReturn {
     }
 
     if (contextStore.sourceId && sourcesStore.isLoadingSourceDetails) {
+      return false;
+    }
+
+    if (
+      contextStore.sourceId &&
+      sourcesStore.currentSourceDetails?.id !== contextStore.sourceId
+    ) {
       return false;
     }
 
@@ -149,6 +167,11 @@ export function useUrlState(): UrlStateReturn {
   }
 
   async function initialize(): Promise<void> {
+    if (!isExploreRoute()) {
+      state.value = 'ready';
+      return;
+    }
+
     if (state.value === 'loading') {
       return;
     }
@@ -181,6 +204,39 @@ export function useUrlState(): UrlStateReturn {
       }
 
       const params = normalizeQueryParams(getRouteQueryParams() as Record<string, unknown>);
+
+      if (params.share) {
+        pendingQueryResolve.value = true;
+        try {
+          const response = await exploreApi.getQueryShare(params.share);
+          if (response.data) {
+            const resolvedTeamId = response.data.team_id ?? (params.team ? parseInt(params.team, 10) : null);
+            if (!resolvedTeamId) {
+              throw new Error("Share link has no team context");
+            }
+            const shareTeam = resolvedTeamId.toString();
+            const shareSource = response.data.source_id.toString();
+            params.team = shareTeam;
+            params.source = shareSource;
+            contextStore.selectTeam(resolvedTeamId);
+            exploreStore.suppressNextSourceReset(response.data.source_id);
+            contextStore.selectSource(response.data.source_id);
+
+            const newQuery: Record<string, string> = {
+              team: shareTeam,
+              source: shareSource,
+              share: params.share,
+            };
+            await router.replace({ query: newQuery });
+
+            const hydrateResult = exploreStore.hydrateFromQueryShare(response.data);
+            shouldExecute = hydrateResult.shouldExecute;
+          }
+        } finally {
+          pendingQueryResolve.value = false;
+        }
+      }
+
       const routeSelection = await routeSync.applyRouteContext();
       const teamId = routeSelection.teamId;
       const resolvedSourceId = routeSelection.sourceId;
@@ -206,33 +262,56 @@ export function useUrlState(): UrlStateReturn {
         }
       }
 
-      const result = exploreStore.initializeFromUrl(params);
-      shouldExecute = result.shouldExecute;
+      if (!params.share) {
+        const result = exploreStore.initializeFromUrl(params);
+        shouldExecute = result.shouldExecute;
 
-      if (result.needsResolve && result.queryId) {
-        pendingQueryResolve.value = true;
+        if (result.needsResolve && result.queryId) {
+          pendingQueryResolve.value = true;
 
-        try {
-          // Use team/source from URL params, not from store state
-          // The stores might not be updated yet or might have different values
-          const teamId = params.team ? parseInt(params.team, 10) : teamsStore.currentTeamId;
-          const sourceId = params.source ? parseInt(params.source, 10) : exploreStore.sourceId;
-
-          if (teamId && sourceId) {
-            const response = await savedQueriesApi.resolveQuery(
-              teamId,
-              sourceId,
-              parseInt(result.queryId)
-            );
-
+          try {
+            const response = await savedQueriesApi.resolve(parseInt(result.queryId), params.team);
             if (response.data) {
+              const resolvedTeam = String(response.data.resolved_team_id);
+              const resolvedSource = String(response.data.source_id);
+
+              let contextChanged = false;
+              if (response.data.resolved_team_id && resolvedTeam !== params.team) {
+                params.team = resolvedTeam;
+                contextStore.selectTeam(response.data.resolved_team_id);
+                contextChanged = true;
+              }
+
+              if (response.data.source_id && resolvedSource !== params.source) {
+                params.source = resolvedSource;
+                exploreStore.suppressNextSourceReset(response.data.source_id);
+                contextStore.selectSource(response.data.source_id);
+                contextChanged = true;
+              } else if (response.data.source_id && contextStore.sourceId !== response.data.source_id) {
+                exploreStore.suppressNextSourceReset(response.data.source_id);
+                contextStore.selectSource(response.data.source_id);
+                contextChanged = true;
+              }
+
+              if (resolvedTeam !== route.query.team || resolvedSource !== route.query.source) {
+                await router.replace({
+                  path: '/logs/explore',
+                  query: { team: resolvedTeam, source: resolvedSource, id: result.queryId },
+                });
+              }
+
+              if (contextChanged) {
+                await nextTick();
+              }
+
               const hydrateResult = exploreStore.hydrateFromResolvedQuery(response.data);
               shouldExecute = hydrateResult.shouldExecute;
             }
+          } finally {
+            pendingQueryResolve.value = false;
           }
-        } finally {
-          pendingQueryResolve.value = false;
         }
+
       }
 
       await waitForReadiness();
@@ -251,22 +330,29 @@ export function useUrlState(): UrlStateReturn {
     }
   }
 
-  function waitForReadiness(maxWaitMs = 5000): Promise<void> {
+  function waitForReadiness(maxWaitMs = 5000): Promise<boolean> {
     if (checkReadiness()) {
-      return Promise.resolve();
+      return Promise.resolve(true);
     }
 
     return new Promise((resolve) => {
       const timeout = setTimeout(() => {
         stopWatch();
         console.warn('useUrlState: Readiness timeout, proceeding anyway');
-        resolve();
+        toast({
+          title: "Loading is taking longer than expected",
+          description: "Some teams or sources may not be ready yet — results could be incomplete.",
+          duration: TOAST_DURATION.WARNING,
+        });
+        resolve(false);
       }, maxWaitMs);
 
       const stopWatch = watch(
         [
           () => teamsStore.teams,
           () => teamsStore.currentTeamId,
+          () => contextStore.sourceId,
+          () => sourcesStore.currentSourceDetails?.id,
           () => sourcesStore.isLoadingTeamSources,
           () => sourcesStore.isLoadingSourceDetails,
           () => pendingQueryResolve.value,
@@ -275,7 +361,7 @@ export function useUrlState(): UrlStateReturn {
           if (checkReadiness()) {
             clearTimeout(timeout);
             stopWatch();
-            resolve();
+            resolve(true);
           }
         },
         { immediate: true }
@@ -284,6 +370,10 @@ export function useUrlState(): UrlStateReturn {
   }
 
   function syncUrlFromStore(): void {
+    if (!isExploreRoute()) {
+      return;
+    }
+
     if (state.value !== 'ready') {
       return;
     }
@@ -305,7 +395,7 @@ export function useUrlState(): UrlStateReturn {
 
     if (nextKey !== currentKey) {
       pendingRouteSyncKey = nextKey;
-      router.replace({ query }).catch(err => {
+      router.replace({ path: '/logs/explore', query }).catch(err => {
         pendingRouteSyncKey = null;
         if (err.name !== 'NavigationDuplicated') {
           console.error('useUrlState: Error updating URL:', err);
@@ -314,7 +404,11 @@ export function useUrlState(): UrlStateReturn {
     }
   }
 
-  function pushHistoryEntry(): void {
+  async function pushHistoryEntry(): Promise<void> {
+    if (!isExploreRoute()) {
+      return;
+    }
+
     if (state.value !== 'ready') {
       return;
     }
@@ -323,12 +417,15 @@ export function useUrlState(): UrlStateReturn {
     const query = normalizeQueryParams(exploreStore.urlQueryParameters as Record<string, unknown>);
     pendingRouteSyncKey = buildQueryKey(query);
 
-    router.push({ query }).catch(err => {
+    try {
+      await router.push({ path: '/logs/explore', query });
+    } catch (err: any) {
+      skipNextSync = false;
       pendingRouteSyncKey = null;
       if (err.name !== 'NavigationDuplicated') {
         console.error('useUrlState: Error pushing history:', err);
       }
-    });
+    }
   }
 
   async function selectTeam(teamId: number): Promise<void> {
@@ -357,6 +454,7 @@ export function useUrlState(): UrlStateReturn {
       () => exploreStore.selectedRelativeTime,
       () => exploreStore.activeMode,
       () => exploreStore.selectedQueryId,
+      () => exploreStore.activeShareToken,
     ],
     () => {
       syncUrlFromStore();
@@ -368,6 +466,11 @@ export function useUrlState(): UrlStateReturn {
     () => route.fullPath,
     async () => {
       if (state.value !== 'ready') {
+        return;
+      }
+
+      if (!isExploreRoute()) {
+        pendingRouteSyncKey = null;
         return;
       }
 
@@ -394,6 +497,11 @@ export function useUrlState(): UrlStateReturn {
       }
 
       if (normalized.id) {
+        return;
+      }
+
+      if (normalized.share) {
+        await initialize();
         return;
       }
 

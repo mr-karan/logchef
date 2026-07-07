@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import type { AcceptableValue } from 'reka-ui'
 
 type TeamOption = UserTeamMembership | TeamWithMemberCount
 
@@ -65,14 +66,14 @@ const sourceTriggerClass = computed(() =>
     : 'h-8 text-sm w-64'
 )
 
-function handleTeamChange(teamIdValue: string) {
-  const teamId = parseInt(teamIdValue, 10)
+function handleTeamChange(value: AcceptableValue) {
+  const teamId = parseInt(String(value ?? ''), 10)
   if (Number.isNaN(teamId)) return
   emit('update:team', teamId)
 }
 
-function handleSourceChange(sourceIdValue: string) {
-  const sourceId = parseInt(sourceIdValue, 10)
+function handleSourceChange(value: AcceptableValue) {
+  const sourceId = parseInt(String(value ?? ''), 10)
   if (Number.isNaN(sourceId)) return
   emit('update:source', sourceId)
 }

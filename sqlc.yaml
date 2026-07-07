@@ -1,28 +1,55 @@
 version: "2"
 sql:
   - engine: "sqlite"
-    queries: "internal/sqlite/queries.sql"
+    queries: "internal/store/sqlite/queries.sql"
     schema:
-      - "internal/sqlite/migrations/000001_init.up.sql"
-      - "internal/sqlite/migrations/000002_add_editor_role.up.sql"
-      - "internal/sqlite/migrations/000003_add_api_tokens.up.sql"
-      - "internal/sqlite/migrations/000004_add_alerts.up.sql"
-      - "internal/sqlite/migrations/000005_add_system_settings.up.sql"
-      - "internal/sqlite/migrations/000006_add_bookmarks.up.sql"
-      - "internal/sqlite/migrations/000007_add_alert_notifications.up.sql"
-      - "internal/sqlite/migrations/000009_add_user_preferences.up.sql"
-      - "internal/sqlite/migrations/000010_improve_bookmark_index.up.sql"
-      - "internal/sqlite/migrations/000011_add_managed_column.up.sql"
-      - "internal/sqlite/migrations/000012_datasource_sources.up.sql"
-      - "internal/sqlite/migrations/000013_query_languages.up.sql"
-      - "internal/sqlite/migrations/000014_remove_legacy_query_type.up.sql"
+      - "internal/store/sqlite/migrations/000001_init.up.sql"
+      - "internal/store/sqlite/migrations/000002_add_editor_role.up.sql"
+      - "internal/store/sqlite/migrations/000003_add_api_tokens.up.sql"
+      - "internal/store/sqlite/migrations/000004_add_alerts.up.sql"
+      - "internal/store/sqlite/migrations/000005_add_system_settings.up.sql"
+      - "internal/store/sqlite/migrations/000006_add_bookmarks.up.sql"
+      - "internal/store/sqlite/migrations/000007_add_alert_notifications.up.sql"
+      - "internal/store/sqlite/migrations/000009_add_user_preferences.up.sql"
+      - "internal/store/sqlite/migrations/000010_improve_bookmark_index.up.sql"
+      - "internal/store/sqlite/migrations/000011_add_managed_column.up.sql"
+      - "internal/store/sqlite/migrations/000012_add_query_shares.up.sql"
+      - "internal/store/sqlite/migrations/000013_add_export_jobs.up.sql"
+      - "internal/store/sqlite/migrations/000014_add_tls_enable.up.sql"
+      - "internal/store/sqlite/migrations/000015_add_query_folders.up.sql"
+      - "internal/store/sqlite/migrations/000016_drop_query_folders.up.sql"
+      - "internal/store/sqlite/migrations/000017_de_team_saved_queries.up.sql"
+      - "internal/store/sqlite/migrations/000018_drop_residual_team_coupling.up.sql"
+      - "internal/store/sqlite/migrations/000019_add_collections.up.sql"
+      - "internal/store/sqlite/migrations/000020_drop_bookmarks_seed_personal_collections.up.sql"
+      - "internal/store/sqlite/migrations/000021_saved_query_created_from_team.up.sql"
+      - "internal/store/sqlite/migrations/000022_add_team_id_to_query_shares.up.sql"
+      - "internal/store/sqlite/migrations/000023_add_service_token_scopes.up.sql"
+      - "internal/store/sqlite/migrations/000024_add_collection_editor_role.up.sql"
+      - "internal/store/sqlite/migrations/000025_datasource_sources.up.sql"
+      - "internal/store/sqlite/migrations/000026_query_languages.up.sql"
+      - "internal/store/sqlite/migrations/000027_remove_legacy_query_type.up.sql"
     gen:
       go:
         package: "sqlc"
-        out: "internal/sqlite/sqlc"
+        out: "internal/store/sqlite/sqlc"
         sql_package: "database/sql"
         emit_json_tags: true
         emit_prepared_queries: true
+        emit_interface: true
+        emit_exact_table_names: false
+        emit_empty_slices: true
+  - engine: "postgresql"
+    queries: "internal/store/postgres/queries.sql"
+    schema:
+      - "internal/store/postgres/migrations/000001_init.up.sql"
+      - "internal/store/postgres/migrations/000002_datasource_multibackend.up.sql"
+    gen:
+      go:
+        package: "sqlc"
+        out: "internal/store/postgres/sqlc"
+        sql_package: "pgx/v5"
+        emit_json_tags: true
         emit_interface: true
         emit_exact_table_names: false
         emit_empty_slices: true

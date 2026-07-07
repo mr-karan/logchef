@@ -79,12 +79,273 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
-    <!-- Unreleased -->
+    <!-- v1.7.0 -->
     <article class="version">
       <div class="version-header">
-        <span class="version-tag unreleased">Unreleased</span>
-        <span class="version-badge">Next</span>
-        <a href="https://github.com/mr-karan/logchef/compare/v1.4.0...HEAD" class="version-link" target="_blank">Compare &rarr;</a>
+        <span class="version-tag">v1.7.0</span>
+        <span class="version-date">Jul 6, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.7.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Logchef 1.7 makes the metadata store <strong>pluggable</strong>. Alongside the default single-binary SQLite, you can now run an <strong>opt-in Postgres backend</strong> so multiple Logchef replicas share state behind a load balancer &mdash; the groundwork for high availability. SQLite stays the default, so single-instance setups are unchanged. The release also lets you <strong>switch alerting off</strong> server-wide, opens <strong>collection curation</strong> to any participant, adds an admin <strong>"All Queries"</strong> browse view, and brings <strong>type-to-filter pickers and searchable, sortable tables</strong> to the member and resource pages.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Opt-in Postgres metadata backend</strong> &mdash; Store users, teams, sources, saved queries, collections, alerts, tokens, and settings in Postgres instead of SQLite, so several Logchef replicas can serve any request off shared state. Set <code>database.driver = "postgres"</code> with a <code>[postgres]</code> DSN (or the matching env vars). SQLite remains the default and the single-binary start is unchanged; your logs always stay in ClickHouse. <a href="/operations/database-backends/">Database backends &amp; HA &rarr;</a></li>
+          <li><strong>Turn alerting off server-wide</strong> &mdash; Set <code>alerts.enabled = false</code> and the UI hides alerting entirely while every alert endpoint returns a clean <code>503</code>. Useful when you run Logchef purely for exploration, or want a single alert-evaluating instance.</li>
+          <li><strong>"All Queries" browse for admins</strong> &mdash; Global admins can now see every saved query, including ones not pinned to any collection. Queries on sources you can't reach show as locked.</li>
+          <li><strong>Redesigned Library</strong> &mdash; Saved queries and collections merge into a single <code>/logs/library</code> (collections rail + detail pane). Collections gain an <strong>editor</strong> role, and editing a saved query is delegated to its creator, a global admin, or an owner/editor of a shared collection that contains it. The Save dialog gets an inline collection picker, and the UI only offers Edit/Delete actions you're actually allowed to take.</li>
+          <li><strong>Curate shared collections as a member</strong> &mdash; Any participant (owner, editor, or member) can pin, move, and remove queries in a shared collection. Renaming, deleting, and managing members stays owner-only.</li>
+          <li><strong>Collection detail upgrades</strong> &mdash; Pin an existing saved query with an "Add query" search picker, move a query to another collection, and see each query's author in a new "Created by" column.</li>
+          <li><strong>Searchable pickers &amp; tables</strong> &mdash; Type-to-filter dropdowns for inviting collection members and adding service accounts to teams, plus a search box and sortable columns on Manage Sources and team-member lists.</li>
+          <li><strong>Token expiry everywhere</strong> &mdash; The service-tokens admin page now shows the same expiry status as the profile API-token list (never expires / expires / expiring soon / expired), and the CLI flags an expired saved token in <code>logchef auth current</code>.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Pluggable store architecture</strong> &mdash; The metadata layer now sits behind a backend-agnostic contract with a shared conformance suite that runs against both SQLite and Postgres in CI, so the two backends stay in lockstep.</li>
+          <li><strong>Upgraded to Go 1.26</strong> with hot-path optimizations across query handling.</li>
+          <li><strong>Collection member list is owner-only</strong> &mdash; now enforced on the server, not just hidden in the UI.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Inline permission errors show a toast</strong> instead of bouncing you to a full-page Forbidden view &mdash; toggles, saves, and deletes stay put on a 403.</li>
+          <li><strong>Dead toggles work again</strong> &mdash; several Switch/Checkbox controls (admin Active toggle, alert enable/disable, source TLS/auth, column selector, variable multi-selects) were silently no-op'd by a binding mismatch and now respond.</li>
+          <li><strong>Saved-query resolver no longer crashes</strong> on certain resolve paths &mdash; it returns a clean error instead.</li>
+          <li><strong>Accurate access errors</strong> for exports and shared queries &mdash; <code>404</code> only when something's missing, <code>403</code> when you lack team access.</li>
+          <li><strong>Tighter memory accounting</strong> on large responses (fixes an under-count from the performance pass), cancellable field-value loading, and identifier validation on provisioned sources.</li>
+          <li><strong>UI polish</strong> &mdash; the add-query dialog no longer overflows, the Library "All queries" view survives navigation, and the date picker's type drift is fixed (TypeScript checks are green and enforced in CI again).</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v1.6.1 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.6.1</span>
+        <span class="version-date">May 20, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Patch release. Adds <strong>Service accounts</strong> &mdash; non-login principals you can add to teams and issue scoped API tokens for. Every token now carries an explicit scope list (e.g. <code>logs:read</code>, <code>alerts:write</code>) enforced by middleware, with presets and an active-preset highlight in the picker. The team member dialog distinguishes humans from service accounts, and service principals get a clear badge in team rosters. Also surfaces ClickHouse column comments through the schema API for the new LogChef CLI v0.1.6 to consume.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Service accounts</strong> &mdash; Non-login principals managed at <strong>Administration &rarr; Service Tokens</strong>. Cannot authenticate via OIDC or CLI exchange; exist only to own tokens and team memberships. <a href="/features/service-tokens/">Learn more &rarr;</a></li>
+          <li><strong>Scoped API tokens</strong> &mdash; Tokens now carry an explicit list of scopes (<code>logs:read</code>, <code>alerts:write</code>, &hellip;). Presets in the picker: Read-only, Logs viewer, Logs analyst, Alerts manager, Source admin, Full access. The active preset stays highlighted while the selection matches.</li>
+          <li><strong>Account-type toggle in Add Team Member</strong> &mdash; Pick Human user or Service account; the dropdown filters to that type and shows the principal's name with email as a subtitle instead of the raw service-account email.</li>
+          <li><strong>Service account badge</strong> in team member tables &mdash; bot icon + "Service account" pill so automation principals are visually distinct from humans.</li>
+          <li><strong>Manage teams on each service account card</strong> &mdash; team chips, a destructive warning when an account is in zero teams (its tokens won't reach any source), and an in-place add/remove dialog.</li>
+          <li><strong>Schema column descriptions</strong> &mdash; The schema API now surfaces ClickHouse column comments. Consumed by LogChef CLI v0.1.6's <code>schema</code> command.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>"Create API Token" defaults to the Read-only preset.</strong> Previously defaulted to Full access, which made the scope picker look entirely disabled out of the box.</li>
+          <li><strong>Read-only preset is now every <code>:read</code> scope.</strong> Adds <code>tokens:read</code>, <code>users:read</code>, <code>settings:read</code>. Admin-gated routes still enforce admin role separately.</li>
+          <li><strong><code>/admin/users/*</code> routes 404 on service accounts.</strong> Service principals are managed via the dedicated <code>/admin/service-accounts/*</code> path so they can't be promoted through the human-user CRUD path.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Scope picker checkboxes are interactive again.</strong> The component was bound to <code>:checked</code>; the underlying primitive uses <code>model-value</code>. The bug was hidden behind the old Full-access default.</li>
+          <li><strong>Token creation rejects empty scopes (HTTP 400).</strong> Requests with no scopes used to silently mint a full-access token.</li>
+          <li><strong>Corrupt or empty stored scopes fail closed.</strong> A token row with malformed scope JSON now grants no access instead of full access.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- CLI v0.1.6 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.6</span>
+        <span class="version-date">May 20, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.6" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Major CLI release. Adds four new subcommands (<code>saved-queries</code>, <code>find</code>, <code>tail</code>, <code>whoami</code>, <code>auth current</code>), full time-range injection on raw SQL, agent-friendly output formats (<code>msg</code>, <code>json-flat</code>), a symmetric <code>--explain</code> / <code>--dry-run</code> split across <code>query</code> and <code>sql</code>, and TTY-aware highlighting so pipes don't need <code>--no-highlight</code>. Requires Logchef server v1.6.1+ for the saved-queries resolve endpoint and ClickHouse column descriptions.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong><code>saved-queries</code></strong> &mdash; List and run saved queries by name, numeric ID, or a pasted explorer URL. <code>--var</code>, <code>--limit</code>, <code>--show-sql</code>, and all output-format overrides supported.</li>
+          <li><strong><code>find &lt;pattern&gt;</code></strong> &mdash; Discover sources with recent matches for a service, job, host, or message pattern. Each match line is followed by per-column samples: label-shaped columns (service/host/job_name) get the top 3 values with counts; free-form text columns (msg) get one truncated sample row. Suppress with <code>--no-samples</code>. Per-source timeout defaults to 30s.</li>
+          <li><strong><code>tail &lt;query&gt;</code></strong> &mdash; Follow matching LogChefQL rows by polling. <code>text</code>, <code>jsonl</code>, or <code>msg</code> output; stable dedup across column-order changes; one-shot stderr warning when a poll returns at <code>--limit</code>.</li>
+          <li><strong><code>whoami</code></strong> &mdash; Print the authenticated user and accessible teams.</li>
+          <li><strong><code>auth current</code></strong> &mdash; Offline subcommand that prints the active context, server URL, and token source (config vs env), plus the token expiry when it came from saved config. No network call. Useful for "is my <code>LOGCHEF_AUTH_TOKEN</code> even set?" diagnostics.</li>
+          <li><strong>SQL time flags on <code>sql</code></strong> &mdash; <code>--since</code> / <code>--from</code> / <code>--to</code> inject a timestamp predicate before the first top-level <code>GROUP BY</code> / <code>ORDER BY</code> / <code>LIMIT</code> / <code>HAVING</code> / <code>SETTINGS</code> / <code>FORMAT</code>. The scanner skips string literals, quoted identifiers, comments, and parenthesized subqueries; use <code>__START__</code> / <code>__END__</code> placeholders for full control (e.g. CTEs).</li>
+          <li><strong><code>--explain</code> / <code>--show-sql</code> on <code>query</code> and <code>sql</code></strong> &mdash; Print <code>Generated SQL: &lt;sql&gt;</code> to stderr, then continue executing. Plays cleanly with <code>--output jsonl | jq</code> pipes.</li>
+          <li><strong><code>--dry-run</code> on <code>query</code> and <code>sql</code></strong> &mdash; Print the resolved SQL to stdout (no prefix) and exit without keeping results. <code>sql --dry-run</code> is fully offline; <code>query --dry-run</code> calls the server once for LogChefQL translation.</li>
+          <li><strong><code>--output msg</code></strong> &mdash; Print only the message column (one row per line) on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>. Falls back to the first selected column when <code>msg</code> isn't projected.</li>
+          <li><strong><code>--output json-flat</code></strong> &mdash; Hoist JSON-shaped <code>msg</code> fields to top-level JSON rows on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>.</li>
+          <li><strong><code>LOGCHEF_DEFAULT_TEAM</code> / <code>LOGCHEF_DEFAULT_SOURCE</code></strong> &mdash; Env defaults when <code>--team</code> / <code>--source</code> are omitted. Precedence: flag &rarr; env &rarr; saved config.</li>
+          <li><strong>Schema column descriptions</strong> &mdash; <code>schema --output text</code> shows a new DESCRIPTION column when the source's ClickHouse columns carry comments; <code>schema --output json</code> includes them inline.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Highlighting auto-disables on non-TTY output.</strong> All five subcommands (<code>query</code>, <code>sql</code>, <code>collections</code>, <code>saved-queries</code>, <code>tail</code>) skip ANSI escapes when stdout is piped, so <code>... | jq</code> and <code>... &gt; file</code> produce clean output without <code>--no-highlight</code>. The flag still works as an explicit override.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- CLI v0.1.5 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.5</span>
+        <span class="version-date">May 19, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.5" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>CSV export & streaming SQL</strong> &mdash; New <code>--output csv</code> and <code>--stream</code> flags on <code>logchef sql</code>. Stream large result sets directly without timing out, or pipe them to a CSV file.</li>
+          <li><strong>v1.6.0 API compatibility</strong> &mdash; CLI now works with Logchef 1.6's de-teamed collections API. Saved queries resolve from your team membership automatically.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Product name standardized</strong> &mdash; "LogChef" &rarr; "Logchef" throughout all CLI help text, prompts, and auth pages.</li>
+        </ul>
+      </div>
+    </article>
+
+
+    <!-- v1.6.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.6.0</span>
+        <span class="version-date">May 13, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        Logchef 1.6 reorganizes saved queries around <strong>Collections</strong> &mdash; cross-team curation lists you can share with teammates. Teams now exist purely for access control. A new <strong>Editor</strong> team role sits between Member and Admin: editors can save queries and manage collections without getting full admin rights.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Collections</strong> &mdash; Group saved queries into shareable lists. Everyone gets a personal collection automatically. Shared collections are invite-only; queries you can't run show with a lock icon.</li>
+          <li><strong>Unified Saved Queries page</strong> &mdash; One place to browse, search, and pin queries. Pick "All Queries", your personal collection, or any shared collection from a dropdown at the top.</li>
+          <li><strong>"Add to Collection" drawer</strong> &mdash; Open the menu on any saved query and tick the collections you want it pinned to. Create new collections inline.</li>
+          <li><strong>Editor team role</strong> &mdash; A new role for teammates who curate queries and collections. Editors can save queries, create collections, and invite collection members. They can't invite team members or link sources &mdash; those stay admin-only.</li>
+          <li><strong>Share a saved query with a link</strong> &mdash; <code>/logs/saved/:queryId</code> resolves the right team and source automatically, so the recipient lands directly on the query.</li>
+          <li><strong>CSV / JSON downloads</strong> stream from the backend with admission control, so very large exports don't tip the server over.</li>
+          <li><strong>Calendar month/year drill-down</strong> in the date picker.</li>
+          <li><strong>OIDC <code>skip_email_verified_check</code></strong> &mdash; Skip the email-verified claim on providers that don't pass it through (e.g. Cloudflare Access in front of an upstream IdP). (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>)</li>
+          <li><strong>Native ClickHouse TLS</strong> &mdash; Configure TLS directly in the source connection instead of relying on stunnel/sidecars. (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>)</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Save your own queries.</strong> The Save button is now visible to every team member (it was hidden from non-admins by mistake). Editing or deleting a saved query still requires the original creator or a global admin.</li>
+          <li><strong>Distinct icons for LogchefQL and SQL</strong> in the saved queries list, so you can tell them apart at a glance.</li>
+          <li><strong>Cleaner admin and settings pages</strong> &mdash; consistent header, sections, and empty-state styling across Users, Teams, Sources, System Settings, Profile, and Preferences.</li>
+          <li><strong>Saved queries belong to a source, not a team.</strong> Anyone with source access can see and run them. The team you saved from is just a hint used to pick the right access path.</li>
+          <li><strong>Explore UI polish</strong> &mdash; quieter top bar, concrete query placeholders, Local|UTC timezone toggle.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type removed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M19 12H5"/></svg>
+          Removed
+        </div>
+        <ul class="change-list">
+          <li><strong>Query Folders</strong> &mdash; replaced by Collections.</li>
+          <li><strong>Bookmarks</strong> &mdash; your starred queries automatically move to your personal collection.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Very large query results</strong> are now capped (<code>[query] max_limit</code>, default 100k rows) so the browser doesn't run out of memory.</li>
+          <li><strong>Long raw SQL in the URL</strong> no longer trips the server's HTTP header size limit.</li>
+          <li><strong>Switching sources is race-free</strong> &mdash; the explorer waits for the new source's schema before running a query, and a slower in-flight response can't overwrite a faster one.</li>
+          <li><strong>Saved queries open against the right source</strong> &mdash; the query's source overrides any stale source param in the URL.</li>
+          <li><strong>Export job pruner is crash-safe</strong> &mdash; interrupted prunes no longer leave orphaned download files.</li>
+          <li><strong>Translate API errors</strong> are surfaced to the editor instead of failing silently.</li>
+          <li><strong>Export download URLs are relative</strong>, so downloads work behind reverse proxies that rewrite hostnames.</li>
+        </ul>
+      </div>
+
+      <div class="contributors">
+        <strong>Contributors:</strong> <a href="https://github.com/m0nikasingh" target="_blank">@m0nikasingh</a> &mdash; OIDC email verification skip (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), native ClickHouse TLS (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>), AI SQL insert mode fix (<a href="https://github.com/mr-karan/logchef/pull/89" target="_blank">#89</a>)
+      </div>
+    </article>
+
+    <!-- v1.5.0 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.5.0</span>
+        <span class="version-date">Apr 8, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.5.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <div class="change-section">
@@ -101,7 +362,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Improved
+          Changed
         </div>
         <ul class="change-list">
           <li><strong>New visual theme</strong> &mdash; Upgraded to Tailwind CSS v4 with Vega/Zinc/Blue theme, sharper borders, and bolder chart colors</li>
@@ -127,12 +388,54 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
     </article>
 
+    <!-- v1.4.1 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.4.1</span>
+        <span class="version-date">Apr 2, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.4.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Canonical request logging &amp; activity logs</strong> &mdash; Every API request emits a structured line with method, path, status, latency, user, and team. A companion activity log tracks user-visible state changes for audit.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Product name standardized to "Logchef"</strong> &mdash; Lingering "LogChef" casing replaced across the UI, docs, and log lines.</li>
+          <li><strong>Session-management logs dropped to DEBUG</strong> &mdash; Only <code>user.login</code> stays at INFO; the rest was audit-grade noise.</li>
+          <li><strong><code>slog</code> source field flattened to <code>file:line</code></strong> &mdash; Easier to grep, fewer bytes per line.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Team admins can manage members on provisioned teams.</strong> The managed flag was locking them out of all membership edits.</li>
+          <li><strong>Idle ClickHouse connection cleanup</strong> &mdash; Added <code>IdleTimeout</code> and a periodic <code>QueryTracker</code> sweep so leaked connections don't accumulate.</li>
+          <li><strong>Provisioning docs moved into the sidebar</strong> with a clearer "Getting started" sub-section.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.4.0 -->
     <article class="version">
       <div class="version-header">
         <span class="version-tag">v1.4.0</span>
         <span class="version-date">Mar 30, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.4.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
@@ -167,7 +470,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <article class="version">
       <div class="version-header">
         <span class="version-tag">CLI v0.1.4</span>
-        <span class="version-date">2026-02-05</span>
+        <span class="version-date">Feb 5, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.4" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <div class="change-section">
@@ -185,7 +489,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Improved
+          Changed
         </div>
         <ul class="change-list">
           <li><strong>CLI guidance</strong> — Missing team/source errors now suggest <code>logchef teams</code> and <code>logchef sources --team &lt;team&gt;</code></li>
@@ -217,7 +521,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Improved
+          Changed
         </div>
         <ul class="change-list">
           <li><strong>SQL editor max height</strong> — Editor now caps at 300px with scrollbar for lengthy queries, leaving more room for results</li>
@@ -238,23 +542,22 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
     </article>
 
-    <!-- v1.2.1 + CLI v0.1.2 -->
+    <!-- v1.2.2 -->
     <article class="version">
       <div class="version-header">
-        <span class="version-tag">v1.2.1</span>
-        <span class="version-date">Jan 21, 2026</span>
-        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.2.1" class="version-link" target="_blank">Release notes →</a>
+        <span class="version-tag">v1.2.2</span>
+        <span class="version-date">Jan 27, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.2.2" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <div class="change-section">
-        <div class="change-type added">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
-          Added
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
         </div>
         <ul class="change-list">
-          <li><strong>Run saved queries from CLI</strong> — New <code>logchef collections</code> command to list and execute your saved queries directly from the terminal</li>
-          <li><strong>Interactive CLI mode</strong> — Run <code>logchef query</code> or <code>logchef sql</code> without arguments and get guided prompts to select your team, source, and enter your query</li>
-          <li><strong>Copy CLI command from web</strong> — Click the terminal icon in the explore toolbar to copy the equivalent CLI command for your current query</li>
+          <li><strong>Version sidebar matches the running binary</strong> &mdash; The <code>versionString</code> linker flag is wired through to the UI, so the version badge no longer falls back to <code>unknown</code>.</li>
+          <li><strong>Alertmanager UI settings removed</strong> &mdash; Obsolete after the SMTP / webhook alert delivery work in v1.2.0.</li>
         </ul>
       </div>
 
@@ -264,7 +567,79 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Browser navigation</strong> — Back and forward buttons now correctly restore your previous query and results</li>
+          <li><strong>TLS migration description corrected</strong> &mdash; The migration description for the alert-TLS toggle was misleading.</li>
+          <li><strong>Changelog template syntax escaped</strong> &mdash; <code>{"{{ ... }}"}</code> examples now render literally instead of being interpolated.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- CLI v0.1.3 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.3</span>
+        <span class="version-date">Jan 27, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.3" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong><code>--timeout</code> on <code>query</code></strong> &mdash; Override the server-side query timeout from the CLI.</li>
+          <li><strong>Timezone auto-detection on <code>auth</code></strong> &mdash; <code>logchef auth</code> records your local IANA timezone in the saved context so subsequent queries use it by default. Config gained a <code>version</code> field for future schema migrations.</li>
+          <li><strong>Pre-built binary install docs</strong> &mdash; <code>docs/integration/cli</code> now lists download URLs for Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>LogchefQL prompt example</strong> &mdash; Interactive mode now shows <code>level="error"</code> instead of the older unquoted form.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- CLI v0.1.2 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">CLI v0.1.2</span>
+        <span class="version-date">Jan 21, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.2" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Run saved queries from CLI</strong> &mdash; New <code>logchef collections</code> command to list and execute your saved queries directly from the terminal.</li>
+          <li><strong>Interactive CLI mode</strong> &mdash; Run <code>logchef query</code> or <code>logchef sql</code> without arguments and get guided prompts to select your team, source, and enter your query.</li>
+          <li><strong>Copy CLI command from web</strong> &mdash; Click the terminal icon in the explore toolbar to copy the equivalent CLI command for your current query.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v1.2.1 -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag">v1.2.1</span>
+        <span class="version-date">Jan 21, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v1.2.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Explore history URL hydration</strong> &mdash; Browser back/forward now correctly restores the previous query and results.</li>
         </ul>
       </div>
     </article>
@@ -333,7 +708,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Improved
+          Changed
         </div>
         <ul class="change-list">
           <li><strong>Better error messages</strong> — Query errors now show exactly where the problem is with helpful suggestions.</li>
@@ -380,7 +755,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="change-section">
         <div class="change-type changed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
-          Improved
+          Changed
         </div>
         <ul class="change-list">
           <li><strong>Cleaner log table</strong> — Compact rows, click any cell to copy, and action buttons appear on hover.</li>

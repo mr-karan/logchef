@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Star, Link } from 'lucide-vue-next';
+import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Link } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
 import {
   DropdownMenu,
@@ -16,7 +16,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/composables/useToast';
 import { TOAST_DURATION } from '@/lib/constants';
-import { type SavedTeamQuery } from '@/api/savedQueries';
+import { type SavedQuery } from '@/api/savedQueries';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useExploreStore } from '@/stores/explore';
 import { useAuthStore } from '@/stores/auth';
@@ -30,7 +30,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'save'): void;
-  (e: 'select-saved-query', query: SavedTeamQuery): void;
+  (e: 'select-saved-query', query: SavedQuery): void;
   (e: 'save-as-new'): void;
 }>();
 
@@ -42,7 +42,7 @@ const authStore = useAuthStore();
 
 const {
   isEditingExistingQuery,
-  canManageCollections,
+  canSaveQuery,
 } = useSavedQueries();
 
 // Local state
@@ -75,7 +75,7 @@ watch(
   () => [props.selectedTeamId, props.selectedSourceId],
   async ([teamId, sourceId]) => {
     if (teamId && sourceId) {
-      await loadQueries(teamId, sourceId);
+      await loadQueries(teamId, sourceId as number);
     }
   },
   { immediate: true }
@@ -83,7 +83,7 @@ watch(
 
 // Load queries when dropdown opens
 watch(isOpen, async (open) => {
-  if (open && props.selectedTeamId && props.selectedSourceId && !queries.value.length) {
+  if (open && props.selectedSourceId && !queries.value.length) {
     await loadQueries(props.selectedTeamId, props.selectedSourceId);
   }
 
@@ -93,13 +93,14 @@ watch(isOpen, async (open) => {
   }
 });
 
-// Function to load queries using the store
-async function loadQueries(teamId: number, sourceId: number) {
-  if (!teamId || !sourceId) return;
+// Load queries for a source via the saved-queries store. teamId is no longer
+// needed for the API call but is kept in the prop signature for callers that
+// still pass it.
+async function loadQueries(_teamId: number | undefined, sourceId: number) {
+  if (!sourceId) return;
 
   try {
-    await savedQueriesStore.fetchTeamSourceQueries(teamId, sourceId);
-
+    await savedQueriesStore.list(sourceId);
   } catch (error) {
     console.error('Error triggering query load from store:', error);
     toast({
@@ -112,7 +113,7 @@ async function loadQueries(teamId: number, sourceId: number) {
 }
 
 // Handle query selection
-function selectQuery(query: SavedTeamQuery) {
+function selectQuery(query: SavedQuery) {
   try {
     emit('select-saved-query', query);
     isOpen.value = false;
@@ -143,41 +144,17 @@ const isUserAuthenticated = computed(() => authStore.isAuthenticated);
 const activeSavedQueryName = computed(() => exploreStore.activeSavedQueryName);
 
 const navigateToCollectionsView = () => {
-  const query: Record<string, string | number> = {};
-  if (props.selectedTeamId) query.team = props.selectedTeamId;
-  if (props.selectedSourceId) query.source = props.selectedSourceId;
-
   router.push({
-    path: '/logs/saved',
-    query
+    path: '/logs/library',
+    query: {},
   });
   isOpen.value = false;
 };
 
-// Toggle bookmark status for a query
-async function handleToggleBookmark(event: Event, query: SavedTeamQuery) {
-  event.stopPropagation(); // Prevent triggering query selection
-
-  if (!props.selectedTeamId || !props.selectedSourceId) {
-    return;
-  }
-
-  await savedQueriesStore.toggleBookmark(
-    props.selectedTeamId,
-    props.selectedSourceId,
-    query.id
-  );
-}
-
-// Copy shareable collection URL to clipboard
-async function copyCollectionUrl(event: Event, query: SavedTeamQuery) {
-  event.stopPropagation(); // Prevent triggering query selection
-
-  if (!props.selectedTeamId || !props.selectedSourceId) {
-    return;
-  }
-
-  const url = `${window.location.origin}/logs/collection/${props.selectedTeamId}/${props.selectedSourceId}/${query.id}`;
+// Copy shareable saved-query URL to clipboard
+async function copyCollectionUrl(event: Event, query: SavedQuery) {
+  event.stopPropagation();
+  const url = `${window.location.origin}/logs/saved/${query.id}`;
 
   try {
     await navigator.clipboard.writeText(url);
@@ -208,16 +185,16 @@ async function copyCollectionUrl(event: Event, query: SavedTeamQuery) {
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent class="w-64" align="end">
-      <DropdownMenuItem v-if="canManageCollections" @click="handleSave">
+      <DropdownMenuItem v-if="canSaveQuery" @click="handleSave">
         <Save class="w-4 h-4 mr-2" />
         <span>{{ isEditingExistingQuery ? 'Update Current Query' : 'Save Current Query to Collection...' }}</span>
       </DropdownMenuItem>
-      <DropdownMenuItem v-if="canManageCollections && isEditingExistingQuery" @click="handleRequestSaveAsNew">
+      <DropdownMenuItem v-if="canSaveQuery && isEditingExistingQuery" @click="handleRequestSaveAsNew">
         <PlusCircle class="w-4 h-4 mr-2" />
         <span>Save as New Query...</span>
       </DropdownMenuItem>
 
-      <DropdownMenuSeparator v-if="canManageCollections" />
+      <DropdownMenuSeparator v-if="canSaveQuery" />
 
       <DropdownMenuLabel v-if="hasQueries">Load from Collection</DropdownMenuLabel>
       <DropdownMenuSub v-if="hasQueries">
@@ -236,21 +213,6 @@ async function copyCollectionUrl(event: Event, query: SavedTeamQuery) {
             class="flex items-center justify-between gap-2"
           >
             <div class="flex items-center gap-2 flex-1 min-w-0">
-              <button
-                v-if="canManageCollections"
-                @click="(e) => handleToggleBookmark(e, query)"
-                class="p-0.5 rounded hover:bg-muted transition-colors flex-shrink-0"
-                :title="query.is_bookmarked ? 'Remove bookmark' : 'Add bookmark'"
-              >
-                <Star
-                  class="h-3.5 w-3.5 transition-transform hover:scale-110"
-                  :class="query.is_bookmarked ? 'text-amber-500 fill-amber-500' : 'text-muted-foreground'"
-                />
-              </button>
-              <Star
-                v-else-if="query.is_bookmarked"
-                class="h-3.5 w-3.5 text-amber-500 fill-amber-500 flex-shrink-0"
-              />
               <span class="truncate" :title="query.name">{{ query.name }}</span>
             </div>
             <button

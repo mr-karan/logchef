@@ -2,10 +2,11 @@ package datasource
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -33,7 +34,7 @@ type Provider interface {
 }
 
 type Service struct {
-	db        *sqlite.DB
+	db        store.Store
 	log       *slog.Logger
 	providers map[models.SourceType]Provider
 }
@@ -46,9 +47,10 @@ const (
 	CapabilityFieldValues      Capability = "field_values"
 	CapabilitySourceInspection Capability = "source_inspection"
 	CapabilityAISQLGeneration  Capability = "ai_sql_generation"
+	CapabilityLogContext       Capability = "log_context"
 )
 
-func NewService(db *sqlite.DB, log *slog.Logger) *Service {
+func NewService(db store.Store, log *slog.Logger) *Service {
 	return &Service{
 		db:        db,
 		log:       log.With("component", "datasource_service"),
@@ -106,7 +108,7 @@ func (s *Service) CreateSource(ctx context.Context, req *models.CreateSourceRequ
 	if err == nil && existingSource != nil {
 		return nil, fmt.Errorf("source identity %q already exists (ID: %d): %w", source.IdentityKey, existingSource.ID, ErrSourceAlreadyExists)
 	}
-	if err != nil && !sqlite.IsNotFoundError(err) && !sqlite.IsSourceNotFoundError(err) {
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
 		return nil, fmt.Errorf("check existing source identity: %w", err)
 	}
 
@@ -205,6 +207,25 @@ func (s *Service) Histogram(ctx context.Context, sourceID models.SourceID, req H
 		return nil, err
 	}
 	return provider.Histogram(ctx, source, req)
+}
+
+// LogContextProvider is an optional interface for providers that can fetch
+// the logs surrounding a specific timestamp (grep -C for logs). Providers that
+// don't implement it are reported via ErrOperationNotSupported.
+type LogContextProvider interface {
+	GetLogContext(ctx context.Context, source *models.Source, req LogContextRequest) (*models.LogContextResponse, error)
+}
+
+func (s *Service) GetLogContext(ctx context.Context, sourceID models.SourceID, req LogContextRequest) (*models.LogContextResponse, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	lcp, ok := provider.(LogContextProvider)
+	if !ok {
+		return nil, ErrOperationNotSupported
+	}
+	return lcp.GetLogContext(ctx, source, req)
 }
 
 func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, req AlertQueryRequest) (*models.QueryResult, error) {

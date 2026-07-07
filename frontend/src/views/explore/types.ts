@@ -15,13 +15,15 @@ export interface QueryExecutionState {
 
 // Query save form data
 export interface SaveQueryFormData {
-  team_id: number;
   name: string;
   description: string;
   source_id: number;
+  created_from_team_id?: number | null;
   query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
   editor_mode: 'builder' | 'native';
   query_content: string;
+  // Optional collection to pin the query to on save (new queries only).
+  collection_id?: number | null;
 }
 
 // Editor modes

@@ -2,17 +2,8 @@
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
+import { PageHeader, LoadingState } from '@/components/layout'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Pencil, Eye, EyeOff, Save, X, Mail, Webhook, Loader2 } from 'lucide-vue-next'
 import { Input } from '@/components/ui/input'
 import {
@@ -42,10 +33,14 @@ import { Textarea } from '@/components/ui/textarea'
 import { Switch } from '@/components/ui/switch'
 import { useSettingsStore } from '@/stores/settings'
 import { useAuthStore } from '@/stores/auth'
+import { useMetaStore } from '@/stores/meta'
 import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
-import { toast } from 'vue-sonner'
+import { useToast } from '@/composables/useToast'
+
+const { toast } = useToast()
 
 const authStore = useAuthStore()
+const metaStore = useMetaStore()
 
 const settingsStore = useSettingsStore()
 const { isLoading } = storeToRefs(settingsStore)
@@ -57,7 +52,9 @@ const showTestWebhookDialog = ref(false)
 const settingToEdit = ref<SystemSetting | null>(null)
 const settingToDelete = ref<SystemSetting | null>(null)
 const showSensitiveValues = ref<Record<string, boolean>>({})
-const currentTab = ref('alerts')
+// Default to Alerts unless the server has disabled alerting; in that case
+// fall back to AI so an admin isn't landed on a hidden tab.
+const currentTab = ref(metaStore.alertsEnabled ? 'alerts' : 'ai')
 const testEmailRecipient = ref('')
 const testWebhookUrl = ref('')
 const isTestingEmail = ref(false)
@@ -71,7 +68,6 @@ const editForm = ref<UpdateSettingRequest>({
   is_sensitive: false
 })
 
-// Get settings by category
 const alertsSettings = computed(() => settingsStore.getSettingsByCategory('alerts'))
 const aiSettings = computed(() => settingsStore.getSettingsByCategory('ai'))
 const authSettings = computed(() => settingsStore.getSettingsByCategory('auth'))
@@ -144,7 +140,6 @@ const getCategoryDescription = (category: string) => {
 }
 
 const formatKey = (key: string) => {
-  // Remove category prefix and convert to title case
   const parts = key.split('.')
   const name = parts[parts.length - 1]
   const acronyms = ['url', 'api', 'ai', 'tls', 'id', 'smtp']
@@ -180,7 +175,7 @@ const handleTestEmail = async () => {
 
 const handleTestWebhook = async () => {
   if (!testWebhookUrl.value.trim()) {
-    toast.error('Webhook URL is required')
+    toast({ title: 'Webhook URL is required', variant: 'destructive' })
     return
   }
   isTestingWebhook.value = true
@@ -201,27 +196,19 @@ onMounted(() => {
 
 <template>
   <div class="space-y-6">
-    <Card>
-      <CardHeader>
-        <CardTitle>System Settings</CardTitle>
-        <CardDescription>
-          Manage runtime configuration settings for LogChef
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <div v-if="isLoading" class="text-center py-4">
-          Loading settings...
-        </div>
-        <Tabs v-else v-model="currentTab" class="w-full">
+    <PageHeader title="System Settings" description="Manage runtime configuration settings for LogChef." />
+
+    <LoadingState v-if="isLoading" label="Loading settings…" />
+    <Tabs v-else v-model="currentTab" class="w-full">
           <TabsList>
-            <TabsTrigger value="alerts">Alerts</TabsTrigger>
+            <TabsTrigger v-if="metaStore.alertsEnabled" value="alerts">Alerts</TabsTrigger>
             <TabsTrigger value="ai">AI</TabsTrigger>
             <TabsTrigger value="auth">Authentication</TabsTrigger>
             <TabsTrigger value="server">Server</TabsTrigger>
           </TabsList>
 
           <!-- Alerts Tab -->
-          <TabsContent value="alerts" class="space-y-4">
+          <TabsContent v-if="metaStore.alertsEnabled" value="alerts" class="space-y-4">
             <div class="flex items-center justify-between">
               <div class="text-sm text-muted-foreground">
                 {{ getCategoryDescription('alerts') }}
@@ -436,8 +423,6 @@ onMounted(() => {
             </div>
           </TabsContent>
         </Tabs>
-      </CardContent>
-    </Card>
 
     <!-- Edit Dialog -->
     <Dialog :open="showEditDialog" @update:open="showEditDialog = false">
@@ -486,8 +471,8 @@ onMounted(() => {
           <div class="flex items-center space-x-2">
             <Switch
               id="sensitive"
-              :checked="editForm.is_sensitive"
-              @update:checked="editForm.is_sensitive = $event"
+              :model-value="editForm.is_sensitive"
+              @update:model-value="editForm.is_sensitive = $event"
             />
             <Label for="sensitive" class="text-sm font-normal">
               Mark as sensitive (will be masked in responses)
@@ -507,31 +492,15 @@ onMounted(() => {
       </DialogContent>
     </Dialog>
 
-    <!-- Delete Confirmation Dialog -->
-    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = false">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Delete Setting</AlertDialogTitle>
-          <AlertDialogDescription class="space-y-2">
-            <p>Are you sure you want to delete setting "{{ settingToDelete?.key }}"?</p>
-            <p class="font-medium text-destructive">
-              This action cannot be undone. The system will fall back to the default value from config.toml.
-            </p>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="showDeleteDialog = false">
-            Cancel
-          </AlertDialogCancel>
-          <AlertDialogAction
-            @click="confirmDelete"
-            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-          >
-            Delete
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      :open="showDeleteDialog"
+      title="Delete setting?"
+      :description="settingToDelete ? `Delete &quot;${settingToDelete.key}&quot;? The system will fall back to the default value from config.toml.` : undefined"
+      confirm-text="Delete"
+      destructive
+      @update:open="(v) => { if (!v) { showDeleteDialog = false; settingToDelete = null } }"
+      @confirm="confirmDelete"
+    />
 
     <!-- Test Email Dialog -->
     <Dialog :open="showTestEmailDialog" @update:open="showTestEmailDialog = false">

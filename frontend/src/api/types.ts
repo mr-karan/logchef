@@ -31,22 +31,6 @@ export interface APIErrorResponse {
 export type APIResponse<T = any> = APISuccessResponse<T> | APIErrorResponse;
 
 /**
- * Saved team query representation
- */
-export interface SavedTeamQuery {
-  id: number;
-  team_id: number;
-  source_id: number;
-  name: string;
-  description: string;
-  query_language?: string;
-  editor_mode?: string;
-  query_content: string;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
  * Team information
  */
 export interface Team {

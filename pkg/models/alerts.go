@@ -111,9 +111,11 @@ const (
 )
 
 // Alert encapsulates a rule that is continuously evaluated against log data.
+// Alerts are scoped to a single source. Visibility (read access) is granted to
+// any user with source access via any team; edit access is creator + global
+// admin (legacy alerts with NULL CreatedBy are global-admin-only).
 type Alert struct {
 	ID                AlertID                `json:"id"`
-	TeamID            TeamID                 `json:"team_id"`
 	SourceID          SourceID               `json:"source_id"`
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description,omitempty"`
@@ -135,6 +137,7 @@ type Alert struct {
 	LastState         AlertState             `json:"last_state"`
 	LastEvaluatedAt   *time.Time             `json:"last_evaluated_at,omitempty"`
 	LastTriggeredAt   *time.Time             `json:"last_triggered_at,omitempty"`
+	CreatedBy         *UserID                `json:"created_by,omitempty"`
 	CreatedAt         time.Time              `json:"created_at"`
 	UpdatedAt         time.Time              `json:"updated_at"`
 }
@@ -154,6 +157,7 @@ type AlertHistoryEntry struct {
 
 // CreateAlertRequest defines the payload required to create a new alert rule.
 type CreateAlertRequest struct {
+	SourceID          SourceID               `json:"source_id"`
 	Name              string                 `json:"name"`
 	Description       string                 `json:"description"`
 	QueryLanguage     QueryLanguage          `json:"query_language,omitempty"`

@@ -73,6 +73,10 @@ export const useContextStore = defineStore('context', () => {
     saveToStorage(persisted)
   }
 
+  function clearSource() {
+    sourceId.value = null
+  }
+
   function clear() {
     teamId.value = null
     sourceId.value = null
@@ -125,6 +129,7 @@ export const useContextStore = defineStore('context', () => {
     hasValidContext,
     selectTeam,
     selectSource,
+    clearSource,
     clear,
     clearStorage,
     setFromRoute,

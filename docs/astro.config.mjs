@@ -66,9 +66,11 @@ export default defineConfig({
         {
           label: "Features",
           items: [
+            { label: "Collections & Saved Queries", link: "/features/collections" },
             { label: "Alerting", link: "/features/alerting" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "User Management", link: "/core/user-management" },
+            { label: "Service Tokens", link: "/features/service-tokens" },
             { label: "Provisioning", link: "/getting-started/provisioning" },
           ],
         },
@@ -90,6 +92,7 @@ export default defineConfig({
         {
           label: "Operations",
           items: [
+            { label: "Database & High Availability", link: "/operations/database-backends" },
             { label: "Metrics Reference", link: "/operations/metrics" },
             { label: "Contributing", link: "/contributing/setup" },
           ],

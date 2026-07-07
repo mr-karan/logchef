@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { alertsApi, type Alert, type CreateAlertRequest, type UpdateAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
 import { useContextStore } from "./context";
+import { useMetaStore } from "./meta";
 
 interface AlertsState {
   alerts: Alert[];
@@ -47,11 +48,20 @@ export const useAlertsStore = defineStore("alerts", () => {
     state.data.value.selectedAlertId = null;
   }
 
-  async function fetchAlerts(teamId: number, sourceId: number) {
-    return await state.withLoading(`fetchAlerts-${teamId}-${sourceId}`, async () => {
+  // Belt-and-braces: even if the router guard is bypassed (bookmarked URL
+  // hitting the view before meta has loaded, or a devtools call), stop
+  // firing alert HTTP when the server advertises alerts as disabled.
+  function alertsDisabledResult() {
+    return { success: false as const, data: null };
+  }
+
+  async function fetchAlerts(_teamId?: number | undefined, sourceId?: number) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
+    const key = sourceId ? `fetchAlerts-${sourceId}` : 'fetchAlerts-all';
+    return await state.withLoading(key, async () => {
       return await state.callApi<Alert[]>({
-        apiCall: () => alertsApi.listAlerts(teamId, sourceId),
-        operationKey: `fetchAlerts-${teamId}-${sourceId}`,
+        apiCall: () => alertsApi.list(sourceId),
+        operationKey: key,
         onSuccess: (response) => {
           state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
           // Clear selected alert if it no longer exists in the new list.
@@ -86,10 +96,11 @@ export const useAlertsStore = defineStore("alerts", () => {
     }
   }
 
-  async function createAlert(teamId: number, sourceId: number, payload: CreateAlertRequest) {
+  async function createAlert(_teamId: number | undefined, sourceId: number, payload: Omit<CreateAlertRequest, "source_id">) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     return await state.withLoading("createAlert", async () => {
       return await state.callApi<Alert>({
-        apiCall: () => alertsApi.createAlert(teamId, sourceId, payload),
+        apiCall: () => alertsApi.create({ ...payload, source_id: sourceId }),
         operationKey: "createAlert",
         successMessage: "Alert created successfully",
         onSuccess: (response) => {
@@ -102,10 +113,11 @@ export const useAlertsStore = defineStore("alerts", () => {
     });
   }
 
-  async function updateAlert(teamId: number, sourceId: number, alertId: number, payload: UpdateAlertRequest) {
+  async function updateAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: UpdateAlertRequest) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     return await state.withLoading(`updateAlert-${alertId}`, async () => {
       return await state.callApi<Alert>({
-        apiCall: () => alertsApi.updateAlert(teamId, sourceId, alertId, payload),
+        apiCall: () => alertsApi.update(alertId, payload),
         operationKey: `updateAlert-${alertId}`,
         successMessage: "Alert updated successfully",
         onSuccess: (response) => {
@@ -117,10 +129,11 @@ export const useAlertsStore = defineStore("alerts", () => {
     });
   }
 
-  async function deleteAlert(teamId: number, sourceId: number, alertId: number) {
+  async function deleteAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     return await state.withLoading(`deleteAlert-${alertId}`, async () => {
       return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.deleteAlert(teamId, sourceId, alertId),
+        apiCall: () => alertsApi.delete(alertId),
         operationKey: `deleteAlert-${alertId}`,
         successMessage: "Alert deleted",
         onSuccess: () => {
@@ -130,10 +143,11 @@ export const useAlertsStore = defineStore("alerts", () => {
     });
   }
 
-  async function refreshAlert(teamId: number, sourceId: number, alertId: number) {
+  async function refreshAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     return await state.withLoading(`refreshAlert-${alertId}`, async () => {
       return await state.callApi<Alert>({
-        apiCall: () => alertsApi.getAlert(teamId, sourceId, alertId),
+        apiCall: () => alertsApi.get(alertId),
         operationKey: `refreshAlert-${alertId}`,
         onSuccess: (response) => {
           if (response) {
@@ -146,8 +160,8 @@ export const useAlertsStore = defineStore("alerts", () => {
   }
 
   async function toggleAlertActivity(
-    teamId: number,
-    sourceId: number,
+    teamId: number | undefined,
+    sourceId: number | undefined,
     alertId: number,
     isActive: boolean
   ) {

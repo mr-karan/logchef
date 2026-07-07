@@ -36,6 +36,7 @@ func (p *ClickHouseProvider) Capabilities() []Capability {
 		CapabilityFieldValues,
 		CapabilitySourceInspection,
 		CapabilityAISQLGeneration,
+		CapabilityLogContext,
 	}
 }
 
@@ -314,12 +315,40 @@ func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Sourc
 	}
 
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), req.MaxLimit)
-	builtQuery, err := qb.BuildRawQuery(req.RawQuery, req.Limit)
+	buildResult, err := qb.BuildRawQueryWithLimitPolicy(req.RawQuery, req.Limit, req.DefaultLimit, req.MaxLimit)
 	if err != nil {
 		return nil, fmt.Errorf("invalid query syntax: %w", err)
 	}
 
-	return client.QueryWithTimeout(ctx, builtQuery, req.QueryTimeout)
+	return client.QueryWithOptions(ctx, buildResult.SQL, clickhouse.QueryOptions{
+		TimeoutSeconds: req.QueryTimeout,
+		Settings: map[string]any{
+			"max_execution_time":   *req.QueryTimeout,
+			"max_result_rows":      buildResult.AppliedLimit,
+			"result_overflow_mode": "break",
+		},
+		LimitApplied:     buildResult.AppliedLimit,
+		MaxRows:          buildResult.AppliedLimit,
+		MaxResponseBytes: req.MaxResponseBytes,
+		Warnings:         queryWarningsForBuildResult(buildResult),
+	})
+}
+
+func queryWarningsForBuildResult(result clickhouse.QueryBuildResult) []models.QueryWarning {
+	warnings := make([]models.QueryWarning, 0, 2)
+	if result.LimitAdded {
+		warnings = append(warnings, models.QueryWarning{
+			Code:    "LIMIT_APPLIED",
+			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", result.AppliedLimit),
+		})
+	}
+	if result.LimitCapped {
+		warnings = append(warnings, models.QueryWarning{
+			Code:    "LIMIT_CAPPED",
+			Message: fmt.Sprintf("Result limit capped at %d rows.", result.AppliedLimit),
+		})
+	}
+	return warnings
 }
 
 func (p *ClickHouseProvider) GetSourceSchema(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
@@ -549,7 +578,7 @@ func (p *ClickHouseProvider) CheckSourceConnectionStatus(ctx context.Context, so
 }
 
 func (p *ClickHouseProvider) GetSourceHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
-	return p.manager.GetHealth(ctx, sourceID)
+	return p.manager.GetCachedHealth(sourceID)
 }
 
 func (p *ClickHouseProvider) connectionFromConfig(raw json.RawMessage) (models.ConnectionInfo, error) {
@@ -850,4 +879,48 @@ func mapClickHouseSchemaInspection(
 	}
 
 	return schema
+}
+
+// GetLogContext fetches logs surrounding a target timestamp via the ClickHouse
+// surrounding-logs query pair.
+func (p *ClickHouseProvider) GetLogContext(ctx context.Context, source *models.Source, req LogContextRequest) (*models.LogContextResponse, error) {
+	if source.MetaTSField == "" {
+		return nil, &ValidationError{Field: "meta_ts_field", Message: "source does not have a timestamp field configured"}
+	}
+
+	if req.BeforeLimit <= 0 {
+		req.BeforeLimit = 10
+	}
+	if req.AfterLimit <= 0 {
+		req.AfterLimit = 10
+	}
+	if req.QueryTimeout == nil {
+		defaultTimeout := models.DefaultQueryTimeoutSeconds
+		req.QueryTimeout = &defaultTimeout
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
+	}
+
+	result, err := client.GetSurroundingLogs(ctx, source.GetFullTableName(), source.MetaTSField, clickhouse.LogContextParams{
+		TargetTime:      time.UnixMilli(req.TargetTimestamp),
+		BeforeLimit:     req.BeforeLimit,
+		AfterLimit:      req.AfterLimit,
+		BeforeOffset:    req.BeforeOffset,
+		AfterOffset:     req.AfterOffset,
+		ExcludeBoundary: req.ExcludeBoundary,
+	}, req.QueryTimeout)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching log context for source %d: %w", source.ID, err)
+	}
+
+	return &models.LogContextResponse{
+		TargetTimestamp: req.TargetTimestamp,
+		BeforeLogs:      result.BeforeLogs,
+		TargetLogs:      result.TargetLogs,
+		AfterLogs:       result.AfterLogs,
+		Stats:           result.Stats,
+	}, nil
 }

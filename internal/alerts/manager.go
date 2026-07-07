@@ -2,10 +2,9 @@ package alerts
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"strconv"
 	"strings"
@@ -14,7 +13,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
-	"github.com/mr-karan/logchef/internal/sqlite"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -22,7 +21,7 @@ import (
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config      config.AlertsConfig
-	DB          *sqlite.DB
+	DB          store.Store
 	Datasources *datasource.Service
 	Logger      *slog.Logger
 	Sender      AlertSender
@@ -31,7 +30,7 @@ type Options struct {
 // Manager coordinates alert evaluation and dispatches notifications when thresholds are met.
 type Manager struct {
 	cfg        config.AlertsConfig
-	db         *sqlite.DB
+	db         store.Store
 	datasource *datasource.Service
 	log        *slog.Logger
 	sender     AlertSender
@@ -68,9 +67,7 @@ func (m *Manager) Start(ctx context.Context) {
 	}
 	m.log.Debug("starting alert manager", "interval", interval)
 
-	m.wg.Add(1)
-	go func() {
-		defer m.wg.Done()
+	m.wg.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -89,7 +86,7 @@ func (m *Manager) Start(ctx context.Context) {
 				return
 			}
 		}
-	}()
+	})
 }
 
 // Stop signals the manager to stop evaluating alerts.
@@ -200,7 +197,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 
 func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, value float64) error {
 	prevHistory, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) && !errors.Is(err, sqlite.ErrNotFound) {
+	if err != nil && !models.IsNotFound(err) {
 		m.log.Warn("failed to check existing alert history", "alert_id", alert.ID, "error", err)
 	}
 	alreadyActive := err == nil && prevHistory != nil
@@ -297,7 +294,7 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to fetch unresolved alert history: %w", err)
@@ -311,7 +308,7 @@ func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value
 
 	message := fmt.Sprintf("alert %s resolved with value %.4f", alert.Name, value)
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return nil
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
@@ -347,14 +344,6 @@ func (m *Manager) buildAlertMetadata(ctx context.Context, alert *models.Alert, s
 	labels["alertname"] = alert.Name
 	labels["alert_id"] = strconv.FormatInt(int64(alert.ID), 10)
 	labels["severity"] = string(alert.Severity)
-
-	if team, err := m.db.GetTeam(ctx, alert.TeamID); err == nil && team != nil {
-		labels["team"] = team.Name
-		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
-	} else {
-		labels["team_id"] = strconv.FormatInt(int64(alert.TeamID), 10)
-		m.log.Warn("failed to fetch team name for alert metadata", "team_id", alert.TeamID, "error", err)
-	}
 
 	if source, err := m.db.GetSource(ctx, alert.SourceID); err == nil && source != nil {
 		labels["source"] = source.Name
@@ -398,8 +387,7 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 }
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
-	recipientEmails, missingRecipients, resolutionErr := m.resolveRecipientEmails(ctx, alert)
-	teamName := labels["team"]
+	recipientEmails, missingRecipients := m.resolveRecipientEmails(ctx, alert)
 	sourceName := labels["source"]
 
 	return AlertNotification{
@@ -408,8 +396,6 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Description:             strings.TrimSpace(alert.Description),
 		Status:                  status,
 		Severity:                alert.Severity,
-		TeamID:                  alert.TeamID,
-		TeamName:                teamName,
 		SourceID:                alert.SourceID,
 		SourceName:              sourceName,
 		Value:                   value,
@@ -428,35 +414,26 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
 		RecipientEmails:         recipientEmails,
 		MissingRecipientUserIDs: missingRecipients,
-		RecipientResolutionErr:  resolutionErr,
 		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
 }
 
-func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, resolutionErr string) {
+func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID) {
 	if alert == nil || len(alert.RecipientUserIDs) == 0 {
-		return nil, nil, ""
+		return nil, nil
 	}
 
-	members, err := m.db.ListTeamMembersWithDetails(ctx, alert.TeamID)
-	if err != nil {
-		return nil, append([]models.UserID(nil), alert.RecipientUserIDs...), err.Error()
-	}
-
-	emailsByID := make(map[models.UserID]string, len(members))
-	for _, member := range members {
-		email := strings.TrimSpace(member.Email)
-		if email == "" {
-			continue
-		}
-		emailsByID[member.UserID] = email
-	}
-
+	// Recipients are users (not team-scoped). Resolve each by id directly.
 	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
 	emails := make([]string, 0, len(alert.RecipientUserIDs))
 	missing := make([]models.UserID, 0)
 	for _, userID := range alert.RecipientUserIDs {
-		email := emailsByID[userID]
+		user, err := m.db.GetUser(ctx, userID)
+		if err != nil || user == nil {
+			missing = append(missing, userID)
+			continue
+		}
+		email := strings.TrimSpace(user.Email)
 		if email == "" {
 			missing = append(missing, userID)
 			continue
@@ -468,7 +445,7 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 		emails = append(emails, email)
 	}
 
-	return emails, missing, ""
+	return emails, missing
 }
 
 func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {
@@ -485,7 +462,7 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 	}
 
 	base = strings.TrimSuffix(base, "/")
-	return fmt.Sprintf("%s/logs/alerts/%d?team=%d&source=%d", base, alert.ID, alert.TeamID, alert.SourceID)
+	return fmt.Sprintf("%s/logs/alerts/%d?source=%d", base, alert.ID, alert.SourceID)
 }
 
 type noopSender struct{}
@@ -502,7 +479,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return fmt.Errorf("no active alert to resolve")
 		}
 		return fmt.Errorf("failed to find unresolved alert history: %w", err)
@@ -510,7 +487,7 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 
 	// Update the history entry in the database
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if errors.Is(err, sql.ErrNoRows) || errors.Is(err, sqlite.ErrNotFound) {
+		if models.IsNotFound(err) {
 			return fmt.Errorf("alert history entry not found")
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
@@ -548,9 +525,7 @@ func copyStringMap(src map[string]string) map[string]string {
 		return nil
 	}
 	dst := make(map[string]string, len(src))
-	for k, v := range src {
-		dst[k] = v
-	}
+	maps.Copy(dst, src)
 	return dst
 }
 func compareThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {

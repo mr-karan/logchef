@@ -9,7 +9,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
 import { type Source } from '@/api/sources'
-import { Loader2, Plus, Trash2, UserPlus, Database } from 'lucide-vue-next'
+import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { Badge } from '@/components/ui/badge'
 import {
     Table,
     TableBody,
@@ -34,6 +35,8 @@ import {
     SelectTrigger,
     SelectValue,
 } from '@/components/ui/select'
+import { SearchableSelect } from '@/components/ui/searchable-select'
+import { useTableSearchSort } from '@/composables/useTableSearchSort'
 import { useUsersStore } from "@/stores/users"
 import { useSourcesStore } from "@/stores/sources"
 import { useTeamsStore } from "@/stores/teams"
@@ -81,6 +84,7 @@ const description = ref('')
 const activeTab = ref('members')
 const showAddMemberDialog = ref(false)
 const newMemberRole = ref('member')
+const newMemberType = ref<'human' | 'service'>('human')
 const selectedUserId = ref('')
 const showAddSourceDialog = ref(false)
 const selectedSourceId = ref('')
@@ -93,11 +97,14 @@ watch(() => team.value, (newTeam) => {
     }
 }, { immediate: true })
 
-// Compute available users (users not in team) sorted alphabetically by email
+// Compute available users (users not in team) sorted alphabetically by full_name/email
 const availableUsers = computed(() => {
     const teamMemberIds = members.value?.map(m => String(m.user_id)) || []
     const users = usersStore.getUsersNotInTeam(teamMemberIds)
-    return users.sort((a, b) => a.email.localeCompare(b.email))
+    const wantedType = newMemberType.value
+    return users
+        .filter(user => (user.account_type ?? 'human') === wantedType)
+        .sort((a, b) => (a.full_name || a.email).localeCompare(b.full_name || b.email))
 })
 
 // Compute available sources (sources not in team) sorted alphabetically by name
@@ -107,11 +114,47 @@ const availableSources = computed(() => {
     return sources.sort((a, b) => a.name.localeCompare(b.name))
 })
 
+// Items for the searchable pickers (add-member and add-source dialogs).
+const userItems = computed(() =>
+    availableUsers.value.map(u => ({
+        value: String(u.id),
+        label: u.full_name || u.email,
+        sublabel: (u.full_name && newMemberType.value === 'human') ? u.email : undefined,
+    })))
+const sourceItems = computed(() =>
+    availableSources.value.map(s => ({ value: String(s.id), label: formatSourceName(s) })))
+
+// Search + sort for the members table.
+const {
+    search: memberSearch,
+    rows: sortedMembers,
+    sortKey: memberSortKey,
+    sortDir: memberSortDir,
+    toggleSort: toggleMemberSort,
+} = useTableSearchSort(members, {
+    searchKeys: ['email', (m) => m.full_name, (m) => m.role],
+    sortAccessors: {
+        name: (m) => (m.full_name || m.email || '').toLowerCase(),
+        role: (m) => m.role || '',
+        added: (m) => new Date(m.created_at),
+    },
+    initialSort: { key: 'added', dir: 'desc' },
+})
+
 // Load users when dialog opens to prevent unnecessary API calls
 watch(showAddMemberDialog, async (isOpen) => {
-    if (isOpen && !usersStore.users.length) {
-        await usersStore.loadUsers()
+    if (isOpen) {
+        newMemberType.value = 'human'
+        selectedUserId.value = ''
+        if (!usersStore.users.length) {
+            await usersStore.loadUsers()
+        }
     }
+})
+
+// Reset selection when switching the account type filter
+watch(newMemberType, () => {
+    selectedUserId.value = ''
 })
 
 // Load sources when dialog opens to prevent unnecessary API calls
@@ -144,7 +187,7 @@ const handleSubmit = async () => {
 
 
 const handleAddMember = async () => {
-    if (!team.value || !selectedUserId.value) return
+    if (!team.value || !selectedUserId.value || selectedUserId.value === '__none__') return
 
     const result = await teamsStore.addTeamMember(team.value.id, {
         user_id: Number(selectedUserId.value),
@@ -318,23 +361,37 @@ onMounted(async () => {
                                         <DialogHeader>
                                             <DialogTitle>Add Team Member</DialogTitle>
                                             <DialogDescription>
-                                                Add a new member to the team
+                                                Add a human user or service account to the team
                                             </DialogDescription>
                                         </DialogHeader>
                                         <div class="space-y-4 py-4">
                                             <div class="space-y-2">
-                                                <Label>User</Label>
-                                                <Select v-model="selectedUserId">
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Select a user" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem v-for="user in availableUsers" :key="user.id"
-                                                            :value="String(user.id)" :text-value="user.email">
-                                                            {{ user.email }}
-                                                        </SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <Label>Account type</Label>
+                                                <div class="grid grid-cols-2 gap-2">
+                                                    <Button type="button" size="sm"
+                                                        :variant="newMemberType === 'human' ? 'default' : 'outline'"
+                                                        class="gap-2 justify-start"
+                                                        @click="newMemberType = 'human'">
+                                                        <User class="h-4 w-4" />
+                                                        Human user
+                                                    </Button>
+                                                    <Button type="button" size="sm"
+                                                        :variant="newMemberType === 'service' ? 'default' : 'outline'"
+                                                        class="gap-2 justify-start"
+                                                        @click="newMemberType = 'service'">
+                                                        <Bot class="h-4 w-4" />
+                                                        Service account
+                                                    </Button>
+                                                </div>
+                                            </div>
+                                            <div class="space-y-2">
+                                                <Label>{{ newMemberType === 'service' ? 'Service account' : 'User' }}</Label>
+                                                <SearchableSelect
+                                                    v-model="selectedUserId"
+                                                    :items="userItems"
+                                                    :placeholder="newMemberType === 'service' ? 'Select a service account' : 'Select a user'"
+                                                    :search-placeholder="newMemberType === 'service' ? 'Search service accounts…' : 'Search users…'"
+                                                    :empty-text="newMemberType === 'service' ? 'No service accounts available.' : 'No users available.'" />
                                             </div>
                                             <div class="space-y-2">
                                                 <Label>Role</Label>
@@ -369,27 +426,53 @@ onMounted(async () => {
                                 <Loader2 class="h-6 w-6 animate-spin mx-auto mb-2" />
                                 <p class="text-sm text-muted-foreground">Loading members...</p>
                             </div>
-                            <Table v-else>
+                            <template v-else>
+                                <div v-if="members.length > 0" class="relative mb-3 max-w-sm">
+                                    <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                                    <Input v-model="memberSearch" placeholder="Search members…" class="pl-8" />
+                                </div>
+                            <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Email</TableHead>
-                                        <TableHead>Role</TableHead>
-                                        <TableHead>Added</TableHead>
+                                        <TableHead>
+                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('name')">
+                                                Email
+                                                <component :is="memberSortKey === 'name' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                            </button>
+                                        </TableHead>
+                                        <TableHead>
+                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('role')">
+                                                Role
+                                                <component :is="memberSortKey === 'role' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                            </button>
+                                        </TableHead>
+                                        <TableHead>
+                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('added')">
+                                                Added
+                                                <component :is="memberSortKey === 'added' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
+                                            </button>
+                                        </TableHead>
                                         <TableHead class="text-right">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    <TableRow v-if="members.length === 0">
+                                    <TableRow v-if="sortedMembers.length === 0">
                                         <TableCell colspan="4" class="text-center py-4 text-muted-foreground">
-                                            No members found
+                                            {{ memberSearch ? 'No members match your search' : 'No members found' }}
                                         </TableCell>
                                     </TableRow>
-                                    <TableRow v-for="member in members" :key="member.user_id">
+                                    <TableRow v-for="member in sortedMembers" :key="member.user_id">
                                         <TableCell>
-                                            <div class="flex flex-col">
-                                                <span>{{ member.email }}</span>
-                                                <span class="text-sm text-muted-foreground">{{ member.full_name
-                                                }}</span>
+                                            <div class="flex flex-col gap-1">
+                                                <div class="flex items-center gap-2">
+                                                    <Bot v-if="member.account_type === 'service'" class="h-4 w-4 text-muted-foreground" />
+                                                    <span class="font-medium">{{ member.full_name || member.email }}</span>
+                                                    <Badge v-if="member.account_type === 'service'" variant="secondary" class="text-xs">
+                                                        Service account
+                                                    </Badge>
+                                                </div>
+                                                <span v-if="member.account_type !== 'service' && member.full_name"
+                                                    class="text-sm text-muted-foreground">{{ member.email }}</span>
                                             </div>
                                         </TableCell>
                                         <TableCell class="capitalize">{{ member.role }}</TableCell>
@@ -404,6 +487,7 @@ onMounted(async () => {
                                     </TableRow>
                                 </TableBody>
                             </Table>
+                            </template>
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -436,18 +520,12 @@ onMounted(async () => {
                                         <div class="space-y-4 py-4">
                                             <div class="space-y-2">
                                                 <Label>Source</Label>
-                                                <Select v-model="selectedSourceId">
-                                                    <SelectTrigger>
-                                                        <SelectValue placeholder="Select a source" />
-                                                    </SelectTrigger>
-                                                    <SelectContent>
-                                                        <SelectItem v-for="source in availableSources" :key="source.id"
-                                                            :value="String(source.id)"
-                                                            :text-value="formatSourceName(source)">
-                                                            {{ formatSourceName(source) }}
-                                                        </SelectItem>
-                                                    </SelectContent>
-                                                </Select>
+                                                <SearchableSelect
+                                                    v-model="selectedSourceId"
+                                                    :items="sourceItems"
+                                                    placeholder="Select a source"
+                                                    search-placeholder="Search sources…"
+                                                    empty-text="No sources available." />
                                             </div>
                                         </div>
                                         <DialogFooter>

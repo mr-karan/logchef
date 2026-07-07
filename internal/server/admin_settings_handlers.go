@@ -11,7 +11,6 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mr-karan/logchef/internal/alerts"
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -181,22 +180,19 @@ func (s *Server) handleDeleteSetting(c *fiber.Ctx) error {
 }
 
 // settingToResponse converts a database setting to API response format.
-func (s *Server) settingToResponse(setting sqlc.SystemSetting) SystemSettingResponse {
+func (s *Server) settingToResponse(setting *models.SystemSetting) SystemSettingResponse {
 	response := SystemSettingResponse{
 		Key:         setting.Key,
 		Value:       setting.Value,
 		ValueType:   setting.ValueType,
 		Category:    setting.Category,
-		IsSensitive: setting.IsSensitive == 1,
+		Description: setting.Description,
+		IsSensitive: setting.IsSensitive,
 		CreatedAt:   setting.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:   setting.UpdatedAt.Format(time.RFC3339),
 	}
 
-	if setting.Description.Valid {
-		response.Description = setting.Description.String
-	}
-
-	// Mask sensitive values in responses
+	// Mask sensitive values in responses.
 	if response.IsSensitive && response.Value != "" {
 		response.MaskedValue = "********"
 	}
@@ -381,7 +377,6 @@ func (s *Server) handleTestEmail(c *fiber.Ctx) error {
 		Description:     "This is a test notification to verify your SMTP configuration.",
 		Status:          models.AlertStatusTriggered,
 		Severity:        models.AlertSeverityInfo,
-		TeamName:        "Test Team",
 		SourceName:      "Test Source",
 		Value:           1.0,
 		ThresholdOp:     models.AlertThresholdGreaterThan,
@@ -448,7 +443,6 @@ func (s *Server) handleTestWebhook(c *fiber.Ctx) error {
 		Description:    "This is a test notification to verify your webhook configuration.",
 		Status:         models.AlertStatusTriggered,
 		Severity:       models.AlertSeverityInfo,
-		TeamName:       "Test Team",
 		SourceName:     "Test Source",
 		Value:          1.0,
 		ThresholdOp:    models.AlertThresholdGreaterThan,

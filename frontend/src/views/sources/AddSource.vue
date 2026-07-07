@@ -170,7 +170,7 @@ watch(sourceType, () => {
   validationError.value = null;
 });
 
-function handleSourceTypeChange(value: string) {
+function handleSourceTypeChange(value: unknown) {
   sourceType.value = value === "victorialogs" ? "victorialogs" : "clickhouse";
 }
 
@@ -294,7 +294,7 @@ async function submitForm() {
         });
         router.push({ name: "Sources" });
       } else {
-        formError.value = result.error || "Failed to update source";
+        formError.value = result.error?.message || "Failed to update source";
       }
       return;
     }
@@ -329,7 +329,7 @@ async function submitForm() {
     if (result.success) {
       router.push({ name: "Sources" });
     } else {
-      formError.value = result.error || "Failed to create source";
+      formError.value = result.error?.message || "Failed to create source";
     }
   } catch (error) {
     console.error("Error saving source:", error);

@@ -15,19 +15,38 @@
 port = 8125
 # Bind address (0.0.0.0 listens on all interfaces).
 host = "0.0.0.0"
-# HTTP server request timeout.
-http_server_timeout = "30s"
+# HTTP server request timeout. Must exceed preview and export execution ceilings.
+http_server_timeout = "15m"
 # Secure cookie flag (set to false for local HTTP development).
 secure_cookie = false
 # Frontend URL for auth redirects and UI links is managed in the Admin UI.
 # For first boot with a separate frontend origin, set LOGCHEF_SERVER__FRONTEND_URL.
 
 # -----------------------------------------------------------------------------
-# SQLite (required)
+# Metadata backend (optional) — selects where application metadata is stored
+# -----------------------------------------------------------------------------
+[database]
+# "sqlite" (default, single binary, zero-config) or "postgres" (multi-replica/HA).
+# Logs always live in ClickHouse regardless of this setting.
+driver = "sqlite"
+
+# -----------------------------------------------------------------------------
+# SQLite (used when database.driver = "sqlite")
 # -----------------------------------------------------------------------------
 [sqlite]
 # Path to the SQLite database file (relative to the working directory).
 path = "local.db"
+
+# -----------------------------------------------------------------------------
+# Postgres (used when database.driver = "postgres")
+# -----------------------------------------------------------------------------
+# [postgres]
+# Full connection string (required when driver = "postgres").
+# dsn = "postgres://logchef:logchef@localhost:5432/logchef?sslmode=disable"
+# Connection pool tuning (optional; sane defaults applied).
+# max_open_conns = 25
+# max_idle_conns = 5
+# conn_max_lifetime = "30m"
 
 # -----------------------------------------------------------------------------
 # OpenID Connect (OIDC) (required)
@@ -50,6 +69,10 @@ cli_client_id = "logchef-cli"
 redirect_url = "http://localhost:8125/api/v1/auth/callback"
 # OIDC scopes to request.
 scopes = ["openid", "email", "profile"]
+# Keep false unless your OIDC provider omits email_verified while verifying
+# email addresses by other means. Missing/null email_verified is allowed only
+# when this is true; explicit email_verified=false is always rejected.
+skip_email_verified_check = false
 
 # -----------------------------------------------------------------------------
 # Authentication (required)
@@ -65,9 +88,28 @@ api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf4
 # Query Settings (optional)
 # -----------------------------------------------------------------------------
 [query]
-# Maximum rows returned per query. Increase for large exports if your
-# ClickHouse cluster can handle it. Default: 1000000 (1 million).
-# max_limit = 1000000
+# Browser Run is intentionally bounded. Download uses [export].
+default_preview_limit = 1000
+max_preview_limit = 100000
+max_response_bytes = 67108864
+default_timeout_seconds = 30
+max_timeout_seconds = 300
+max_concurrent_per_user = 3
+max_concurrent_global = 30
+
+[export]
+# Download jobs use this higher cap and keep completed artifacts for a limited time.
+max_rows = 1000000
+default_timeout_seconds = 120
+max_timeout_seconds = 600
+max_concurrent_per_user = 1
+max_concurrent_global = 5
+artifact_ttl = "24h"
+formats = ["csv", "ndjson"]
+
+[shares]
+default_ttl = "720h"
+max_query_text_bytes = 1048576
 
 # -----------------------------------------------------------------------------
 # Provisioning (optional) — Declarative config for teams, sources, access

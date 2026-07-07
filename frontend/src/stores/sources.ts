@@ -2,13 +2,12 @@ import { defineStore } from "pinia";
 import { computed, ref, reactive, watch } from "vue";
 import { useTeamsStore } from "./teams";
 import { useContextStore } from "./context";
-import { sourcesApi } from "@/api/sources";
+import { sourcesApi, asClickHouseConnection } from "@/api/sources";
 import type {
   Source,
   CreateSourcePayload,
   UpdateSourcePayload,
   SourceInspection,
-  CreateTeamQueryRequest,
   ValidateConnectionRequestInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
@@ -47,7 +46,6 @@ export const useSourcesStore = defineStore("sources", () => {
   // Computed properties
   const sources = computed(() => state.data.value.sources);
   const teamSources = computed(() => state.data.value.teamSources);
-  const sourceQueries = computed(() => state.data.value.sourceQueries);
   const sourceInspections = computed(() => state.data.value.sourceInspections);
   const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
   
@@ -107,8 +105,9 @@ export const useSourcesStore = defineStore("sources", () => {
   // Get formatted table name from current source details
   const getCurrentSourceTableName = computed(() => {
     const details = state.data.value.currentSourceDetails;
-    if (details?.connection?.database && details?.connection?.table_name) {
-      return `${details.connection.database}.${details.connection.table_name}`;
+    const chConn = asClickHouseConnection(details?.connection);
+    if (chConn?.database && chConn?.table_name) {
+      return `${chConn.database}.${chConn.table_name}`;
     }
     return null; // Or a default/placeholder
   });
@@ -274,43 +273,6 @@ export const useSourcesStore = defineStore("sources", () => {
     });
   }
 
-  // Function to load source queries
-  async function loadTeamSourceQueries(teamId: number, sourceId: number) {
-    return await state.withLoading(`loadTeamSourceQueries-${sourceId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.listTeamSourceQueries(teamId, sourceId),
-        operationKey: `loadTeamSourceQueries-${sourceId}`,
-        onSuccess: (data) => {
-          state.data.value.sourceQueries = {
-            ...state.data.value.sourceQueries,
-            [sourceId]: data
-          };
-        },
-        showToast: false,
-      });
-    });
-  }
-
-  // Create a new query for a team's source
-  async function createTeamSourceQuery(teamId: number, sourceId: number, queryData: Omit<CreateTeamQueryRequest, "team_id">) {
-    return await state.withLoading(`createTeamSourceQuery-${sourceId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.createTeamSourceQuery(teamId, sourceId, queryData),
-        operationKey: `createTeamSourceQuery-${sourceId}`,
-        successMessage: "Query saved successfully",
-        onSuccess: (data) => {
-          // Add to existing queries if we have them loaded
-          if (state.data.value.sourceQueries[sourceId]) {
-            state.data.value.sourceQueries = {
-              ...state.data.value.sourceQueries,
-              [sourceId]: [...state.data.value.sourceQueries[sourceId], data]
-            };
-          }
-        }
-      });
-    });
-  }
-
   async function createSource(payload: CreateSourcePayload) {
     const result = await state.withLoading("createSource", async () => {
       return await state.callApi({
@@ -465,6 +427,11 @@ export const useSourcesStore = defineStore("sources", () => {
         onSuccess: async (data: any) => {
           if (!data) return;
 
+          // Stale-request guard: only commit if this source is still the
+          // one the user has selected. A fast source switch can cause an
+          // older request to resolve after a newer one.
+          if (contextStore.sourceId !== sourceId) return;
+
           state.data.value.currentSourceDetails = data as Source;
 
           // Update the source in teamSources as well (like the existing getSource does)
@@ -488,7 +455,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const connectionKey = JSON.stringify(connectionInfo);
 
     return await state.withLoading("validateSourceConnection", async () => {
-      return await state.callApi({
+      return await state.callApi<{ message: string }>({
         apiCall: () => sourcesApi.validateSourceConnection(connectionInfo),
         operationKey: "validateSourceConnection",
         showToast: true,
@@ -614,7 +581,6 @@ export const useSourcesStore = defineStore("sources", () => {
     // State
     sources,
     teamSources,
-    sourceQueries,
     isLoading: state.isLoading,
     error: state.error,
     teamSourcesMap,
@@ -653,8 +619,6 @@ export const useSourcesStore = defineStore("sources", () => {
     // Actions
     loadSources,
     loadTeamSources,
-    loadTeamSourceQueries,
-    createTeamSourceQuery,
     createSource,
     updateSource,
     deleteSource,

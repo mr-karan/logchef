@@ -1,0 +1,154 @@
+---
+title: Service Tokens
+description: Non-login service accounts with scoped API tokens for automation.
+---
+
+Logchef separates **service accounts** (non-login principals) from human users
+and lets you issue **scoped API tokens** for each one. Use them for log
+shippers, CI checks, dashboards, alert pipelines, or any automation that needs
+read or write access without a real person behind it.
+
+A service account never logs in via OIDC. It exists only to own tokens and
+appear as a team member.
+
+## Concepts
+
+**Two independent axes of access:**
+
+| Axis | Granted by | Enforced by |
+|------|------------|-------------|
+| **Token scopes** | scope picker when issuing a token | `requireTokenScope(...)` middleware |
+| **Team / source access** | adding the account to a team | `requireTeamMember`, `requireTeamHasSource` |
+
+Both must pass for a call to succeed. A read-only token in zero teams will
+authenticate but every `/teams/:id/sources/...` route returns 403. Conversely,
+adding the account to every team without granting `logs:read` on the token also
+yields 403. Pick the narrowest token scopes and the smallest set of teams that
+let the automation do its job.
+
+## Create a service account
+
+1. **Administration → Service Tokens → Create service account**
+2. Give it a name (e.g. `ci-log-checker`, `grafana-pipeline`).
+
+The account is created as `member` role with `account_type = service`. It
+cannot log in. The generated email (`svc-<id>@service.logchef.internal`) is an
+internal placeholder; the name is what shows up in team member lists.
+
+## Add it to teams
+
+A service account on its own can hit `/me`, `/me/tokens`, and any admin
+endpoint if its tokens carry the right scopes — but **source-scoped routes
+require team membership**.
+
+From the **Service Tokens** page, click **Manage teams** on the account card.
+Pick the teams whose sources the automation needs, set role to **Member**
+(matches a read-only token's expectations), and add.
+
+You can also add a service account from the normal **Admin → Teams → Add
+Member** dialog — switch the dialog's "Account type" toggle to **Service
+account** and the picker filters to service principals only.
+
+## Issue a token
+
+1. **Service Tokens → Create token** on the account card
+2. Pick an expiration: 7 / 30 / 90 days or never
+3. Pick scopes: choose a preset or hand-pick
+
+### Scope presets
+
+| Preset | Scopes | Use case |
+|--------|--------|----------|
+| **Read-only** | every `:read` scope | Default — log shippers, dashboards, audit tools |
+| **Logs viewer** | `profile:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read` | Smallest footprint for "just run queries" |
+| **Logs analyst** | Logs viewer + `saved_queries:write`, `collections:write`, `query_shares:*` | Read logs and save/share queries |
+| **Alerts manager** | `alerts:*`, `logs:read`, `sources:read`, `saved_queries:read`, `profile:read` | Manage alert definitions end-to-end |
+| **Source admin** | `sources:*`, `settings:read`, `profile:read` | Provision/update sources |
+| **Full access** | `*` | Equivalent to a logged-in session — last resort |
+
+You can deviate from any preset by toggling individual scopes after picking
+one. The active preset stays highlighted while the selection matches; once
+you customize, it falls back to a scope count badge.
+
+The token is shown **exactly once**. Copy it before closing the dialog. If
+lost, delete and reissue.
+
+## Using a token
+
+Pass it as a bearer header on any API call:
+
+```bash
+TOKEN='logchef_<account-id>_<32-hex>'
+BASE='https://logchef.example.com/api/v1'
+
+# Sanity check — should return the service account's user record
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/me"
+
+# List teams the account belongs to
+curl -sS -H "Authorization: Bearer $TOKEN" "$BASE/me/teams"
+
+# Run a LogchefQL query
+curl -sS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "$BASE/teams/8/sources/11/logchefql/query" \
+  -d '{
+    "query": "level=\"error\"",
+    "limit": 100,
+    "start_time": "2026-05-19T00:00:00Z",
+    "end_time": "2026-05-19T23:59:59Z"
+  }'
+
+# Raw SQL
+curl -sS -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  "$BASE/teams/8/sources/11/logs/query" \
+  -d '{"raw_sql":"SELECT timestamp, message FROM logs.app WHERE level='\''error'\'' LIMIT 50"}'
+```
+
+## Failure modes
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `401 Invalid or expired token` | Token revoked, expired, or wrong value | Check `Service Tokens` page; reissue if needed |
+| `403 API token does not have the required scope` | Token is missing the scope the route requires | Reissue with the right preset or add specific scopes |
+| `403 Team membership required` | Service account is not in the team owning the source | **Manage teams** on the account card; add to the team |
+| `404` on `/admin/users/<svc-id>` | Service accounts are managed via the dedicated endpoint | Use `/admin/service-accounts/<id>` |
+| All teams listed for the account but queries still 403 | Token scope does not include `logs:read` | Reissue with Read-only or Logs viewer preset |
+
+## Revoking access
+
+- **Revoke a single token**: Service Tokens page → token row → trash icon.
+- **Revoke everything for an account**: delete the service account — all of
+  its tokens and team memberships go with it.
+- **Reduce blast radius without deleting**: remove the account from specific
+  teams using **Manage teams**.
+
+A revoked or deleted token starts returning `401` immediately on the next
+request — no cache, no grace period.
+
+## Service accounts vs human accounts
+
+| | Human user | Service account |
+|---|---|---|
+| Logs in via OIDC | Yes | No — rejected at OIDC callback |
+| Owns sessions (cookies) | Yes | No |
+| Owns API tokens | Yes (issued from `Settings → API Tokens`) | Yes (issued from `Service Tokens`) |
+| Appears in `/admin/users` | Yes | No — managed via `/admin/service-accounts` |
+| Appears in team member pickers | Yes (in **Human user** mode) | Yes (in **Service account** mode) |
+| Default token scope | Full access (session-equivalent) | Read-only preset |
+| Visual indicator in team list | None | `Service account` badge + bot icon |
+
+## Best practices
+
+- **One service account per workload.** Easier to audit, easier to rotate.
+- **Match team role to broadest scope you might issue.** If a service account
+  may eventually need `saved_queries:write`, give it the Editor team role; for
+  pure read tokens, Member is fine. Mismatched role and scope is safe (strictest
+  layer wins) but confusing for future readers.
+- **Prefer short-lived tokens.** 30 days is the default in the UI; renew on a
+  schedule rather than minting "never expires" tokens.
+- **Keep `tokens:write` off automation tokens.** A token with `tokens:write`
+  can mint more tokens for itself — only useful for orchestration that
+  intentionally rotates.

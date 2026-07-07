@@ -13,16 +13,25 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Loader2 } from 'lucide-vue-next';
 import { useSavedQueriesStore } from '@/stores/savedQueries';
+import { useCollectionsStore } from '@/stores/collections';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
+import { asClickHouseConnection } from '@/api/sources';
 import { useExploreStore } from '@/stores/explore';
 import { useVariableStore } from '@/stores/variables';
 import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
-import {storeToRefs} from "pinia";
+import { storeToRefs } from "pinia";
 import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata } from '@/lib/queryMetadata';
 
 const props = defineProps<{
@@ -47,16 +56,30 @@ const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const exploreStore = useExploreStore();
 const variableStore = useVariableStore();
+const collectionsStore = useCollectionsStore();
 const { toast } = useToast();
 
 // Form state
 const name = ref('');
 const description = ref('');
 const saveTimestamp = ref(true);
+// Inline save-to-collection (new queries only); defaults to the personal collection.
+const selectedCollectionId = ref<string>('');
+const collectionOptions = computed(() => {
+  const personal = collectionsStore.personalCollection;
+  // Adding an item is owner-only on the backend, so only offer collections the
+  // caller actually owns — otherwise the save succeeds but the pin 403s silently.
+  const shared = collectionsStore.sharedCollections.filter((c) => c.caller_role === "owner");
+  return personal ? [personal, ...shared] : shared;
+});
 const isSubmitting = ref(false);
 const isEditing = computed(() => !!props.editData || (!!props.initialData && props.isEditMode));
 const queryId = ref('');
 const { allVariables } = storeToRefs(variableStore);
+
+const currentTeamId = computed(() => {
+  return teamsStore.currentTeamId;
+});
 
 // Get the current source ID
 const currentSourceId = computed(() => {
@@ -92,22 +115,16 @@ const currentSourceId = computed(() => {
   return '';
 });
 
-// Get current team name
-const currentTeamName = computed(() => {
-  if (!teamsStore.currentTeamId) return '';
-
-  const team = teamsStore.teams.find(t => t.id === teamsStore.currentTeamId);
-  return team ? team.name : '';
-});
-
 // Get source name for display
 const sourceName = computed(() => {
+  if (props.editData?.source_name) return props.editData.source_name;
+  if (props.initialData?.source_name) return props.initialData.source_name;
   if (!currentSourceId.value) return '';
 
   // Find the source in the sources list
   const source = sourcesStore.teamSources.find(s => s.id === currentSourceId.value);
-  // Return the source name if available, otherwise fallback to table_name
-  return source ? (source.name || source.connection.table_name) : '';
+  // Return the source name if available, otherwise fallback to table_name (ClickHouse only)
+  return source ? (source.name || asClickHouseConnection(source.connection)?.table_name || '') : '';
 });
 
 const currentSourceDescriptor = computed(() => {
@@ -193,6 +210,10 @@ onMounted(async () => {
     promises.push(savedQueriesStore.fetchUserTeams());
   }
 
+  if (!collectionsStore.collections.length) {
+    promises.push(collectionsStore.fetchCollections());
+  }
+
   if (currentSourceId.value && !sourcesStore.teamSources.length) {
     // Load teams first if needed
     if (!teamsStore.teams.length) {
@@ -200,13 +221,18 @@ onMounted(async () => {
     }
 
     // Then load sources for the current team
-    if (teamsStore.currentTeamId) {
-      promises.push(sourcesStore.loadTeamSources(teamsStore.currentTeamId));
+    if (currentTeamId.value) {
+      promises.push(sourcesStore.loadTeamSources(currentTeamId.value));
     }
   }
 
   if (promises.length > 0) {
     await Promise.all(promises);
+  }
+
+  // Default the collection picker to the user's personal collection.
+  if (!selectedCollectionId.value && collectionsStore.personalCollection) {
+    selectedCollectionId.value = String(collectionsStore.personalCollection.id);
   }
 
   // Initialize form with data if provided
@@ -440,16 +466,17 @@ async function handleSubmit(event: Event) {
       // Prepare the query content with the proper structure
       const preparedContent = prepareQueryContent(saveTimestamp.value);
 
-      // Create the base payload
       const payload = {
-        team_id: teamsStore.currentTeamId?.toString() || '',
         source_id: currentSourceId.value,
+        created_from_team_id: currentTeamId.value ?? null,
         name: name.value,
         description: description.value,
         query_content: preparedContent,
         query_language: queryMetadata.queryLanguage,
         editor_mode: queryMetadata.editorMode,
-        save_timestamp: saveTimestamp.value
+        save_timestamp: saveTimestamp.value,
+        // Pin new queries to the chosen collection in one step. Omitted on edit.
+        collection_id: !isEditing.value && selectedCollectionId.value ? Number(selectedCollectionId.value) : null,
       };
 
 
@@ -484,8 +511,8 @@ function handleClose() {
 }
 
 // Add computed properties for the descriptions
-const editDescription = 'Update details for this collection item.'
-const saveDescription = 'Save your current query to your collection for future use.'
+const editDescription = 'Update this saved query.'
+const saveDescription = 'Save this query for reuse. Collections can organize it afterward.'
 </script>
 
 <template>
@@ -495,11 +522,11 @@ const saveDescription = 'Save your current query to your collection for future u
         <DialogTitle>
           <span v-if="isEditing" class="flex items-center">
             <Pencil class="h-4 w-4 mr-2" />
-            Edit Collection Item
+            Edit Saved Query
           </span>
           <span v-else class="flex items-center">
             <SaveIcon class="h-4 w-4 mr-2" />
-            Add to Collection
+            Save Query
           </span>
         </DialogTitle>
         <DialogDescription>
@@ -508,23 +535,12 @@ const saveDescription = 'Save your current query to your collection for future u
       </DialogHeader>
 
       <form @submit="handleSubmit" class="space-y-4">
-        <!-- Source and Team Information (non-editable) -->
+        <!-- Source information (non-editable) -->
         <div class="border rounded-md p-3 bg-muted/20">
-          <div class="grid grid-cols-2 gap-4">
-            <!-- Team Information -->
-            <div>
-              <div class="text-sm font-medium">Team</div>
-              <div class="text-sm text-muted-foreground mt-1">
-                {{ currentTeamName }}
-              </div>
-            </div>
-
-            <!-- Source Information -->
-            <div>
-              <div class="text-sm font-medium">Source</div>
-              <div class="text-sm text-muted-foreground mt-1">
-                {{ sourceName }}
-              </div>
+          <div>
+            <div class="text-sm font-medium">Source</div>
+            <div class="text-sm text-muted-foreground mt-1">
+              {{ sourceName }}
             </div>
           </div>
         </div>
@@ -553,9 +569,27 @@ const saveDescription = 'Save your current query to your collection for future u
           </p>
         </div>
 
+        <!-- Add to collection (new queries only) -->
+        <div v-if="!isEditing" class="grid gap-2">
+          <Label>Add to collection</Label>
+          <Select v-model="selectedCollectionId">
+            <SelectTrigger>
+              <SelectValue placeholder="Choose a collection" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="c in collectionOptions" :key="c.id" :value="String(c.id)">
+                {{ c.name }}<span v-if="c.is_personal" class="ml-1 text-xs text-muted-foreground">· personal</span>
+              </SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-sm text-muted-foreground">
+            Saves the query and adds it to this collection in one step.
+          </p>
+        </div>
+
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
-          <Checkbox id="save_timestamp" v-model:checked="saveTimestamp" />
+          <Checkbox id="save_timestamp" v-model="saveTimestamp" />
           <div class="space-y-1 leading-none">
             <Label for="save_timestamp">Save current timestamp</Label>
             <p class="text-sm text-muted-foreground">

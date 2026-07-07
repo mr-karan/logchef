@@ -2,7 +2,7 @@ import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
-import { useContextStore } from "./context";
+import { useMetaStore } from "./meta";
 import type { APIErrorResponse } from "@/api/types";
 
 interface AlertHistoryState {
@@ -17,8 +17,6 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     currentAlertId: null,
     limit: 100,
   });
-
-  const contextStore = useContextStore();
 
   const entries = computed(() => state.data.value.entries);
   const currentAlertId = computed(() => state.data.value.currentAlertId);
@@ -35,22 +33,19 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     state.data.value.limit = limit > 0 ? limit : state.data.value.limit;
   }
 
-  async function loadHistory(alertId: number, teamId?: number | null, sourceId?: number | null, limit?: number) {
-    const effectiveTeamId = teamId ?? contextStore.teamId;
-    const effectiveSourceId = sourceId ?? contextStore.sourceId;
-    if (!effectiveTeamId || !effectiveSourceId) {
-      const error: APIErrorResponse = {
-        status: "error",
-        message: "Missing team or source context",
-        error_type: "ValidationError",
-      };
-      return { success: false, error };
-    }
+  // Belt-and-braces: match the guard in useAlertsStore so that a stale
+  // bookmarked URL bypassing the router guard cannot fire alert HTTP.
+  function alertsDisabledResult() {
+    return { success: false as const, data: null };
+  }
+
+  async function loadHistory(alertId: number, _teamId?: number | null, _sourceId?: number | null, limit?: number) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     setCurrentContext(alertId);
     const effectiveLimit = limit ?? state.data.value.limit;
     return await state.withLoading(`loadHistory-${alertId}`, async () => {
       return await state.callApi<AlertHistoryEntry[]>({
-        apiCall: () => alertsApi.listAlertHistory(effectiveTeamId, effectiveSourceId, alertId, effectiveLimit),
+        apiCall: () => alertsApi.history(alertId, effectiveLimit),
         operationKey: `loadHistory-${alertId}`,
         onSuccess: (response) => {
           state.data.value.entries = response ?? [];
@@ -62,10 +57,8 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
   }
 
   async function resolveCurrentAlert(message?: string) {
-    const teamId = contextStore.teamId;
-    const sourceId = contextStore.sourceId;
     const alertId = state.data.value.currentAlertId;
-    if (!teamId || !sourceId || !alertId) {
+    if (!alertId) {
       const error: APIErrorResponse = {
         status: "error",
         message: "Missing alert context",
@@ -73,13 +66,14 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       };
       return { success: false, error };
     }
-    return resolveAlert(teamId, sourceId, alertId, { message });
+    return resolveAlert(undefined, undefined, alertId, { message });
   }
 
-  async function resolveAlert(teamId: number, sourceId: number, alertId: number, payload: ResolveAlertRequest) {
+  async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
+    if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     return await state.withLoading(`resolveAlert-${alertId}`, async () => {
       return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.resolveAlert(teamId, sourceId, alertId, payload),
+        apiCall: () => alertsApi.resolve(alertId, payload),
         operationKey: `resolveAlert-${alertId}`,
         successMessage: "Alert resolved",
         onSuccess: () => {

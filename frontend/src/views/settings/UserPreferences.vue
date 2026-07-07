@@ -1,13 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { storeToRefs } from "pinia";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { PageHeader, PageSection } from "@/components/layout";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
@@ -63,116 +57,103 @@ const fieldsPanelOpen = computed({
 
 <template>
   <div class="space-y-6">
-    <div class="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-      <div>
-        <h1 class="text-2xl font-bold tracking-tight">Preferences</h1>
-        <p class="text-muted-foreground mt-2">
-          Tune the interface to match how you explore logs every day.
+    <PageHeader
+      title="Preferences"
+      description="Tune the interface to match how you explore logs every day."
+    >
+      <template #actions>
+        <p class="text-xs text-muted-foreground">
+          {{ isSaving ? "Saving changes…" : "Changes save automatically." }}
         </p>
+      </template>
+    </PageHeader>
+
+    <PageSection title="Appearance" description="Choose how LogChef looks across sessions.">
+      <div class="space-y-3">
+        <Label class="text-sm font-medium">Theme</Label>
+        <RadioGroup v-model="themePreference" class="grid gap-3 md:grid-cols-3">
+          <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+            <RadioGroupItem value="light" class="mt-1" />
+            <div>
+              <p class="text-sm font-medium">Light</p>
+              <p class="text-xs text-muted-foreground">Bright workspace with crisp contrast.</p>
+            </div>
+          </Label>
+          <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+            <RadioGroupItem value="dark" class="mt-1" />
+            <div>
+              <p class="text-sm font-medium">Dark</p>
+              <p class="text-xs text-muted-foreground">Reduce glare for long analysis sessions.</p>
+            </div>
+          </Label>
+          <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+            <RadioGroupItem value="auto" class="mt-1" />
+            <div>
+              <p class="text-sm font-medium">System</p>
+              <p class="text-xs text-muted-foreground">Match your operating system preference.</p>
+            </div>
+          </Label>
+        </RadioGroup>
       </div>
-      <p class="text-xs text-muted-foreground">
-        {{ isSaving ? "Saving changes…" : "Changes save automatically." }}
-      </p>
-    </div>
+    </PageSection>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Appearance</CardTitle>
-        <CardDescription>Choose how LogChef looks across sessions.</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-6">
-        <div class="space-y-3">
-          <Label class="text-sm font-medium">Theme</Label>
-          <RadioGroup v-model="themePreference" class="grid gap-3 md:grid-cols-3">
-            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-              <RadioGroupItem value="light" class="mt-1" />
-              <div>
-                <p class="text-sm font-medium">Light</p>
-                <p class="text-xs text-muted-foreground">Bright workspace with crisp contrast.</p>
-              </div>
-            </Label>
-            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-              <RadioGroupItem value="dark" class="mt-1" />
-              <div>
-                <p class="text-sm font-medium">Dark</p>
-                <p class="text-xs text-muted-foreground">Reduce glare for long analysis sessions.</p>
-              </div>
-            </Label>
-            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-              <RadioGroupItem value="auto" class="mt-1" />
-              <div>
-                <p class="text-sm font-medium">System</p>
-                <p class="text-xs text-muted-foreground">Match your operating system preference.</p>
-              </div>
-            </Label>
-          </RadioGroup>
+    <PageSection title="Log Explorer" description="Set defaults for log viewing and navigation." content-class="space-y-6">
+      <div class="grid gap-4 md:grid-cols-2">
+        <div class="space-y-2">
+          <Label for="timezone">Default Timezone</Label>
+          <Select v-model="timezonePreference">
+            <SelectTrigger id="timezone">
+              <SelectValue placeholder="Select timezone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="local">Local time</SelectItem>
+              <SelectItem value="utc">UTC</SelectItem>
+            </SelectContent>
+          </Select>
+          <p class="text-xs text-muted-foreground">Controls how timestamps are displayed.</p>
         </div>
-      </CardContent>
-    </Card>
+      </div>
 
-    <Card>
-      <CardHeader>
-        <CardTitle>Log Explorer</CardTitle>
-        <CardDescription>Set defaults for log viewing and navigation.</CardDescription>
-      </CardHeader>
-      <CardContent class="space-y-6">
-        <div class="grid gap-4 md:grid-cols-2">
-          <div class="space-y-2">
-            <Label for="timezone">Default Timezone</Label>
-            <Select v-model="timezonePreference">
-              <SelectTrigger id="timezone">
-                <SelectValue placeholder="Select timezone" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="local">Local time</SelectItem>
-                <SelectItem value="utc">UTC</SelectItem>
-              </SelectContent>
-            </Select>
-            <p class="text-xs text-muted-foreground">Controls how timestamps are displayed.</p>
-          </div>
+      <Separator />
+
+      <div class="space-y-3">
+        <Label class="text-sm font-medium">Default View Mode</Label>
+        <RadioGroup v-model="displayModePreference" class="grid gap-3 md:grid-cols-3">
+          <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+            <RadioGroupItem value="table" class="mt-1" />
+            <div>
+              <p class="text-sm font-medium">Table</p>
+              <p class="text-xs text-muted-foreground">Columnar layout with full field visibility.</p>
+            </div>
+          </Label>
+          <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+            <RadioGroupItem value="compact" class="mt-1" />
+            <div>
+              <p class="text-sm font-medium">Compact</p>
+              <p class="text-xs text-muted-foreground">Dense, streaming-style logs for quick scans.</p>
+            </div>
+          </Label>
+          <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
+            <RadioGroupItem value="json" class="mt-1" />
+            <div>
+              <p class="text-sm font-medium">JSON</p>
+              <p class="text-xs text-muted-foreground">Inspect raw structured events without table formatting.</p>
+            </div>
+          </Label>
+        </RadioGroup>
+      </div>
+
+      <Separator />
+
+      <div class="flex items-center justify-between">
+        <div class="space-y-0.5">
+          <Label>Show Fields Panel by default</Label>
+          <p class="text-sm text-muted-foreground">
+            Keep the fields and filters panel open when exploring logs.
+          </p>
         </div>
-
-        <Separator />
-
-        <div class="space-y-3">
-          <Label class="text-sm font-medium">Default View Mode</Label>
-          <RadioGroup v-model="displayModePreference" class="grid gap-3 md:grid-cols-3">
-            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-              <RadioGroupItem value="table" class="mt-1" />
-              <div>
-                <p class="text-sm font-medium">Table</p>
-                <p class="text-xs text-muted-foreground">Columnar layout with full field visibility.</p>
-              </div>
-            </Label>
-            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-              <RadioGroupItem value="compact" class="mt-1" />
-              <div>
-                <p class="text-sm font-medium">Compact</p>
-                <p class="text-xs text-muted-foreground">Dense, streaming-style logs for quick scans.</p>
-              </div>
-            </Label>
-            <Label class="flex items-start gap-3 rounded-md border p-3 hover:bg-muted/40">
-              <RadioGroupItem value="json" class="mt-1" />
-              <div>
-                <p class="text-sm font-medium">JSON</p>
-                <p class="text-xs text-muted-foreground">Inspect raw structured events without table formatting.</p>
-              </div>
-            </Label>
-          </RadioGroup>
-        </div>
-
-        <Separator />
-
-        <div class="flex items-center justify-between">
-          <div class="space-y-0.5">
-            <Label>Show Fields Panel by default</Label>
-            <p class="text-sm text-muted-foreground">
-              Keep the fields and filters panel open when exploring logs.
-            </p>
-          </div>
-          <Switch v-model="fieldsPanelOpen" />
-        </div>
-      </CardContent>
-    </Card>
+        <Switch v-model="fieldsPanelOpen" />
+      </div>
+    </PageSection>
   </div>
 </template>

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { PageHeader, PageSection, EmptyState, LoadingState } from '@/components/layout'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog'
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import TokenScopePicker from '@/components/tokens/TokenScopePicker.vue'
 import { Badge } from '@/components/ui/badge'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Alert, AlertDescription } from '@/components/ui/alert'
@@ -15,25 +16,26 @@ import { useUsersStore } from '@/stores/users'
 import { useAPITokensStore } from '@/stores/apiTokens'
 import { Loader2, Plus, Trash2, Copy, Key, Calendar, Clock, Shield, AlertTriangle } from 'lucide-vue-next'
 import { formatDate } from '@/utils/format'
+import { formatScopes, READ_ONLY_SCOPES, type TokenScope } from '@/lib/tokenScopes'
+import { getExpiryStatus, isTokenExpired } from '@/lib/tokenExpiry'
 
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const apiTokensStore = useAPITokensStore()
 const { toast } = useToast()
 
-// Form state
 const fullName = ref('')
 const isSubmitting = ref(false)
 
-// API Token state
 const showCreateTokenDialog = ref(false)
 const newTokenName = ref('')
-const newTokenExpiry = ref('30d') // Default to 30 days
+const newTokenExpiry = ref('30d')
 const isCreatingToken = ref(false)
+const newTokenScopes = ref<TokenScope[]>([...READ_ONLY_SCOPES])
 const createdTokenData = ref<{ token: string; api_token: any } | null>(null)
 const showTokenDisplay = ref(false)
+const tokenToDelete = ref<{ id: number; name: string } | null>(null)
 
-// Expiry options
 const expiryOptions = [
     { value: '7d', label: '7 days', hours: 7 * 24 },
     { value: '30d', label: '30 days', hours: 30 * 24 },
@@ -41,12 +43,10 @@ const expiryOptions = [
     { value: 'never', label: 'Never expires', hours: null }
 ]
 
-// Load user data and API tokens
 onMounted(async () => {
     if (authStore.user) {
         fullName.value = authStore.user.full_name
     }
-    // Load API tokens
     await apiTokensStore.loadTokens()
 })
 
@@ -75,7 +75,6 @@ const handleSubmit = async () => {
     isSubmitting.value = false
 }
 
-// API Token management functions
 const handleCreateToken = async () => {
     if (!newTokenName.value.trim()) {
         toast({
@@ -98,7 +97,8 @@ const handleCreateToken = async () => {
     
     const result = await apiTokensStore.createToken({
         name: newTokenName.value.trim(),
-        expires_at: expiresAt?.toISOString() ?? undefined
+        expires_at: expiresAt?.toISOString() ?? undefined,
+        scopes: newTokenScopes.value,
     })
     
     if (result.success && result.data) {
@@ -107,13 +107,17 @@ const handleCreateToken = async () => {
         showTokenDisplay.value = true
         newTokenName.value = ''
         newTokenExpiry.value = '30d' // Reset to default
+        newTokenScopes.value = [...READ_ONLY_SCOPES]
     }
     
     isCreatingToken.value = false
 }
 
-const handleDeleteToken = async (tokenId: number) => {
-    await apiTokensStore.deleteToken(tokenId)
+const confirmDeleteToken = async () => {
+    const target = tokenToDelete.value
+    tokenToDelete.value = null
+    if (!target) return
+    await apiTokensStore.deleteToken(target.id)
 }
 
 const copyToClipboard = async (text: string) => {
@@ -133,128 +137,60 @@ const closeTokenDisplay = () => {
     createdTokenData.value = null
 }
 
-// Token expiry utility functions
-const isTokenExpired = (expiresAt: string | null | undefined): boolean => {
-    if (!expiresAt) return false
-    return new Date(expiresAt) < new Date()
-}
-
-type BadgeVariant = "default" | "destructive" | "success" | "outline" | "secondary"
-
-const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; variant: BadgeVariant; isExpired: boolean } => {
-    if (!expiresAt) return { text: 'Never expires', variant: 'secondary', isExpired: false }
-    
-    const expiry = new Date(expiresAt)
-    const now = new Date()
-    const isExpired = expiry < now
-    
-    if (isExpired) {
-        return { text: `Expired ${formatDate(expiresAt)}`, variant: 'destructive', isExpired: true }
-    }
-    
-    // Check if expiring soon (within 7 days)
-    const daysUntilExpiry = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))
-    if (daysUntilExpiry <= 7) {
-        return { text: `Expires in ${daysUntilExpiry} day${daysUntilExpiry === 1 ? '' : 's'}`, variant: 'outline', isExpired: false }
-    }
-    
-    return { text: `Expires ${formatDate(expiresAt)}`, variant: 'secondary', isExpired: false }
-}
 </script>
 
 <template>
     <div class="space-y-6">
-        <!-- Header -->
-        <div>
-            <h1 class="text-2xl font-bold tracking-tight">My Profile</h1>
-            <p class="text-muted-foreground mt-2">
-                Manage your account information
-            </p>
-        </div>
+        <PageHeader title="Profile" description="Manage your account information." />
 
-        <div class="space-y-6">
-            <!-- Account Info -->
-            <Card>
-                <CardHeader>
-                    <CardTitle>Account Information</CardTitle>
-                    <CardDescription>
-                        View your account details
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <dl class="space-y-4 text-sm">
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Email</dt>
-                            <dd class="font-medium">{{ authStore.user?.email }}</dd>
-                        </div>
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Role</dt>
-                            <dd class="font-medium capitalize">{{ authStore.user?.role }}</dd>
-                        </div>
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Last Login</dt>
-                            <dd class="font-medium">
-                                {{ authStore.user?.last_login_at ? formatDate(authStore.user.last_login_at) :
-                                    'Never'
-                                }}
-                            </dd>
-                        </div>
-                        <div class="flex flex-col space-y-1">
-                            <dt class="text-muted-foreground">Account Created</dt>
-                            <dd class="font-medium">{{ formatDate(authStore.user?.created_at || '') }}</dd>
-                        </div>
-                    </dl>
-                </CardContent>
-            </Card>
+        <PageSection title="Account information" description="View your account details.">
+            <dl class="space-y-4 text-sm">
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Email</dt>
+                    <dd class="font-medium">{{ authStore.user?.email }}</dd>
+                </div>
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Role</dt>
+                    <dd class="font-medium capitalize">{{ authStore.user?.role }}</dd>
+                </div>
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Last Login</dt>
+                    <dd class="font-medium">
+                        {{ authStore.user?.last_login_at ? formatDate(authStore.user.last_login_at) : 'Never' }}
+                    </dd>
+                </div>
+                <div class="flex flex-col space-y-1">
+                    <dt class="text-muted-foreground">Account Created</dt>
+                    <dd class="font-medium">{{ formatDate(authStore.user?.created_at || '') }}</dd>
+                </div>
+            </dl>
+        </PageSection>
 
-            <!-- Profile Settings -->
-            <Card>
-                <CardHeader>
-                    <CardTitle>Profile Settings</CardTitle>
-                    <CardDescription>
-                        Update your profile information
-                    </CardDescription>
-                </CardHeader>
-                <CardContent>
-                    <form @submit.prevent="handleSubmit" class="space-y-6">
-                        <div class="space-y-4">
-                            <div class="grid gap-2">
-                                <Label for="full_name">Full Name</Label>
-                                <Input id="full_name" v-model="fullName" required />
-                            </div>
-                        </div>
+        <PageSection title="Profile settings" description="Update your profile information.">
+            <form @submit.prevent="handleSubmit" class="space-y-6">
+                <div class="grid gap-2">
+                    <Label for="full_name">Full Name</Label>
+                    <Input id="full_name" v-model="fullName" required />
+                </div>
+                <div class="flex justify-end">
+                    <Button type="submit" :disabled="isSubmitting">
+                        <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
+                        Save Changes
+                    </Button>
+                </div>
+            </form>
+        </PageSection>
 
-                        <div class="flex justify-end">
-                            <Button type="submit" :disabled="isSubmitting">
-                                <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
-                                Save Changes
-                            </Button>
-                        </div>
-                    </form>
-                </CardContent>
-            </Card>
-
-            <!-- API Tokens -->
-            <Card>
-                <CardHeader>
-                    <div class="flex items-center justify-between">
-                        <div>
-                            <CardTitle class="flex items-center gap-2">
-                                <Key class="h-5 w-5" />
-                                API Tokens
-                            </CardTitle>
-                            <CardDescription>
-                                Manage your personal access tokens for API authentication
-                            </CardDescription>
-                        </div>
-                        <Dialog v-model:open="showCreateTokenDialog">
+        <PageSection title="API tokens" description="Manage your personal access tokens for API authentication.">
+            <template #actions>
+                <Dialog v-model:open="showCreateTokenDialog">
                             <DialogTrigger asChild>
                                 <Button class="flex items-center gap-2">
                                     <Plus class="h-4 w-4" />
                                     Generate Token
                                 </Button>
                             </DialogTrigger>
-                            <DialogContent class="sm:max-w-[425px]">
+                            <DialogContent class="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
                                 <DialogHeader>
                                     <DialogTitle>Create API Token</DialogTitle>
                                     <DialogDescription>
@@ -288,6 +224,10 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                             </SelectContent>
                                         </Select>
                                     </div>
+                                    <div class="grid gap-2">
+                                        <Label>Scopes</Label>
+                                        <TokenScopePicker v-model="newTokenScopes" />
+                                    </div>
                                     <Alert>
                                         <Shield class="h-4 w-4" />
                                         <AlertDescription>
@@ -305,7 +245,7 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                     </Button>
                                     <Button 
                                         @click="handleCreateToken"
-                                        :disabled="isCreatingToken || !newTokenName.trim()"
+                                        :disabled="isCreatingToken || !newTokenName.trim() || newTokenScopes.length === 0"
                                     >
                                         <Loader2 v-if="isCreatingToken" class="mr-2 h-4 w-4 animate-spin" />
                                         Create Token
@@ -313,20 +253,18 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                 </DialogFooter>
                             </DialogContent>
                         </Dialog>
-                    </div>
-                </CardHeader>
-                <CardContent>
-                    <div v-if="apiTokensStore.isLoading" class="flex items-center justify-center py-8">
-                        <Loader2 class="h-6 w-6 animate-spin" />
-                    </div>
-                    
-                    <div v-else-if="apiTokensStore.tokens.length === 0" class="text-center py-8 text-muted-foreground">
-                        <Key class="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>No API tokens found</p>
-                        <p class="text-sm">Create your first token to get started</p>
-                    </div>
-                    
-                    <div v-else class="space-y-4">
+            </template>
+
+            <LoadingState v-if="apiTokensStore.isLoading" />
+
+            <EmptyState
+                v-else-if="apiTokensStore.tokens.length === 0"
+                :icon="Key"
+                title="No API tokens"
+                description="Create your first token to get started."
+            />
+
+            <div v-else class="space-y-3">
                         <div 
                             v-for="token in apiTokensStore.tokens" 
                             :key="token.id"
@@ -351,6 +289,9 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                         <AlertTriangle v-if="getExpiryStatus(token.expires_at).isExpired" class="h-3 w-3 mr-1" />
                                         {{ getExpiryStatus(token.expires_at).text }}
                                     </Badge>
+                                    <Badge variant="outline" class="text-xs">
+                                        {{ formatScopes(token.scopes) }}
+                                    </Badge>
                                 </div>
                                 <div class="flex items-center gap-4 text-sm text-muted-foreground">
                                     <div class="flex items-center gap-1">
@@ -367,40 +308,17 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                                     </div>
                                 </div>
                             </div>
-                            <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                    <Button 
-                                        variant="ghost" 
-                                        size="sm"
-                                        class="text-destructive hover:text-destructive"
-                                    >
-                                        <Trash2 class="h-4 w-4" />
-                                    </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                    <AlertDialogHeader>
-                                        <AlertDialogTitle>Delete API Token</AlertDialogTitle>
-                                        <AlertDialogDescription>
-                                            Are you sure you want to delete the token "{{ token.name }}"? 
-                                            This action cannot be undone and any applications using this token will lose access.
-                                        </AlertDialogDescription>
-                                    </AlertDialogHeader>
-                                    <AlertDialogFooter>
-                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                        <AlertDialogAction
-                                            class="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                                            @click="handleDeleteToken(token.id)"
-                                        >
-                                            Delete Token
-                                        </AlertDialogAction>
-                                    </AlertDialogFooter>
-                                </AlertDialogContent>
-                            </AlertDialog>
+                            <Button
+                                variant="ghost"
+                                size="sm"
+                                class="text-destructive hover:text-destructive"
+                                @click="tokenToDelete = { id: token.id, name: token.name }"
+                            >
+                                <Trash2 class="h-4 w-4" />
+                            </Button>
                         </div>
                     </div>
-                </CardContent>
-            </Card>
-        </div>
+        </PageSection>
 
         <!-- Token Display Dialog -->
         <Dialog v-model:open="showTokenDisplay">
@@ -460,5 +378,15 @@ const getExpiryStatus = (expiresAt: string | null | undefined): { text: string; 
                 </DialogFooter>
             </DialogContent>
         </Dialog>
+
+        <ConfirmDialog
+            :open="tokenToDelete !== null"
+            title="Delete API token?"
+            :description="tokenToDelete ? `Delete &quot;${tokenToDelete.name}&quot;? Any applications using it will lose access. This cannot be undone.` : undefined"
+            confirm-text="Delete"
+            destructive
+            @update:open="(v) => { if (!v) tokenToDelete = null }"
+            @confirm="confirmDeleteToken"
+        />
     </div>
 </template>

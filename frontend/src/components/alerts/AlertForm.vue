@@ -26,6 +26,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useAlertsStore } from "@/stores/alerts";
 import { useSourcesStore } from "@/stores/sources";
 import { alertsApi } from "@/api/alerts";
+import { asClickHouseConnection } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
 import { useTeamsStore } from "@/stores/teams";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
@@ -37,12 +38,14 @@ import {
   resolveAlertMetadata,
   supportsAlertEditorMode,
 } from "@/lib/queryMetadata";
+import type { AcceptableValue } from "reka-ui";
 
 // Extended types for local usage until API types are updated
-interface ExtendedCreateAlertRequest extends CreateAlertRequest {
+// The form doesn't include source_id — the parent adds it from context.
+type FormCreatePayload = Omit<CreateAlertRequest, "source_id"> & {
   recipient_user_ids: number[];
   webhook_urls: string[];
-}
+};
 
 interface ExtendedUpdateAlertRequest extends UpdateAlertRequest {
   recipient_user_ids?: number[];
@@ -62,7 +65,7 @@ const props = withDefaults(defineProps<{
 
 const emit = defineEmits<{
   (e: "cancel"): void;
-  (e: "create", payload: ExtendedCreateAlertRequest): void;
+  (e: "create", payload: FormCreatePayload): void;
   (e: "update", payload: ExtendedUpdateAlertRequest): void;
 }>();
 
@@ -92,8 +95,9 @@ const generatedQueryLanguageLabel = computed(() => {
 
 // Get current source table name for SQL generation
 const currentTableName = computed(() => {
-  const database = currentSource.value?.connection?.database;
-  const tableName = currentSource.value?.connection?.table_name;
+  const chConn = asClickHouseConnection(currentSource.value?.connection);
+  const database = chConn?.database;
+  const tableName = chConn?.table_name;
   if (database && tableName) {
     return `${database}.${tableName}`;
   }
@@ -447,8 +451,8 @@ function removeAnnotation(id: number) {
 }
 
 // Recipient management
-function addRecipient(userIdStr: string) {
-  const userId = parseInt(userIdStr);
+function addRecipient(value: AcceptableValue) {
+  const userId = parseInt(String(value ?? ""));
   if (userId && !form.recipient_user_ids.includes(userId)) {
     form.recipient_user_ids.push(userId);
   }
@@ -538,7 +542,8 @@ async function handleTestQuery() {
   testQueryResult.value = null;
 
   try {
-    const result = await alertsApi.testAlertQuery(props.teamId, props.sourceId, {
+    const result = await alertsApi.testQuery({
+      source_id: props.sourceId,
       query_language: alertMetadata.value.queryLanguage,
       editor_mode: alertMetadata.value.editorMode,
       query: form.query.trim(),
@@ -555,7 +560,7 @@ async function handleTestQuery() {
   }
 }
 
-function applyTemplate(template: ReturnType<typeof getQueryTemplates>[0]) {
+function applyTemplate(template: (typeof queryTemplates.value)[number]) {
   form.editor_mode = template.editorMode;
   form.query = template.query;
   testQueryResult.value = null;
@@ -1045,7 +1050,7 @@ function handleSubmit() {
                 {{ form.is_active ? "This alert will evaluate on schedule" : "Disabled alerts are skipped until re-enabled" }}
               </p>
             </div>
-            <Switch :checked="form.is_active" :disabled="isDisabled" @update:checked="(checked) => (form.is_active = Boolean(checked))" />
+            <Switch :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
           </div>
         </section>
 
@@ -1454,7 +1459,7 @@ function handleSubmit() {
             {{ form.is_active ? "This alert will evaluate on schedule" : "Disabled alerts are skipped until re-enabled" }}
           </p>
         </div>
-        <Switch :checked="form.is_active" :disabled="isDisabled" @update:checked="(checked) => (form.is_active = Boolean(checked))" />
+        <Switch :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
       </div>
     </section>
 

@@ -40,7 +40,7 @@ function updateForm(patch: Partial<ClickHouseSourceFormState>) {
   emit("update:modelValue", { ...props.modelValue, ...patch });
 }
 
-function updateTableMode(value: string) {
+function updateTableMode(value: unknown) {
   updateForm({ tableMode: value === "connect" ? "connect" : "create" });
 }
 
@@ -124,7 +124,7 @@ function resetSchema() {
           </div>
           <Switch
             :checked="modelValue.enableAuth"
-            @update:checked="(checked) => updateForm({ enableAuth: checked })"
+            @update:checked="(checked: boolean) => updateForm({ enableAuth: checked })"
           />
         </div>
 

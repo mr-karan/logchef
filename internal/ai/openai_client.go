@@ -262,8 +262,11 @@ func validateAndFormatSQL(sqlInput string) (string, error) {
 		return "", ErrInvalidSQLGeneratedByAI
 	}
 
-	// The String() method of the parser provides properly formatted SQL
-	formattedSQL := stmts[0].String()
+	// Render the parsed statement back to SQL via the parser's Formatter
+	// (clickhouse-sql-parser v0.5 replaced node.String() with this).
+	f := clickhouseparser.NewFormatter()
+	f.WriteExpr(stmts[0])
+	formattedSQL := f.String()
 	// Restore escaped quotes
 	formattedSQL = strings.ReplaceAll(formattedSQL, placeholder, "''")
 	formattedSQL = strings.TrimSpace(formattedSQL) // Ensure formatted SQL isn't just whitespace

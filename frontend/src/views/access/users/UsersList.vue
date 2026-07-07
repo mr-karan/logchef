@@ -2,18 +2,9 @@
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-    AlertDialog,
-    AlertDialogAction,
-    AlertDialogCancel,
-    AlertDialogContent,
-    AlertDialogDescription,
-    AlertDialogFooter,
-    AlertDialogHeader,
-    AlertDialogTitle,
-} from '@/components/ui/alert-dialog'
-import { Plus, Trash2, Shield, User2, Search, Pencil } from 'lucide-vue-next'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
+import { Plus, Trash2, Shield, User2, Search, Pencil, Users } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -60,32 +51,24 @@ const editForm = ref({
 
 const searchQuery = ref('')
 
-// Computed properties from store
-const users = computed(() => usersStore.users)
+const humanUsers = computed(() => usersStore.users.filter(user => user.account_type !== 'service'))
 
-// Simple computed property to filter users
 const filteredUsers = computed(() => {
-    if (!searchQuery.value) return users.value;
-
+    if (!searchQuery.value) return humanUsers.value;
     const query = searchQuery.value.toLowerCase();
-    return users.value.filter(user =>
+    return humanUsers.value.filter(user =>
         user?.full_name?.toLowerCase().includes(query) ||
         user?.email?.toLowerCase().includes(query)
     );
 })
 
-// Load users with automatic error handling in store
 const loadUsers = async (forceReload = false) => {
     await usersStore.loadUsers(forceReload);
 }
 
 const confirmDelete = async () => {
     if (!userToDelete.value) return
-
     await usersStore.deleteUser(userToDelete.value.id);
-    // Store automatically handles errors and success
-
-    // Reset UI state
     showDeleteDialog.value = false;
     userToDelete.value = null;
 }
@@ -99,7 +82,6 @@ const toggleUserStatus = async (user: User) => {
     await usersStore.updateUser(user.id, {
         status: user.status === 'active' ? 'inactive' : 'active',
     });
-    // Store handles loading state and errors automatically
 }
 
 const handleEdit = (user: User) => {
@@ -120,8 +102,6 @@ const confirmEdit = async () => {
         email: editForm.value.email,
         role: editForm.value.role
     });
-
-    // Reset UI state
     showEditDialog.value = false;
     userToEdit.value = null;
 }
@@ -133,119 +113,103 @@ onMounted(() => {
 
 <template>
     <div class="space-y-6">
-        <Card>
-            <CardHeader>
-                <div class="flex items-center justify-between">
-                    <div>
-                        <CardTitle>Manage Users</CardTitle>
-                        <CardDescription>
-                            View and manage your users
-                        </CardDescription>
-                    </div>
-                    <AddUser />
-                </div>
-            </CardHeader>
-            <CardContent>
-                <div v-if="isLoading" class="text-center py-4">
-                    Loading users...
-                </div>
-                <div v-else-if="users.length === 0" class="rounded-lg border p-4 text-center">
-                    <p class="text-muted-foreground mb-4">No users found</p>
-                    <AddUser>
-                        <Button>
-                            <Plus class="mr-2 h-4 w-4" />
-                            Add Your First User
-                        </Button>
-                    </AddUser>
-                </div>
-                <div v-else class="space-y-4">
-                    <div class="flex items-center">
-                        <div class="relative w-full max-w-sm">
-                            <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                            <Input placeholder="Search users by name or email..." class="pl-8" v-model="searchQuery" />
-                        </div>
-                    </div>
+        <PageHeader title="Users" description="View and manage your users">
+            <template #actions>
+                <AddUser />
+            </template>
+        </PageHeader>
 
-                    <div v-if="filteredUsers.length === 0" class="rounded-lg border p-4 text-center">
-                        <p class="text-muted-foreground">No results found for "<span class="font-medium">{{ searchQuery
-                        }}</span>"</p>
-                    </div>
+        <LoadingState v-if="isLoading" label="Loading users…" />
 
-                    <div v-else class="rounded-md border">
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Name</TableHead>
-                                    <TableHead>Email</TableHead>
-                                    <TableHead>Role</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Created At</TableHead>
-                                    <TableHead>Last Login</TableHead>
-                                    <TableHead></TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                <TableRow v-for="user in filteredUsers" :key="user.id">
-                                    <TableCell>{{ user.full_name }}</TableCell>
-                                    <TableCell>{{ user.email }}</TableCell>
-                                    <TableCell>
-                                        <Badge :variant="user.role === 'admin' ? 'destructive' : 'outline'"
-                                            class="capitalize inline-flex items-center gap-1 font-medium">
-                                            <Shield v-if="user.role === 'admin'" class="h-3 w-3" />
-                                            <User2 v-else class="h-3 w-3" />
-                                            {{ user.role }}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell>
-                                        <div class="flex items-center space-x-2">
-                                            <Switch :checked="user.status === 'active'"
-                                                @update:checked="toggleUserStatus(user)" />
-                                            <span class="capitalize">{{ user.status }}</span>
-                                        </div>
-                                    </TableCell>
-                                    <TableCell>{{ formatDate(user.created_at) }}</TableCell>
-                                    <TableCell>{{ formatDate(user.last_login_at) }}</TableCell>
-                                    <TableCell>
-                                        <div class="flex items-center gap-2 justify-end">
-                                            <Button variant="outline" size="icon" @click="handleEdit(user)">
-                                                <Pencil class="h-4 w-4" />
-                                            </Button>
-                                            <Button variant="destructive" size="icon" @click="handleDelete(user)">
-                                                <Trash2 class="h-4 w-4" />
-                                            </Button>
-                                        </div>
-                                    </TableCell>
-                                </TableRow>
-                            </TableBody>
-                        </Table>
-                    </div>
-                </div>
-            </CardContent>
-        </Card>
+        <EmptyState
+            v-else-if="humanUsers.length === 0"
+            :icon="Users"
+            title="No users yet"
+            description="Add your first user to get started."
+        >
+            <template #action>
+                <AddUser>
+                    <Button size="sm">
+                        <Plus class="mr-2 h-4 w-4" />
+                        Add user
+                    </Button>
+                </AddUser>
+            </template>
+        </EmptyState>
 
-        <!-- Delete Confirmation Dialog -->
-        <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = false">
-            <AlertDialogContent>
-                <AlertDialogHeader>
-                    <AlertDialogTitle>Delete User</AlertDialogTitle>
-                    <AlertDialogDescription class="space-y-2">
-                        <p>Are you sure you want to delete user "{{ userToDelete?.full_name }}"?</p>
-                        <p class="font-medium text-destructive">
-                            This action cannot be undone.
-                        </p>
-                    </AlertDialogDescription>
-                </AlertDialogHeader>
-                <AlertDialogFooter>
-                    <AlertDialogCancel @click="showDeleteDialog = false">
-                        Cancel
-                    </AlertDialogCancel>
-                    <AlertDialogAction @click="confirmDelete"
-                        class="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-                        Delete
-                    </AlertDialogAction>
-                </AlertDialogFooter>
-            </AlertDialogContent>
-        </AlertDialog>
+        <div v-else class="space-y-4">
+            <div class="relative w-full max-w-sm">
+                <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+                <Input placeholder="Search users by name or email…" class="pl-8 h-9" v-model="searchQuery" />
+            </div>
+
+            <EmptyState
+                v-if="filteredUsers.length === 0"
+                :icon="Search"
+                title="No results"
+                :description="`No users match &quot;${searchQuery}&quot;.`"
+                class="rounded-md border"
+            />
+
+            <div v-else class="rounded-md border">
+                <Table>
+                    <TableHeader>
+                        <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Email</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Created At</TableHead>
+                            <TableHead>Last Login</TableHead>
+                            <TableHead></TableHead>
+                        </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                        <TableRow v-for="user in filteredUsers" :key="user.id">
+                            <TableCell>{{ user.full_name }}</TableCell>
+                            <TableCell>{{ user.email }}</TableCell>
+                            <TableCell>
+                                <Badge :variant="user.role === 'admin' ? 'destructive' : 'outline'"
+                                    class="capitalize inline-flex items-center gap-1 font-medium">
+                                    <Shield v-if="user.role === 'admin'" class="h-3 w-3" />
+                                    <User2 v-else class="h-3 w-3" />
+                                    {{ user.role }}
+                                </Badge>
+                            </TableCell>
+                            <TableCell>
+                                <div class="flex items-center space-x-2">
+                                    <Switch :model-value="user.status === 'active'"
+                                        @update:model-value="toggleUserStatus(user)" />
+                                    <span class="capitalize">{{ user.status }}</span>
+                                </div>
+                            </TableCell>
+                            <TableCell>{{ formatDate(user.created_at) }}</TableCell>
+                            <TableCell>{{ formatDate(user.last_login_at) }}</TableCell>
+                            <TableCell>
+                                <div class="flex items-center gap-2 justify-end">
+                                    <Button variant="outline" size="icon" @click="handleEdit(user)">
+                                        <Pencil class="h-4 w-4" />
+                                    </Button>
+                                    <Button variant="destructive" size="icon" @click="handleDelete(user)">
+                                        <Trash2 class="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            </TableCell>
+                        </TableRow>
+                    </TableBody>
+                </Table>
+            </div>
+        </div>
+
+        <ConfirmDialog
+            :open="showDeleteDialog"
+            title="Delete user?"
+            :description="userToDelete ? `Delete user &quot;${userToDelete.full_name}&quot;? This action cannot be undone.` : undefined"
+            confirm-text="Delete"
+            destructive
+            @update:open="(v) => { if (!v) { showDeleteDialog = false; userToDelete = null } }"
+            @confirm="confirmDelete"
+        />
 
         <!-- Edit Dialog -->
         <Dialog :open="showEditDialog" @update:open="showEditDialog = false">

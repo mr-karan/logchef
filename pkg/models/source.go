@@ -43,6 +43,7 @@ type ConnectionInfo struct {
 	Password  string `json:"password"`
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
+	TLSEnable bool   `json:"tls_enable"`
 }
 
 type VictoriaLogsAuth struct {
@@ -260,6 +261,7 @@ func (s *Source) RedactedConnectionConfig() json.RawMessage {
 			Password:  s.Connection.Password,
 			Database:  s.Connection.Database,
 			TableName: s.Connection.TableName,
+			TLSEnable: s.Connection.TLSEnable,
 		})
 		if err != nil {
 			return json.RawMessage(`{}`)
@@ -394,14 +396,7 @@ type SourceWithTeams struct {
 	Teams  []*Team         `json:"teams"`
 }
 
-// TeamGroupedQuery represents a query grouped by team.
-type TeamGroupedQuery struct {
-	TeamID   TeamID            `json:"team_id"`
-	TeamName string            `json:"team_name"`
-	Queries  []*SavedTeamQuery `json:"queries"`
-}
-
-// ConnectionValidationResult represents the result of a connection validation.
+// ConnectionValidationResult represents the result of a connection validation
 type ConnectionValidationResult struct {
 	Message string `json:"message"`
 }
@@ -413,4 +408,5 @@ type ConnectionInfoResponse struct {
 	Password  string `json:"password,omitempty"`
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
+	TLSEnable bool   `json:"tls_enable"`
 }

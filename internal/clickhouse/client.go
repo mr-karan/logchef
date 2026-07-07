@@ -2,9 +2,13 @@ package clickhouse
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"math"
 	"reflect"
 	"regexp"
@@ -22,11 +26,39 @@ import (
 
 // Default values for query execution
 const (
+	// queryTimeoutGrace is added to the ClickHouse max_execution_time when
+	// deriving the Go context deadline, so ClickHouse's own timeout trips first
+	// (returning a proper CH error); the Go deadline is only a backstop for
+	// network/driver stalls that the server-side setting can't bound.
+	queryTimeoutGrace = 5 * time.Second
+
+	// fieldValuesConcurrency bounds how many per-field distinct-value queries run
+	// in parallel in GetAllFilterableFieldValues, so a wide table doesn't fan out
+	// into dozens of simultaneous ClickHouse queries.
+	fieldValuesConcurrency = 6
+
 	// DefaultQueryTimeout is the default max_execution_time in seconds if not specified
 	DefaultQueryTimeout = 60
 	// MaxQueryTimeout is the maximum allowed timeout to prevent resource abuse
 	MaxQueryTimeout = 300 // 5 minutes
 )
+
+// QueryOptions controls ClickHouse execution and LogChef-side result handling.
+type QueryOptions struct {
+	TimeoutSeconds   *int
+	Settings         map[string]any
+	LimitApplied     int
+	MaxRows          int
+	MaxResponseBytes int
+	Warnings         []models.QueryWarning
+}
+
+// RowStreamWriter receives rows as they are read from ClickHouse.
+type RowStreamWriter interface {
+	Begin(columns []models.ColumnInfo) error
+	WriteRow(row map[string]any) error
+	Finish(stats models.QueryStats) error
+}
 
 // Client represents a connection to a ClickHouse database using the native protocol.
 // It provides methods for executing queries and retrieving metadata.
@@ -43,13 +75,14 @@ type Client struct {
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
 type ClientOptions struct {
-	Host     string                 // Hostname or IP address.
-	Database string                 // Target database name.
-	Username string                 // Username for authentication.
-	Password string                 // Password for authentication.
-	Settings map[string]interface{} // Additional ClickHouse settings (e.g., max_execution_time).
-	SourceID string                 // Source ID for metrics tracking.
-	Source   *models.Source         // Source model for enhanced metrics.
+	Host      string         // Hostname or IP address.
+	Database  string         // Target database name.
+	Username  string         // Username for authentication.
+	Password  string         // Password for authentication.
+	Settings  map[string]any // Additional ClickHouse settings (e.g., max_execution_time).
+	SourceID  string         // Source ID for metrics tracking.
+	Source    *models.Source // Source model for enhanced metrics.
+	TLSEnable bool           // Enable TLS for the connection.
 }
 
 // ExtendedColumnInfo provides detailed column metadata, including nullability,
@@ -80,10 +113,30 @@ type TableInfo struct {
 // It takes connection options and a logger, creates the connection, and returns a Client instance.
 // Note: This does not automatically verify the connection with a ping - callers should do that if needed.
 func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
-	// Ensure host includes the native protocol port (default 9000) if not specified.
+	// Ensure host includes the native protocol port if not specified.
+	// Default to 9440 for TLS connections, 9000 for plaintext.
 	host := opts.Host
 	if !strings.Contains(host, ":") {
-		host += ":9000"
+		if opts.TLSEnable {
+			host += ":9440"
+		} else {
+			host += ":9000"
+		}
+	}
+
+	// Build TLS config if enabled. Uses the system root CA pool; operators
+	// who need a custom CA bundle should install it into the OS trust store.
+	var tlsCfg *tls.Config
+	if opts.TLSEnable {
+		rootCAs, err := x509.SystemCertPool()
+		if err != nil {
+			logger.Warn("failed to load system cert pool, falling back to empty pool", "error", err)
+			rootCAs = x509.NewCertPool()
+		}
+		tlsCfg = &tls.Config{
+			RootCAs:    rootCAs,
+			MinVersion: tls.VersionTLS12,
+		}
 	}
 
 	options := &clickhouse.Options{
@@ -102,19 +155,19 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 			Method: clickhouse.CompressionLZ4,
 		},
 		Protocol: clickhouse.Native,
+		TLS:      tlsCfg,
 	}
 
 	// Apply any additional user-provided settings.
 	if opts.Settings != nil {
-		for k, v := range opts.Settings {
-			options.Settings[k] = v
-		}
+		maps.Copy(options.Settings, opts.Settings)
 	}
 
 	logger.Debug("creating clickhouse connection",
 		"host", host,
 		"database", opts.Database,
 		"protocol", "native",
+		"tls", opts.TLSEnable,
 	)
 
 	conn, err := clickhouse.Open(options)
@@ -187,6 +240,12 @@ func (c *Client) Query(ctx context.Context, query string /* params LogQueryParam
 // QueryWithTimeout executes a SELECT query with a timeout setting.
 // The timeoutSeconds parameter is required and will always be applied.
 func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeconds *int) (*models.QueryResult, error) {
+	return c.QueryWithOptions(ctx, query, QueryOptions{TimeoutSeconds: timeoutSeconds})
+}
+
+// QueryWithOptions executes a SELECT query and buffers a bounded result for
+// browser preview style responses.
+func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryOptions) (*models.QueryResult, error) {
 	start := time.Now()          // Used for calculating total duration including hook overhead.
 	queryStartTime := time.Now() // Separate timer for actual DB execution
 	var queryDuration time.Duration
@@ -199,37 +258,41 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 	}
 
 	// Ensure timeout is provided (should always be the case now)
-	if timeoutSeconds == nil {
+	if opts.TimeoutSeconds == nil {
 		defaultTimeout := DefaultQueryTimeout
-		timeoutSeconds = &defaultTimeout
+		opts.TimeoutSeconds = &defaultTimeout
 	}
+
+	// Bound the Go context by the timeout too — max_execution_time only limits
+	// ClickHouse-side execution, not a stalled network read or driver hang.
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(*opts.TimeoutSeconds)*time.Second+queryTimeoutGrace)
+	defer cancel()
 
 	defer func() {
 		c.logger.Debug("query processing complete",
 			"duration_ms", time.Since(start).Milliseconds(),
 			"query", query,
-			"timeout_seconds", *timeoutSeconds,
+			"timeout_seconds", *opts.TimeoutSeconds,
 		)
 	}()
 
 	// Delegate DDL statements (CREATE, ALTER, DROP, etc.) to execDDL.
 	if isDDLStatement(query) {
-		return c.execDDLWithTimeout(ctx, query, timeoutSeconds)
+		return c.execDDLWithTimeout(ctx, query, opts.TimeoutSeconds)
 	}
 
 	var rows driver.Rows
-	var resultData []map[string]interface{}
+	var resultData []map[string]any
 	var columnsInfo []models.ColumnInfo
+	var bytesReturned int
+	truncatedReason := ""
 
 	// Execute the core query logic within the hook wrapper.
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		var queryErr error
 		queryStartTime = time.Now() // Reset timer before execution
 
-		// Always apply timeout setting
-		hookCtx = clickhouse.Context(hookCtx, clickhouse.WithSettings(clickhouse.Settings{
-			"max_execution_time": *timeoutSeconds,
-		}))
+		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
 
 		rows, queryErr = c.conn.Query(hookCtx, query)
 		if queryErr != nil {
@@ -243,30 +306,31 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 			}
 		}()
 
-		// Get column names and types.
-		columnTypes := rows.ColumnTypes()
-		columnsInfo = make([]models.ColumnInfo, len(columnTypes)) // Use new name
-		scanDest := make([]interface{}, len(columnTypes))         // Prepare scan destinations.
-		for i, ct := range columnTypes {
-			columnsInfo[i] = models.ColumnInfo{
-				Name: ct.Name(),
-				Type: ct.DatabaseTypeName(),
-			}
-			// Use reflection to create pointers of the correct underlying type for Scan.
-			scanDest[i] = reflect.New(ct.ScanType()).Interface()
-		}
+		columnsInfo, scanDest, scanPtrs := prepareRowScan(rows)
 
-		// Process rows.
-		resultData = make([]map[string]interface{}, 0) // Initialize slice.
+		// Preallocate to the applied row bound (capped) to avoid repeated slice
+		// regrowth on large result sets, without over-committing on huge limits.
+		resultData = make([]map[string]any, 0, boundedRowCap(opts))
 		for rows.Next() {
+			if opts.MaxRows > 0 && len(resultData) >= opts.MaxRows {
+				truncatedReason = "row_limit"
+				break
+			}
+
 			if err := rows.Scan(scanDest...); err != nil {
 				return fmt.Errorf("scanning row: %w", err)
 			}
 
-			rowMap := make(map[string]interface{})
-			for i, col := range columnsInfo { // Use new name
-				// Dereference the pointer to get the actual scanned value.
-				rowMap[col.Name] = reflect.ValueOf(scanDest[i]).Elem().Interface()
+			rowMap := scanRowMap(scanPtrs, columnsInfo)
+			if opts.MaxResponseBytes > 0 {
+				// Approximate size for the soft byte budget instead of marshaling
+				// every row (the full result is JSON-encoded once for the response).
+				rowSize := approxJSONSize(rowMap)
+				if bytesReturned+rowSize > opts.MaxResponseBytes {
+					truncatedReason = "byte_limit"
+					break
+				}
+				bytesReturned += rowSize
 			}
 			resultData = append(resultData, rowMap)
 		}
@@ -295,16 +359,203 @@ func (c *Client) QueryWithTimeout(ctx context.Context, query string, timeoutSeco
 
 	// Construct the final result.
 	queryResult := &models.QueryResult{
-		Logs:    resultData,
-		Columns: columnsInfo,
+		Logs:     resultData,
+		Columns:  columnsInfo,
+		Warnings: opts.Warnings,
 		Stats: models.QueryStats{
 			RowsRead:        len(resultData), // Use length of returned data as approximation
 			BytesRead:       0,               // Cannot reliably get BytesRead currently
+			RowsReturned:    len(resultData),
+			BytesReturned:   bytesReturned,
+			LimitApplied:    opts.LimitApplied,
+			Truncated:       truncatedReason != "",
+			TruncatedReason: truncatedReason,
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
 
 	return queryResult, nil
+}
+
+// QueryStream executes a SELECT query and streams rows into writer without
+// retaining the full result set in memory.
+func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOptions, writer RowStreamWriter) (models.QueryStats, error) {
+	start := time.Now()
+	if opts.TimeoutSeconds == nil {
+		defaultTimeout := DefaultQueryTimeout
+		opts.TimeoutSeconds = &defaultTimeout
+	}
+
+	// Bound the Go context by the timeout (backstop for network/driver stalls
+	// beyond ClickHouse's max_execution_time). Safe to cancel on return: rows
+	// are fully consumed within this call.
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(*opts.TimeoutSeconds)*time.Second+queryTimeoutGrace)
+	defer cancel()
+
+	if isDDLStatement(query) {
+		return models.QueryStats{}, fmt.Errorf("streaming DDL statements is not supported")
+	}
+
+	var stats models.QueryStats
+	var rowsReturned int
+	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
+		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
+
+		rows, err := c.conn.Query(hookCtx, query)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		columnsInfo, scanDest, scanPtrs := prepareRowScan(rows)
+		if err := writer.Begin(columnsInfo); err != nil {
+			return err
+		}
+
+		for rows.Next() {
+			if opts.MaxRows > 0 && rowsReturned >= opts.MaxRows {
+				stats.Truncated = true
+				stats.TruncatedReason = "row_limit"
+				break
+			}
+
+			if err := rows.Scan(scanDest...); err != nil {
+				return fmt.Errorf("scanning row: %w", err)
+			}
+			rowMap := scanRowMap(scanPtrs, columnsInfo)
+			if err := writer.WriteRow(rowMap); err != nil {
+				return err
+			}
+			rowsReturned++
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		stats.RowsRead = rowsReturned
+		stats.RowsReturned = rowsReturned
+		stats.LimitApplied = opts.LimitApplied
+		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
+		return writer.Finish(stats)
+	})
+	if err != nil {
+		return stats, fmt.Errorf("streaming query results: %w", err)
+	}
+
+	stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
+	return stats, nil
+}
+
+func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions) context.Context {
+	settings := clickhouse.Settings{
+		"max_execution_time": *opts.TimeoutSeconds,
+	}
+	maps.Copy(settings, opts.Settings)
+	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+}
+
+// boundedRowCap returns a preallocation hint for the result slice: the applied
+// limit / MaxRows, capped so a huge configured limit doesn't over-commit memory
+// for what may be a small result set.
+func boundedRowCap(opts QueryOptions) int {
+	hint := opts.LimitApplied
+	if opts.MaxRows > 0 && (hint <= 0 || opts.MaxRows < hint) {
+		hint = opts.MaxRows
+	}
+	if hint < 0 {
+		return 0
+	}
+	if hint > 4096 {
+		return 4096
+	}
+	return hint
+}
+
+// prepareRowScan returns column metadata, the []any scan targets for rows.Scan,
+// and the addressable reflect.Values backing them (kept so scanRowMap can deref
+// without a fresh reflect.ValueOf per cell per row). All three are allocated
+// once per query and reused across every row.
+func prepareRowScan(rows driver.Rows) (columns []models.ColumnInfo, dests []any, ptrs []reflect.Value) {
+	columnTypes := rows.ColumnTypes()
+	columnsInfo := make([]models.ColumnInfo, len(columnTypes))
+	scanDest := make([]any, len(columnTypes))
+	ptrValues := make([]reflect.Value, len(columnTypes))
+	for i, ct := range columnTypes {
+		columnsInfo[i] = models.ColumnInfo{
+			Name: ct.Name(),
+			Type: ct.DatabaseTypeName(),
+		}
+		p := reflect.New(ct.ScanType()) // *T, never nil
+		ptrValues[i] = p
+		scanDest[i] = p.Interface()
+	}
+	return columnsInfo, scanDest, ptrValues
+}
+
+func scanRowMap(ptrs []reflect.Value, columnsInfo []models.ColumnInfo) map[string]any {
+	rowMap := make(map[string]any, len(columnsInfo))
+	for i, col := range columnsInfo {
+		// ptrs[i] is the *T from reflect.New (always non-nil), so Elem() is valid;
+		// Interface() yields the scanned value exactly as before.
+		rowMap[col.Name] = ptrs[i].Elem().Interface()
+	}
+	return rowMap
+}
+
+// approxJSONSize returns a fast approximation of a scanned row's JSON-encoded
+// size, used only for the soft response-byte budget. Scalars (the overwhelming
+// majority of log columns) are estimated arithmetically; only non-scalar values
+// fall back to json.Marshal — avoiding a full per-row marshal on the scan path.
+func approxJSONSize(row map[string]any) int {
+	size := 2 // {}
+	for k, v := range row {
+		size += len(k) + 4 // "k": plus separators
+		size += approxValueSize(v)
+	}
+	return size
+}
+
+// jsonStringSize returns the JSON-encoded byte size of s (including surrounding
+// quotes) without allocating, accounting for escaping so the response byte
+// budget can't be materially under-counted by escape-heavy payloads. It counts
+// conservatively (>= the real encoded size for standard/HTML-escaping encoders).
+func jsonStringSize(s string) int {
+	n := 2 // surrounding quotes
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; {
+		case c == '"', c == '\\', c == '\n', c == '\r', c == '\t', c == '\b', c == '\f':
+			n += 2 // short escape, e.g. \n
+		case c < 0x20, c == '<', c == '>', c == '&':
+			n += 6 // \u00XX (control) or HTML-escaped form
+		default:
+			n++
+		}
+	}
+	return n
+}
+
+func approxValueSize(v any) int {
+	switch val := v.(type) {
+	case nil:
+		return 4 // null
+	case string:
+		return jsonStringSize(val)
+	case []byte:
+		return jsonStringSize(string(val))
+	case bool:
+		return 5
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return 20
+	case float32, float64:
+		return 24
+	case time.Time:
+		return 32
+	default:
+		if b, err := json.Marshal(v); err == nil {
+			return len(b)
+		}
+		return 16
+	}
 }
 
 // execDDLWithTimeout executes a DDL statement with a timeout setting.
@@ -334,7 +585,7 @@ func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSe
 
 	// Return empty result for DDL statements.
 	return &models.QueryResult{
-		Logs:    []map[string]interface{}{},
+		Logs:    []map[string]any{},
 		Columns: []models.ColumnInfo{},
 		Stats: models.QueryStats{
 			RowsRead:        0,
@@ -520,6 +771,7 @@ func (c *Client) getBaseTableInfo(ctx context.Context, database, table string) (
 		// Set to nil to indicate extended columns are not available
 		extColumns = nil
 	}
+	columns = withColumnDescriptions(columns, extColumns)
 
 	return &TableInfo{
 		Database:     database,
@@ -732,6 +984,28 @@ func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) *T
 	}
 }
 
+func withColumnDescriptions(columns []models.ColumnInfo, extColumns []ExtendedColumnInfo) []models.ColumnInfo {
+	if len(columns) == 0 || len(extColumns) == 0 {
+		return columns
+	}
+
+	commentsByName := make(map[string]string, len(extColumns))
+	for _, col := range extColumns {
+		if col.Comment != "" {
+			commentsByName[col.Name] = col.Comment
+		}
+	}
+
+	if len(commentsByName) == 0 {
+		return columns
+	}
+
+	for i := range columns {
+		columns[i].Description = commentsByName[columns[i].Name]
+	}
+	return columns
+}
+
 // parseEngineParams extracts parameters from engine constructor string.
 func parseEngineParams(engineFull string) []string {
 	start := strings.Index(engineFull, "(")
@@ -804,6 +1078,9 @@ func stripQuotes(s string) string {
 
 // parseSortKeys attempts to extract individual column names from the sorting_key string.
 // It handles simple cases and tuple() but might fail on complex expressions.
+// sortKeyIdentifierRe extracts a leading identifier from a sort-key expression.
+var sortKeyIdentifierRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*`)
+
 func parseSortKeys(sortingKey string) []string {
 	if sortingKey == "" {
 		return nil
@@ -827,8 +1104,7 @@ func parseSortKeys(sortingKey string) []string {
 		// Further strip potential backticks or quotes if needed, though identifiers
 		// usually don't contain them after parsing functions like tuple().
 		// Basic identifier extraction:
-		re := regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*`) // Simple identifier regex
-		match := re.FindString(trimmed)
+		match := sortKeyIdentifierRe.FindString(trimmed)
 		if match != "" && !isKeyword(match) { // Check if it's not a keyword
 			keys = append(keys, match)
 		}
@@ -1162,18 +1438,22 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	}
 
 	results := make(map[string]*FieldValuesResult)
+	var mu sync.Mutex
 
 	// Default timeout for String fields (shorter to fail fast on high cardinality)
 	stringFieldTimeout := 5
 	lowCardTimeout := 10
 
+	// Fan out the per-field distinct-value queries with bounded concurrency. Each
+	// query already carries its own timeout, so one slow field can't stall the
+	// rest; the semaphore caps how many hit ClickHouse at once.
+	sem := make(chan struct{}, fieldValuesConcurrency)
+	var wg sync.WaitGroup
+
 	for _, col := range columns {
-		// Check if context was cancelled (e.g., client disconnected or request timed out)
-		// This allows early termination when the caller no longer needs the results
+		// Stop launching new work once the caller's context is done.
 		if ctx.Err() != nil {
-			c.logger.Debug("context cancelled, stopping field value queries",
-				"error", ctx.Err(),
-				"fields_completed", len(results))
+			c.logger.Debug("context cancelled, stopping field value queries", "error", ctx.Err())
 			break
 		}
 
@@ -1205,19 +1485,37 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 			LogchefQL:      params.LogchefQL, // Pass through user's LogchefQL query
 		}
 
-		fieldResult, err := c.GetFieldDistinctValues(ctx, database, table, fieldParams)
-		if err != nil {
-			// Log but don't fail - this field just won't have values shown
-			// Common for high cardinality String fields that timeout
-			c.logger.Debug("skipping field values (likely timeout or high cardinality)",
-				"field", col.Name,
-				"type", col.Type,
-				"error", err)
-			continue
+		// Acquire a slot, but honor cancellation while all slots are busy
+		// (otherwise a cancelled request keeps launching fields up to the
+		// per-field timeout).
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			c.logger.Debug("context cancelled while awaiting field-value slot", "error", ctx.Err())
 		}
-		results[col.Name] = fieldResult
+		if ctx.Err() != nil {
+			break // exit the loop; wg.Wait below drains in-flight queries
+		}
+		wg.Go(func() {
+			defer func() { <-sem }()
+
+			fieldResult, err := c.GetFieldDistinctValues(ctx, database, table, fieldParams)
+			if err != nil {
+				// Log but don't fail - this field just won't have values shown.
+				// Common for high cardinality String fields that timeout.
+				c.logger.Debug("skipping field values (likely timeout or high cardinality)",
+					"field", fieldParams.FieldName,
+					"type", fieldParams.FieldType,
+					"error", err)
+				return
+			}
+			mu.Lock()
+			results[fieldParams.FieldName] = fieldResult
+			mu.Unlock()
+		})
 	}
 
+	wg.Wait()
 	return results, nil
 }
 

@@ -71,5 +71,8 @@
     "esbuild",
     "maplibre-gl",
     "vue-demi"
-  ]
+  ],
+  "overrides": {
+    "@internationalized/date": "3.12.0"
+  }
 }

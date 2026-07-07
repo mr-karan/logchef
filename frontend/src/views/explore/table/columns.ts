@@ -232,7 +232,7 @@ export function createColumns(
           return h(
             "span",
             {
-              class: "flex-render-content font-mono text-[13px]", // Base class
+              class: "flex-render-content font-mono tabular-nums text-[13px]", // Base class
               title: value as string // Keep the original value as title
             },
             formatLogContent(formattedTime, false)
@@ -246,7 +246,7 @@ export function createColumns(
           return h(
             "span",
             {
-              class: "flex-render-content font-mono text-[13px]", // Base class
+              class: "flex-render-content font-mono tabular-nums text-[13px]", // Base class
               title: value // Keep the original value as title
             },
             formatLogContent(formattedTime, false)

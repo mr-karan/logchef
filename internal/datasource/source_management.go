@@ -3,9 +3,9 @@ package datasource
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
-	"github.com/mr-karan/logchef/internal/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -60,7 +60,7 @@ func (s *Service) UpdateSource(ctx context.Context, sourceID models.SourceID, re
 		if err == nil && existingSource != nil && existingSource.ID != sourceID {
 			return nil, fmt.Errorf("source identity %q already exists (ID: %d): %w", result.Source.IdentityKey, existingSource.ID, ErrSourceAlreadyExists)
 		}
-		if err != nil && !sqlite.IsNotFoundError(err) && !sqlite.IsSourceNotFoundError(err) {
+		if err != nil && !errors.Is(err, models.ErrNotFound) {
 			return nil, fmt.Errorf("check existing source identity: %w", err)
 		}
 	}

@@ -535,7 +535,7 @@ defineExpose({
     <Button
       variant="ghost"
       size="sm"
-      class="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+      class="h-7 px-2 text-xs bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal"
       @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
       title="Click to toggle timezone"
     >

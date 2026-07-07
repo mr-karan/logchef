@@ -81,6 +81,40 @@ func TestValidateConfig_ValidVictoriaLogsSource(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
+	chSource := func(database, table, tsField, sevField string) config.ProvisionSource {
+		return config.ProvisionSource{
+			Name:              "s",
+			SourceType:        "clickhouse",
+			MetaTSField:       tsField,
+			MetaSeverityField: sevField,
+			Connection: map[string]any{
+				"host":       "h:9000",
+				"database":   database,
+				"table_name": table,
+				"password":   "p",
+			},
+		}
+	}
+	cases := []struct {
+		name string
+		src  config.ProvisionSource
+	}{
+		{"bad database", chSource("db; DROP TABLE x", "tbl", "", "")},
+		{"bad table", chSource("db", "tbl`)--", "", "")},
+		{"bad ts field", chSource("db", "tbl", "ts field", "")},
+		{"bad severity field", chSource("db", "tbl", "", "sev-field")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{tc.src}}
+			if err := ValidateConfig(cfg); err == nil {
+				t.Errorf("%s should fail identifier validation", tc.name)
+			}
+		})
+	}
+}
+
 func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,

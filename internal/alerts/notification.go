@@ -14,8 +14,6 @@ type AlertNotification struct {
 	Description    string
 	Status         models.AlertStatus
 	Severity       models.AlertSeverity
-	TeamID         models.TeamID
-	TeamName       string
 	SourceID       models.SourceID
 	SourceName     string
 	Value          float64

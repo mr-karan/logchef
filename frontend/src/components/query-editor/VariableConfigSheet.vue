@@ -295,10 +295,11 @@ watch(
                     <div v-for="opt in variable.options" :key="opt.value"
                       class="flex items-center gap-2 px-2 py-1 rounded-sm hover:bg-muted cursor-pointer"
                       @click="toggleDefaultMultiSelectValue(variable, opt.value)">
+                      <!-- Display-only: the enclosing row's @click drives the toggle.
+                           Binding @update here too would double-toggle on checkbox clicks. -->
                       <Checkbox
-                        :checked="isDefaultMultiSelectValueSelected(variable, opt.value)"
-                        @update:checked="toggleDefaultMultiSelectValue(variable, opt.value)"
-                        class="h-3.5 w-3.5"
+                        :model-value="isDefaultMultiSelectValueSelected(variable, opt.value)"
+                        class="h-3.5 w-3.5 pointer-events-none"
                       />
                       <span class="text-xs">{{ opt.label || opt.value }}</span>
                     </div>
@@ -310,7 +311,7 @@ watch(
                 <!-- Single-select dropdown default -->
                 <Select v-else-if="variable.inputType === 'dropdown' && variable.options?.length"
                   :model-value="String(variable.defaultValue ?? '')"
-                  @update:model-value="(val) => { variable.defaultValue = val; variableStore.upsertVariable(variable); }">
+                  @update:model-value="(val) => { variable.defaultValue = val as string; variableStore.upsertVariable(variable); }">
                   <SelectTrigger class="h-9">
                     <SelectValue placeholder="No default" />
                   </SelectTrigger>

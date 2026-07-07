@@ -1,0 +1,88 @@
+name: Go Tests
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'sqlc.yaml'
+      - 'internal/**/migrations/**'
+      - 'internal/**/queries.sql'
+      - '.github/workflows/go-tests.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - '**/*.go'
+      - 'go.mod'
+      - 'go.sum'
+      - 'sqlc.yaml'
+      - 'internal/**/migrations/**'
+      - 'internal/**/queries.sql'
+      - '.github/workflows/go-tests.yml'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Postgres service so the store conformance suite runs against BOTH backends
+    # (SQLite via temp files, Postgres via this service).
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: logchef
+          POSTGRES_PASSWORD: logchef
+          POSTGRES_DB: logchef
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U logchef -d logchef"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      LOGCHEF_TEST_POSTGRES_DSN: postgres://logchef:logchef@localhost:5432/logchef?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test (SQLite + Postgres conformance)
+        run: go test -race ./...
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: latest
+
+  sqlc:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install sqlc
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+      - name: Verify generated code is in sync
+        run: |
+          sqlc generate
+          git diff --exit-code || {
+            echo "::error::sqlc generated code is out of date — run 'just sqlc-generate' and commit the result."
+            exit 1
+          }

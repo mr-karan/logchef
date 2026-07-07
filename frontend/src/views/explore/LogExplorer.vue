@@ -4,6 +4,7 @@ import {
   computed,
   watch,
   onMounted,
+  onBeforeUnmount,
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
@@ -20,7 +21,6 @@ import { FieldSideBar } from "@/components/field-sidebar";
 import { getErrorMessage } from "@/api/types";
 import DataTable from "./table/data-table.vue";
 import CompactLogList from "./table/CompactLogListSimple.vue";
-import { exportRawDataToCSV } from "./table/export";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
@@ -28,12 +28,15 @@ import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
 import { supportsQueryLanguage } from "@/lib/queryMetadata";
+import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
+import { exploreApi } from "@/api/explore";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
-import type { SavedTeamQuery } from "@/api/savedQueries";
+import type { SavedQuery } from "@/api/savedQueries";
 import { logchefqlApi, type FilterCondition } from "@/api/logchefql";
+import { generateCliCommand } from "@/utils/cliCommand";
 
 // Type alias for backwards compatibility
 type QueryCondition = FilterCondition;
@@ -57,6 +60,7 @@ const savedQueriesStore = useSavedQueriesStore();
 const preferencesStore = usePreferencesStore();
 const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
+const { getVariablesForApi } = useVariables();
 
 const urlState = useUrlState();
 const isInitializing = computed(() => urlState.state.value !== 'ready');
@@ -84,7 +88,6 @@ const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
 const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDetails.value, 'logchefql'));
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
-const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingSourceDetails);
 
 // Computed properties for the clean approach
 const currentTeamId = computed(() => contextStore.teamId);
@@ -109,6 +112,8 @@ const isChangingContext = computed(() => {
   const sourceLoading = sourcesStore.isLoadingSourceDetails;
   return teamLoading || sourceLoading;
 });
+const isExporting = ref(false);
+let exportAbortController: AbortController | null = null;
 
 async function handleTeamChange(teamId: number) {
   await urlState.selectTeam(teamId);
@@ -155,7 +160,7 @@ const queryEditorRef = ref<ComponentPublicInstance<{
   toggleSqlEditorVisibility?: () => void;
 }> | null>(null);
 const isLoadingQuery = ref(false);
-const editQueryData = ref<SavedTeamQuery | null>(null);
+const editQueryData = ref<SavedQuery | null>(null);
 const topBarRef = ref<InstanceType<typeof ExploreTopBar> | null>(null);
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
 const isHistogramVisible = ref(true);
@@ -378,7 +383,7 @@ const handleQueryExecution = async (debouncingKey = "") => {
     }
 
     if (result && result.success && !isInitializing.value) {
-      urlState.pushHistoryEntry();
+      await urlState.pushHistoryEntry();
 
       if (activeMode.value === 'sql') {
         handleTimeRangeUpdate();
@@ -414,7 +419,7 @@ watch(
     if (isInitializing.value) return;
     if (!newSourceId || !currentTeamId.value) return;
     try {
-      await loadSourceQueries(currentTeamId.value, newSourceId);
+      await loadSourceQueries(newSourceId);
     } catch (e) {
       console.error('Error loading saved queries for source:', e);
     }
@@ -508,15 +513,11 @@ const handleSaveOrUpdateClick = async () => {
     return;
   }
 
-  if (queryId && currentTeamId.value && currentSourceId.value) {
+  if (queryId) {
     // --- Update Existing Query Flow ---
     try {
       isLoadingQuery.value = true;
-      const result = await savedQueriesStore.fetchTeamSourceQueryDetails(
-        currentTeamId.value,
-        currentSourceId.value,
-        queryId
-      );
+      const result = await savedQueriesStore.fetchById(queryId);
 
       if (result.success && savedQueriesStore.selectedQuery) {
         const existingQuery = savedQueriesStore.selectedQuery;
@@ -547,30 +548,14 @@ const handleSaveOrUpdateClick = async () => {
 
 // Handle updating an existing query
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
-  // Ensure we have the necessary IDs
-  if (!currentSourceId.value || !formData.team_id) {
-    toast({
-      title: "Error",
-      description: "Missing source or team ID for update.",
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-    return;
-  }
-
   try {
-    const response = await savedQueriesStore.updateTeamSourceQuery(
-      formData.team_id,
-      currentSourceId.value,
-      queryId,
-      {
-        name: formData.name,
-        description: formData.description,
-        query_language: formData.query_language,
-        editor_mode: formData.editor_mode,
-        query_content: formData.query_content,
-      }
-    );
+    const response = await savedQueriesStore.update(queryId, {
+      name: formData.name,
+      description: formData.description,
+      query_language: formData.query_language,
+      editor_mode: formData.editor_mode,
+      query_content: formData.query_content,
+    });
 
     if (response && response.success) {
       showSaveQueryModal.value = false;
@@ -618,16 +603,224 @@ const openDatePicker = () => {
   }
 };
 
-const handleExport = () => {
-  const logs = exploreStore.logs;
-  const columns = exploreStore.columns;
-  if (!logs?.length || !columns?.length) return;
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const sourceName = selectedSourceName.value || 'logs';
-  const timestamp = new Date().toISOString().slice(0, 19).replace(/[:-]/g, '');
-  exportRawDataToCSV(logs, columns, {
-    fileName: `${sourceName}-export-${timestamp}`,
-  });
+const triggerBrowserDownload = (downloadUrl: string, fileName?: string) => {
+  const link = document.createElement("a");
+  link.href = downloadUrl;
+  if (fileName) {
+    link.download = fileName;
+  }
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+};
+
+class ExportAbortedError extends Error {
+  constructor() {
+    super("Export polling aborted");
+    this.name = "ExportAbortedError";
+  }
+}
+
+const waitForExportCompletion = async (exportId: string, timeoutSeconds: number, signal: AbortSignal) => {
+  if (!currentTeamId.value || !currentSourceId.value) {
+    throw new Error("Team and source are required for export");
+  }
+
+  const deadline = Date.now() + (timeoutSeconds + 60) * 1000;
+  while (Date.now() < deadline) {
+    if (signal.aborted) throw new ExportAbortedError();
+    const response = await exploreApi.getExportJob(currentSourceId.value, exportId, currentTeamId.value);
+    if (signal.aborted) throw new ExportAbortedError();
+    const job = response.data;
+    if (!job) {
+      throw new Error("Export status is unavailable");
+    }
+    if (job.status === "complete") {
+      return job;
+    }
+    if (job.status === "failed") {
+      throw new Error(job.error_message || "Export failed");
+    }
+    await sleep(1000);
+  }
+
+  throw new Error("Export is taking longer than expected. Please try again.");
+};
+
+const handleExport = async () => {
+  if (!currentTeamId.value || !currentSourceId.value) return;
+
+  const sql = exploreStore.lastExecutedState?.sqlQuery ||
+    (exploreStore.activeMode === "sql" ? exploreStore.sqlForExecution : "");
+  if (!sql?.trim()) {
+    toast({
+      title: "Cannot Download",
+      description: "Run the query before downloading results.",
+      variant: "destructive",
+      duration: TOAST_DURATION.WARNING,
+    });
+    return;
+  }
+
+  exportAbortController?.abort();
+  exportAbortController = new AbortController();
+  const signal = exportAbortController.signal;
+
+  try {
+    isExporting.value = true;
+    const queryTimeout = Math.max(exploreStore.queryTimeout, 120);
+    const response = await exploreApi.createExportJob(currentSourceId.value, {
+      query_text: sql,
+      format: "csv",
+      query_timeout: queryTimeout,
+      variables: getVariablesForApi(),
+    }, currentTeamId.value);
+    const job = response.data;
+    if (!job?.id) {
+      throw new Error("Export job was not created");
+    }
+
+    const completedJob = await waitForExportCompletion(job.id, queryTimeout, signal);
+    if (!completedJob.download_url) {
+      throw new Error("Export download is unavailable");
+    }
+
+    triggerBrowserDownload(completedJob.download_url, completedJob.file_name);
+  } catch (error: any) {
+    if (error instanceof ExportAbortedError) return;
+    toast({
+      title: "Download Failed",
+      description: getErrorMessage(error),
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  } finally {
+    if (exportAbortController?.signal === signal) {
+      exportAbortController = null;
+    }
+    isExporting.value = false;
+  }
+};
+
+onBeforeUnmount(() => {
+  exportAbortController?.abort();
+  exportAbortController = null;
+});
+
+const calendarDatePartToDate = (value: any) => {
+  if (!value) return undefined;
+
+  return new Date(
+    value.year,
+    value.month - 1,
+    value.day,
+    "hour" in value ? value.hour : 0,
+    "minute" in value ? value.minute : 0,
+    "second" in value ? value.second : 0
+  );
+};
+
+const copyTextWithFallback = async (text: string) => {
+  if (navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch (error) {
+      console.warn("Clipboard API failed, falling back to execCommand:", error);
+    }
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+
+  const copied = document.execCommand("copy");
+  document.body.removeChild(textarea);
+
+  if (!copied) {
+    throw new Error("Failed to copy share link");
+  }
+};
+
+const handleCopyCliCommand = async () => {
+  if (!currentTeamId.value || !currentSourceId.value) {
+    toast({
+      title: "Cannot copy CLI command",
+      description: "Team and source must be selected.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+    return;
+  }
+
+  try {
+    const timeRange = exploreStore.timeRange;
+    const command = generateCliCommand({
+      teamId: currentTeamId.value,
+      sourceId: currentSourceId.value,
+      mode: exploreStore.activeMode,
+      query:
+        exploreStore.activeMode === "logchefql"
+          ? exploreStore.logchefqlCode
+          : exploreStore.rawSql,
+      relativeTime: exploreStore.selectedRelativeTime || undefined,
+      absoluteStart: calendarDatePartToDate(timeRange?.start),
+      absoluteEnd: calendarDatePartToDate(timeRange?.end),
+      limit: exploreStore.limit,
+      timeout: exploreStore.queryTimeout,
+    });
+
+    await copyTextWithFallback(command);
+    toast({
+      title: "CLI Command Copied",
+      description: "Paste in your terminal to run the same query.",
+      duration: TOAST_DURATION.SUCCESS,
+    });
+  } catch (error: any) {
+    toast({
+      title: "Copy Failed",
+      description: error?.message || "Failed to copy CLI command.",
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
+};
+
+const handleShare = async () => {
+  try {
+    const share = await exploreStore.createQueryShare();
+    if (!share?.share_url) return;
+
+    const currentQuery = {
+      team: String(currentTeamId.value ?? ""),
+      source: String(currentSourceId.value ?? ""),
+      share: share.token,
+    };
+
+    await router.replace({ query: currentQuery });
+    await copyTextWithFallback(share.share_url);
+
+    toast({
+      title: "Share Link Copied",
+      description: "URL updated to the share link and copied to clipboard.",
+      duration: TOAST_DURATION.SUCCESS,
+    });
+  } catch (error: any) {
+    toast({
+      title: "Share Failed",
+      description: error?.message || getErrorMessage(error),
+      variant: "destructive",
+      duration: TOAST_DURATION.ERROR,
+    });
+  }
 };
 
 // Function to generate example query based on sort keys
@@ -903,15 +1096,11 @@ watch(
       urlSource = route.query.source ? parseInt(route.query.source as string) : null;
     }
 
-    if (newQueryId && urlTeam && urlSource) {
+    if (newQueryId) {
       try {
         isLoadingQuery.value = true;
 
-        const fetchResult = await savedQueriesStore.fetchTeamSourceQueryDetails(
-          urlTeam,
-          urlSource,
-          newQueryId as string
-        );
+        const fetchResult = await savedQueriesStore.fetchById(newQueryId as string);
 
         if (fetchResult.success && savedQueriesStore.selectedQuery) {
           exploreStore.setGroupByField("__none__");
@@ -919,6 +1108,17 @@ watch(
           const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
 
           if (loadResult) {
+            // Wait for the source SCHEMA (currentSourceDetails), not just the source
+            // id, before executing — prepareQueryForExecution throws "No source
+            // selected" until the schema loads. The fresh-load path gates on this in
+            // useUrlState.checkReadiness(); this KeepAlive watcher path must too,
+            // otherwise opening a saved query for an un-warmed source races and fails
+            // on first open (works on retry once the schema is cached).
+            for (let i = 0; i < 30; i++) {
+              if (sourcesStore.currentSourceDetails?.id === currentSourceId.value) break;
+              await new Promise((r) => setTimeout(r, 100));
+            }
+
             await handleQueryExecution("query-from-url");
 
             nextTick(() => {
@@ -1170,12 +1370,14 @@ onMounted(async () => {
                     :canExecute="canExecuteQuery"
                     :showRunButton="true"
                     :isCancelling="exploreStore.isCancellingQuery"
+                    :queryTimeout="exploreStore.queryTimeout"
                     @change="(event) => event.mode === 'logchefql'
                       ? updateLogchefqlValue(event.query, event.isUserInput)
                       : updateSqlValue(event.query, event.isUserInput)"
                     @submit="() => handleQueryExecution('editor-submit')" 
                     @execute="() => handleQueryExecution('editor-run-button')"
                     @cancel-query="handleCancelQuery"
+                    @update:query-timeout="exploreStore.setQueryTimeout($event)"
                     @update:activeMode="(mode, isModeSwitchOnly) =>
                       changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
                     @toggle-fields="showFieldsPanel = !showFieldsPanel" 
@@ -1269,9 +1471,12 @@ onMounted(async () => {
                 :displayMode="displayMode"
                 :logsCount="exploreStore.logs?.length || 0"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
+                :isExporting="isExporting"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"
+                @share="handleShare"
+                @copy-cli="handleCopyCliCommand"
               />
 
               <!-- Histogram visualization -->
@@ -1301,7 +1506,7 @@ onMounted(async () => {
                   <component
                     v-else-if="exploreStore.columns?.length > 0"
                     :is="displayMode === 'table' ? DataTable : CompactLogList"
-                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId ?? 'noquery'}-${displayMode}`"
                     :columns="exploreStore.columns as any"
                     :data="exploreStore.logs"
                     :stats="exploreStore.queryStats"

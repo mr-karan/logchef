@@ -75,8 +75,15 @@ const isLoadingRuntimeDependencies = ref(false);
 const loadError = ref<string | null>(null);
 
 const fieldNames = computed(() => Object.keys(props.schema ?? {}));
+function buildModelCacheKey(
+  language: SqlMonacoEditorProps["language"],
+  sourceId: number
+) {
+  return `${language}-${sourceId ?? "default"}`;
+}
+
 const modelCacheKey = computed(
-  () => `${props.language}-${props.sourceId ?? "default"}`
+  () => buildModelCacheKey(props.language, props.sourceId)
 );
 
 const monacoOptions = computed(() => {
@@ -175,6 +182,45 @@ function syncEditorValue(nextValue: string) {
     if (selection) {
       editorRef.value.setSelection(selection);
     }
+  });
+}
+
+function bindEditorContext(
+  language: SqlMonacoEditorProps["language"],
+  sourceId: number,
+  value: string,
+  previousKey?: string
+) {
+  const editor = editorRef.value;
+  const deps = getMonacoDependencies();
+
+  if (!editor || !deps || isDisposing.value) {
+    return;
+  }
+
+  if (previousKey) {
+    saveCurrentViewState(previousKey);
+  }
+
+  const nextKey = buildModelCacheKey(language, sourceId);
+  const model = deps.monacoUtils.getOrCreateModel(
+    value,
+    language,
+    sourceId,
+    nextKey
+  );
+
+  editor.setModel(model);
+  editor.updateOptions(monacoOptions.value);
+  registerCompletionProvider();
+  restoreCurrentViewState(nextKey);
+
+  nextTick(() => {
+    if (!editorRef.value || isDisposing.value) {
+      return;
+    }
+
+    editorRef.value.layout();
   });
 }
 
@@ -375,18 +421,7 @@ async function initializeEditor(editor: MonacoEditor) {
   }
 
   deps.monacoUtils.registerEditorInstance(editor);
-
-  const model = deps.monacoUtils.getOrCreateModel(
-    editorValue.value,
-    props.language,
-    props.sourceId,
-    modelCacheKey.value
-  );
-
-  editor.setModel(model);
-  editor.updateOptions(monacoOptions.value);
-  restoreCurrentViewState();
-  registerCompletionProvider();
+  bindEditorContext(props.language, props.sourceId, editorValue.value);
 
   activeDisposables.value.push(
     editor.onDidFocusEditorWidget(() => emit("focus-change", true)),
@@ -525,29 +560,39 @@ watch(
 );
 
 watch(
-  () => props.sourceId,
-  (newSourceId, oldSourceId) => {
-    const editor = editorRef.value;
-    const deps = getMonacoDependencies();
-
-    if (!editor || isDisposing.value || !deps) {
+  () => props.language,
+  (newLanguage, oldLanguage) => {
+    if (!editorRef.value || isDisposing.value || !oldLanguage || newLanguage === oldLanguage) {
       return;
     }
 
-    if (oldSourceId !== undefined) {
-      saveCurrentViewState(`${props.language}-${oldSourceId ?? "default"}`);
+    const nextValue = props.value || "";
+    editorValue.value = nextValue;
+
+    bindEditorContext(
+      newLanguage,
+      props.sourceId,
+      nextValue,
+      buildModelCacheKey(oldLanguage, props.sourceId)
+    );
+  }
+);
+
+watch(
+  () => props.sourceId,
+  (newSourceId, oldSourceId) => {
+    if (!editorRef.value || isDisposing.value) {
+      return;
     }
 
-    const model = deps.monacoUtils.getOrCreateModel(
-      editorValue.value,
+    bindEditorContext(
       props.language,
       newSourceId,
-      `${props.language}-${newSourceId ?? "default"}`
+      props.value || "",
+      oldSourceId !== undefined
+        ? buildModelCacheKey(props.language, oldSourceId)
+        : undefined
     );
-
-    editor.setModel(model);
-    restoreCurrentViewState();
-    nextTick(() => editor.layout());
   }
 );
 

@@ -3,11 +3,18 @@ package provisioning
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+// sqlIdentifierRe matches a ClickHouse identifier (database, table, column):
+// starts with a letter or underscore, then letters/digits/underscores. Provisioned
+// sources are admin config-as-code, but these values are interpolated into raw
+// ClickHouse SQL, so validate them here too (defense-in-depth, matching the API).
+var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // ValidateConfig checks the provisioning config for internal consistency.
 func ValidateConfig(cfg *config.ProvisioningConfig) error {
@@ -30,7 +37,8 @@ func validateSources(cfg *config.ProvisioningConfig) []string {
 	var errs []string
 	seen := make(map[string]bool)
 
-	for i, src := range cfg.Sources {
+	for i := range cfg.Sources {
+		src := cfg.Sources[i]
 		prefix := fmt.Sprintf("sources[%d] (%q)", i, src.Name)
 
 		if src.Name == "" {
@@ -60,9 +68,21 @@ func validateSources(cfg *config.ProvisioningConfig) []string {
 			}
 			if strings.TrimSpace(conn.Database) == "" {
 				errs = append(errs, fmt.Sprintf("%s: clickhouse database is required", prefix))
+			} else if !sqlIdentifierRe.MatchString(conn.Database) {
+				errs = append(errs, fmt.Sprintf("%s: database %q is not a valid identifier", prefix, conn.Database))
 			}
 			if strings.TrimSpace(conn.TableName) == "" {
 				errs = append(errs, fmt.Sprintf("%s: clickhouse table_name is required", prefix))
+			} else if !sqlIdentifierRe.MatchString(conn.TableName) {
+				errs = append(errs, fmt.Sprintf("%s: table_name %q is not a valid identifier", prefix, conn.TableName))
+			}
+			// These are interpolated into raw ClickHouse SQL, so enforce
+			// identifier shape here too (defense-in-depth, matching the API).
+			if src.MetaTSField != "" && !sqlIdentifierRe.MatchString(src.MetaTSField) {
+				errs = append(errs, fmt.Sprintf("%s: meta_ts_field %q is not a valid identifier", prefix, src.MetaTSField))
+			}
+			if src.MetaSeverityField != "" && !sqlIdentifierRe.MatchString(src.MetaSeverityField) {
+				errs = append(errs, fmt.Sprintf("%s: meta_severity_field %q is not a valid identifier", prefix, src.MetaSeverityField))
 			}
 		case models.SourceTypeVictoriaLogs:
 			conn, err := src.VictoriaLogsConnection()
@@ -108,7 +128,8 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 
 	// Build source name set for reference validation
 	sourceNames := make(map[string]bool)
-	for _, src := range cfg.Sources {
+	for i := range cfg.Sources {
+		src := cfg.Sources[i]
 		sourceNames[src.Name] = true
 	}
 

@@ -126,11 +126,14 @@ export function useQuery() {
   };
 
   // Change query mode - uses backend as single source of truth for SQL generation
-  const changeMode = async (newMode: EditorMode, _isModeSwitchOnly: boolean = false) => {
+  // When isModeSwitchOnly is true, skip LogchefQL→SQL translation (e.g. AI insert,
+  // loading a saved SQL query) so existing rawSql content is preserved.
+  const changeMode = async (newMode: EditorMode, isModeSwitchOnly: boolean = false) => {
     // Clear any validation errors when changing modes
     queryError.value = '';
-    // If switching to SQL mode
-    if (newMode === 'sql' && activeMode.value === 'logchefql') {
+
+    // If switching to SQL mode and caller hasn't already set rawSql
+    if (newMode === 'sql' && activeMode.value === 'logchefql' && !isModeSwitchOnly) {
       // First, check if we have the actual generated SQL from a previous execution
       if (exploreStore.generatedDisplayQuery) {
         exploreStore.setRawSql(exploreStore.generatedDisplayQuery);
@@ -175,10 +178,13 @@ export function useQuery() {
             if (generatedQuery) {
               exploreStore.setRawSql(generatedQuery);
             } else {
-              console.warn("useQuery: Backend did not return a generated query, response:", response.data);
+              queryError.value = "Could not generate SQL from your query. Please refine and try again.";
+              return;
             }
           } catch (error: any) {
             console.error("useQuery: Failed to get full SQL from backend:", error);
+            queryError.value = error?.message || "Failed to translate query to SQL. Please try again.";
+            return;
           }
         }
       }

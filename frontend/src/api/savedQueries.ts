@@ -18,30 +18,42 @@ export interface SavedQueryContent {
 }
 
 /**
- * Saved team query representation
+ * Saved query representation. Cross-team — visibility is via source access
+ * through any team membership; edit access is creator + global admin.
+ *
+ * The legacy is_bookmarked flag is gone in v1.6 — users curate queries via
+ * Collections (every user has an auto-created personal collection).
  */
-export interface SavedTeamQuery {
+export interface SavedQuery {
   id: number;
-  team_id: number;
   source_id: number;
+  created_from_team_id?: number | null;
   name: string;
   description: string;
   query_language: QueryLanguage;
   editor_mode: SavedQueryEditorMode;
   query_content: string; // JSON string of SavedQueryContent
-  is_bookmarked: boolean;
+  created_by?: number | null;
+  // Creator identity for display. Populated where the server joins users
+  // (e.g. collection items); absent for legacy queries with no creator.
+  created_by_name?: string;
+  created_by_email?: string;
   created_at: string;
   updated_at: string;
-  team_name?: string;
   source_name?: string;
+  // Per-request authorization hints from the server for the calling user.
+  // can_edit reflects delegated collection-editor access; can_delete is
+  // creator/global-admin only. Absent when the server didn't compute them.
+  can_edit?: boolean;
+  can_delete?: boolean;
+  // runnable = caller has source access to run it. Set on the admin "all queries"
+  // browse list; rows for unreachable sources are shown locked. Absent elsewhere
+  // (treat absent as runnable — those lists are already source-access-gated).
+  runnable?: boolean;
 }
 
-/**
- * Toggle bookmark response
- */
-export interface ToggleBookmarkResponse {
-  is_bookmarked: boolean;
-  message: string;
+export interface ResolvedSavedQuery extends SavedQuery {
+  resolved_team_id: number;
 }
 
 /**
@@ -54,54 +66,48 @@ export interface Team {
 }
 
 /**
- * Team grouped query
- */
-export interface TeamGroupedQuery {
-  team_id: number;
-  team_name: string;
-  queries: SavedTeamQuery[];
-}
-
-/**
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  listTeamCollections: (teamId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/collections`),
+  list: (sourceId?: number) => {
+    const url =
+      sourceId !== undefined && sourceId !== null
+        ? `/saved-queries?source_id=${sourceId}`
+        : "/saved-queries";
+    return apiClient.get<SavedQuery[]>(url);
+  },
 
-  listTeamSourceQueries: (teamId: number, sourceId: number) =>
-    apiClient.get<SavedTeamQuery[]>(`/teams/${teamId}/sources/${sourceId}/collections`),
+  // listAll returns every saved query across all sources (global-admin only),
+  // each marked .runnable for the caller. Backs the Library "All queries" view.
+  // Admin-scoped endpoint (route-level requireAdmin), separate from the
+  // source-gated /saved-queries used by the explorer dropdown + CLI.
+  listAll: () => apiClient.get<SavedQuery[]>("/admin/saved-queries"),
 
-  getTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
-    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
+  get: (queryId: number | string) =>
+    apiClient.get<SavedQuery>(`/saved-queries/${queryId}`),
 
-  createTeamSourceQuery: (teamId: number, sourceId: number, query: {
+  create: (query: {
+    source_id: number;
+    created_from_team_id?: number | null;
     name: string;
     description: string;
     query_language: QueryLanguage;
     editor_mode: SavedQueryEditorMode;
     query_content: string;
-  }) => apiClient.post<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections`, query),
+  }) => apiClient.post<SavedQuery>("/saved-queries", query),
 
-  updateTeamSourceQuery: (
-    teamId: number,
-    sourceId: number,
-    collectionId: string,
-    query: Partial<Omit<SavedTeamQuery, "id" | "team_id" | "source_id" | "created_at" | "updated_at">>
-  ) =>
-    apiClient.put<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`, query),
+  update: (
+    queryId: number | string,
+    query: Partial<Omit<SavedQuery, "id" | "source_id" | "created_by" | "created_at" | "updated_at">>
+  ) => apiClient.put<SavedQuery>(`/saved-queries/${queryId}`, query),
 
-  deleteTeamSourceQuery: (teamId: number, sourceId: number, collectionId: string) =>
-    apiClient.delete<{ success: boolean }>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}`),
+  delete: (queryId: number | string) =>
+    apiClient.delete<{ message: string }>(`/saved-queries/${queryId}`),
 
-  toggleBookmark: (teamId: number, sourceId: number, collectionId: number) =>
-    apiClient.patch<ToggleBookmarkResponse>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/bookmark`),
+  resolve: (queryId: number | string, preferredTeamId?: number | string | null) => {
+    const suffix = preferredTeamId ? `?team_id=${encodeURIComponent(String(preferredTeamId))}` : "";
+    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`);
+  },
 
-  resolveQuery: (teamId: number, sourceId: number, collectionId: number) =>
-    apiClient.get<SavedTeamQuery>(`/teams/${teamId}/sources/${sourceId}/collections/${collectionId}/resolve`),
-
-  listMyCollections: () =>
-    apiClient.get<SavedTeamQuery[]>("/me/collections"),
-
-  getUserTeams: () => apiClient.get<Team[]>("/me/teams")
+  getUserTeams: () => apiClient.get<Team[]>("/me/teams"),
 };

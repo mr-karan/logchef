@@ -1,11 +1,13 @@
 package server
 
 import (
+	"context"
 	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -62,20 +64,18 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 			attrs = append(attrs, slog.String("source_id", sourceID))
 		}
 
-		// Convert to []any for slog
-		args := make([]any, len(attrs))
-		for i, a := range attrs {
-			args[i] = a
+		// Single canonical log line per request. LogAttrs takes []slog.Attr
+		// directly, avoiding the per-request []any conversion.
+		var level slog.Level
+		switch {
+		case status >= 500:
+			level = slog.LevelError
+		case status >= 400:
+			level = slog.LevelWarn
+		default:
+			level = slog.LevelInfo
 		}
-
-		// Single canonical log line per request
-		if status >= 500 {
-			log.Error("http", args...)
-		} else if status >= 400 {
-			log.Warn("http", args...)
-		} else {
-			log.Info("http", args...)
-		}
+		log.LogAttrs(context.Background(), level, "http", attrs...)
 
 		return chainErr
 	}

@@ -1,0 +1,17 @@
+DROP TABLE IF EXISTS collection_members;
+DROP TABLE IF EXISTS collection_items;
+DROP TABLE IF EXISTS collections;
+DROP TABLE IF EXISTS saved_queries;
+DROP TABLE IF EXISTS export_jobs;
+DROP TABLE IF EXISTS query_shares;
+DROP TABLE IF EXISTS user_preferences;
+DROP TABLE IF EXISTS system_settings;
+DROP TABLE IF EXISTS alert_history;
+DROP TABLE IF EXISTS alerts;
+DROP TABLE IF EXISTS api_tokens;
+DROP TABLE IF EXISTS team_members;
+DROP TABLE IF EXISTS team_sources;
+DROP TABLE IF EXISTS sessions;
+DROP TABLE IF EXISTS teams;
+DROP TABLE IF EXISTS sources;
+DROP TABLE IF EXISTS users;

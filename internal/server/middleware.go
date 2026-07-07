@@ -145,6 +145,23 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 	return c.Next()
 }
 
+func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		authMethod, _ := c.Locals("auth_method").(string)
+		if authMethod != "token" {
+			return c.Next()
+		}
+
+		apiToken, ok := c.Locals("api_token").(*models.APIToken)
+		if !ok || !core.TokenHasScope(apiToken, scope) {
+			user, _ := c.Locals("user").(*models.User)
+			metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
+			return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
+		}
+		return c.Next()
+	}
+}
+
 // requireSourceNotManaged rejects mutations on config-managed sources.
 func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
@@ -178,25 +195,6 @@ func (s *Server) requireTeamNotManaged(c *fiber.Ctx) error {
 	if err == nil && managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This team is managed by provisioning config and cannot be modified via API",
-			models.ManagedResourceErrorType)
-	}
-	return c.Next()
-}
-
-// requireUserNotManaged rejects mutations on config-managed users.
-func (s *Server) requireUserNotManaged(c *fiber.Ctx) error {
-	userIDStr := c.Params("userID")
-	if userIDStr == "" {
-		return c.Next()
-	}
-	userID, err := core.ParseUserID(userIDStr)
-	if err != nil {
-		return c.Next()
-	}
-	managed, err := s.sqlite.IsUserManaged(c.Context(), userID)
-	if err == nil && managed {
-		return SendErrorWithType(c, fiber.StatusForbidden,
-			"This user is managed by provisioning config and cannot be modified via API",
 			models.ManagedResourceErrorType)
 	}
 	return c.Next()
@@ -342,50 +340,6 @@ func (s *Server) requireTeamHasSource(c *fiber.Ctx) error {
 
 	// Team has access to the source, continue with the request
 	return c.Next()
-}
-
-// requireCollectionManagement checks if a user has privileges to manage collections for the requested team.
-// This includes Team Editors, Team Admins, or Global Admins.
-// Assumes requireAuth has already run.
-func (s *Server) requireCollectionManagement(c *fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
-		s.log.Error("user not found in context for collection management check")
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
-	}
-
-	teamIDStr := c.Params("teamID")
-	teamID, err := core.ParseTeamID(teamIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-	}
-
-	// Global admins bypass specific team role checks.
-	if user.Role == models.UserRoleAdmin {
-		return c.Next()
-	}
-
-	// Fetch the user's specific role within this team using the core function.
-	teamMember, err := core.GetTeamMember(c.Context(), s.sqlite, teamID, user.ID)
-	if err != nil {
-		// This error means something unexpected happened during DB interaction, not "not found".
-		s.log.Error("failed to get team member details for collection management check", "error", err, "team_id", teamID, "user_id", user.ID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify team role", models.GeneralErrorType)
-	}
-
-	if teamMember == nil {
-		// core.GetTeamMember returns (nil, nil) if the user is not found in the team.
-		s.log.Warn("User not a member of the team for collection management check", "user_id", user.ID, "team_id", teamID)
-		return SendErrorWithType(c, fiber.StatusForbidden, "Team membership required for this action", models.AuthorizationErrorType)
-	}
-
-	// Check if the team member is an Admin or Editor.
-	if teamMember.Role == models.TeamRoleAdmin || teamMember.Role == models.TeamRoleEditor {
-		return c.Next()
-	}
-
-	s.log.Warn("Collection management privileges required, but user has role", "user_id", user.ID, "team_id", teamID, "team_role", teamMember.Role)
-	return SendErrorWithType(c, fiber.StatusForbidden, "Collection management privileges required", models.AuthorizationErrorType)
 }
 
 // notFoundHandler returns a standardized 404 Not Found error for API routes.

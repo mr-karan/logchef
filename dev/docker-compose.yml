@@ -75,7 +75,30 @@ services:
         environment:
             - MP_MAX_MESSAGES=20
 
+    # Postgres metadata backend (opt-in alternative to the default SQLite).
+    # Connect with: postgres://logchef:logchef@localhost:5432/logchef?sslmode=disable
+    # Enable in logchef via [database].driver = "postgres" + [postgres].dsn.
+    postgres:
+        image: postgres:17-alpine
+        hostname: postgres
+        restart: on-failure
+        ports:
+            - "5432:5432"
+        environment:
+            POSTGRES_USER: logchef
+            POSTGRES_PASSWORD: logchef
+            POSTGRES_DB: logchef
+        volumes:
+            - postgres-data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "pg_isready -U logchef -d logchef"]
+            interval: 5s
+            timeout: 3s
+            retries: 5
+            start_period: 5s
+
 volumes:
     clickhouse-data:
     clickhouse-logs:
     victorialogs-data:
+    postgres-data:

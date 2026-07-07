@@ -1,8 +1,6 @@
 <script setup lang="ts">
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
-import { Button } from "@/components/ui/button";
-
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -11,13 +9,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 import {
   Sidebar,
@@ -33,7 +24,6 @@ import {
   SidebarMenuButton,
   SidebarProvider,
   SidebarRail,
-  SidebarTrigger,
 } from "@/components/ui/sidebar";
 
 import {
@@ -42,7 +32,6 @@ import {
   Users,
   Search,
   Database,
-  ClipboardList,
   UserCircle2,
   UsersRound,
   ChevronsUpDown,
@@ -51,16 +40,18 @@ import {
   Monitor,
   Bell,
   Wrench,
+  FolderOpen,
+  KeyRound,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
+import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useMetaStore } from "@/stores/meta";
-import { ref, watch, computed, onMounted } from "vue";
+import { ref, watch, onMounted, computed } from "vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
-import { useRouter } from "vue-router";
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
@@ -68,7 +59,7 @@ const preferencesStore = usePreferencesStore();
 const metaStore = useMetaStore();
 const teamsStore = useTeamsStore();
 const exploreStore = useExploreStore();
-const router = useRouter();
+const { isGlobalAdmin, isAnyTeamAdmin } = useTeamPermissions();
 
 const setThemePreference = (mode: ThemeMode) => {
   themeStore.setTheme(mode);
@@ -84,58 +75,17 @@ onMounted(() => {
   preferencesStore.loadPreferences();
 });
 
-// Function to navigate to collections with clean URL  
-const navigateToCollections = () => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
-  
-  // Explicitly define only the query params we want
+// Carry team/source context into URLs that support it, so deep links keep
+// the user's current scope.
+function withContext(path: string) {
   const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  
-  // Use router.push to completely replace the URL with only our desired params
-  router.push({
-    path: "/logs/saved", 
-    query
-  });
-};
+  if (teamsStore.currentTeamId) query.team = String(teamsStore.currentTeamId);
+  if (exploreStore.sourceId) query.source = String(exploreStore.sourceId);
+  return { path, query };
+}
 
-const explorerTo = computed(() => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
-  const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  return {
-    path: "/logs/explore",
-    query,
-  };
-});
-
-const alertsTo = computed(() => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
-  const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  return {
-    path: "/logs/alerts",
-    query,
-  };
-});
-
-const collectionsTo = computed(() => {
-  const team = teamsStore.currentTeamId ? teamsStore.currentTeamId.toString() : undefined;
-  const source = exploreStore.sourceId ? exploreStore.sourceId.toString() : undefined;
-  const query: Record<string, string> = {};
-  if (team) query.team = team;
-  if (source) query.source = source;
-  return {
-    path: "/logs/saved",
-    query,
-  };
-});
+const CONTEXTUAL_URLS = new Set(["/logs/explore", "/logs/alerts"]);
+const resolveTo = (url: string) => CONTEXTUAL_URLS.has(url) ? withContext(url) : url;
 
 // Get initial sidebar state from cookie or default to true
 const getSavedState = () => {
@@ -180,48 +130,59 @@ interface NavItem {
   adminOnly?: boolean;
 }
 
-// Group navigation items by category
-const mainNavItems: NavItem[] = [
+// Group navigation items by category. Filtered so the Alerts entry drops out
+// when the server advertises `alerts_enabled: false` via /api/v1/meta.
+const allMainNavItems: NavItem[] = [
   {
     title: "Explorer",
     icon: Search,
     url: "/logs/explore",
   },
   {
+    title: "Library",
+    icon: FolderOpen,
+    url: "/logs/library",
+  },
+  {
     title: "Alerts",
     icon: Bell,
     url: "/logs/alerts",
   },
-  {
-    title: "Collections",
-    icon: ClipboardList,
-    url: "/logs/saved",
-  },
 ];
+
+const mainNavItems = computed(() =>
+  allMainNavItems.filter((item) => item.url !== "/logs/alerts" || metaStore.alertsEnabled)
+);
 
 const adminNavItems: NavItem[] = [
   {
     title: "Sources",
     icon: Database,
-    url: "/management/sources/list",
+    url: "/admin/sources",
     adminOnly: true,
   },
   {
     title: "Users",
     icon: UsersRound,
-    url: "/management/users",
+    url: "/admin/users",
+    adminOnly: true,
+  },
+  {
+    title: "Service Tokens",
+    icon: KeyRound,
+    url: "/admin/service-tokens",
     adminOnly: true,
   },
   {
     title: "Teams",
     icon: Users,
-    url: "/management/teams",
+    url: "/admin/teams",
     adminOnly: true,
   },
   {
     title: "System Settings",
     icon: Wrench,
-    url: "/management/settings",
+    url: "/admin/settings",
     adminOnly: true,
   },
 ];
@@ -230,7 +191,7 @@ const navItems = [
   {
     title: "Profile",
     icon: UserCircle2,
-    url: "/profile",
+    url: "/settings/profile",
   },
   {
     title: "Preferences",
@@ -275,20 +236,10 @@ const navItems = [
                   ">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <!-- Collections uses custom navigation -->
-                      <template v-if="item.url === '/logs/saved'">
-                        <button @click="navigateToCollections" class="flex items-center w-full text-left">
-                          <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
-                          <span v-if="sidebarOpen">{{ item.title }}</span>
-                        </button>
-                      </template>
-                      <!-- Regular router links for other items -->
-                      <template v-else>
-                        <router-link :to="item.url === '/logs/explore' ? explorerTo : item.url === '/logs/alerts' ? alertsTo : item.url" class="flex items-center" active-class="font-medium">
-                          <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
-                          <span v-if="sidebarOpen">{{ item.title }}</span>
-                        </router-link>
-                      </template>
+                      <router-link :to="resolveTo(item.url)" class="flex items-center" active-class="font-medium">
+                        <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
+                        <span v-if="sidebarOpen">{{ item.title }}</span>
+                      </router-link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
                 </template>
@@ -296,18 +247,17 @@ const navItems = [
             </SidebarGroupContent>
           </SidebarGroup>
 
-          <!-- Admin Navigation -->
-          <!-- Show for global admins OR team admins -->
-          <SidebarGroup v-if="authStore.user?.role === 'admin' || teamsStore.isAnyTeamAdmin" class="mt-4">
+          <!-- Administration section: visible to global admins and any-team admins.
+               Global admins see every item; team admins see only Teams. -->
+          <SidebarGroup v-if="isGlobalAdmin || isAnyTeamAdmin" class="mt-4">
             <SidebarGroupLabel v-if="sidebarOpen">Administration</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <template v-for="item in adminNavItems" :key="item.title">
-                  <!-- Global admins see all items, team admins only see "Teams" -->
-                  <SidebarMenuItem v-if="authStore.user?.role === 'admin' || item.title === 'Teams'">
+                  <SidebarMenuItem v-if="isGlobalAdmin || item.title === 'Teams'">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url === '/logs/saved' ? collectionsTo : item.url" class="flex items-center" active-class="font-medium">
+                      <router-link :to="item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
                       </router-link>
@@ -327,7 +277,7 @@ const navItems = [
                   <SidebarMenuItem>
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
-                      <router-link :to="item.url === '/logs/saved' ? collectionsTo : item.url" class="flex items-center" active-class="font-medium">
+                      <router-link :to="item.url" class="flex items-center" active-class="font-medium">
                         <component :is="item.icon" class="size-5" :class="sidebarOpen ? 'mr-3 ml-1' : 'mx-auto'" />
                         <span v-if="sidebarOpen">{{ item.title }}</span>
                       </router-link>
@@ -391,7 +341,7 @@ const navItems = [
                   </DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
-                    <router-link to="/profile" class="cursor-pointer">
+                    <router-link to="/settings/profile" class="cursor-pointer">
                       <UserCircle2 class="mr-2 h-4 w-4" />
                       <span>Profile</span>
                     </router-link>

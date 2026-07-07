@@ -1,8 +1,12 @@
 pub mod auth;
 pub mod collections;
 pub mod config;
+pub mod find;
 pub mod query;
+pub mod saved_queries;
 pub mod schema;
 pub mod sources;
 pub mod sql;
+pub mod tail;
 pub mod teams;
+pub mod whoami;

@@ -450,7 +450,7 @@ onUnmounted(() => {
                         </Badge>
                         <Badge
                           variant="outline"
-                          class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-60 group-hover:opacity-100"
+                          class="text-[9px] h-4 px-1 font-normal flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           {{ getCleanType(field.type) }}
                         </Badge>
@@ -504,26 +504,18 @@ onUnmounted(() => {
                               :key="valueInfo.value"
                               class="flex items-center gap-1 group/value"
                             >
-                              <TooltipProvider>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <button
-                                      class="flex-1 flex items-center gap-2 px-2 py-1 rounded text-left hover:bg-primary/10 transition-colors min-w-0"
-                                      @click="addFilter(field.name, valueInfo.value, '=')"
-                                    >
-                                      <span class="text-xs text-foreground truncate flex-1" :title="valueInfo.value">
-                                        {{ valueInfo.value || '(empty)' }}
-                                      </span>
-                                      <span class="text-[10px] text-muted-foreground flex-shrink-0">
-                                        {{ formatCount(valueInfo.count) }}
-                                      </span>
-                                    </button>
-                                  </TooltipTrigger>
-                                  <TooltipContent side="right" class="text-xs">
-                                    <p>Click to filter: {{ field.name }}="{{ valueInfo.value }}"</p>
-                                  </TooltipContent>
-                                </Tooltip>
-                              </TooltipProvider>
+                              <button
+                                class="flex-1 flex items-center gap-2 px-2 py-1 rounded text-left hover:bg-primary/10 transition-colors min-w-0"
+                                @click="addFilter(field.name, valueInfo.value, '=')"
+                                :title="`${field.name}=&quot;${valueInfo.value}&quot;`"
+                              >
+                                <span class="text-xs text-foreground truncate flex-1">
+                                  {{ valueInfo.value || '(empty)' }}
+                                </span>
+                                <span class="text-[10px] text-muted-foreground flex-shrink-0">
+                                  {{ formatCount(valueInfo.count) }}
+                                </span>
+                              </button>
 
                               <TooltipProvider>
                                 <Tooltip>

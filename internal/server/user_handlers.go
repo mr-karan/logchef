@@ -3,7 +3,6 @@ package server
 import (
 	"errors"
 	"strconv"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -31,26 +30,37 @@ func (s *Server) handleListUsers(c *fiber.Ctx) error {
 // URL: GET /api/v1/admin/users/:userID
 // Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleGetUser(c *fiber.Ctx) error {
+	user, err := s.loadHumanUser(c)
+	if err != nil {
+		return err
+	}
+	return SendSuccess(c, fiber.StatusOK, user)
+}
+
+// loadHumanUser parses :userID and returns the user only if it's a human account.
+// Service principals are managed via /admin/service-accounts/* and must not leak
+// through the human-user CRUD path.
+func (s *Server) loadHumanUser(c *fiber.Ctx) (*models.User, error) {
 	userIDStr := c.Params("userID")
 	if userIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "User ID is required")
+		return nil, SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
-
 	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
+		return nil, SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
 	}
-
 	user, err := core.GetUser(c.Context(), s.sqlite, userID)
 	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
-			return SendError(c, fiber.StatusNotFound, "User not found")
+			return nil, SendError(c, fiber.StatusNotFound, "User not found")
 		}
-		s.log.Error("failed to get user", "error", err)
-		return SendError(c, fiber.StatusInternalServerError, "Error getting user")
+		s.log.Error("failed to get user", "error", err, "user_id", userID)
+		return nil, SendError(c, fiber.StatusInternalServerError, "Error getting user")
 	}
-
-	return SendSuccess(c, fiber.StatusOK, user)
+	if user.AccountType == models.UserAccountTypeService {
+		return nil, SendError(c, fiber.StatusNotFound, "User not found")
+	}
+	return user, nil
 }
 
 // handleCreateUser creates a new user in the system.
@@ -100,15 +110,11 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 // URL: PUT /api/v1/admin/users/:userID
 // Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
-	userIDStr := c.Params("userID")
-	if userIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "User ID is required")
-	}
-
-	userID, err := core.ParseUserID(userIDStr)
+	existing, err := s.loadHumanUser(c)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
+		return err
 	}
+	userID := existing.ID
 
 	var req struct {
 		Email    *string `json:"email"`
@@ -166,15 +172,11 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 // URL: DELETE /api/v1/admin/users/:userID
 // Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleDeleteUser(c *fiber.Ctx) error {
-	userIDStr := c.Params("userID")
-	if userIDStr == "" {
-		return SendError(c, fiber.StatusBadRequest, "User ID is required")
-	}
-
-	userID, err := core.ParseUserID(userIDStr)
+	existing, err := s.loadHumanUser(c)
 	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
+		return err
 	}
+	userID := existing.ID
 
 	if err := core.DeleteUser(c.Context(), s.sqlite, s.log, userID); err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
@@ -253,16 +255,13 @@ func (s *Server) handleCreateAPIToken(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
 
-	var req struct {
-		Name      string     `json:"name"`
-		ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	}
+	var req models.CreateAPITokenRequest
 
 	if err := c.BodyParser(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, req.Name, req.ExpiresAt)
+	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, req.Name, req.ExpiresAt, req.Scopes)
 	if err != nil {
 		// Handle specific error types from core
 		if valErr, ok := err.(*core.ValidationError); ok {
@@ -310,6 +309,177 @@ func (s *Server) handleDeleteAPIToken(c *fiber.Ctx) error {
 }
 
 // --- Current User Preferences Handlers ---
+
+// --- Admin Service Account Handlers ---
+
+func (s *Server) handleListServiceAccounts(c *fiber.Ctx) error {
+	accounts, err := core.ListServiceAccounts(c.Context(), s.sqlite)
+	if err != nil {
+		s.log.Error("failed to list service accounts", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing service accounts")
+	}
+	return SendSuccess(c, fiber.StatusOK, accounts)
+}
+
+func (s *Server) handleCreateServiceAccount(c *fiber.Ctx) error {
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+
+	account, err := core.CreateServiceAccount(c.Context(), s.sqlite, s.log, req.Name)
+	if err != nil {
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+		s.log.Error("failed to create service account", "error", err)
+		return SendError(c, fiber.StatusInternalServerError, "Error creating service account")
+	}
+	return SendSuccess(c, fiber.StatusCreated, account)
+}
+
+func (s *Server) handleDeleteServiceAccount(c *fiber.Ctx) error {
+	userID, err := core.ParseUserID(c.Params("userID"))
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid service account ID format")
+	}
+	if err := core.DeleteServiceAccount(c.Context(), s.sqlite, s.log, userID); err != nil {
+		if errors.Is(err, core.ErrUserNotFound) {
+			return SendError(c, fiber.StatusNotFound, "Service account not found")
+		}
+		s.log.Error("failed to delete service account", "error", err, "user_id", userID)
+		return SendError(c, fiber.StatusInternalServerError, "Error deleting service account")
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account deleted successfully"})
+}
+
+func (s *Server) loadServiceAccount(c *fiber.Ctx) (*models.User, error) {
+	userID, err := core.ParseUserID(c.Params("userID"))
+	if err != nil {
+		return nil, SendError(c, fiber.StatusBadRequest, "Invalid service account ID format")
+	}
+	account, err := core.GetUser(c.Context(), s.sqlite, userID)
+	if err != nil || account.AccountType != models.UserAccountTypeService {
+		return nil, SendError(c, fiber.StatusNotFound, "Service account not found")
+	}
+	return account, nil
+}
+
+func (s *Server) handleListServiceAccountTokens(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	tokens, err := core.ListAPITokensForUser(c.Context(), s.sqlite, account.ID)
+	if err != nil {
+		s.log.Error("failed to list service account tokens", "error", err, "user_id", account.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing service account tokens")
+	}
+	return SendSuccess(c, fiber.StatusOK, tokens)
+}
+
+func (s *Server) handleCreateServiceAccountToken(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+
+	var req models.CreateAPITokenRequest
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+	if len(req.Scopes) == 0 {
+		req.Scopes = core.ReadOnlyTokenScopes()
+	}
+
+	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, account.ID, req.Name, req.ExpiresAt, req.Scopes)
+	if err != nil {
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+		s.log.Error("failed to create service account token", "error", err, "user_id", account.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error creating service account token")
+	}
+	return SendSuccess(c, fiber.StatusCreated, response)
+}
+
+func (s *Server) handleListServiceAccountTeams(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	teams, err := core.ListTeamsForUser(c.Context(), s.sqlite, account.ID)
+	if err != nil {
+		s.log.Error("failed to list service account teams", "error", err, "user_id", account.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing service account teams")
+	}
+	return SendSuccess(c, fiber.StatusOK, teams)
+}
+
+func (s *Server) handleAddServiceAccountToTeam(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	var req struct {
+		TeamID models.TeamID   `json:"team_id"`
+		Role   models.TeamRole `json:"role"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
+	}
+	if req.Role == "" {
+		req.Role = models.TeamRoleMember
+	}
+	if err := core.AddTeamMember(c.Context(), s.sqlite, s.log, req.TeamID, account.ID, req.Role); err != nil {
+		if valErr, ok := err.(*core.ValidationError); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
+		}
+		if errors.Is(err, core.ErrTeamNotFound) {
+			return SendError(c, fiber.StatusNotFound, "Team not found")
+		}
+		s.log.Error("failed to add service account to team", "error", err, "user_id", account.ID, "team_id", req.TeamID)
+		return SendError(c, fiber.StatusInternalServerError, "Error adding service account to team")
+	}
+	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Service account added to team"})
+}
+
+func (s *Server) handleRemoveServiceAccountFromTeam(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	teamID, err := core.ParseTeamID(c.Params("teamID"))
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid team ID format")
+	}
+	if err := core.RemoveTeamMember(c.Context(), s.sqlite, s.log, teamID, account.ID); err != nil {
+		s.log.Error("failed to remove service account from team", "error", err, "user_id", account.ID, "team_id", teamID)
+		return SendError(c, fiber.StatusInternalServerError, "Error removing service account from team")
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account removed from team"})
+}
+
+func (s *Server) handleDeleteServiceAccountToken(c *fiber.Ctx) error {
+	account, err := s.loadServiceAccount(c)
+	if err != nil {
+		return err
+	}
+	tokenID, err := strconv.Atoi(c.Params("tokenID"))
+	if err != nil {
+		return SendError(c, fiber.StatusBadRequest, "Invalid token ID format")
+	}
+	if err := core.DeleteAPIToken(c.Context(), s.sqlite, s.log, account.ID, tokenID); err != nil {
+		if errors.Is(err, core.ErrAPITokenNotFound) {
+			return SendError(c, fiber.StatusNotFound, "API token not found")
+		}
+		s.log.Error("failed to delete service account token", "error", err, "token_id", tokenID, "user_id", account.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error deleting service account token")
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "API token deleted successfully"})
+}
 
 // UserPreferencesResponse represents user preferences in API responses.
 type UserPreferencesResponse struct {

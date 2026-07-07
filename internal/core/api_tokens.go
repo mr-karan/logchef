@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
-	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,8 +12,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/sqlite"
-	"github.com/mr-karan/logchef/internal/sqlite/sqlc"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -58,26 +56,94 @@ func hashAPIToken(token, secret string) string {
 	return hex.EncodeToString(hasher.Sum(nil))
 }
 
-// validateAPITokenCreation validates parameters for creating a new API token
-func validateAPITokenCreation(name string) error {
+var validTokenScopes = map[models.TokenScope]struct{}{
+	models.TokenScopeAll:               {},
+	models.TokenScopeProfileRead:       {},
+	models.TokenScopeProfileWrite:      {},
+	models.TokenScopeTokensRead:        {},
+	models.TokenScopeTokensWrite:       {},
+	models.TokenScopeUsersRead:         {},
+	models.TokenScopeUsersWrite:        {},
+	models.TokenScopeTeamsRead:         {},
+	models.TokenScopeTeamsWrite:        {},
+	models.TokenScopeSourcesRead:       {},
+	models.TokenScopeSourcesWrite:      {},
+	models.TokenScopeLogsRead:          {},
+	models.TokenScopeSavedQueriesRead:  {},
+	models.TokenScopeSavedQueriesWrite: {},
+	models.TokenScopeCollectionsRead:   {},
+	models.TokenScopeCollectionsWrite:  {},
+	models.TokenScopeAlertsRead:        {},
+	models.TokenScopeAlertsWrite:       {},
+	models.TokenScopeQuerySharesRead:   {},
+	models.TokenScopeQuerySharesWrite:  {},
+	models.TokenScopeSettingsRead:      {},
+	models.TokenScopeSettingsWrite:     {},
+}
+
+var readOnlyTokenScopes = []models.TokenScope{
+	models.TokenScopeProfileRead,
+	models.TokenScopeTokensRead,
+	models.TokenScopeUsersRead,
+	models.TokenScopeTeamsRead,
+	models.TokenScopeSourcesRead,
+	models.TokenScopeLogsRead,
+	models.TokenScopeSavedQueriesRead,
+	models.TokenScopeCollectionsRead,
+	models.TokenScopeAlertsRead,
+	models.TokenScopeQuerySharesRead,
+	models.TokenScopeSettingsRead,
+}
+
+// ReadOnlyTokenScopes returns the common read-only preset used by service tokens.
+func ReadOnlyTokenScopes() []models.TokenScope {
+	scopes := make([]models.TokenScope, len(readOnlyTokenScopes))
+	copy(scopes, readOnlyTokenScopes)
+	return scopes
+}
+
+// validateAPITokenCreation validates parameters for creating a new API token.
+func validateAPITokenCreation(name string, scopes []models.TokenScope) ([]models.TokenScope, error) {
 	if name == "" {
-		return &ValidationError{Field: "name", Message: "token name is required"}
+		return nil, &ValidationError{Field: "name", Message: "token name is required"}
 	}
 	if len(name) < 2 || len(name) > 100 {
-		return &ValidationError{Field: "name", Message: "token name must be between 2 and 100 characters"}
+		return nil, &ValidationError{Field: "name", Message: "token name must be between 2 and 100 characters"}
 	}
-	return nil
+	if len(scopes) == 0 {
+		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
+	}
+
+	normalized := make([]models.TokenScope, 0, len(scopes))
+	seen := make(map[models.TokenScope]struct{}, len(scopes))
+	for _, scope := range scopes {
+		if _, ok := validTokenScopes[scope]; !ok {
+			return nil, &ValidationError{Field: "scopes", Message: "invalid token scope"}
+		}
+		if scope == models.TokenScopeAll {
+			return []models.TokenScope{models.TokenScopeAll}, nil
+		}
+		if _, ok := seen[scope]; ok {
+			continue
+		}
+		seen[scope] = struct{}{}
+		normalized = append(normalized, scope)
+	}
+	if len(normalized) == 0 {
+		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
+	}
+	return normalized, nil
 }
 
 // CreateAPIToken creates a new API token for a user
-func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, userID models.UserID, name string, expiresAt *time.Time) (*models.CreateAPITokenResponse, error) {
-	// Validate input
-	if err := validateAPITokenCreation(name); err != nil {
+func CreateAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logger, authCfg *config.AuthConfig, userID models.UserID, name string, expiresAt *time.Time, scopes []models.TokenScope) (*models.CreateAPITokenResponse, error) {
+	normalizedScopes, err := validateAPITokenCreation(name, scopes)
+	if err != nil {
 		return nil, err
 	}
 
 	// Verify user exists
-	_, err := GetUser(ctx, db, userID)
+	_, err = GetUser(ctx, db, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -98,19 +164,14 @@ func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCf
 		prefix = prefix[:12] + "..."
 	}
 
-	// Convert expiresAt to sql.NullTime
-	var sqlExpiresAt sql.NullTime
-	if expiresAt != nil {
-		sqlExpiresAt = sql.NullTime{Time: *expiresAt, Valid: true}
-	}
-
-	// Save to database
-	tokenID, err := db.CreateAPIToken(ctx, sqlc.CreateAPITokenParams{
-		UserID:    int64(userID),
+	// Save to database. The adapter owns scope serialization and null handling.
+	tokenID, err := db.CreateAPIToken(ctx, &models.APIToken{
+		UserID:    userID,
 		Name:      name,
 		TokenHash: tokenHash,
 		Prefix:    prefix,
-		ExpiresAt: sqlExpiresAt,
+		ExpiresAt: expiresAt,
+		Scopes:    normalizedScopes,
 	})
 	if err != nil {
 		log.Error("failed to create API token in database", "error", err, "user_id", userID)
@@ -118,7 +179,7 @@ func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCf
 	}
 
 	// Get the created token
-	apiToken, err := GetAPIToken(ctx, db, int(tokenID))
+	apiToken, err := GetAPIToken(ctx, db, tokenID)
 	if err != nil {
 		log.Error("failed to retrieve created API token", "error", err, "token_id", tokenID)
 		return nil, fmt.Errorf("failed to retrieve created token: %w", err)
@@ -133,35 +194,28 @@ func CreateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCf
 }
 
 // GetAPIToken retrieves an API token by ID
-func GetAPIToken(ctx context.Context, db *sqlite.DB, tokenID int) (*models.APIToken, error) {
-	sqlcToken, err := db.GetAPIToken(ctx, int64(tokenID))
+func GetAPIToken(ctx context.Context, db store.StoreOps, tokenID int) (*models.APIToken, error) {
+	token, err := db.GetAPIToken(ctx, tokenID)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
+		if errors.Is(err, models.ErrNotFound) {
 			return nil, ErrAPITokenNotFound
 		}
 		return nil, fmt.Errorf("error getting API token from database: %w", err)
 	}
-
-	return convertSQLCAPITokenToModel(sqlcToken), nil
+	return token, nil
 }
 
 // ListAPITokensForUser lists all API tokens for a specific user
-func ListAPITokensForUser(ctx context.Context, db *sqlite.DB, userID models.UserID) ([]*models.APIToken, error) {
-	sqlcTokens, err := db.ListAPITokensForUser(ctx, int64(userID))
+func ListAPITokensForUser(ctx context.Context, db store.StoreOps, userID models.UserID) ([]*models.APIToken, error) {
+	tokens, err := db.ListAPITokensForUser(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("error listing API tokens for user: %w", err)
 	}
-
-	tokens := make([]*models.APIToken, len(sqlcTokens))
-	for i := range sqlcTokens {
-		tokens[i] = convertSQLCAPITokenToModel(sqlcTokens[i])
-	}
-
 	return tokens, nil
 }
 
 // DeleteAPIToken deletes an API token by ID, ensuring the user owns it
-func DeleteAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID models.UserID, tokenID int) error {
+func DeleteAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, tokenID int) error {
 	// Verify the token exists and belongs to the user
 	token, err := GetAPIToken(ctx, db, tokenID)
 	if err != nil {
@@ -172,11 +226,7 @@ func DeleteAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID
 		return ErrAPITokenNotFound // Don't reveal that token exists for security
 	}
 
-	// Delete the token
-	if err := db.DeleteAPIToken(ctx, sqlc.DeleteAPITokenParams{
-		ID:     int64(tokenID),
-		UserID: int64(userID),
-	}); err != nil {
+	if err := db.DeleteAPIToken(ctx, tokenID, userID); err != nil {
 		log.Error("failed to delete API token", "error", err, "token_id", tokenID, "user_id", userID)
 		return fmt.Errorf("failed to delete API token: %w", err)
 	}
@@ -186,7 +236,7 @@ func DeleteAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, userID
 }
 
 // AuthenticateAPIToken authenticates a token and returns the associated user
-func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, authCfg *config.AuthConfig, token string) (*models.User, *models.APIToken, error) {
+func AuthenticateAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logger, authCfg *config.AuthConfig, token string) (*models.User, *models.APIToken, error) {
 	// Validate basic token format
 	if !hasTokenPrefix(token) {
 		return nil, nil, ErrInvalidToken
@@ -196,21 +246,21 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 	tokenHash := hashAPIToken(token, authCfg.APITokenSecret)
 
 	// Direct lookup by token hash (very efficient with unique index)
-	sqlcToken, err := db.GetAPITokenByHash(ctx, tokenHash)
+	apiToken, err := db.GetAPITokenByHash(ctx, tokenHash)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || sqlite.IsNotFoundError(err) {
+		if errors.Is(err, models.ErrNotFound) {
 			return nil, nil, ErrInvalidToken
 		}
 		return nil, nil, fmt.Errorf("failed to get token: %w", err)
 	}
 
-	// Check if token is expired
-	if sqlcToken.ExpiresAt.Valid && time.Now().After(sqlcToken.ExpiresAt.Time) {
+	// Check if token is expired (Expired is computed by the store on read)
+	if apiToken.Expired {
 		return nil, nil, ErrTokenExpired
 	}
 
 	// Get associated user
-	user, err := GetUser(ctx, db, models.UserID(sqlcToken.UserID))
+	user, err := GetUser(ctx, db, apiToken.UserID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to get user for token: %w", err)
 	}
@@ -220,30 +270,19 @@ func AuthenticateAPIToken(ctx context.Context, db *sqlite.DB, log *slog.Logger, 
 		return nil, nil, ErrInvalidToken
 	}
 
-	apiToken := convertSQLCAPITokenToModel(sqlcToken)
 	//nolint:contextcheck // Background goroutine for async last-used update
-	go func() {
+	go func() { //nolint:gosec // G118: detached background last-used update, must outlive request
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = UpdateAPITokenLastUsed(ctx, db, int(sqlcToken.ID))
+		_ = UpdateAPITokenLastUsed(ctx, db, apiToken.ID)
 	}()
 
 	return user, apiToken, nil
 }
 
 // UpdateAPITokenLastUsed updates the last used timestamp for an API token
-func UpdateAPITokenLastUsed(ctx context.Context, db *sqlite.DB, tokenID int) error {
-	return db.UpdateAPITokenLastUsed(ctx, int64(tokenID))
-}
-
-// CleanupExpiredTokens removes all expired API tokens
-func CleanupExpiredTokens(ctx context.Context, db *sqlite.DB, log *slog.Logger) error {
-	if err := db.DeleteExpiredAPITokens(ctx); err != nil {
-		log.Error("failed to cleanup expired API tokens", "error", err)
-		return fmt.Errorf("failed to cleanup expired tokens: %w", err)
-	}
-
-	return nil
+func UpdateAPITokenLastUsed(ctx context.Context, db store.StoreOps, tokenID int) error {
+	return db.UpdateAPITokenLastUsed(ctx, tokenID)
 }
 
 // Helper functions
@@ -255,25 +294,15 @@ func hasTokenPrefix(token string) bool {
 	return subtle.ConstantTimeCompare([]byte(token[:len(TokenPrefix)]), []byte(TokenPrefix)) == 1
 }
 
-func convertSQLCAPITokenToModel(sqlcToken sqlc.ApiToken) *models.APIToken {
-	token := &models.APIToken{
-		ID:     int(sqlcToken.ID),
-		UserID: models.UserID(sqlcToken.UserID),
-		Name:   sqlcToken.Name,
-		Prefix: sqlcToken.Prefix,
-		Timestamps: models.Timestamps{
-			CreatedAt: sqlcToken.CreatedAt,
-			UpdatedAt: sqlcToken.UpdatedAt,
-		},
+// TokenHasScope reports whether token grants the requested semantic scope.
+func TokenHasScope(token *models.APIToken, required models.TokenScope) bool {
+	if token == nil {
+		return false
 	}
-
-	if sqlcToken.LastUsedAt.Valid {
-		token.LastUsedAt = &sqlcToken.LastUsedAt.Time
+	for _, scope := range token.Scopes {
+		if scope == models.TokenScopeAll || scope == required {
+			return true
+		}
 	}
-
-	if sqlcToken.ExpiresAt.Valid {
-		token.ExpiresAt = &sqlcToken.ExpiresAt.Time
-	}
-
-	return token
+	return false
 }

@@ -239,7 +239,7 @@ func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
 // The backend handles the full translation and execution.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/query
-func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
+func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -267,19 +267,27 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 
 	// Apply defaults
 	if req.Limit <= 0 {
-		req.Limit = 100
+		req.Limit = s.config.Query.DefaultPreviewLimit
+	}
+	if req.Limit > s.config.Query.MaxPreviewLimit {
+		req.Limit = s.config.Query.MaxPreviewLimit
 	}
 	if req.Timezone == "" {
 		req.Timezone = "UTC"
 	}
 	if req.QueryTimeout == nil {
-		defaultTimeout := models.DefaultQueryTimeoutSeconds
+		defaultTimeout := s.config.Query.DefaultTimeoutSeconds
 		req.QueryTimeout = &defaultTimeout
 	}
 
 	// Validate timeout
 	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	if s.config.Query.MaxTimeoutSeconds > 0 && *req.QueryTimeout > s.config.Query.MaxTimeoutSeconds {
+		return SendErrorWithType(c, fiber.StatusBadRequest,
+			fmt.Sprintf("Query timeout cannot exceed %d seconds for Run", s.config.Query.MaxTimeoutSeconds),
+			models.ValidationErrorType)
 	}
 
 	// Get source information
@@ -383,19 +391,37 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
 
-	// Add query to tracker
-	queryID := queryTracker.AddQuery(user.ID, sourceID, teamID, executableQuery, cancel)
+	// Add query to tracker atomically with admission control.
+	queryID, err := queryTracker.StartQuery(
+		QueryClassPreview,
+		user.ID,
+		sourceID,
+		teamID,
+		executableQuery,
+		cancel,
+		s.config.Query.MaxConcurrentPerUser,
+		s.config.Query.MaxConcurrentGlobal,
+	)
+	if err != nil {
+		var admissionErr *QueryAdmissionError
+		if errors.As(err, &admissionErr) {
+			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+		}
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
+	}
 	defer queryTracker.RemoveQuery(queryID)
 
 	// Execute via core function
 	queryParams := datasource.QueryRequest{
-		RawQuery:     executableQuery,
-		StartTime:    queryStartTime,
-		EndTime:      queryEndTime,
-		Timezone:     req.Timezone,
-		Limit:        req.Limit,
-		MaxLimit:     s.config.Query.MaxLimit,
-		QueryTimeout: req.QueryTimeout,
+		RawQuery:         executableQuery,
+		StartTime:        queryStartTime,
+		EndTime:          queryEndTime,
+		Timezone:         req.Timezone,
+		Limit:            req.Limit,
+		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
+		MaxLimit:         s.config.Query.MaxPreviewLimit,
+		MaxResponseBytes: s.config.Query.MaxResponseBytes,
+		QueryTimeout:     req.QueryTimeout,
 	}
 	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, queryParams)
 	if err != nil {
@@ -417,19 +443,23 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error {
 			"query_id", queryID,
 			"rows", len(result.Logs),
 			"duration_ms", result.Stats.ExecutionTimeMs,
-			"limit", req.Limit,
+			"limit_requested", req.Limit,
+			"limit_applied", result.Stats.LimitApplied,
+			"truncated", result.Stats.Truncated,
 		)
 	}
 
 	// Add query_id and generated SQL to response
-	responseData := map[string]interface{}{
-		"logs":                     result.Logs,
-		"columns":                  result.Columns,
-		"stats":                    result.Stats,
-		"query_id":                 queryID,
-		"generated_sql":            executableQuery, // Deprecated legacy field kept for compatibility.
-		"generated_query":          executableQuery,
+	columns := normalizeResultColumns(source, result)
+	responseData := map[string]any{
+		"logs":            result.Logs,
+		"columns":         columns,
+		"stats":           result.Stats,
+		"query_id":        queryID,
+		"generated_sql":   executableQuery, // Deprecated legacy field kept for compatibility.
+		"generated_query": executableQuery,
 		"generated_query_language": executableQueryLanguage,
+		"warnings":        result.Warnings,
 	}
 
 	return SendSuccess(c, fiber.StatusOK, responseData)

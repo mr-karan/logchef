@@ -26,6 +26,7 @@ If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs gu
 - **OIDC + RBAC included**: SSO and team-based access out of the box.
 - **Datasource-first**: Connect ClickHouse tables or VictoriaLogs instances without reshaping your storage layer.
 - **Single binary**: One executable, no runtime dependencies.
+- **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
 - **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
 - **CLI**: Query logs from your terminal with syntax highlighting and multi-context support.
@@ -94,9 +95,8 @@ For comprehensive documentation, including setup guides, configuration options, 
 
 We welcome contributions! To get started:
 
-1. **Development Setup**: See our [Development Setup Guide](https://logchef.app/contributing/setup) or use the Nix flake:
+1. **Development Setup**: See our [Development Setup Guide](https://logchef.app/contributing/setup):
    ```bash
-   nix develop
    just sqlc-generate
    just dev-docker
    just build

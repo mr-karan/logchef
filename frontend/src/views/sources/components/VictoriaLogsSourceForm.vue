@@ -30,7 +30,7 @@ function updateForm(patch: Partial<VictoriaLogsSourceFormState>) {
   emit("update:modelValue", { ...props.modelValue, ...patch });
 }
 
-function updateAuthMode(value: string) {
+function updateAuthMode(value: unknown) {
   const authMode = value === "basic" || value === "bearer" ? value : "none";
   updateForm({ authMode });
 }
