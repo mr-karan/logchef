@@ -89,7 +89,7 @@ interface Props {
 
 const props = defineProps<Props>()
 const emit = defineEmits<{
-  (e: 'loadQuery', mode: 'logchefql' | 'sql', query: string): void
+  (e: 'loadQuery', mode: 'logchefql' | 'native', query: string): void
 }>()
 
 const isOpen = ref(false)

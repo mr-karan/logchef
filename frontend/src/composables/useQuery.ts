@@ -10,7 +10,7 @@ import { logchefqlApi } from '@/api/logchefql';
 import { useVariables } from "@/composables/useVariables";
 
 // Define the valid editor modes
-type EditorMode = 'logchefql' | 'sql';
+type EditorMode = 'logchefql' | 'native';
 
 // Interface for tracking why a query is dirty (used in computed)
 interface DirtyStateReason {
@@ -40,8 +40,8 @@ export function useQuery() {
   });
 
   const sqlQuery = computed({
-    get: () => exploreStore.rawSql,
-    set: (value) => exploreStore.setRawSql(value)
+    get: () => exploreStore.nativeQuery,
+    set: (value) => exploreStore.setNativeQuery(value)
   });
 
   // Active mode computed property
@@ -127,16 +127,16 @@ export function useQuery() {
 
   // Change query mode - uses backend as single source of truth for SQL generation
   // When isModeSwitchOnly is true, skip LogchefQL→SQL translation (e.g. AI insert,
-  // loading a saved SQL query) so existing rawSql content is preserved.
+  // loading a saved SQL query) so existing nativeQuery content is preserved.
   const changeMode = async (newMode: EditorMode, isModeSwitchOnly: boolean = false) => {
     // Clear any validation errors when changing modes
     queryError.value = '';
 
-    // If switching to SQL mode and caller hasn't already set rawSql
-    if (newMode === 'sql' && activeMode.value === 'logchefql' && !isModeSwitchOnly) {
+    // If switching to SQL mode and caller hasn't already set nativeQuery
+    if (newMode === 'native' && activeMode.value === 'logchefql' && !isModeSwitchOnly) {
       // First, check if we have the actual generated SQL from a previous execution
       if (exploreStore.generatedDisplayQuery) {
-        exploreStore.setRawSql(exploreStore.generatedDisplayQuery);
+        exploreStore.setNativeQuery(exploreStore.generatedDisplayQuery);
       } else {
         // No executed query yet - ask backend for full SQL (even if LogchefQL is empty)
         const currentTeamId = teamsStore.currentTeamId;
@@ -176,7 +176,7 @@ export function useQuery() {
 
             const generatedQuery = response.data?.generated_query || response.data?.full_sql;
             if (generatedQuery) {
-              exploreStore.setRawSql(generatedQuery);
+              exploreStore.setNativeQuery(generatedQuery);
             } else {
               queryError.value = "Could not generate SQL from your query. Please refine and try again.";
               return;
@@ -199,7 +199,7 @@ export function useQuery() {
   // The time picker in SQL mode is informational only - users have full control over their query
   const handleTimeRangeUpdate = () => {
     // In SQL mode, user has full control - don't modify their query
-    if (exploreStore.activeMode === 'sql') {
+    if (exploreStore.activeMode === 'native') {
       return;
     }
 
@@ -212,7 +212,7 @@ export function useQuery() {
   // Users have full control over their LIMIT clause
   const handleLimitUpdate = () => {
     // In SQL mode, user has full control - don't modify their query
-    if (exploreStore.activeMode === 'sql') {
+    if (exploreStore.activeMode === 'native') {
       return;
     }
   };
@@ -296,7 +296,7 @@ export function useQuery() {
         }
       }
 
-      if (mode === 'sql') {
+      if (mode === 'native') {
         // For SQL mode, apply variable substitution ONLY - DO NOT modify the query
         // User has full control over their raw SQL including time ranges
         const queryWithVariables = convertVariables(query);

@@ -196,10 +196,10 @@ const displayQueryContent = computed(() => {
   }
   
   // Fall back to exploreStore (when creating new query from Explorer and props not passed)
-  const activeMode = exploreStore.activeMode || "sql";
+  const activeMode = exploreStore.activeMode || "native";
   return activeMode === "logchefql" 
     ? exploreStore.logchefqlCode || ""
-    : exploreStore.rawSql || "";
+    : exploreStore.nativeQuery || "";
 });
 
 // Load teams and sources on mount if needed

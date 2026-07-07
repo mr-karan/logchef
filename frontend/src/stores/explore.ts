@@ -36,6 +36,7 @@ import { asClickHouseConnection } from '@/api/sources';
 import {
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
+  normalizeExploreMode,
   resolveSavedQueryMetadata,
   supportsQueryLanguage,
 } from "@/lib/queryMetadata";
@@ -50,8 +51,8 @@ interface SavedQuerySnapshot {
 
 interface ExploreDraft {
   version: number;
-  mode: "logchefql" | "sql";
-  rawSql: string;
+  mode: "logchefql" | "native";
+  nativeQuery: string;
   logchefqlCode: string;
   limit: number;
   relativeTime: string | null;
@@ -73,12 +74,12 @@ export interface ExploreState {
   } | null;
   selectedRelativeTime: string | null;
   filterConditions: FilterCondition[];
-  rawSql: string;
+  nativeQuery: string;
   pendingRawSql?: string;
   displaySql?: string;
   logchefQuery?: string;
   logchefqlCode: string;
-  activeMode: "logchefql" | "sql";
+  activeMode: "logchefql" | "native";
   isLoading?: boolean;
   error?: string | null;
   queryId?: string | null;
@@ -91,7 +92,7 @@ export interface ExploreState {
   lastExecutedState?: {
     timeRange: string;
     limit: number;
-    mode: "logchefql" | "sql";
+    mode: "logchefql" | "native";
     logchefqlQuery?: string;
     sqlQuery: string;
     sourceId: number;
@@ -198,7 +199,7 @@ export const useExploreStore = defineStore("explore", () => {
     timeRange: null,
     selectedRelativeTime: null,
     filterConditions: [],
-    rawSql: "",
+    nativeQuery: "",
     logchefqlCode: "",
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
@@ -252,19 +253,19 @@ export const useExploreStore = defineStore("explore", () => {
   const supportsLogchefQLForSource = (source = getCurrentSource()) => supportsQueryLanguage(source, "logchefql");
   const supportsClickHouseSQLForSource = (source = getCurrentSource()) =>
     getNativeQueryLanguageForSource(source) === "clickhouse-sql";
-  const getDefaultModeForSource = (source = getCurrentSource()): "logchefql" | "sql" =>
-    supportsLogchefQLForSource(source) ? "logchefql" : "sql";
+  const getDefaultModeForSource = (source = getCurrentSource()): "logchefql" | "native" =>
+    supportsLogchefQLForSource(source) ? "logchefql" : "native";
   const normalizeModeForSource = (
-    mode: "logchefql" | "sql",
+    mode: "logchefql" | "native",
     source = getCurrentSource(),
-  ): "logchefql" | "sql" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "sql" : mode);
+  ): "logchefql" | "native" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "native" : mode);
   const isNativeHistogramSource = (source = getCurrentSource()) => getNativeQueryLanguageForSource(source) === "logsql";
 
   const isHistogramEligible = computed(() => {
     const source = getCurrentSource();
     return (
       state.data.value.activeMode === 'logchefql' ||
-      (state.data.value.activeMode === 'sql' && isNativeHistogramSource(source))
+      (state.data.value.activeMode === 'native' && isNativeHistogramSource(source))
     );
   });
   const variableStore = useVariableStore();
@@ -284,7 +285,7 @@ export const useExploreStore = defineStore("explore", () => {
       return;
     }
 
-    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
     let absoluteStart: number | null = null;
     let absoluteEnd: number | null = null;
 
@@ -296,7 +297,7 @@ export const useExploreStore = defineStore("explore", () => {
     const draft: ExploreDraft = {
       version: 1,
       mode: activeMode,
-      rawSql,
+      nativeQuery,
       logchefqlCode,
       limit,
       relativeTime: selectedRelativeTime,
@@ -330,8 +331,8 @@ export const useExploreStore = defineStore("explore", () => {
         return false;
       }
 
-      state.data.value.activeMode = draft.mode === "sql" ? "sql" : "logchefql";
-      state.data.value.rawSql = draft.rawSql || "";
+      state.data.value.activeMode = draft.mode ? normalizeExploreMode(draft.mode) : "logchefql";
+      state.data.value.nativeQuery = draft.nativeQuery || "";
       state.data.value.logchefqlCode = draft.logchefqlCode || "";
       if (draft.limit > 0) {
         state.data.value.limit = draft.limit;
@@ -354,7 +355,7 @@ export const useExploreStore = defineStore("explore", () => {
         variableStore.setAllVariable(draft.variables);
       } else {
         const { ensureVariablesFromSql } = useVariables();
-        ensureVariablesFromSql(state.data.value.activeMode === "sql" ? state.data.value.rawSql : state.data.value.logchefqlCode);
+        ensureVariablesFromSql(state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode);
       }
       return true;
     } catch (error) {
@@ -364,7 +365,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function buildCurrentShareSnapshot(): string {
-    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
     let absoluteStart: number | null = null;
     let absoluteEnd: number | null = null;
 
@@ -376,7 +377,7 @@ export const useExploreStore = defineStore("explore", () => {
     return JSON.stringify({
       sourceId: sourceId.value,
       mode: activeMode,
-      query: activeMode === "sql" ? rawSql : logchefqlCode,
+      query: activeMode === "native" ? nativeQuery : logchefqlCode,
       limit,
       relativeTime: selectedRelativeTime,
       absoluteStart,
@@ -454,9 +455,9 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   const sqlForExecution = computed(() => {
-    const { activeMode, rawSql } = state.data.value;
-    if (activeMode === 'sql') {
-      return rawSql;
+    const { activeMode, nativeQuery } = state.data.value;
+    if (activeMode === 'native') {
+      return nativeQuery;
     }
 
     const translationResult = _logchefQlTranslationResult.value;
@@ -467,11 +468,11 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   const isQueryStateDirty = computed(() => {
-    const { lastExecutedState, limit, activeMode, logchefqlCode, rawSql } = state.data.value;
+    const { lastExecutedState, limit, activeMode, logchefqlCode, nativeQuery } = state.data.value;
 
     if (!lastExecutedState) {
       return (activeMode === 'logchefql' && !!logchefqlCode?.trim()) ||
-             (activeMode === 'sql' && !!rawSql?.trim());
+             (activeMode === 'native' && !!nativeQuery?.trim());
     }
 
     const timeRangeChanged = JSON.stringify(state.data.value.timeRange) !== lastExecutedState.timeRange;
@@ -490,13 +491,13 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   const hasDivergedFromSavedQuery = computed(() => {
-    const { savedQuerySnapshot, selectedQueryId, activeMode, logchefqlCode, rawSql, limit, selectedRelativeTime, timeRange } = state.data.value;
+    const { savedQuerySnapshot, selectedQueryId, activeMode, logchefqlCode, nativeQuery, limit, selectedRelativeTime, timeRange } = state.data.value;
     
     if (!selectedQueryId || !savedQuerySnapshot) {
       return false;
     }
 
-    const currentContent = activeMode === 'logchefql' ? logchefqlCode : rawSql;
+    const currentContent = activeMode === 'logchefql' ? logchefqlCode : nativeQuery;
     if (currentContent !== savedQuerySnapshot.queryContent) {
       return true;
     }
@@ -587,8 +588,8 @@ export const useExploreStore = defineStore("explore", () => {
 
     params.limit = limit.toString();
 
-    if (activeMode === 'sql') {
-      params.mode = 'sql';
+    if (activeMode === 'native') {
+      params.mode = 'native';
     }
 
     return params;
@@ -619,7 +620,7 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutionTimestamp = null;
     state.data.value.lastExecutedState = undefined;
     state.data.value.hasExecutedQuery = false;
-    state.data.value.rawSql = '';
+    state.data.value.nativeQuery = '';
     state.data.value.logchefqlCode = '';
   }
 
@@ -667,14 +668,14 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
-  function setRawSql(sql: string) {
-    state.data.value.rawSql = sql;
+  function setNativeQuery(sql: string) {
+    state.data.value.nativeQuery = sql;
     clearSavedQueryIfDirty();
     clearShareSelectionIfDirty();
     persistDraft();
   }
 
-  function setActiveMode(mode: 'logchefql' | 'sql') {
+  function setActiveMode(mode: 'logchefql' | 'native') {
     const currentMode = state.data.value.activeMode;
     const normalizedMode = normalizeModeForSource(mode);
     if (normalizedMode === currentMode) return;
@@ -764,21 +765,21 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     if (params.mode) {
-      const mode = normalizeModeForSource(params.mode === 'sql' ? 'sql' : 'logchefql');
+      const mode = normalizeModeForSource(normalizeExploreMode(params.mode));
       state.data.value.activeMode = mode;
 
       if (mode === 'logchefql' && params.q) {
         state.data.value.logchefqlCode = params.q;
-      } else if (mode === 'sql' && params.sql) {
-        state.data.value.rawSql = params.sql;
+      } else if (mode === 'native' && params.sql) {
+        state.data.value.nativeQuery = params.sql;
       }
     } else {
       if (params.q) {
         state.data.value.activeMode = normalizeModeForSource('logchefql');
         state.data.value.logchefqlCode = params.q;
       } else if (params.sql) {
-        state.data.value.activeMode = normalizeModeForSource('sql');
-        state.data.value.rawSql = params.sql;
+        state.data.value.activeMode = normalizeModeForSource('native');
+        state.data.value.nativeQuery = params.sql;
       }
     }
 
@@ -790,8 +791,8 @@ export const useExploreStore = defineStore("explore", () => {
     // Ensure variables from SQL are initialized in the variable store.
     // This handles page reload where the variable store is empty but SQL has placeholders.
     const { ensureVariablesFromSql } = useVariables();
-    const sqlToCheck = state.data.value.activeMode === 'sql'
-      ? state.data.value.rawSql
+    const sqlToCheck = state.data.value.activeMode === 'native'
+      ? state.data.value.nativeQuery
       : state.data.value.logchefqlCode;
     if (sqlToCheck) {
       ensureVariablesFromSql(sqlToCheck);
@@ -802,7 +803,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const hasRequiredParams = !!(sourceId.value && state.data.value.timeRange);
-    const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;
+    const hasQueryContent = state.data.value.activeMode === 'native' ? !!state.data.value.nativeQuery : true;
 
     return { needsResolve: false, shouldExecute: hasRequiredParams && hasQueryContent };
   }
@@ -833,7 +834,7 @@ export const useExploreStore = defineStore("explore", () => {
       if (isLogchefQL) {
         state.data.value.logchefqlCode = queryContent;
       } else {
-        state.data.value.rawSql = queryContent;
+        state.data.value.nativeQuery = queryContent;
       }
 
       const limit = content.limit || 100;
@@ -905,14 +906,14 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.selectedQueryId = null;
       state.data.value.activeSavedQueryName = null;
       state.data.value.savedQuerySnapshot = null;
-      state.data.value.activeMode = payload.mode === "sql" ? "sql" : "logchefql";
+      state.data.value.activeMode = payload.mode ? normalizeExploreMode(payload.mode) : "logchefql";
 
-      if (state.data.value.activeMode === "sql") {
-        state.data.value.rawSql = payload.query || "";
+      if (state.data.value.activeMode === "native") {
+        state.data.value.nativeQuery = payload.query || "";
         state.data.value.logchefqlCode = "";
       } else {
         state.data.value.logchefqlCode = payload.query || "";
-        state.data.value.rawSql = "";
+        state.data.value.nativeQuery = "";
       }
 
       if (payload.limit > 0) {
@@ -963,7 +964,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   function _clearQueryContent() {
     state.data.value.logchefqlCode = '';
-    state.data.value.rawSql = '';
+    state.data.value.nativeQuery = '';
     state.data.value.activeMode = getDefaultModeForSource();
     state.data.value.selectedQueryId = null;
     clearActiveShareSelection();
@@ -1007,7 +1008,7 @@ export const useExploreStore = defineStore("explore", () => {
         timezone: state.data.value.selectedTimezoneIdentifier || undefined
       });
 
-      state.data.value.rawSql = result.success ? result.sql : '';
+      state.data.value.nativeQuery = result.success ? result.sql : '';
     }
 
     histogramStore.clearHistogramData();
@@ -1038,7 +1039,7 @@ export const useExploreStore = defineStore("explore", () => {
           timezone: state.data.value.selectedTimezoneIdentifier || undefined
         });
 
-        state.data.value.rawSql = result.success ? result.sql : '';
+        state.data.value.nativeQuery = result.success ? result.sql : '';
       }
     }
 
@@ -1244,8 +1245,8 @@ export const useExploreStore = defineStore("explore", () => {
 
           sql = result.sql;
 
-          if (state.data.value.activeMode === 'sql') {
-            state.data.value.rawSql = result.sql;
+          if (state.data.value.activeMode === 'native') {
+            state.data.value.nativeQuery = result.sql;
           }
         }
       }
@@ -1446,11 +1447,11 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function buildQuerySharePayload(): QuerySharePayload {
-    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
     const payload: QuerySharePayload = {
       version: 1,
       mode: activeMode,
-      query: activeMode === "sql" ? rawSql : logchefqlCode,
+      query: activeMode === "native" ? nativeQuery : logchefqlCode,
       limit,
       timezone: selectedTimezoneIdentifier || getTimezoneIdentifier(),
       variables: variableStore.allVariables as unknown as QuerySharePayload["variables"],
@@ -1477,7 +1478,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const payload = buildQuerySharePayload();
-    if (payload.mode === "sql" && !payload.query.trim()) {
+    if (payload.mode === "native" && !payload.query.trim()) {
       throw new Error("Query is required to create a share link");
     }
 
@@ -1518,7 +1519,7 @@ export const useExploreStore = defineStore("explore", () => {
     if (state.data.value.activeMode === 'logchefql') {
       queryText = state.data.value.generatedDisplayQuery || "";
     } else if (isNativeHistogramSource()) {
-      queryText = state.data.value.rawSql?.trim() || "*";
+      queryText = state.data.value.nativeQuery?.trim() || "*";
     }
 
     if (!queryText) {
@@ -1539,8 +1540,8 @@ export const useExploreStore = defineStore("explore", () => {
   async function generateAiSql(naturalLanguageQuery: string, currentQuery?: string) {
     const result = await aiStore.generateAiSql(naturalLanguageQuery, currentQuery);
     
-    if (result.success && result.data && state.data.value.activeMode === 'sql') {
-      state.data.value.rawSql = result.data.sql_query || '';
+    if (result.success && result.data && state.data.value.activeMode === 'native') {
+      state.data.value.nativeQuery = result.data.sql_query || '';
     }
     
     return result;
@@ -1567,11 +1568,11 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       if (!supportsLogchefQLForSource(source) && state.data.value.activeMode === 'logchefql') {
-        if (!state.data.value.rawSql && state.data.value.logchefqlCode.trim()) {
-          state.data.value.rawSql = state.data.value.logchefqlCode;
+        if (!state.data.value.nativeQuery && state.data.value.logchefqlCode.trim()) {
+          state.data.value.nativeQuery = state.data.value.logchefqlCode;
         }
         state.data.value.logchefqlCode = '';
-        state.data.value.activeMode = 'sql';
+        state.data.value.activeMode = 'native';
         return;
       }
 
@@ -1636,7 +1637,7 @@ export const useExploreStore = defineStore("explore", () => {
     timeRange: computed(() => state.data.value.timeRange),
     selectedRelativeTime: computed(() => state.data.value.selectedRelativeTime),
     filterConditions: computed(() => state.data.value.filterConditions),
-    rawSql: computed(() => state.data.value.rawSql),
+    nativeQuery: computed(() => state.data.value.nativeQuery),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
     activeMode: computed(() => state.data.value.activeMode),
     error: state.error,
@@ -1679,7 +1680,7 @@ export const useExploreStore = defineStore("explore", () => {
     setLimit,
     setQueryTimeout,
     setFilterConditions,
-    setRawSql,
+    setNativeQuery,
     setActiveMode,
     setLogchefqlCode,
     clearActiveSavedQuerySelection,

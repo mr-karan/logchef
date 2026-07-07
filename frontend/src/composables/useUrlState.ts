@@ -10,6 +10,7 @@ import { savedQueriesApi } from '@/api/savedQueries';
 import { useTeamSourceContext } from '@/composables/useTeamSourceContext';
 import { useTeamSourceRouteSync } from '@/composables/useTeamSourceRouteSync';
 import { exploreApi } from '@/api/explore';
+import { normalizeExploreMode } from '@/lib/queryMetadata';
 
 export type UrlSyncState = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -93,8 +94,8 @@ export function useUrlState(): UrlStateReturn {
     if (limit) normalized.limit = limit;
 
     const mode = getValue('mode');
-    if (mode === 'sql') {
-      normalized.mode = 'sql';
+    if (mode && normalizeExploreMode(mode) === 'native') {
+      normalized.mode = 'native';
     }
 
     const q = getValue('q');

@@ -627,7 +627,7 @@ const handleEditorChange = (value: string | undefined) => {
   if (props.activeMode === "logchefql") {
     exploreStore.setLogchefqlCode(currentQuery);
   } else {
-    exploreStore.setRawSql(currentQuery);
+    exploreStore.setNativeQuery(currentQuery);
   }
 
   validationError.value = null;
@@ -763,7 +763,7 @@ const submitQuery = async () => {
     if (props.activeMode === "logchefql") {
       if (exploreStore.logchefqlCode !== currentContent) exploreStore.setLogchefqlCode(currentContent);
     } else {
-      if (exploreStore.rawSql !== currentContent) exploreStore.setRawSql(currentContent);
+      if (exploreStore.nativeQuery !== currentContent) exploreStore.setNativeQuery(currentContent);
     }
 
     emit("submit", {
@@ -879,7 +879,7 @@ const router = useRouter();
 
 const isEditingExistingQuery = computed(() => !!route.query.id);
 
-const handleLoadQueryFromHistory = (mode: 'logchefql' | 'sql', query: string) => {
+const handleLoadQueryFromHistory = (mode: 'logchefql' | 'native', query: string) => {
   const editorMode = mode === 'logchefql' ? 'logchefql' : 'clickhouse-sql';
 
   emit('change', {
@@ -931,7 +931,7 @@ const handleAiDialogSubmit = (payload: { naturalLanguageQuery: string; currentQu
 const handleAiInsert = (sql: string) => {
   // AI always generates raw SQL — write it directly to the SQL store
   // before triggering mode switch so translation cannot overwrite it.
-  exploreStore.setRawSql(sql);
+  exploreStore.setNativeQuery(sql);
   exploreStore.clearActiveSavedQuerySelection();
   editorContent.value = sql;
 

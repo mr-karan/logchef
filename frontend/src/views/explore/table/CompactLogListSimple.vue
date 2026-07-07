@@ -17,6 +17,7 @@ import {
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
 import type { Source } from '@/api/sources'
+import { hasSourceCapability } from '@/lib/queryMetadata'
 import { isPrimaryMessageField } from './fieldSemantics'
 
 interface Props {
@@ -26,7 +27,7 @@ interface Props {
   isLoading?: boolean
   sourceId?: string | number
   teamId?: string | number
-  source?: Pick<Source, 'source_type'> | null
+  source?: Pick<Source, 'source_type' | 'capabilities'> | null
   timestampField?: string
   severityField?: string
   timezone?: 'local' | 'utc'
@@ -379,9 +380,9 @@ const renderedRows = computed(() => {
 // Handle row click interactions
 const expandedRowId = ref<string | null>(null)
 
-// Context modal state (ClickHouse-backed sources only until other providers
-// expose a log-context capability)
-const supportsLogContext = computed(() => props.source?.source_type !== 'victorialogs')
+// Context modal state (only for sources advertising the log_context capability;
+// the backend 400s otherwise, e.g. VictoriaLogs)
+const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 

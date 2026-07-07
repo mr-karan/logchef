@@ -2,7 +2,7 @@ interface QueryHistoryEntry {
   id: string;
   teamId: number;
   sourceId: number;
-  mode: 'logchefql' | 'sql';
+  mode: 'logchefql' | 'native';
   query: string;
   timestamp: number;
   executionCount: number;
@@ -13,7 +13,7 @@ interface QueryHistoryEntry {
 interface QueryHistoryOptions {
   teamId: number;
   sourceId: number;
-  mode: 'logchefql' | 'sql';
+  mode: 'logchefql' | 'native';
   query: string;
   title?: string;
 }

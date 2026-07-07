@@ -85,7 +85,7 @@ const currentLimit = computed(() => exploreStore.limit)
 
 // ClickHouse native SQL owns its own time/LIMIT clauses. VictoriaLogs native mode does not.
 const isNativeSqlMode = computed(() =>
-  exploreStore.activeMode === 'sql' && getNativeQueryLanguageForSource(props.selectedSource) === 'clickhouse-sql'
+  exploreStore.activeMode === 'native' && getNativeQueryLanguageForSource(props.selectedSource) === 'clickhouse-sql'
 )
 
 // Query timeout
@@ -153,7 +153,7 @@ function copyCliCommand() {
     query:
       exploreStore.activeMode === 'logchefql'
         ? exploreStore.logchefqlCode
-        : exploreStore.rawSql,
+        : exploreStore.nativeQuery,
     relativeTime: exploreStore.selectedRelativeTime || undefined,
     absoluteStart: tr?.start
       ? new Date(

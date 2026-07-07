@@ -203,6 +203,19 @@ export function getSourceTypeLabel(source: SourceDescriptor): string {
   }
 }
 
-export function getExploreModeForQueryLanguage(language: QueryLanguage): "logchefql" | "sql" {
-  return language === "logchefql" ? "logchefql" : "sql";
+export type ExploreMode = "logchefql" | "native";
+
+export function getExploreModeForQueryLanguage(language: QueryLanguage): ExploreMode {
+  return language === "logchefql" ? "logchefql" : "native";
+}
+
+/**
+ * Normalizes a persisted/URL/share explore mode value to the canonical set.
+ * The native editor mode was historically stored as "sql" (the ClickHouse-only
+ * era, before multi-datasource); accept that legacy value on read and always
+ * emit "native" going forward. This is the single place that understands the
+ * old "sql" alias.
+ */
+export function normalizeExploreMode(value: string | null | undefined): ExploreMode {
+  return value === "logchefql" ? "logchefql" : "native";
 }

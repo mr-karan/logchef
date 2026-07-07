@@ -27,6 +27,7 @@ import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
 import { getDefaultColumnVisibility } from './defaultColumnVisibility'
 import type { Source } from '@/api/sources'
+import { hasSourceCapability } from '@/lib/queryMetadata'
 import TableControls from './TableControls.vue'
 import { usePreferencesStore } from '@/stores/preferences'
 
@@ -36,13 +37,13 @@ interface Props {
     stats: QueryStats
     sourceId: string
     teamId: number | null
-    source?: Pick<Source, 'source_type'> | null
+    source?: Pick<Source, 'source_type' | 'capabilities'> | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
-    activeMode?: 'logchefql' | 'clickhouse-sql' | 'sql' // Current query mode
+    activeMode?: 'logchefql' | 'clickhouse-sql' | 'native' // Current query mode
     isLoading?: boolean // Prop to indicate loading state
 }
 
@@ -75,9 +76,9 @@ const tableColumns = ref<CustomColumnDef[]>([])
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
-// Context modal state (ClickHouse-backed sources only until other providers
-// expose a log-context capability)
-const supportsLogContext = computed(() => props.source?.source_type !== 'victorialogs')
+// Context modal state (only for sources advertising the log_context capability;
+// the backend 400s otherwise, e.g. VictoriaLogs)
+const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 

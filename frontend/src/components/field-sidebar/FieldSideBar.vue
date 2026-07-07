@@ -75,7 +75,7 @@ const getCurrentFilterQuery = (): string => {
   }
 
   if (!supportsQueryLanguage(props.source, 'logchefql')) {
-    const query = exploreStore.rawSql || ''
+    const query = exploreStore.nativeQuery || ''
     return query ? convertVariables(query) : ''
   }
 

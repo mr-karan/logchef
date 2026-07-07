@@ -234,7 +234,7 @@ const canSaveOrUpdateQuery = computed(() => {
     !!currentTeamId.value &&
     !!currentSourceId.value &&
     hasValidSource.value &&
-    (!!exploreStore.logchefqlCode?.trim() || !!exploreStore.rawSql?.trim())
+    (!!exploreStore.logchefqlCode?.trim() || !!exploreStore.nativeQuery?.trim())
   );
 });
 
@@ -245,7 +245,7 @@ const currentQueryContentJson = computed(() => {
     limit: exploreStore.limit,
     content: exploreStore.activeMode === 'logchefql' 
       ? exploreStore.logchefqlCode 
-      : exploreStore.rawSql,
+      : exploreStore.nativeQuery,
   });
 });
 
@@ -385,7 +385,7 @@ const handleQueryExecution = async (debouncingKey = "") => {
     if (result && result.success && !isInitializing.value) {
       await urlState.pushHistoryEntry();
 
-      if (activeMode.value === 'sql') {
+      if (activeMode.value === 'native') {
         handleTimeRangeUpdate();
       }
     }
@@ -494,7 +494,7 @@ const updateLogchefqlValue = (newValue: string, _isUserInput = false) => {
 
 const updateSqlValue = (newValue: string, _isUserInput = false) => {
   // Use the store's action to update SQL
-  exploreStore.setRawSql(newValue);
+  exploreStore.setNativeQuery(newValue);
 };
 
 // New handler for the Save/Update button
@@ -653,7 +653,7 @@ const handleExport = async () => {
   if (!currentTeamId.value || !currentSourceId.value) return;
 
   const sql = exploreStore.lastExecutedState?.sqlQuery ||
-    (exploreStore.activeMode === "sql" ? exploreStore.sqlForExecution : "");
+    (exploreStore.activeMode === "native" ? exploreStore.sqlForExecution : "");
   if (!sql?.trim()) {
     toast({
       title: "Cannot Download",
@@ -770,7 +770,7 @@ const handleCopyCliCommand = async () => {
       query:
         exploreStore.activeMode === "logchefql"
           ? exploreStore.logchefqlCode
-          : exploreStore.rawSql,
+          : exploreStore.nativeQuery,
       relativeTime: exploreStore.selectedRelativeTime || undefined,
       absoluteStart: calendarDatePartToDate(timeRange?.start),
       absoluteEnd: calendarDatePartToDate(timeRange?.end),
@@ -913,7 +913,7 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
     let currentQuery = "";
     if (activeMode.value === "logchefql" && logchefQuery.value) {
       currentQuery = logchefQuery.value.trim();
-    } else if (activeMode.value === "sql" && sqlQuery.value) {
+    } else if (activeMode.value === "native" && sqlQuery.value) {
       currentQuery = sqlQuery.value.trim();
     }
 
@@ -956,12 +956,12 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
   if (!supportsLogchefQL.value) {
     const exactFilter = `${field}:=${formatLogsqlValue(value)}`;
     const filterExpression = operator === '!=' ? `NOT ${exactFilter}` : exactFilter;
-    const currentQuery = exploreStore.rawSql?.trim() || '';
+    const currentQuery = exploreStore.nativeQuery?.trim() || '';
 
-    exploreStore.setRawSql(appendLogsqlExpression(currentQuery, filterExpression));
+    exploreStore.setNativeQuery(appendLogsqlExpression(currentQuery, filterExpression));
 
-    if (activeMode.value !== 'sql') {
-      changeMode('sql');
+    if (activeMode.value !== 'native') {
+      changeMode('native');
     }
 
     nextTick(() => {
@@ -1003,11 +1003,11 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
 // Handle field name click from sidebar - inserts field name into query
 const handleFieldClick = (fieldName: string) => {
   if (!supportsLogchefQL.value) {
-    const currentQuery = exploreStore.rawSql?.trim() || '';
-    exploreStore.setRawSql(appendLogsqlExpression(currentQuery, `${fieldName}:=`));
+    const currentQuery = exploreStore.nativeQuery?.trim() || '';
+    exploreStore.setNativeQuery(appendLogsqlExpression(currentQuery, `${fieldName}:=`));
 
-    if (activeMode.value !== 'sql') {
-      changeMode('sql');
+    if (activeMode.value !== 'native') {
+      changeMode('native');
     }
 
     nextTick(() => {
@@ -1379,7 +1379,7 @@ onMounted(async () => {
                     @cancel-query="handleCancelQuery"
                     @update:query-timeout="exploreStore.setQueryTimeout($event)"
                     @update:activeMode="(mode, isModeSwitchOnly) =>
-                      changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
+                      changeMode(mode === 'logchefql' ? 'logchefql' : 'native', isModeSwitchOnly)"
                     @toggle-fields="showFieldsPanel = !showFieldsPanel" 
                     @select-saved-query="loadSavedQuery"
                     @save-query="handleSaveOrUpdateClick" 

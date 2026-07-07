@@ -1,7 +1,7 @@
 interface CliCommandOptions {
   teamId: number
   sourceId: number
-  mode: 'logchefql' | 'sql'
+  mode: 'logchefql' | 'native'
   query: string
   relativeTime?: string
   absoluteStart?: Date
@@ -29,7 +29,7 @@ export function generateCliCommand(options: CliCommandOptions): string {
   // Escape query for shell
   const escapedQuery = escapeShellArg(query)
 
-  if (mode === 'sql') {
+  if (mode === 'native') {
     let cmd = `logchef sql ${escapedQuery} -t ${teamId} -S ${sourceId}`
     if (timeout) cmd += ` --timeout ${timeout}`
     return cmd

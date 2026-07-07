@@ -82,7 +82,7 @@ export function useSavedQueries(
   async function handleSaveQueryClick() {
     const query = exploreStore.activeMode === 'logchefql'
         ? exploreStore.logchefqlCode
-        : exploreStore.rawSql
+        : exploreStore.nativeQuery
 
     if (!query?.trim()) {
       toast({
@@ -274,7 +274,7 @@ export function useSavedQueries(
       if (isLogchefQL) {
         exploreStore.setLogchefqlCode(queryToLoad)
       } else {
-        exploreStore.setRawSql(queryToLoad)
+        exploreStore.setNativeQuery(queryToLoad)
       }
 
       if (content.limit) exploreStore.setLimit(content.limit)
