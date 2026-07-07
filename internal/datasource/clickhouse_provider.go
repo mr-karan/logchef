@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -929,4 +930,83 @@ func (p *ClickHouseProvider) GetLogContext(ctx context.Context, source *models.S
 		AfterLogs:       result.AfterLogs,
 		Stats:           result.Stats,
 	}, nil
+}
+
+// buildLogchefQLSchema builds a LogchefQL schema (name -> type) from the
+// source's columns for type-aware SQL generation. Returns nil when no column
+// metadata is available; the translator handles a nil schema gracefully.
+func buildLogchefQLSchema(source *models.Source) *logchefql.Schema {
+	if source == nil || len(source.Columns) == 0 {
+		return nil
+	}
+
+	columns := make([]logchefql.ColumnInfo, len(source.Columns))
+	for i, col := range source.Columns {
+		columns[i] = logchefql.ColumnInfo{
+			Name: col.Name,
+			Type: col.Type,
+		}
+	}
+	return &logchefql.Schema{Columns: columns}
+}
+
+// CompileLogchefQL compiles a LogchefQL query into executable ClickHouse SQL.
+// When a complete time window is supplied it returns the full SELECT ... WHERE
+// ... query with the time range baked in; otherwise Query and FilterOnly both
+// carry the WHERE-clause-only SQL.
+func (p *ClickHouseProvider) CompileLogchefQL(ctx context.Context, source *models.Source, req LogchefQLCompileRequest) (*CompiledLogchefQL, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+
+	// Schema-aware SQL generation needs column types. The source resolved by
+	// the service does not carry populated columns, so fetch the schema on
+	// demand when it's missing. This is best-effort: a nil schema still yields a
+	// valid (if less type-aware) translation, matching the behaviour when a
+	// source is disconnected.
+	if len(source.Columns) == 0 {
+		if columns, err := p.GetSourceSchema(ctx, source); err == nil {
+			source.Columns = columns
+		}
+	}
+	schema := buildLogchefQLSchema(source)
+
+	translateResult := logchefql.Translate(req.Query, schema)
+	compiled := &CompiledLogchefQL{
+		Language:   models.QueryLanguageClickHouseSQL,
+		Valid:      translateResult.Valid,
+		Error:      translateResult.Error,
+		Conditions: translateResult.Conditions,
+		FieldsUsed: translateResult.FieldsUsed,
+		FilterOnly: translateResult.SQL,
+		Query:      translateResult.SQL,
+	}
+
+	if !translateResult.Valid {
+		if translateResult.Error != nil {
+			return compiled, translateResult.Error
+		}
+		return compiled, &logchefql.ParseError{Code: logchefql.ErrUnexpectedToken, Message: "invalid LogchefQL query"}
+	}
+
+	// Build the full executable SQL (with time range) only when the caller
+	// supplied a complete time window.
+	if req.StartTime != "" && req.EndTime != "" && req.Timezone != "" {
+		fullSQL, err := logchefql.BuildFullQuery(logchefql.QueryBuildParams{
+			LogchefQL:      req.Query,
+			Schema:         schema,
+			TableName:      source.GetFullTableName(),
+			TimestampField: source.MetaTSField,
+			StartTime:      req.StartTime,
+			EndTime:        req.EndTime,
+			Timezone:       req.Timezone,
+			Limit:          req.Limit,
+		})
+		if err != nil {
+			return compiled, err
+		}
+		compiled.Query = fullSQL
+	}
+
+	return compiled, nil
 }

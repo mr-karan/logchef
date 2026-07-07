@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -226,6 +227,61 @@ func (s *Service) GetLogContext(ctx context.Context, sourceID models.SourceID, r
 		return nil, ErrOperationNotSupported
 	}
 	return lcp.GetLogContext(ctx, source, req)
+}
+
+// LogchefQLCompileRequest carries the raw LogchefQL query and the transport
+// values needed to build an executable native query. Times are passed through
+// as accepted by the HTTP handlers (they may be empty for preview-only
+// translation); providers that bake the time range into the query interpret
+// them, others ignore them.
+type LogchefQLCompileRequest struct {
+	Query     string
+	StartTime string
+	EndTime   string
+	Timezone  string
+	Limit     int
+}
+
+// CompiledLogchefQL is the result of compiling LogchefQL into a provider's
+// native query language.
+type CompiledLogchefQL struct {
+	// Query is the executable native query: full SQL (with time range) for
+	// ClickHouse when a complete time window is supplied, the WHERE-only SQL
+	// otherwise; the LogsQL query for VictoriaLogs.
+	Query string
+	// FilterOnly is the WHERE-clause-only SQL for ClickHouse; for VictoriaLogs
+	// it mirrors Query.
+	FilterOnly string
+	Language   models.QueryLanguage
+	Valid      bool
+	Error      *logchefql.ParseError
+	Conditions []logchefql.FilterCondition
+	FieldsUsed []string
+}
+
+// LogchefQLCompiler is an optional interface for providers that can compile
+// LogchefQL into their native query language. Providers that don't implement it
+// are reported via ErrOperationNotSupported.
+//
+// On a parse or build failure the implementation returns a non-nil
+// CompiledLogchefQL (with Valid/Error populated from the parse pass) together
+// with a non-nil error, so callers that only need the translation metadata (the
+// translate endpoint) can render it while callers that require an executable
+// query (the query endpoint) can surface the failure.
+type LogchefQLCompiler interface {
+	CompileLogchefQL(ctx context.Context, source *models.Source, req LogchefQLCompileRequest) (*CompiledLogchefQL, error)
+}
+
+func (s *Service) CompileLogchefQL(ctx context.Context, sourceID models.SourceID, req LogchefQLCompileRequest) (*CompiledLogchefQL, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	compiler, ok := provider.(LogchefQLCompiler)
+	if !ok {
+		return nil, ErrOperationNotSupported
+	}
+	return compiler.CompileLogchefQL(ctx, source, req)
 }
 
 func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, req AlertQueryRequest) (*models.QueryResult, error) {

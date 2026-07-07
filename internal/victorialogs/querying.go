@@ -155,6 +155,16 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	}, nil
 }
 
+// translateLogchefQLToLogsQL is the single point where LogchefQL is compiled
+// into LogsQL for this provider. Both the field-values call sites (via
+// compileQueryForVictoriaLogs) and the LogchefQLCompiler interface method wrap
+// it.
+func translateLogchefQLToLogsQL(queryText string, source *models.Source) *logchefql.LogsQLTranslateResult {
+	return logchefql.TranslateToLogsQL(queryText, &logchefql.LogsQLTranslateOptions{
+		DefaultTimestampField: source.MetaTSField,
+	})
+}
+
 func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage, source *models.Source) (string, error) {
 	normalizedLanguage := models.NormalizeQueryLanguage(language)
 	switch normalizedLanguage {
@@ -165,9 +175,7 @@ func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage
 		}
 		return query, nil
 	case models.QueryLanguageLogchefQL:
-		result := logchefql.TranslateToLogsQL(queryText, &logchefql.LogsQLTranslateOptions{
-			DefaultTimestampField: source.MetaTSField,
-		})
+		result := translateLogchefQLToLogsQL(queryText, source)
 		if !result.Valid {
 			if result.Error != nil {
 				return "", result.Error
@@ -178,6 +186,28 @@ func compileQueryForVictoriaLogs(queryText string, language models.QueryLanguage
 	default:
 		return "", fmt.Errorf("victorialogs does not support query language %q", normalizedLanguage)
 	}
+}
+
+// CompileLogchefQL compiles a LogchefQL query into a LogsQL query. The time
+// range is not baked into the query; callers pass it to QueryLogs separately.
+func (p *Provider) CompileLogchefQL(_ context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	result := translateLogchefQLToLogsQL(req.Query, source)
+	compiled := &datasource.CompiledLogchefQL{
+		Language:   models.QueryLanguageLogsQL,
+		Valid:      result.Valid,
+		Error:      result.Error,
+		Conditions: result.Conditions,
+		FieldsUsed: result.FieldsUsed,
+		Query:      result.Query,
+		FilterOnly: result.Query,
+	}
+	if !result.Valid {
+		if result.Error != nil {
+			return compiled, result.Error
+		}
+		return compiled, fmt.Errorf("invalid LogchefQL query")
+	}
+	return compiled, nil
 }
 
 func (p *Provider) GetSourceSchema(ctx context.Context, source *models.Source) ([]models.ColumnInfo, error) {
