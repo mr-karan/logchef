@@ -38,6 +38,12 @@ func TestValidateDashboardPanels_Valid(t *testing.T) {
 	if err := ValidateDashboardPanels(empty); err != nil {
 		t.Fatalf("empty blob rejected: %v", err)
 	}
+
+	// The finer grid (#78) allows 2/8/9-wide panels alongside the original 3/4/6/12.
+	fineGrid := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":8,"h":2},{"id":"p2","x":8,"y":0,"w":4,"h":2},{"id":"p3","x":0,"y":2,"w":2,"h":1}],"panels":[]}`)
+	if err := ValidateDashboardPanels(fineGrid); err != nil {
+		t.Fatalf("fine-grid widths rejected: %v", err)
+	}
 }
 
 func TestValidateDashboardPanels_Violations(t *testing.T) {

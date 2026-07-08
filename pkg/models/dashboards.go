@@ -65,9 +65,12 @@ var validDashboardPanelTypes = map[DashboardPanelType]struct{}{
 
 // validDashboardPanelWidths is the set of allowed grid column spans (12-col grid).
 var validDashboardPanelWidths = map[int]struct{}{
+	2:  {},
 	3:  {},
 	4:  {},
 	6:  {},
+	8:  {},
+	9:  {},
 	12: {},
 }
 
@@ -159,7 +162,7 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 		layoutIDs[l.ID] = struct{}{}
 
 		if _, ok := validDashboardPanelWidths[l.W]; !ok {
-			return fmt.Errorf("layout %q has invalid width %d (allowed: 3, 4, 6, 12)", l.ID, l.W)
+			return fmt.Errorf("layout %q has invalid width %d (allowed: 2, 3, 4, 6, 8, 9, 12)", l.ID, l.W)
 		}
 		if l.H < MinDashboardPanelH || l.H > MaxDashboardPanelH {
 			return fmt.Errorf("layout %q has invalid height %d (allowed: %d-%d)", l.ID, l.H, MinDashboardPanelH, MaxDashboardPanelH)

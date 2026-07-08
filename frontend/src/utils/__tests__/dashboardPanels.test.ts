@@ -42,12 +42,15 @@ function panel(id: string, overrides: Partial<DashboardPanel> = {}): DashboardPa
 
 describe("snapPanelWidth", () => {
   it("snaps arbitrary widths to the nearest allowed preset", () => {
-    expect(snapPanelWidth(7)).toBe(6);
+    expect(snapPanelWidth(7)).toBe(6); // equidistant 6/8 -> first-wins keeps 6
     expect(snapPanelWidth(5)).toBe(4); // equidistant 4/6 -> first-wins keeps 4
     expect(snapPanelWidth(11)).toBe(12);
-    expect(snapPanelWidth(1)).toBe(3);
+    expect(snapPanelWidth(1)).toBe(2);
     expect(snapPanelWidth(3)).toBe(3);
     expect(snapPanelWidth(12)).toBe(12);
+    expect(snapPanelWidth(2)).toBe(2);
+    expect(snapPanelWidth(8)).toBe(8);
+    expect(snapPanelWidth(9)).toBe(9);
   });
 
   it("falls back to a default for missing/invalid widths", () => {
@@ -328,12 +331,31 @@ describe("previewResizeLayout", () => {
 });
 
 describe("addTileSlot", () => {
-  it("returns the slot a new default panel would pack into", () => {
+  it("returns the slot a new default panel would pack into when it exactly fills the remainder", () => {
     const slot = addTileSlot([{ id: "a", w: 6, h: 2 }]);
     expect(slot).toMatchObject({ x: 6, y: 0, w: 6, h: 2 });
   });
-  it("places the tile at the origin on an empty dashboard", () => {
-    expect(addTileSlot([])).toMatchObject({ x: 0, y: 0 });
+  it("fills the whole canvas width on an empty dashboard", () => {
+    expect(addTileSlot([])).toMatchObject({ x: 0, y: 0, w: 12 });
+  });
+  it("fills a narrow remainder in the bottom row instead of wrapping to an orphaned box", () => {
+    // a (w8,h3) leaves only 4 free columns in row 0 — the default 6-wide tile
+    // wouldn't fit there, but the tile should still occupy those 4 columns
+    // (matching row 0's height) rather than dropping to a fresh row.
+    const slot = addTileSlot([{ id: "a", w: 8, h: 3 }]);
+    expect(slot).toEqual({ id: "__add__", x: 8, y: 0, w: 4, h: 3 });
+  });
+  it("wraps to a fresh row at the default size once the bottom row is exactly full", () => {
+    const slot = addTileSlot([{ id: "a", w: 12, h: 2 }]);
+    expect(slot).toEqual({ id: "__add__", x: 0, y: 2, w: 6, h: 2 });
+  });
+  it("considers only the bottom row, not earlier rows with free space", () => {
+    const order: PanelSize[] = [
+      { id: "a", w: 4, h: 2 }, // row 0: 4 used, 8 free (ignored — not the bottom row)
+      { id: "b", w: 12, h: 2 }, // row 0 wraps here since 4+12>12; b takes row 1 alone
+    ];
+    const slot = addTileSlot(order);
+    expect(slot).toEqual({ id: "__add__", x: 0, y: 4, w: 6, h: 2 });
   });
 });
 
@@ -462,5 +484,11 @@ describe("validatePanelsBlob", () => {
   it("rejects invalid layout width/height", () => {
     expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 5, h: 2 }] }))).toMatch(/width/i);
     expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 6, h: 9 }] }))).toMatch(/height/i);
+  });
+
+  it("accepts the finer grid presets (2/8/9-wide panels)", () => {
+    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 8, h: 2 }] }))).toBeNull();
+    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 9, h: 2 }] }))).toBeNull();
+    expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 2, h: 2 }] }))).toBeNull();
   });
 });

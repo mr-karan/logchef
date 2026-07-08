@@ -26,6 +26,7 @@ import {
   previewResizeLayout,
   addTileSlot,
   layoutRowCount,
+  columnTrackWidth,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
@@ -36,7 +37,7 @@ const router = useRouter();
 const store = useDashboardsStore();
 
 // Grid geometry. 12 columns; each layout row is ROW_HEIGHT px tall.
-const ROW_HEIGHT_PX = 80;
+const ROW_HEIGHT_PX = 60;
 const GRID_GAP_PX = 12;
 const ROW_STRIDE = ROW_HEIGHT_PX + GRID_GAP_PX;
 
@@ -181,6 +182,14 @@ const canvasRows = computed(() => {
   return Math.max(rows, tile ? tile.y + tile.h : 0, 1);
 });
 const canvasHeightPx = computed(() => canvasRows.value * ROW_STRIDE - GRID_GAP_PX);
+
+// Dot-grid spacing in real px (column stride × row stride) so the dots line up
+// exactly with the actual column/row tracks instead of a viewport-relative
+// percentage that drifts out of sync with the grid as the canvas resizes.
+const dotGridBackgroundSize = computed(() => {
+  const colStride = columnTrackWidth(renderGeom.value) + GRID_GAP_PX;
+  return `${colStride}px ${ROW_STRIDE}px`;
+});
 
 function rectStyle(item: DashboardLayoutItem) {
   const r = cellRect(item, renderGeom.value);
@@ -416,7 +425,7 @@ onBeforeRouteLeave(() => {
     <div class="mb-4 flex items-start justify-between gap-4 flex-wrap">
       <div class="min-w-0">
         <div class="flex items-center gap-2">
-          <Button variant="ghost" size="sm" class="h-7 px-2 -ml-2" @click="goBack">
+          <Button variant="ghost" size="sm" class="h-8 px-2 -ml-2" @click="goBack">
             <ArrowLeft class="h-4 w-4" />
           </Button>
           <LayoutDashboard class="h-5 w-5 text-muted-foreground shrink-0" />
@@ -489,7 +498,7 @@ onBeforeRouteLeave(() => {
       class="dash-canvas"
       :style="{
         height: `${canvasHeightPx}px`,
-        backgroundSize: `${100 / 12}% ${ROW_STRIDE}px`,
+        backgroundSize: dotGridBackgroundSize,
       }"
     >
       <!-- Move placeholder (drop slot) -->
@@ -515,7 +524,7 @@ onBeforeRouteLeave(() => {
           title="Drag to move"
           @pointerdown="beginDrag('move', item.id, $event)"
         >
-          <GripVertical class="h-3.5 w-3.5 opacity-60" />
+          <GripVertical class="h-3.5 w-3.5 opacity-60 shrink-0" />
           <span class="dash-item__title">{{ panelById.get(item.id)?.title || "Panel" }}</span>
           <span class="dash-item__actions">
             <button class="dash-item__btn" title="Edit panel" @pointerdown.stop @click="openEditPanel(item.id)">
@@ -534,7 +543,7 @@ onBeforeRouteLeave(() => {
         <div class="dash-item__body">
           <DashboardPanel
             :panel="panelById.get(item.id)!"
-            :height-px="panelPixelHeight(item.h) - 34"
+            :height-px="panelPixelHeight(item.h) - 36"
             :chrome="false"
           />
         </div>
@@ -546,7 +555,7 @@ onBeforeRouteLeave(() => {
         />
       </div>
 
-      <!-- Ghost add-panel tile -->
+      <!-- Ghost add-panel tile: fills the real remaining space in the bottom row -->
       <button
         v-if="addTile"
         class="dash-addtile"
@@ -559,14 +568,19 @@ onBeforeRouteLeave(() => {
     </div>
 
     <!-- Empty dashboard (view mode) -->
-    <div
-      v-else-if="dashboard && placements.length === 0"
-      class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
-    >
-      <p class="text-sm text-muted-foreground">This dashboard has no panels yet.</p>
-      <Button v-if="canEdit" variant="outline" size="sm" class="gap-1.5" @click="startEdit">
-        <Pencil class="h-4 w-4" />
-        Edit to add panels
+    <div v-else-if="dashboard && placements.length === 0" class="dash-empty">
+      <div class="dash-empty__icon">
+        <LayoutDashboard class="h-7 w-7" />
+      </div>
+      <div>
+        <p class="text-base font-semibold">This dashboard is empty</p>
+        <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          Add a panel to start visualizing logs — pick a source, write a query, and choose how to chart it.
+        </p>
+      </div>
+      <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" @click="startEdit">
+        <Plus class="h-4 w-4" />
+        Add your first panel
       </Button>
     </div>
 
@@ -599,6 +613,28 @@ onBeforeRouteLeave(() => {
 </template>
 
 <style scoped>
+.dash-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+}
+.dash-empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
 .dash-grid {
   display: grid;
   grid-auto-flow: row;
@@ -612,11 +648,20 @@ onBeforeRouteLeave(() => {
 .dash-canvas {
   position: relative;
   width: 100%;
-  border-radius: 0.6rem;
-  /* Dot-grid: one dot at every column/row corner. */
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  /* Distinct surface from the page so "canvas" reads as its own zone in edit
+     mode, matching the tinted panel headers. Note: no padding here — this
+     element is both the positioned ancestor for absolutely-positioned panels
+     and the ref used for pixel-geometry math (containerWidth, drag hit
+     testing), so its content box must equal the canvas coordinate space. */
+  background-color: color-mix(in srgb, var(--muted) 18%, var(--background));
+  /* Dot-grid: one dot at every column/row corner, spaced to the real column
+     and row stride (in px) so it reads as a uniform grid instead of a
+     viewport-relative smear. */
   background-image: radial-gradient(
     circle at 1px 1px,
-    color-mix(in srgb, var(--muted-foreground) 28%, transparent) 1.5px,
+    color-mix(in srgb, var(--muted-foreground) 45%, transparent) 1.5px,
     transparent 0
   );
   background-position: 0 0;
@@ -632,9 +677,14 @@ onBeforeRouteLeave(() => {
   border-radius: 0.6rem;
   background: var(--card);
   will-change: transform;
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.dash-item:hover {
+  border-color: color-mix(in srgb, var(--foreground) 20%, var(--border));
+  box-shadow: 0 2px 10px -4px rgb(0 0 0 / 0.18);
 }
 .dash-item--animate {
-  transition: transform 0.16s ease, width 0.16s ease, height 0.16s ease;
+  transition: transform 0.16s ease, width 0.16s ease, height 0.16s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 .dash-item--dragging {
   z-index: 20;
@@ -646,13 +696,18 @@ onBeforeRouteLeave(() => {
 .dash-item__header {
   display: flex;
   align-items: center;
-  gap: 0.35rem;
-  height: 30px;
-  padding: 0 0.35rem 0 0.5rem;
+  gap: 0.45rem;
+  height: 32px;
+  padding: 0 0.4rem 0 0.65rem;
   border-bottom: 1px solid var(--border);
   cursor: grab;
   user-select: none;
-  background: color-mix(in srgb, var(--muted) 40%, transparent);
+  /* Same tint as the view-mode panel header (DashboardPanel.vue) so a
+     dashboard looks identical whether you're editing it or not. */
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
+}
+.dash-item__header:hover {
+  background: color-mix(in srgb, var(--muted) 55%, transparent);
 }
 .dash-item__header:active {
   cursor: grabbing;
@@ -669,7 +724,10 @@ onBeforeRouteLeave(() => {
 .dash-item__actions {
   display: inline-flex;
   align-items: center;
-  gap: 0.1rem;
+  gap: 0.15rem;
+  padding-left: 0.4rem;
+  margin-left: 0.15rem;
+  border-left: 1px solid var(--border);
 }
 .dash-item__btn {
   display: inline-flex;
@@ -679,6 +737,7 @@ onBeforeRouteLeave(() => {
   height: 1.4rem;
   border-radius: 0.3rem;
   color: var(--muted-foreground);
+  cursor: pointer;
 }
 .dash-item__btn:hover {
   background: var(--accent);
@@ -706,6 +765,15 @@ onBeforeRouteLeave(() => {
     color-mix(in srgb, var(--muted-foreground) 55%, transparent) 50% 100%
   );
   border-bottom-right-radius: 0.6rem;
+  transition: background 0.12s ease;
+}
+.dash-item:hover .dash-item__resize,
+.dash-item__resize:hover {
+  background: linear-gradient(
+    135deg,
+    transparent 0 50%,
+    color-mix(in srgb, var(--primary) 65%, transparent) 50% 100%
+  );
 }
 .dash-placeholder {
   position: absolute;
@@ -717,6 +785,10 @@ onBeforeRouteLeave(() => {
   pointer-events: none;
   z-index: 1;
 }
+/* Add-tile deliberately uses a SOLID border + flat fill (vs. the dashed,
+   primary-tinted move placeholder above) so the two states — "drop here"
+   during a drag vs. "click to add" at rest — read as distinct affordances
+   instead of one shared dashed idiom. */
 .dash-addtile {
   position: absolute;
   top: 0;
@@ -726,14 +798,16 @@ onBeforeRouteLeave(() => {
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
-  border: 2px dashed var(--border);
+  border: 1px solid var(--border);
   border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--muted) 25%, transparent);
   color: var(--muted-foreground);
+  cursor: pointer;
   transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
 }
 .dash-addtile:hover {
-  border-color: color-mix(in srgb, var(--primary) 60%, transparent);
+  border-color: color-mix(in srgb, var(--primary) 55%, transparent);
   color: var(--foreground);
-  background: color-mix(in srgb, var(--primary) 5%, transparent);
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
 }
 </style>

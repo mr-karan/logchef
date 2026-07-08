@@ -10,7 +10,7 @@ import type {
 // set of presets (mirrors the server-side validation in pkg/models/dashboards.go)
 // and heights are clamped to 1..6 rows.
 export const DASHBOARD_GRID_COLUMNS = 12;
-export const ALLOWED_PANEL_WIDTHS = [3, 4, 6, 12] as const;
+export const ALLOWED_PANEL_WIDTHS = [2, 3, 4, 6, 8, 9, 12] as const;
 export const MIN_PANEL_HEIGHT = 1;
 export const MAX_PANEL_HEIGHT = 6;
 export const DEFAULT_PANEL_WIDTH = 6;
@@ -421,17 +421,45 @@ export function previewResizeLayout(
 }
 
 /**
- * Where the ghost "+ Add panel" tile goes: the first free slot a default-sized
- * panel would pack into, i.e. the slot the panel created by clicking it will
- * actually take.
+ * Where the ghost "+ Add panel" tile goes. Unlike a real panel (which always
+ * packs at the default size, see `reflowPanels`), the ghost is a visual
+ * affordance for "there's room here" — it fills whatever space is actually
+ * left in the current bottom row instead of a fixed phantom size that can
+ * land disconnected below everything (e.g. a 6-wide default that doesn't fit
+ * a 4-wide remainder wraps to its own orphaned row). Only once the bottom row
+ * is exactly full does the tile drop to a fresh row at the default size.
  */
 export function addTileSlot(
   order: PanelSize[],
   w: number = DEFAULT_PANEL_WIDTH,
   h: number = DEFAULT_PANEL_HEIGHT
 ): DashboardLayoutItem {
-  const packed = packLayout([...(order ?? []), { id: "__add__", w, h }]);
-  return packed[packed.length - 1];
+  // Replay packLayout's shelf-packing cursor (without placing a phantom item)
+  // to find where the bottom row currently ends.
+  let x = 0;
+  let rowY = 0;
+  let rowMaxH = 0;
+  for (const size of order ?? []) {
+    const itemW = snapPanelWidth(size.w);
+    const itemH = clampPanelHeight(size.h);
+    if (x + itemW > DASHBOARD_GRID_COLUMNS) {
+      rowY += rowMaxH;
+      x = 0;
+      rowMaxH = 0;
+    }
+    x += itemW;
+    rowMaxH = Math.max(rowMaxH, itemH);
+  }
+
+  const available = DASHBOARD_GRID_COLUMNS - x;
+  if (available <= 0) {
+    // Bottom row is exactly full: wrap to a fresh row at the default size.
+    return { id: "__add__", x: 0, y: rowY + rowMaxH, w: snapPanelWidth(w), h: clampPanelHeight(h) };
+  }
+  // Fill the real remaining width of the bottom row, matching that row's
+  // established height so the tile reads as part of it (falls back to the
+  // default height when the row hasn't started yet, i.e. an empty canvas).
+  return { id: "__add__", x, y: rowY, w: available, h: rowMaxH > 0 ? rowMaxH : clampPanelHeight(h) };
 }
 
 /** Total rows a layout occupies (bottom edge of its lowest panel). */

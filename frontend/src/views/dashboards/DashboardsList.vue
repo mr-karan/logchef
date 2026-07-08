@@ -1,7 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
-import { LayoutDashboard, Plus, MoreVertical, Trash2, LayoutGrid } from "lucide-vue-next";
+import {
+  LayoutDashboard,
+  Plus,
+  MoreVertical,
+  Trash2,
+  LayoutGrid,
+  Search,
+  BarChart3,
+  Hash,
+  Table2,
+  User,
+} from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -31,6 +42,15 @@ const store = useDashboardsStore();
 const isLoading = computed(() => store.isLoadingOperation("fetchDashboards"));
 const dashboards = computed(() => store.dashboards);
 
+const search = ref("");
+const filteredDashboards = computed(() => {
+  const q = search.value.trim().toLowerCase();
+  if (!q) return dashboards.value;
+  return dashboards.value.filter(
+    (d) => d.name.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q)
+  );
+});
+
 onMounted(() => {
   void store.fetchDashboards();
 });
@@ -41,6 +61,16 @@ function openDashboard(id: number) {
 
 function panelCount(d: Dashboard): number {
   return d.panels?.panels?.length ?? 0;
+}
+
+// Distinct panel types on a dashboard, for the small type-icon row on each
+// card — a cheap stand-in for a real thumbnail that still hints at content.
+const TYPE_ICONS = { timeseries: BarChart3, stat: Hash, table: Table2 } as const;
+function panelTypeIcons(d: Dashboard) {
+  const types = new Set((d.panels?.panels ?? []).map((p) => p.type));
+  return Array.from(types)
+    .filter((t): t is keyof typeof TYPE_ICONS => t in TYPE_ICONS)
+    .map((t) => TYPE_ICONS[t]);
 }
 
 function updatedLabel(d: Dashboard): string {
@@ -98,44 +128,73 @@ async function doDelete() {
 <template>
   <div class="mx-auto w-full max-w-[1400px] px-4 py-4">
     <!-- Header -->
-    <div class="mb-5 flex items-center justify-between gap-4">
+    <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-2">
         <LayoutDashboard class="h-5 w-5 text-muted-foreground" />
         <h1 class="text-lg font-semibold">Dashboards</h1>
       </div>
-      <Button size="sm" class="gap-1.5" @click="openCreate">
-        <Plus class="h-4 w-4" />
-        New dashboard
-      </Button>
-    </div>
-
-    <!-- Loading -->
-    <div v-if="isLoading && dashboards.length === 0" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-      <Skeleton v-for="n in 6" :key="n" class="h-32 w-full rounded-lg" />
-    </div>
-
-    <!-- Empty -->
-    <div
-      v-else-if="dashboards.length === 0"
-      class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-20 text-center"
-    >
-      <LayoutGrid class="h-9 w-9 text-muted-foreground" />
-      <div>
-        <p class="text-sm font-medium">No dashboards yet</p>
-        <p class="text-sm text-muted-foreground">Create a dashboard to group saved visualizations.</p>
+      <div class="flex items-center gap-2">
+        <div v-if="dashboards.length > 0" class="relative">
+          <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
+          <Input v-model="search" placeholder="Search dashboards…" class="h-9 w-56 pl-8" />
+        </div>
+        <Button size="sm" class="gap-1.5" @click="openCreate">
+          <Plus class="h-4 w-4" />
+          New dashboard
+        </Button>
       </div>
-      <Button size="sm" class="gap-1.5" @click="openCreate">
+    </div>
+
+    <!-- Loading: card-shaped skeletons previewing the real card layout -->
+    <div v-if="isLoading && dashboards.length === 0" class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div v-for="n in 6" :key="n" class="flex flex-col gap-3 rounded-lg border bg-card p-4">
+        <div class="flex items-start justify-between gap-2">
+          <Skeleton class="h-4 w-2/3" />
+          <Skeleton class="h-4 w-4 shrink-0 rounded" />
+        </div>
+        <Skeleton class="h-3 w-full" />
+        <Skeleton class="h-3 w-4/5" />
+        <div class="mt-1 flex items-center gap-2">
+          <Skeleton class="h-4 w-16 rounded" />
+          <Skeleton class="h-3 w-20" />
+          <Skeleton class="ml-auto h-3 w-14" />
+        </div>
+      </div>
+    </div>
+
+    <!-- Empty: no dashboards at all -->
+    <div v-else-if="dashboards.length === 0" class="dash-list-empty">
+      <div class="dash-list-empty__icon">
+        <LayoutGrid class="h-8 w-8" />
+      </div>
+      <div>
+        <p class="text-base font-semibold">No dashboards yet</p>
+        <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
+          Build a dashboard to group saved queries into a shared view — errors by service, latency
+          trends, or anything you check often.
+        </p>
+      </div>
+      <Button size="sm" class="mt-1 gap-1.5" @click="openCreate">
         <Plus class="h-4 w-4" />
-        New dashboard
+        Create your first dashboard
       </Button>
+    </div>
+
+    <!-- Empty: search matched nothing -->
+    <div
+      v-else-if="filteredDashboards.length === 0"
+      class="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed py-14 text-center"
+    >
+      <p class="text-sm font-medium">No dashboards match “{{ search }}”</p>
+      <p class="text-sm text-muted-foreground">Try a different name or clear the search.</p>
     </div>
 
     <!-- Cards -->
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
       <div
-        v-for="d in dashboards"
+        v-for="d in filteredDashboards"
         :key="d.id"
-        class="group relative flex cursor-pointer flex-col rounded-lg border bg-card p-4 transition-colors hover:border-primary/50 hover:bg-accent/40"
+        class="group relative flex cursor-pointer flex-col rounded-lg border bg-card p-4 transition-all hover:-translate-y-0.5 hover:border-primary/50 hover:shadow-md"
         @click="openDashboard(d.id)"
       >
         <div class="flex items-start justify-between gap-2">
@@ -164,10 +223,20 @@ async function doDelete() {
         </p>
 
         <div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-          <span class="rounded bg-muted px-1.5 py-0.5">{{ panelCount(d) }} panel{{ panelCount(d) === 1 ? "" : "s" }}</span>
-          <span class="truncate">{{ d.created_by_name || d.created_by_email || "Unknown" }}</span>
-          <span v-if="updatedLabel(d)" class="ml-auto shrink-0">{{ updatedLabel(d) }}</span>
+          <span class="rounded bg-muted px-1.5 py-0.5 font-medium">
+            {{ panelCount(d) }} panel{{ panelCount(d) === 1 ? "" : "s" }}
+          </span>
+          <span v-if="panelTypeIcons(d).length" class="flex items-center gap-1 text-muted-foreground/70">
+            <component :is="icon" v-for="(icon, i) in panelTypeIcons(d)" :key="i" class="h-3 w-3" />
+          </span>
+          <span class="ml-auto flex items-center gap-1 truncate">
+            <User class="h-3 w-3 shrink-0" />
+            <span class="truncate">{{ d.created_by_name || d.created_by_email || "Unknown" }}</span>
+          </span>
         </div>
+        <p v-if="updatedLabel(d)" class="mt-1 text-[11px] text-muted-foreground/70">
+          Updated {{ updatedLabel(d) }}
+        </p>
       </div>
     </div>
 
@@ -219,3 +288,28 @@ async function doDelete() {
     />
   </div>
 </template>
+
+<style scoped>
+.dash-list-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+  background: color-mix(in srgb, var(--muted) 12%, transparent);
+  padding: 3.5rem 1.5rem;
+  text-align: center;
+}
+.dash-list-empty__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3.5rem;
+  height: 3.5rem;
+  border-radius: 9999px;
+  background: color-mix(in srgb, var(--primary) 12%, transparent);
+  color: var(--primary);
+}
+</style>

@@ -35,7 +35,7 @@ const panelState = computed<PanelState>(
 // Chart body height = outer height minus the header row (when shown) and the
 // body padding.
 const BODY_PADDING_PX = 16;
-const HEADER_PX = 30;
+const HEADER_PX = 32;
 const chartHeight = computed(() =>
   Math.max(70, props.heightPx - BODY_PADDING_PX - (props.chrome ? HEADER_PX : 0))
 );
@@ -142,10 +142,15 @@ const typeIcon = computed(() => {
   display: flex;
   align-items: center;
   gap: 0.4rem;
-  padding: 0.35rem 0.6rem;
+  padding: 0.35rem 0.65rem;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  min-height: 30px;
+  height: 32px;
+  min-height: 32px;
+  /* Same tint as the edit-mode drag header (DashboardView.vue's
+     .dash-item__header) so a dashboard reads identically in view vs. edit
+     mode instead of one being flat and the other tinted. */
+  background: color-mix(in srgb, var(--muted) 35%, transparent);
 }
 .dash-panel__icon {
   width: 0.85rem;
