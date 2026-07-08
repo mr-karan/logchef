@@ -883,3 +883,47 @@ WHERE ci.saved_query_id = $1
   AND cm.user_id = $2
   AND c.is_personal = false
   AND cm.role IN ('owner', 'editor');
+
+-- Dashboards -----------------------------------------------------------------
+
+-- name: CreateDashboard :one
+-- Insert a new dashboard and return its id.
+INSERT INTO dashboards (name, description, panels_json, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id;
+
+-- name: GetDashboard :one
+-- Look up one dashboard by id.
+SELECT * FROM dashboards WHERE id = $1;
+
+-- name: ListDashboards :many
+-- List every dashboard, newest-updated first, with the creator's email/name via
+-- a LEFT JOIN (NULL for dashboards whose author was deleted).
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+ORDER BY d.updated_at DESC, d.id DESC;
+
+-- name: UpdateDashboard :one
+-- Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+UPDATE dashboards
+SET name = $1,
+    description = $2,
+    panels_json = $3,
+    updated_at = now()
+WHERE id = $4
+RETURNING id;
+
+-- name: DeleteDashboard :one
+-- Delete a dashboard; RETURNING lets callers detect not-found.
+DELETE FROM dashboards WHERE id = $1
+RETURNING id;

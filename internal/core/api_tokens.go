@@ -75,6 +75,8 @@ var validTokenScopes = map[models.TokenScope]struct{}{
 	models.TokenScopeCollectionsWrite:  {},
 	models.TokenScopeAlertsRead:        {},
 	models.TokenScopeAlertsWrite:       {},
+	models.TokenScopeDashboardsRead:    {},
+	models.TokenScopeDashboardsWrite:   {},
 	models.TokenScopeQuerySharesRead:   {},
 	models.TokenScopeQuerySharesWrite:  {},
 	models.TokenScopeSettingsRead:      {},
@@ -91,6 +93,7 @@ var readOnlyTokenScopes = []models.TokenScope{
 	models.TokenScopeSavedQueriesRead,
 	models.TokenScopeCollectionsRead,
 	models.TokenScopeAlertsRead,
+	models.TokenScopeDashboardsRead,
 	models.TokenScopeQuerySharesRead,
 	models.TokenScopeSettingsRead,
 }

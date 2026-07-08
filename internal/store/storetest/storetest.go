@@ -5,6 +5,7 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
+	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
@@ -267,6 +269,70 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	}
 	if _, err := s.GetCollectionMember(ctx, pc.ID, stranger.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("GetCollectionMember(non-member) err = %v, want ErrNotFound", err)
+	}
+}
+
+func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
+	owner := mkUser(t, ctx, s, "dash-owner@test.dev")
+
+	panels := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"5xx","type":"timeseries","team_id":1,"source_id":1,"query":"status>=500","query_language":"logchefql"}]}`)
+	d := &models.Dashboard{Name: "Ops", Description: "ops overview", PanelsJSON: panels, CreatedBy: &owner.ID}
+	if err := s.CreateDashboard(ctx, d); err != nil || d.ID == 0 {
+		t.Fatalf("CreateDashboard: %v / id=%d", err, d.ID)
+	}
+	if d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
+		t.Fatalf("CreateDashboard did not populate timestamps: %+v", d)
+	}
+
+	got, err := s.GetDashboard(ctx, d.ID)
+	if err != nil || got.Name != "Ops" || got.Description != "ops overview" {
+		t.Fatalf("GetDashboard: %v / %+v", err, got)
+	}
+	// panels_json must round-trip byte-for-byte.
+	if string(got.PanelsJSON) != string(panels) {
+		t.Fatalf("panels did not round-trip:\n got %s\nwant %s", got.PanelsJSON, panels)
+	}
+	if got.CreatedBy == nil || *got.CreatedBy != owner.ID {
+		t.Fatalf("created_by not persisted: %+v", got.CreatedBy)
+	}
+
+	// List includes it, newest-updated first, with the creator's email joined in.
+	list, err := s.ListDashboards(ctx)
+	if err != nil || len(list) == 0 {
+		t.Fatalf("ListDashboards: %v / %d", err, len(list))
+	}
+	if list[0].ID != d.ID {
+		t.Errorf("ListDashboards[0].ID = %d, want %d (newest first)", list[0].ID, d.ID)
+	}
+	if list[0].CreatedByEmail != owner.Email {
+		t.Errorf("ListDashboards[0].CreatedByEmail = %q, want %q", list[0].CreatedByEmail, owner.Email)
+	}
+
+	// Update mutates name + panels.
+	newPanels := json.RawMessage(`{"version":1,"layout":[],"panels":[]}`)
+	got.Name = "Ops v2"
+	got.PanelsJSON = newPanels
+	if err := s.UpdateDashboard(ctx, got); err != nil {
+		t.Fatalf("UpdateDashboard: %v", err)
+	}
+	if after, _ := s.GetDashboard(ctx, d.ID); after.Name != "Ops v2" || string(after.PanelsJSON) != string(newPanels) {
+		t.Errorf("after update = %+v", after)
+	}
+
+	if err := s.DeleteDashboard(ctx, d.ID); err != nil {
+		t.Fatalf("DeleteDashboard: %v", err)
+	}
+
+	// Not-found neutrality: both backends surface models.ErrNotFound (never a raw
+	// driver error) for a missing dashboard, on read and on mutation.
+	if _, err := s.GetDashboard(ctx, d.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetDashboard(deleted) err = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteDashboard(ctx, d.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("DeleteDashboard(deleted) err = %v, want ErrNotFound", err)
+	}
+	if err := s.UpdateDashboard(ctx, got); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("UpdateDashboard(deleted) err = %v, want ErrNotFound", err)
 	}
 }
 

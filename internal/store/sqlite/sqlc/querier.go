@@ -39,6 +39,9 @@ type Querier interface {
 	// Collections (cross-team curation lists for saved queries)
 	// Insert a new collection (personal or shared)
 	CreateCollection(ctx context.Context, arg CreateCollectionParams) (CreateCollectionRow, error)
+	// Dashboards -----------------------------------------------------------------
+	// Insert a new dashboard and return its id.
+	CreateDashboard(ctx context.Context, arg CreateDashboardParams) (int64, error)
 	// Export Jobs
 	// Persist an async export job
 	CreateExportJob(ctx context.Context, arg CreateExportJobParams) error
@@ -65,6 +68,8 @@ type Querier interface {
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
 	DeleteCollection(ctx context.Context, id int64) error
+	// Delete a dashboard; RETURNING lets callers detect not-found.
+	DeleteDashboard(ctx context.Context, id int64) (int64, error)
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
 	// Delete a query share and return its token
@@ -93,6 +98,8 @@ type Querier interface {
 	GetCollection(ctx context.Context, id int64) (Collection, error)
 	// Look up a single membership row
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
+	// Look up one dashboard by id.
+	GetDashboard(ctx context.Context, id int64) (Dashboard, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
@@ -156,6 +163,9 @@ type Querier interface {
 	ListCollectionMembers(ctx context.Context, collectionID int64) ([]ListCollectionMembersRow, error)
 	// List collections the user owns or is a member of, with member count and item count
 	ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error)
+	// List every dashboard, newest-updated first, with the creator's email/name via
+	// a LEFT JOIN (NULL for dashboards whose author was deleted).
+	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error)
 	// Provisioning Queries
@@ -226,6 +236,8 @@ type Querier interface {
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
+	// Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
 	// Update a saved query's mutable fields

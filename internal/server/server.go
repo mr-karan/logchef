@@ -344,6 +344,18 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Get("/:alertID/history", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertHistory)
 	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert)
 
+	// Dashboards (saved grids of visualization panels). Visibility: any
+	// authenticated user can list/view. Edit/delete: creator + global admin
+	// (dashboards whose author was deleted are global-admin-only). Panel data is
+	// fetched by the frontend through the existing team-scoped log endpoints, so
+	// there is no source-access gate here.
+	dashboardRoutes := api.Group("/dashboards", s.requireAuth)
+	dashboardRoutes.Get("/", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleListDashboards)
+	dashboardRoutes.Post("/", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleCreateDashboard)
+	dashboardRoutes.Get("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleGetDashboard)
+	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard)
+	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard)
+
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
 	s.app.Use("/assets", filesystem.New(filesystem.Config{

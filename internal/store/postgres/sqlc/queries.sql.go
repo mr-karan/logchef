@@ -368,6 +368,34 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 	return i, err
 }
 
+const createDashboard = `-- name: CreateDashboard :one
+
+INSERT INTO dashboards (name, description, panels_json, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id
+`
+
+type CreateDashboardParams struct {
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+	PanelsJson  string      `json:"panels_json"`
+	CreatedBy   pgtype.Int8 `json:"created_by"`
+}
+
+// Dashboards -----------------------------------------------------------------
+// Insert a new dashboard and return its id.
+func (q *Queries) CreateDashboard(ctx context.Context, arg CreateDashboardParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createDashboard,
+		arg.Name,
+		arg.Description,
+		arg.PanelsJson,
+		arg.CreatedBy,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const createExportJob = `-- name: CreateExportJob :exec
 
 INSERT INTO export_jobs (
@@ -641,6 +669,19 @@ func (q *Queries) DeleteCollection(ctx context.Context, id int64) error {
 	return err
 }
 
+const deleteDashboard = `-- name: DeleteDashboard :one
+DELETE FROM dashboards WHERE id = $1
+RETURNING id
+`
+
+// Delete a dashboard; RETURNING lets callers detect not-found.
+func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, deleteDashboard, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
 WHERE expires_at < $1
@@ -893,6 +934,26 @@ func (q *Queries) GetCollectionMember(ctx context.Context, arg GetCollectionMemb
 		&i.Role,
 		&i.AddedBy,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getDashboard = `-- name: GetDashboard :one
+SELECT id, name, description, panels_json, created_by, created_at, updated_at FROM dashboards WHERE id = $1
+`
+
+// Look up one dashboard by id.
+func (q *Queries) GetDashboard(ctx context.Context, id int64) (Dashboard, error) {
+	row := q.db.QueryRow(ctx, getDashboard, id)
+	var i Dashboard
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.PanelsJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1905,6 +1966,66 @@ func (q *Queries) ListCollectionsForUser(ctx context.Context, userID int64) ([]L
 			&i.CallerRole,
 			&i.MemberCount,
 			&i.ItemCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboards = `-- name: ListDashboards :many
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+ORDER BY d.updated_at DESC, d.id DESC
+`
+
+type ListDashboardsRow struct {
+	ID             int64              `json:"id"`
+	Name           string             `json:"name"`
+	Description    pgtype.Text        `json:"description"`
+	PanelsJson     string             `json:"panels_json"`
+	CreatedBy      pgtype.Int8        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CreatedByEmail pgtype.Text        `json:"created_by_email"`
+	CreatedByName  pgtype.Text        `json:"created_by_name"`
+}
+
+// List every dashboard, newest-updated first, with the creator's email/name via
+// a LEFT JOIN (NULL for dashboards whose author was deleted).
+func (q *Queries) ListDashboards(ctx context.Context) ([]ListDashboardsRow, error) {
+	rows, err := q.db.Query(ctx, listDashboards)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardsRow{}
+	for rows.Next() {
+		var i ListDashboardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.PanelsJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedByEmail,
+			&i.CreatedByName,
 		); err != nil {
 			return nil, err
 		}
@@ -3103,6 +3224,36 @@ type UpdateCollectionParams struct {
 func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error {
 	_, err := q.db.Exec(ctx, updateCollection, arg.Name, arg.Description, arg.ID)
 	return err
+}
+
+const updateDashboard = `-- name: UpdateDashboard :one
+UPDATE dashboards
+SET name = $1,
+    description = $2,
+    panels_json = $3,
+    updated_at = now()
+WHERE id = $4
+RETURNING id
+`
+
+type UpdateDashboardParams struct {
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+	PanelsJson  string      `json:"panels_json"`
+	ID          int64       `json:"id"`
+}
+
+// Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+func (q *Queries) UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateDashboard,
+		arg.Name,
+		arg.Description,
+		arg.PanelsJson,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const updateExportJobRunning = `-- name: UpdateExportJobRunning :one

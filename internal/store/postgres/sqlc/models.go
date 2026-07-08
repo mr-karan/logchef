@@ -87,6 +87,16 @@ type CollectionMember struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type Dashboard struct {
+	ID          int64              `json:"id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	PanelsJson  string             `json:"panels_json"`
+	CreatedBy   pgtype.Int8        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ExportJob struct {
 	ID           string             `json:"id"`
 	SourceID     int64              `json:"source_id"`

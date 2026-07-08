@@ -108,6 +108,18 @@ type CollectionStore interface {
 	UserCanEditSavedQueryViaSharedCollection(ctx context.Context, userID models.UserID, queryID int) (bool, error)
 }
 
+// DashboardStore persists dashboards (a saved grid of visualization panels).
+// The panel blob is validated in models/core, not here — these methods are the
+// raw persistence surface. Reads/mutations on a missing id return
+// models.ErrNotFound.
+type DashboardStore interface {
+	CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error
+	GetDashboard(ctx context.Context, id int) (*models.Dashboard, error)
+	ListDashboards(ctx context.Context) ([]*models.Dashboard, error)
+	UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) error
+	DeleteDashboard(ctx context.Context, id int) error
+}
+
 // AlertStore persists alert definitions and their evaluation history.
 type AlertStore interface {
 	CreateAlert(ctx context.Context, alert *models.Alert) error
@@ -227,7 +239,7 @@ type TokenStore interface {
 // callback receives, and what consumers should accept when they don't manage
 // the connection lifecycle themselves.
 //
-// It composes one interface per domain; together they cover all 13 metadata
+// It composes one interface per domain; together they cover all 14 metadata
 // domains. Every method speaks pkg/models types — no sqlc or driver types leak
 // through.
 type StoreOps interface {
@@ -237,6 +249,7 @@ type StoreOps interface {
 	SourceStore
 	SavedQueryStore
 	CollectionStore
+	DashboardStore
 	AlertStore
 	ExportJobStore
 	QueryShareStore

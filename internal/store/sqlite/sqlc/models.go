@@ -88,6 +88,16 @@ type CollectionMember struct {
 	CreatedAt    time.Time     `json:"created_at"`
 }
 
+type Dashboard struct {
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	PanelsJson  string         `json:"panels_json"`
+	CreatedBy   sql.NullInt64  `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
 type ExportJob struct {
 	ID           string         `json:"id"`
 	SourceID     int64          `json:"source_id"`

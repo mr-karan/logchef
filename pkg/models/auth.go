@@ -54,6 +54,8 @@ const (
 	TokenScopeCollectionsWrite  TokenScope = "collections:write"
 	TokenScopeAlertsRead        TokenScope = "alerts:read"
 	TokenScopeAlertsWrite       TokenScope = "alerts:write"
+	TokenScopeDashboardsRead    TokenScope = "dashboards:read"
+	TokenScopeDashboardsWrite   TokenScope = "dashboards:write"
 	TokenScopeQuerySharesRead   TokenScope = "query_shares:read"
 	TokenScopeQuerySharesWrite  TokenScope = "query_shares:write"
 	TokenScopeSettingsRead      TokenScope = "settings:read"
