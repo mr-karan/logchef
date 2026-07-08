@@ -71,6 +71,7 @@ export default defineConfig({
           label: "Features",
           items: [
             { label: "Collections & Saved Queries", link: "/features/collections" },
+            { label: "Dashboards", link: "/features/dashboards" },
             { label: "Alerting", link: "/features/alerting" },
             { label: "AI SQL Generation", link: "/features/ai-sql-generation" },
             { label: "User Management", link: "/core/user-management" },

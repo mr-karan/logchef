@@ -209,6 +209,191 @@ scn_livetail() {
   settle 1
 }
 
+# Dashboards (#56 / #73). Route taken: API-created dashboard + browser-verified
+# render and edit-mode persistence.
+#
+# Panels are built through the editor sheet's reka-ui Select pickers + Monaco
+# query editor, which are fiddly to drive reliably by a11y ref, so this scenario
+# creates the dashboard via the HTTP API (the sanctioned fallback in #73) and
+# then exercises the real UI: navigate via the sidebar Dashboards entry, assert
+# the dashboard lists + both panels render data (not an empty/locked/error
+# state), then rename a panel through the browser editor sheet, save, reload,
+# and assert the rename persisted. Self-seeding (fresh CH + VL fixtures in a 15m
+# window, matching the dashboard's default range) and re-runnable (leftover
+# dashboards with the same name are deleted first). Cleans up at the end.
+DASH_API="${DASH_API:-http://localhost:8125/api/v1}"
+DASH_TOKEN="${DASH_TOKEN:-logchef_1_devsetuptoken00000000000000}"
+DASH_NAME="e2e-dashboards"
+DASH_CH_TITLE="e2e 5xx timeseries"
+DASH_VL_TITLE="e2e error count"
+DASH_RENAMED="e2e 5xx renamed"
+
+dash_api() { # METHOD PATH [BODY]
+  local method="$1" path="$2" body="${3:-}"
+  if [ -n "$body" ]; then
+    curl -sS -X "$method" -H "Authorization: Bearer $DASH_TOKEN" \
+      -H "Content-Type: application/json" -d "$body" "$DASH_API$path"
+  else
+    curl -sS -X "$method" -H "Authorization: Bearer $DASH_TOKEN" "$DASH_API$path"
+  fi
+}
+
+scn_dashboards() {
+  # --- Seed fresh fixtures in the default 15m window ---
+  if ! docker ps >/dev/null 2>&1 || ! docker inspect "$CH_CONTAINER" >/dev/null 2>&1; then
+    pass "dashboards: ClickHouse dev container not reachable — scenario skipped"
+    return
+  fi
+  # A handful of 5xx rows at now() so the timeseries panel has buckets.
+  if ! ch_insert "INSERT INTO default.http (timestamp,host,method,protocol,referer,request,status,\`user-identifier\`,bytes) SELECT now(),'api.logchef.dev','GET','HTTP/1.1','-','/dash-e2e',500,'admin',toUInt32(number) FROM numbers(8)"; then
+    fail "dashboards: ClickHouse fixture INSERT failed"
+    return
+  fi
+
+  # Discover a VictoriaLogs source linked to team 1 (source 8 is usual on dev).
+  local vl_id
+  vl_id="$(dash_api GET /teams/1/sources | python3 -c 'import sys,json;d=json.load(sys.stdin)["data"];print(next((s["id"] for s in d if s["source_type"]=="victorialogs"),""))' 2>/dev/null)"
+  if [ -n "$vl_id" ]; then
+    # Fresh error rows so the VL stat panel counts > 0.
+    local now_ts; now_ts="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    local i
+    for i in 1 2 3; do
+      curl -sS -X POST -H 'Content-Type: application/stream+json' \
+        --data-binary "{\"timestamp\":\"${now_ts}\",\"service\":\"dash-e2e\",\"level\":\"error\",\"message\":\"dash-e2e error ${i}\"}" \
+        "${VICTORIALOGS_URL}/insert/jsonline?_stream_fields=service&_time_field=timestamp&_msg_field=message" >/dev/null 2>&1
+    done
+  fi
+
+  # --- Idempotency: delete any leftover dashboard by name ---
+  local leftover
+  leftover="$(dash_api GET /dashboards | python3 -c "import sys,json;d=json.load(sys.stdin)['data'];print(' '.join(str(x['id']) for x in d if x['name']=='$DASH_NAME'))" 2>/dev/null)"
+  for id in $leftover; do dash_api DELETE "/dashboards/$id" >/dev/null; done
+
+  # --- Create the dashboard via API: CH timeseries + (optional) VL stat ---
+  local panels layout body
+  panels="{\"id\":\"p1\",\"title\":\"$DASH_CH_TITLE\",\"type\":\"timeseries\",\"team_id\":1,\"source_id\":1,\"query\":\"status>=500\",\"query_language\":\"logchefql\",\"options\":{}}"
+  layout="{\"id\":\"p1\",\"x\":0,\"y\":0,\"w\":6,\"h\":3}"
+  if [ -n "$vl_id" ]; then
+    panels="$panels,{\"id\":\"p2\",\"title\":\"$DASH_VL_TITLE\",\"type\":\"stat\",\"team_id\":1,\"source_id\":$vl_id,\"query\":\"level=\\\"error\\\"\",\"query_language\":\"logchefql\",\"options\":{}}"
+    layout="$layout,{\"id\":\"p2\",\"x\":6,\"y\":0,\"w\":3,\"h\":3}"
+  fi
+  body="{\"name\":\"$DASH_NAME\",\"description\":\"e2e dashboards scenario\",\"panels\":{\"version\":1,\"layout\":[$layout],\"panels\":[$panels]}}"
+
+  local dash_id
+  dash_id="$(dash_api POST /dashboards "$body" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["id"])' 2>/dev/null)"
+  if [ -z "$dash_id" ]; then
+    fail "dashboards: API create failed"
+    return
+  fi
+  pass "dashboards: created via API (id=$dash_id${vl_id:+, VL stat on source $vl_id})"
+
+  # --- Navigate via the sidebar Dashboards entry, assert it lists ---
+  # The sidebar collapses to icons-only (nav links lose their text label); expand
+  # it so the "Dashboards" link is addressable by its accessible name.
+  if [ -z "$(ref 'link "Dashboards"')" ]; then
+    click_by 'button "Toggle Sidebar"'; settle 1
+  fi
+  if click_by 'link "Dashboards"'; then
+    settle 1
+  else
+    ab open "$BASE_URL/dashboards" >/dev/null; settle 1
+    fail "dashboards: sidebar Dashboards entry not found (opened by URL instead)"
+  fi
+  wait_for "New dashboard" 10 || true
+  assert_present "dashboards: created dashboard appears in list" "$DASH_NAME"
+  shot dashboards-list
+
+  # --- Open the dashboard view (cards are non-interactive divs; open by URL) ---
+  ab open "$BASE_URL/dashboards/$dash_id" >/dev/null
+  settle 1
+  wait_for 'button "Edit"' 15 || true
+
+  # Panel chrome renders (titles from the panel headers).
+  assert_present "dashboards: CH timeseries panel rendered" "$DASH_CH_TITLE"
+  if [ -n "$vl_id" ]; then
+    assert_present "dashboards: VL stat panel rendered" "$DASH_VL_TITLE"
+  else
+    pass "dashboards: no VictoriaLogs source linked — VL stat panel skipped"
+  fi
+
+  # Panels rendered data (not an empty/locked/error state). Poll a few seconds
+  # for the async panel XHRs to resolve, then confirm no failure text is present.
+  local out i ok=0
+  for ((i = 0; i < 10; i++)); do
+    out="$(snap)"
+    if ! grep -qiE 'No data for this time range|No access to this source|Failed to load' <<<"$out"; then
+      ok=1; break
+    fi
+    sleep 1
+  done
+  if [ "$ok" -eq 1 ]; then
+    pass "dashboards: panels rendered data (no empty/locked/error state)"
+  else
+    fail "dashboards: a panel is in an empty/locked/error state"
+  fi
+  shot dashboards-view
+
+  # --- Edit-mode persistence: rename a panel through the browser editor sheet ---
+  if ! click_by 'button "Edit"'; then
+    fail "dashboards: Edit button not available (creator/admin edit)"
+    dash_api DELETE "/dashboards/$dash_id" >/dev/null
+    return
+  fi
+  settle 1
+  assert_control "dashboards: edit mode entered (Add panel present)" 'button "Add panel"'
+
+  # The per-panel controls are hover-revealed but present in the DOM; open the
+  # editor sheet for the first panel (the CH timeseries) via its "Edit panel"
+  # control. "Update panel" is unique to the edit-existing sheet, so wait on it
+  # (not "Add panel", which is always present in the edit-mode header).
+  local renamed=0
+  if click_by 'button "Edit panel"'; then
+    if wait_for 'button "Update panel"' 12; then
+      settle 1   # let the side sheet finish its slide-in before typing
+      local tbox j
+      # The Title <input> is filled through Playwright, but the sheet animation +
+      # Monaco init can race a single fill; retry until the value sticks.
+      for ((j = 0; j < 4; j++)); do
+        tbox="$(ref 'textbox "Title"')"
+        [ -n "$tbox" ] || { sleep 1; continue; }
+        ab fill "$tbox" "$DASH_RENAMED" >/dev/null
+        sleep 1
+        snapi | grep -qiE "textbox \"Title\".*${DASH_RENAMED}" && break
+      done
+      if [ -n "$tbox" ] && snapi | grep -qiE "textbox \"Title\".*${DASH_RENAMED}"; then
+        click_by 'button "Update panel"'; settle 1
+        assert_present "dashboards: renamed panel shown in grid (edit mode)" "$DASH_RENAMED"
+        renamed=1
+      else
+        fail "dashboards: panel Title input not editable in editor sheet"
+      fi
+    else
+      fail "dashboards: panel editor sheet did not open"
+    fi
+  else
+    fail "dashboards: 'Edit panel' control not found in edit mode"
+  fi
+
+  # Save (wait until the Save button is enabled — it stays disabled until the
+  # draft is dirty), reload from the server, and assert the rename persisted.
+  if [ "$renamed" -eq 1 ]; then
+    if wait_for 'button "Save" \[ref' 8 && click_by 'button "Save" \[ref'; then
+      settle 2
+      ab open "$BASE_URL/dashboards/$dash_id" >/dev/null
+      settle 1
+      wait_for 'button "Edit"' 15 || true
+      assert_present "dashboards: renamed panel persisted after save + reload" "$DASH_RENAMED"
+      shot dashboards-renamed
+    else
+      fail "dashboards: Save button never enabled / not clickable"
+    fi
+  fi
+
+  # --- Cleanup ---
+  dash_api DELETE "/dashboards/$dash_id" >/dev/null
+  ab open "$BASE_URL/logs/explore" >/dev/null; settle 1
+}
+
 # The admin users page lists the seeded admin user.
 scn_admin_users() {
   ab open "$BASE_URL/admin/users" >/dev/null; settle 1

@@ -174,6 +174,79 @@ if vl_id:
 
     call("DELETE", f"/admin/sources/{vl_id}")
 
+# ── Dashboards CRUD (#56/#73) ─────────────────────────────
+# Dashboards are a top-level resource (not team-scoped in the path); the panel
+# blob carries the team/source per panel. Idempotent: drop leftovers by name.
+DASH_NAME = "smoke-dashboard"
+_, existing = call("GET", "/dashboards")
+for d in (existing.get("data") or []):
+    if d.get("name") == DASH_NAME:
+        call("DELETE", f"/dashboards/{d['id']}")
+
+def panel(pid, ptype="timeseries", title="p"):
+    return {"id": pid, "title": title, "type": ptype, "team_id": team_id,
+            "source_id": ch_id, "query": "status>=500", "query_language": "logchefql", "options": {}}
+
+def layout(pid, y=0, w=6, h=2):
+    return {"id": pid, "x": 0, "y": y, "w": w, "h": h}
+
+# create (valid)
+code, r = call("POST", "/dashboards", {
+    "name": DASH_NAME, "description": "created by smoke",
+    "panels": {"version": 1, "layout": [layout("p1")], "panels": [panel("p1", "timeseries", "5xx over time")]},
+}, expect=201)
+check("dashboard create", code in (200, 201) and "id" in r.get("data", {}), str(r)[:300])
+dash_id = r["data"]["id"] if code in (200, 201) else None
+
+if dash_id:
+    # list includes it, with can_edit hint
+    code, r = call("GET", "/dashboards")
+    names = [d["name"] for d in (r.get("data") or [])]
+    check("dashboard list includes created", code == 200 and DASH_NAME in names, str(names)[:200])
+
+    # get round-trips the panel blob
+    code, r = call("GET", f"/dashboards/{dash_id}")
+    d = r.get("data", {})
+    ok = code == 200 and d.get("panels", {}).get("version") == 1 and len(d["panels"]["panels"]) == 1
+    check("dashboard get round-trip", ok, str(r)[:300])
+
+    # update: rename + add a second (stat) panel
+    code, r = call("PUT", f"/dashboards/{dash_id}", {
+        "name": DASH_NAME, "description": "updated by smoke",
+        "panels": {"version": 1,
+                   "layout": [layout("p1"), layout("p2", y=2, w=3, h=1)],
+                   "panels": [panel("p1", "timeseries", "5xx over time"), panel("p2", "stat", "5xx count")]},
+    })
+    ok = code == 200 and len(r.get("data", {}).get("panels", {}).get("panels", [])) == 2
+    check("dashboard update (rename + add panel)", ok, str(r)[:300])
+
+    # invalid: 25 panels exceeds the max of 24 → 400
+    many_panels = [panel(f"p{i}") for i in range(25)]
+    many_layout = [layout(f"p{i}", y=i, w=3, h=1) for i in range(25)]
+    code, r = call("PUT", f"/dashboards/{dash_id}", {
+        "name": DASH_NAME, "description": "too many",
+        "panels": {"version": 1, "layout": many_layout, "panels": many_panels},
+    })
+    check("dashboard 25-panel blob rejected (400)", code == 400, f"code={code} {str(r)[:200]}")
+
+    # invalid: bad panel type → 400
+    code, r = call("POST", "/dashboards", {
+        "name": "smoke-dashboard-bad", "description": "bad type",
+        "panels": {"version": 1, "layout": [layout("p1")],
+                   "panels": [{**panel("p1"), "type": "piechart"}]},
+    })
+    check("dashboard invalid panel type rejected (400)", code == 400, f"code={code} {str(r)[:200]}")
+
+    # delete, then confirm it's gone (404)
+    code, r = call("DELETE", f"/dashboards/{dash_id}")
+    check("dashboard delete", code == 200, str(r)[:200])
+    code, r = call("GET", f"/dashboards/{dash_id}")
+    check("dashboard get after delete (404)", code == 404, f"code={code} {str(r)[:200]}")
+
+# 404 for a never-existent id
+code, r = call("GET", "/dashboards/99999999")
+check("dashboard get missing id (404)", code == 404, f"code={code} {str(r)[:200]}")
+
 print(f"\n══ {len(passed)} passed, {len(failed)} failed")
 if failed:
     print("failed:", failed)
