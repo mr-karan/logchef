@@ -6,17 +6,25 @@ import PanelTimeseries from "./PanelTimeseries.vue";
 import PanelStat from "./PanelStat.vue";
 import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
-import { useDashboardsStore } from "@/stores/dashboards";
+import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
 
 interface Props {
   panel: DashboardPanel;
   /** Outer pixel height of the panel's grid cell (used to size the chart). */
   heightPx: number;
+  /**
+   * Optional explicit panel state. When provided (e.g. the editor's Preview
+   * pane), it overrides the per-id lookup in the store so the same panel chrome
+   * and sub-components render a preview result.
+   */
+  state?: PanelState;
 }
 const props = defineProps<Props>();
 
 const store = useDashboardsStore();
-const panelState = computed(() => store.panelStates[props.panel.id] ?? { status: "idle" as const });
+const panelState = computed<PanelState>(
+  () => props.state ?? store.panelStates[props.panel.id] ?? { status: "idle" as const }
+);
 
 // Chart body height = outer height minus the header row and the body padding.
 const CHROME_PX = 30 /* header */ + 16 /* body padding */;
