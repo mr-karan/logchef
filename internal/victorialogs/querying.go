@@ -817,6 +817,17 @@ func formatAPITime(ts time.Time) string {
 	return ts.UTC().Format(time.RFC3339)
 }
 
+// formatTimezoneOffset returns a VictoriaLogs-compatible duration string for
+// the `offset` param on /select/logsql/hits, which shifts histogram bucket
+// boundaries so they align to the given timezone's day/hour boundaries.
+//
+// VL's `offset` expects a duration (e.g. "19800s" / "5h30m"), not a clock
+// offset string like "+05:30". The sign matches the zone's seconds-east-of-UTC
+// value: verified empirically against a running VictoriaLogs instance that
+// offset=19800s (UTC+5:30, Asia/Kolkata) aligns daily buckets to IST midnight
+// (00:00 IST == 18:30 UTC), and offset=-9000s (UTC-2:30, America/St_Johns)
+// aligns buckets to NDT midnight (00:00 NDT == 02:30 UTC) — i.e. the offset
+// value is simply the zone's UTC offset in seconds.
 func formatTimezoneOffset(timezone string, start, end *time.Time) string {
 	locationName := strings.TrimSpace(timezone)
 	if locationName == "" || strings.EqualFold(locationName, "UTC") {
@@ -835,7 +846,12 @@ func formatTimezoneOffset(timezone string, start, end *time.Time) string {
 		reference = *end
 	}
 
-	return reference.In(loc).Format("-07:00")
+	_, offsetSeconds := reference.In(loc).Zone()
+	if offsetSeconds == 0 {
+		return ""
+	}
+
+	return fmt.Sprintf("%ds", offsetSeconds)
 }
 
 func statsFromHeaders(resp *http.Response, rowCount int) models.QueryStats {
