@@ -343,16 +343,18 @@ scn_dashboards() {
   assert_control "dashboards: edit mode entered (Add panel present)" 'button "Add panel"'
 
   # The per-panel controls are hover-revealed but present in the DOM; open the
-  # editor sheet for the first panel (the CH timeseries) via its "Edit panel"
-  # control. "Update panel" is unique to the edit-existing sheet, so wait on it
-  # (not "Add panel", which is always present in the edit-mode header).
+  # panel builder drawer for the first panel (the CH timeseries) via its "Edit
+  # panel" control. The drawer is draft-first (issue #77): there is no
+  # "Update panel" save button — typing into Title writes straight through to
+  # the dashboard draft, so wait on the "Title" textbox itself (unique to the
+  # open drawer) and close via the drawer's own "Close" control.
   local renamed=0
   if click_by 'button "Edit panel"'; then
-    if wait_for 'button "Update panel"' 12; then
-      settle 1   # let the side sheet finish its slide-in before typing
+    if wait_for 'textbox "Title"' 12; then
+      settle 1   # let the drawer finish its slide-in before typing
       local tbox j
-      # The Title <input> is filled through Playwright, but the sheet animation +
-      # Monaco init can race a single fill; retry until the value sticks.
+      # The Title <input> is filled through Playwright, but the drawer animation
+      # + Monaco init can race a single fill; retry until the value sticks.
       for ((j = 0; j < 4; j++)); do
         tbox="$(ref 'textbox "Title"')"
         [ -n "$tbox" ] || { sleep 1; continue; }
@@ -361,14 +363,14 @@ scn_dashboards() {
         snapi | grep -qiE "textbox \"Title\".*${DASH_RENAMED}" && break
       done
       if [ -n "$tbox" ] && snapi | grep -qiE "textbox \"Title\".*${DASH_RENAMED}"; then
-        click_by 'button "Update panel"'; settle 1
+        click_by 'button "Close"'; settle 1
         assert_present "dashboards: renamed panel shown in grid (edit mode)" "$DASH_RENAMED"
         renamed=1
       else
-        fail "dashboards: panel Title input not editable in editor sheet"
+        fail "dashboards: panel Title input not editable in the builder drawer"
       fi
     else
-      fail "dashboards: panel editor sheet did not open"
+      fail "dashboards: panel builder drawer did not open"
     fi
   else
     fail "dashboards: 'Edit panel' control not found in edit mode"

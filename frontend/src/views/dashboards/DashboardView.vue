@@ -14,7 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
-import PanelEditorSheet from "./components/PanelEditorSheet.vue";
+import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
 import { useDashboardsStore } from "@/stores/dashboards";
 import {
   normalizeDashboardLayout,
@@ -72,20 +72,44 @@ const baseLayout = computed<DashboardLayoutItem[]>(() =>
   placements.value.map((p) => ({ id: p.panel.id, x: p.x, y: p.y, w: p.w, h: p.h }))
 );
 
-// --- Panel editor sheet -----------------------------------------------------
+// --- Panel builder drawer ----------------------------------------------------
+// DashboardView owns editorOpen + editingPanelId; the drawer is draft-first
+// (it reads/writes editDraft directly by id, see PanelBuilderDrawer.vue), so
+// there's no panel object to pass in or a "save" event to listen for. Closing
+// the drawer only exits panel-editing — the dashboard stays in edit mode.
 const editorOpen = ref(false);
-const editingPanel = ref<PanelModel | null>(null);
+const editingPanelId = ref<string | null>(null);
+// Tracks a panel created via "Add panel" so a cancel-while-pristine (no
+// team/source chosen, title untouched) can drop the shell instead of leaving
+// a dead panel in the draft.
+const pendingNewPanelId = ref<string | null>(null);
 
 function openAddPanel() {
-  editingPanel.value = null;
+  const id = store.createDraftShell();
+  if (!id) return;
+  pendingNewPanelId.value = id;
+  editingPanelId.value = id;
   editorOpen.value = true;
 }
-function openEditPanel(panel: PanelModel) {
-  editingPanel.value = panel;
+function openEditPanel(id: string) {
+  pendingNewPanelId.value = null;
+  editingPanelId.value = id;
   editorOpen.value = true;
 }
-function onPanelSave(panel: PanelModel) {
-  store.upsertDraftPanel(panel);
+function handleEditorOpenChange(open: boolean) {
+  if (open) {
+    editorOpen.value = true;
+    return;
+  }
+  const id = editingPanelId.value;
+  if (id && pendingNewPanelId.value === id) {
+    const p = store.editDraft?.panels.find((pp) => pp.id === id);
+    const pristine = !!p && p.title === "New panel" && !(p.team_id > 0) && !(p.source_id > 0);
+    if (pristine) store.removeDraftPanel(id);
+  }
+  pendingNewPanelId.value = null;
+  editingPanelId.value = null;
+  editorOpen.value = false;
 }
 function removePanel(id: string) {
   store.removeDraftPanel(id);
@@ -272,6 +296,8 @@ function cancelEdit() {
     return;
   }
   editorOpen.value = false;
+  editingPanelId.value = null;
+  pendingNewPanelId.value = null;
   store.cancelEdit();
 }
 async function saveEdit() {
@@ -492,7 +518,7 @@ onBeforeRouteLeave(() => {
           <GripVertical class="h-3.5 w-3.5 opacity-60" />
           <span class="dash-item__title">{{ panelById.get(item.id)?.title || "Panel" }}</span>
           <span class="dash-item__actions">
-            <button class="dash-item__btn" title="Edit panel" @pointerdown.stop @click="openEditPanel(panelById.get(item.id)!)">
+            <button class="dash-item__btn" title="Edit panel" @pointerdown.stop @click="openEditPanel(item.id)">
               <Pencil class="h-3.5 w-3.5" />
             </button>
             <button
@@ -567,8 +593,8 @@ onBeforeRouteLeave(() => {
       </div>
     </div>
 
-    <!-- Panel editor side sheet -->
-    <PanelEditorSheet v-model:open="editorOpen" :panel="editingPanel" @save="onPanelSave" />
+    <!-- Panel builder drawer -->
+    <PanelBuilderDrawer :open="editorOpen" :panel-id="editingPanelId" @update:open="handleEditorOpenChange" />
   </div>
 </template>
 

@@ -477,6 +477,58 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     executeSinglePanel(panel);
   }
 
+  // Patch-merge a partial update into one draft panel (by id), then reflow.
+  // `options` merges shallowly into the panel's existing options rather than
+  // replacing the whole object, so callers only need to pass the fields that
+  // changed. This is the ONLY way the panel builder drawer mutates a panel —
+  // there is no detached local copy of the panel config.
+  function updateDraftPanel(
+    id: string,
+    patch: Partial<Omit<DashboardPanel, "options">> & { options?: Partial<DashboardPanel["options"]> }
+  ) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
+    const idx = draft.panels.findIndex((p) => p.id === id);
+    if (idx < 0) return;
+    const { options: optionsPatch, ...rest } = patch;
+    const current = draft.panels[idx];
+    const merged: DashboardPanel = {
+      ...current,
+      ...rest,
+      options: optionsPatch ? { ...(current.options ?? {}), ...optionsPatch } : current.options,
+    };
+    const panels = [...draft.panels];
+    panels[idx] = merged;
+    setDraft(reflowPanels({ ...draft, panels }));
+  }
+
+  // Create-on-canvas: push a bare panel shell into the draft immediately (so the
+  // canvas reflects it at the next free slot via reflowPanels' default sizing)
+  // and return its id. The caller opens the builder drawer on that id; the panel
+  // query never executes until team_id + source_id are set (the drawer gates
+  // preview on that, and saveEdit validates it before the round-trip).
+  function createDraftShell(): string | null {
+    const draft = state.data.value.editDraft;
+    if (!draft) return null;
+    const id =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `p-${Math.random().toString(36).slice(2, 10)}`;
+    const panel: DashboardPanel = {
+      id,
+      title: "New panel",
+      type: "timeseries",
+      team_id: 0,
+      source_id: 0,
+      query: "",
+      query_language: "logchefql",
+      options: {},
+    };
+    const panels = [...draft.panels, panel];
+    setDraft(reflowPanels({ ...draft, panels }));
+    return id;
+  }
+
   function removeDraftPanel(id: string) {
     const draft = state.data.value.editDraft;
     if (!draft) return;
@@ -636,6 +688,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     cancelEdit,
     saveEdit,
     upsertDraftPanel,
+    updateDraftPanel,
+    createDraftShell,
     removeDraftPanel,
     resizeDraftPanel,
     reorderDraftPanels,
