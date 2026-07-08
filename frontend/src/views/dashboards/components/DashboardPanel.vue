@@ -98,6 +98,7 @@ const typeIcon = computed(() => {
           :granularity="panelState.timeseries.granularity"
           :group-by="panelState.timeseries.groupBy"
           :height="chartHeight"
+          :chart="panel.options?.chart"
         />
         <PanelStat
           v-else-if="panel.type === 'stat' && panelState.stat"

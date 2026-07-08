@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { VisAxis, VisStackedBar, VisXYContainer } from "@unovis/vue";
+import { VisArea, VisAxis, VisLine, VisStackedBar, VisXYContainer } from "@unovis/vue";
 import { ChartContainer, ChartCrosshair, ChartLegendContent, ChartTooltip } from "@/components/ui/chart";
 import {
   buildHistogramChartModel,
@@ -19,12 +19,17 @@ interface Props {
   granularity?: string | null;
   groupBy?: string | null;
   height?: number;
+  /** Render style. Absent/undefined defaults to 'line' (Grafana-like). */
+  chart?: "bars" | "line" | "area";
 }
 const props = withDefaults(defineProps<Props>(), {
   granularity: null,
   groupBy: null,
   height: 160,
 });
+
+// 'line' is the default render style when the panel hasn't set one explicitly.
+const effectiveChart = computed<"bars" | "line" | "area">(() => props.chart ?? "line");
 
 const CHART_MARGIN = { top: 8, right: 12, bottom: 22, left: 8 };
 
@@ -38,6 +43,14 @@ const seriesAccessors = computed(() =>
   )
 );
 const seriesColors = computed(() => chartModel.value.series.map((series) => series.color));
+
+// Bars and area are drawn stacked (crosshair circles must land on the cumulative
+// height), while line series are drawn independently at their own value.
+const crosshairYProps = computed(() =>
+  effectiveChart.value === "line"
+    ? { y: seriesAccessors.value }
+    : { yStacked: seriesAccessors.value }
+);
 
 const chartRange = computed(() => {
   if (!chartModel.value.rows.length) {
@@ -126,6 +139,7 @@ function formatXAxisTick(value: number | Date) {
         :num-ticks="4"
       />
       <VisStackedBar
+        v-if="effectiveChart === 'bars'"
         :x="(row: HistogramChartRow) => row?.ts"
         :y="seriesAccessors"
         :color="seriesColors"
@@ -134,10 +148,27 @@ function formatXAxisTick(value: number | Date) {
         :bar-max-width="36"
         :bar-min-height1-px="true"
       />
+      <VisArea
+        v-else-if="effectiveChart === 'area'"
+        :x="(row: HistogramChartRow) => row?.ts"
+        :y="seriesAccessors"
+        :color="seriesColors"
+        :opacity="0.25"
+        :line="true"
+        :line-color="seriesColors"
+        :line-width="2"
+      />
+      <VisLine
+        v-else
+        :x="(row: HistogramChartRow) => row?.ts"
+        :y="seriesAccessors"
+        :color="seriesColors"
+        :line-width="2"
+      />
       <ChartTooltip />
       <ChartCrosshair
         :x="(row: HistogramChartRow) => row?.ts"
-        :y-stacked="seriesAccessors"
+        v-bind="crosshairYProps"
         :color="seriesColors"
         :template="tooltipTemplate"
         :snap-to-data="true"
