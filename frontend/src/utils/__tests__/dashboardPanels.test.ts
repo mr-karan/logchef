@@ -6,11 +6,20 @@ import {
   sumHistogramCounts,
   packLayout,
   moveItem,
-  reorderByTarget,
   sizeForPanel,
   reflowPanels,
   validatePanelsBlob,
+  columnTrackWidth,
+  pointToCell,
+  cellRect,
+  cellToMoveIndex,
+  previewMoveLayout,
+  snapResize,
+  previewResizeLayout,
+  addTileSlot,
+  layoutRowCount,
   type PanelSize,
+  type GridGeometry,
 } from "@/utils/dashboardPanels";
 import type {
   DashboardPanel,
@@ -214,14 +223,131 @@ describe("moveItem", () => {
   });
 });
 
-describe("reorderByTarget", () => {
-  it("moves the dragged id to the target's slot", () => {
-    expect(reorderByTarget(["a", "b", "c"], "c", "a")).toEqual(["c", "a", "b"]);
-    expect(reorderByTarget(["a", "b", "c"], "a", "c")).toEqual(["b", "c", "a"]);
+// --- Grid-canvas pointer math (edit-mode direct manipulation) --------------
+
+// A tidy geometry: 12 tracks across 1200px with no gap → 100px columns, 80px
+// rows. Exact integer math keeps the assertions readable.
+const GEOM: GridGeometry = { left: 0, top: 0, width: 1200, gap: 0, rowHeight: 80 };
+
+describe("columnTrackWidth", () => {
+  it("splits the canvas into 12 equal tracks when there's no gap", () => {
+    expect(columnTrackWidth({ width: 1200, gap: 0 })).toBe(100);
   });
-  it("leaves order unchanged when dropping onto itself or an unknown id", () => {
-    expect(reorderByTarget(["a", "b", "c"], "b", "b")).toEqual(["a", "b", "c"]);
-    expect(reorderByTarget(["a", "b", "c"], "b", "ghost")).toEqual(["a", "b", "c"]);
+  it("subtracts the 11 inter-track gaps", () => {
+    expect(columnTrackWidth({ width: 1200, gap: 10 })).toBeCloseTo(1090 / 12, 5);
+  });
+});
+
+describe("pointToCell", () => {
+  it("maps a pointer inside the canvas to its column and row", () => {
+    expect(pointToCell(250, 90, GEOM)).toEqual({ col: 2, row: 1 });
+  });
+  it("honors the canvas viewport offset", () => {
+    const geom: GridGeometry = { ...GEOM, left: 100, top: 50 };
+    expect(pointToCell(350, 130, geom)).toEqual({ col: 2, row: 1 });
+  });
+  it("clamps columns to 0..11 and rows at 0", () => {
+    expect(pointToCell(5000, -40, GEOM)).toEqual({ col: 11, row: 0 });
+    expect(pointToCell(-40, -40, GEOM)).toEqual({ col: 0, row: 0 });
+  });
+  it("adds the scroll offset to the row calculation", () => {
+    expect(pointToCell(0, 90, GEOM, 80)).toEqual({ col: 0, row: 2 });
+  });
+});
+
+describe("cellRect", () => {
+  it("computes the pixel rect for a placement (no gap)", () => {
+    expect(cellRect({ x: 2, y: 1, w: 3, h: 2 }, GEOM)).toEqual({
+      left: 200,
+      top: 80,
+      width: 300,
+      height: 160,
+    });
+  });
+  it("accounts for inter-track gaps in offset and span", () => {
+    const rect = cellRect({ x: 1, y: 0, w: 2, h: 1 }, { width: 1200, gap: 10, rowHeight: 80 });
+    const track = (1200 - 10 * 11) / 12;
+    expect(rect.left).toBeCloseTo(track + 10, 5);
+    expect(rect.width).toBeCloseTo(track * 2 + 10, 5);
+  });
+});
+
+describe("cellToMoveIndex", () => {
+  // a | b  (top row), c below — dragging c around the a/b row.
+  const items: DashboardLayoutItem[] = [
+    { id: "a", x: 0, y: 0, w: 6, h: 2 },
+    { id: "b", x: 6, y: 0, w: 6, h: 2 },
+    { id: "c", x: 0, y: 2, w: 6, h: 2 },
+  ];
+  it("inserts before a panel when the pointer is in its left half", () => {
+    expect(cellToMoveIndex(items, "c", { col: 1, row: 0 })).toBe(0);
+  });
+  it("inserts after a panel when the pointer is in its right half", () => {
+    expect(cellToMoveIndex(items, "c", { col: 4, row: 0 })).toBe(1);
+  });
+  it("appends when the pointer is in empty space below everything", () => {
+    expect(cellToMoveIndex(items, "c", { col: 0, row: 9 })).toBe(2);
+  });
+});
+
+describe("previewMoveLayout", () => {
+  const order: PanelSize[] = [
+    { id: "a", w: 6, h: 2 },
+    { id: "b", w: 6, h: 2 },
+    { id: "c", w: 6, h: 2 },
+  ];
+  it("re-inserts the dragged panel at the target index and repacks", () => {
+    const out = previewMoveLayout(order, "c", 0);
+    expect(out.map((i) => i.id)).toEqual(["c", "a", "b"]);
+  });
+  it("leaves the order untouched for an unknown dragged id", () => {
+    const out = previewMoveLayout(order, "ghost", 0);
+    expect(out.map((i) => i.id)).toEqual(["a", "b", "c"]);
+  });
+});
+
+describe("snapResize", () => {
+  it("snaps width to an allowed span and rounds height to whole rows", () => {
+    expect(snapResize(6, 2, 600, 80, GEOM)).toEqual({ w: 12, h: 3 });
+  });
+  it("clamps a shrink to the minimum height", () => {
+    expect(snapResize(6, 2, -300, -240, GEOM)).toEqual({ w: 3, h: 1 });
+  });
+});
+
+describe("previewResizeLayout", () => {
+  it("applies the new size to one panel and repacks the rest at their sizes", () => {
+    const order: PanelSize[] = [
+      { id: "a", w: 6, h: 2 },
+      { id: "b", w: 6, h: 2 },
+    ];
+    const out = previewResizeLayout(order, "a", 12, 4);
+    const a = out.find((i) => i.id === "a");
+    expect(a).toMatchObject({ w: 12, h: 4 });
+  });
+});
+
+describe("addTileSlot", () => {
+  it("returns the slot a new default panel would pack into", () => {
+    const slot = addTileSlot([{ id: "a", w: 6, h: 2 }]);
+    expect(slot).toMatchObject({ x: 6, y: 0, w: 6, h: 2 });
+  });
+  it("places the tile at the origin on an empty dashboard", () => {
+    expect(addTileSlot([])).toMatchObject({ x: 0, y: 0 });
+  });
+});
+
+describe("layoutRowCount", () => {
+  it("returns the bottom edge of the lowest panel", () => {
+    expect(
+      layoutRowCount([
+        { id: "a", x: 0, y: 0, w: 6, h: 2 },
+        { id: "b", x: 0, y: 2, w: 6, h: 3 },
+      ])
+    ).toBe(5);
+  });
+  it("is 0 for an empty layout", () => {
+    expect(layoutRowCount([])).toBe(0);
   });
 });
 

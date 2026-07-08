@@ -176,20 +176,6 @@ export function moveItem<T>(list: T[], from: number, to: number): T[] {
 }
 
 /**
- * Reorder `ids` by moving `draggedId` to sit at `targetId`'s position (the drag-
- * and-drop reorder primitive). Dropping a panel onto itself, or referencing an
- * unknown id, leaves the order unchanged.
- */
-export function reorderByTarget(ids: string[], draggedId: string, targetId: string): string[] {
-  const from = ids.indexOf(draggedId);
-  const to = ids.indexOf(targetId);
-  if (from === -1 || to === -1 || from === to) {
-    return ids.slice();
-  }
-  return moveItem(ids, from, to);
-}
-
-/**
  * Read the size for a panel from an existing layout, falling back to defaults for
  * panels that have no layout entry yet (e.g. a just-added panel).
  */
@@ -261,4 +247,194 @@ export function validatePanelsBlob(blob: DashboardPanels): string | null {
     }
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Pointer-drag math (edit-mode direct manipulation).
+//
+// The grid canvas has 12 equal column tracks separated by a fixed gap, and
+// fixed-height row tracks separated by the same gap. Given the canvas geometry,
+// these pure functions translate pointer pixels into grid cells, grid cells into
+// a move-insertion index, and pointer deltas into snapped resize spans — the
+// components only wire pointer events to them. All previews go back through
+// packLayout so the drag ghost/placeholder always reflects the exact layout that
+// a commit would produce (top-left gravity reflow, no collision engine).
+// ---------------------------------------------------------------------------
+
+/** Pixel geometry of the grid canvas, in the same coordinate space as the pointer. */
+export interface GridGeometry {
+  /** Canvas left edge (viewport px, e.g. getBoundingClientRect().left). */
+  left: number;
+  /** Canvas top edge (viewport px). */
+  top: number;
+  /** Canvas inner width in px. */
+  width: number;
+  /** Gap between tracks in px. */
+  gap: number;
+  /** Height of one row track in px (excluding the gap). */
+  rowHeight: number;
+}
+
+export interface GridCell {
+  col: number;
+  row: number;
+}
+
+/** Pixel rect of a grid placement, relative to the canvas origin. */
+export interface PixelRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Width of one column track in px (12 tracks + 11 gaps fill the canvas). */
+export function columnTrackWidth(geom: Pick<GridGeometry, "width" | "gap">): number {
+  return (geom.width - geom.gap * (DASHBOARD_GRID_COLUMNS - 1)) / DASHBOARD_GRID_COLUMNS;
+}
+
+/**
+ * Map a pointer position (viewport px) to the grid cell under it. `scrollTop`
+ * is the scroll offset of a scrolling ancestor whose scrolling does NOT move
+ * the canvas rect (pass 0 when `geom` comes from a fresh getBoundingClientRect,
+ * which already reflects page scroll). Out-of-bounds pointers clamp to the
+ * nearest valid column; rows clamp at 0 and grow without bound below.
+ */
+export function pointToCell(
+  px: number,
+  py: number,
+  geom: GridGeometry,
+  scrollTop = 0
+): GridCell {
+  // Column i starts at i * (track + gap), so a single stride division hit-tests
+  // both the track and the gap trailing it.
+  const colStride = (geom.width + geom.gap) / DASHBOARD_GRID_COLUMNS;
+  const rowStride = geom.rowHeight + geom.gap;
+  const col = colStride > 0 ? Math.floor((px - geom.left) / colStride) : 0;
+  const row = Math.floor((py - geom.top + scrollTop) / rowStride);
+  return {
+    col: Math.min(DASHBOARD_GRID_COLUMNS - 1, Math.max(0, col)),
+    row: Math.max(0, row),
+  };
+}
+
+/** Pixel rect (canvas-relative) for a grid placement. */
+export function cellRect(
+  item: { x: number; y: number; w: number; h: number },
+  geom: Pick<GridGeometry, "width" | "gap" | "rowHeight">
+): PixelRect {
+  const track = columnTrackWidth(geom);
+  return {
+    left: item.x * (track + geom.gap),
+    top: item.y * (geom.rowHeight + geom.gap),
+    width: item.w * track + (item.w - 1) * geom.gap,
+    height: item.h * geom.rowHeight + (item.h - 1) * geom.gap,
+  };
+}
+
+/**
+ * Given the layout at drag start (reading order) and the cell under the pointer,
+ * compute where the dragged panel should be inserted among the OTHER panels
+ * (an index into the order with the dragged panel removed, 0..n). Rules:
+ *
+ *  - a panel counts as "before" the pointer when it sits entirely above the
+ *    pointer row, or starts at/above that row and ends left of the pointer col;
+ *  - when the pointer is inside a panel, its right half means "insert after";
+ *  - empty space below everything appends to the end.
+ *
+ * Hit-testing against the drag-START layout (not the live preview) keeps the
+ * target stable — previewing a move doesn't shift the cells being tested.
+ */
+export function cellToMoveIndex(
+  items: DashboardLayoutItem[],
+  draggedId: string,
+  cell: GridCell
+): number {
+  const others = (items ?? []).filter((i) => i.id !== draggedId);
+  let index = 0;
+  for (const o of others) {
+    const above = o.y + o.h <= cell.row;
+    const leftOf = o.y <= cell.row && o.x + o.w <= cell.col;
+    const contains =
+      o.x <= cell.col && cell.col < o.x + o.w && o.y <= cell.row && cell.row < o.y + o.h;
+    if (above || leftOf) {
+      index++;
+    } else if (contains && cell.col >= o.x + o.w / 2) {
+      index++;
+    }
+  }
+  return Math.min(index, others.length);
+}
+
+/**
+ * Preview layout for a move drag: the dragged panel is lifted out of the order
+ * and re-inserted at `insertIndex` (an index into the order without it, i.e.
+ * cellToMoveIndex's output), then everything re-packs. The dragged panel's slot
+ * in the result is the drop placeholder; committing the move produces exactly
+ * this layout.
+ */
+export function previewMoveLayout(
+  order: PanelSize[],
+  draggedId: string,
+  insertIndex: number
+): DashboardLayoutItem[] {
+  const list = order ?? [];
+  const dragged = list.find((o) => o.id === draggedId);
+  if (!dragged) {
+    return packLayout(list);
+  }
+  const rest = list.filter((o) => o.id !== draggedId);
+  const idx = Math.max(0, Math.min(insertIndex, rest.length));
+  rest.splice(idx, 0, dragged);
+  return packLayout(rest);
+}
+
+/**
+ * Snap a resize drag to grid spans: the panel's size at drag start plus the
+ * pointer delta, snapped to the allowed width presets and clamped to 1..6 rows.
+ */
+export function snapResize(
+  startW: number,
+  startH: number,
+  dxPx: number,
+  dyPx: number,
+  geom: Pick<GridGeometry, "width" | "gap" | "rowHeight">
+): { w: number; h: number } {
+  const colStride = (geom.width + geom.gap) / DASHBOARD_GRID_COLUMNS;
+  const rowStride = geom.rowHeight + geom.gap;
+  const wUnits = colStride > 0 ? startW + dxPx / colStride : startW;
+  const hUnits = Math.max(MIN_PANEL_HEIGHT, Math.round(startH + dyPx / rowStride));
+  return {
+    w: snapPanelWidth(Math.max(1, wUnits)),
+    h: clampPanelHeight(hUnits),
+  };
+}
+
+/** Preview layout for a resize drag: same order, one panel at the new size. */
+export function previewResizeLayout(
+  order: PanelSize[],
+  id: string,
+  w: number,
+  h: number
+): DashboardLayoutItem[] {
+  return packLayout((order ?? []).map((o) => (o.id === id ? { id: o.id, w, h } : o)));
+}
+
+/**
+ * Where the ghost "+ Add panel" tile goes: the first free slot a default-sized
+ * panel would pack into, i.e. the slot the panel created by clicking it will
+ * actually take.
+ */
+export function addTileSlot(
+  order: PanelSize[],
+  w: number = DEFAULT_PANEL_WIDTH,
+  h: number = DEFAULT_PANEL_HEIGHT
+): DashboardLayoutItem {
+  const packed = packLayout([...(order ?? []), { id: "__add__", w, h }]);
+  return packed[packed.length - 1];
+}
+
+/** Total rows a layout occupies (bottom edge of its lowest panel). */
+export function layoutRowCount(layout: DashboardLayoutItem[]): number {
+  return (layout ?? []).reduce((max, l) => Math.max(max, l.y + l.h), 0);
 }

@@ -9,29 +9,27 @@ import {
   Plus,
   Save,
   X,
-  Move,
-  Maximize2,
+  GripVertical,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelEditorSheet from "./components/PanelEditorSheet.vue";
 import { useDashboardsStore } from "@/stores/dashboards";
 import {
   normalizeDashboardLayout,
-  reorderByTarget,
-  ALLOWED_PANEL_WIDTHS,
-  MIN_PANEL_HEIGHT,
-  MAX_PANEL_HEIGHT,
+  cellRect,
+  pointToCell,
+  cellToMoveIndex,
+  previewMoveLayout,
+  snapResize,
+  previewResizeLayout,
+  addTileSlot,
+  layoutRowCount,
+  type PanelSize,
+  type GridGeometry,
 } from "@/utils/dashboardPanels";
-import type { DashboardPanel as PanelModel } from "@/api/dashboards";
+import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
 
 const route = useRoute();
 const router = useRouter();
@@ -40,6 +38,7 @@ const store = useDashboardsStore();
 // Grid geometry. 12 columns; each layout row is ROW_HEIGHT px tall.
 const ROW_HEIGHT_PX = 80;
 const GRID_GAP_PX = 12;
+const ROW_STRIDE = ROW_HEIGHT_PX + GRID_GAP_PX;
 
 const dashboardId = computed(() => Number(route.params.id));
 const isLoading = computed(() => store.isLoadingOperation("loadDashboard"));
@@ -49,10 +48,6 @@ const notFound = ref(false);
 
 const isEditing = computed(() => store.isEditing);
 const canEdit = computed(() => store.canEdit);
-const heightOptions = Array.from(
-  { length: MAX_PANEL_HEIGHT - MIN_PANEL_HEIGHT + 1 },
-  (_, i) => MIN_PANEL_HEIGHT + i
-);
 
 // In edit mode the grid renders from the working draft; otherwise from the live
 // dashboard. Both go through the same normalizer for stable placements.
@@ -64,7 +59,18 @@ const placements = computed(() => {
   return normalizeDashboardLayout(blob.panels ?? [], blob.layout ?? []);
 });
 
-const orderedIds = computed(() => placements.value.map((p) => p.panel.id));
+// Panel model lookup + draft-start ordering, used by the edit canvas.
+const panelById = computed(() => {
+  const m = new Map<string, PanelModel>();
+  for (const p of placements.value) m.set(p.panel.id, p.panel);
+  return m;
+});
+const baseOrder = computed<PanelSize[]>(() =>
+  placements.value.map((p) => ({ id: p.panel.id, w: p.w, h: p.h }))
+);
+const baseLayout = computed<DashboardLayoutItem[]>(() =>
+  placements.value.map((p) => ({ id: p.panel.id, x: p.x, y: p.y, w: p.w, h: p.h }))
+);
 
 // --- Panel editor sheet -----------------------------------------------------
 const editorOpen = ref(false);
@@ -84,40 +90,178 @@ function onPanelSave(panel: PanelModel) {
 function removePanel(id: string) {
   store.removeDraftPanel(id);
 }
-function setWidth(id: string, w: number, currentH: number) {
-  store.resizeDraftPanel(id, w, currentH);
+
+// --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
+const gridEl = ref<HTMLElement | null>(null);
+const containerWidth = ref(1200);
+let resizeObserver: ResizeObserver | null = null;
+
+// Geometry used purely for RENDERING placements to pixel rects (reactive to
+// container width; left/top don't matter for rects).
+const renderGeom = computed(() => ({
+  width: containerWidth.value || 1200,
+  gap: GRID_GAP_PX,
+  rowHeight: ROW_HEIGHT_PX,
+}));
+
+interface DragState {
+  kind: "move" | "resize";
+  id: string;
+  pointerId: number;
+  originX: number;
+  originY: number;
+  // Canvas viewport origin captured at drag start (for pointToCell).
+  canvasLeft: number;
+  canvasTop: number;
+  // Grab offset within the panel so it doesn't jump under the cursor (move).
+  grabDX: number;
+  grabDY: number;
+  startW: number;
+  startH: number;
+  startLayout: DashboardLayoutItem[];
+  startOrder: PanelSize[];
+  // Live state
+  previewLayout: DashboardLayoutItem[];
+  visualLeft: number;
+  visualTop: number;
+  visualW: number;
+  visualH: number;
+  curW: number;
+  curH: number;
 }
-function setHeight(id: string, currentW: number, h: number) {
-  store.resizeDraftPanel(id, currentW, h);
+const drag = ref<DragState | null>(null);
+
+// The layout the canvas renders right now — the live preview while dragging,
+// otherwise the packed draft layout.
+const renderLayout = computed<DashboardLayoutItem[]>(() =>
+  drag.value ? drag.value.previewLayout : baseLayout.value
+);
+
+function pointerGeom(d: DragState): GridGeometry {
+  return {
+    left: d.canvasLeft,
+    top: d.canvasTop,
+    width: containerWidth.value || 1200,
+    gap: GRID_GAP_PX,
+    rowHeight: ROW_HEIGHT_PX,
+  };
 }
 
-// --- Native HTML5 drag reorder ----------------------------------------------
-const draggedId = ref<string | null>(null);
-const dragOverId = ref<string | null>(null);
+// Ghost "+ Add panel" tile sits in the first free slot (hidden mid-drag).
+const addTile = computed(() => (drag.value ? null : addTileSlot(baseOrder.value)));
 
-function onDragStart(id: string, event: DragEvent) {
-  draggedId.value = id;
-  if (event.dataTransfer) {
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData("text/plain", id);
+// Canvas height must contain the tallest of the live layout and the add tile.
+const canvasRows = computed(() => {
+  const rows = layoutRowCount(renderLayout.value);
+  const tile = addTile.value;
+  return Math.max(rows, tile ? tile.y + tile.h : 0, 1);
+});
+const canvasHeightPx = computed(() => canvasRows.value * ROW_STRIDE - GRID_GAP_PX);
+
+function rectStyle(item: DashboardLayoutItem) {
+  const r = cellRect(item, renderGeom.value);
+  return {
+    transform: `translate(${r.left}px, ${r.top}px)`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+  };
+}
+function rectStylePx(r: { left: number; top: number; width: number; height: number }) {
+  return {
+    transform: `translate(${r.left}px, ${r.top}px)`,
+    width: `${r.width}px`,
+    height: `${r.height}px`,
+  };
+}
+
+function panelPixelHeight(h: number): number {
+  return h * ROW_HEIGHT_PX + (h - 1) * GRID_GAP_PX;
+}
+
+function beginDrag(kind: "move" | "resize", panelId: string, event: PointerEvent) {
+  if (!isEditing.value || !gridEl.value) return;
+  event.preventDefault();
+  const rect = gridEl.value.getBoundingClientRect();
+  const item = baseLayout.value.find((i) => i.id === panelId);
+  if (!item) return;
+  const pr = cellRect(item, renderGeom.value);
+  drag.value = {
+    kind,
+    id: panelId,
+    pointerId: event.pointerId,
+    originX: event.clientX,
+    originY: event.clientY,
+    canvasLeft: rect.left,
+    canvasTop: rect.top,
+    grabDX: event.clientX - (rect.left + pr.left),
+    grabDY: event.clientY - (rect.top + pr.top),
+    startW: item.w,
+    startH: item.h,
+    startLayout: baseLayout.value,
+    startOrder: baseOrder.value,
+    previewLayout: baseLayout.value,
+    visualLeft: pr.left,
+    visualTop: pr.top,
+    visualW: pr.width,
+    visualH: pr.height,
+    curW: item.w,
+    curH: item.h,
+  };
+  window.addEventListener("pointermove", onPointerMove);
+  window.addEventListener("pointerup", onPointerUp);
+  window.addEventListener("keydown", onDragKey);
+}
+
+function onPointerMove(event: PointerEvent) {
+  const d = drag.value;
+  if (!d || event.pointerId !== d.pointerId) return;
+  if (d.kind === "move") {
+    d.visualLeft = event.clientX - d.canvasLeft - d.grabDX;
+    d.visualTop = event.clientY - d.canvasTop - d.grabDY;
+    const cell = pointToCell(event.clientX, event.clientY, pointerGeom(d));
+    const insertIndex = cellToMoveIndex(d.startLayout, d.id, cell);
+    d.previewLayout = previewMoveLayout(d.startOrder, d.id, insertIndex);
+  } else {
+    const dx = event.clientX - d.originX;
+    const dy = event.clientY - d.originY;
+    const { w, h } = snapResize(d.startW, d.startH, dx, dy, renderGeom.value);
+    d.curW = w;
+    d.curH = h;
+    d.previewLayout = previewResizeLayout(d.startOrder, d.id, w, h);
   }
 }
-function onDragOver(id: string) {
-  if (draggedId.value && draggedId.value !== id) {
-    dragOverId.value = id;
+
+function onPointerUp() {
+  const d = drag.value;
+  teardownDrag();
+  if (!d) return;
+  if (d.kind === "move") {
+    store.reorderDraftPanels(d.previewLayout.map((i) => i.id));
+  } else if (d.curW !== d.startW || d.curH !== d.startH) {
+    store.resizeDraftPanel(d.id, d.curW, d.curH);
   }
 }
-function onDrop(targetId: string) {
-  const dragged = draggedId.value;
-  draggedId.value = null;
-  dragOverId.value = null;
-  if (!dragged || dragged === targetId) return;
-  store.reorderDraftPanels(reorderByTarget(orderedIds.value, dragged, targetId));
+
+function onDragKey(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    teardownDrag(); // cancel: drop the preview, base layout re-renders untouched
+  }
 }
-function onDragEnd() {
-  draggedId.value = null;
-  dragOverId.value = null;
+
+function teardownDrag() {
+  drag.value = null;
+  window.removeEventListener("pointermove", onPointerMove);
+  window.removeEventListener("pointerup", onPointerUp);
+  window.removeEventListener("keydown", onDragKey);
 }
+
+// Placeholder rect (the dragged panel's landing slot) while moving.
+const movePlaceholder = computed(() => {
+  const d = drag.value;
+  if (!d || d.kind !== "move") return null;
+  const item = d.previewLayout.find((i) => i.id === d.id);
+  return item ? cellRect(item, renderGeom.value) : null;
+});
 
 // --- Edit lifecycle + dirty guard -------------------------------------------
 function startEdit() {
@@ -195,6 +339,24 @@ watch(dashboardId, () => {
   }
 });
 
+function observeWidth() {
+  if (!gridEl.value) return;
+  containerWidth.value = gridEl.value.clientWidth;
+  resizeObserver = new ResizeObserver((entries) => {
+    for (const e of entries) containerWidth.value = e.contentRect.width;
+  });
+  resizeObserver.observe(gridEl.value);
+}
+
+// Re-attach the width observer whenever the edit canvas mounts/unmounts.
+watch(gridEl, (el) => {
+  if (resizeObserver) {
+    resizeObserver.disconnect();
+    resizeObserver = null;
+  }
+  if (el) observeWidth();
+});
+
 onMounted(() => {
   if (!Number.isNaN(dashboardId.value)) {
     void load();
@@ -205,6 +367,8 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   clearRefreshTimer();
+  teardownDrag();
+  if (resizeObserver) resizeObserver.disconnect();
   store.clearCurrent();
 });
 
@@ -243,13 +407,16 @@ onBeforeRouteLeave(() => {
         <p v-if="dashboard?.description" class="mt-1 text-sm text-muted-foreground">
           {{ dashboard.description }}
         </p>
-        <p v-if="dashboard" class="mt-1 text-xs text-muted-foreground">
+        <p v-if="dashboard && !isEditing" class="mt-1 text-xs text-muted-foreground">
           Created by {{ creatorLabel }}<span v-if="updatedLabel"> · Updated {{ updatedLabel }}</span>
+        </p>
+        <p v-else-if="isEditing" class="mt-1 text-xs text-muted-foreground">
+          Drag a panel by its header to move it · drag the bottom-right corner to resize.
         </p>
       </div>
 
       <div class="flex items-center gap-2 flex-wrap">
-        <DashboardToolbar v-if="dashboard" />
+        <DashboardToolbar v-if="dashboard && !isEditing" />
         <template v-if="dashboard && !isEditing && canEdit">
           <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="startEdit">
             <Pencil class="h-3.5 w-3.5" />
@@ -288,23 +455,96 @@ onBeforeRouteLeave(() => {
       <Button variant="outline" size="sm" @click="router.push('/dashboards')">Back to dashboards</Button>
     </div>
 
-    <!-- Empty dashboard -->
+    <!-- Edit-mode grid canvas: dot-grid background, absolute-positioned panels,
+         pointer drag-to-move + corner resize, live placeholder, ghost add tile. -->
+    <div
+      v-else-if="dashboard && isEditing"
+      ref="gridEl"
+      class="dash-canvas"
+      :style="{
+        height: `${canvasHeightPx}px`,
+        backgroundSize: `${100 / 12}% ${ROW_STRIDE}px`,
+      }"
+    >
+      <!-- Move placeholder (drop slot) -->
+      <div v-if="movePlaceholder" class="dash-placeholder" :style="rectStylePx(movePlaceholder)" />
+
+      <!-- Panels -->
+      <div
+        v-for="item in renderLayout"
+        :key="item.id"
+        class="dash-item"
+        :class="{
+          'dash-item--dragging': drag && drag.id === item.id,
+          'dash-item--animate': !drag || drag.id !== item.id,
+        }"
+        :style="
+          drag && drag.kind === 'move' && drag.id === item.id
+            ? rectStylePx({ left: drag.visualLeft, top: drag.visualTop, width: drag.visualW, height: drag.visualH })
+            : rectStyle(item)
+        "
+      >
+        <div
+          class="dash-item__header"
+          title="Drag to move"
+          @pointerdown="beginDrag('move', item.id, $event)"
+        >
+          <GripVertical class="h-3.5 w-3.5 opacity-60" />
+          <span class="dash-item__title">{{ panelById.get(item.id)?.title || "Panel" }}</span>
+          <span class="dash-item__actions">
+            <button class="dash-item__btn" title="Edit panel" @pointerdown.stop @click="openEditPanel(panelById.get(item.id)!)">
+              <Pencil class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="dash-item__btn dash-item__btn--danger"
+              title="Remove panel"
+              @pointerdown.stop
+              @click="removePanel(item.id)"
+            >
+              <Trash2 class="h-3.5 w-3.5" />
+            </button>
+          </span>
+        </div>
+        <div class="dash-item__body">
+          <DashboardPanel
+            :panel="panelById.get(item.id)!"
+            :height-px="panelPixelHeight(item.h) - 34"
+            :chrome="false"
+          />
+        </div>
+        <!-- SE resize handle -->
+        <span
+          class="dash-item__resize"
+          title="Drag to resize"
+          @pointerdown="beginDrag('resize', item.id, $event)"
+        />
+      </div>
+
+      <!-- Ghost add-panel tile -->
+      <button
+        v-if="addTile"
+        class="dash-addtile"
+        :style="rectStyle(addTile)"
+        @click="openAddPanel"
+      >
+        <Plus class="h-5 w-5" />
+        <span class="text-xs font-medium">Add panel</span>
+      </button>
+    </div>
+
+    <!-- Empty dashboard (view mode) -->
     <div
       v-else-if="dashboard && placements.length === 0"
       class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
     >
       <p class="text-sm text-muted-foreground">This dashboard has no panels yet.</p>
-      <Button v-if="isEditing" size="sm" class="gap-1.5" @click="openAddPanel">
-        <Plus class="h-4 w-4" />
-        Add panel
-      </Button>
-      <Button v-else-if="canEdit" variant="outline" size="sm" class="gap-1.5" @click="startEdit">
+      <Button v-if="canEdit" variant="outline" size="sm" class="gap-1.5" @click="startEdit">
         <Pencil class="h-4 w-4" />
         Edit to add panels
       </Button>
     </div>
 
-    <!-- Grid -->
+    <!-- View-mode grid (CSS grid, static) -->
     <div
       v-else-if="dashboard"
       class="dash-grid"
@@ -318,70 +558,12 @@ onBeforeRouteLeave(() => {
         v-for="p in placements"
         :key="p.panel.id"
         class="dash-cell"
-        :class="{ 'dash-cell--dragover': dragOverId === p.panel.id, 'dash-cell--editing': isEditing }"
         :style="{
           gridColumn: `${p.x + 1} / span ${p.w}`,
           gridRow: `${p.y + 1} / span ${p.h}`,
         }"
-        :draggable="isEditing"
-        @dragstart="isEditing && onDragStart(p.panel.id, $event)"
-        @dragover.prevent="isEditing && onDragOver(p.panel.id)"
-        @drop.prevent="isEditing && onDrop(p.panel.id)"
-        @dragend="onDragEnd"
       >
         <DashboardPanel :panel="p.panel" :height-px="panelOuterHeight(p.h)" />
-
-        <!-- Edit-mode controls -->
-        <div v-if="isEditing" class="dash-cell__controls" @dragstart.stop>
-          <span class="dash-cell__drag" title="Drag to reorder">
-            <Move class="h-3.5 w-3.5" />
-          </span>
-          <DropdownMenu>
-            <DropdownMenuTrigger as-child>
-              <button class="dash-cell__btn" title="Resize panel" @mousedown.stop>
-                <Maximize2 class="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" class="w-44">
-              <DropdownMenuLabel class="text-xs">Width</DropdownMenuLabel>
-              <div class="grid grid-cols-4 gap-1 px-2 pb-1.5">
-                <button
-                  v-for="w in ALLOWED_PANEL_WIDTHS"
-                  :key="`w-${w}`"
-                  class="rounded border px-1 py-0.5 text-xs hover:bg-accent"
-                  :class="{ 'bg-primary text-primary-foreground': p.w === w }"
-                  @click="setWidth(p.panel.id, w, p.h)"
-                >
-                  {{ w }}
-                </button>
-              </div>
-              <DropdownMenuSeparator />
-              <DropdownMenuLabel class="text-xs">Height</DropdownMenuLabel>
-              <div class="grid grid-cols-6 gap-1 px-2 pb-1.5">
-                <button
-                  v-for="h in heightOptions"
-                  :key="`h-${h}`"
-                  class="rounded border px-1 py-0.5 text-xs hover:bg-accent"
-                  :class="{ 'bg-primary text-primary-foreground': p.h === h }"
-                  @click="setHeight(p.panel.id, p.w, h)"
-                >
-                  {{ h }}
-                </button>
-              </div>
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <button class="dash-cell__btn" title="Edit panel" @mousedown.stop @click="openEditPanel(p.panel)">
-            <Pencil class="h-3.5 w-3.5" />
-          </button>
-          <button
-            class="dash-cell__btn dash-cell__btn--danger"
-            title="Remove panel"
-            @mousedown.stop
-            @click="removePanel(p.panel.id)"
-          >
-            <Trash2 class="h-3.5 w-3.5" />
-          </button>
-        </div>
       </div>
     </div>
 
@@ -399,55 +581,133 @@ onBeforeRouteLeave(() => {
   position: relative;
   min-height: 0;
 }
-.dash-cell--editing {
-  cursor: grab;
-}
-.dash-cell--editing:active {
-  cursor: grabbing;
-}
-.dash-cell--dragover {
-  outline: 2px dashed var(--primary);
-  outline-offset: 2px;
+
+/* --- Edit-mode canvas ------------------------------------------------------ */
+.dash-canvas {
+  position: relative;
+  width: 100%;
   border-radius: 0.6rem;
+  /* Dot-grid: one dot at every column/row corner. */
+  background-image: radial-gradient(
+    circle at 1px 1px,
+    color-mix(in srgb, var(--muted-foreground) 28%, transparent) 1.5px,
+    transparent 0
+  );
+  background-position: 0 0;
 }
-.dash-cell__controls {
+.dash-item {
   position: absolute;
-  top: 0.3rem;
-  right: 0.3rem;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--card);
+  will-change: transform;
+}
+.dash-item--animate {
+  transition: transform 0.16s ease, width 0.16s ease, height 0.16s ease;
+}
+.dash-item--dragging {
+  z-index: 20;
+  box-shadow: 0 12px 30px -8px rgb(0 0 0 / 0.35);
+  scale: 1.01;
+  cursor: grabbing;
+  opacity: 0.95;
+}
+.dash-item__header {
   display: flex;
   align-items: center;
-  gap: 0.2rem;
-  padding: 0.15rem;
-  border-radius: 0.4rem;
-  background: color-mix(in srgb, var(--card) 88%, transparent);
-  border: 1px solid var(--border);
-  opacity: 0;
-  transition: opacity 0.12s ease;
-  z-index: 2;
+  gap: 0.35rem;
+  height: 30px;
+  padding: 0 0.35rem 0 0.5rem;
+  border-bottom: 1px solid var(--border);
+  cursor: grab;
+  user-select: none;
+  background: color-mix(in srgb, var(--muted) 40%, transparent);
 }
-.dash-cell:hover .dash-cell__controls,
-.dash-cell:focus-within .dash-cell__controls {
-  opacity: 1;
+.dash-item__header:active {
+  cursor: grabbing;
 }
-.dash-cell__drag,
-.dash-cell__btn {
+.dash-item__title {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-item__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.1rem;
+}
+.dash-item__btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.5rem;
-  height: 1.5rem;
+  width: 1.4rem;
+  height: 1.4rem;
   border-radius: 0.3rem;
   color: var(--muted-foreground);
 }
-.dash-cell__drag {
-  cursor: grab;
-}
-.dash-cell__btn:hover {
+.dash-item__btn:hover {
   background: var(--accent);
   color: var(--foreground);
 }
-.dash-cell__btn--danger:hover {
+.dash-item__btn--danger:hover {
   background: color-mix(in srgb, var(--destructive) 15%, transparent);
   color: var(--destructive);
+}
+.dash-item__body {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+.dash-item__resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+  background: linear-gradient(
+    135deg,
+    transparent 0 50%,
+    color-mix(in srgb, var(--muted-foreground) 55%, transparent) 50% 100%
+  );
+  border-bottom-right-radius: 0.6rem;
+}
+.dash-placeholder {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 2px dashed color-mix(in srgb, var(--primary) 70%, transparent);
+  border-radius: 0.6rem;
+  background: color-mix(in srgb, var(--primary) 8%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+.dash-addtile {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  border: 2px dashed var(--border);
+  border-radius: 0.6rem;
+  color: var(--muted-foreground);
+  transition: border-color 0.12s ease, color 0.12s ease, background 0.12s ease;
+}
+.dash-addtile:hover {
+  border-color: color-mix(in srgb, var(--primary) 60%, transparent);
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--primary) 5%, transparent);
 }
 </style>

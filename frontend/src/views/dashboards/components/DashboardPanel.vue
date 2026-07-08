@@ -18,17 +18,27 @@ interface Props {
    * and sub-components render a preview result.
    */
   state?: PanelState;
+  /**
+   * Whether to render the panel's own header + card border. Defaults to true.
+   * Edit mode wraps each panel in its own chrome (drag header, resize handle),
+   * so it passes false to avoid a doubled header/border.
+   */
+  chrome?: boolean;
 }
-const props = defineProps<Props>();
+const props = withDefaults(defineProps<Props>(), { chrome: true });
 
 const store = useDashboardsStore();
 const panelState = computed<PanelState>(
   () => props.state ?? store.panelStates[props.panel.id] ?? { status: "idle" as const }
 );
 
-// Chart body height = outer height minus the header row and the body padding.
-const CHROME_PX = 30 /* header */ + 16 /* body padding */;
-const chartHeight = computed(() => Math.max(70, props.heightPx - CHROME_PX));
+// Chart body height = outer height minus the header row (when shown) and the
+// body padding.
+const BODY_PADDING_PX = 16;
+const HEADER_PX = 30;
+const chartHeight = computed(() =>
+  Math.max(70, props.heightPx - BODY_PADDING_PX - (props.chrome ? HEADER_PX : 0))
+);
 
 const typeIcon = computed(() => {
   switch (props.panel.type) {
@@ -43,8 +53,11 @@ const typeIcon = computed(() => {
 </script>
 
 <template>
-  <div class="dash-panel" :class="{ 'dash-panel--locked': panelState.status === 'locked' }">
-    <div class="dash-panel__header">
+  <div
+    class="dash-panel"
+    :class="{ 'dash-panel--locked': panelState.status === 'locked', 'dash-panel--bare': !chrome }"
+  >
+    <div v-if="chrome" class="dash-panel__header">
       <component :is="typeIcon" class="dash-panel__icon" />
       <span class="dash-panel__title" :title="panel.title">{{ panel.title || "Untitled" }}</span>
       <Lock
@@ -115,6 +128,14 @@ const typeIcon = computed(() => {
 }
 .dash-panel--locked {
   opacity: 0.6;
+}
+/* In edit mode the .dash-item wrapper owns the border/header, so the panel
+   renders body-only and transparent. */
+.dash-panel--bare {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .dash-panel__header {
   display: flex;
