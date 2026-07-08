@@ -128,7 +128,11 @@ api.interceptors.response.use(
         message: "You don't have permission to access this resource.",
         error_type: "AuthorizationError",
       };
-      showErrorToast(forbiddenError);
+      // Callers can opt out of the toast (e.g. dashboard panels render an inline
+      // locked state per panel and must not spawn one toast per forbidden source).
+      if (!(error.config as { suppressErrorToast?: boolean } | undefined)?.suppressErrorToast) {
+        showErrorToast(forbiddenError);
+      }
 
       // Only a navigation/page-load (GET) 403 should switch to the full-page
       // Forbidden view. Inline mutations (PUT/POST/PATCH/DELETE) are recoverable

@@ -17,6 +17,8 @@ export type TokenScope =
   | "collections:write"
   | "alerts:read"
   | "alerts:write"
+  | "dashboards:read"
+  | "dashboards:write"
   | "query_shares:read"
   | "query_shares:write"
   | "settings:read"
@@ -39,6 +41,7 @@ export const READ_ONLY_SCOPES: TokenScope[] = [
   "saved_queries:read",
   "collections:read",
   "alerts:read",
+  "dashboards:read",
   "query_shares:read",
   "settings:read",
 ];
@@ -61,6 +64,8 @@ export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
   { value: "collections:write", label: "Collections write", description: "Create and manage collections, members, and items.", group: "Collections" },
   { value: "alerts:read", label: "Alerts read", description: "List alerts and alert history.", group: "Alerts" },
   { value: "alerts:write", label: "Alerts write", description: "Create, test, update, delete, and resolve alerts.", group: "Alerts" },
+  { value: "dashboards:read", label: "Dashboards read", description: "List and view dashboards and their panels.", group: "Dashboards" },
+  { value: "dashboards:write", label: "Dashboards write", description: "Create, update, and delete dashboards.", group: "Dashboards" },
   { value: "query_shares:read", label: "Query shares read", description: "Open existing query share links.", group: "Sharing" },
   { value: "query_shares:write", label: "Query shares write", description: "Create and delete query share links.", group: "Sharing" },
   { value: "settings:read", label: "Settings read", description: "Read system settings and provisioning export.", group: "Administration" },

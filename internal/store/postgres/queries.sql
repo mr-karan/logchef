@@ -893,8 +893,20 @@ VALUES ($1, $2, $3, $4)
 RETURNING id;
 
 -- name: GetDashboard :one
--- Look up one dashboard by id.
-SELECT * FROM dashboards WHERE id = $1;
+-- Look up one dashboard by id, with creator identity like ListDashboards.
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+WHERE d.id = $1;
 
 -- name: ListDashboards :many
 -- List every dashboard, newest-updated first, with the creator's email/name via

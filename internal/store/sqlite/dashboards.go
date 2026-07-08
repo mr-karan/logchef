@@ -68,7 +68,23 @@ func (db *DB) GetDashboard(ctx context.Context, id int) (*models.Dashboard, erro
 		}
 		return nil, fmt.Errorf("getting dashboard id %d: %w", id, err)
 	}
-	return mapDashboardRow(row), nil
+	d := &models.Dashboard{
+		ID:          int(row.ID),
+		Name:        row.Name,
+		Description: row.Description.String,
+		PanelsJSON:  json.RawMessage(row.PanelsJson),
+		Timestamps: models.Timestamps{
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+		},
+		CreatedByEmail: row.CreatedByEmail.String,
+		CreatedByName:  row.CreatedByName.String,
+	}
+	if row.CreatedBy.Valid {
+		uid := models.UserID(row.CreatedBy.Int64)
+		d.CreatedBy = &uid
+	}
+	return d, nil
 }
 
 // ListDashboards returns every dashboard, newest-updated first, with creator info.

@@ -8,11 +8,15 @@ export async function apiRequest<T>(
   method: "get" | "post" | "put" | "patch" | "delete",
   url: string,
   data?: any,
-  options?: { timeout?: number; signal?: AbortSignal }
+  options?: { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean }
 ): Promise<APIResponse<T>> {
   const config = {
     ...(options?.timeout ? { timeout: options.timeout * 1000 } : {}), // Convert seconds to milliseconds
-    ...(options?.signal ? { signal: options.signal } : {})
+    ...(options?.signal ? { signal: options.signal } : {}),
+    // Custom flag read back off `error.config` by the response interceptor to
+    // suppress the global error toast (e.g. per-panel 403s on a dashboard, where
+    // an inline locked/error state is shown instead of a toast storm).
+    ...(options?.suppressErrorToast ? { suppressErrorToast: true } : {})
   };
   
   let response;
@@ -28,10 +32,12 @@ export async function apiRequest<T>(
 /**
  * Shorthand methods for common API operations
  */
+type RequestOptions = { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean };
+
 export const apiClient = {
-  get: <T>(url: string, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("get", url, undefined, options),
-  post: <T>(url: string, data?: any, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("post", url, data, options),
-  put: <T>(url: string, data?: any, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("put", url, data, options),
-  patch: <T>(url: string, data?: any, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("patch", url, data, options),
-  delete: <T>(url: string, options?: { timeout?: number; signal?: AbortSignal }) => apiRequest<T>("delete", url, undefined, options)
+  get: <T>(url: string, options?: RequestOptions) => apiRequest<T>("get", url, undefined, options),
+  post: <T>(url: string, data?: any, options?: RequestOptions) => apiRequest<T>("post", url, data, options),
+  put: <T>(url: string, data?: any, options?: RequestOptions) => apiRequest<T>("put", url, data, options),
+  patch: <T>(url: string, data?: any, options?: RequestOptions) => apiRequest<T>("patch", url, data, options),
+  delete: <T>(url: string, options?: RequestOptions) => apiRequest<T>("delete", url, undefined, options)
 };

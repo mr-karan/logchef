@@ -114,6 +114,30 @@ const routes: RouteRecordRaw[] = [
     ],
   },
 
+  // Dashboards Section (cross-team; each panel carries its own team/source, so
+  // dashboards live at the top level rather than under the context-scoped /logs
+  // tree — they still render inside the standard InnerApp sidebar shell).
+  {
+    path: "/dashboards",
+    meta: {
+      requiresAuth: true,
+    },
+    children: [
+      {
+        path: "",
+        name: "Dashboards",
+        component: lazy("DashboardsList", () => import("@/views/dashboards/DashboardsList.vue")),
+        meta: { title: "Dashboards" },
+      },
+      {
+        path: ":id",
+        name: "DashboardView",
+        component: lazy("DashboardView", () => import("@/views/dashboards/DashboardView.vue")),
+        meta: { title: "Dashboard" },
+      },
+    ],
+  },
+
   // Admin Section. Per-route gates: `requiresAdmin` blocks non-global admins;
   // `requiresAnyTeamAdmin` lets team admins through for their team's pages.
   // The parent has no role meta — children declare their own access.

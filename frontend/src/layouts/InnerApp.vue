@@ -42,6 +42,7 @@ import {
   Wrench,
   FolderOpen,
   KeyRound,
+  LayoutDashboard,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -147,6 +148,11 @@ const allMainNavItems: NavItem[] = [
     title: "Alerts",
     icon: Bell,
     url: "/logs/alerts",
+  },
+  {
+    title: "Dashboards",
+    icon: LayoutDashboard,
+    url: "/dashboards",
   },
 ];
 

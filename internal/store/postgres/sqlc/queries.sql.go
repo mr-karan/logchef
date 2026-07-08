@@ -939,13 +939,37 @@ func (q *Queries) GetCollectionMember(ctx context.Context, arg GetCollectionMemb
 }
 
 const getDashboard = `-- name: GetDashboard :one
-SELECT id, name, description, panels_json, created_by, created_at, updated_at FROM dashboards WHERE id = $1
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+WHERE d.id = $1
 `
 
-// Look up one dashboard by id.
-func (q *Queries) GetDashboard(ctx context.Context, id int64) (Dashboard, error) {
+type GetDashboardRow struct {
+	ID             int64              `json:"id"`
+	Name           string             `json:"name"`
+	Description    pgtype.Text        `json:"description"`
+	PanelsJson     string             `json:"panels_json"`
+	CreatedBy      pgtype.Int8        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CreatedByEmail pgtype.Text        `json:"created_by_email"`
+	CreatedByName  pgtype.Text        `json:"created_by_name"`
+}
+
+// Look up one dashboard by id, with creator identity like ListDashboards.
+func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error) {
 	row := q.db.QueryRow(ctx, getDashboard, id)
-	var i Dashboard
+	var i GetDashboardRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -954,6 +978,8 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (Dashboard, error)
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.CreatedByEmail,
+		&i.CreatedByName,
 	)
 	return i, err
 }

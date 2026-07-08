@@ -98,8 +98,8 @@ type Querier interface {
 	GetCollection(ctx context.Context, id int64) (Collection, error)
 	// Look up a single membership row
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
-	// Look up one dashboard by id.
-	GetDashboard(ctx context.Context, id int64) (Dashboard, error)
+	// Look up one dashboard by id, with creator identity like ListDashboards.
+	GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)

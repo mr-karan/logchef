@@ -61,7 +61,19 @@ func (s *Store) GetDashboard(ctx context.Context, id int) (*models.Dashboard, er
 		}
 		return nil, fmt.Errorf("getting dashboard id %d: %w", id, err)
 	}
-	return dashboardToModel(row), nil
+	return &models.Dashboard{
+		ID:          int(row.ID),
+		Name:        row.Name,
+		Description: textStr(row.Description),
+		PanelsJSON:  json.RawMessage(row.PanelsJson),
+		CreatedBy:   userIDPtr(row.CreatedBy),
+		Timestamps: models.Timestamps{
+			CreatedAt: row.CreatedAt.Time,
+			UpdatedAt: row.UpdatedAt.Time,
+		},
+		CreatedByEmail: textStr(row.CreatedByEmail),
+		CreatedByName:  textStr(row.CreatedByName),
+	}, nil
 }
 
 // ListDashboards returns every dashboard, newest-updated first, with creator info.

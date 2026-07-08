@@ -292,6 +292,9 @@ func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
 	if string(got.PanelsJSON) != string(panels) {
 		t.Fatalf("panels did not round-trip:\n got %s\nwant %s", got.PanelsJSON, panels)
 	}
+	if got.CreatedByEmail != owner.Email {
+		t.Fatalf("GetDashboard creator identity not joined: %q", got.CreatedByEmail)
+	}
 	if got.CreatedBy == nil || *got.CreatedBy != owner.ID {
 		t.Fatalf("created_by not persisted: %+v", got.CreatedBy)
 	}
