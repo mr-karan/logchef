@@ -22,6 +22,10 @@ import { runWithConcurrency } from "@/utils/promisePool";
 export const PANEL_FETCH_CONCURRENCY = 4;
 
 const DEFAULT_RELATIVE_TIME = "15m";
+// Panel queries run in UTC for now. Switching to the viewer's timezone is
+// tracked separately: the VictoriaLogs histogram path mis-formats a non-UTC
+// zone as an `offset=+05:30` clock string where VictoriaLogs expects a
+// duration, so it 400s. Fix that first (see the VL-offset issue), then flip.
 const PANEL_QUERY_TIMEZONE = "UTC";
 
 export type PanelStatus = "idle" | "loading" | "success" | "empty" | "error" | "locked";

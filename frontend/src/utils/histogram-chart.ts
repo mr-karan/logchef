@@ -172,6 +172,40 @@ export function formatTooltipTimestamp(
   return formatter.format(value);
 }
 
+// Insert zero-count rows for every missing time bucket between the first and
+// last returned bucket. ClickHouse only returns rows for buckets that matched
+// at least one log (no WITH FILL), so sparse or grouped series come back with
+// gaps; a continuous time axis then plots isolated bars/points with dead space
+// between them. Filling the gaps makes the series read as a real histogram
+// (and lets line/area charts draw a continuous baseline). VictoriaLogs already
+// zero-fills server-side, so filled input is simply left unchanged.
+function fillBucketGaps<T extends { ts: number }>(
+  rows: T[],
+  stepMs: number,
+  makeZero: (ts: number) => T,
+): T[] {
+  if (rows.length < 2 || stepMs <= 0) return rows;
+  const first = rows[0].ts;
+  const last = rows[rows.length - 1].ts;
+  // Safety: never expand beyond a sane bucket count (guards against a bad
+  // step/window producing a runaway loop).
+  if ((last - first) / stepMs > 5000) return rows;
+
+  const byTs = new Map(rows.map((row) => [row.ts, row]));
+  const out: T[] = [];
+  for (let ts = first; ts <= last + stepMs / 2; ts += stepMs) {
+    out.push(byTs.get(ts) ?? makeZero(ts));
+  }
+  // Belt-and-suspenders: keep any real bucket that didn't land on the generated
+  // grid (should not happen for interval-aligned buckets, but never drop data).
+  const present = new Set(out.map((row) => row.ts));
+  for (const row of rows) {
+    if (!present.has(row.ts)) out.push(row);
+  }
+  out.sort((left, right) => left.ts - right.ts);
+  return out;
+}
+
 export function buildHistogramChartModel(
   buckets: HistogramData[],
   granularity?: string | null,
@@ -206,20 +240,29 @@ export function buildHistogramChartModel(
         ? new Date(sortedBuckets[1].bucket).getTime() - new Date(sortedBuckets[0].bucket).getTime()
         : 60_000);
 
-    const rows = sortedBuckets.map((bucket, index) => {
+    const rawRows = sortedBuckets.map((bucket) => {
       const ts = new Date(bucket.bucket).getTime();
-      const nextBucketTs =
-        index < sortedBuckets.length - 1
-          ? new Date(sortedBuckets[index + 1].bucket).getTime()
-          : ts + bucketWidthMs;
-
       return {
         ts,
         bucket: bucket.bucket,
-        bucketEndTs: nextBucketTs,
+        bucketEndTs: ts + bucketWidthMs,
         total: bucket.log_count,
         count: bucket.log_count,
       } satisfies HistogramChartRow;
+    });
+
+    // Zero-fill missing buckets, then set each row's end to the next row's start
+    // so bar widths and the crosshair snap stay contiguous.
+    const rows = fillBucketGaps(rawRows, bucketWidthMs, (ts) => ({
+      ts,
+      bucket: new Date(ts).toISOString(),
+      bucketEndTs: ts + bucketWidthMs,
+      total: 0,
+      count: 0,
+    }));
+    rows.forEach((row, index) => {
+      row.bucketEndTs =
+        index < rows.length - 1 ? rows[index + 1].ts : row.ts + bucketWidthMs;
     });
 
     const chartConfig = {
@@ -271,12 +314,12 @@ export function buildHistogramChartModel(
     bucketRows.set(ts, existingRow);
   });
 
-  const rowList = [...bucketRows.values()].sort((left, right) => left.ts - right.ts);
+  const populatedRows = [...bucketRows.values()].sort((left, right) => left.ts - right.ts);
   const derivedBucketWidth =
     parseGranularityToMilliseconds(granularity) ??
     (() => {
-      for (let index = 1; index < rowList.length; index += 1) {
-        const diff = rowList[index].ts - rowList[index - 1].ts;
+      for (let index = 1; index < populatedRows.length; index += 1) {
+        const diff = populatedRows[index].ts - populatedRows[index - 1].ts;
         if (diff > 0) {
           return diff;
         }
@@ -284,6 +327,15 @@ export function buildHistogramChartModel(
 
       return 60_000;
     })();
+
+  // Zero-fill gaps; the forEach below then sets every series key to 0 on the
+  // inserted rows and recomputes contiguous bucket ends.
+  const rowList = fillBucketGaps<HistogramChartRow>(populatedRows, derivedBucketWidth, (ts) => ({
+    ts,
+    bucket: new Date(ts).toISOString(),
+    bucketEndTs: ts,
+    total: 0,
+  }));
 
   rowList.forEach((row, index) => {
     row.bucketEndTs = index < rowList.length - 1 ? rowList[index + 1].ts : row.ts + derivedBucketWidth;
