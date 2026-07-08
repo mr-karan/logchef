@@ -15,6 +15,11 @@ export interface DashboardPanelOptions {
   limit?: number;
   /** Subset of columns to display for table panels (empty/absent = all). */
   columns?: string[];
+  /**
+   * Timeseries render style. Absent = "line" (Grafana-like default) for new
+   * panels; legacy panels with no value continue to render as stacked bars.
+   */
+  chart?: "bars" | "line" | "area";
 }
 
 export interface DashboardPanel {
