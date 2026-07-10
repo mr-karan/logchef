@@ -77,7 +77,7 @@ func (p *ClickHouseProvider) PrepareSource(ctx context.Context, req *models.Crea
 	if err != nil {
 		return nil, err
 	}
-	if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Username, conn.Password, conn.Database, conn.TableName); err != nil {
+	if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Database, conn.TableName); err != nil {
 		return nil, err
 	}
 
@@ -158,7 +158,7 @@ func (p *ClickHouseProvider) ValidateConnection(ctx context.Context, req *models
 	if err != nil {
 		return nil, err
 	}
-	if err := validateClickHouseConnection("", false, conn.Host, conn.Username, conn.Password, conn.Database, conn.TableName); err != nil {
+	if err := validateClickHouseConnection("", false, conn.Host, conn.Database, conn.TableName); err != nil {
 		return nil, err
 	}
 
@@ -225,7 +225,7 @@ func (p *ClickHouseProvider) UpdateSource(ctx context.Context, source *models.So
 		if conn.Password == "" && conn.Username != "" {
 			conn.Password = source.Connection.Password
 		}
-		if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Username, conn.Password, conn.Database, conn.TableName); err != nil {
+		if err := validateClickHouseConnection("connection.", true, conn.Host, conn.Database, conn.TableName); err != nil {
 			return nil, err
 		}
 

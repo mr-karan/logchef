@@ -159,7 +159,7 @@ func (s *Source) SyncConnectionConfig() error {
 
 	switch s.SourceType {
 	case SourceTypeClickHouse:
-		payload, err := json.Marshal(s.Connection)
+		payload, err := json.Marshal(s.Connection) //nolint:gosec // internal round-trip into the source's stored connection_config JSON, never logged or returned to a client.
 		if err != nil {
 			return fmt.Errorf("marshal clickhouse connection config: %w", err)
 		}

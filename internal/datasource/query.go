@@ -2,17 +2,12 @@ package datasource
 
 import (
 	"errors"
-	"fmt"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 var ErrOperationNotSupported = errors.New("datasource operation not supported")
-
-func unsupportedOperationError(sourceType models.SourceType, operation string) error {
-	return fmt.Errorf("%s does not support %s: %w", sourceType, operation, ErrOperationNotSupported)
-}
 
 type QueryRequest struct {
 	RawQuery         string

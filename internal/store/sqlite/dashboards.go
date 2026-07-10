@@ -11,25 +11,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// mapDashboardRow converts a generated sqlc.Dashboard into the domain model.
-func mapDashboardRow(row sqlc.Dashboard) *models.Dashboard {
-	d := &models.Dashboard{
-		ID:          int(row.ID),
-		Name:        row.Name,
-		Description: row.Description.String,
-		PanelsJSON:  json.RawMessage(row.PanelsJson),
-		Timestamps: models.Timestamps{
-			CreatedAt: row.CreatedAt,
-			UpdatedAt: row.UpdatedAt,
-		},
-	}
-	if row.CreatedBy.Valid {
-		uid := models.UserID(row.CreatedBy.Int64)
-		d.CreatedBy = &uid
-	}
-	return d
-}
-
 // CreateDashboard inserts a new dashboard and repopulates the model with the
 // persisted row (id and timestamps).
 func (db *DB) CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error {

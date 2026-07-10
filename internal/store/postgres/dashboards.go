@@ -9,20 +9,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func dashboardToModel(r sqlc.Dashboard) *models.Dashboard {
-	return &models.Dashboard{
-		ID:          int(r.ID),
-		Name:        r.Name,
-		Description: textStr(r.Description),
-		PanelsJSON:  json.RawMessage(r.PanelsJson),
-		CreatedBy:   userIDPtr(r.CreatedBy),
-		Timestamps: models.Timestamps{
-			CreatedAt: r.CreatedAt.Time,
-			UpdatedAt: r.UpdatedAt.Time,
-		},
-	}
-}
-
 // CreateDashboard inserts a new dashboard and repopulates the model with the
 // persisted row (id and timestamps).
 func (s *Store) CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error {

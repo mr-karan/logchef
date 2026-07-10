@@ -108,69 +108,92 @@ func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.Provis
 		cfgSrc := cfg.Sources[i]
 		desiredNames[cfgSrc.Name] = true
 
-		existing, isManaged := managedByName[cfgSrc.Name]
-		if !isManaged {
-			// Check for an unmanaged source with the same name (adopt). Any
-			// lookup error is treated as "not found" -> create, matching the
-			// prior behavior.
-			if unmanaged, err := tx.GetSourceByNameForProvisioning(ctx, cfgSrc.Name); err == nil {
-				log.Info("adopting existing source as managed", "name", cfgSrc.Name, "id", unmanaged.ID)
-				adopted, err := sourceFromConfig(cfgSrc, unmanaged.ID)
-				if err != nil {
-					return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
-				}
-				if err := tx.UpdateSource(ctx, adopted); err != nil {
-					return fmt.Errorf("failed to adopt source %q: %w", cfgSrc.Name, err)
-				}
-				if err := tx.SetSourceManaged(ctx, unmanaged.ID, true, cfgSrc.SecretRef); err != nil {
-					return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
-				}
-				*toConnect = append(*toConnect, *adopted)
-				continue
+		if existing, isManaged := managedByName[cfgSrc.Name]; isManaged {
+			if err := updateManagedSourceIfNeeded(ctx, tx, log, cfgSrc, existing, toConnect); err != nil {
+				return err
 			}
-
-			// Create a new source.
-			log.Info("creating managed source", "name", cfgSrc.Name)
-
-			// Validate datasource connectivity before creating (best-effort).
-			if err := validateSourceConnection(ctx, ds, cfgSrc, log); err != nil {
-				log.Warn("datasource validation failed for provisioned source, creating anyway",
-					"name", cfgSrc.Name, "error", err)
-			}
-
-			src, err := sourceFromConfig(cfgSrc, 0)
-			if err != nil {
-				return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
-			}
-			if err := tx.CreateSource(ctx, src); err != nil {
-				return fmt.Errorf("failed to create source %q: %w", cfgSrc.Name, err)
-			}
-			if err := tx.SetSourceManaged(ctx, src.ID, true, cfgSrc.SecretRef); err != nil {
-				return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
-			}
-
-			*toConnect = append(*toConnect, *src)
 		} else {
-			// Update existing managed source if fields changed.
-			needsUpdate, err := sourceNeedsUpdate(existing, cfgSrc)
-			if err != nil {
-				return fmt.Errorf("failed to compare managed source %q: %w", cfgSrc.Name, err)
-			}
-			if needsUpdate {
-				log.Info("updating managed source", "name", cfgSrc.Name)
-				updated, err := sourceFromConfig(cfgSrc, existing.ID)
-				if err != nil {
-					return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
-				}
-				if err := tx.UpdateSource(ctx, updated); err != nil {
-					return fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
-				}
-				*toConnect = append(*toConnect, *updated)
+			if err := createOrAdoptSource(ctx, tx, ds, log, cfgSrc, toConnect); err != nil {
+				return err
 			}
 		}
 	}
 
-	// Prune: delete managed sources not in config.
+	return pruneManagedSources(ctx, tx, cfg, log, managedByName, desiredNames)
+}
+
+// createOrAdoptSource handles a config source with no managed counterpart:
+// it adopts a same-named unmanaged source if one exists, otherwise creates a
+// new managed source.
+func createOrAdoptSource(ctx context.Context, tx store.StoreOps, ds *datasource.Service, log *slog.Logger, cfgSrc config.ProvisionSource, toConnect *[]models.Source) error {
+	// Check for an unmanaged source with the same name (adopt). Any lookup
+	// error is treated as "not found" -> create, matching the prior behavior.
+	if unmanaged, err := tx.GetSourceByNameForProvisioning(ctx, cfgSrc.Name); err == nil {
+		log.Info("adopting existing source as managed", "name", cfgSrc.Name, "id", unmanaged.ID)
+		adopted, err := sourceFromConfig(cfgSrc, unmanaged.ID)
+		if err != nil {
+			return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+		}
+		if err := tx.UpdateSource(ctx, adopted); err != nil {
+			return fmt.Errorf("failed to adopt source %q: %w", cfgSrc.Name, err)
+		}
+		if err := tx.SetSourceManaged(ctx, unmanaged.ID, true, cfgSrc.SecretRef); err != nil {
+			return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
+		}
+		*toConnect = append(*toConnect, *adopted)
+		return nil
+	}
+
+	// Create a new source.
+	log.Info("creating managed source", "name", cfgSrc.Name)
+
+	// Validate datasource connectivity before creating (best-effort).
+	if err := validateSourceConnection(ctx, ds, cfgSrc, log); err != nil {
+		log.Warn("datasource validation failed for provisioned source, creating anyway",
+			"name", cfgSrc.Name, "error", err)
+	}
+
+	src, err := sourceFromConfig(cfgSrc, 0)
+	if err != nil {
+		return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+	}
+	if err := tx.CreateSource(ctx, src); err != nil {
+		return fmt.Errorf("failed to create source %q: %w", cfgSrc.Name, err)
+	}
+	if err := tx.SetSourceManaged(ctx, src.ID, true, cfgSrc.SecretRef); err != nil {
+		return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
+	}
+
+	*toConnect = append(*toConnect, *src)
+	return nil
+}
+
+// updateManagedSourceIfNeeded updates an already-managed source in place when
+// its desired config diverges from the persisted row.
+func updateManagedSourceIfNeeded(ctx context.Context, tx store.StoreOps, log *slog.Logger, cfgSrc config.ProvisionSource, existing *models.Source, toConnect *[]models.Source) error {
+	needsUpdate, err := sourceNeedsUpdate(existing, cfgSrc)
+	if err != nil {
+		return fmt.Errorf("failed to compare managed source %q: %w", cfgSrc.Name, err)
+	}
+	if !needsUpdate {
+		return nil
+	}
+
+	log.Info("updating managed source", "name", cfgSrc.Name)
+	updated, err := sourceFromConfig(cfgSrc, existing.ID)
+	if err != nil {
+		return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+	}
+	if err := tx.UpdateSource(ctx, updated); err != nil {
+		return fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
+	}
+	*toConnect = append(*toConnect, *updated)
+	return nil
+}
+
+// pruneManagedSources deletes (or, with prune=false, just logs) managed
+// sources that are no longer declared in config.
+func pruneManagedSources(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger, managedByName map[string]*models.Source, desiredNames map[string]bool) error {
 	for name, src := range managedByName {
 		if desiredNames[name] {
 			continue
@@ -184,7 +207,6 @@ func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.Provis
 			log.Warn("managed source not in config (prune=false, keeping)", "name", name)
 		}
 	}
-
 	return nil
 }
 

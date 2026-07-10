@@ -199,7 +199,7 @@ func TestQueryLogsAppliesHeadersScopeAndLimit(t *testing.T) {
 		Scope: models.VictoriaLogsScope{
 			Query: `{app="payments"}`,
 		},
-	}, "_time", "level")
+	})
 
 	result, err := provider.QueryLogs(context.Background(), source, datasource.QueryRequest{
 		RawQuery:     "level:error",
@@ -276,7 +276,7 @@ func TestSchemaAndFieldValueDiscovery(t *testing.T) {
 		Scope: models.VictoriaLogsScope{
 			Query: "kubernetes.namespace:=prod",
 		},
-	}, "_time", "level")
+	})
 
 	columns, err := provider.GetSourceSchema(context.Background(), source)
 	if err != nil {
@@ -355,7 +355,7 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 		Scope: models.VictoriaLogsScope{
 			Query: "service:=api",
 		},
-	}, "_time", "level")
+	})
 
 	start := time.Date(2026, 4, 8, 10, 0, 0, 0, time.UTC)
 	end := start.Add(10 * time.Minute)
@@ -422,16 +422,16 @@ func TestInspectSourceIncludesSchemaAndActivity(t *testing.T) {
 		case "/select/logsql/hits":
 			switch r.Form.Get("step") {
 			case "1h":
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"hits":[{"fields":{},"timestamps":["%s"],"values":[8],"total":8}]}`, now.Format(time.RFC3339))))
+				_, _ = fmt.Fprintf(w, `{"hits":[{"fields":{},"timestamps":["%s"],"values":[8],"total":8}]}`, now.Format(time.RFC3339))
 			case "1d":
 				dayOne := now.Add(-24 * time.Hour).Format(time.RFC3339)
 				dayTwo := now.Format(time.RFC3339)
-				_, _ = w.Write([]byte(fmt.Sprintf(`{"hits":[{"fields":{},"timestamps":["%s","%s"],"values":[12,20],"total":32}]}`, dayOne, dayTwo)))
+				_, _ = fmt.Fprintf(w, `{"hits":[{"fields":{},"timestamps":["%s","%s"],"values":[12,20],"total":32}]}`, dayOne, dayTwo)
 			default:
 				t.Fatalf("unexpected step: %q", r.Form.Get("step"))
 			}
 		case "/select/logsql/query":
-			_, _ = w.Write([]byte(fmt.Sprintf(`{"_time":"%s","_msg":"latest row","service":"api"}`, latest)))
+			_, _ = fmt.Fprintf(w, `{"_time":"%s","_msg":"latest row","service":"api"}`, latest)
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -444,7 +444,7 @@ func TestInspectSourceIncludesSchemaAndActivity(t *testing.T) {
 		Scope: models.VictoriaLogsScope{
 			Query: `{app="payments"}`,
 		},
-	}, "_time", "level")
+	})
 
 	inspection, err := provider.InspectSource(context.Background(), source)
 	if err != nil {
@@ -501,15 +501,15 @@ func mustJSON(t *testing.T, value interface{}) json.RawMessage {
 	return payload
 }
 
-func mustSource(t *testing.T, conn models.VictoriaLogsConnectionInfo, metaTSField, metaSeverityField string) *models.Source {
+func mustSource(t *testing.T, conn models.VictoriaLogsConnectionInfo) *models.Source {
 	t.Helper()
 
 	source := &models.Source{
 		ID:                1,
 		Name:              "VictoriaLogs Dev",
 		SourceType:        models.SourceTypeVictoriaLogs,
-		MetaTSField:       metaTSField,
-		MetaSeverityField: metaSeverityField,
+		MetaTSField:       "_time",
+		MetaSeverityField: "level",
 		ConnectionConfig:  mustJSON(t, conn),
 	}
 	if err := source.SyncConnectionConfig(); err != nil {

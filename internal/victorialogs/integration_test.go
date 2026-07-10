@@ -169,7 +169,7 @@ func TestIntegrationVictoriaLogs(t *testing.T) {
 	// Build the source exactly as production does: SourceType victorialogs,
 	// _time as the meta timestamp field, connection_config JSON pointing at the
 	// live instance.
-	source := mustSource(t, conn, "_time", "level")
+	source := mustSource(t, conn)
 	provider := newTestProvider(nil) // nil server => real http.Client hitting the env URL.
 
 	// Mirror the production source lifecycle (health check + connection cache).

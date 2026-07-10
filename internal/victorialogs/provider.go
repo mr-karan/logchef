@@ -326,7 +326,7 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 		return false, fmt.Errorf("invalid victorialogs base_url: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, nil)
+	req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, http.NoBody)
 	if err != nil {
 		return false, fmt.Errorf("create victorialogs health request: %w", err)
 	}

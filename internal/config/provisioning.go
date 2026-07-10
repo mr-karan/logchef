@@ -119,7 +119,7 @@ func (s *ProvisionSource) ConnectionPayload() (json.RawMessage, error) {
 		if err != nil {
 			return nil, err
 		}
-		payload, err := json.Marshal(conn)
+		payload, err := json.Marshal(conn) //nolint:gosec // internal round-trip into the source's stored connection_config JSON, never logged or returned to a client.
 		if err != nil {
 			return nil, fmt.Errorf("marshal clickhouse connection config: %w", err)
 		}

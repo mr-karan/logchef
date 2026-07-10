@@ -29,6 +29,7 @@ func TestHandleLocalLoginGating(t *testing.T) {
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusNotFound {
 			t.Errorf("status = %d, want 404", resp.StatusCode)
 		}
@@ -42,6 +43,7 @@ func TestHandleLocalLoginGating(t *testing.T) {
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", resp.StatusCode)
 		}

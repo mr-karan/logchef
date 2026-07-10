@@ -306,78 +306,97 @@ func Load(path string) (*Config, error) {
 
 	// Load separate provisioning file if specified.
 	if cfg.Provisioning.File != "" {
-		provPath := cfg.Provisioning.File
-		// Resolve relative paths against the config file directory.
-		if !filepath.IsAbs(provPath) {
-			provPath = filepath.Join(filepath.Dir(path), provPath)
+		if err := loadProvisioningFile(&cfg, path); err != nil {
+			return nil, err
 		}
-		pk := koanf.New(".")
-		if err := pk.Load(file.Provider(provPath), toml.Parser()); err != nil {
-			return nil, fmt.Errorf("error loading provisioning file %q: %w", provPath, err)
-		}
-		log.Printf("loaded provisioning config from: %s", provPath)
-		// Unmarshal from root — the standalone file uses top-level keys
-		// (manage_sources, [[sources]], [[teams]]) without a [provisioning] prefix.
-		if err := pk.Unmarshal("", &cfg.Provisioning); err != nil {
-			return nil, fmt.Errorf("error parsing provisioning file: %w", err)
-		}
-		// Preserve the file path
-		cfg.Provisioning.File = provPath
 	}
 
+	if err := validateConfig(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+// loadProvisioningFile loads cfg.Provisioning.File (resolved relative to the
+// main config file's directory) and unmarshals it into cfg.Provisioning.
+func loadProvisioningFile(cfg *Config, mainConfigPath string) error {
+	provPath := cfg.Provisioning.File
+	// Resolve relative paths against the config file directory.
+	if !filepath.IsAbs(provPath) {
+		provPath = filepath.Join(filepath.Dir(mainConfigPath), provPath)
+	}
+	pk := koanf.New(".")
+	if err := pk.Load(file.Provider(provPath), toml.Parser()); err != nil {
+		return fmt.Errorf("error loading provisioning file %q: %w", provPath, err)
+	}
+	log.Printf("loaded provisioning config from: %s", provPath)
+	// Unmarshal from root — the standalone file uses top-level keys
+	// (manage_sources, [[sources]], [[teams]]) without a [provisioning] prefix.
+	if err := pk.Unmarshal("", &cfg.Provisioning); err != nil {
+		return fmt.Errorf("error parsing provisioning file: %w", err)
+	}
+	// Preserve the file path
+	cfg.Provisioning.File = provPath
+	return nil
+}
+
+// validateConfig checks the required/interdependent configuration fields
+// once defaults and provisioning have been applied.
+func validateConfig(cfg *Config) error {
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
 	case "sqlite":
 		// SQLite path defaults are always applied; nothing further required.
 	case "postgres":
 		if cfg.Postgres.DSN == "" {
-			return nil, fmt.Errorf("postgres.dsn is required when database.driver is \"postgres\" (set it in file or %sPOSTGRES__DSN)", envPrefix)
+			return fmt.Errorf("postgres.dsn is required when database.driver is \"postgres\" (set it in file or %sPOSTGRES__DSN)", envPrefix)
 		}
 	default:
-		return nil, fmt.Errorf("database.driver must be \"sqlite\" or \"postgres\", got %q", cfg.Database.Driver)
+		return fmt.Errorf("database.driver must be \"sqlite\" or \"postgres\", got %q", cfg.Database.Driver)
 	}
 
 	// Validate required configurations
 	if len(cfg.Auth.AdminEmails) == 0 {
-		return nil, fmt.Errorf("admin_emails is required in auth configuration (either in file or %sAUTH__ADMIN_EMAILS)", envPrefix)
+		return fmt.Errorf("admin_emails is required in auth configuration (either in file or %sAUTH__ADMIN_EMAILS)", envPrefix)
 	}
 
 	// Validate API token secret
 	if cfg.Auth.APITokenSecret == "" {
-		return nil, fmt.Errorf("api_token_secret is required in auth configuration (either in file or %sAUTH__API_TOKEN_SECRET)", envPrefix)
+		return fmt.Errorf("api_token_secret is required in auth configuration (either in file or %sAUTH__API_TOKEN_SECRET)", envPrefix)
 	}
 	if len(cfg.Auth.APITokenSecret) < 32 {
-		return nil, fmt.Errorf("api_token_secret must be at least 32 characters long for security")
+		return fmt.Errorf("api_token_secret must be at least 32 characters long for security")
 	}
 
 	// Validate local auth configuration
 	if cfg.Auth.Local.Enabled && cfg.Auth.Local.AdminEmail != "" && len(cfg.Auth.Local.AdminPassword) < 10 {
-		return nil, fmt.Errorf("auth.local.admin_password must be at least 10 characters (set it via %sAUTH__LOCAL__ADMIN_PASSWORD)", envPrefix)
+		return fmt.Errorf("auth.local.admin_password must be at least 10 characters (set it via %sAUTH__LOCAL__ADMIN_PASSWORD)", envPrefix)
 	}
 
 	// Validate OIDC configuration. When local auth is enabled, OIDC becomes
 	// optional: skip these checks entirely if no provider_url is set, so
 	// Logchef can run without an external identity provider.
 	if cfg.Auth.Local.Enabled && cfg.OIDC.ProviderURL == "" {
-		return &cfg, nil
+		return nil
 	}
 	if cfg.OIDC.ProviderURL == "" {
-		return nil, fmt.Errorf("provider_url is required in OIDC configuration (either in file or %sOIDC__PROVIDER_URL; alternatively enable [auth.local] to run without OIDC)", envPrefix)
+		return fmt.Errorf("provider_url is required in OIDC configuration (either in file or %sOIDC__PROVIDER_URL; alternatively enable [auth.local] to run without OIDC)", envPrefix)
 	}
 	if cfg.OIDC.AuthURL == "" {
-		return nil, fmt.Errorf("auth_url is required in OIDC configuration (either in file or %sOIDC__AUTH_URL)", envPrefix)
+		return fmt.Errorf("auth_url is required in OIDC configuration (either in file or %sOIDC__AUTH_URL)", envPrefix)
 	}
 	if cfg.OIDC.TokenURL == "" {
-		return nil, fmt.Errorf("token_url is required in OIDC configuration (either in file or %sOIDC__TOKEN_URL)", envPrefix)
+		return fmt.Errorf("token_url is required in OIDC configuration (either in file or %sOIDC__TOKEN_URL)", envPrefix)
 	}
 	if cfg.OIDC.ClientID == "" {
-		return nil, fmt.Errorf("client_id is required in OIDC configuration (either in file or %sOIDC__CLIENT_ID)", envPrefix)
+		return fmt.Errorf("client_id is required in OIDC configuration (either in file or %sOIDC__CLIENT_ID)", envPrefix)
 	}
 	if cfg.OIDC.RedirectURL == "" {
-		return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
+		return fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
 	}
 
-	return &cfg, nil
+	return nil
 }
 
 func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config defaults are a flat per-key table

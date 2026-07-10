@@ -149,9 +149,9 @@ func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {
 	return m
 }
 
-func mustExec(t *testing.T, db *sql.DB, query string, args ...any) {
+func mustExec(t *testing.T, db *sql.DB, query string) {
 	t.Helper()
-	if _, err := db.Exec(query, args...); err != nil {
+	if _, err := db.Exec(query); err != nil {
 		t.Fatalf("exec %s: %v", query, err)
 	}
 }

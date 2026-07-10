@@ -44,7 +44,7 @@ type fakeClickHouseCompiler struct {
 
 var sqlTimeFormatRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
 
-func (f *fakeClickHouseCompiler) Type() models.SourceType { return models.SourceTypeClickHouse }
+func (f *fakeClickHouseCompiler) Type() models.SourceType               { return models.SourceTypeClickHouse }
 func (f *fakeClickHouseCompiler) Capabilities() []datasource.Capability { return nil }
 func (f *fakeClickHouseCompiler) SupportedQueryLanguages() []models.QueryLanguage {
 	return []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL}
@@ -92,7 +92,7 @@ func newTranslateTestApp() *fiber.App {
 	return app
 }
 
-func postTranslate(t *testing.T, app *fiber.App, body map[string]any) (int, map[string]any) {
+func postTranslate(t *testing.T, app *fiber.App, body map[string]any) (status int, parsed map[string]any) {
 	t.Helper()
 
 	raw, err := json.Marshal(body)
@@ -106,8 +106,8 @@ func postTranslate(t *testing.T, app *fiber.App, body map[string]any) (int, map[
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
+	defer resp.Body.Close()
 
-	var parsed map[string]any
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}

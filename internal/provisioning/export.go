@@ -63,8 +63,6 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 			if err := provisioned.SetConnectionConfig(conn); err != nil {
 				return nil, fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
 			}
-		case models.SourceTypeClickHouse:
-			fallthrough
 		default:
 			conn := src.Connection
 			if src.SecretRef != "" {

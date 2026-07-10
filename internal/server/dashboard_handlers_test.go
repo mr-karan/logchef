@@ -81,6 +81,7 @@ func TestHandleCreateDashboardValidation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("app.Test: %v", err)
 			}
+			defer resp.Body.Close()
 			if resp.StatusCode != tc.want {
 				body, _ := io.ReadAll(resp.Body)
 				t.Fatalf("status = %d, want %d (body=%s)", resp.StatusCode, tc.want, body)
@@ -140,6 +141,7 @@ func TestHandleUpdateDashboardAuthz(t *testing.T) {
 		if err != nil {
 			t.Fatalf("app.Test(%s): %v", m.method, err)
 		}
+		resp.Body.Close()
 		if resp.StatusCode != http.StatusForbidden {
 			t.Fatalf("%s by stranger: status = %d, want 403", m.method, resp.StatusCode)
 		}
@@ -154,15 +156,18 @@ func TestHandleUpdateDashboardAuthz(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		rb, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
 		t.Fatalf("update by creator: status = %d, want 200 (body=%s)", resp.StatusCode, rb)
 	}
+	resp.Body.Close()
 
 	// Global admin can delete even though they are not the creator.
-	req = httptest.NewRequest(http.MethodDelete, path, nil)
+	req = httptest.NewRequest(http.MethodDelete, path, http.NoBody)
 	resp, err = newApp(admin).Test(req)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("delete by admin: status = %d, want 200", resp.StatusCode)
 	}
@@ -177,10 +182,11 @@ func TestHandleGetDashboardNotFound(t *testing.T) {
 	app := fiber.New()
 	withUser(app, http.MethodGet, "/dashboards/:dashboardID", user, s.handleGetDashboard)
 
-	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/dashboards/99999", nil))
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/dashboards/99999", http.NoBody))
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusNotFound {
 		t.Fatalf("status = %d, want 404", resp.StatusCode)
 	}

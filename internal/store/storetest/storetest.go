@@ -304,6 +304,15 @@ func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("CreateDashboard did not populate timestamps: %+v", d)
 	}
 
+	got := verifyDashboardGetAndList(t, ctx, s, d, owner, panels)
+	verifyDashboardUpdateAndDelete(t, ctx, s, d.ID, got)
+}
+
+// verifyDashboardGetAndList checks GetDashboard/ListDashboards against the
+// just-created dashboard d, and returns the fetched row for further mutation.
+func verifyDashboardGetAndList(t *testing.T, ctx context.Context, s store.Store, d *models.Dashboard, owner *models.User, panels json.RawMessage) *models.Dashboard {
+	t.Helper()
+
 	got, err := s.GetDashboard(ctx, d.ID)
 	if err != nil || got.Name != "Ops" || got.Description != "ops overview" {
 		t.Fatalf("GetDashboard: %v / %+v", err, got)
@@ -331,6 +340,15 @@ func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
 		t.Errorf("ListDashboards[0].CreatedByEmail = %q, want %q", list[0].CreatedByEmail, owner.Email)
 	}
 
+	return got
+}
+
+// verifyDashboardUpdateAndDelete exercises UpdateDashboard/DeleteDashboard on
+// dashboard id, then confirms all three operations report models.ErrNotFound
+// once the row is gone.
+func verifyDashboardUpdateAndDelete(t *testing.T, ctx context.Context, s store.Store, id int, got *models.Dashboard) {
+	t.Helper()
+
 	// Update mutates name + panels.
 	newPanels := json.RawMessage(`{"version":1,"layout":[],"panels":[]}`)
 	got.Name = "Ops v2"
@@ -338,20 +356,20 @@ func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.UpdateDashboard(ctx, got); err != nil {
 		t.Fatalf("UpdateDashboard: %v", err)
 	}
-	if after, _ := s.GetDashboard(ctx, d.ID); after.Name != "Ops v2" || string(after.PanelsJSON) != string(newPanels) {
+	if after, _ := s.GetDashboard(ctx, id); after.Name != "Ops v2" || string(after.PanelsJSON) != string(newPanels) {
 		t.Errorf("after update = %+v", after)
 	}
 
-	if err := s.DeleteDashboard(ctx, d.ID); err != nil {
+	if err := s.DeleteDashboard(ctx, id); err != nil {
 		t.Fatalf("DeleteDashboard: %v", err)
 	}
 
 	// Not-found neutrality: both backends surface models.ErrNotFound (never a raw
 	// driver error) for a missing dashboard, on read and on mutation.
-	if _, err := s.GetDashboard(ctx, d.ID); !errors.Is(err, models.ErrNotFound) {
+	if _, err := s.GetDashboard(ctx, id); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("GetDashboard(deleted) err = %v, want ErrNotFound", err)
 	}
-	if err := s.DeleteDashboard(ctx, d.ID); !errors.Is(err, models.ErrNotFound) {
+	if err := s.DeleteDashboard(ctx, id); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("DeleteDashboard(deleted) err = %v, want ErrNotFound", err)
 	}
 	if err := s.UpdateDashboard(ctx, got); !errors.Is(err, models.ErrNotFound) {

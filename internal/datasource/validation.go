@@ -113,7 +113,7 @@ func validateOptionalColumnName(field, name string) error {
 	return nil
 }
 
-func validateClickHouseConnection(connFieldPrefix string, requireTable bool, connHost, connUsername, connPassword, connDatabase, connTable string) error {
+func validateClickHouseConnection(connFieldPrefix string, requireTable bool, connHost, connDatabase, connTable string) error {
 	if strings.TrimSpace(connHost) == "" {
 		return &ValidationError{Field: connFieldPrefix + "host", Message: "host is required"}
 	}
@@ -147,7 +147,7 @@ func validateClickHouseConnection(connFieldPrefix string, requireTable bool, con
 	return nil
 }
 
-func ValidateVictoriaLogsConnection(connFieldPrefix string, baseURL string) error {
+func ValidateVictoriaLogsConnection(connFieldPrefix, baseURL string) error {
 	if strings.TrimSpace(baseURL) == "" {
 		return &ValidationError{Field: connFieldPrefix + "base_url", Message: "base_url is required"}
 	}

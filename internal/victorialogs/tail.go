@@ -41,7 +41,7 @@ func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req data
 	form.Set("query", query)
 	applyScopeFilters(form, conn)
 
-	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/tail", form)
+	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/tail", form) //nolint:bodyclose // resp.Body is closed by the unconditional defer on the next line; bodyclose can't trace Close() ownership across the goroutine below that reads resp.Body (verified false positive, not a leak).
 	if err != nil {
 		return err
 	}

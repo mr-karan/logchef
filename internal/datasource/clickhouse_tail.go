@@ -199,7 +199,7 @@ func tailDedupKey(row map[string]any, ts time.Time) string {
 	for _, k := range keys {
 		_, _ = h.Write([]byte(k))
 		_, _ = h.Write([]byte{0})
-		_, _ = h.Write([]byte(fmt.Sprint(row[k])))
+		_, _ = fmt.Fprint(h, row[k])
 		_, _ = h.Write([]byte{0})
 	}
 	return strconv.FormatInt(ts.UnixNano(), 10) + ":" + strconv.FormatUint(h.Sum64(), 16)

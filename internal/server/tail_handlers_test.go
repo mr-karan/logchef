@@ -68,11 +68,12 @@ func TestHandleTailLogsInvalidParams(t *testing.T) {
 
 	t.Run("invalid source ID returns 400", func(t *testing.T) {
 		t.Parallel()
-		req := httptest.NewRequest(http.MethodGet, "/teams/1/sources/notanumber/logs/tail", nil)
+		req := httptest.NewRequest(http.MethodGet, "/teams/1/sources/notanumber/logs/tail", http.NoBody)
 		resp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", resp.StatusCode)
 		}
@@ -80,11 +81,12 @@ func TestHandleTailLogsInvalidParams(t *testing.T) {
 
 	t.Run("invalid team ID returns 400", func(t *testing.T) {
 		t.Parallel()
-		req := httptest.NewRequest(http.MethodGet, "/teams/notanumber/sources/1/logs/tail", nil)
+		req := httptest.NewRequest(http.MethodGet, "/teams/notanumber/sources/1/logs/tail", http.NoBody)
 		resp, err := app.Test(req)
 		if err != nil {
 			t.Fatalf("app.Test: %v", err)
 		}
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusBadRequest {
 			t.Errorf("status = %d, want 400", resp.StatusCode)
 		}
@@ -116,6 +118,7 @@ func TestResolveTailQueryRejectsRawSQL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)
 	}
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Errorf("status = %d, want 400 written by resolveTailQuery", resp.StatusCode)
 	}

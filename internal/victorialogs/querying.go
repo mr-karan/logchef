@@ -615,7 +615,7 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	if err := p.decodeJSONRequest(ctx, conn, "/select/logsql/stats_query", form, &result); err != nil {
 		return nil, err
 	}
-	if strings.ToLower(result.Status) != "success" {
+	if !strings.EqualFold(result.Status, "success") {
 		return nil, fmt.Errorf("victorialogs stats_query returned status %q", result.Status)
 	}
 
@@ -1048,8 +1048,8 @@ func orderFieldNames(source *models.Source, fieldNames []string) []string {
 	return out
 }
 
-func defaultDiscoveryWindow() (time.Time, time.Time) {
-	end := time.Now().UTC()
-	start := end.Add(-defaultDiscoveryLookback)
+func defaultDiscoveryWindow() (start, end time.Time) {
+	end = time.Now().UTC()
+	start = end.Add(-defaultDiscoveryLookback)
 	return start, end
 }

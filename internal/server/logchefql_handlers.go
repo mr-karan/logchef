@@ -47,7 +47,7 @@ type ValidateResponse struct {
 	Error *logchefql.ParseError `json:"error,omitempty"`
 }
 
-func parseLogchefQLTimeRange(startTime, endTime, timezone string) (*time.Time, *time.Time, error) {
+func parseLogchefQLTimeRange(startTime, endTime, timezone string) (startPtr, endPtr *time.Time, err error) {
 	locationName := timezone
 	if locationName == "" {
 		locationName = "UTC"
@@ -104,15 +104,63 @@ func parseLogchefQLTimeValue(value string, loc *time.Location) (time.Time, error
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/translate
 func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	sourceID, req, hasTimeParams, ok := parseTranslateRequest(c)
+	if !ok {
+		return nil
 	}
 
-	var req TranslateRequest
+	if ok := s.validateTranslateSource(c, sourceID); !ok {
+		return nil
+	}
+
+	compiled, includeFullSQL, ok := s.compileTranslateQuery(c, sourceID, req, hasTimeParams)
+	if !ok {
+		return nil
+	}
+
+	response := TranslateResponse{
+		GeneratedQuery:         compiled.Query,
+		GeneratedQueryLanguage: compiled.Language,
+		Valid:                  compiled.Valid,
+		Error:                  compiled.Error,
+		Conditions:             compiled.Conditions,
+		FieldsUsed:             compiled.FieldsUsed,
+	}
+	if compiled.Language == models.QueryLanguageClickHouseSQL {
+		response.SQL = compiled.FilterOnly
+		response.GeneratedQuery = compiled.FilterOnly
+		if includeFullSQL {
+			response.FullSQL = compiled.Query
+			response.GeneratedQuery = compiled.Query
+		}
+	}
+
+	// Ensure conditions is never nil
+	if response.Conditions == nil {
+		response.Conditions = []logchefql.FilterCondition{}
+	}
+	if response.FieldsUsed == nil {
+		response.FieldsUsed = []string{}
+	}
+
+	return SendSuccess(c, fiber.StatusOK, response)
+}
+
+// parseTranslateRequest parses and defaults the translate request body and
+// path params, writing the error response and returning ok=false on failure
+// (the Send* helpers return nil, so their return value is not a safe error
+// sentinel — see the tail_handlers regression test for why this codebase
+// uses an explicit ok bool instead).
+func parseTranslateRequest(c *fiber.Ctx) (sourceID models.SourceID, req TranslateRequest, hasTimeParams, ok bool) {
+	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+	if err != nil {
+		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+		return 0, TranslateRequest{}, false, false
+	}
+
 	if err := c.BodyParser(&req); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+		return 0, TranslateRequest{}, false, false
 	}
 
 	// Apply defaults
@@ -122,27 +170,41 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 
 	// Time params are optional - only needed for full_sql generation
 	// Check if all time params are provided for full SQL generation
-	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
+	hasTimeParams = req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
-	// Get source information for schema
+	return sourceID, req, hasTimeParams, true
+}
+
+// validateTranslateSource fetches the source and confirms it supports
+// LogchefQL, writing the error response and returning false on failure.
+func (s *Server) validateTranslateSource(c *fiber.Ctx, sourceID models.SourceID) bool {
 	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			_ = SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			return false
 		}
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return false
 	}
 	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
+		_ = SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
+		return false
 	}
+	return true
+}
 
-	// Compile the query into the source's native language behind the
-	// datasource layer. A query parse failure still returns a non-nil compiled
-	// result (with Valid/Error populated), which the translate endpoint renders
-	// as a 200 with valid=false rather than an error response. A failure to
-	// build full_sql from an otherwise-valid query (e.g. a bad time range) is
-	// handled separately below and returns a 400.
+// compileTranslateQuery compiles the LogchefQL query into the source's native
+// language and validates the resulting full_sql against the request's time
+// range, writing the error response and returning ok=false on failure.
+//
+// A query parse failure still returns a non-nil compiled result (with
+// Valid/Error populated), which the translate endpoint renders as a 200 with
+// valid=false rather than an error response. A failure to build full_sql from
+// an otherwise-valid query (e.g. a bad time range) is handled separately here
+// and returns a 400.
+func (s *Server) compileTranslateQuery(c *fiber.Ctx, sourceID models.SourceID, req TranslateRequest, hasTimeParams bool) (compiled *datasource.CompiledLogchefQL, includeFullSQL, ok bool) {
 	compiled, compileErr := s.datasources.CompileLogchefQL(c.Context(), sourceID, datasource.LogchefQLCompileRequest{
 		Query:     req.Query,
 		StartTime: req.StartTime,
@@ -152,10 +214,12 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	})
 	if compiled == nil {
 		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
+			_ = SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
+			return nil, false, false
 		}
 		s.log.Error("failed to compile logchefql query", "error", compileErr, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to translate query", models.GeneralErrorType)
+		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to translate query", models.GeneralErrorType)
+		return nil, false, false
 	}
 
 	// A query that parses fine (compiled.Valid) but still fails to compile once
@@ -171,35 +235,11 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		if compiled.Error != nil {
 			message = compiled.Error.Error()
 		}
-		return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
+		_ = SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
+		return nil, false, false
 	}
 
-	response := TranslateResponse{
-		GeneratedQuery:         compiled.Query,
-		GeneratedQueryLanguage: compiled.Language,
-		Valid:                  compiled.Valid,
-		Error:                  compiled.Error,
-		Conditions:             compiled.Conditions,
-		FieldsUsed:             compiled.FieldsUsed,
-	}
-	if compiled.Language == models.QueryLanguageClickHouseSQL {
-		response.SQL = compiled.FilterOnly
-		response.GeneratedQuery = compiled.FilterOnly
-		if compiled.Valid && hasTimeParams && compileErr == nil {
-			response.FullSQL = compiled.Query
-			response.GeneratedQuery = compiled.Query
-		}
-	}
-
-	// Ensure conditions is never nil
-	if response.Conditions == nil {
-		response.Conditions = []logchefql.FilterCondition{}
-	}
-	if response.FieldsUsed == nil {
-		response.FieldsUsed = []string{}
-	}
-
-	return SendSuccess(c, fiber.StatusOK, response)
+	return compiled, compiled.Valid && hasTimeParams && compileErr == nil, true
 }
 
 // handleLogchefQLValidate validates a LogchefQL query without translating to SQL.
