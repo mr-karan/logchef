@@ -72,6 +72,8 @@ type Querier interface {
 	DeleteDashboard(ctx context.Context, id int64) (int64, error)
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
+	// Delete all sessions whose expiry is at or before the given time
+	DeleteExpiredSessions(ctx context.Context, expiresAt time.Time) error
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	// Delete a saved query

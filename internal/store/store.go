@@ -43,6 +43,9 @@ type SessionStore interface {
 	DeleteSession(ctx context.Context, id models.SessionID) error
 	DeleteUserSessions(ctx context.Context, userID models.UserID) error
 	CountUserSessions(ctx context.Context, userID models.UserID) (int, error)
+	// DeleteExpiredSessions removes all sessions whose expiry is at or before
+	// the given time. Used by the periodic session sweeper.
+	DeleteExpiredSessions(ctx context.Context, before time.Time) error
 }
 
 // UserPreferenceStore persists per-user UI preferences as an opaque JSON blob.

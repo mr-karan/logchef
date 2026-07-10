@@ -125,6 +125,10 @@ DELETE FROM sessions WHERE user_id = ?;
 -- Count active sessions for a user
 SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at > ?;
 
+-- name: DeleteExpiredSessions :exec
+-- Delete all sessions whose expiry is at or before the given time
+DELETE FROM sessions WHERE expires_at <= ?;
+
 -- Teams
 
 -- name: CreateTeam :one

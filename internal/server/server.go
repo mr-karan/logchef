@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"runtime/debug"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
@@ -57,6 +58,9 @@ type Server struct {
 	log           *slog.Logger
 	buildInfo     string
 	version       string
+
+	stop chan struct{} // closed by Shutdown to stop background maintenance loops
+	wg   sync.WaitGroup
 }
 
 // @title Logchef API
@@ -130,6 +134,7 @@ func New(opts ServerOptions) *Server {
 		log:           opts.Logger,
 		buildInfo:     opts.BuildInfo,
 		version:       opts.Version,
+		stop:          make(chan struct{}),
 	}
 
 	// Register all application routes.
@@ -380,7 +385,11 @@ func (s *Server) Start() error {
 }
 
 // Shutdown gracefully shuts down the Fiber server within the given context timeout.
+// It also stops background maintenance loops (e.g. the expired-session/export-job
+// sweeper) and waits for them to exit before returning.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
+	close(s.stop)
+	s.wg.Wait()
 	return s.app.ShutdownWithContext(ctx)
 }

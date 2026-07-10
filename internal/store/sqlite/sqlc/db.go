@@ -96,6 +96,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.deleteExpiredExportJobsStmt, err = db.PrepareContext(ctx, deleteExpiredExportJobs); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteExpiredExportJobs: %w", err)
 	}
+	if q.deleteExpiredSessionsStmt, err = db.PrepareContext(ctx, deleteExpiredSessions); err != nil {
+		return nil, fmt.Errorf("error preparing query DeleteExpiredSessions: %w", err)
+	}
 	if q.deleteQueryShareStmt, err = db.PrepareContext(ctx, deleteQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query DeleteQueryShare: %w", err)
 	}
@@ -504,6 +507,11 @@ func (q *Queries) Close() error {
 	if q.deleteExpiredExportJobsStmt != nil {
 		if cerr := q.deleteExpiredExportJobsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing deleteExpiredExportJobsStmt: %w", cerr)
+		}
+	}
+	if q.deleteExpiredSessionsStmt != nil {
+		if cerr := q.deleteExpiredSessionsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing deleteExpiredSessionsStmt: %w", cerr)
 		}
 	}
 	if q.deleteQueryShareStmt != nil {
@@ -1044,6 +1052,7 @@ type Queries struct {
 	deleteCollectionStmt                *sql.Stmt
 	deleteDashboardStmt                 *sql.Stmt
 	deleteExpiredExportJobsStmt         *sql.Stmt
+	deleteExpiredSessionsStmt           *sql.Stmt
 	deleteQueryShareStmt                *sql.Stmt
 	deleteSavedQueryStmt                *sql.Stmt
 	deleteSessionStmt                   *sql.Stmt
@@ -1169,6 +1178,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		deleteCollectionStmt:                q.deleteCollectionStmt,
 		deleteDashboardStmt:                 q.deleteDashboardStmt,
 		deleteExpiredExportJobsStmt:         q.deleteExpiredExportJobsStmt,
+		deleteExpiredSessionsStmt:           q.deleteExpiredSessionsStmt,
 		deleteQueryShareStmt:                q.deleteQueryShareStmt,
 		deleteSavedQueryStmt:                q.deleteSavedQueryStmt,
 		deleteSessionStmt:                   q.deleteSessionStmt,

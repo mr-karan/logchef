@@ -304,8 +304,10 @@ func applyStatusUpdate(ctx context.Context, db store.StoreOps, existing *models.
 	return true, nil
 }
 
-// DeleteUser deletes a user from the database.
-func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
+// DeleteUser deletes a user from the database, along with any sessions the
+// user holds. The user row and session rows are removed in the same
+// transaction so a deleted user can never be left with a live session.
+func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
 	// Validate user exists
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
@@ -329,13 +331,18 @@ func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id mod
 		}
 	}
 
-	if err := db.DeleteUser(ctx, id); err != nil {
-		log.Error("failed to delete user from db", "error", err, "user_id", id)
-		return fmt.Errorf("error deleting user: %w", err)
+	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.DeleteUser(ctx, id); err != nil {
+			return fmt.Errorf("error deleting user: %w", err)
+		}
+		if err := tx.DeleteUserSessions(ctx, id); err != nil {
+			return fmt.Errorf("error deleting user sessions: %w", err)
+		}
+		return nil
+	}); err != nil {
+		log.Error("failed to delete user and sessions", "error", err, "user_id", id)
+		return err
 	}
-
-	// TODO: Consider deleting user sessions as well?
-	// if err := db.DeleteUserSessions(ctx, id); err != nil { ... }
 
 	log.Debug("user deleted", "user_id", id)
 	return nil

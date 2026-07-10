@@ -411,16 +411,21 @@ func buildExportJobDownloadURL(teamID models.TeamID, job *models.ExportJob) stri
 }
 
 func (s *Server) startBackgroundCleanup() {
-	go func() {
+	s.wg.Go(func() {
 		s.cleanupExpiredBackgroundState()
 
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			s.cleanupExpiredBackgroundState()
+		for {
+			select {
+			case <-ticker.C:
+				s.cleanupExpiredBackgroundState()
+			case <-s.stop:
+				return
+			}
 		}
-	}()
+	})
 }
 
 func (s *Server) cleanupExpiredBackgroundState() {
@@ -447,5 +452,9 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	}
 	if err := s.sqlite.DeleteExpiredExportJobs(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired export job rows", "error", err)
+	}
+
+	if err := s.sqlite.DeleteExpiredSessions(ctx, now); err != nil {
+		s.log.Warn("failed to delete expired sessions", "error", err)
 	}
 }

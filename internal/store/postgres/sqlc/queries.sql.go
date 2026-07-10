@@ -693,6 +693,16 @@ func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt pgtype.
 	return err
 }
 
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+DELETE FROM sessions WHERE expires_at <= $1
+`
+
+// Delete all sessions whose expiry is at or before the given time
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredSessions, expiresAt)
+	return err
+}
+
 const deleteQueryShare = `-- name: DeleteQueryShare :one
 DELETE FROM query_shares
 WHERE token = $1

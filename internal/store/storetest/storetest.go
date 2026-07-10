@@ -204,6 +204,26 @@ func testSessions(t *testing.T, ctx context.Context, s store.Store) {
 	if _, err := s.GetSession(ctx, sess.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("after delete GetSession err = %v, want ErrNotFound", err)
 	}
+
+	// DeleteExpiredSessions only sweeps rows whose expiry has passed; a live
+	// session must survive the sweep.
+	live := &models.Session{ID: models.SessionID("sess-live"), UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}
+	expired := &models.Session{ID: models.SessionID("sess-expired"), UserID: u.ID, ExpiresAt: time.Now().Add(-time.Hour)}
+	if err := s.CreateSession(ctx, live); err != nil {
+		t.Fatalf("CreateSession(live): %v", err)
+	}
+	if err := s.CreateSession(ctx, expired); err != nil {
+		t.Fatalf("CreateSession(expired): %v", err)
+	}
+	if err := s.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+	if _, err := s.GetSession(ctx, live.ID); err != nil {
+		t.Errorf("live session should survive sweep, got err: %v", err)
+	}
+	if _, err := s.GetSession(ctx, expired.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("expired session should be swept, got err: %v", err)
+	}
 }
 
 func testSettings(t *testing.T, ctx context.Context, s store.Store) {
