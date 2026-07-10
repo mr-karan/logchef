@@ -177,3 +177,88 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.isEditing).toBe(true);
   });
 });
+
+describe("dashboards store — panel time params (issue #80: logchefql timezone shift)", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [] } });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "1m" } });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+  });
+
+  const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+  const SQL_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+  it("sends a UTC SQL-datetime string paired with timezone: UTC to logchefql/query", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel());
+
+    expect(mocks.logchefqlQuery).toHaveBeenCalledTimes(1);
+    // dashboardPanelApi.logchefqlQuery(teamId, sourceId, body, signal)
+    const [, , body] = mocks.logchefqlQuery.mock.calls[0];
+    // The server's ClickHouse compiler only accepts "YYYY-MM-DD HH:MM:SS" here
+    // (it rejects RFC3339 with a 400). Since that string carries no offset,
+    // it must always be paired with timezone: "UTC" — sending the viewer's
+    // real IANA zone here (as the histogram/logs-query paths correctly do)
+    // would shift the query window by that zone's offset. This was the bug.
+    expect(body.start_time).toMatch(SQL_DATETIME);
+    expect(body.end_time).toMatch(SQL_DATETIME);
+    expect(body.timezone).toBe("UTC");
+  });
+
+  it("sends a UTC SQL-datetime string paired with timezone: UTC to logchefql/translate", async () => {
+    mocks.translate.mockResolvedValue({
+      status: "success",
+      data: { valid: true, sql: "", full_sql: "SELECT 1", conditions: [], fields_used: [] },
+    });
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel({
+      id: "p2",
+      title: "Rate",
+      type: "timeseries",
+      team_id: 1,
+      source_id: 1,
+      query: "",
+      query_language: "logchefql",
+      options: {},
+    });
+
+    expect(mocks.translate).toHaveBeenCalledTimes(1);
+    // dashboardPanelApi.translate(teamId, sourceId, body, signal)
+    const [, , body] = mocks.translate.mock.calls[0];
+    expect(body.start_time).toMatch(SQL_DATETIME);
+    expect(body.end_time).toMatch(SQL_DATETIME);
+    expect(body.timezone).toBe("UTC");
+  });
+
+  it("still sends RFC3339 to logs/histogram and logs/query (unaffected by this fix)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel({ ...tablePanel("p3"), query_language: "clickhouse-sql" });
+
+    expect(mocks.logsQuery).toHaveBeenCalledTimes(1);
+    const [, , sqlBody] = mocks.logsQuery.mock.calls[0];
+    expect(sqlBody.start_time).toMatch(RFC3339);
+    expect(sqlBody.end_time).toMatch(RFC3339);
+
+    store.upsertDraftPanel({
+      id: "p4",
+      title: "Rate",
+      type: "timeseries",
+      team_id: 1,
+      source_id: 1,
+      query: "SELECT 1",
+      query_language: "clickhouse-sql",
+      options: {},
+    });
+    // Timeseries panels resolve their native query via an async helper before
+    // calling the histogram endpoint, so the call lands a microtask later.
+    await vi.waitFor(() => expect(mocks.histogram).toHaveBeenCalledTimes(1));
+    const [, , histBody] = mocks.histogram.mock.calls[0];
+    expect(histBody.start_time).toMatch(RFC3339);
+    expect(histBody.end_time).toMatch(RFC3339);
+  });
+});

@@ -115,7 +115,12 @@ export interface SqlQueryRequestBody {
 
 export interface LogchefqlQueryRequestBody {
   query: string;
-  start_time: string; // "YYYY-MM-DD HH:MM:SS"
+  // "YYYY-MM-DD HH:MM:SS" — the server bakes this straight into ClickHouse's
+  // toDateTime(str, timezone) and does NOT accept RFC3339 here (unlike
+  // HistogramRequestBody/SqlQueryRequestBody). Callers must send a UTC
+  // wall-clock string paired with timezone: "UTC" — pairing it with the
+  // viewer's real IANA zone shifts the query window (see PanelState store).
+  start_time: string;
   end_time: string;
   timezone?: string;
   limit?: number;
@@ -123,7 +128,10 @@ export interface LogchefqlQueryRequestBody {
 
 export interface TranslateRequestBody {
   query: string;
-  start_time?: string; // "YYYY-MM-DD HH:MM:SS"
+  // "YYYY-MM-DD HH:MM:SS" — same contract/caveat as LogchefqlQueryRequestBody
+  // above; full_sql generation silently no-ops (rather than erroring) if this
+  // isn't in the exact expected format.
+  start_time?: string;
   end_time?: string;
   timezone?: string;
   limit?: number;

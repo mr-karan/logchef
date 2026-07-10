@@ -102,15 +102,31 @@ function stableStringify(value: unknown): string {
   return JSON.stringify(value);
 }
 
-// A UTC instant as RFC3339 (histogram endpoint contract).
+// A UTC instant as RFC3339 (histogram + logs/query endpoint contract).
 function msToRfc3339(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-// A UTC instant as "YYYY-MM-DD HH:MM:SS" (logchefql endpoint contract).
+// A UTC instant as "YYYY-MM-DD HH:MM:SS" (logchefql translate/query endpoint
+// contract). Unlike the histogram/logs-query endpoints, these two do NOT
+// accept RFC3339 for ClickHouse-backed sources: the compiler bakes this
+// string straight into `toDateTime(str, tz)` and its validator rejects
+// anything but this exact layout (400 "invalid time format: expected
+// 'YYYY-MM-DD HH:MM:SS'"); `/translate` is worse — it silently omits
+// `full_sql` instead of erroring, which would run stat/timeseries panels
+// against the wrong (empty) query. So this format stays.
 function msToSqlDateTime(ms: number): string {
   return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 }
+
+// Because msToSqlDateTime always emits a UTC wall-clock string, the timezone
+// used to interpret it must always be UTC too — sending the viewer's real
+// IANA zone here (as PANEL_QUERY_TIMEZONE does for the RFC3339 endpoints)
+// would tell the server to parse a UTC string as if it were local time in
+// that zone, shifting the query window by the zone's offset. This is the
+// bug this fix addresses: non-UTC viewers previously got a shifted window on
+// the two logchefql endpoints.
+const LOGCHEFQL_TIME_TIMEZONE = "UTC";
 
 function isAbort(err: unknown): boolean {
   return (
@@ -305,7 +321,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         query: panel.query,
         start_time: msToSqlDateTime(range.start),
         end_time: msToSqlDateTime(range.end),
-        timezone: PANEL_QUERY_TIMEZONE,
+        timezone: LOGCHEFQL_TIME_TIMEZONE,
         limit: panel.options?.limit,
       },
       signal
@@ -389,7 +405,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         query: panel.query,
         start_time: msToSqlDateTime(range.start),
         end_time: msToSqlDateTime(range.end),
-        timezone: PANEL_QUERY_TIMEZONE,
+        timezone: LOGCHEFQL_TIME_TIMEZONE,
         limit,
       },
       signal
