@@ -88,6 +88,9 @@ const pendingNewPanelId = ref<string | null>(null);
 function openAddPanel() {
   const id = store.createDraftShell();
   if (!id) return;
+  // Persist an explicit chart choice on new panels so a future change to the
+  // "absent chart" default can't silently restyle already-saved panels.
+  store.updateDraftPanel(id, { options: { chart: "line" } });
   pendingNewPanelId.value = id;
   editingPanelId.value = id;
   editorOpen.value = true;

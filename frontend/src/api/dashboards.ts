@@ -16,8 +16,10 @@ export interface DashboardPanelOptions {
   /** Subset of columns to display for table panels (empty/absent = all). */
   columns?: string[];
   /**
-   * Timeseries render style. Absent = "line" (Grafana-like default) for new
-   * panels; legacy panels with no value continue to render as stacked bars.
+   * Timeseries render style. Absent = "line" (Grafana-like default) — this
+   * also applies to legacy panels saved before this option existed, since the
+   * runtime has no way to distinguish "legacy" from "new" at render time.
+   * Explicit values are always honored.
    */
   chart?: "bars" | "line" | "area";
 }
