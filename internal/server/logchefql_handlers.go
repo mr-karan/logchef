@@ -138,9 +138,11 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 	}
 
 	// Compile the query into the source's native language behind the
-	// datasource layer. A parse/build failure still returns a non-nil compiled
+	// datasource layer. A query parse failure still returns a non-nil compiled
 	// result (with Valid/Error populated), which the translate endpoint renders
-	// as a 200 with valid=false rather than an error response.
+	// as a 200 with valid=false rather than an error response. A failure to
+	// build full_sql from an otherwise-valid query (e.g. a bad time range) is
+	// handled separately below and returns a 400.
 	compiled, compileErr := s.datasources.CompileLogchefQL(c.Context(), sourceID, datasource.LogchefQLCompileRequest{
 		Query:     req.Query,
 		StartTime: req.StartTime,
@@ -154,6 +156,22 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 		}
 		s.log.Error("failed to compile logchefql query", "error", compileErr, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to translate query", models.GeneralErrorType)
+	}
+
+	// A query that parses fine (compiled.Valid) but still fails to compile once
+	// the time range is baked in (compileErr != nil) means the supplied
+	// start/end/timezone were rejected while building full_sql — e.g. RFC3339
+	// timestamps against a ClickHouse source, which requires "YYYY-MM-DD
+	// HH:MM:SS". Surface this as a 400 exactly like /logchefql/query does,
+	// instead of silently omitting full_sql from an otherwise 200 response.
+	// Query parse failures (compiled.Valid == false) are intentionally left to
+	// the 200/valid=false path below for real-time editor validation.
+	if compiled.Valid && hasTimeParams && compileErr != nil {
+		message := compileErr.Error()
+		if compiled.Error != nil {
+			message = compiled.Error.Error()
+		}
+		return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
 	}
 
 	response := TranslateResponse{
