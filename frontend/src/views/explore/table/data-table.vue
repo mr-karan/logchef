@@ -14,6 +14,7 @@ import {
     type PaginationState,
     type ColumnSizingState,
     type ColumnResizeMode,
+    type ColumnFiltersState,
 } from '@tanstack/vue-table'
 import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
@@ -29,6 +30,7 @@ import { getDefaultColumnVisibility } from './defaultColumnVisibility'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import TableControls from './TableControls.vue'
+import ColumnFilterButton from './ColumnFilterButton.vue'
 import { usePreferencesStore } from '@/stores/preferences'
 
 interface Props {
@@ -94,6 +96,10 @@ const pagination = ref<PaginationState>({
     pageSize: 50,
 })
 const globalFilter = ref('')
+// Column filters are local to this table (client-side filtering of the
+// currently loaded result page only) and reset whenever a new query runs -
+// see the watch on props.data below. They are intentionally not persisted.
+const columnFilters = ref<ColumnFiltersState>([])
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
@@ -258,6 +264,15 @@ watch(
     },
     { immediate: true, deep: true } // Use deep watch for searchTerms array changes
 );
+
+// Reset column filters whenever a new query runs. A new query replaces
+// props.data with a fresh array reference, so any change here means the
+// previously loaded result page is gone and stale filters no longer apply.
+watch(() => props.data, () => {
+    if (columnFilters.value.length > 0) {
+        columnFilters.value = [];
+    }
+});
 
 // Save state whenever relevant parts change
 watch([columnOrder, columnSizing, columnVisibility], () => {
@@ -471,6 +486,9 @@ const table = useVueTable({
         get globalFilter() {
             return globalFilter.value
         },
+        get columnFilters() {
+            return columnFilters.value
+        },
         get columnSizing() {
             return columnSizing.value
         },
@@ -486,6 +504,7 @@ const table = useVueTable({
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
+    onColumnFiltersChange: updaterOrValue => valueUpdater(updaterOrValue, columnFilters),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
     onColumnOrderChange: updaterOrValue => {
         const nextValue = typeof updaterOrValue === 'function'
@@ -718,6 +737,13 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             <FlexRender v-if="!header.isPlaceholder && header.column.columnDef.header"
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
+
+                                        <!-- Column Filter (client-side, filters the currently loaded page only) -->
+                                        <ColumnFilterButton
+                                            v-if="header.column.getCanFilter()"
+                                            :column="header.column"
+                                            class="mr-1"
+                                        />
 
                                         <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
                                         <div v-if="header.column.getCanResize()"

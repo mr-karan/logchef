@@ -4,6 +4,7 @@ import type { Column, ColumnDef, Row } from "@tanstack/vue-table";
 import { formatTimestamp, formatLogContent } from "@/lib/utils";
 import { getSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';
+import { columnFilterFn } from './columnFilter';
 
 // Width configurations for each column type
 // maxWidth is set very high to allow free resizing - users should be able to expand columns as needed
@@ -359,6 +360,8 @@ export function createColumns(
 
       enableHiding: true,
       enableColumnFilter: true,
+      // Client-side filtering of the currently loaded result page (see columnFilter.ts).
+      filterFn: columnFilterFn,
     };
   });
 }

@@ -2,7 +2,8 @@
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Input } from '@/components/ui/input'
-import { RefreshCw, Search } from 'lucide-vue-next'
+import { Button } from '@/components/ui/button'
+import { RefreshCw, Search, FilterX } from 'lucide-vue-next'
 import DataTablePagination from './data-table-pagination.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
 import type { Table } from '@tanstack/vue-table'
@@ -70,6 +71,16 @@ function formatExecutionTime(ms: number): string {
 
 // Check if table has rows
 const hasRows = computed(() => props.table && props.table.getRowModel().rows?.length > 0)
+
+// Column filters are client-side (see data-table.vue / columnFilter.ts) and only
+// ever filter the currently loaded result page - surface that plainly here.
+const hasColumnFilters = computed(() => (props.table?.getState().columnFilters?.length ?? 0) > 0)
+const filteredRowCount = computed(() => props.table?.getFilteredRowModel().rows.length ?? 0)
+const totalRowCount = computed(() => props.table?.getCoreRowModel().rows.length ?? 0)
+
+function clearColumnFilters() {
+  props.table.resetColumnFilters()
+}
 </script>
 
 <template>
@@ -86,6 +97,27 @@ const hasRows = computed(() => props.table && props.table.getRowModel().rows?.le
         <span v-if="stats.rows_read !== undefined" :title="`Rows read: ${stats.rows_read.toLocaleString()}`">
           {{ stats.rows_read.toLocaleString() }} rows
         </span>
+      </template>
+
+      <!-- Column filter indicator - client-side filtering of the loaded page only -->
+      <template v-if="hasColumnFilters">
+        <span v-if="!isLoading && (stats || showStats)" class="text-muted-foreground/40">·</span>
+        <span
+          class="text-primary font-medium"
+          title="Column filters only narrow the rows already loaded on this page"
+        >
+          {{ filteredRowCount.toLocaleString() }} of {{ totalRowCount.toLocaleString() }} rows
+        </span>
+        <Button
+          variant="ghost"
+          size="sm"
+          class="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+          title="Clear all column filters"
+          @click="clearColumnFilters"
+        >
+          <FilterX class="h-3 w-3 mr-1" />
+          Clear filters
+        </Button>
       </template>
     </div>
 
