@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"net"
 	"reflect"
 	"regexp"
 	"strings"
@@ -352,7 +353,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			rowsReturned = int64(len(resultData))
 		}
 		errorType := metrics.DetermineErrorType(err)
-		timedOut := false // TODO: better timeout detection
+		timedOut := isTimeoutError(err)
 		queryHelper.Finish(success, rowsReturned, errorType, timedOut)
 	}
 
@@ -456,6 +457,52 @@ func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions
 	}
 	maps.Copy(settings, opts.Settings)
 	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+}
+
+// ClickHouse exception codes (see clickhouse-go's lib/proto.Exception.Code)
+// that indicate the query was aborted due to a timeout rather than some
+// other server-side failure.
+const (
+	chExceptionTimeoutExceeded int32 = 159 // TIMEOUT_EXCEEDED: max_execution_time exceeded server-side.
+	chExceptionSocketTimeout   int32 = 209 // SOCKET_TIMEOUT: the connection's socket timed out mid-query.
+)
+
+// isTimeoutError reports whether err represents a query timeout, so the
+// query metrics can distinguish timeouts from other kinds of failures. It
+// checks, in order:
+//   - the Go context deadline (queryTimeoutGrace backstop) expiring, surfaced
+//     as context.DeadlineExceeded anywhere in the error chain;
+//   - ClickHouse itself reporting the query was aborted for taking too long
+//     (*clickhouse.Exception with code 159 TIMEOUT_EXCEEDED or 209
+//     SOCKET_TIMEOUT);
+//   - the underlying net.Conn reporting a read/write timeout.
+//
+// A plain context.Canceled (e.g. the caller/request going away) is
+// deliberately not treated as a timeout — that's a cancellation, not a
+// deadline being hit.
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+
+	var exception *clickhouse.Exception
+	if errors.As(err, &exception) {
+		switch exception.Code {
+		case chExceptionTimeoutExceeded, chExceptionSocketTimeout:
+			return true
+		}
+	}
+
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+
+	return false
 }
 
 // boundedRowCap returns a preallocation hint for the result slice: the applied
