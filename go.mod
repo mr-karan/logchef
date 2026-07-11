@@ -12,6 +12,7 @@ require (
 	github.com/VictoriaMetrics/metrics v1.44.0
 	github.com/alecthomas/participle/v2 v2.1.4
 	github.com/coreos/go-oidc/v3 v3.19.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/gofiber/fiber/v2 v2.52.13
 	github.com/gofiber/swagger v1.1.1
 	github.com/golang-migrate/migrate/v4 v4.19.1
@@ -38,7 +39,6 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-faster/city v1.0.1 // indirect
 	github.com/go-faster/errors v0.7.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-openapi/jsonpointer v0.24.0 // indirect
 	github.com/go-openapi/jsonreference v0.21.6 // indirect
 	github.com/go-openapi/spec v0.22.6 // indirect

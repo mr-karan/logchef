@@ -71,3 +71,37 @@ func TestLoad_RejectsUnknownDriver(t *testing.T) {
 		t.Fatal("expected error for unknown driver")
 	}
 }
+
+func TestLoad_AutoProvisionEnabledRequiresAllowedDomains(t *testing.T) {
+	_, err := Load(writeConfig(t, "\n[auth.auto_provision]\nenabled = true\n"))
+	if err == nil {
+		t.Fatal("expected error when auto_provision.enabled=true with no allowed_domains")
+	}
+}
+
+func TestLoad_AutoProvisionEnabledWithAllowedDomains(t *testing.T) {
+	extra := "\n[auth.auto_provision]\nenabled = true\nallowed_domains = [\"example.com\"]\ndefault_team_ids = [1, 2]\n"
+	cfg, err := Load(writeConfig(t, extra))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Auth.AutoProvision.Enabled {
+		t.Error("auto_provision.enabled = false, want true")
+	}
+	if got := cfg.Auth.AutoProvision.AllowedDomains; len(got) != 1 || got[0] != "example.com" {
+		t.Errorf("allowed_domains = %v, want [example.com]", got)
+	}
+	if got := cfg.Auth.AutoProvision.DefaultTeamIDs; len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Errorf("default_team_ids = %v, want [1 2]", got)
+	}
+}
+
+func TestLoad_AutoProvisionDisabledByDefault(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.AutoProvision.Enabled {
+		t.Error("auto_provision.enabled should default to false")
+	}
+}

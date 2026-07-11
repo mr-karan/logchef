@@ -207,6 +207,55 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 	return user, nil
 }
 
+// GetOrCreateAutoProvisionedUser gets or creates a regular (member) user for
+// JIT OIDC auto-provisioning. Unlike CreateUser, it does not pre-check
+// existence before inserting: it always attempts the insert and, on a unique
+// email conflict, re-fetches the existing row. This makes it safe for two
+// concurrent first logins from the same email to both succeed instead of
+// racing on a check-then-act window.
+//
+// The created user is left unmanaged (the DB default) so the provisioning
+// reconciler never adopts or deletes it.
+func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
+	if fullName == "" {
+		fullName = email
+	}
+	if err := validateUserCreation(email, fullName, models.UserRoleMember); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	user := &models.User{
+		Email:       email,
+		FullName:    fullName,
+		Role:        models.UserRoleMember,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeHuman,
+		Timestamps: models.Timestamps{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	}
+
+	if err := db.CreateUser(ctx, user); err != nil {
+		if models.IsConflict(err) {
+			// Another concurrent login (or a pre-existing user) won the race;
+			// re-fetch the row that now exists under the unique email constraint.
+			existing, getErr := db.GetUserByEmail(ctx, email)
+			if getErr != nil {
+				log.Error("failed to re-fetch user after auto-provision conflict", "error", getErr, "email", email)
+				return nil, fmt.Errorf("error re-fetching user after conflict: %w", getErr)
+			}
+			return existing, nil
+		}
+		log.Error("error auto-provisioning user in db", "error", err, "email", email)
+		return nil, fmt.Errorf("error auto-provisioning user: %w", err)
+	}
+
+	log.Debug("user auto-provisioned", "user_id", user.ID, "email", user.Email)
+	return user, nil
+}
+
 // UpdateUser updates an existing user's information.
 func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {

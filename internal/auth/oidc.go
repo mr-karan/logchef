@@ -186,14 +186,25 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.StoreOps, lo
 	// Look up user in the local database.
 	user, err := core.GetUserByEmail(ctx, db, claims.Email)
 	if err != nil {
-		// User not found is treated as unauthorized access.
+		// User not found: try JIT auto-provisioning (only runs after the
+		// email_verified gate above has already passed) before treating this
+		// as unauthorized access.
 		if errors.Is(err, core.ErrUserNotFound) {
-			p.log.Warn("unauthorized user attempted login (user not found in db)", "email", claims.Email, "name", claims.Name)
-			return nil, nil, ErrUnauthorizedUser
+			provisioned, attempted, provErr := autoProvisionUser(ctx, db, log, authCfg.AutoProvision, claims.Email, claims.Name)
+			if provErr != nil {
+				p.log.Error("failed to auto-provision user", "error", provErr, "email", claims.Email)
+				return nil, nil, fmt.Errorf("failed to auto-provision user: %w", provErr)
+			}
+			if !attempted {
+				p.log.Warn("unauthorized user attempted login (user not found in db)", "email", claims.Email, "name", claims.Name)
+				return nil, nil, ErrUnauthorizedUser
+			}
+			user = provisioned
+		} else {
+			// Log other unexpected DB errors.
+			p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
+			return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
 		}
-		// Log other unexpected DB errors.
-		p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
-		return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
 	}
 	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
 		p.log.Warn("inactive user attempted login", "user_id", user.ID, "email", user.Email)

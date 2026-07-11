@@ -167,6 +167,26 @@ type AuthConfig struct {
 	// Local enables email+password authentication alongside (or instead of)
 	// OIDC — so Logchef can run without an external identity provider.
 	Local LocalAuthConfig `koanf:"local"`
+	// AutoProvision enables just-in-time user creation on first OIDC login
+	// from an allowed company domain, instead of failing with "user not found".
+	AutoProvision AutoProvisionConfig `koanf:"auto_provision"`
+}
+
+// AutoProvisionConfig controls JIT (just-in-time) user provisioning on first
+// OIDC login. When Enabled, a user authenticating via OIDC for the first time
+// from an allowed domain is created automatically (as a regular, unmanaged
+// member) instead of being rejected as "user not found".
+type AutoProvisionConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// AllowedDomains is the list of email domains eligible for auto-provisioning.
+	// Matching is an exact, case-insensitive comparison against the domain part
+	// of the OIDC email claim — no subdomain/wildcard matching. Required
+	// (non-empty) when Enabled is true.
+	AllowedDomains []string `koanf:"allowed_domains"`
+	// DefaultTeamIDs are the team IDs an auto-provisioned user is added to as
+	// role "member". Best-effort: a nonexistent team ID is logged and skipped,
+	// it never fails the login.
+	DefaultTeamIDs []int `koanf:"default_team_ids"`
 }
 
 // LocalAuthConfig configures built-in email+password authentication.
@@ -372,6 +392,12 @@ func validateConfig(cfg *Config) error {
 	// Validate local auth configuration
 	if cfg.Auth.Local.Enabled && cfg.Auth.Local.AdminEmail != "" && len(cfg.Auth.Local.AdminPassword) < 10 {
 		return fmt.Errorf("auth.local.admin_password must be at least 10 characters (set it via %sAUTH__LOCAL__ADMIN_PASSWORD)", envPrefix)
+	}
+
+	// Validate auto-provisioning configuration: an allowed domain list is
+	// required when enabled, otherwise every OIDC domain would be eligible.
+	if cfg.Auth.AutoProvision.Enabled && len(cfg.Auth.AutoProvision.AllowedDomains) == 0 {
+		return fmt.Errorf("auth.auto_provision.allowed_domains must be non-empty when auth.auto_provision.enabled is true (either in file or %sAUTH__AUTO_PROVISION__ALLOWED_DOMAINS)", envPrefix)
 	}
 
 	// Validate OIDC configuration. When local auth is enabled, OIDC becomes

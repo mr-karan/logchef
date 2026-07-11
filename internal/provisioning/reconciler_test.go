@@ -363,3 +363,56 @@ func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 		t.Errorf("source should have been unlinked, got %d", len(sources))
 	}
 }
+
+// TestReconcile_IgnoresAutoProvisionedUsers guards the JIT auto-provisioning
+// contract (#34): a user created outside of provisioning (e.g. via OIDC
+// first-login auto-provisioning) is created unmanaged, and Reconcile must
+// never adopt (mark managed) or delete it as long as the provisioning config
+// doesn't reference its email — even with prune=true and an unrelated team
+// under management.
+func TestReconcile_IgnoresAutoProvisionedUsers(t *testing.T) {
+	db := newReconcileTestDB(t)
+	ctx := context.Background()
+	ds := newTestDatasourceService(db)
+
+	// Simulate a JIT auto-provisioned user: created directly, unmanaged, and
+	// never mentioned by any provisioning config.
+	autoUser := &models.User{
+		Email:       "walker@example.com",
+		FullName:    "Walker Auto",
+		Role:        models.UserRoleMember,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeHuman,
+	}
+	if err := db.CreateUser(ctx, autoUser); err != nil {
+		t.Fatalf("seed auto-provisioned user: %v", err)
+	}
+	if managed, err := db.IsUserManaged(ctx, autoUser.ID); err != nil || managed {
+		t.Fatalf("precondition: auto-provisioned user should start unmanaged (managed=%v err=%v)", managed, err)
+	}
+
+	cfg := &config.ProvisioningConfig{
+		ManageTeams: true,
+		Prune:       true,
+		Teams: []config.ProvisionTeam{{
+			Name:    "team1",
+			Members: []config.ProvisionMember{{Email: "alice@example.com", Role: "member"}},
+		}},
+	}
+
+	if err := Reconcile(ctx, cfg, db, ds, quietLogger(), nil); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// The auto-provisioned user must survive, untouched and unmanaged.
+	got, err := db.GetUser(ctx, autoUser.ID)
+	if err != nil {
+		t.Fatalf("auto-provisioned user should still exist after reconcile: %v", err)
+	}
+	if managed, err := db.IsUserManaged(ctx, got.ID); err != nil || managed {
+		t.Fatalf("auto-provisioned user must remain unmanaged after reconcile (managed=%v err=%v)", managed, err)
+	}
+	if got.Email != autoUser.Email || got.FullName != autoUser.FullName {
+		t.Errorf("auto-provisioned user was modified by reconcile: got %+v", got)
+	}
+}
