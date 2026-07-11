@@ -105,6 +105,26 @@ Use native LogsQL when you need:
 - `unpack_json`
 - other VictoriaLogs-native pipe flows
 
+## Live Tail
+
+VictoriaLogs sources support **Live Tail** from the explorer's Live toggle. Unlike
+ClickHouse (which is polled on an interval), Logchef proxies VictoriaLogs' native
+tail stream directly, so new rows arrive as a genuine push rather than a poll.
+Live tail is available in LogchefQL mode and in native LogsQL mode; the time-range
+and limit controls are disabled while a tail is running.
+
+## Known limitations
+
+A few Logchef features are ClickHouse-only for now and are not available on
+VictoriaLogs sources:
+
+- **AI SQL generation** — the AI assistant only writes ClickHouse SQL.
+- **Log context** ("surrounding logs") — jumping from a row to the logs around it.
+- **Exports / downloads** — streaming a full result set to CSV or NDJSON.
+
+Everything else in this guide — explore, histograms, field values, saved queries,
+live tail, and alerting — works the same as on ClickHouse.
+
 ## Result Views
 
 Logchef keeps the result experience backend-neutral:

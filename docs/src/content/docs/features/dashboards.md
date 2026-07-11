@@ -53,15 +53,31 @@ dashboards default to the last 15 minutes.
 Set an **auto-refresh** interval — off, 30 seconds, 1 minute, or 5 minutes — to keep
 a wall-board style view current. There is also a manual refresh button.
 
+Panels render correctly for viewers in any timezone: histogram buckets (time series
+panels) align to your local timezone, while table and stat panels use a UTC-anchored
+query internally so their time window doesn't shift for non-UTC viewers.
+
+## Chart styles
+
+Time series panels can render as **bars** (default), **line**, or **area**. Set the
+style per panel in the panel builder — the histogram data is shared with the
+explorer, including zero-filled gaps so a sparse or grouped series (e.g. 5xx errors
+by host) renders as a continuous chart instead of isolated bars floating over dead
+space.
+
 ## Editing
 
-Open a dashboard and choose **Edit** to enter edit mode. From there you can:
+Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
 
-- **Add a panel** — a side sheet lets you pick the team and source, write the query
-  (with a live preview), choose the panel type, and set per-type options.
-- **Rename or reconfigure** an existing panel through the same sheet.
-- **Resize** a panel to one of the preset widths and heights.
-- **Reorder** panels by dragging them into place.
+- **Move a panel** — drag it by its header to a new grid position.
+- **Resize a panel** — drag the handle on its bottom-right corner.
+- **Add a panel** — click an empty grid slot, or the "+ Add panel" tile. This opens
+  the **panel builder**, a full-height drawer where you pick the team and source,
+  write the query in the Monaco editor (LogchefQL or the source's native language)
+  with a live preview, choose the panel type, and set type-specific options: group-by
+  and chart style for time series, a row limit and optional column subset for tables.
+- **Edit or remove** an existing panel via the pencil / trash icons on its header,
+  which reopens the same panel builder drawer.
 
 Changes stay local until you **Save**; **Cancel** discards them. Leaving with unsaved
 edits prompts first.

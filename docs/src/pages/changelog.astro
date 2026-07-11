@@ -79,6 +79,59 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- Unreleased -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+        <span class="version-badge">In development</span>
+        <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md" class="version-link" target="_blank">Full changelog &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        This release makes <strong>VictoriaLogs a first-class datasource</strong> alongside ClickHouse &mdash; add a VictoriaLogs source, query it in LogchefQL (compiled to LogsQL) or raw LogsQL, and build alerts and live tails against it. Sources now advertise an explicit <strong>capability set</strong> (histogram, field values, exports, live tail, &hellip;) instead of hardcoded backend checks. Alongside VictoriaLogs, this release adds <strong>built-in local authentication</strong> (run without an external OIDC provider), <strong>live tail</strong> (stream logs in real time), a <strong>Dashboards</strong> upgrade (direct-manipulation grid editing, a full-height panel builder, line/area/bar chart styles), and <strong>client-side column filters</strong> in the results table.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>VictoriaLogs datasource</strong> &mdash; Add a source with a base URL, auth mode (none / basic / bearer), optional multi-tenant account &amp; project IDs, and an immutable scope query applied to every request. Query in LogchefQL (compiled to LogsQL) or native LogsQL. Alerts support both a condition builder and native <code>stats_query</code>. AI SQL generation, log context, and streamed exports remain ClickHouse-only for now. <a href="/tutorials/victorialogs/">VictoriaLogs guide &rarr;</a></li>
+          <li><strong>Built-in local authentication</strong> &mdash; Run Logchef with email+password login, with or without OIDC. Configure via <code>[auth.local]</code> (<code>enabled</code>, <code>admin_email</code>, <code>admin_password</code>). Rate-limited per IP and per email. <a href="/getting-started/configuration/#local-authentication-run-without-oidc">Learn more &rarr;</a></li>
+          <li><strong>Live tail</strong> &mdash; A <strong>Live</strong> toggle in the explorer streams matching rows over SSE. ClickHouse is polled (<code>[tail] poll_interval</code>); VictoriaLogs proxies its native tail stream directly. Works in LogchefQL mode on any source, and in native LogsQL mode on VictoriaLogs.</li>
+          <li><strong>Dashboards: grid-canvas editing</strong> &mdash; Drag a panel by its header to move it, drag its corner to resize. A full-height panel builder drawer (with a live query preview) replaces the old form sheet.</li>
+          <li><strong>Dashboards: chart styles</strong> &mdash; Time series panels render as bars, line, or area, set per panel.</li>
+          <li><strong>Client-side column filters</strong> &mdash; Click a column header's filter icon to narrow currently-loaded rows by a contains match or a numeric comparison (<code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>=</code>). No extra query is sent.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Source credentials are never echoed back</strong> in API responses &mdash; a <code>has_password</code> flag replaces the stored credential; blank on update means "keep existing".</li>
+          <li><strong>Sparse and grouped histograms render as continuous charts</strong> &mdash; gaps between the first and last bucket are now zero-filled, in both the explorer and dashboard panels.</li>
+          <li><strong>Dashboard panels are timezone-correct for every viewer</strong> &mdash; time-series buckets align to your local timezone; table/stat panels use an internally UTC-pinned query so their window doesn't shift.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Deleting a user deletes their sessions too</strong> &mdash; a removed user's session no longer keeps working until natural expiry.</li>
+          <li><strong>Condition-mode alerts aggregate over a real field</strong> &mdash; <code>sum</code>/<code>avg</code>/<code>min</code>/<code>max</code> now use a field you pick, instead of a hardcoded column that didn't exist on most datasets.</li>
+          <li><strong>ClickHouse query results no longer lose their columns</strong> on the alert-evaluation path, fixing alerts whose query returned rows failing to evaluate.</li>
+          <li><strong>Exports return a clean 400</strong> (and the Download button hides) on sources that don't support them, instead of a 500 or a silently-failing background job.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.7.0 -->
     <article class="version">
       <div class="version-header">

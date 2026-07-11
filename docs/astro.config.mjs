@@ -90,7 +90,8 @@ export default defineConfig({
         {
           label: "Tutorials",
           items: [
-            { label: "Vector + OTEL Logs", link: "/tutorials/vector-otel" },
+            { label: "VictoriaLogs", link: "/tutorials/victorialogs" },
+            { label: "Vector + OTEL Logs", link: "/integration/vector" },
             { label: "NGINX Logs", link: "/tutorials/nginx-logs" },
           ],
         },

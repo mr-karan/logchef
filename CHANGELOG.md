@@ -5,6 +5,128 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+This release makes **VictoriaLogs a first-class datasource** alongside ClickHouse
+— add a VictoriaLogs source, query it in LogchefQL (compiled to LogsQL) or raw
+LogsQL, and build alerts and live tails against it. Under the hood, sources moved
+from a ClickHouse-shaped schema to a generic datasource-provider model with an
+explicit capability set (schema inspection, histogram, field values, AI SQL
+generation, log context, exports, live tail) so each backend only claims what it
+actually supports. Alongside VictoriaLogs, this release adds **built-in local
+authentication** (run without an external OIDC provider), **live tail** (stream
+logs in real time), a big **Dashboards** upgrade (direct-manipulation grid
+editing, a full-height panel builder, line/area/bar chart styles), and
+**client-side column filters** in the results table.
+
+### Added
+- **VictoriaLogs datasource.** Add a VictoriaLogs source (base URL, auth mode —
+  none/basic/bearer, optional multi-tenant `account_id`/`project_id`, and an
+  optional immutable scope query applied server-side to every query). Query it in
+  LogchefQL — compiled to LogsQL — or write native LogsQL directly. Alerts support
+  both a LogchefQL condition builder (with a field-and-aggregate picker) and
+  native LogsQL via `stats_query`. See the
+  [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/). Known gaps:
+  AI SQL generation, log context ("surrounding logs"), and streamed
+  exports/downloads remain ClickHouse-only for now.
+- **Datasource capability model.** Each source now advertises a capability set
+  (`schema_inspection`, `histogram`, `field_values`, `source_inspection`,
+  `ai_sql_generation`, `log_context`, `exports`, `live_tail`) that both the API
+  and UI gate on, instead of hardcoded source-type checks. ClickHouse supports
+  all eight; VictoriaLogs currently supports the first four plus `live_tail`.
+- **Built-in local authentication.** Set `[auth.local]` (`enabled`,
+  `admin_email`, `admin_password`, or the matching `LOGCHEF_AUTH__LOCAL__*` env
+  vars) to run Logchef with email+password auth, with or without OIDC — the
+  login page shows whichever are configured. Logins are rate-limited per IP and
+  per email. The bootstrap admin's password is reconciled on every startup, so
+  rotation is a config change plus restart; there is no self-service password
+  change yet. See [Local authentication](https://logchef.app/getting-started/configuration/#local-authentication-run-without-oidc).
+- **Live tail.** A **Live** toggle in the explorer streams matching rows in real
+  time over SSE. ClickHouse sources are polled (`[tail] poll_interval`, default
+  2s); VictoriaLogs sources proxy VictoriaLogs' native tail stream directly.
+  Available in LogchefQL mode on any source, and in native mode on VictoriaLogs
+  (LogsQL) — not available for raw ClickHouse SQL. Guardrails:
+  `max_per_user`, `max_global`, `session_ttl`, `max_rows_per_sec` under `[tail]`.
+- **Dashboards: grid-canvas editing.** Edit mode is now direct manipulation —
+  drag a panel by its header to move it, drag its corner to resize. Adding or
+  editing a panel opens a full-height panel builder drawer (replacing the old
+  form sheet) with a live query preview.
+- **Dashboards: chart styles.** Time series panels render as bars (default),
+  line, or area, set per panel in the builder.
+- **Client-side column filters** in the results table. Click a column header's
+  filter icon to narrow currently-loaded rows by a contains match, or a
+  comparison (`>`, `>=`, `<`, `<=`, `=`) on numeric columns. No extra query is
+  sent; filters reset on the next run. (Closes #4)
+- **Renovate** — automated dependency update PRs for Go, npm, Cargo, and GitHub
+  Actions, grouped by ecosystem with weekly scheduling. (Closes #62)
+
+### Changed
+- **Source credentials are never echoed back in API responses.** Source
+  connection payloads now carry a `has_password` flag instead of the stored
+  credential; blank credentials on update mean "keep existing" for both
+  ClickHouse and VictoriaLogs providers. (Closes #49)
+- **Explore mode naming is backend-neutral.** The editor's native mode is now
+  called `native` (state `nativeQuery`) instead of the ClickHouse-era `sql`;
+  old URLs, drafts, and query-share payloads with the legacy `sql` value still
+  load correctly. Server contracts are unchanged. (Closes #46)
+- **Histogram zero-fill.** Sparse or grouped time-series data (explorer and
+  dashboard panels alike) now fills gaps between the first and last bucket with
+  zero-count rows, so a sparse or grouped series renders as a continuous chart
+  instead of floating bars.
+- **Dashboard timezone handling.** Time-series panels align histogram buckets to
+  the viewer's local timezone; table/stat panels are pinned to a UTC query
+  internally so their time window no longer shifts for non-UTC viewers.
+
+### Fixed
+- **Deleting a user now deletes their sessions too** — previously a removed
+  user's existing session kept working until natural expiry. Expired sessions
+  are also swept by the existing 15-minute background maintenance loop, which
+  now shuts down cleanly on server stop. (Closes #53)
+- **Condition-mode alerts aggregate over a real field.** `sum`/`avg`/`min`/`max`
+  previously compiled against a literal `value` column on both backends and
+  silently misbehaved on datasets without that field. The condition builder now
+  has a field selector (schema-backed) and refuses to save without one. (Closes #43)
+- **ClickHouse query results no longer lose their columns** on the alert
+  evaluation path — a variable-shadowing bug zeroed out `columnsInfo` for every
+  result, which the preview path masked but alert evaluation did not, failing
+  any alert whose query returned rows. Present since the 1.7 query-path
+  refactor; backported.
+- **LogchefQL-to-SQL translate returns 400, not a silently-dropped `full_sql`**,
+  on malformed time-range formats. (Closes #82)
+- **Query-timeout detection for metrics is accurate** — ClickHouse timeout
+  classification no longer relies on brittle string matching. (Closes #54)
+- **The grouped-histogram legend no longer clips** in the explorer. (Closes #38)
+- **Exports return a clean 400** (and the Download button hides) on sources
+  that don't support them, instead of a 500 or a job that fails asynchronously
+  after returning 202.
+
+### Removed
+- **Dead chip-based column filter component** in the results table, superseded
+  by the new column-header filters. (Closes #32)
+
+### Internal
+- **Datasource provider refactor.** Sources moved from ClickHouse-shaped fields
+  to a generic `connection_config` JSON blob keyed by `source_type`
+  (`clickhouse` | `victorialogs`), with LogchefQL compilation, query execution,
+  and inspection unified behind the provider layer.
+- **golangci-lint debt cleared** — `just check` passes clean. (Closes #83)
+- Nix flake files removed; Astro build cache untracked; Starlight social config
+  fixed for the v0.33+ array format.
+- VictoriaLogs real-instance integration suite and CI job; VictoriaLogs browser
+  e2e scenario; host-network Docker Compose variant for local testing.
+
+### Migration notes
+| Backend | Migration | What it does |
+|---------|-----------|---------------|
+| SQLite | 000025 | Generalizes `sources` into a datasource-neutral shape: connection details move into `connection_config` JSON, discriminated by `source_type` (`clickhouse` \| `victorialogs`). |
+| SQLite | 000026 | Adds `query_language` / `editor_mode` to `saved_queries` and `alerts`, backfilled from the legacy `query_type`. |
+| SQLite | 000027 | Drops the legacy `query_type` column now that `query_language`/`editor_mode` are authoritative. |
+| SQLite | 000028 | Adds `users.password_hash` (nullable — NULL means OIDC-only) for local authentication. |
+| SQLite | 000029 | Creates `dashboards` (`panels_json` blob; `created_by` nulled, not cascaded, on user deletion). |
+| Postgres | 000002–000004 | Mirrors the datasource, local-auth, and dashboards migrations above for the Postgres backend. |
+
+All migrations apply automatically on upgrade; no manual steps required.
+
 ## [1.7.0] - 2026-07-06
 
 Logchef 1.7 makes the **metadata store pluggable**: alongside the default

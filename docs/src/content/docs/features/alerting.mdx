@@ -19,7 +19,7 @@ For ClickHouse and VictoriaLogs sources, Logchef can generate the executable ale
 
 ## Query Modes
 
-**Condition mode** — Write a LogchefQL filter condition and pick an aggregate function. Logchef generates the backend-native executable query and adds the alert window automatically.
+**Condition mode** — Write a LogchefQL filter condition and pick an aggregate function (`count`, `sum`, `avg`, `min`, `max`). For anything beyond `count`, also pick the field to aggregate over — schema-backed suggestions show all fields for VictoriaLogs sources and numeric columns for ClickHouse. Logchef generates the backend-native executable query and adds the alert window automatically.
 
 ```
 severity_text = "ERROR"

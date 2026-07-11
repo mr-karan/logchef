@@ -5,6 +5,12 @@ description: Understanding Sources, Teams, and access control in Logchef
 
 Logchef implements a team-based access control system that helps organize and secure your log data. This guide explains the core concepts of user management and how to effectively use them.
 
+## Authentication
+
+Users sign in via **OIDC/SSO**, or via built-in **email+password** authentication
+if your instance has it enabled — see [Local authentication](/getting-started/configuration/#local-authentication-run-without-oidc)
+to run Logchef without an external identity provider. Both can be enabled at once.
+
 ## Sources
 
 A Source in Logchef represents a distinct datasource-backed log scope that users can query independently. Depending on the backend, a source may map to a ClickHouse table or to a VictoriaLogs connection plus optional tenant/scope boundaries.

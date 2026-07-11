@@ -190,6 +190,25 @@ The UI uses preview limits for Run and export limits for Download.
 
 **Environment variables:** `LOGCHEF_QUERY__MAX_PREVIEW_LIMIT=100000`, `LOGCHEF_EXPORT__MAX_ROWS=1000000`
 
+### Live tail settings
+
+Controls the `/logs/tail` SSE streams that power the explorer's **Live** toggle.
+ClickHouse sources are polled every `poll_interval`; VictoriaLogs sources stream
+natively. The other settings are admission guardrails shared by both backends.
+
+```toml
+[tail]
+poll_interval = "2s"
+max_per_user = 2
+max_global = 20
+# Kept under [server] http_server_timeout (15m default) — the write deadline
+# caps any single response, tails included. Clients re-arm on end.
+session_ttl = "14m"
+max_rows_per_sec = 100
+```
+
+**Environment variables:** `LOGCHEF_TAIL__MAX_PER_USER=4`, `LOGCHEF_TAIL__SESSION_TTL=20m`
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.

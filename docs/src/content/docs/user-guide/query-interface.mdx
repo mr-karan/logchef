@@ -77,6 +77,15 @@ In native mode:
 
 Press **Esc** or click **Cancel** to stop a running query. This cancels the backend query, not just the HTTP request.
 
+## Live Tail
+
+Click **Live** to stream matching rows as they arrive, instead of running one-shot
+queries. Live tail is available in LogchefQL mode on any source, and in native mode
+on VictoriaLogs sources (LogsQL); it is not available for raw ClickHouse SQL. While
+a tail is running, the time range and row limit are controlled by the stream, not
+the toolbar. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs) for how
+tailing differs between backends.
+
 ## Results
 
 ### Table View
@@ -85,6 +94,11 @@ Press **Esc** or click **Cancel** to stop a running query. This cancels the back
 - Double-click a column header divider to auto-fit width
 - Expand rows with the chevron to see full log details
 - Best when you want explicit columns and field-level scanning
+- **Column filters** — click the filter icon in a column header to narrow the
+  currently-loaded rows by that column. Type text for a contains match, or a
+  comparison like `>500`, `>=500`, `<500`, or `=500` on numeric columns.
+  Filtering is client-side only (no new query is sent) and resets whenever you
+  run a new query. The toolbar shows how many rows match out of the total.
 
 ### Compact View
 
@@ -103,6 +117,8 @@ The time histogram shows log volume distribution. Click and drag to zoom into a 
 ### Export
 
 Export results as CSV — all rows, visible rows, filtered rows, or current page.
+The **Download** button (a backend-streamed export job, for very large result
+sets) only appears for sources that support it — currently ClickHouse only.
 
 ## Query Variables
 

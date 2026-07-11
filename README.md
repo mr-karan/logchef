@@ -21,9 +21,11 @@ If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs gu
 ## Features
 
 - **Query-first log exploration**: Fast filtering with LogchefQL plus native SQL or LogsQL depending on the source.
+- **Live tail**: Stream matching logs in real time from the explorer.
+- **Dashboards**: Multi-panel views (time series, stat, table) on a shared time range, with a direct-manipulation grid editor.
 - **AI Query Assistant**: Turn natural language into ClickHouse SQL instantly.
 - **Real-time alerting**: Schedule rules and send email or webhook notifications.
-- **OIDC + RBAC included**: SSO and team-based access out of the box.
+- **OIDC or local auth + RBAC**: SSO out of the box, or run without an external identity provider using built-in email+password authentication.
 - **Datasource-first**: Connect ClickHouse tables or VictoriaLogs instances without reshaping your storage layer.
 - **Single binary**: One executable, no runtime dependencies.
 - **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
