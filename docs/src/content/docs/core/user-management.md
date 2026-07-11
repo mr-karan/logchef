@@ -11,6 +11,11 @@ Users sign in via **OIDC/SSO**, or via built-in **email+password** authenticatio
 if your instance has it enabled — see [Local authentication](/getting-started/configuration/#local-authentication-run-without-oidc)
 to run Logchef without an external identity provider. Both can be enabled at once.
 
+By default an OIDC login only works for users that already exist in Logchef.
+With [SSO auto-provisioning](/getting-started/configuration/#sso-auto-provisioning-jit-user-creation)
+enabled, a first-time login from an allowed email domain creates the user
+automatically as a regular member, optionally joining a set of default teams.
+
 ## Sources
 
 A Source in Logchef represents a distinct datasource-backed log scope that users can query independently. Depending on the backend, a source may map to a ClickHouse table or to a VictoriaLogs connection plus optional tenant/scope boundaries.

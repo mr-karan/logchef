@@ -41,6 +41,16 @@ editing, a full-height panel builder, line/area/bar chart styles), and
   per email. The bootstrap admin's password is reconciled on every startup, so
   rotation is a config change plus restart; there is no self-service password
   change yet. See [Local authentication](https://logchef.app/getting-started/configuration/#local-authentication-run-without-oidc).
+- **SSO auto-provisioning (JIT user creation).** With `[auth.auto_provision]`
+  (`enabled`, `allowed_domains`, `default_team_ids`, or the matching
+  `LOGCHEF_AUTH__AUTO_PROVISION__*` env vars), a first-time OIDC login from an
+  allowed email domain creates the user automatically instead of failing with
+  "user not found". Off by default; `allowed_domains` is required when enabled
+  and matched exactly (case-insensitive, no subdomains/wildcards). New users
+  are always regular members (never admins), created after the
+  `email_verified` check, joined to `default_team_ids` best-effort as role
+  `member`, and left unmanaged by declarative provisioning. Browser login
+  only — the CLI token exchange still requires an existing user. (Closes #34)
 - **Live tail.** A **Live** toggle in the explorer streams matching rows in real
   time over SSE. ClickHouse sources are polled (`[tail] poll_interval`, default
   2s); VictoriaLogs sources proxy VictoriaLogs' native tail stream directly.
