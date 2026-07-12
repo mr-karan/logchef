@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from "vue";
 import {
   Dialog,
   DialogContent,
@@ -8,49 +7,18 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { useAlertsStore } from "@/stores/alerts";
-import { useSourcesStore } from "@/stores/sources";
-import { alertsApi } from "@/api/alerts";
-import { asClickHouseConnection } from "@/api/sources";
-import { logchefqlApi } from "@/api/logchefql";
-import { useTeamsStore } from "@/stores/teams";
-import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
-import { X, Plus, User, Bell } from "lucide-vue-next";
-import { Badge } from "@/components/ui/badge";
-import {
-  getNativeQueryLanguageForSource,
-  getQueryLanguageLabel,
-  resolveAlertMetadata,
-  supportsAlertEditorMode,
-} from "@/lib/queryMetadata";
-import type { AcceptableValue } from "reka-ui";
+import type { Alert } from "@/api/alerts";
+import AlertBasicInfoSection from "./AlertBasicInfoSection.vue";
+import AlertQuerySection from "./AlertQuerySection.vue";
+import AlertScheduleSection from "./AlertScheduleSection.vue";
+import AlertNotificationSection from "./AlertNotificationSection.vue";
+import { useAlertForm, type ExtendedUpdateAlertRequest, type FormCreatePayload } from "@/composables/useAlertForm";
 
-// Extended types for local usage until API types are updated
+// Extended types for local usage until API types are updated.
 // The form doesn't include source_id — the parent adds it from context.
-type FormCreatePayload = Omit<CreateAlertRequest, "source_id"> & {
-  recipient_user_ids: number[];
-  webhook_urls: string[];
-};
-
-interface ExtendedUpdateAlertRequest extends UpdateAlertRequest {
-  recipient_user_ids?: number[];
-  webhook_urls?: string[];
-}
+export type { FormCreatePayload, ExtendedUpdateAlertRequest };
 
 const props = withDefaults(defineProps<{
   open: boolean;
@@ -69,619 +37,43 @@ const emit = defineEmits<{
   (e: "update", payload: ExtendedUpdateAlertRequest): void;
 }>();
 
-const alertsStore = useAlertsStore();
-const sourcesStore = useSourcesStore();
-const teamsStore = useTeamsStore();
-const currentSource = computed(() => {
-  if (props.sourceId != null) {
-    const teamSource = sourcesStore.teamSources.find((source) => source.id === props.sourceId);
-    if (teamSource) {
-      return teamSource;
-    }
-  }
-  return sourcesStore.currentSourceDetails;
-});
-const sourceType = computed(() => currentSource.value?.source_type || "clickhouse");
-const supportsConditionEditor = computed(() => supportsAlertEditorMode(currentSource.value, "condition"));
-
-// Column suggestions for the aggregate field. ClickHouse schemas narrow to
-// numeric types; VictoriaLogs fields are untyped so all names are offered.
-const aggregateFieldSuggestions = computed(() => {
-  const columns = currentSource.value?.columns || [];
-  if (sourceType.value === "victorialogs") {
-    return columns.map((c) => c.name);
-  }
-  return columns
-    .filter((c) => /Int|Float|Decimal/i.test(c.type || ""))
-    .map((c) => c.name);
-});
-
-function logsqlFieldRef(field: string): string {
-  return /^[a-zA-Z_][a-zA-Z0-9_.]*$/.test(field) ? field : JSON.stringify(field);
-}
-const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
-const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
-const nativeQueryLabel = computed(() => `${nativeEditorLabel.value} Query`);
-const generatedQueryLanguageLabel = computed(() => {
-  if (alertMetadata.value.queryLanguage === "logsql") {
-    return "Generated LogsQL";
-  }
-  return "Generated SQL";
-});
-
-// Get current source table name for SQL generation
-const currentTableName = computed(() => {
-  const chConn = asClickHouseConnection(currentSource.value?.connection);
-  const database = chConn?.database;
-  const tableName = chConn?.table_name;
-  if (database && tableName) {
-    return `${database}.${tableName}`;
-  }
-  return "logs";
-});
-
-const form = reactive({
-  name: "",
-  description: "",
-  editor_mode: "condition" as "condition" | "native",
-  query: "",
-  condition_json: "", // LogChefQL condition string
-  aggregate_function: "count" as "count" | "sum" | "avg" | "min" | "max",
-  aggregate_field: "",
-  lookback_seconds: 300,
-  threshold_operator: "gt" as Alert["threshold_operator"],
-  threshold_value: 1,
-  frequency_seconds: 300,
-  severity: "warning" as Alert["severity"],
-  is_active: true,
-  labels: [] as Array<{ id: number; key: string; value: string }>,
-  annotations: [] as Array<{ id: number; key: string; value: string }>,
-  recipient_user_ids: [] as number[],
-  webhook_urls: [] as string[],
-});
-
-// UI state for adding webhook
-const newWebhookUrl = ref("");
-
-// LogChefQL validation state
-const conditionError = ref<string | null>(null);
-
-// Get source details for schema-aware parsing (same pattern as explore page)
-const sourceDetails = currentSource;
-const timestampField = computed(() => sourceDetails.value?._meta_ts_field || "timestamp");
-const alertMetadata = computed(() =>
-  resolveAlertMetadata({
-    editor_mode: form.editor_mode,
-    source_type: sourceType.value,
-    query_languages: currentSource.value?.query_languages,
-    alert_editor_modes: currentSource.value?.alert_editor_modes,
-  })
-);
-
-// Generate ClickHouse lookback expression based on lookback_seconds
-const lookbackExpression = computed(() => {
-  const seconds = form.lookback_seconds || 300;
-  return `now() - toIntervalSecond(${seconds})`;
-});
-
-const nativeQueryPlaceholder = computed(() => {
-  if (sourceType.value === "victorialogs") {
-    return `level:="error" | stats count() as value`;
-  }
-
-  return `SELECT count(*) as value FROM ${currentTableName.value} WHERE severity = 'ERROR' AND \`${timestampField.value}\` >= ${lookbackExpression.value}`;
-});
-
-const nativeQueryHelpText = computed(() => {
-  if (sourceType.value === "victorialogs") {
-    return "Use a template above to start with a valid LogsQL stats query. The alert lookback window is applied automatically.";
-  }
-
-  return "Use a template above to auto-fill with the correct table, timestamp field, and lookback window.";
-});
-
-// Generated executable query from LogchefQL condition
-const generatedQuery = ref("");
-const isTranslating = ref(false);
-
-// Team members for recipient selection
-const teamMembers = computed(() => {
-  if (!props.teamId) return [];
-  return teamsStore.getTeamMembersByTeamId(props.teamId);
-});
-
-// Fetch team members on mount or when teamId changes
-watch(() => props.teamId, (id) => {
-  if (id) {
-    teamsStore.listTeamMembers(id);
-  }
-}, { immediate: true });
-
-// Translate LogChefQL condition to SQL using backend API
-async function translateCondition() {
-  if (!supportsConditionEditor.value) {
-    conditionError.value = null;
-    generatedQuery.value = "";
-    return;
-  }
-  if (form.editor_mode !== "condition" || !form.condition_json.trim()) {
-    conditionError.value = null;
-    generatedQuery.value = "";
-    return;
-  }
-
-  const teamId = props.teamId;
-  
-  if (!teamId || !props.sourceId) {
-    conditionError.value = "Team or source not available";
-    return;
-  }
-
-  isTranslating.value = true;
-  try {
-    const response = await logchefqlApi.translate(teamId, props.sourceId, { query: form.condition_json });
-    
-    if (response.data && response.data.valid) {
-      conditionError.value = null;
-      const translatedQuery = response.data.generated_query || response.data.sql || "";
-      const translatedLanguage = response.data.generated_query_language || nativeQueryLanguage.value;
-
-      if (form.aggregate_function !== "count" && !form.aggregate_field.trim()) {
-        conditionError.value = `Select the numeric field to ${form.aggregate_function}() over`;
-        generatedQuery.value = "";
-        return;
-      }
-      const aggregateField = form.aggregate_field.trim();
-      if (translatedLanguage === "logsql") {
-        const filterQuery = translatedQuery.trim() || "*";
-        const statsExpression = form.aggregate_function === "count"
-          ? "count()"
-          : `${form.aggregate_function}(${logsqlFieldRef(aggregateField)})`;
-        generatedQuery.value = `${filterQuery} | stats ${statsExpression} as value`;
-      } else {
-        const aggFunc = form.aggregate_function === "count" ? "count(*)" : `${form.aggregate_function}(\`${aggregateField}\`)`;
-        const tableName = currentTableName.value;
-        const tsField = timestampField.value;
-
-        let whereClause = response.data.sql ? `(${response.data.sql})` : "1=1";
-        whereClause += ` AND \`${tsField}\` >= ${lookbackExpression.value}`;
-
-        generatedQuery.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
-      }
-    } else if (response.data && !response.data.valid) {
-      conditionError.value = response.data.error?.message || "Invalid condition";
-      generatedQuery.value = "";
-    } else {
-      conditionError.value = 'status' in response && response.status === 'error' ? response.message : "Translation failed";
-      generatedQuery.value = "";
-    }
-  } catch (error: any) {
-    conditionError.value = error.message || "Translation error";
-    generatedQuery.value = "";
-  } finally {
-    isTranslating.value = false;
-  }
-}
-
-// Watch for changes that should trigger translation with debounce
-let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-watch(
-  () => [form.condition_json, form.aggregate_function, form.aggregate_field, form.lookback_seconds],
-  () => {
-    if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
-    translateDebounceTimer = setTimeout(() => {
-      if (form.editor_mode === "condition") {
-        translateCondition();
-      }
-    }, 300);
-  }
-);
-
-// Sync generated query to query field when using condition mode
-watch(generatedQuery, (query) => {
-  if (form.editor_mode === "condition" && query) {
-    form.query = query;
-  }
-});
-
-const labelCounter = ref(0);
-const annotationCounter = ref(0);
-
-const testQueryResult = ref<TestAlertQueryResponse | null>(null);
-const isTestingQuery = ref(false);
-const testQueryError = ref<string | null>(null);
-
-type QueryTemplate = {
-  name: string;
-  description: string;
-  editorMode: "native";
-  query: string;
-};
-
-function getClickHouseQueryTemplates(): QueryTemplate[] {
-  const tableName = currentTableName.value;
-  const tsField = timestampField.value;
-  const lookback = lookbackExpression.value;
-  
-  return [
-    {
-      name: "High Error Count",
-      description: "Alert when error count exceeds threshold in lookback window",
-      editorMode: "native" as const,
-      query: `SELECT count(*) as value
-FROM ${tableName}
-WHERE severity = 'ERROR'
-  AND \`${tsField}\` >= ${lookback}`,
-    },
-    {
-      name: "Critical Logs",
-      description: "Alert on any critical severity logs",
-      editorMode: "native" as const,
-      query: `SELECT count(*) as value
-FROM ${tableName}
-WHERE severity = 'CRITICAL'
-  AND \`${tsField}\` >= ${lookback}`,
-    },
-    {
-      name: "High Response Time",
-      description: "Alert when average response time is high",
-      editorMode: "native" as const,
-      query: `SELECT avg(response_time) as value
-FROM ${tableName}
-WHERE \`${tsField}\` >= ${lookback}`,
-    },
-    {
-      name: "Failed Requests",
-      description: "Alert on HTTP 5xx status codes",
-      editorMode: "native" as const,
-      query: `SELECT count(*) as value
-FROM ${tableName}
-WHERE status_code >= 500
-  AND \`${tsField}\` >= ${lookback}`,
-    },
-    {
-      name: "Low Success Rate",
-      description: "Alert when success rate drops below threshold",
-      editorMode: "native" as const,
-      query: `SELECT (countIf(status_code < 400) * 100.0 / count(*)) as value
-FROM ${tableName}
-WHERE \`${tsField}\` >= ${lookback}`,
-    },
-  ];
-}
-
-function getVictoriaLogsQueryTemplates(): QueryTemplate[] {
-  return [
-    {
-      name: "High Error Count",
-      description: "Alert when error logs exceed the threshold in the lookback window",
-      editorMode: "native",
-      query: `level:="ERROR" | stats count() as value`,
-    },
-    {
-      name: "Critical Logs",
-      description: "Alert on any critical severity logs",
-      editorMode: "native",
-      query: `level:="CRITICAL" | stats count() as value`,
-    },
-    {
-      name: "Failed Requests",
-      description: "Alert on HTTP 5xx status codes",
-      editorMode: "native",
-      query: `status_code:>=500 | stats count() as value`,
-    },
-    {
-      name: "High Response Time",
-      description: "Alert when the average response time is high",
-      editorMode: "native",
-      query: `response_time:* | stats avg(response_time) as value`,
-    },
-  ];
-}
-
-const queryTemplates = computed(() =>
-  sourceType.value === "victorialogs" ? getVictoriaLogsQueryTemplates() : getClickHouseQueryTemplates()
-);
-
-// LogChefQL condition templates
-const conditionTemplates = [
-  {
-    name: "Error Logs",
-    description: "Match logs with ERROR severity",
-    condition: `severity = "ERROR"`,
-    aggregate: "count" as const,
-  },
-  {
-    name: "Critical Logs",
-    description: "Match logs with CRITICAL severity",
-    condition: `severity = "CRITICAL"`,
-    aggregate: "count" as const,
-  },
-  {
-    name: "Server Errors",
-    description: "Match HTTP 5xx status codes",
-    condition: `status_code >= 500`,
-    aggregate: "count" as const,
-  },
-  {
-    name: "Slow Requests",
-    description: "Match requests taking over 1 second",
-    condition: `response_time > 1000`,
-    aggregate: "count" as const,
-  },
-  {
-    name: "Error Messages",
-    description: "Match logs containing 'error' in the message",
-    condition: `message ~ "error"`,
-    aggregate: "count" as const,
-  },
-];
-
-function applyConditionTemplate(template: typeof conditionTemplates[0]) {
-  form.condition_json = template.condition;
-  form.aggregate_function = template.aggregate;
-  testQueryResult.value = null;
-  testQueryError.value = null;
-  conditionError.value = null;
-  generatedQuery.value = "";
-}
-
-const isSubmitting = computed(() => {
-  if (props.mode === "create") {
-    return alertsStore.isLoadingOperation("createAlert");
-  }
-  return props.alert ? alertsStore.isLoadingOperation(`updateAlert-${props.alert.id}`) : false;
-});
-
-const isDisabled = computed(() => !props.teamId || !props.sourceId || isSubmitting.value);
-
-const isValid = computed(() => {
-  const hasName = !!form.name.trim();
-  const hasThreshold = form.threshold_value !== undefined;
-  const hasFrequency = form.frequency_seconds > 0;
-  const hasLookback = form.lookback_seconds > 0;
-  
-  // For condition mode, check if condition is valid and generates SQL
-  if (form.editor_mode === "condition") {
-    return hasName && hasThreshold && hasFrequency && hasLookback && 
-           !!form.condition_json.trim() && !conditionError.value && !!generatedQuery.value;
-  }
-  
-  // For SQL mode, just check if query is not empty
-  return hasName && !!form.query.trim() && hasThreshold && hasFrequency && hasLookback;
-});
-
-function addLabel() {
-  form.labels.push({ id: labelCounter.value++, key: "", value: "" });
-}
-
-function removeLabel(id: number) {
-  const index = form.labels.findIndex((label) => label.id === id);
-  if (index >= 0) {
-    form.labels.splice(index, 1);
-  }
-}
-
-function addAnnotation() {
-  form.annotations.push({ id: annotationCounter.value++, key: "", value: "" });
-}
-
-function removeAnnotation(id: number) {
-  const index = form.annotations.findIndex((annotation) => annotation.id === id);
-  if (index >= 0) {
-    form.annotations.splice(index, 1);
-  }
-}
-
-// Recipient management
-function addRecipient(value: AcceptableValue) {
-  const userId = parseInt(String(value ?? ""));
-  if (userId && !form.recipient_user_ids.includes(userId)) {
-    form.recipient_user_ids.push(userId);
-  }
-}
-
-function removeRecipient(userId: number) {
-  form.recipient_user_ids = form.recipient_user_ids.filter(id => id !== userId);
-}
-
-// Webhook management
-function addWebhook() {
-  const url = newWebhookUrl.value.trim();
-  if (url && !form.webhook_urls.includes(url)) {
-    form.webhook_urls.push(url);
-    newWebhookUrl.value = "";
-  }
-}
-
-function removeWebhook(url: string) {
-  form.webhook_urls = form.webhook_urls.filter(u => u !== url);
-}
-
-function resetForm(alert: Alert | null) {
-  testQueryResult.value = null;
-  testQueryError.value = null;
-  conditionError.value = null;
-  generatedQuery.value = "";
-  newWebhookUrl.value = "";
-  
-  if (!alert) {
-    form.name = "";
-    form.description = "";
-    form.editor_mode = supportsConditionEditor.value ? "condition" : "native";
-    form.query = "";
-    form.condition_json = "";
-    form.aggregate_function = "count";
-    form.aggregate_field = "";
-    form.lookback_seconds = 300;
-    form.threshold_operator = "gt";
-    form.threshold_value = 1;
-    form.frequency_seconds = 300;
-    form.severity = "warning";
-    form.is_active = true;
-    form.labels = [];
-    form.annotations = [];
-    form.recipient_user_ids = [];
-    form.webhook_urls = [];
-    labelCounter.value = 0;
-    annotationCounter.value = 0;
-    return;
-  }
-  
-  // Type assertion to access extra fields that might exist on the alert object
-  const extendedAlert = alert as unknown as { recipient_user_ids?: number[]; webhook_urls?: string[] };
-  
-  form.name = alert.name;
-  form.description = alert.description ?? "";
-  form.editor_mode = supportsConditionEditor.value ? alert.editor_mode : "native";
-  form.query = alert.query;
-  form.condition_json = alert.condition_json ?? "";
-  form.aggregate_function = "count";
-  form.aggregate_field = "";
-  const aggMatch = (alert.query || "").match(/(count|sum|avg|min|max)\(\s*[`"]?([^`")]*)[`"]?\s*\)/);
-  if (aggMatch) {
-    form.aggregate_function = aggMatch[1] as typeof form.aggregate_function;
-    if (aggMatch[1] !== "count") {
-      form.aggregate_field = aggMatch[2].trim();
-    }
-  }
-  form.lookback_seconds = alert.lookback_seconds;
-  form.threshold_operator = alert.threshold_operator;
-  form.threshold_value = alert.threshold_value;
-  form.frequency_seconds = alert.frequency_seconds;
-  form.severity = alert.severity;
-  form.is_active = alert.is_active;
-  labelCounter.value = 0;
-  annotationCounter.value = 0;
-  form.labels = alert.labels
-    ? Object.entries(alert.labels).map(([key, value]) => ({ id: labelCounter.value++, key, value }))
-    : [];
-  form.annotations = alert.annotations
-    ? Object.entries(alert.annotations).map(([key, value]) => ({ id: annotationCounter.value++, key, value }))
-    : [];
-    
-  form.recipient_user_ids = extendedAlert.recipient_user_ids ? [...extendedAlert.recipient_user_ids] : [];
-  form.webhook_urls = extendedAlert.webhook_urls ? [...extendedAlert.webhook_urls] : [];
-}
-
-async function handleTestQuery() {
-  if (!props.teamId || !props.sourceId || !form.query.trim()) {
-    return;
-  }
-
-  isTestingQuery.value = true;
-  testQueryError.value = null;
-  testQueryResult.value = null;
-
-  try {
-    const result = await alertsApi.testQuery({
-      source_id: props.sourceId,
-      query_language: alertMetadata.value.queryLanguage,
-      editor_mode: alertMetadata.value.editorMode,
-      query: form.query.trim(),
-      condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
-      lookback_seconds: form.lookback_seconds,
-      threshold_operator: form.threshold_operator,
-      threshold_value: form.threshold_value,
-    });
-    testQueryResult.value = result.data;
-  } catch (error: any) {
-    testQueryError.value = error?.response?.data?.message || error.message || "Failed to test query";
-  } finally {
-    isTestingQuery.value = false;
-  }
-}
-
-function applyTemplate(template: (typeof queryTemplates.value)[number]) {
-  form.editor_mode = template.editorMode;
-  form.query = template.query;
-  testQueryResult.value = null;
-  testQueryError.value = null;
-}
-
-watch(
-  () => props.alert,
-  (alert) => {
-    if (props.mode === "edit" || (props.mode === "create" && alert)) {
-      resetForm(alert || null);
-    }
-  },
-  { immediate: true }
-);
-
-watch(
-  () => props.open,
-  (open) => {
-    if (open) {
-      if (props.mode === "create" && !props.alert) {
-        resetForm(null);
-      }
-    }
-  },
-  { immediate: false }
-);
-
-watch(supportsConditionEditor, () => {
-  if (!supportsConditionEditor.value && form.editor_mode === "condition") {
-    form.editor_mode = "native";
-    conditionError.value = null;
-    generatedQuery.value = "";
-  }
-});
-
-watch(
-  () => [form.query, form.threshold_operator, form.threshold_value],
-  () => {
-    testQueryResult.value = null;
-    testQueryError.value = null;
-  }
-);
+const {
+  form,
+  supportsConditionEditor,
+  aggregateFieldSuggestions,
+  nativeEditorLabel,
+  nativeQueryLabel,
+  nativeQueryPlaceholder,
+  nativeQueryHelpText,
+  generatedQueryLanguageLabel,
+  generatedQuery,
+  conditionError,
+  conditionTemplates,
+  queryTemplates,
+  applyConditionTemplate,
+  applyTemplate,
+  newWebhookUrl,
+  teamMembers,
+  testQueryResult,
+  isTestingQuery,
+  testQueryError,
+  handleTestQuery,
+  isSubmitting,
+  isDisabled,
+  isValid,
+  addLabel,
+  removeLabel,
+  addAnnotation,
+  removeAnnotation,
+  addRecipient,
+  removeRecipient,
+  addWebhook,
+  removeWebhook,
+  handleSubmit,
+} = useAlertForm(props, emit);
 
 function handleClose() {
   emit("cancel");
-}
-
-function handleSubmit() {
-  if (!isValid.value || isSubmitting.value) {
-    return;
-  }
-  
-  const labelsRecord = form.labels.reduce<Record<string, string>>((acc, { key, value }) => {
-    const trimmedKey = key.trim();
-    if (trimmedKey) acc[trimmedKey] = value;
-    return acc;
-  }, {});
-  
-  const annotationsRecord = form.annotations.reduce<Record<string, string>>((acc, { key, value }) => {
-    const trimmedKey = key.trim();
-    if (trimmedKey) acc[trimmedKey] = value;
-    return acc;
-  }, {});
-
-  const basePayload = {
-    name: form.name.trim(),
-    description: form.description.trim(),
-    query_language: alertMetadata.value.queryLanguage,
-    editor_mode: alertMetadata.value.editorMode,
-    query: form.query.trim(),
-    condition_json: form.editor_mode === "condition" ? form.condition_json.trim() : undefined,
-    lookback_seconds: Number(form.lookback_seconds),
-    threshold_operator: form.threshold_operator,
-    threshold_value: Number(form.threshold_value),
-    frequency_seconds: Number(form.frequency_seconds),
-    severity: form.severity,
-    is_active: form.is_active,
-    labels: labelsRecord,
-    annotations: annotationsRecord,
-    recipient_user_ids: form.recipient_user_ids,
-    webhook_urls: form.webhook_urls,
-  };
-
-  if (props.mode === "create") {
-    emit("create", basePayload);
-  } else {
-    emit("update", basePayload);
-  }
 }
 </script>
 
@@ -698,392 +90,46 @@ function handleSubmit() {
       </DialogHeader>
 
       <form class="space-y-6" @submit.prevent="handleSubmit">
-        <!-- Basic Information -->
-        <section class="space-y-4">
-          <div class="grid gap-4 lg:grid-cols-3">
-            <div class="space-y-2 lg:col-span-2">
-              <Label for="alert-name">Alert name</Label>
-              <Input id="alert-name" v-model="form.name" placeholder="High error rate alert" :disabled="isDisabled" />
-            </div>
-            <div class="space-y-2">
-              <Label for="alert-severity">Severity</Label>
-              <Select :model-value="form.severity" :disabled="isDisabled" @update:model-value="(value: any) => (form.severity = value)">
-                <SelectTrigger id="alert-severity">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Severity</SelectLabel>
-                    <SelectItem value="info">Info</SelectItem>
-                    <SelectItem value="warning">Warning</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div class="space-y-2">
-            <Label for="alert-description">Description <span class="text-xs text-muted-foreground">(optional)</span></Label>
-            <Textarea id="alert-description" v-model="form.description" placeholder="Provide context about when this alert should fire and what action to take" :rows="2" :disabled="isDisabled" />
-          </div>
-        </section>
+        <AlertBasicInfoSection :form="form" :disabled="isDisabled" />
 
-        <!-- Evaluation Query -->
-        <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <h3 class="text-sm font-semibold">Evaluation query</h3>
-              <p class="text-xs text-muted-foreground mt-1">
-                {{ form.editor_mode === 'condition'
-                  ? 'Write a simple filter condition. The time filter is auto-applied.' 
-                  : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
-              </p>
-            </div>
-            <!-- Query Type Toggle -->
-            <Tabs :model-value="form.editor_mode" @update:model-value="(v: any) => form.editor_mode = v" class="w-auto">
-              <TabsList class="h-8">
-                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogchefQL</TabsTrigger>
-                <TabsTrigger value="native" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+        <AlertQuerySection
+          :form="form"
+          :disabled="isDisabled"
+          :supports-condition-editor="supportsConditionEditor"
+          :native-editor-label="nativeEditorLabel"
+          :native-query-label="nativeQueryLabel"
+          :native-query-placeholder="nativeQueryPlaceholder"
+          :native-query-help-text="nativeQueryHelpText"
+          :generated-query-language-label="generatedQueryLanguageLabel"
+          :aggregate-field-suggestions="aggregateFieldSuggestions"
+          :condition-templates="conditionTemplates"
+          :query-templates="queryTemplates"
+          :condition-error="conditionError"
+          :generated-query="generatedQuery"
+          :is-testing-query="isTestingQuery"
+          :test-query-result="testQueryResult"
+          :test-query-error="testQueryError"
+          :on-apply-condition-template="applyConditionTemplate"
+          :on-apply-template="applyTemplate"
+          :on-test-query="handleTestQuery"
+        />
 
-          <!-- LogChefQL Mode -->
-          <template v-if="form.editor_mode === 'condition'">
-            <!-- Condition Templates -->
-            <div class="space-y-2">
-              <Label for="condition-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-              <Select @update:model-value="(value: any) => applyConditionTemplate(conditionTemplates[parseInt(value)])">
-                <SelectTrigger id="condition-template">
-                  <SelectValue placeholder="Choose a template..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Condition Templates</SelectLabel>
-                    <SelectItem v-for="(template, index) in conditionTemplates" :key="index" :value="String(index)">
-                      <div class="flex flex-col gap-0.5">
-                        <span class="font-medium">{{ template.name }}</span>
-                        <span class="text-xs text-muted-foreground">{{ template.description }}</span>
-                      </div>
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
+        <AlertScheduleSection :form="form" :disabled="isDisabled" />
 
-            <!-- Aggregate Function -->
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div class="space-y-2">
-                <Label for="aggregate-function">Aggregate function</Label>
-                <Select :model-value="form.aggregate_function" @update:model-value="(v: any) => form.aggregate_function = v">
-                  <SelectTrigger id="aggregate-function">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="count">count(*) - Count matching logs</SelectItem>
-                    <SelectItem value="sum">sum(field) - Sum of a field</SelectItem>
-                    <SelectItem value="avg">avg(field) - Average of a field</SelectItem>
-                    <SelectItem value="min">min(field) - Minimum of a field</SelectItem>
-                    <SelectItem value="max">max(field) - Maximum of a field</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div v-if="form.aggregate_function !== 'count'" class="space-y-2">
-                <Label for="aggregate-field" class="required">Field to aggregate</Label>
-                <Input
-                  id="aggregate-field"
-                  v-model="form.aggregate_field"
-                  list="aggregate-field-suggestions"
-                  placeholder="numeric field, e.g. duration_ms"
-                />
-                <datalist id="aggregate-field-suggestions">
-                  <option v-for="name in aggregateFieldSuggestions" :key="name" :value="name" />
-                </datalist>
-              </div>
-            </div>
-
-            <!-- Condition Input -->
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <Label for="alert-condition">Filter condition</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  :disabled="!generatedQuery || isDisabled || isTestingQuery"
-                  @click="handleTestQuery"
-                >
-                  {{ isTestingQuery ? "Testing..." : "Test Query" }}
-                </Button>
-              </div>
-              <Input
-                id="alert-condition"
-                v-model="form.condition_json"
-                placeholder='severity = "ERROR" and status_code >= 500'
-                :disabled="isDisabled"
-                class="font-mono text-sm"
-              />
-              <p v-if="conditionError" class="text-xs text-destructive">{{ conditionError }}</p>
-              <p class="text-xs text-muted-foreground">
-                Examples: <code class="bg-muted px-1 rounded">severity = "ERROR"</code>, 
-                <code class="bg-muted px-1 rounded">status_code >= 500</code>, 
-                <code class="bg-muted px-1 rounded">message ~ "timeout"</code>
-              </p>
-            </div>
-
-            <div v-if="generatedQuery" class="space-y-2">
-              <Label class="text-xs text-muted-foreground">{{ generatedQueryLanguageLabel }} (read-only)</Label>
-              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedQuery }}</pre>
-            </div>
-          </template>
-
-          <!-- Native Mode -->
-          <template v-else>
-            <!-- Query Templates -->
-            <div class="space-y-2">
-              <Label for="query-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-              <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
-                <SelectTrigger id="query-template">
-                  <SelectValue placeholder="Choose a template..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Query Templates</SelectLabel>
-                    <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
-                      <div class="flex flex-col gap-0.5">
-                        <span class="font-medium">{{ template.name }}</span>
-                        <span class="text-xs text-muted-foreground">{{ template.description }}</span>
-                      </div>
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-              <Label for="alert-query">{{ nativeQueryLabel }}</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  :disabled="!form.query.trim() || isDisabled || isTestingQuery"
-                  @click="handleTestQuery"
-                >
-                  {{ isTestingQuery ? "Testing..." : "Test Query" }}
-                </Button>
-              </div>
-              <Textarea
-                id="alert-query"
-                v-model="form.query"
-                :placeholder="nativeQueryPlaceholder"
-                :rows="6"
-                :disabled="isDisabled"
-                class="font-mono text-sm resize-none"
-              />
-              <p class="text-xs text-muted-foreground">
-                {{ nativeQueryHelpText }}
-              </p>
-            </div>
-          </template>
-
-          <!-- Test Query Results -->
-          <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 space-y-1">
-                <h4 class="text-sm font-medium">Test Result</h4>
-                <div class="flex items-baseline gap-3">
-                  <span class="text-2xl font-semibold tabular-nums">{{ testQueryResult.value }}</span>
-                  <span class="text-sm text-muted-foreground">
-                    {{ testQueryResult.threshold_met ? '✓ Threshold met' : '✗ Threshold not met' }}
-                  </span>
-                </div>
-              </div>
-              <div class="text-right space-y-1">
-                <div class="text-xs text-muted-foreground">Execution time</div>
-                <div class="text-sm font-medium tabular-nums">{{ testQueryResult.execution_time_ms }}ms</div>
-              </div>
-            </div>
-
-            <!-- Warnings -->
-            <div v-if="testQueryResult.warnings && testQueryResult.warnings.length > 0" class="space-y-2">
-              <div
-                v-for="(warning, index) in testQueryResult.warnings"
-                :key="index"
-                class="flex gap-2 text-sm rounded-md bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3"
-              >
-                <span class="text-yellow-600 dark:text-yellow-500 flex-shrink-0">⚠️</span>
-                <span class="text-yellow-900 dark:text-yellow-100">{{ warning }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Test Query Error -->
-          <div v-if="testQueryError" class="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-4">
-            <div class="flex gap-2 text-sm">
-              <span class="text-red-600 dark:text-red-500 flex-shrink-0">✗</span>
-              <span class="text-red-900 dark:text-red-100">{{ testQueryError }}</span>
-            </div>
-          </div>
-        </section>
-
-        <!-- Threshold & Timing -->
-        <section class="space-y-4">
-          <div>
-            <h3 class="text-sm font-semibold mb-3">Threshold & timing</h3>
-            <div class="grid gap-4 lg:grid-cols-2">
-              <div class="space-y-2">
-                <Label for="alert-threshold-operator">Threshold operator</Label>
-                <Select :model-value="form.threshold_operator" :disabled="isDisabled" @update:model-value="(value: any) => (form.threshold_operator = value)">
-                  <SelectTrigger id="alert-threshold-operator">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gt">Greater than (&gt;)</SelectItem>
-                    <SelectItem value="gte">Greater than or equal (&ge;)</SelectItem>
-                    <SelectItem value="lt">Less than (&lt;)</SelectItem>
-                    <SelectItem value="lte">Less than or equal (&le;)</SelectItem>
-                    <SelectItem value="eq">Equal (=)</SelectItem>
-                    <SelectItem value="neq">Not equal (&ne;)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div class="space-y-2">
-                <Label for="alert-threshold-value">Threshold value</Label>
-                <Input id="alert-threshold-value" v-model.number="form.threshold_value" type="number" min="0" step="0.01" :disabled="isDisabled" placeholder="1" />
-              </div>
-              <div class="space-y-2">
-                <Label for="alert-lookback">
-                  Lookback window (seconds)
-                  <span class="text-xs font-normal text-muted-foreground ml-1">· Time range to query</span>
-                </Label>
-                <Input id="alert-lookback" v-model.number="form.lookback_seconds" type="number" min="60" step="60" :disabled="isDisabled" placeholder="300" />
-                <p class="text-xs text-muted-foreground">
-                  How far back to look in logs (e.g., 300s = last 5 minutes)
-                </p>
-              </div>
-              <div class="space-y-2">
-                <Label for="alert-frequency">
-                  Evaluation frequency (seconds)
-                  <span class="text-xs font-normal text-muted-foreground ml-1">· How often to check</span>
-                </Label>
-                <Input id="alert-frequency" v-model.number="form.frequency_seconds" type="number" min="30" step="30" :disabled="isDisabled" placeholder="300" />
-                <p class="text-xs text-muted-foreground">
-                  How often this alert runs (e.g., 300s = every 5 minutes)
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Notifications & Routing -->
-        <section class="space-y-6 border-t pt-4">
-          <div>
-            <h3 class="text-sm font-semibold flex items-center gap-2">
-              <Bell class="h-4 w-4" />
-              Notifications & Routing
-            </h3>
-            <p class="text-xs text-muted-foreground mt-1">Configure where alerts should be sent when triggered.</p>
-          </div>
-
-          <!-- Recipients -->
-          <div class="space-y-3">
-             <Label class="text-xs font-medium">Team Members <span class="font-normal text-muted-foreground ml-1">· Notify via email</span></Label>
-             <div class="flex gap-2">
-                <Select @update:model-value="addRecipient">
-                  <SelectTrigger class="w-full">
-                    <SelectValue placeholder="Select team member to notify..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="member in teamMembers" :key="member.user_id" :value="String(member.user_id)">
-                      <div class="flex items-center gap-2">
-                        <User class="h-3 w-3" />
-                        <span>{{ member.full_name || member.email }}</span>
-                        <span class="text-xs text-muted-foreground ml-1">({{ member.role }})</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-             </div>
-             
-             <!-- Selected Recipients List -->
-             <div v-if="form.recipient_user_ids.length > 0" class="flex flex-wrap gap-2">
-                <Badge v-for="userId in form.recipient_user_ids" :key="userId" variant="secondary" class="flex items-center gap-1 font-normal">
-                  <User class="h-3 w-3 opacity-50" />
-                  <span>
-                    {{ teamMembers.find(m => m.user_id === userId)?.full_name || teamMembers.find(m => m.user_id === userId)?.email || `User ${userId}` }}
-                  </span>
-                  <button type="button" @click="removeRecipient(userId)" class="ml-1 hover:text-destructive">
-                    <X class="h-3 w-3" />
-                  </button>
-                </Badge>
-             </div>
-          </div>
-
-          <!-- Webhooks -->
-          <div class="space-y-3">
-            <Label class="text-xs font-medium">Webhook URLs <span class="font-normal text-muted-foreground ml-1">· Send JSON payload</span></Label>
-            <div class="flex gap-2">
-              <Input v-model="newWebhookUrl" placeholder="https://api.example.com/hooks/..." @keydown.enter.prevent="addWebhook" />
-              <Button type="button" variant="secondary" @click="addWebhook">
-                <Plus class="h-4 w-4" />
-              </Button>
-            </div>
-            
-            <!-- Added Webhooks List -->
-            <div v-if="form.webhook_urls.length > 0" class="space-y-2">
-              <div v-for="url in form.webhook_urls" :key="url" class="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm">
-                <span class="truncate font-mono text-xs">{{ url }}</span>
-                <button type="button" @click="removeWebhook(url)" class="text-muted-foreground hover:text-destructive">
-                  <X class="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Metadata -->
-          <div class="grid gap-4 md:grid-cols-2">
-            <!-- Labels -->
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <Label class="text-xs font-medium">Labels <span class="font-normal text-muted-foreground ml-1">· Grouping</span></Label>
-                <Button type="button" variant="outline" size="sm" @click="addLabel" :disabled="isDisabled">
-                  + Add Label
-                </Button>
-              </div>
-              <div class="space-y-2">
-                <div v-for="label in form.labels" :key="label.id" class="flex gap-2">
-                  <Input v-model="label.key" placeholder="Key" class="flex-1" :disabled="isDisabled" />
-                  <Input v-model="label.value" placeholder="Value" class="flex-1" :disabled="isDisabled" />
-                  <Button type="button" variant="ghost" size="icon" @click="removeLabel(label.id)" :disabled="isDisabled">
-                    <X class="h-4 w-4" />
-                  </Button>
-                </div>
-                <p v-if="form.labels.length === 0" class="text-xs text-muted-foreground">No custom labels.</p>
-              </div>
-            </div>
-
-            <!-- Annotations -->
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <Label class="text-xs font-medium">Annotations <span class="font-normal text-muted-foreground ml-1">· Context</span></Label>
-                <Button type="button" variant="outline" size="sm" @click="addAnnotation" :disabled="isDisabled">
-                  + Add Annotation
-                </Button>
-              </div>
-              <div class="space-y-2">
-                <div v-for="annotation in form.annotations" :key="annotation.id" class="flex gap-2">
-                  <Input v-model="annotation.key" placeholder="Key" class="flex-1" :disabled="isDisabled" />
-                  <Input v-model="annotation.value" placeholder="Value" class="flex-1" :disabled="isDisabled" />
-                  <Button type="button" variant="ghost" size="icon" @click="removeAnnotation(annotation.id)" :disabled="isDisabled">
-                    <X class="h-4 w-4" />
-                  </Button>
-                </div>
-                <p v-if="form.annotations.length === 0" class="text-xs text-muted-foreground">No custom annotations.</p>
-              </div>
-            </div>
-          </div>
-        </section>
+        <AlertNotificationSection
+          :form="form"
+          :disabled="isDisabled"
+          :team-members="teamMembers"
+          v-model:new-webhook-url="newWebhookUrl"
+          :on-add-recipient="addRecipient"
+          :on-remove-recipient="removeRecipient"
+          :on-add-webhook="addWebhook"
+          :on-remove-webhook="removeWebhook"
+          :on-add-label="addLabel"
+          :on-remove-label="removeLabel"
+          :on-add-annotation="addAnnotation"
+          :on-remove-annotation="removeAnnotation"
+        />
 
         <!-- Alert Status -->
         <section class="space-y-4">
@@ -1098,7 +144,7 @@ function handleSubmit() {
           </div>
         </section>
 
-        <DialogFooter v-if="!inline" class="pt-4">
+        <DialogFooter class="pt-4">
           <Button type="button" variant="ghost" @click="handleClose" :disabled="isSubmitting">
             Cancel
           </Button>
@@ -1106,407 +152,54 @@ function handleSubmit() {
             {{ isSubmitting ? "Saving..." : mode === "create" ? "Create alert" : "Save changes" }}
           </Button>
         </DialogFooter>
-        <div v-else class="flex items-center justify-end gap-2 pt-4">
-          <Button type="submit" :disabled="!isValid || isDisabled">
-            {{ isSubmitting ? "Saving..." : "Save changes" }}
-          </Button>
-        </div>
       </form>
     </DialogContent>
   </Dialog>
 
   <!-- Inline mode (no dialog wrapper) -->
   <form v-else class="space-y-6" @submit.prevent="handleSubmit">
-    <!-- Reuse same form sections - copy content from above -->
-    <!-- Ideally this should be refactored into components, but for now duplicating as per original pattern -->
-    
-    <!-- Basic Information -->
-        <section class="space-y-4">
-          <div class="grid gap-4 lg:grid-cols-3">
-            <div class="space-y-2 lg:col-span-2">
-              <Label for="alert-name-inline">Alert name</Label>
-              <Input id="alert-name-inline" v-model="form.name" placeholder="High error rate alert" :disabled="isDisabled" />
-            </div>
-            <div class="space-y-2">
-              <Label for="alert-severity-inline">Severity</Label>
-              <Select :model-value="form.severity" :disabled="isDisabled" @update:model-value="(value: any) => (form.severity = value)">
-                <SelectTrigger id="alert-severity-inline">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Severity</SelectLabel>
-                    <SelectItem value="info">Info</SelectItem>
-                    <SelectItem value="warning">Warning</SelectItem>
-                    <SelectItem value="critical">Critical</SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
-          <div class="space-y-2">
-            <Label for="alert-description-inline">Description <span class="text-xs text-muted-foreground">(optional)</span></Label>
-            <Textarea id="alert-description-inline" v-model="form.description" placeholder="Provide context about when this alert should fire and what action to take" :rows="2" :disabled="isDisabled" />
-          </div>
-        </section>
+    <AlertBasicInfoSection :form="form" :disabled="isDisabled" />
 
-        <!-- Evaluation Query -->
-        <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
-          <div class="flex items-start justify-between gap-4">
-            <div>
-              <h3 class="text-sm font-semibold">Evaluation query</h3>
-              <p class="text-xs text-muted-foreground mt-1">
-                {{ form.editor_mode === 'condition'
-                  ? 'Write a simple filter condition. The time filter is auto-applied.' 
-                  : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
-              </p>
-            </div>
-            <!-- Query Type Toggle -->
-            <Tabs :model-value="form.editor_mode" @update:model-value="(v: any) => form.editor_mode = v" class="w-auto">
-              <TabsList class="h-8">
-                <TabsTrigger v-if="supportsConditionEditor" value="condition" class="text-xs px-3 h-7">LogchefQL</TabsTrigger>
-                <TabsTrigger value="native" class="text-xs px-3 h-7">{{ nativeEditorLabel }}</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+    <AlertQuerySection
+      :form="form"
+      :disabled="isDisabled"
+      :supports-condition-editor="supportsConditionEditor"
+      :native-editor-label="nativeEditorLabel"
+      :native-query-label="nativeQueryLabel"
+      :native-query-placeholder="nativeQueryPlaceholder"
+      :native-query-help-text="nativeQueryHelpText"
+      :generated-query-language-label="generatedQueryLanguageLabel"
+      :aggregate-field-suggestions="aggregateFieldSuggestions"
+      :condition-templates="conditionTemplates"
+      :query-templates="queryTemplates"
+      :condition-error="conditionError"
+      :generated-query="generatedQuery"
+      :is-testing-query="isTestingQuery"
+      :test-query-result="testQueryResult"
+      :test-query-error="testQueryError"
+      :on-apply-condition-template="applyConditionTemplate"
+      :on-apply-template="applyTemplate"
+      :on-test-query="handleTestQuery"
+    />
 
-          <!-- LogChefQL Mode -->
-          <template v-if="form.editor_mode === 'condition'">
-            <!-- Condition Templates -->
-            <div class="space-y-2">
-              <Label for="condition-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-              <Select @update:model-value="(value: any) => applyConditionTemplate(conditionTemplates[parseInt(value)])">
-                <SelectTrigger id="condition-template-inline">
-                  <SelectValue placeholder="Choose a template..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Condition Templates</SelectLabel>
-                    <SelectItem v-for="(template, index) in conditionTemplates" :key="index" :value="String(index)">
-                      <div class="flex flex-col gap-0.5">
-                        <span class="font-medium">{{ template.name }}</span>
-                        <span class="text-xs text-muted-foreground">{{ template.description }}</span>
-                      </div>
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
+    <AlertScheduleSection :form="form" :disabled="isDisabled" />
 
-            <!-- Aggregate Function -->
-            <div class="grid gap-4 sm:grid-cols-2">
-              <div class="space-y-2">
-                <Label for="aggregate-function-inline">Aggregate function</Label>
-                <Select :model-value="form.aggregate_function" @update:model-value="(v: any) => form.aggregate_function = v">
-                  <SelectTrigger id="aggregate-function-inline">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="count">count(*) - Count matching logs</SelectItem>
-                    <SelectItem value="sum">sum(field) - Sum of a field</SelectItem>
-                    <SelectItem value="avg">avg(field) - Average of a field</SelectItem>
-                    <SelectItem value="min">min(field) - Minimum of a field</SelectItem>
-                    <SelectItem value="max">max(field) - Maximum of a field</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div v-if="form.aggregate_function !== 'count'" class="space-y-2">
-                <Label for="aggregate-field" class="required">Field to aggregate</Label>
-                <Input
-                  id="aggregate-field"
-                  v-model="form.aggregate_field"
-                  list="aggregate-field-suggestions"
-                  placeholder="numeric field, e.g. duration_ms"
-                />
-                <datalist id="aggregate-field-suggestions">
-                  <option v-for="name in aggregateFieldSuggestions" :key="name" :value="name" />
-                </datalist>
-              </div>
-            </div>
+    <AlertNotificationSection
+      :form="form"
+      :disabled="isDisabled"
+      :team-members="teamMembers"
+      v-model:new-webhook-url="newWebhookUrl"
+      :on-add-recipient="addRecipient"
+      :on-remove-recipient="removeRecipient"
+      :on-add-webhook="addWebhook"
+      :on-remove-webhook="removeWebhook"
+      :on-add-label="addLabel"
+      :on-remove-label="removeLabel"
+      :on-add-annotation="addAnnotation"
+      :on-remove-annotation="removeAnnotation"
+    />
 
-            <!-- Condition Input -->
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <Label for="alert-condition-inline">Filter condition</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  :disabled="!generatedQuery || isDisabled || isTestingQuery"
-                  @click="handleTestQuery"
-                >
-                  {{ isTestingQuery ? "Testing..." : "Test Query" }}
-                </Button>
-              </div>
-              <Input
-                id="alert-condition-inline"
-                v-model="form.condition_json"
-                placeholder='severity = "ERROR" and status_code >= 500'
-                :disabled="isDisabled"
-                class="font-mono text-sm"
-              />
-              <p v-if="conditionError" class="text-xs text-destructive">{{ conditionError }}</p>
-              <p class="text-xs text-muted-foreground">
-                Examples: <code class="bg-muted px-1 rounded">severity = "ERROR"</code>, 
-                <code class="bg-muted px-1 rounded">status_code >= 500</code>, 
-                <code class="bg-muted px-1 rounded">message ~ "timeout"</code>
-              </p>
-            </div>
-
-            <div v-if="generatedQuery" class="space-y-2">
-              <Label class="text-xs text-muted-foreground">{{ generatedQueryLanguageLabel }} (read-only)</Label>
-              <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedQuery }}</pre>
-            </div>
-          </template>
-
-          <!-- Native Mode -->
-          <template v-else>
-            <!-- Query Templates -->
-            <div class="space-y-2">
-              <Label for="query-template-inline">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
-              <Select @update:model-value="(value: any) => applyTemplate(queryTemplates[parseInt(value)])">
-                <SelectTrigger id="query-template-inline">
-                  <SelectValue placeholder="Choose a template..." />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel>Query Templates</SelectLabel>
-                    <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
-                      <div class="flex flex-col gap-0.5">
-                        <span class="font-medium">{{ template.name }}</span>
-                        <span class="text-xs text-muted-foreground">{{ template.description }}</span>
-                      </div>
-                    </SelectItem>
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div class="space-y-2">
-              <div class="flex items-center justify-between">
-                <Label for="alert-query-inline">{{ nativeQueryLabel }}</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  :disabled="!form.query.trim() || isDisabled || isTestingQuery"
-                  @click="handleTestQuery"
-                >
-                  {{ isTestingQuery ? "Testing..." : "Test Query" }}
-                </Button>
-              </div>
-              <Textarea
-                id="alert-query-inline"
-                v-model="form.query"
-                :placeholder="nativeQueryPlaceholder"
-                :rows="6"
-                :disabled="isDisabled"
-                class="font-mono text-sm resize-none"
-              />
-              <p class="text-xs text-muted-foreground">
-                {{ nativeQueryHelpText }}
-              </p>
-            </div>
-          </template>
-
-          <!-- Test Query Results -->
-          <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
-            <div class="flex items-start justify-between gap-4">
-              <div class="flex-1 space-y-1">
-                <h4 class="text-sm font-medium">Test Result</h4>
-                <div class="flex items-baseline gap-3">
-                  <span class="text-2xl font-semibold tabular-nums">{{ testQueryResult.value }}</span>
-                  <span class="text-sm text-muted-foreground">
-                    {{ testQueryResult.threshold_met ? '✓ Threshold met' : '✗ Threshold not met' }}
-                  </span>
-                </div>
-              </div>
-              <div class="text-right space-y-1">
-                <div class="text-xs text-muted-foreground">Execution time</div>
-                <div class="text-sm font-medium tabular-nums">{{ testQueryResult.execution_time_ms }}ms</div>
-              </div>
-            </div>
-
-            <!-- Warnings -->
-            <div v-if="testQueryResult.warnings && testQueryResult.warnings.length > 0" class="space-y-2">
-              <div
-                v-for="(warning, index) in testQueryResult.warnings"
-                :key="index"
-                class="flex gap-2 text-sm rounded-md bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 p-3"
-              >
-                <span class="text-yellow-600 dark:text-yellow-500 flex-shrink-0">⚠️</span>
-                <span class="text-yellow-900 dark:text-yellow-100">{{ warning }}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- Test Query Error -->
-          <div v-if="testQueryError" class="rounded-lg border border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/20 p-4">
-            <div class="flex gap-2 text-sm">
-              <span class="text-red-600 dark:text-red-500 flex-shrink-0">✗</span>
-              <span class="text-red-900 dark:text-red-100">{{ testQueryError }}</span>
-            </div>
-          </div>
-        </section>
-
-        <!-- Threshold & Timing -->
-        <section class="space-y-4">
-          <div>
-            <h3 class="text-sm font-semibold mb-3">Threshold & timing</h3>
-            <div class="grid gap-4 lg:grid-cols-2">
-              <div class="space-y-2">
-                <Label for="alert-threshold-operator-inline">Threshold operator</Label>
-                <Select :model-value="form.threshold_operator" :disabled="isDisabled" @update:model-value="(value: any) => (form.threshold_operator = value)">
-                  <SelectTrigger id="alert-threshold-operator-inline">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="gt">Greater than (&gt;)</SelectItem>
-                    <SelectItem value="gte">Greater than or equal (&ge;)</SelectItem>
-                    <SelectItem value="lt">Less than (&lt;)</SelectItem>
-                    <SelectItem value="lte">Less than or equal (&le;)</SelectItem>
-                    <SelectItem value="eq">Equal (=)</SelectItem>
-                    <SelectItem value="neq">Not equal (&ne;)</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div class="space-y-2">
-                <Label for="alert-threshold-value-inline">Threshold value</Label>
-                <Input id="alert-threshold-value-inline" v-model.number="form.threshold_value" type="number" min="0" step="0.01" :disabled="isDisabled" placeholder="1" />
-              </div>
-              <div class="space-y-2">
-                <Label for="alert-lookback-inline">
-                  Lookback window (seconds)
-                  <span class="text-xs font-normal text-muted-foreground ml-1">· Time range to query</span>
-                </Label>
-                <Input id="alert-lookback-inline" v-model.number="form.lookback_seconds" type="number" min="60" step="60" :disabled="isDisabled" placeholder="300" />
-                <p class="text-xs text-muted-foreground">
-                  How far back to look in logs (e.g., 300s = last 5 minutes)
-                </p>
-              </div>
-              <div class="space-y-2">
-                <Label for="alert-frequency-inline">
-                  Evaluation frequency (seconds)
-                  <span class="text-xs font-normal text-muted-foreground ml-1">· How often to check</span>
-                </Label>
-                <Input id="alert-frequency-inline" v-model.number="form.frequency_seconds" type="number" min="30" step="30" :disabled="isDisabled" placeholder="300" />
-                <p class="text-xs text-muted-foreground">
-                  How often this alert runs (e.g., 300s = every 5 minutes)
-                </p>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- Notifications & Routing (Inline) -->
-        <section class="space-y-6 border-t pt-4">
-          <div>
-            <h3 class="text-sm font-semibold flex items-center gap-2">
-              <Bell class="h-4 w-4" />
-              Notifications & Routing
-            </h3>
-            <p class="text-xs text-muted-foreground mt-1">Configure where alerts should be sent when triggered.</p>
-          </div>
-
-          <!-- Recipients -->
-          <div class="space-y-3">
-             <Label class="text-xs font-medium">Team Members <span class="font-normal text-muted-foreground ml-1">· Notify via email</span></Label>
-             <div class="flex gap-2">
-                <Select @update:model-value="addRecipient">
-                  <SelectTrigger class="w-full">
-                    <SelectValue placeholder="Select team member to notify..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem v-for="member in teamMembers" :key="member.user_id" :value="String(member.user_id)">
-                      <div class="flex items-center gap-2">
-                        <User class="h-3 w-3" />
-                        <span>{{ member.full_name || member.email }}</span>
-                        <span class="text-xs text-muted-foreground ml-1">({{ member.role }})</span>
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-             </div>
-             
-             <!-- Selected Recipients List -->
-             <div v-if="form.recipient_user_ids.length > 0" class="flex flex-wrap gap-2">
-                <Badge v-for="userId in form.recipient_user_ids" :key="userId" variant="secondary" class="flex items-center gap-1 font-normal">
-                  <User class="h-3 w-3 opacity-50" />
-                  <span>
-                    {{ teamMembers.find(m => m.user_id === userId)?.full_name || teamMembers.find(m => m.user_id === userId)?.email || `User ${userId}` }}
-                  </span>
-                  <button type="button" @click="removeRecipient(userId)" class="ml-1 hover:text-destructive">
-                    <X class="h-3 w-3" />
-                  </button>
-                </Badge>
-             </div>
-          </div>
-
-          <!-- Webhooks -->
-          <div class="space-y-3">
-            <Label class="text-xs font-medium">Webhook URLs <span class="font-normal text-muted-foreground ml-1">· Send JSON payload</span></Label>
-            <div class="flex gap-2">
-              <Input v-model="newWebhookUrl" placeholder="https://api.example.com/hooks/..." @keydown.enter.prevent="addWebhook" />
-              <Button type="button" variant="secondary" @click="addWebhook">
-                <Plus class="h-4 w-4" />
-              </Button>
-            </div>
-            
-            <!-- Added Webhooks List -->
-            <div v-if="form.webhook_urls.length > 0" class="space-y-2">
-              <div v-for="url in form.webhook_urls" :key="url" class="flex items-center justify-between gap-2 border rounded-md px-3 py-2 text-sm">
-                <span class="truncate font-mono text-xs">{{ url }}</span>
-                <button type="button" @click="removeWebhook(url)" class="text-muted-foreground hover:text-destructive">
-                  <X class="h-4 w-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Metadata -->
-          <div class="grid gap-4 md:grid-cols-2">
-            <!-- Labels -->
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <Label class="text-xs font-medium">Labels <span class="font-normal text-muted-foreground ml-1">· Grouping</span></Label>
-                <Button type="button" variant="outline" size="sm" @click="addLabel" :disabled="isDisabled">
-                  + Add Label
-                </Button>
-              </div>
-              <div class="space-y-2">
-                <div v-for="label in form.labels" :key="label.id" class="flex gap-2">
-                  <Input v-model="label.key" placeholder="Key" class="flex-1" :disabled="isDisabled" />
-                  <Input v-model="label.value" placeholder="Value" class="flex-1" :disabled="isDisabled" />
-                  <Button type="button" variant="ghost" size="icon" @click="removeLabel(label.id)" :disabled="isDisabled">
-                    <X class="h-4 w-4" />
-                  </Button>
-                </div>
-                <p v-if="form.labels.length === 0" class="text-xs text-muted-foreground">No custom labels.</p>
-              </div>
-            </div>
-
-            <!-- Annotations -->
-            <div class="space-y-3">
-              <div class="flex items-center justify-between">
-                <Label class="text-xs font-medium">Annotations <span class="font-normal text-muted-foreground ml-1">· Context</span></Label>
-                <Button type="button" variant="outline" size="sm" @click="addAnnotation" :disabled="isDisabled">
-                  + Add Annotation
-                </Button>
-              </div>
-              <div class="space-y-2">
-                <div v-for="annotation in form.annotations" :key="annotation.id" class="flex gap-2">
-                  <Input v-model="annotation.key" placeholder="Key" class="flex-1" :disabled="isDisabled" />
-                  <Input v-model="annotation.value" placeholder="Value" class="flex-1" :disabled="isDisabled" />
-                  <Button type="button" variant="ghost" size="icon" @click="removeAnnotation(annotation.id)" :disabled="isDisabled">
-                    <X class="h-4 w-4" />
-                  </Button>
-                </div>
-                <p v-if="form.annotations.length === 0" class="text-xs text-muted-foreground">No custom annotations.</p>
-              </div>
-            </div>
-          </div>
-        </section>
-
+    <!-- Alert Status -->
     <section class="space-y-4">
       <div class="flex items-center justify-between rounded-lg border bg-muted/20 p-4">
         <div>
