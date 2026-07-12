@@ -47,6 +47,30 @@ func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
 
+// newTestSource creates a source row with a minimal valid connection config.
+// SourceType is left empty, which datasource.NormalizeSourceType treats as
+// clickhouse — matching the fakeProvider registered by
+// newFakeDatasourceService.
+func newTestSource(t *testing.T, db *sqlite.DB, name string) *models.Source {
+	t.Helper()
+	// Sources are deduped by identity key (host+db+table), not name, so the
+	// table name must vary per source to avoid a spurious ErrConflict between
+	// unrelated sources in the same test.
+	source := &models.Source{
+		Name: name,
+		Connection: models.ConnectionInfo{
+			Host:      "ch:9000",
+			Username:  "default",
+			Database:  "default",
+			TableName: name,
+		},
+	}
+	if err := db.CreateSource(context.Background(), source); err != nil {
+		t.Fatalf("CreateSource(%s): %v", name, err)
+	}
+	return source
+}
+
 func TestEnsurePersonalCollectionIdempotent(t *testing.T) {
 	t.Parallel()
 	db := newTestDB(t)
@@ -254,5 +278,161 @@ func TestCollectionItemParticipationAndRosterVisibility(t *testing.T) {
 	}
 	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, owner.ID); err != nil {
 		t.Errorf("owner should be able to list members, got %v", err)
+	}
+}
+
+// TestGetCollectionForUserAdminNoFreePass pins the documented behavior in
+// GetCollectionForUser: a global admin with no membership row on the
+// collection is treated exactly like any other non-member — 404, not a free
+// pass. Admin bypass exists elsewhere (e.g. UserCanDeleteSavedQuery) but not
+// here; collection visibility mirrors team-membership-gated source access.
+func TestGetCollectionForUserAdminNoFreePass(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "admin-gate-owner@example.com", "Owner")
+	admin := newTestUser(t, db, "admin-gate-admin@example.com", "Admin")
+	admin.Role = models.UserRoleAdmin
+	if err := db.UpdateUser(ctx, admin); err != nil {
+		t.Fatalf("UpdateUser(admin): %v", err)
+	}
+
+	coll, err := CreateCollection(ctx, db, log, "Owner Only", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+
+	if _, _, err := GetCollectionForUser(ctx, db, log, coll.ID, admin.ID); !errors.Is(err, ErrCollectionNotFound) {
+		t.Errorf("GetCollectionForUser(admin, non-member) err = %v, want ErrCollectionNotFound", err)
+	}
+	// Sanity: the owner themselves can still see it.
+	if _, _, err := GetCollectionForUser(ctx, db, log, coll.ID, owner.ID); err != nil {
+		t.Errorf("GetCollectionForUser(owner): %v", err)
+	}
+}
+
+// TestUpdateCollectionAuthorization pins UpdateCollection's owner-only gate
+// and the personal-collection-is-immutable rule.
+func TestUpdateCollectionAuthorization(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "update-coll-owner@example.com", "Owner")
+	member := newTestUser(t, db, "update-coll-member@example.com", "Member")
+
+	coll, err := CreateCollection(ctx, db, log, "Original", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("AddCollectionMember: %v", err)
+	}
+
+	// A plain member cannot rename the collection.
+	if _, err := UpdateCollection(ctx, db, log, coll.ID, member.ID, "Hijacked", ""); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("UpdateCollection(member) err = %v, want ErrCollectionForbidden", err)
+	}
+
+	// The owner can.
+	updated, err := UpdateCollection(ctx, db, log, coll.ID, owner.ID, "Renamed", "new description")
+	if err != nil {
+		t.Fatalf("UpdateCollection(owner): %v", err)
+	}
+	if updated.Name != "Renamed" {
+		t.Errorf("UpdateCollection name = %q, want %q", updated.Name, "Renamed")
+	}
+
+	// A personal collection can never be renamed, even by its owner.
+	personal, err := EnsurePersonalCollection(ctx, db, log, owner)
+	if err != nil {
+		t.Fatalf("EnsurePersonalCollection: %v", err)
+	}
+	if _, err := UpdateCollection(ctx, db, log, personal.ID, owner.ID, "New Name", ""); !errors.Is(err, ErrPersonalCollectionImmutable) {
+		t.Errorf("UpdateCollection(personal) err = %v, want ErrPersonalCollectionImmutable", err)
+	}
+}
+
+// TestDeleteCollectionAuthorization pins DeleteCollection's owner-only gate
+// and the personal-collection-is-immutable rule.
+func TestDeleteCollectionAuthorization(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "delete-coll-owner@example.com", "Owner")
+	member := newTestUser(t, db, "delete-coll-member@example.com", "Member")
+
+	coll, err := CreateCollection(ctx, db, log, "Doomed", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("AddCollectionMember: %v", err)
+	}
+
+	if err := DeleteCollection(ctx, db, log, coll.ID, member.ID); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("DeleteCollection(member) err = %v, want ErrCollectionForbidden", err)
+	}
+
+	personal, err := EnsurePersonalCollection(ctx, db, log, owner)
+	if err != nil {
+		t.Fatalf("EnsurePersonalCollection: %v", err)
+	}
+	if err := DeleteCollection(ctx, db, log, personal.ID, owner.ID); !errors.Is(err, ErrPersonalCollectionImmutable) {
+		t.Errorf("DeleteCollection(personal) err = %v, want ErrPersonalCollectionImmutable", err)
+	}
+
+	if err := DeleteCollection(ctx, db, log, coll.ID, owner.ID); err != nil {
+		t.Errorf("DeleteCollection(owner): %v", err)
+	}
+}
+
+// TestAddCollectionMemberAuthorization pins AddCollectionMember's owner-only
+// gate, invalid-role rejection, and the personal-collection-is-immutable rule.
+func TestAddCollectionMemberAuthorization(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "add-member-owner@example.com", "Owner")
+	member := newTestUser(t, db, "add-member-member@example.com", "Member")
+	target := newTestUser(t, db, "add-member-target@example.com", "Target")
+
+	coll, err := CreateCollection(ctx, db, log, "Team Coll", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, member.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("AddCollectionMember(seed): %v", err)
+	}
+
+	// A non-owner member cannot invite anyone.
+	if err := AddCollectionMember(ctx, db, log, coll.ID, member.ID, target.ID, models.CollectionRoleMember); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("AddCollectionMember(non-owner) err = %v, want ErrCollectionForbidden", err)
+	}
+
+	// An unknown role is rejected before the ownership check even matters.
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, target.ID, models.CollectionRole("bogus")); !errors.Is(err, ErrInvalidCollectionRole) {
+		t.Errorf("AddCollectionMember(bogus role) err = %v, want ErrInvalidCollectionRole", err)
+	}
+
+	// The owner can add a valid member.
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, target.ID, models.CollectionRoleEditor); err != nil {
+		t.Errorf("AddCollectionMember(owner, editor): %v", err)
+	}
+
+	// Personal collections reject membership changes outright, even by their owner.
+	personal, err := EnsurePersonalCollection(ctx, db, log, owner)
+	if err != nil {
+		t.Fatalf("EnsurePersonalCollection: %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, personal.ID, owner.ID, target.ID, models.CollectionRoleMember); !errors.Is(err, ErrPersonalCollectionImmutable) {
+		t.Errorf("AddCollectionMember(personal) err = %v, want ErrPersonalCollectionImmutable", err)
 	}
 }
