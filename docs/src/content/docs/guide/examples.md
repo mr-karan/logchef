@@ -561,7 +561,7 @@ trace_id!="" and span_id!="" and level="error"
    - `response_time>1000` is cleaner than text matching
    - Works well with numeric fields like status codes, durations, counts
 
-3. **Leverage Nested Field Access**
+3. **Use Nested Field Access**
 
    - Query Map and JSON columns directly: `log_attributes.user_id="123"`
    - No need to flatten your log schema

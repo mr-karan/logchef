@@ -3,14 +3,14 @@ title: Declarative Provisioning
 description: Manage teams, sources, and access control via config files
 ---
 
-Logchef supports declarative provisioning — define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.
+Logchef supports declarative provisioning: define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.
 
 ## How It Works
 
 Provisioning uses a **managed vs unmanaged** strategy:
 
-- **Managed resources** — Declared in your provisioning config. Logchef creates, updates, and optionally deletes them on startup. The API rejects manual edits to managed resources.
-- **Unmanaged resources** — Created via the UI. Provisioning ignores them entirely.
+- **Managed resources**: Declared in your provisioning config. Logchef creates, updates, and optionally deletes them on startup. The API rejects manual edits to managed resources.
+- **Unmanaged resources**: Created via the UI. Provisioning ignores them entirely.
 
 This means you can gradually adopt provisioning: start by declaring a few sources, and leave everything else UI-managed.
 
@@ -187,7 +187,7 @@ When you first enable provisioning on an existing Logchef instance, resources de
 - Matched resources are adopted (marked as managed) and updated to match config
 - Unmatched config entries create new resources
 
-No special migration flag is needed — adoption happens automatically on name match.
+No special migration flag is needed. Adoption happens automatically on name match.
 
 ## Pruning
 
@@ -224,7 +224,7 @@ curl -s https://logchef.example.com/api/v1/admin/provisioning/export \
   -H "Authorization: Bearer <token>" | jq .
 ```
 
-This returns a JSON representation of all sources, teams, and memberships — useful as a starting point for writing your `provisioning.toml`.
+This returns a JSON representation of all sources, teams, and memberships, useful as a starting point for writing your `provisioning.toml`.
 
 ## Inline vs Separate File
 

@@ -1,5 +1,5 @@
 ---
-title: "OpenTelemetry Logs in ClickHouse, Actually Queryable — With LogChef"
+title: "OpenTelemetry Logs in ClickHouse, Made Actually Queryable with LogChef"
 description: "Exporting OTel logs to ClickHouse solves storage. It doesn't solve search. LogChef adds a query UI, field explorer, and alerting over your existing otel_logs table."
 pubDate: 2026-07-15
 tags: ["opentelemetry", "clickhouse", "observability", "logs", "otel"]
@@ -8,7 +8,7 @@ author: "LogChef Team"
 
 You wired up the OpenTelemetry Collector, pointed the `clickhouseexporter` at your ClickHouse cluster, and logs are flowing. `otel_logs` is filling up, insert throughput is fine, and storage costs dropped compared to whatever SaaS platform you were paying per-GB before. On paper, you're done.
 
-Then someone asks "did the checkout service log anything about `CONNECTION_REFUSED` in the last hour, for this trace ID?" and you're staring at a table with a `LogAttributes` column of type `Map(String, String)`, a `ResourceAttributes` map with another few dozen keys, and a `clickhouse-client` prompt. You can answer the question. It takes a `WHERE ResourceAttributes['service.name'] = 'checkout' AND positionCaseInsensitive(Body, 'CONNECTION_REFUSED') > 0` query you have to hand-write, re-derive the right map key casing from memory, and paste into a terminal — every time, for every on-call engineer, with no history of what anyone queried last time.
+Then someone asks "did the checkout service log anything about `CONNECTION_REFUSED` in the last hour, for this trace ID?" and you're staring at a table with a `LogAttributes` column of type `Map(String, String)`, a `ResourceAttributes` map with another few dozen keys, and a `clickhouse-client` prompt. You can answer the question. It takes a `WHERE ResourceAttributes['service.name'] = 'checkout' AND positionCaseInsensitive(Body, 'CONNECTION_REFUSED') > 0` query you have to hand-write, re-derive the right map key casing from memory, and paste into a terminal, every time, for every on-call engineer, with no history of what anyone queried last time.
 
 That's the actual gap. Getting OTel logs *into* ClickHouse is well-trodden ground. Getting a team to *search* them without everyone becoming a ClickHouse SQL expert is not. [LogChef](https://github.com/mr-karan/logchef) is a single-binary log analytics UI built specifically for this: point it at your ClickHouse table (including the exact `otel_logs` schema the Collector creates), and it gives you a query language, a field sidebar, saved queries, live tail, and alerting on top.
 
@@ -71,7 +71,7 @@ ENGINE = MergeTree
 ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp);
 ```
 
-If you'd rather ship via [Vector](https://vector.dev) — say, you're not running the Collector, or you want more control over the transform — LogChef's own bundled schema is a simplified, single-map take on the same OTel data model (`timestamp`, `severity_text`, `severity_number`, `service_name`, `trace_id`, `span_id`, `body`, one flat `log_attributes` map). A minimal Vector sink into that shape:
+If you'd rather ship via [Vector](https://vector.dev) (say, you're not running the Collector, or you want more control over the transform), LogChef's own bundled schema is a simplified, single-map take on the same OTel data model (`timestamp`, `severity_text`, `severity_number`, `service_name`, `trace_id`, `span_id`, `body`, one flat `log_attributes` map). A minimal Vector sink into that shape:
 
 ```toml
 [sources.otlp_logs.grpc]
@@ -105,7 +105,7 @@ database = "default"
 table = "logs"
 ```
 
-Either way, the point is the same: **LogChef doesn't require its own schema.** It connects to any ClickHouse table with a timestamp column, auto-detects the columns, and adapts its query interface to them — so the real `otel_logs` table the Collector already created for you works as-is. You can even declare it via [provisioning](/getting-started/provisioning) config with `table_name = "otel_logs"` and skip the UI setup entirely.
+Either way, the point is the same: **LogChef doesn't require its own schema.** It connects to any ClickHouse table with a timestamp column, auto-detects the columns, and adapts its query interface to them, so the real `otel_logs` table the Collector already created for you works as-is. You can even declare it via [provisioning](/getting-started/provisioning) config with `table_name = "otel_logs"` and skip the UI setup entirely.
 
 ## Querying it: LogchefQL over Map columns
 
@@ -148,13 +148,13 @@ Substring search on the log body uses `~` (case-insensitive contains, `positionC
 Body~"connection refused" and ServiceName="checkout"
 ```
 
-If a map key itself contains a dot as a single literal key (rather than being a multi-segment path you want joined), quote the segment: `LogAttributes."user.name"="alice"`. And when you need aggregation — `GROUP BY ServiceName, SeverityText`, error-rate-over-time, joins against a traces table — LogchefQL steps aside for **native SQL mode**, where the query runs exactly as written, with no automatic time-range or `LIMIT` injected.
+If a map key itself contains a dot as a single literal key (rather than being a multi-segment path you want joined), quote the segment: `LogAttributes."user.name"="alice"`. And when you need aggregation (`GROUP BY ServiceName, SeverityText`, error-rate-over-time, joins against a traces table), LogchefQL steps aside for **native SQL mode**, where the query runs exactly as written, with no automatic time-range or `LIMIT` injected.
 
 ## Actually finding the field names
 
 The honest failure mode of hand-writing these queries isn't syntax, it's not remembering what's in the map. Did that service tag its span with `http.status_code` or `http.response.status_code`? Is it `k8s.pod.name` or `k8s.pod_name`? LogChef's **field sidebar** exists for this: it lists queryable columns from your source and their top distinct values for the current time range, with click-to-filter.
 
-Two honest caveats here, because it's easy to oversell this feature for OTel data specifically. First, `LowCardinality` and `Enum` columns (`ServiceName`, `SeverityText` in the schema above) load their top values automatically when you open the sidebar; plain `String` columns require a click, so you don't accidentally fire an expensive distinct-values scan on something like `Body`. Second, and more importantly: **`Map`, `Array`, `Tuple`, and JSON columns are excluded from the sidebar's value list entirely**, since ClickHouse can't cheaply enumerate distinct values for them. That means `ResourceAttributes` and `LogAttributes` themselves won't show up as expandable fields with a value list — you still need to know the key you're looking for and type `ResourceAttributes.service.name=` yourself. The sidebar helps you discover `ServiceName` and `SeverityText` values instantly; it doesn't turn the attribute maps into a browsable tree.
+Two honest caveats here, because it's easy to oversell this feature for OTel data specifically. First, `LowCardinality` and `Enum` columns (`ServiceName`, `SeverityText` in the schema above) load their top values automatically when you open the sidebar; plain `String` columns require a click, so you don't accidentally fire an expensive distinct-values scan on something like `Body`. Second, and more importantly: **`Map`, `Array`, `Tuple`, and JSON columns are excluded from the sidebar's value list entirely**, since ClickHouse can't cheaply enumerate distinct values for them. That means `ResourceAttributes` and `LogAttributes` themselves won't show up as expandable fields with a value list; you still need to know the key you're looking for and type `ResourceAttributes.service.name=` yourself. The sidebar helps you discover `ServiceName` and `SeverityText` values instantly; it doesn't turn the attribute maps into a browsable tree.
 
 ## Alerting without a separate stack
 
@@ -176,13 +176,13 @@ WHERE ResourceAttributes['deployment.environment'] = 'production'
 
 ## Live tail and saved queries
 
-For the "watch it happen right now" case, **Live** streams matching rows as they arrive instead of running one-shot queries — worth knowing that on ClickHouse sources this polls rather than subscribes, so it's not a true push stream, and it can occasionally re-show a row near the poll boundary. It's still faster than re-running the same query on a loop by hand.
+For the "watch it happen right now" case, **Live** streams matching rows as they arrive instead of running one-shot queries. Worth knowing that on ClickHouse sources this polls rather than subscribes, so it's not a true push stream, and it can occasionally re-show a row near the poll boundary. It's still faster than re-running the same query on a loop by hand.
 
-And once a query is worth keeping — the one that finds checkout errors by trace, the one that surfaces 5xx spikes by environment — **Save** it into your personal library or a shared collection (an on-call runbook, say), so the next person paging doesn't have to reconstruct the map-key syntax from scratch.
+And once a query is worth keeping (the one that finds checkout errors by trace, the one that surfaces 5xx spikes by environment), **Save** it into your personal library or a shared collection (an on-call runbook, say), so the next person paging doesn't have to reconstruct the map-key syntax from scratch.
 
 ## What this doesn't do
 
-To be direct about the boundaries: LogChef doesn't parse or reshape OTLP itself — it's a query and access layer over a ClickHouse (or VictoriaLogs) table that something else (the Collector, Vector, Fluent Bit, whatever) already populated. There's no OTLP receiver built into LogChef, no schema-transform step, and no special-cased "OTel mode" beyond the fact that its bundled default schema happens to be modeled on the OTel log data model and its query language happens to handle dotted map keys well. If your `LogAttributes` map is inconsistent across services — one team using `http.status_code`, another `httpStatusCode` — LogChef will surface that inconsistency exactly as-is; it won't normalize it for you.
+To be direct about the boundaries: LogChef doesn't parse or reshape OTLP itself — it's a query and access layer over a ClickHouse (or VictoriaLogs) table that something else (the Collector, Vector, Fluent Bit, whatever) already populated. There's no OTLP receiver built into LogChef, no schema-transform step, and no special-cased "OTel mode" beyond the fact that its bundled default schema happens to be modeled on the OTel log data model and its query language happens to handle dotted map keys well. If your `LogAttributes` map is inconsistent across services (one team using `http.status_code`, another `httpStatusCode`), LogChef will surface that inconsistency exactly as-is; it won't normalize it for you.
 
 ## Try it
 

@@ -3,7 +3,7 @@ title: Schema Design
 description: Understanding Logchef's log schema design and optimization
 ---
 
-Logchef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure. Logchef is designed to work with any Clickhouse schema, requiring only a timestamp field. However, if you don't have an existing schema or wish to quickly start ingesting logs without worrying about the schema details, you can use the built-in schemas Logchef provides.
+Logchef works with any Clickhouse table that has a timestamp field. If you don't have an existing schema, or want to start ingesting logs quickly without worrying about the details, you can use the optimized built-in schemas Logchef provides.
 
 ## OpenTelemetry Schema
 

@@ -6,9 +6,9 @@ tags: ["clickhouse", "nginx", "observability", "logs", "incident-response"]
 author: "LogChef Team"
 ---
 
-Your pager goes off: `5xx rate > 2%`, evaluated over the last 5 minutes. No deploy just went out. No infra change is in flight. The dashboard shows a jagged spike in the error-rate panel and not much else — Grafana can tell you *that* something broke, not *what* is breaking or *for whom*.
+Your pager goes off: `5xx rate > 2%`, evaluated over the last 5 minutes. No deploy just went out. No infra change is in flight. The dashboard shows a jagged spike in the error-rate panel and not much else. Grafana can tell you *that* something broke, not *what* is breaking or *for whom*.
 
-This is the part where a lot of teams still `ssh` into a box and `tail -f access.log | grep " 5"`. If your nginx logs already live in ClickHouse, you don't have to. This post walks through that exact failure mode — alert fires, you open the log explorer, live-tail to confirm it's still happening, narrow the noise with a query language, then drop into SQL to find the one endpoint (and the one backend) actually causing it.
+This is the part where a lot of teams still `ssh` into a box and `tail -f access.log | grep " 5"`. If your nginx logs already live in ClickHouse, you don't have to. This post walks through that exact failure mode: alert fires, you open the log explorer, live-tail to confirm it's still happening, narrow the noise with a query language, then drop into SQL to find the one endpoint (and the one backend) actually causing it.
 
 We'll use [LogChef](https://github.com/mr-karan/logchef), an open-source query and alerting layer on top of ClickHouse (and VictoriaLogs), and a schema you can copy directly.
 
@@ -39,7 +39,7 @@ TTL toDateTime(toUnixTimestamp(timestamp)) + toIntervalDay(7)
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
 ```
 
-`host` here is whichever edge/app node emitted the log line — useful once you have more than one nginx instance behind a load balancer, which is exactly the case where "one bad host" is a plausible root cause. `ORDER BY (host, timestamp)` means queries that filter or group by `host` first are cheap; the `minmax` index on `status` and the token bloom filter on `referer` keep filtered scans fast without a full column scan.
+`host` here is whichever edge/app node emitted the log line, useful once you have more than one nginx instance behind a load balancer, which is exactly the case where "one bad host" is a plausible root cause. `ORDER BY (host, timestamp)` means queries that filter or group by `host` first are cheap; the `minmax` index on `status` and the token bloom filter on `referer` keep filtered scans fast without a full column scan.
 
 A Vector pipeline that gets nginx's combined log format into this shape:
 
@@ -81,7 +81,7 @@ compression = "gzip"
 skip_unknown_fields = true
 ```
 
-Point LogChef at this table — Sources → Add Source, host/port/database/table — assign it to a team, and you're ready to query. Worth saying plainly: LogChef doesn't collect or parse logs itself. Vector (or whatever ships your logs) does that job; LogChef is the query and alerting surface on top of what's already in ClickHouse.
+Point LogChef at this table (Sources → Add Source, host/port/database/table), assign it to a team, and you're ready to query. Worth saying plainly: LogChef doesn't collect or parse logs itself. Vector (or whatever ships your logs) does that job; LogChef is the query and alerting surface on top of what's already in ClickHouse.
 
 ## The alert that started this
 
@@ -94,13 +94,13 @@ LogChef's alerting evaluates a query on a schedule and fires when a threshold tr
 - **Frequency**: `60s`
 - **Recipients**: your on-call rotation, plus a webhook into whatever chat tool you use
 
-That's the alert that just paged you. It tells you the count crossed a threshold — nothing about which host or endpoint. That's what the rest of this is for.
+That's the alert that just paged you. It tells you the count crossed a threshold, nothing about which host or endpoint. That's what the rest of this is for.
 
-## Confirm it's still happening: Live Tail
+## Confirm it's still happening: live tail
 
 Before digging into history, check if the spike is ongoing. Open the source in LogChef, type `status>=500` in LogchefQL mode, and click **Live**. Instead of running one query, LogChef streams matching rows as they land.
 
-Two things worth knowing before you rely on it: on ClickHouse sources, live tail polls rather than subscribes — it re-scans a short trailing window each cycle to catch rows that finish ingesting slightly late, so there's a small delay, not a true push stream. And it's only available in LogchefQL mode; if you're on the SQL tab, there's no **Live** button — raw ClickHouse SQL isn't supported for tailing (VictoriaLogs sources can tail in native LogsQL too, but ClickHouse can't).
+Two things worth knowing before you rely on it: on ClickHouse sources, live tail polls rather than subscribes. It re-scans a short trailing window each cycle to catch rows that finish ingesting slightly late, so there's a small delay, not a true push stream. And it's only available in LogchefQL mode; if you're on the SQL tab, there's no **Live** button, since raw ClickHouse SQL isn't supported for tailing (VictoriaLogs sources can tail in native LogsQL too, but ClickHouse can't).
 
 If rows are still streaming in with `status>=500`, you're mid-incident, not looking at a blip that already resolved.
 
@@ -158,18 +158,18 @@ Illustrative output — the shape of what you're looking for, not a claim about 
 | edge-01 | `POST /api/checkout HTTP/1.1` | 502 | ~40 |
 | edge-02 | `GET /api/catalog HTTP/1.1` | 500 | ~12 |
 
-One host, one endpoint, one status code dominates the count by an order of magnitude. That's the signal an aggregate count-over-time alert can't give you on its own — it tells you *something* crossed a threshold, not that it's concentrated on `edge-03` serving `/api/checkout`.
+One host, one endpoint, one status code dominates the count by an order of magnitude. That's the signal an aggregate count-over-time alert can't give you on its own: it tells you *something* crossed a threshold, not that it's concentrated on `edge-03` serving `/api/checkout`.
 
-From here, the result view's **Histogram** tab (with **Group By** set to `host`) turns the same query into a time-series bar chart, so you can see exactly when the spike on `edge-03` started relative to the others — useful for correlating against a deploy timestamp or a config push on that one node.
+From here, the result view's **Histogram** tab (with **Group By** set to `host`) turns the same query into a time-series bar chart, so you can see exactly when the spike on `edge-03` started relative to the others. That's useful for correlating against a deploy timestamp or a config push on that one node.
 
 ## What this doesn't do for you
 
 Worth being direct about the limits, since none of this replaces judgment:
 
-- LogChef found *where* the errors are concentrated. It didn't tell you *why* `edge-03` is failing — that's still a `nginx -T` / upstream health check / systemd journal problem on that host.
+- LogChef found *where* the errors are concentrated. It didn't tell you *why* `edge-03` is failing; that's still a `nginx -T` / upstream health check / systemd journal problem on that host.
 - The alert is a threshold on a count, not an anomaly detector. Set the threshold too low and you get paged on normal traffic variance; too high and small but real problems don't page at all.
-- Live tail on ClickHouse is a polling window, not a real subscription, and rows that are byte-identical across every column (including timestamp) can't be told apart from a re-fetch — a real constraint of ClickHouse tables having no row ID, not a bug to chase.
+- Live tail on ClickHouse is a polling window, not a real subscription, and rows that are byte-identical across every column (including timestamp) can't be told apart from a re-fetch. That's a real constraint of ClickHouse tables having no row ID, not a bug to chase.
 
-None of that makes the workflow useless — it makes the incident go from "somewhere in prod, no idea where" to "this one host, this one endpoint" in the time it takes to type three queries.
+None of that makes the workflow useless. It moves the incident from "somewhere in prod, no idea where" to "this one host, this one endpoint" in the time it takes to type three queries.
 
 Try this against your own logs at the [live demo](https://demo.logchef.app), or self-host from [github.com/mr-karan/logchef](https://github.com/mr-karan/logchef).

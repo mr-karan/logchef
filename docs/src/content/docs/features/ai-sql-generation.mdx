@@ -3,7 +3,7 @@ title: AI SQL Generation
 description: Generate ClickHouse SQL from natural language questions.
 ---
 
-Logchef can translate natural language questions into ClickHouse SQL queries using OpenAI-compatible LLMs. The AI is schema-aware — it knows your table's columns and types.
+Logchef can translate natural language questions into ClickHouse SQL queries using OpenAI-compatible LLMs. The AI is schema-aware: it knows your table's columns and types.
 
 ## Usage
 
@@ -66,4 +66,4 @@ For AI assistant integration outside the web UI (e.g., Claude Desktop), see [MCP
 
 ## Limitations
 
-AI-generated SQL should always be reviewed before execution. The model can produce incorrect queries, especially for complex aggregations or unfamiliar schemas. Start simple and iterate.
+Always review AI-generated SQL before running it. The model can get complex aggregations or unfamiliar schemas wrong, so start with simple questions and iterate from there.

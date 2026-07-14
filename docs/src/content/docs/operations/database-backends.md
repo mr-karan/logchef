@@ -3,9 +3,9 @@ title: Database Backends & High Availability
 description: Choose between the default SQLite metadata store and the opt-in Postgres backend for multi-replica deployments
 ---
 
-Logchef stores its **application metadata** — users, teams, sources, sessions,
+Logchef stores its **application metadata** (users, teams, sources, sessions,
 saved queries, collections, alerts, API tokens, settings, export jobs, and query
-shares — in a relational database. (Your **logs** always live in ClickHouse and
+shares) in a relational database. (Your **logs** always live in ClickHouse and
 are unaffected by this choice.)
 
 Two backends are supported:
@@ -15,7 +15,7 @@ Two backends are supported:
 | **SQLite** (default) | Single instance | Zero-config, single binary, embedded file. The default. |
 | **Postgres** (opt-in) | Multiple replicas / HA | Shared metadata so any replica serves any request. |
 
-SQLite remains the default — a single-binary, zero-config start is preserved. You
+SQLite remains the default. A single-binary, zero-config start is preserved. You
 only need Postgres if you run **more than one Logchef replica** against shared
 state (e.g. behind a load balancer for availability).
 
@@ -53,7 +53,7 @@ Logchef validates the selection on startup and exits with a clear error if
 
 On startup Logchef applies any pending schema migrations automatically. The
 Postgres backend acquires a **PostgreSQL advisory lock** before migrating, so
-multiple replicas starting at once will not race — only one migrates while the
+multiple replicas starting at once will not race: only one migrates while the
 others wait, then all proceed.
 
 ## High-availability caveats
@@ -80,7 +80,7 @@ accordingly.
 ### Sessions and writes are shared
 
 Authentication sessions and all metadata writes live in Postgres, so a user's
-session and data are visible across replicas — this is exactly the property that
+session and data are visible across replicas: this is exactly the property that
 makes multi-replica serving work.
 
 ## Development

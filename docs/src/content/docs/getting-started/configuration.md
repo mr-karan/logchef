@@ -124,7 +124,7 @@ LOGCHEF_AUTH__LOCAL__ADMIN_EMAIL=admin@example.com
 LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD=change-me-please
 ```
 
-When local auth is enabled the whole `[oidc]` section becomes optional — the
+When local auth is enabled the whole `[oidc]` section becomes optional. The
 login page shows an email/password form (and the SSO button too, if OIDC is
 also configured). The bootstrap admin is created (or its password updated)
 on every startup, so rotating the password is just a config change + restart.
@@ -133,7 +133,7 @@ The login endpoint is rate limited per IP and per email.
 ### SSO auto-provisioning (JIT user creation)
 
 By default, an OIDC login from a user who doesn't already exist in Logchef is
-rejected with "user not found" — someone has to create the user first (via the
+rejected with "user not found": someone has to create the user first (via the
 admin UI or [declarative provisioning](/getting-started/provisioning/)).
 **Auto-provisioning** removes that step for your own company domain: a
 first-time OIDC login from an allowed email domain creates the user on the
@@ -163,7 +163,7 @@ LOGCHEF_AUTH__AUTO_PROVISION__DEFAULT_TEAM_IDS="1"
 
 Behavior notes:
 
-- Auto-provisioned users are always created as regular, active **members** —
+- Auto-provisioned users are always created as regular, active **members**,
   never admins. Admin access still comes only from `auth.admin_emails`.
 - Provisioning runs **after** the `email_verified` claim check, so an
   unverified email can never mint a user.
@@ -171,7 +171,7 @@ Behavior notes:
   [declarative provisioning](/getting-started/provisioning/): the reconciler
   never adopts, updates, or prunes them, and admins can edit them freely.
 - Applies to the **browser OIDC login** only. The CLI token exchange still
-  requires the user to already exist — run the web login once first.
+  requires the user to already exist. Run the web login once first.
 
 ### Auth Settings
 

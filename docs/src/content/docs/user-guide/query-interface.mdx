@@ -34,7 +34,7 @@ See [Search Syntax](/guide/search-syntax) for the full reference.
 
 ### ClickHouse SQL
 
-Write raw ClickHouse SQL. You control everything — time filters, aggregations, joins, CTEs.
+Write raw ClickHouse SQL. You control everything: time filters, aggregations, joins, CTEs.
 
 ```sql
 SELECT
@@ -61,16 +61,16 @@ If you are running VictoriaLogs specifically, see [Using VictoriaLogs with Logch
 
 ## Time Controls
 
-- **Quick ranges** — Last 5m, 15m, 1h, 24h, 7d, etc.
-- **Absolute range** — Type dates directly or pick from the calendar
-- **Relative syntax** — `now-1h`, `now-7d` in the input fields
-- **Timezone** — Toggle between browser local and UTC
+- **Quick ranges**: Last 5m, 15m, 1h, 24h, 7d, etc.
+- **Absolute range**: Type dates directly or pick from the calendar
+- **Relative syntax**: `now-1h`, `now-7d` in the input fields
+- **Timezone**: Toggle between browser local and UTC
 
 In LogchefQL mode, the time range is applied automatically.
 
 In native mode:
 
-- ClickHouse SQL treats the time picker as informational — you manage time filters in your SQL.
+- ClickHouse SQL treats the time picker as informational: you manage time filters in your SQL.
 - VictoriaLogs LogsQL applies the selected time range outside the query text.
 
 ## Query Cancellation
@@ -89,7 +89,7 @@ tailing differs between backends.
 **Limitations:** on ClickHouse sources, live tail polls rather than subscribes, with
 a short trailing re-scan window to catch rows that finish ingesting slightly behind
 the poll cursor. Two log rows that are byte-for-byte identical across every column,
-including the timestamp, cannot be told apart and are shown only once — ClickHouse
+including the timestamp, cannot be told apart and are shown only once. ClickHouse
 rows have no unique row ID to distinguish genuine duplicates from a re-fetch of the
 same row. A stream also ends automatically after a fixed session lifetime; reopen
 **Live** to start a new one.
@@ -102,7 +102,7 @@ same row. A stream also ends automatically after a fixed session lifetime; reope
 - Double-click a column header divider to auto-fit width
 - Expand rows with the chevron to see full log details
 - Best when you want explicit columns and field-level scanning
-- **Column filters** — click the filter icon in a column header to narrow the
+- **Column filters**: click the filter icon in a column header to narrow the
   currently-loaded rows by that column. Type text for a contains match, or a
   comparison like `>500`, `>=500`, `<500`, or `=500` on numeric columns.
   Filtering is client-side only (no new query is sent) and resets whenever you
@@ -124,9 +124,9 @@ The time histogram shows log volume distribution. Click and drag to zoom into a 
 
 ### Export
 
-Export results as CSV — all rows, visible rows, filtered rows, or current page.
+Export results as CSV: all rows, visible rows, filtered rows, or current page.
 The **Download** button (a backend-streamed export job, for very large result
-sets) only appears for sources that support it — currently ClickHouse only.
+sets) only appears for sources that support it: currently ClickHouse only.
 
 ## Query Variables
 

@@ -38,7 +38,7 @@ internal placeholder; the name is what shows up in team member lists.
 ## Add it to teams
 
 A service account on its own can hit `/me`, `/me/tokens`, and any admin
-endpoint if its tokens carry the right scopes — but **source-scoped routes
+endpoint if its tokens carry the right scopes, but **source-scoped routes
 require team membership**.
 
 From the **Service Tokens** page, click **Manage teams** on the account card.
@@ -46,7 +46,7 @@ Pick the teams whose sources the automation needs, set role to **Member**
 (matches a read-only token's expectations), and add.
 
 You can also add a service account from the normal **Admin → Teams → Add
-Member** dialog — switch the dialog's "Account type" toggle to **Service
+Member** dialog. Switch the dialog's "Account type" toggle to **Service
 account** and the picker filters to service principals only.
 
 ## Issue a token
@@ -59,12 +59,12 @@ account** and the picker filters to service principals only.
 
 | Preset | Scopes | Use case |
 |--------|--------|----------|
-| **Read-only** | every `:read` scope | Default — log shippers, dashboards, audit tools |
+| **Read-only** | every `:read` scope | Default for log shippers, dashboards, audit tools |
 | **Logs viewer** | `profile:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read` | Smallest footprint for "just run queries" |
 | **Logs analyst** | Logs viewer + `saved_queries:write`, `collections:write`, `query_shares:*` | Read logs and save/share queries |
 | **Alerts manager** | `alerts:*`, `logs:read`, `sources:read`, `saved_queries:read`, `profile:read` | Manage alert definitions end-to-end |
 | **Source admin** | `sources:*`, `settings:read`, `profile:read` | Provision/update sources |
-| **Full access** | `*` | Equivalent to a logged-in session — last resort |
+| **Full access** | `*` | Equivalent to a logged-in session; last resort |
 
 You can deviate from any preset by toggling individual scopes after picking
 one. The active preset stays highlighted while the selection matches; once
@@ -120,22 +120,22 @@ curl -sS -X POST \
 ## Revoking access
 
 - **Revoke a single token**: Service Tokens page → token row → trash icon.
-- **Revoke everything for an account**: delete the service account — all of
+- **Revoke everything for an account**: delete the service account. All of
   its tokens and team memberships go with it.
 - **Reduce blast radius without deleting**: remove the account from specific
   teams using **Manage teams**.
 
 A revoked or deleted token starts returning `401` immediately on the next
-request — no cache, no grace period.
+request. There's no cache and no grace period.
 
 ## Service accounts vs human accounts
 
 | | Human user | Service account |
 |---|---|---|
-| Logs in via OIDC | Yes | No — rejected at OIDC callback |
+| Logs in via OIDC | Yes | No, rejected at OIDC callback |
 | Owns sessions (cookies) | Yes | No |
 | Owns API tokens | Yes (issued from `Settings → API Tokens`) | Yes (issued from `Service Tokens`) |
-| Appears in `/admin/users` | Yes | No — managed via `/admin/service-accounts` |
+| Appears in `/admin/users` | Yes | No, managed via `/admin/service-accounts` |
 | Appears in team member pickers | Yes (in **Human user** mode) | Yes (in **Service account** mode) |
 | Default token scope | Full access (session-equivalent) | Read-only preset |
 | Visual indicator in team list | None | `Service account` badge + bot icon |
@@ -150,5 +150,5 @@ request — no cache, no grace period.
 - **Prefer short-lived tokens.** 30 days is the default in the UI; renew on a
   schedule rather than minting "never expires" tokens.
 - **Keep `tokens:write` off automation tokens.** A token with `tokens:write`
-  can mint more tokens for itself — only useful for orchestration that
-  intentionally rotates.
+  can mint more tokens for itself. That's only useful for orchestration that
+  intentionally rotates tokens.

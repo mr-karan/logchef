@@ -72,7 +72,7 @@ response_time>1000 and status>=500
 
 ## Nested Field Access
 
-LogchefQL supports accessing nested fields using **dot notation**. This works seamlessly with:
+LogchefQL supports accessing nested fields using **dot notation**. This works with:
 
 - **Map columns** (e.g., `Map(String, String)`)
 - **JSON columns**
@@ -276,12 +276,12 @@ Native mode gives you direct access to backend-specific capabilities, including:
 - Custom functions
 - Complex expressions
 
-In SQL mode, your query is executed exactly as written—time range and limit controls are disabled since you have full control over the SQL.
+In SQL mode, your query executes exactly as written. Time range and limit controls are disabled since you have full control over the SQL.
 
 ## Tips for Effective Queries
 
 1. **Start specific, then broaden**: Begin with specific conditions and remove filters to expand results
 2. **Use parentheses for complex logic**: `(a or b) and c` is clearer than relying on operator precedence
-3. **Leverage nested field access**: Don't flatten your logs—query them directly
+3. **Use nested field access**: Don't flatten your logs. Query them directly
 4. **Use the pipe operator**: Select only the fields you need for faster queries
 5. **Switch to SQL mode**: For aggregations and advanced analysis

@@ -1,17 +1,17 @@
 ---
 title: Architecture
-description: Comprehensive overview of Logchef's architecture, components, and data flow
+description: Overview of Logchef's architecture, components, and data flow
 ---
 
 ## Architectural Overview
 
-Logchef is architected as a specialized query and visualization layer on top of external log storage backends. Its design emphasizes a clear separation of concerns:
+Logchef is a specialized query and visualization layer on top of external log storage backends. Its design keeps a clear separation of concerns:
 
 - **Query Engine**: Core focus on transforming user intent into the selected datasource's native query language
-- **No Ingestion Pipeline**: The architecture intentionally excludes log collection, focusing exclusively on the query interface
+- **No Ingestion Pipeline**: The architecture intentionally excludes log collection and focuses only on the query interface
 - **Datasource Providers**: Backend-specific provider layers for ClickHouse and VictoriaLogs while keeping a shared application control plane
 
-This architectural approach allows Logchef to leverage the existing ecosystem of log collection tools while providing a specialized interface for exploring logs once they are in ClickHouse, VictoriaLogs, or future supported backends.
+This means Logchef can reuse the existing ecosystem of log collection tools while giving you a dedicated interface for exploring logs once they land in ClickHouse, VictoriaLogs, or future supported backends.
 
 ## System Overview
 
@@ -21,7 +21,7 @@ This architectural approach allows Logchef to leverage the existing ecosystem of
 
 #### Backend
 
-- **Go**: Logchef's core backend is written in Go, providing high performance, concurrency, and efficient resource utilization
+- **Go**: Logchef's core backend is written in Go for performance and concurrency
 - **SQLite**: Lightweight database used for metadata storage of users, teams, sources, and saved queries
 - **ClickHouse**: High-performance columnar database optimized for analytical queries on log data
 - **VictoriaLogs**: Log-native storage engine accessed via LogsQL and HTTP APIs
@@ -62,7 +62,7 @@ This architectural approach allows Logchef to leverage the existing ecosystem of
    - Users construct queries via the UI (LogchefQL or native mode)
    - Logchef translates LogchefQL to SQL for ClickHouse or LogsQL for VictoriaLogs
    - Queries are executed against the appropriate datasource source(s)
-   - Results are processed, formatted, and displayed in the UI
+   - Logchef processes, formats, and displays the results in the UI
 
 ## Data Storage
 
@@ -103,11 +103,3 @@ Logchef connects to remote datasource backends as sources:
 - **Single Binary**: Logchef runs as a lightweight single binary with minimal resource requirements
 - **Stateless Operation**: Core application is stateless for horizontal scaling (only SQLite metadata is persistent)
 - **Proxying**: Can be deployed behind reverse proxies like Nginx or Caddy
-
-This architecture ensures:
-
-- Fast log querying across multiple datasource backends
-- Efficient metadata management
-- Scalable log storage and retrieval
-- Robust access controls
-- Clean and responsive user experience

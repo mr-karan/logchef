@@ -8,7 +8,7 @@ Logchef implements a team-based access control system that helps organize and se
 ## Authentication
 
 Users sign in via **OIDC/SSO**, or via built-in **email+password** authentication
-if your instance has it enabled — see [Local authentication](/getting-started/configuration/#local-authentication-run-without-oidc)
+if your instance has it enabled. See [Local authentication](/getting-started/configuration/#local-authentication-run-without-oidc)
 to run Logchef without an external identity provider. Both can be enabled at once.
 
 By default an OIDC login only works for users that already exist in Logchef.
