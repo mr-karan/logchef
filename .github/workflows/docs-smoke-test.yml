@@ -1,0 +1,41 @@
+name: Docs Deploy Smoke Test
+
+# Post-deploy sanity check for the live docs site: homepage 200 + expected
+# copy, robots.txt, sitemap, canonical/OG tags, llms.txt, and a couple of
+# representative docs pages.
+#
+# Triggered automatically when "Deploy Docs to GitHub Pages" finishes (via
+# workflow_run, so this doesn't need to touch that workflow's file), and can
+# also be run manually against any host — useful for smoke-testing a staging
+# deploy or re-checking without waiting for the next deploy.
+#
+# The checked-out ref is always the default branch (workflow_run triggers
+# always use the workflow file from the default branch), which is fine here
+# since this workflow only reads a live HTTP endpoint, not build output.
+
+on:
+  workflow_run:
+    workflows: ["Deploy Docs to GitHub Pages"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Base URL to smoke-test"
+        required: false
+        default: "https://logchef.app"
+
+jobs:
+  smoke-test:
+    name: Smoke test live site
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run smoke test
+        env:
+          BASE_URL: ${{ inputs.base_url || 'https://logchef.app' }}
+        run: bash docs/scripts/smoke-test.sh

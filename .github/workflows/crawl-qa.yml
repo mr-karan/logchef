@@ -1,0 +1,76 @@
+name: Docs Crawl QA
+
+# Builds the docs site and runs SEO/crawlability quality checks over the
+# static output: broken internal links, duplicate titles/H1s, missing meta
+# descriptions, and sitemap URLs that don't correspond to a real page.
+#
+# Internal link/HTML checks are strict (fail the job). External link checks
+# are informational only — the public internet is flaky and shouldn't block
+# docs PRs.
+
+on:
+  pull_request:
+    paths:
+      - "docs/**"
+      - ".github/workflows/crawl-qa.yml"
+  push:
+    paths:
+      - "docs/**"
+      - ".github/workflows/crawl-qa.yml"
+  workflow_dispatch:
+
+env:
+  BUILD_PATH: "docs"
+
+jobs:
+  crawl-qa:
+    name: Build + crawl QA
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+        working-directory: ${{ env.BUILD_PATH }}
+
+      - name: Build with Astro
+        run: bun run build --site="https://logchef.app"
+        working-directory: ${{ env.BUILD_PATH }}
+
+      - name: HTML quality checks (titles, H1s, meta descriptions, sitemap)
+        run: node ./scripts/crawl-qa.mjs dist
+        working-directory: ${{ env.BUILD_PATH }}
+
+      - name: Restore lychee cache
+        uses: actions/cache@v4
+        with:
+          path: .lycheecache
+          key: lychee-cache-${{ github.run_id }}
+          restore-keys: lychee-cache-
+
+      - name: Check internal links (strict)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --offline
+            --no-progress
+            --root-dir ${{ github.workspace }}/${{ env.BUILD_PATH }}/dist
+            '${{ env.BUILD_PATH }}/dist/**/*.html'
+          fail: true
+
+      - name: Check external links (non-blocking)
+        uses: lycheeverse/lychee-action@v2
+        continue-on-error: true
+        with:
+          args: >-
+            --no-progress
+            --cache
+            --max-cache-age 1d
+            --accept 200,201,202,203,204,206,301,302,303,307,308,403,429
+            --root-dir ${{ github.workspace }}/${{ env.BUILD_PATH }}/dist
+            '${{ env.BUILD_PATH }}/dist/**/*.html'
+          fail: false
