@@ -116,6 +116,110 @@ func TestBuildTailPollSQL(t *testing.T) {
 	}
 }
 
+func TestTailPollWindowStart(t *testing.T) {
+	t.Parallel()
+
+	sessionStart := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	margin := 5 * time.Second
+
+	// At session start the cursor equals sessionStart: cursor-margin is before
+	// sessionStart, so the window clamps to sessionStart rather than reaching
+	// into history from before the tail began.
+	if got := tailPollWindowStart(sessionStart, sessionStart, margin); !got.Equal(sessionStart) {
+		t.Fatalf("at session start: got %v, want %v (clamped)", got, sessionStart)
+	}
+
+	// Once the cursor has advanced well past sessionStart+margin, the window is
+	// simply cursor-margin.
+	cursor := sessionStart.Add(30 * time.Second)
+	want := cursor.Add(-margin)
+	if got := tailPollWindowStart(sessionStart, cursor, margin); !got.Equal(want) {
+		t.Fatalf("advanced cursor: got %v, want %v", got, want)
+	}
+
+	// Just past the clamp boundary: cursor-margin lands exactly on sessionStart.
+	cursor = sessionStart.Add(margin)
+	if got := tailPollWindowStart(sessionStart, cursor, margin); !got.Equal(sessionStart) {
+		t.Fatalf("boundary cursor: got %v, want %v", got, sessionStart)
+	}
+
+	// Zero margin: window is exactly the cursor (no re-scan), matching the old
+	// cursor-only behavior.
+	cursor = sessionStart.Add(time.Minute)
+	if got := tailPollWindowStart(sessionStart, cursor, 0); !got.Equal(cursor) {
+		t.Fatalf("zero margin: got %v, want %v", got, cursor)
+	}
+}
+
+// TestTailBoundaryOverflowRecoveredViaMarginAndDedup proves the chosen fix for
+// the ">1000-row tie at the poll boundary" case: there is no cheap, universal
+// tiebreak column across arbitrary ClickHouse sources, so instead of sorting on
+// one, a poll that comes back full immediately re-polls with a margin-widened
+// window, and the dedup set filters out whatever it already emitted. This
+// simulates a poll LIMIT of 2 cutting a 3-row tied timestamp short, then the
+// follow-up poll (as TailLogs would issue immediately on a full batch)
+// re-fetching the same instant and recovering exactly the missed row.
+func TestTailBoundaryOverflowRecoveredViaMarginAndDedup(t *testing.T) {
+	t.Parallel()
+
+	const simulatedBatchLimit = 2
+	tsField := "timestamp"
+	boundary := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	sessionStart := boundary.Add(-time.Minute)
+	margin := 5 * time.Second
+
+	all := []map[string]any{
+		tsRow(boundary, "a"),
+		tsRow(boundary, "b"),
+		tsRow(boundary, "c"),
+	}
+
+	dedup := newTailDedup()
+
+	// First poll: LIMIT cuts the tie short at 2 of the 3 tied rows (as
+	// ORDER BY timestamp ASC LIMIT simulatedBatchLimit would in ClickHouse).
+	firstBatch := all[:simulatedBatchLimit]
+	fresh1, newest1 := dedup.process(firstBatch, tsField)
+	if len(fresh1) != 2 {
+		t.Fatalf("first poll: expected 2 fresh rows, got %d", len(fresh1))
+	}
+	if !newest1.Equal(boundary) {
+		t.Fatalf("first poll: expected cursor to advance to %v, got %v", boundary, newest1)
+	}
+	cursor := newest1
+	dedup.evictBefore(tailPollWindowStart(sessionStart, cursor, margin))
+
+	// The batch hit the limit, so TailLogs would re-poll immediately with a
+	// margin-widened window instead of waiting for the next tick. Because all
+	// three rows share the exact boundary timestamp, the widened window still
+	// includes it (windowStart <= boundary regardless of margin here), so the
+	// re-poll re-fetches all three tied rows.
+	windowStart := tailPollWindowStart(sessionStart, cursor, margin)
+	if windowStart.After(boundary) {
+		t.Fatalf("re-poll window %v must not be after the boundary %v", windowStart, boundary)
+	}
+	fresh2, newest2 := dedup.process(all, tsField)
+	if !newest2.Equal(boundary) {
+		t.Fatalf("second poll: expected cursor to stay at %v, got %v", boundary, newest2)
+	}
+	if len(fresh2) != 1 || fresh2[0]["_msg"] != "c" {
+		t.Fatalf("second poll: expected only the missed row 'c' to surface fresh, got %v", fresh2)
+	}
+
+	// Across both polls, every row was emitted exactly once.
+	seenMsgs := map[string]bool{}
+	for _, row := range append(fresh1, fresh2...) {
+		msg := row["_msg"].(string)
+		if seenMsgs[msg] {
+			t.Fatalf("row %q emitted more than once", msg)
+		}
+		seenMsgs[msg] = true
+	}
+	if len(seenMsgs) != 3 {
+		t.Fatalf("expected all 3 rows emitted across both polls, got %d: %v", len(seenMsgs), seenMsgs)
+	}
+}
+
 func TestExtractRowTime(t *testing.T) {
 	t.Parallel()
 

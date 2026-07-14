@@ -21,6 +21,16 @@ const (
 	tailFlushInterval = 200 * time.Millisecond
 )
 
+// ErrTailUpstreamClosed reports that the VictoriaLogs tail stream ended
+// because the upstream connection was closed (EOF) without our own context
+// being cancelled first. /select/logsql/tail is meant to stream indefinitely,
+// so an EOF we didn't ask for means VictoriaLogs restarted, timed out the
+// connection, or the network dropped — a connection loss, not a graceful
+// completion. Distinguishing the two matters because the caller reports
+// ctx-cancelled stops (client disconnect, session TTL) as "completed" but
+// must not report an unrequested upstream close the same way.
+var ErrTailUpstreamClosed = errors.New("victorialogs tail: upstream closed the connection unexpectedly")
+
 // TailLogs proxies VictoriaLogs' native /select/logsql/tail stream. The upstream
 // response body streams NDJSON rows as they are ingested; we decode incrementally
 // and batch-emit every tailFlushInterval or tailBatchSize rows, whichever comes
@@ -55,10 +65,18 @@ func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req data
 		for {
 			var row map[string]any
 			if err := decoder.Decode(&row); err != nil {
-				// EOF or a read error caused by ctx cancellation are clean stops.
-				if errors.Is(err, io.EOF) || ctx.Err() != nil {
+				switch {
+				case ctx.Err() != nil:
+					// We asked for this: client disconnect, session TTL, or
+					// admission eviction cancelled ctx, which is what caused the
+					// read to fail (EOF or otherwise). Clean, expected stop.
 					decodeDone <- nil
-				} else {
+				case errors.Is(err, io.EOF):
+					// Upstream closed the stream on its own; ctx is still live, so
+					// nobody asked for this. Report it as a connection loss, not a
+					// graceful completion.
+					decodeDone <- ErrTailUpstreamClosed
+				default:
 					decodeDone <- err
 				}
 				return

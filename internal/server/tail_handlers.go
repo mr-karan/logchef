@@ -69,9 +69,10 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 	}
 
 	tailReq := datasource.TailRequest{
-		Query:        nativeQuery,
-		Language:     nativeLang,
-		PollInterval: s.config.Tail.PollInterval,
+		Query:          nativeQuery,
+		Language:       nativeLang,
+		PollInterval:   s.config.Tail.PollInterval,
+		LookbackMargin: s.config.Tail.LookbackMargin,
 	}
 
 	// Admission control: class tail, per-user and global caps → 429.
@@ -166,6 +167,13 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 		heartbeat := time.NewTicker(tailHeartbeatInterval)
 		defer heartbeat.Stop()
 
+		// sessionTTL fires this timer to end the stream, but it is a request to
+		// stop, not a hard bound: writeFrame's Flush below can still block on a
+		// slow/stalled client. The actual hard bound in that case is fasthttp's
+		// per-connection WriteTimeout ([server] http_server_timeout), which is
+		// set once for the whole streamed response when writing begins — see
+		// TailConfig.SessionTTL's doc comment. Keep sessionTTL comfortably under
+		// http_server_timeout so this timer is normally the one that fires.
 		var ttlCh <-chan time.Time
 		if sessionTTL > 0 {
 			ttlTimer := time.NewTimer(sessionTTL)
@@ -189,8 +197,12 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 				}
 			case err := <-tailDone:
 				if err != nil && streamCtx.Err() == nil {
+					// Log the full, unsanitized error server-side only. The
+					// provider error may embed upstream response bodies (e.g. a
+					// VictoriaLogs error page up to 4KiB) that must never reach
+					// the browser verbatim.
 					log.Warn("tail stream ended with error", "source_id", sourceID, "query_id", queryID, "error", err)
-					payload, _ := json.Marshal(map[string]string{"reason": "error", "message": err.Error()})
+					payload, _ := json.Marshal(map[string]string{"reason": "error", "message": sanitizeTailErrorMessage(err)})
 					writeFrame("end", payload)
 				} else {
 					writeFrame("end", []byte(`{"reason":"completed"}`))
@@ -207,9 +219,15 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 					}
 				}
 				if dropped > 0 && limiter.shouldNotify() {
-					notice, _ := json.Marshal(map[string]string{
-						"code":    "rate_limited",
-						"message": fmt.Sprintf("dropped %d rows; narrow your filter", dropped),
+					// dropped_total is cumulative for the whole session (not just
+					// this window) so a client sampling notices — at most one per
+					// second — never undercounts. message carries the same figure
+					// in prose for display; dropped_total is the structured field
+					// a client should actually read.
+					notice, _ := json.Marshal(map[string]any{
+						"code":          "rate_limited",
+						"message":       fmt.Sprintf("dropped %d rows in the last second (%d dropped this session); narrow your filter", dropped, limiter.droppedTotal),
+						"dropped_total": limiter.droppedTotal,
 					})
 					if !writeFrame("notice", notice) {
 						return
@@ -282,22 +300,47 @@ func (s *Server) resolveTailQuery(c *fiber.Ctx, source *models.Source, sourceID 
 	return strings.TrimSpace(rawQuery), language, true
 }
 
+// tailSanitizedErrorMaxLen bounds the error text sent to the client in an SSE
+// "end" frame. Provider errors can embed upstream response bodies verbatim
+// (e.g. VictoriaLogs error pages up to 4KiB, per doFormRequest) — those must
+// never reach the browser unbounded or with raw formatting intact. The full,
+// unsanitized error is always logged server-side separately.
+const tailSanitizedErrorMaxLen = 200
+
+// sanitizeTailErrorMessage collapses a tail error to a single line and caps
+// its length before it is sent to the client over SSE.
+func sanitizeTailErrorMessage(err error) string {
+	msg := strings.Join(strings.Fields(err.Error()), " ")
+	if msg == "" {
+		return "tail stream ended with an error"
+	}
+	if len(msg) > tailSanitizedErrorMaxLen {
+		msg = msg[:tailSanitizedErrorMaxLen] + "..."
+	}
+	return msg
+}
+
 // tailRateLimiter enforces a per-stream row-rate ceiling. It never buffers:
 // rows beyond the ceiling in the current one-second window are dropped, and at
-// most one notice is surfaced per window.
+// most one notice is surfaced per window. droppedTotal accumulates across the
+// whole stream lifetime (not reset per window) so a notice can report the true
+// session-wide drop count instead of undercounting with just the current
+// window's figure.
 type tailRateLimiter struct {
-	maxPerSec   int
-	windowStart time.Time
-	emitted     int
-	noticeSent  bool
-	now         func() time.Time
+	maxPerSec    int
+	windowStart  time.Time
+	emitted      int
+	noticeSent   bool
+	droppedTotal int64
+	now          func() time.Time
 }
 
 func newTailRateLimiter(maxPerSec int) *tailRateLimiter {
 	return &tailRateLimiter{maxPerSec: maxPerSec, now: time.Now}
 }
 
-// admit reports how many of n rows may be emitted now and how many are dropped.
+// admit reports how many of n rows may be emitted now and how many are
+// dropped, and accumulates dropped into droppedTotal.
 func (l *tailRateLimiter) admit(n int) (allowed, dropped int) {
 	if l.maxPerSec <= 0 {
 		return n, 0 // unlimited
@@ -317,7 +360,9 @@ func (l *tailRateLimiter) admit(n int) (allowed, dropped int) {
 		return n, 0
 	}
 	l.emitted += remaining
-	return remaining, n - remaining
+	dropped = n - remaining
+	l.droppedTotal += int64(dropped)
+	return remaining, dropped
 }
 
 // shouldNotify reports whether a rate-limit notice should be sent for the

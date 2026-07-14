@@ -235,11 +235,16 @@ func (s *Service) GetLogContext(ctx context.Context, sourceID models.SourceID, r
 // TailRequest carries the native query for a live tail stream. Query is the
 // provider's native tail input: a LogsQL query for VictoriaLogs, or a
 // ClickHouse SQL WHERE-fragment (conditions only) for ClickHouse. PollInterval
-// is the ClickHouse poll cadence; VictoriaLogs streams natively and ignores it.
+// is the ClickHouse poll cadence; VictoriaLogs streams natively and ignores
+// both PollInterval and LookbackMargin. LookbackMargin re-scans a trailing
+// window behind the cursor on every ClickHouse poll so rows that land after
+// the cursor advanced past their timestamp (ingestion lag, batched inserts)
+// are still picked up; the provider's dedup set absorbs the resulting overlap.
 type TailRequest struct {
-	Query        string
-	Language     models.QueryLanguage
-	PollInterval time.Duration
+	Query          string
+	Language       models.QueryLanguage
+	PollInterval   time.Duration
+	LookbackMargin time.Duration
 }
 
 // TailEmitter receives a batch of freshly observed rows. Returning an error

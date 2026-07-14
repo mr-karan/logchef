@@ -1,8 +1,10 @@
 package server
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,6 +51,43 @@ func TestTailRateLimiterAdmit(t *testing.T) {
 	}
 }
 
+func TestTailRateLimiterDroppedTotalAccumulates(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 7, 10, 0, 0, 0, time.UTC)
+	limiter := newTailRateLimiter(10)
+	limiter.now = func() time.Time { return now }
+
+	// Window 1: 15 rows in, 10 admitted, 5 dropped.
+	if allowed, dropped := limiter.admit(15); allowed != 10 || dropped != 5 {
+		t.Fatalf("window 1: allowed=%d dropped=%d, want 10/5", allowed, dropped)
+	}
+	if limiter.droppedTotal != 5 {
+		t.Fatalf("window 1: droppedTotal=%d, want 5", limiter.droppedTotal)
+	}
+
+	// Window 2 (next second): another 8 dropped. droppedTotal must be the sum
+	// across both windows (13), not just the current window's count (8) — a
+	// client sampling one notice per second must never undercount the session
+	// total.
+	now = now.Add(time.Second)
+	if allowed, dropped := limiter.admit(18); allowed != 10 || dropped != 8 {
+		t.Fatalf("window 2: allowed=%d dropped=%d, want 10/8", allowed, dropped)
+	}
+	if limiter.droppedTotal != 13 {
+		t.Fatalf("window 2: droppedTotal=%d, want 13 (cumulative)", limiter.droppedTotal)
+	}
+
+	// A window with nothing dropped must not perturb the running total.
+	now = now.Add(time.Second)
+	if allowed, dropped := limiter.admit(3); allowed != 3 || dropped != 0 {
+		t.Fatalf("window 3: allowed=%d dropped=%d, want 3/0", allowed, dropped)
+	}
+	if limiter.droppedTotal != 13 {
+		t.Fatalf("window 3: droppedTotal=%d, want unchanged 13", limiter.droppedTotal)
+	}
+}
+
 func TestTailRateLimiterUnlimited(t *testing.T) {
 	t.Parallel()
 
@@ -56,6 +95,39 @@ func TestTailRateLimiterUnlimited(t *testing.T) {
 	if allowed, dropped := limiter.admit(100000); allowed != 100000 || dropped != 0 {
 		t.Fatalf("unlimited: allowed=%d dropped=%d, want 100000/0", allowed, dropped)
 	}
+}
+
+func TestSanitizeTailErrorMessage(t *testing.T) {
+	t.Parallel()
+
+	t.Run("collapses embedded newlines and whitespace", func(t *testing.T) {
+		t.Parallel()
+		err := errors.New("victorialogs request failed with status 500: <html>\n\t<body>internal error\n\ttraceback line 1\n\ttraceback line 2</body>\n</html>")
+		got := sanitizeTailErrorMessage(err)
+		if strings.ContainsAny(got, "\n\t") {
+			t.Fatalf("expected no raw newlines/tabs in sanitized message, got %q", got)
+		}
+	})
+
+	t.Run("caps length", func(t *testing.T) {
+		t.Parallel()
+		err := errors.New(strings.Repeat("x", 4096)) // simulates a 4KiB upstream body
+		got := sanitizeTailErrorMessage(err)
+		if len(got) > tailSanitizedErrorMaxLen+len("...") {
+			t.Fatalf("sanitized message too long: %d chars", len(got))
+		}
+		if !strings.HasSuffix(got, "...") {
+			t.Fatalf("expected truncation suffix, got %q", got)
+		}
+	})
+
+	t.Run("empty error message gets a fallback", func(t *testing.T) {
+		t.Parallel()
+		got := sanitizeTailErrorMessage(errors.New(""))
+		if got == "" {
+			t.Fatalf("expected a non-empty fallback message")
+		}
+	})
 }
 
 func TestHandleTailLogsInvalidParams(t *testing.T) {

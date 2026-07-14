@@ -72,9 +72,21 @@ type TailConfig struct {
 	// MaxGlobal limits concurrent active tail streams globally.
 	MaxGlobal int `koanf:"max_global"`
 	// SessionTTL is the hard lifetime of a tail stream before it is closed.
+	// The practical upper bound is [server] http_server_timeout: fasthttp sets
+	// a single write deadline for the entire streamed response when it starts
+	// writing, so a Flush blocked on a slow/stalled client can still hold the
+	// connection open past SessionTTL — but never past http_server_timeout.
+	// Keep SessionTTL comfortably under http_server_timeout so the TTL is the
+	// one that normally fires.
 	SessionTTL time.Duration `koanf:"session_ttl"`
 	// MaxRowsPerSec is the per-stream row-rate ceiling; excess rows are dropped.
 	MaxRowsPerSec int `koanf:"max_rows_per_sec"`
+	// LookbackMargin re-scans this trailing window behind the poll cursor on
+	// every ClickHouse tail poll, so rows that finish ingesting slightly behind
+	// the cursor (ingestion lag, batched inserts) are not silently missed. The
+	// window never reaches before the tail session started. VictoriaLogs
+	// streams natively and ignores this.
+	LookbackMargin time.Duration `koanf:"lookback_margin"`
 }
 
 // SharesConfig contains settings for ad hoc query share links.
@@ -275,11 +287,12 @@ const (
 	defaultExportMaxConcurrentGlobal  = 5
 	defaultExportArtifactTTL          = 24 * time.Hour
 
-	defaultTailPollInterval  = 2 * time.Second
-	defaultTailMaxPerUser    = 2
-	defaultTailMaxGlobal     = 20
-	defaultTailSessionTTL    = 14 * time.Minute
-	defaultTailMaxRowsPerSec = 100
+	defaultTailPollInterval   = 2 * time.Second
+	defaultTailMaxPerUser     = 2
+	defaultTailMaxGlobal      = 20
+	defaultTailSessionTTL     = 14 * time.Minute
+	defaultTailMaxRowsPerSec  = 100
+	defaultTailLookbackMargin = 5 * time.Second
 
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
@@ -617,6 +630,12 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.Tail.MaxRowsPerSec <= 0 {
 		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
+	}
+	if !k.Exists("tail.lookback_margin") {
+		cfg.Tail.LookbackMargin = defaultTailLookbackMargin
+	}
+	if cfg.Tail.LookbackMargin < 0 {
+		cfg.Tail.LookbackMargin = defaultTailLookbackMargin
 	}
 
 	if !k.Exists("shares.default_ttl") {

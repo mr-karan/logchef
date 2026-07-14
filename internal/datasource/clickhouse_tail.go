@@ -15,8 +15,11 @@ import (
 
 const (
 	// tailBatchLimit caps rows fetched per poll. A poll returning a full batch
-	// signals the stream is falling behind; the row-rate ceiling upstream then
-	// drops the excess rather than letting it back up.
+	// signals more rows are waiting past this poll's LIMIT; TailLogs re-polls
+	// immediately (up to tailMaxConsecutiveDrains times) instead of waiting for
+	// the next tick, so a busy boundary drains rather than silently losing the
+	// remainder. The row-rate ceiling upstream (server-side) is what actually
+	// drops excess rows for a sustained firehose.
 	tailBatchLimit = 1000
 	// tailPollTimeoutSeconds bounds each poll query tightly — a tail must never
 	// block on a slow poll.
@@ -24,16 +27,34 @@ const (
 	// tailMaxConsecutiveFailures ends the stream after this many back-to-back
 	// poll errors; transient errors below the threshold are retried next tick.
 	tailMaxConsecutiveFailures = 5
+	// tailMaxConsecutiveDrains caps back-to-back immediate re-polls triggered by
+	// full batches. Without a cap, a source ingesting faster than tailBatchLimit
+	// per poll would keep this goroutine draining forever and never reach the
+	// select that checks ctx.Done(), so cancellation (client disconnect, TTL,
+	// admission eviction) would never be observed.
+	tailMaxConsecutiveDrains = 5
 	// defaultTailPollInterval is the fallback cadence when the request carries none.
 	defaultTailPollInterval = 2 * time.Second
+	// defaultTailLookbackMargin is the fallback re-scan window when the request
+	// carries none (e.g. a caller that doesn't populate it, such as a test).
+	defaultTailLookbackMargin = 5 * time.Second
 )
 
-// TailLogs polls the source table on a ticker, emitting rows newer than a cursor
-// that starts at time.Now() and advances to the newest timestamp seen. The poll
-// window is inclusive (>= cursor) so rows sharing the boundary timestamp are not
-// missed at second granularity; boundary rows already emitted are removed by the
-// dedup set (ported from the Rust CLI's tail command). req.Query is a ClickHouse
-// SQL WHERE-fragment (conditions only), which is composed into the poll query.
+// TailLogs polls the source table on a ticker, emitting rows newer than a
+// cursor seeded from ClickHouse's own clock (see now64) rather than the app
+// server's, so app/ClickHouse clock skew cannot create a gap or a backlog at
+// session start. Each poll re-scans a trailing lookbackMargin window behind
+// the cursor — not just the cursor itself — so rows that finish ingesting
+// slightly behind the cursor (ingestion lag, batched inserts arriving after
+// their own timestamp was already polled past) are still picked up; the
+// dedup set (ported from the Rust CLI's tail command) absorbs the resulting
+// overlap so nothing already emitted surfaces twice. The margin window never
+// reaches before the session's start time, so it cannot re-scan history from
+// before the tail began. A poll returning a full batch triggers an immediate
+// re-poll (capped) instead of waiting for the next tick, draining a busy
+// boundary rather than silently dropping the remainder. req.Query is a
+// ClickHouse SQL WHERE-fragment (conditions only), which is composed into the
+// poll query.
 func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source, req TailRequest, emit TailEmitter) error {
 	if source == nil {
 		return fmt.Errorf("source is required")
@@ -51,23 +72,37 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 	if interval <= 0 {
 		interval = defaultTailPollInterval
 	}
+	margin := req.LookbackMargin
+	if margin <= 0 {
+		margin = defaultTailLookbackMargin
+	}
 
 	tsField := source.MetaTSField
 	filter := strings.TrimSpace(req.Query)
 	dedup := newTailDedup()
-	cursor := time.Now()
+
+	sessionStart, err := p.now64(ctx, client)
+	if err != nil {
+		p.log.Warn("tail: SELECT now64() failed, falling back to app clock for initial cursor",
+			"source_id", source.ID, "error", err)
+		sessionStart = time.Now().UTC()
+	}
+	cursor := sessionStart
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	consecutiveFailures := 0
+	consecutiveDrains := 0
 	for {
-		rows, err := p.pollTail(ctx, client, source, tsField, filter, cursor)
+		windowStart := tailPollWindowStart(sessionStart, cursor, margin)
+		rows, err := p.pollTail(ctx, client, source, tsField, filter, windowStart)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			consecutiveFailures++
+			consecutiveDrains = 0
 			p.log.Warn("tail poll failed",
 				"source_id", source.ID,
 				"consecutive_failures", consecutiveFailures,
@@ -81,12 +116,25 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 			if !newest.IsZero() && newest.After(cursor) {
 				cursor = newest
 			}
-			dedup.evictBefore(cursor)
+			dedup.evictBefore(tailPollWindowStart(sessionStart, cursor, margin))
 			if len(fresh) > 0 {
 				if err := emit(fresh); err != nil {
 					return err
 				}
 			}
+
+			if len(rows) >= tailBatchLimit && consecutiveDrains < tailMaxConsecutiveDrains {
+				consecutiveDrains++
+				// Still observe cancellation promptly during a drain burst rather
+				// than looping straight back into pollTail.
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+					continue
+				}
+			}
+			consecutiveDrains = 0
 		}
 
 		select {
@@ -95,6 +143,40 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 		case <-ticker.C:
 		}
 	}
+}
+
+// tailPollWindowStart computes the inclusive lower bound of a poll: margin
+// behind the cursor, but never before the session started (so a tail never
+// re-scans history from before it began).
+func tailPollWindowStart(sessionStart, cursor time.Time, margin time.Duration) time.Time {
+	windowStart := cursor.Add(-margin)
+	if windowStart.Before(sessionStart) {
+		return sessionStart
+	}
+	return windowStart
+}
+
+// now64 asks ClickHouse for its own current wall-clock time, used to seed the
+// tail cursor. Seeding from the server's clock (instead of the app server's
+// time.Now()) avoids a gap or backlog at session start when the two clocks
+// disagree, and gives subsecond precision that a bare time.Now() truncated
+// against a DateTime (not DateTime64) column would otherwise lack.
+func (p *ClickHouseProvider) now64(ctx context.Context, client *clickhouse.Client) (time.Time, error) {
+	timeout := tailPollTimeoutSeconds
+	result, err := client.QueryWithOptions(ctx, "SELECT now64(9, 'UTC') AS ts", clickhouse.QueryOptions{
+		TimeoutSeconds: &timeout,
+	})
+	if err != nil {
+		return time.Time{}, fmt.Errorf("query now64: %w", err)
+	}
+	if len(result.Logs) == 0 {
+		return time.Time{}, fmt.Errorf("now64 query returned no rows")
+	}
+	ts := extractRowTime(result.Logs[0]["ts"])
+	if ts.IsZero() {
+		return time.Time{}, fmt.Errorf("now64 query returned an unparseable timestamp: %v", result.Logs[0]["ts"])
+	}
+	return ts, nil
 }
 
 // pollTail builds and runs a single poll query for rows at/after the cursor.
@@ -188,6 +270,17 @@ func (d *tailDedup) evictBefore(cursor time.Time) {
 
 // tailDedupKey fingerprints a row: the timestamp plus a hash over its sorted
 // field/value pairs, so identical rows collide regardless of map ordering.
+//
+// Inherent limitation: ClickHouse rows have no guaranteed unique identifier
+// (no auto-increment, no row UUID). Two genuinely distinct log events that are
+// byte-identical across every selected column, including the timestamp down
+// to whatever precision the column stores, are indistinguishable from a
+// re-fetch of the same row and will only be emitted once. This is expected to
+// be rare (it requires a full-row collision, not just a shared timestamp) and
+// is documented as a known limitation rather than solved, since fixing it
+// would require either a schema change (a mandatory unique row ID column) or
+// tracking result-set position, neither of which this stream boundary API
+// exposes.
 func tailDedupKey(row map[string]any, ts time.Time) string {
 	keys := make([]string, 0, len(row))
 	for k := range row {
