@@ -3,7 +3,7 @@ title: Using VictoriaLogs with Logchef
 description: Connect VictoriaLogs, ingest data, query with LogchefQL or LogsQL, and write alerts that work well.
 ---
 
-Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared Logchef experience for everyday workflows, with raw LogsQL available when you want VictoriaLogs-native pipes directly.
+Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared Logchef experience for everyday workflows, with raw LogsQL available when you want VictoriaLogs-native pipes directly. This page covers connecting a source and day-to-day usage; for what Logchef adds on top of VictoriaLogs' own UI, see [VictoriaLogs Explorer](/tutorials/victorialogs-explorer).
 
 ## What Works Well
 
@@ -48,10 +48,11 @@ When adding a VictoriaLogs source in Logchef:
 
 - Set the **Base URL** to the VictoriaLogs API endpoint
 - Choose auth mode:
-  - none
-  - basic auth
-  - bearer token
-- Set **Account ID** and **Project ID** together if you use multi-tenant VictoriaLogs
+  - **none** — no credentials sent
+  - **basic auth** — username + password, sent as an `Authorization: Basic ...` header
+  - **bearer token** — sent as `Authorization: Bearer <token>`
+- Set **Account ID** and **Project ID** together if you use multi-tenant VictoriaLogs — both are required together, and both must be numeric (VictoriaLogs tenants are `uint32` account/project IDs). Logchef sends them as `AccountID` / `ProjectID` request headers on every call.
+- Optionally add **custom headers**, e.g. an API key for a fronting proxy
 - Optionally define an **Immutable Scope Query**
 
 Examples of immutable scope:
@@ -64,7 +65,9 @@ Examples of immutable scope:
 kubernetes.namespace:="prod"
 ```
 
-Logchef applies that scope server-side to every query, histogram, field-values lookup, and alert evaluation for that datasource.
+Logchef applies that scope server-side to every query, histogram, field-values lookup, live tail, and alert evaluation for that datasource — it can't be overridden from the query editor.
+
+When you save the source, Logchef validates the connection by checking `/health` and then running a small `field_names` query with your configured auth, tenant headers, and scope applied. This catches a wrong base URL, bad credentials, or an invalid scope filter at setup time rather than on the first real query. Editing a source later and leaving a credential field blank keeps the previously-stored value — you only need to re-enter a username/password/token when you're changing it (or switching auth mode to "none", which clears any stored credentials for that source).
 
 ## Query Modes
 
@@ -109,9 +112,21 @@ Use native LogsQL when you need:
 
 VictoriaLogs sources support **Live Tail** from the explorer's Live toggle. Unlike
 ClickHouse (which is polled on an interval), Logchef proxies VictoriaLogs' native
-tail stream directly, so new rows arrive as a genuine push rather than a poll.
-Live tail is available in LogchefQL mode and in native LogsQL mode; the time-range
-and limit controls are disabled while a tail is running.
+`/select/logsql/tail` stream directly, so new rows arrive as a genuine push rather
+than a poll. Live tail is available in LogchefQL mode and in native LogsQL mode;
+the time-range and limit controls are disabled while a tail is running, since a
+tail follows new data rather than answering a bounded query.
+
+New rows are streamed into the UI in small batches (flushed whenever enough rows
+have accumulated, or at least every 200ms so a slow trickle of logs still shows up
+promptly). If the underlying tail connection drops because VictoriaLogs restarted
+or the network hiccuped — rather than because you stopped the tail yourself —
+Logchef surfaces that as a lost connection rather than a normal stop, so it's
+clear whether the tail ended because you asked it to or because something broke.
+
+Your source's immutable scope filter and tenant headers apply to live tail the
+same way they apply to regular queries — a tail can only ever stream the data the
+source is scoped to.
 
 ## Known limitations
 
@@ -167,6 +182,14 @@ Important rules:
 - Alias it as `value`
 - Let Logchef apply the alert lookback window automatically
 
+Logchef evaluates the query through VictoriaLogs' `stats_query` endpoint and
+prepends a `_time:<lookback>` filter (e.g. `_time:5m`) built from the alert's
+configured lookback — so in the common case you can leave the time window out of
+your query entirely. If your native query already includes its own `_time:`
+filter, Logchef leaves it alone instead of stacking a second one on top (LogsQL
+ANDs multiple `_time` filters together, so adding another would only narrow, or
+even zero out, a window you already scoped intentionally).
+
 ## When To Use LogchefQL vs LogsQL
 
 Use **LogchefQL** when:
@@ -200,6 +223,8 @@ Avoid highly-cardinal request-specific fields as stream fields.
 
 ## Next Steps
 
+- See [VictoriaLogs Explorer](/tutorials/victorialogs-explorer) for what Logchef adds on top of VictoriaLogs' own vmui UI
+- Read [LogsQL Queries](/guide/logsql-queries) for native LogsQL patterns and how LogchefQL compiles to LogsQL
 - Review the [Query Interface](/user-guide/query-interface)
 - Review the [Search Syntax](/guide/search-syntax)
 - Review [Alerting](/features/alerting)

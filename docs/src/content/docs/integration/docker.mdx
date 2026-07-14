@@ -1,0 +1,187 @@
+---
+title: Docker Logs
+description: Collect logs from Docker containers into ClickHouse with Vector's docker_logs source, then explore them in Logchef.
+---
+
+[Vector](https://vector.dev)'s `docker_logs` source connects to the Docker daemon socket and streams stdout/stderr from every running container, no log driver configuration needed. This is the simplest path from plain Docker (or Docker Compose) hosts into ClickHouse for querying with Logchef.
+
+## Prerequisites
+
+- ClickHouse server running and accessible
+- Docker Engine with the daemon socket available (`/var/run/docker.sock`)
+- A Logchef instance (for querying)
+
+## Create the ClickHouse Table
+
+```sql
+CREATE TABLE IF NOT EXISTS default.logs
+(
+    timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
+    severity_text LowCardinality(String) CODEC(ZSTD(1)),
+    severity_number Int32 CODEC(ZSTD(1)),
+    service_name LowCardinality(String) CODEC(ZSTD(1)),
+    namespace LowCardinality(String) CODEC(ZSTD(1)),
+    body String CODEC(ZSTD(1)),
+    log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+
+    INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
+    INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+)
+ENGINE = MergeTree()
+PARTITION BY toDate(timestamp)
+ORDER BY (namespace, service_name, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 30 DAY
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
+```
+
+This is Logchef's [OpenTelemetry schema](/integration/schema-design) — see that page for field and codec details.
+
+## Configure Vector
+
+```toml
+[api]
+enabled = true
+
+# Source: stream logs from every container
+[sources.docker_logs]
+type = "docker_logs"
+include_containers = ["*"]
+
+# Transform: map to the OTEL schema
+[transforms.remap_docker_logs]
+inputs = ["docker_logs"]
+type = "remap"
+source = '''
+  .timestamp = .timestamp
+  .service_name = .container_name
+  .namespace = "docker"
+  .body = .message
+
+  .severity_text = if match(.message, r"(?i)error|exception|fail|critical") {
+    "ERROR"
+  } else if match(.message, r"(?i)warn") {
+    "WARN"
+  } else if match(.message, r"(?i)debug") {
+    "DEBUG"
+  } else {
+    "INFO"
+  }
+
+  .severity_number = if .severity_text == "ERROR" {
+    17
+  } else if .severity_text == "WARN" {
+    13
+  } else if .severity_text == "DEBUG" {
+    5
+  } else {
+    9
+  }
+
+  .log_attributes = {
+    "container.id": .container_id,
+    "container.image": .image,
+    "docker.stream": .stream
+  }
+
+  del(.message)
+  del(.source_type)
+'''
+
+# Sink: ship to ClickHouse
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["remap_docker_logs"]
+endpoint = "http://clickhouse:8123"
+database = "default"
+table = "logs"
+compression = "gzip"
+healthcheck.enabled = false
+skip_unknown_fields = true
+```
+
+Vector's `docker_logs` source emits `container_id`, `container_name`, `image`, `stream` (`stdout`/`stderr`), `label` (container labels as an object), and a `timestamp` already parsed from the Docker log entry. Use `include_containers` / `exclude_containers` (prefix match) or `include_images` / `include_labels` to scope collection to specific services instead of `["*"]`.
+
+## Run with Docker Compose
+
+Mount the Docker socket read-only so Vector can talk to the daemon, and give it access to `/var/lib/docker/containers` for the log file bind-mounts:
+
+```yaml
+services:
+  vector:
+    image: timberio/vector:latest-alpine
+    volumes:
+      - ./vector.toml:/etc/vector/vector.toml:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    command: ["--config", "/etc/vector/vector.toml"]
+    restart: unless-stopped
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:latest
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+
+volumes:
+  clickhouse-data:
+```
+
+Or run Vector standalone against an existing Docker host:
+
+```bash
+docker run -d \
+  --name vector \
+  -v $(pwd)/vector.toml:/etc/vector/vector.toml:ro \
+  -v /var/run/docker.sock:/var/run/docker.sock:ro \
+  timberio/vector:latest-alpine \
+  --config /etc/vector/vector.toml
+```
+
+## Adding Container Labels
+
+Docker labels (e.g. `com.docker.compose.service`, or your own `env=production`) are available on the event as `.label`. Promote useful ones into `log_attributes` in the transform:
+
+```toml
+[transforms.remap_docker_logs]
+inputs = ["docker_logs"]
+type = "remap"
+source = '''
+  # ... existing mapping from above ...
+
+  .log_attributes."compose.service" = .label."com.docker.compose.service" ?? "unknown"
+  .log_attributes.environment = .label.environment ?? "unknown"
+'''
+```
+
+## Connect Logchef
+
+Once logs are flowing into ClickHouse:
+
+1. Log in to Logchef
+2. Go to **Sources > Add Source**
+3. Enter the ClickHouse connection details (host, port, database, table)
+4. Create or select a team and assign the source
+
+Start querying:
+
+```
+namespace="docker" and severity_text="ERROR"
+```
+
+```
+service_name="checkout-api" and log_attributes.docker.stream="stderr"
+```
+
+```
+log_attributes."compose.service"="api" and body~"connection refused"
+```
+
+## Next steps
+
+- Running in Kubernetes instead of plain Docker? See [Kubernetes Logs](/integration/kubernetes)
+- Already run an OpenTelemetry pipeline? See [OpenTelemetry Collector](/integration/otel-collector)
+- Review [Schema Design](/integration/schema-design) and [Search Syntax](/guide/search-syntax) for more

@@ -171,6 +171,7 @@ Key areas of the docs:
             { label: "Query Interface", link: "/user-guide/query-interface" },
             { label: "LogchefQL Syntax", link: "/guide/search-syntax" },
             { label: "SQL Examples", link: "/guide/examples" },
+            { label: "LogsQL Queries", link: "/guide/logsql-queries" },
             { label: "Field Sidebar", link: "/features/field-sidebar" },
           ],
         },
@@ -189,6 +190,11 @@ Key areas of the docs:
         {
           label: "Integration",
           items: [
+            { label: "Overview", link: "/integration" },
+            { label: "Vector", link: "/integration/vector" },
+            { label: "OpenTelemetry Collector", link: "/integration/otel-collector" },
+            { label: "Kubernetes Logs", link: "/integration/kubernetes" },
+            { label: "Docker Logs", link: "/integration/docker" },
             { label: "CLI", link: "/integration/cli" },
             { label: "MCP Server", link: "/integration/mcp-server" },
             { label: "Schema Design", link: "/integration/schema-design" },
@@ -198,8 +204,23 @@ Key areas of the docs:
           label: "Tutorials",
           items: [
             { label: "VictoriaLogs", link: "/tutorials/victorialogs" },
-            { label: "Vector + OTEL Logs", link: "/integration/vector" },
+            { label: "VictoriaLogs Explorer", link: "/tutorials/victorialogs-explorer" },
             { label: "NGINX Logs", link: "/tutorials/nginx-logs" },
+          ],
+        },
+        {
+          label: "Comparisons",
+          items: [
+            { label: "Overview", link: "/comparisons" },
+            { label: "Logchef vs ClickStack", link: "/comparisons/logchef-vs-clickstack" },
+          ],
+        },
+        {
+          label: "Migrate to Logchef",
+          items: [
+            { label: "Overview", link: "/migrate" },
+            { label: "From Elasticsearch", link: "/migrate/from-elasticsearch" },
+            { label: "From Loki", link: "/migrate/from-loki" },
           ],
         },
         {
