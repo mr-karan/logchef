@@ -1,7 +1,11 @@
-import { format } from 'date-fns';
-import { getLocalTimeZone } from '@internationalized/date';
+import { getLocalTimeZone, fromDate } from '@internationalized/date';
 import type { DateValue, CalendarDateTime } from '@internationalized/date';
 import type { TimeRange } from '@/types/query';
+
+/** Zero-pad a number to the given width (default 2). */
+function pad(value: number, width = 2): string {
+  return String(value).padStart(width, '0');
+}
 
 /**
  * Get the user's local timezone
@@ -32,12 +36,19 @@ export function formatDateForSQL(dateTime: DateValue | null | undefined, addQuot
   if (!dateTime) return "now()";
 
   try {
-    // Convert to JS Date using the specified timezone (or local as fallback)
+    // Convert to the absolute instant the picker refers to, interpreting the
+    // wall-clock fields in the chosen timezone.
     const effectiveTimezone = timezone || getLocalTimeZone();
     const jsDate = dateTime.toDate(effectiveTimezone);
 
-    // Format as YYYY-MM-DD HH:MM:SS
-    const formatted = format(jsDate, 'yyyy-MM-dd HH:mm:ss');
+    // Render the wall-clock string IN the same timezone it will be paired with
+    // inside toDateTime(<str>, <tz>). Using date-fns format() here would render
+    // in the browser-local timezone instead, double-shifting the instant when
+    // the picker timezone differs from the browser's local timezone (#103).
+    const zoned = fromDate(jsDate, effectiveTimezone);
+    const formatted =
+      `${pad(zoned.year, 4)}-${pad(zoned.month)}-${pad(zoned.day)} ` +
+      `${pad(zoned.hour)}:${pad(zoned.minute)}:${pad(zoned.second)}`;
 
     // Use standard SQL escaping (double single quotes)
     return addQuotes ? `'${formatted}'` : formatted;
