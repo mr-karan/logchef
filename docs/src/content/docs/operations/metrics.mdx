@@ -1,9 +1,9 @@
 ---
-title: Metrics Reference
-description: Comprehensive guide to LogChef's Prometheus metrics for monitoring usage and performance
+title: "Logchef Prometheus Metrics Reference"
+description: Comprehensive guide to Logchef's Prometheus metrics for monitoring usage and performance
 ---
 
-LogChef exposes comprehensive Prometheus metrics to monitor instance usage, performance, and health. These metrics provide visibility into query patterns, user activity, authentication events, and system resource utilization.
+Logchef exposes comprehensive Prometheus metrics to monitor instance usage, performance, and health. These metrics provide visibility into query patterns, user activity, authentication events, and system resource utilization.
 
 ## Metrics Endpoint
 
@@ -17,7 +17,7 @@ Configure your Prometheus server to scrape this endpoint for monitoring and aler
 
 ## Metric Categories
 
-LogChef emits metrics across several categories:
+Logchef emits metrics across several categories:
 
 - **HTTP Metrics**: Request/response patterns and performance
 - **Query Metrics**: Database query execution and performance  
@@ -250,3 +250,8 @@ For comprehensive monitoring, create dashboards tracking:
 3. **Security Dashboard**: Authentication patterns, authorization failures, user activity
 4. **Source Health Dashboard**: ClickHouse connection status, per-source performance
 5. **User Activity Dashboard**: Top users, team usage patterns, AI feature adoption
+
+## Next steps
+
+- Build the dashboards above inside Logchef itself: see [Dashboards](/features/dashboards)
+- Review [Database Backends & High Availability](/operations/database-backends) if you're scaling to multiple replicas

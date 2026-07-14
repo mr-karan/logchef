@@ -1,5 +1,5 @@
 ---
-title: MCP Server
+title: "Logchef MCP Server: AI Assistant Integration via Model Context Protocol"
 description: Connect AI coding assistants to Logchef for natural language log analysis using the Model Context Protocol.
 ---
 
@@ -12,7 +12,7 @@ The [Logchef MCP server](https://github.com/mr-karan/logchef-mcp) lets AI assist
 Before configuring your client, you need:
 
 1. **A running Logchef instance**: the MCP server connects to Logchef's HTTP API.
-2. **An API token**: generate one from your Logchef profile settings page. The token determines what data the MCP server can access.
+2. **An API token**: generate one from your Logchef profile settings page, or issue a scoped [service token](/features/service-tokens) for the assistant. The token determines what data the MCP server can access.
 
 ## Quick Start
 
@@ -419,3 +419,9 @@ logchef-mcp -debug
   description="Source code, releases, and issue tracker."
   href="https://github.com/mr-karan/logchef-mcp"
 />
+
+## Next steps
+
+- Prefer a terminal workflow? See the [Logchef CLI](/integration/cli)
+- Review [Service Tokens](/features/service-tokens) for scoping what the assistant can access
+- Check [AI SQL Generation](/features/ai-sql-generation) for the web UI's built-in AI assistant

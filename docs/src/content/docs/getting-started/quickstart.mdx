@@ -1,5 +1,5 @@
 ---
-title: Quick Start Guide
+title: "Logchef Quick Start: Install, Configure & Run Your First Query"
 description: Get started with Logchef in minutes
 ---
 
@@ -8,14 +8,14 @@ This guide will help you get Logchef up and running quickly. We'll cover install
 ## Prerequisites
 
 - Docker (for the recommended setup) or a Linux/macOS system for binary installation
-- A Clickhouse instance (included in Docker setup)
+- A ClickHouse instance (included in Docker setup)
 - SSO Provider (Dex is included in the Docker setup)
 
 ## Installation Options
 
 ### Using Docker (Recommended)
 
-The Docker setup is the easiest way to get started with Logchef, as it includes everything you need: Logchef, Clickhouse, Dex SSO, and Vector for demo data.
+The Docker setup is the easiest way to get started with Logchef, as it includes everything you need: Logchef, ClickHouse, Dex SSO, and Vector for demo data.
 
 ```bash
 # Download the compose file
@@ -28,7 +28,7 @@ docker compose up -d
 This will start:
 
 - Logchef UI and API on port 8125 (accessible at http://localhost:8125)
-- Clickhouse for log storage (ports 8123 and 9000)
+- ClickHouse for log storage (ports 8123 and 9000)
 - Dex SSO provider on port 5556
 - Vector for generating demo logs
 
@@ -105,7 +105,7 @@ Before you can start querying logs, you need to set up a team, create a data sou
 
 1. Navigate to Sources > Manage Sources
 2. Click "Add Source"
-3. Enter your Clickhouse connection details:
+3. Enter your ClickHouse connection details:
    ```
    Name: Demo Syslogs
    Host: localhost (or clickhouse if using Docker)
@@ -114,7 +114,7 @@ Before you can start querying logs, you need to set up a team, create a data sou
    Table: syslogs
    ```
 
-![Logchef Source Settings View](/screenshots/logchef_source.png)
+![Add Source form for connecting a ClickHouse data source](/screenshots/logchef_source.png)
 
 4. Test the connection and save
 

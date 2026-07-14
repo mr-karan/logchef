@@ -1,5 +1,5 @@
 ---
-title: Query Examples
+title: "LogchefQL Query Examples for Common Log Analytics Scenarios"
 description: Practical examples for common log analytics scenarios
 ---
 
@@ -584,3 +584,9 @@ trace_id!="" and span_id!="" and level="error"
 
 7. **Switch to SQL Mode for Aggregations**
    - LogchefQL is for filtering; use SQL mode for `COUNT`, `GROUP BY`, etc.
+
+## Next steps
+
+- Read the full [Search Syntax](/guide/search-syntax) reference for every operator
+- Save queries you use often to a [Collection](/features/collections) for your team
+- See the [Query Interface](/user-guide/query-interface) guide for time controls and result views

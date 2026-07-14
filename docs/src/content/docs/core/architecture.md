@@ -1,5 +1,5 @@
 ---
-title: Architecture
+title: "Logchef Architecture: How the Log Analytics Engine Works"
 description: Overview of Logchef's architecture, components, and data flow
 ---
 
@@ -15,7 +15,7 @@ This means Logchef can reuse the existing ecosystem of log collection tools whil
 
 ## System Overview
 
-![Logchef Architecture Diagram](./logchef-architecture.png)
+![Diagram of Logchef's query engine, datasource providers, and SQLite metadata store](./logchef-architecture.png)
 
 ### Technology Stack
 
@@ -103,3 +103,9 @@ Logchef connects to remote datasource backends as sources:
 - **Single Binary**: Logchef runs as a lightweight single binary with minimal resource requirements
 - **Stateless Operation**: Core application is stateless for horizontal scaling (only SQLite metadata is persistent)
 - **Proxying**: Can be deployed behind reverse proxies like Nginx or Caddy
+
+## Next steps
+
+- See [Database Backends & High Availability](/operations/database-backends) for running more than one replica
+- Review [ClickHouse Schema Design](/integration/schema-design) for the log table schema Logchef expects
+- Check [Teams, Sources & Access Control](/core/user-management) for how access is scoped

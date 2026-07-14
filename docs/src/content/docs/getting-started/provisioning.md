@@ -1,5 +1,5 @@
 ---
-title: Declarative Provisioning
+title: "Declarative Provisioning: GitOps for Teams & Sources"
 description: Manage teams, sources, and access control via config files
 ---
 

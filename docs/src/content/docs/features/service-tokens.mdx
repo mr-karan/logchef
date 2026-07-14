@@ -1,5 +1,5 @@
 ---
-title: Service Tokens
+title: "Service Accounts & Scoped API Tokens for Automation"
 description: Non-login service accounts with scoped API tokens for automation.
 ---
 
@@ -152,3 +152,9 @@ request. There's no cache and no grace period.
 - **Keep `tokens:write` off automation tokens.** A token with `tokens:write`
   can mint more tokens for itself. That's only useful for orchestration that
   intentionally rotates tokens.
+
+## Next steps
+
+- Use a token with the [CLI](/integration/cli/#api-token-authentication) for scripted queries
+- Pass a token to the [MCP Server](/integration/mcp-server) for AI assistant access
+- Review [Declarative Provisioning](/getting-started/provisioning) to manage teams and sources as code

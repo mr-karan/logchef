@@ -1,5 +1,5 @@
 ---
-title: Search Syntax
+title: "LogchefQL Search Syntax Reference"
 description: Learn how to use Logchef's simple yet powerful search syntax
 ---
 
@@ -285,3 +285,9 @@ In SQL mode, your query executes exactly as written. Time range and limit contro
 3. **Use nested field access**: Don't flatten your logs. Query them directly
 4. **Use the pipe operator**: Select only the fields you need for faster queries
 5. **Switch to SQL mode**: For aggregations and advanced analysis
+
+## Next steps
+
+- See [Query Examples](/guide/examples) for LogchefQL patterns applied to real scenarios
+- Review the [Query Interface](/user-guide/query-interface) for time controls and result views
+- Try the [Field Values Sidebar](/features/field-sidebar) to build filters without typing

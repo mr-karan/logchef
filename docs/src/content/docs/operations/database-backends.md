@@ -68,7 +68,8 @@ Alert evaluation runs on a per-replica timer. Postgres does **not** coordinate
 this: if N replicas each run the alert manager, every alert is evaluated N times,
 producing duplicate notifications. Until leader election is added, run the alert
 evaluation loop on **exactly one** replica (e.g. a dedicated instance, or disable
-alerts on all but one).
+alerts on all but one). See [Alerting](/features/alerting) for the `alerts.enabled`
+switch used to disable evaluation on the other replicas.
 
 ### Source-cache is per-replica
 

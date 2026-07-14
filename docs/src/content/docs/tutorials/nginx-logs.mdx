@@ -252,3 +252,9 @@ To ensure your log pipeline is working correctly:
 A schema tailored to NGINX logs, like the one built here, can be more efficient for NGINX-specific analysis than a generic schema such as OpenTelemetry, but it's less flexible if you later need to analyze logs from multiple sources together.
 
 Logchef only queries your logs in ClickHouse - it doesn't handle collection. Use a tool like Vector to collect and parse the logs, and Logchef to explore and analyze them.
+
+## Next steps
+
+- Compare this custom schema against the [built-in OpenTelemetry schema](/integration/schema-design)
+- See [Query Examples](/guide/examples) for more LogchefQL patterns
+- Review [Search Syntax](/guide/search-syntax) for the full operator reference

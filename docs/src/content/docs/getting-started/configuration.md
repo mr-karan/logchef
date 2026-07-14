@@ -1,5 +1,5 @@
 ---
-title: Configuration
+title: "Configuring Logchef: Server, Auth & Runtime Settings"
 description: Configure Logchef to match your environment
 ---
 
@@ -256,7 +256,7 @@ max_rows_per_sec = 100
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
 
-![Admin Settings UI](/screenshots/settings.gif)
+![Animated walkthrough of the Admin Settings UI across the AI, alerting, and authentication tabs](/screenshots/settings.gif)
 
 ### AI SQL Generation
 

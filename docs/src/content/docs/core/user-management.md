@@ -1,5 +1,5 @@
 ---
-title: User Management
+title: "Teams, Sources & Access Control in Logchef"
 description: Understanding Sources, Teams, and access control in Logchef
 ---
 
@@ -41,7 +41,7 @@ kubernetes-events     → Cluster events scoped to a specific source
 
 Teams are the primary mechanism for managing access control in Logchef. They create logical groupings of users and determine which Sources they can access.
 
-![Logchef Teams View](/screenshots/logchef_teams.png)
+![Teams management page listing teams and their assigned sources](/screenshots/logchef_teams.png)
 
 ### How Teams Work
 
@@ -50,7 +50,7 @@ Teams are the primary mechanism for managing access control in Logchef. They cre
 - Users can only access Sources that belong to their Teams
 - Teams help maintain data isolation and security
 
-![Logchef Users View](/screenshots/logchef_users.png)
+![Team member list showing each user's role within the team](/screenshots/logchef_users.png)
 
 ### Example Team Structure
 
@@ -87,3 +87,9 @@ DevOps Team         → Access to deployment logs, monitoring
    - Group related Sources under the same Team
    - Use separate Sources for sensitive data
    - Consider creating cross-functional Teams for specific projects
+
+## Next steps
+
+- Manage teams and sources as code with [Declarative Provisioning](/getting-started/provisioning)
+- Set up non-login automation access with [Service Tokens](/features/service-tokens)
+- Share queries across a team with [Collections](/features/collections)

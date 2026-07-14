@@ -1,5 +1,5 @@
 ---
-title: CLI
+title: "Logchef CLI: Query ClickHouse & VictoriaLogs from the Terminal"
 description: Query logs from the terminal.
 ---
 
@@ -37,7 +37,7 @@ logchef schema --team "production" --source "nginx-logs"
 ```
 
 :::tip[Copy CLI Command from Web UI]
-In the LogChef web UI, click the terminal icon (next to the share button) in the explore view to copy the equivalent CLI command for your current query. This is a quick way to transition from the web UI to the terminal.
+In the Logchef web UI, click the terminal icon (next to the share button) in the explore view to copy the equivalent CLI command for your current query. This is a quick way to transition from the web UI to the terminal.
 :::
 
 ## Installation
@@ -175,13 +175,14 @@ logchef --token "logchef_1_abc123..." query ""
 logchef config set auth.token "logchef_1_abc123..."
 ```
 
-Generate API tokens from the LogChef web UI under your profile settings.
+Generate API tokens from the Logchef web UI under your profile settings, or see
+[Service Tokens](/features/service-tokens) for non-login automation accounts.
 
 ## Command Reference
 
 ### Query Logs
 
-The `query` command allows you to execute LogChefQL queries directly from your terminal.
+The `query` command allows you to execute LogchefQL queries directly from your terminal.
 
 LogchefQL compiles to the selected source's native query language:
 
@@ -359,7 +360,7 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 ```
 
 :::tip[When to use `sql` vs `query`]
-- Use `query` (LogChefQL) for quick filtering across supported sources with convenient time flags (`--since 1h`)
+- Use `query` (LogchefQL) for quick filtering across supported sources with convenient time flags (`--since 1h`)
 - Use `sql` when you need full control over the source's native query language
 :::
 
@@ -403,7 +404,7 @@ Sources that fail to inspect (permissions, schema fetch, or query errors) are si
 
 ### Tail
 
-The `tail` command follows matching LogChefQL results by polling for new rows and streaming them until Ctrl-C or `--max-lines` is reached.
+The `tail` command follows matching LogchefQL results by polling for new rows and streaming them until Ctrl-C or `--max-lines` is reached.
 
 ```bash
 logchef tail 'service="payments-api" and msg~"error"' -t production -S app-logs
@@ -447,7 +448,7 @@ The highlighting includes:
 
 ### Saved Queries
 
-The `saved-queries` command lists and runs saved queries from the LogChef web UI. You can pass a saved-query ID, exact name, or an explorer URL copied from the browser.
+The `saved-queries` command lists and runs saved queries from the Logchef web UI. You can pass a saved-query ID, exact name, or an explorer URL copied from the browser.
 
 ```bash
 # List all saved queries visible to your account
@@ -494,7 +495,7 @@ logchef saved-queries 14 --show-sql
 
 ### Collections
 
-The `collections` command lets you list and run saved collections (saved queries) from the LogChef web UI.
+The `collections` command lets you list and run saved collections (saved queries) from the Logchef web UI.
 
 ```bash
 # List all collections for a source
@@ -601,7 +602,7 @@ logchef sources --team "production"
 ### Schema
 
 Show the schema for a source. If the ClickHouse table has column comments,
-LogChef exposes them as `description` in JSON output and shows them in the text
+Logchef exposes them as `description` in JSON output and shows them in the text
 table.
 
 ```bash
@@ -645,7 +646,7 @@ logchef config delete old-server
 
 #### Multi-Context Workflow
 
-The CLI supports managing multiple LogChef instances (dev/staging/prod):
+The CLI supports managing multiple Logchef instances (dev/staging/prod):
 
 ```bash
 # Authenticate with prod (context auto-created from hostname)
@@ -740,7 +741,7 @@ The configuration is stored at `~/.config/logchef/logchef.json`:
 | Section | Key | Description |
 | :--- | :--- | :--- |
 | `current_context` | Active context | Name of the context to use by default |
-| `contexts.<name>.server_url` | Server URL | LogChef server address for this context |
+| `contexts.<name>.server_url` | Server URL | Logchef server address for this context |
 | `contexts.<name>.timeout_secs` | Timeout | HTTP request timeout in seconds |
 | `contexts.<name>.defaults.team` | Default team | Team name (or ID) to use when `--team` is omitted |
 | `contexts.<name>.defaults.source` | Default source | Source name (or ID) to use when `--source` is omitted |
@@ -753,7 +754,7 @@ The configuration is stored at `~/.config/logchef/logchef.json`:
 
 ## Syntax Highlighting
 
-LogChef CLI provides automatic syntax highlighting for common log patterns, powered by [tailspin](https://github.com/bensadeh/tailspin).
+Logchef CLI provides automatic syntax highlighting for common log patterns, powered by [tailspin](https://github.com/bensadeh/tailspin).
 
 ### Built-in Highlighting
 
@@ -970,3 +971,9 @@ for source in "nginx-logs" "app-logs" "api-logs"; do
   logchef query 'level="error"' --source "$source" --limit 5
 done
 ```
+
+## Next steps
+
+- Learn the filter syntax the `query` command accepts in [Search Syntax](/guide/search-syntax)
+- Connect an AI assistant to the same data with the [MCP Server](/integration/mcp-server)
+- Configure the `oidc.cli_client_id` prerequisite in [Configuration](/getting-started/configuration/#openid-connect-oidc)

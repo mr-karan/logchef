@@ -1,5 +1,5 @@
 ---
-title: Roadmap
+title: "Logchef Roadmap: Shipped Features & What's Next"
 description: What Logchef has shipped recently, what's being built now, and where the project is headed.
 ---
 

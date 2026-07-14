@@ -1,5 +1,5 @@
 ---
-title: Dashboards
+title: "Logchef Dashboards: Multi-Panel Log & Metric Views"
 description: Group saved visualizations into a shared grid with one time range and auto-refresh.
 ---
 
@@ -96,3 +96,9 @@ panel's query runs.
 Dashboards ship with Logchef. You don't need to enable anything in config or run an
 extra service: dashboard definitions are saved in Logchef's metadata store, right
 alongside your teams, sources, and saved queries.
+
+## Next steps
+
+- Save the queries behind your panels to a [Collection](/features/collections) so teammates can reuse them
+- Review [Search Syntax](/guide/search-syntax) to write the LogchefQL filters panels use
+- See [Alerting](/features/alerting) to get notified instead of watching a dashboard
