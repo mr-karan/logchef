@@ -1,0 +1,128 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map((post) => ({
+    params: { slug: post.id },
+    props: { post },
+  }));
+}
+
+const { post } = Astro.props;
+const { Content } = await render(post);
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+
+const canonicalUrl = new URL(`/blog/${post.id}/`, Astro.site).toString();
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.pubDate.toISOString(),
+  author: {
+    '@type': 'Organization',
+    name: post.data.author,
+  },
+  mainEntityOfPage: {
+    '@type': 'WebPage',
+    '@id': canonicalUrl,
+  },
+  url: canonicalUrl,
+};
+---
+
+<BaseLayout title={`${post.data.title} — Logchef Blog`} description={post.data.description}>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+
+  <style>
+    main { max-width: 760px; margin: 0 auto; padding: 6rem 1.5rem 4rem; }
+
+    .post-header { margin-bottom: 2.5rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border); }
+    .back-link {
+      display: inline-block; margin-bottom: 1.5rem; font-size: 0.875rem;
+      color: var(--color-text-dim); font-family: var(--font-mono);
+    }
+    .back-link:hover { color: var(--color-accent); }
+    .post-header h1 {
+      font-size: 2.25rem; font-weight: 700; letter-spacing: -0.03em; line-height: 1.2;
+      margin-bottom: 1rem; color: var(--color-text);
+    }
+    .post-header p.description { color: var(--color-text-secondary); font-size: 1.125rem; line-height: 1.6; margin-bottom: 1.25rem; }
+    .post-meta {
+      display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap;
+      font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-dim); margin-bottom: 1rem;
+    }
+    .post-tags { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .post-tags span {
+      font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 0.25rem 0.5rem; border-radius: 4px;
+      background: var(--color-surface); color: var(--color-text-secondary);
+    }
+
+    .prose { color: var(--color-text); font-size: 1.0625rem; line-height: 1.75; }
+    .prose h2 {
+      font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em;
+      margin: 2.5rem 0 1rem;
+    }
+    .prose h3 { font-size: 1.25rem; font-weight: 600; margin: 2rem 0 0.75rem; }
+    .prose p { margin-bottom: 1.25rem; color: var(--color-text-secondary); }
+    .prose strong { color: var(--color-text); font-weight: 600; }
+    .prose a { color: var(--color-accent); }
+    .prose ul, .prose ol { margin: 0 0 1.25rem 1.25rem; color: var(--color-text-secondary); }
+    .prose li { margin-bottom: 0.5rem; }
+    .prose code {
+      font-family: var(--font-mono); font-size: 0.875em;
+      background: var(--color-surface); padding: 0.125rem 0.375rem; border-radius: 4px; color: var(--color-accent);
+    }
+    .prose pre {
+      margin: 0 0 1.5rem; padding: 1.25rem; border-radius: 8px; overflow-x: auto;
+      border: 1px solid var(--color-border); font-size: 0.875rem; line-height: 1.6;
+    }
+    .prose pre code { background: none; padding: 0; color: inherit; }
+    .prose blockquote {
+      margin: 0 0 1.25rem; padding-left: 1rem; border-left: 2px solid var(--color-border);
+      color: var(--color-text-secondary); font-style: italic;
+    }
+    .prose table { width: 100%; border-collapse: collapse; margin-bottom: 1.5rem; font-size: 0.9375rem; }
+    .prose th, .prose td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--color-border); }
+    .prose th { color: var(--color-text); font-weight: 600; }
+    .prose td { color: var(--color-text-secondary); }
+    .prose hr { border: none; border-top: 1px solid var(--color-border); margin: 2.5rem 0; }
+    .prose img { max-width: 100%; border-radius: 8px; }
+
+    @media (max-width: 768px) {
+      .post-header h1 { font-size: 1.75rem; }
+    }
+  </style>
+
+  <main>
+    <header class="post-header">
+      <a href="/blog/" class="back-link">&larr; All posts</a>
+      <h1>{post.data.title}</h1>
+      <p class="description">{post.data.description}</p>
+      <div class="post-meta">
+        <time datetime={post.data.pubDate.toISOString()}>
+          {dateFormatter.format(post.data.pubDate)}
+        </time>
+        <span>&middot;</span>
+        <span>{post.data.author}</span>
+      </div>
+      <div class="post-tags">
+        {post.data.tags.map((tag) => <span>{tag}</span>)}
+      </div>
+    </header>
+
+    <article class="prose">
+      <Content />
+    </article>
+  </main>
+</BaseLayout>

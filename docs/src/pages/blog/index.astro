@@ -1,0 +1,82 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('blog')).sort(
+  (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf()
+);
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+---
+
+<BaseLayout title="Blog — Logchef" description="Guides and field notes on ClickHouse, VictoriaLogs, and log analytics from the Logchef team.">
+  <style>
+    main { max-width: 900px; margin: 0 auto; padding: 6rem 1.5rem 4rem; }
+
+    .page-header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border); }
+    .page-header h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 0.5rem; }
+    .page-header p { color: var(--color-text-secondary); font-size: 1.125rem; }
+
+    .post-list { display: flex; flex-direction: column; }
+    .post-card {
+      display: block; padding: 2rem 0; border-bottom: 1px solid var(--color-border);
+      text-decoration: none; color: inherit; transition: opacity 0.15s ease;
+    }
+    .post-card:last-child { border-bottom: none; }
+    .post-card:hover { text-decoration: none; opacity: 0.85; }
+    .post-meta {
+      display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
+      font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-dim);
+    }
+    .post-card h2 {
+      font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; color: var(--color-text);
+      margin-bottom: 0.5rem; line-height: 1.3;
+    }
+    .post-card p.description { color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; margin-bottom: 0.75rem; }
+    .post-tags { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .post-tags span {
+      font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;
+      padding: 0.25rem 0.5rem; border-radius: 4px;
+      background: var(--color-surface); color: var(--color-text-secondary);
+    }
+
+    .empty-state { color: var(--color-text-secondary); padding: 2rem 0; }
+
+    @media (max-width: 768px) {
+      .page-header h1 { font-size: 2rem; }
+      .post-card h2 { font-size: 1.25rem; }
+    }
+  </style>
+
+  <main>
+    <header class="page-header">
+      <h1>Blog</h1>
+      <p>Guides and field notes on ClickHouse, VictoriaLogs, and log analytics.</p>
+    </header>
+
+    <div class="post-list">
+      {posts.length === 0 && <p class="empty-state">No posts yet — check back soon.</p>}
+      {posts.map((post) => (
+        <a class="post-card" href={`/blog/${post.id}/`}>
+          <div class="post-meta">
+            <time datetime={post.data.pubDate.toISOString()}>
+              {dateFormatter.format(post.data.pubDate)}
+            </time>
+            <span>&middot;</span>
+            <span>{post.data.author}</span>
+          </div>
+          <h2>{post.data.title}</h2>
+          <p class="description">{post.data.description}</p>
+          <div class="post-tags">
+            {post.data.tags.map((tag) => <span>{tag}</span>)}
+          </div>
+        </a>
+      ))}
+    </div>
+  </main>
+</BaseLayout>
