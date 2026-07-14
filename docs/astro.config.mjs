@@ -1,10 +1,16 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
 import { passthroughImageService } from "astro/config";
+import starlightLlmsTxt from "starlight-llms-txt";
+
+const siteUrl = "https://logchef.app";
+const ogImage = `${siteUrl}/screenshots/hero-light.png`;
+const siteDescription =
+  "Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of existing log backends (ClickHouse and VictoriaLogs). Query with LogchefQL, native SQL, or LogsQL, build dashboards, set up alerting, and manage access, all from a single binary.";
 
 // https://astro.build/config
 export default defineConfig({
-  site: "https://logchef.app",
+  site: siteUrl,
   image: {
     service: passthroughImageService(),
   },
@@ -15,7 +21,7 @@ export default defineConfig({
         src: "./public/logo.svg",
         alt: "Logchef",
       },
-      description: "Log analytics platform for ClickHouse and VictoriaLogs",
+      description: siteDescription,
       customCss: ["./src/assets/custom.css"],
       social: [
         {
@@ -24,7 +30,103 @@ export default defineConfig({
           href: "https://github.com/mr-karan/logchef",
         },
       ],
+      // "<Page title> | Logchef" for all docs pages.
+      titleDelimiter: "|",
+      // Show Starlight's built-in "last updated" date (derived from git history) on docs pages.
+      lastUpdated: true,
+      plugins: [
+        // Generates /llms.txt + /llms-full.txt from the docs content at build time.
+        starlightLlmsTxt({
+          description: siteDescription,
+          details: `Logchef supports two datasource backends with different query languages:
+
+- **ClickHouse** sources: query with LogchefQL (Logchef's own simplified filter syntax) or native ClickHouse SQL.
+- **VictoriaLogs** sources: query with LogsQL.
+
+Key areas of the docs:
+
+- Getting Started: install, configure, and understand the architecture.
+- Querying Logs: LogchefQL syntax, SQL examples, the query interface, and the field sidebar.
+- Features: collections/saved queries, dashboards, alerting, AI SQL generation, user management, service tokens, and declarative provisioning.
+- Integration: CLI, MCP server (for AI assistants), and schema design guidance.
+- Tutorials: connecting VictoriaLogs, ingesting via Vector/OTEL, and a worked NGINX logs example.
+- Operations: database backends (SQLite vs Postgres) and the Prometheus metrics reference.`,
+          optionalLinks: [
+            {
+              label: "GitHub repository",
+              url: "https://github.com/mr-karan/logchef",
+              description: "Source code, issues, and releases.",
+            },
+          ],
+        }),
+      ],
+      // Starlight already emits per-page og:title, og:type, og:url, og:locale,
+      // og:description, og:site_name, twitter:card (summary_large_image), and a
+      // canonical <link> (since `site` is set above) — see
+      // node_modules/@astrojs/starlight/utils/head.ts. Only add what Starlight
+      // doesn't already provide: a shared OG/Twitter preview image, plus static
+      // JSON-LD describing the site/organization.
       head: [
+        // OG image (Starlight has no default og:image).
+        {
+          tag: "meta",
+          attrs: { property: "og:image", content: ogImage },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:width", content: "2400" },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:height", content: "1498" },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:type", content: "image/png" },
+        },
+        {
+          tag: "meta",
+          attrs: { property: "og:image:alt", content: "Logchef log explorer" },
+        },
+        // Twitter card image (twitter:card is already set by Starlight).
+        {
+          tag: "meta",
+          attrs: { name: "twitter:image", content: ogImage },
+        },
+        {
+          tag: "meta",
+          attrs: { name: "twitter:image:alt", content: "Logchef log explorer" },
+        },
+        // Sitewide JSON-LD (WebSite + Organization). Per-page structured data
+        // (e.g. Article/BreadcrumbList) is left to whoever owns BaseLayout.astro.
+        {
+          tag: "script",
+          attrs: { type: "application/ld+json" },
+          content: JSON.stringify({
+            "@context": "https://schema.org",
+            "@graph": [
+              {
+                "@type": "WebSite",
+                "@id": `${siteUrl}/#website`,
+                url: `${siteUrl}/`,
+                name: "Logchef",
+                description: siteDescription,
+                publisher: { "@id": `${siteUrl}/#organization` },
+              },
+              {
+                "@type": "Organization",
+                "@id": `${siteUrl}/#organization`,
+                name: "Logchef",
+                url: `${siteUrl}/`,
+                logo: {
+                  "@type": "ImageObject",
+                  url: `${siteUrl}/logo.svg`,
+                },
+                sameAs: ["https://github.com/mr-karan/logchef"],
+              },
+            ],
+          }),
+        },
         // Umami Analytics
         {
           tag: "script",
