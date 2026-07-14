@@ -119,21 +119,26 @@ test-cli-query server_url="" team="" source="":
 run-frontend:
     cd frontend && bun run dev
 
-# Run the documentation server locally
-run-docs:
-    @echo "Starting documentation development server..."
-    cd docs && npm run dev
-
-# Build the documentation
-build-docs:
-    @echo "Building documentation site..."
-    cd docs && npm install && npm run build
-
 # Setup docs custom domain (only run once after creating GitHub Pages)
 setup-docs-domain:
     @echo "Setting up custom domain for documentation..."
     echo "logchef.app" > docs/public/CNAME
     @echo "Created CNAME file. Make sure to set up DNS records pointing to GitHub Pages."
+
+# Run the docs site (Astro dev server) with bun
+docs-dev:
+    @echo "Starting docs dev server..."
+    cd docs && bun run dev
+
+# Build the docs site with bun
+docs-build:
+    @echo "Building docs site..."
+    cd docs && bun run build
+
+# Build and preview the production docs site with bun
+docs-preview:
+    @echo "Building and previewing docs site..."
+    cd docs && bun run build && bun run preview
 
 dev-docker:
     cd dev && docker compose up
