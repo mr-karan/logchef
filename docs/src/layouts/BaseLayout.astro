@@ -1,11 +1,23 @@
 ---
+import Seo from '../components/Seo.astro';
+
 interface Props {
   title: string;
   description?: string;
+  image?: string;
   activeNav?: 'home' | 'docs' | 'changelog' | 'demo';
+  structuredData?: boolean;
+  noindex?: boolean;
 }
 
-const { title, description = "Open-source log explorer for ClickHouse and VictoriaLogs", activeNav } = Astro.props;
+const {
+  title,
+  description = "Open-source log explorer for ClickHouse and VictoriaLogs",
+  image,
+  activeNav,
+  structuredData = true,
+  noindex = false,
+} = Astro.props;
 ---
 
 <!DOCTYPE html>
@@ -15,11 +27,19 @@ const { title, description = "Open-source log explorer for ClickHouse and Victor
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{title}</title>
   <meta name="description" content={description}>
-  <link rel="icon" type="image/svg+xml" href="/logo.svg">
+  {noindex && <meta name="robots" content="noindex, nofollow">}
+
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <link rel="alternate icon" href="/favicon.ico">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+
+  <Seo title={title} description={description} image={image} structuredData={structuredData} />
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
+  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
 
   <!-- Umami Analytics -->
   <script defer src="https://um.mrkaran.dev/script.js" data-website-id="7c608903-19f6-4782-8def-c03e71ff35fc"></script>

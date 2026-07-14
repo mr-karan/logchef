@@ -2,7 +2,11 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 
-<BaseLayout title="Logchef — Multi-Datasource Log Explorer" activeNav="home">
+<BaseLayout
+  title="Logchef — Multi-Datasource Log Explorer"
+  description="Logchef is an open-source, self-hosted log exploration and alerting UI for ClickHouse and VictoriaLogs. Single binary, no per-seat pricing, no vendor lock-in."
+  activeNav="home"
+>
   <style>
     main { max-width: 1200px; margin: 0 auto; overflow: clip; }
 
@@ -368,8 +372,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <h1 class="hero-title">Multi-datasource log exploration without the control-plane tax</h1>
         
         <p class="hero-desc">
-          Run one binary, connect the log backend you already have, and give teams a clean interface for search, alerts, saved queries, and access control.
-          Today that means ClickHouse and VictoriaLogs, with room to grow.
+          Logchef is an open-source, self-hosted log exploration and alerting UI that connects to the ClickHouse or VictoriaLogs data you already run —
+          no proprietary ingestion pipeline, no forced schema. Ship it as a single binary and give your team fast search, saved queries, scheduled alerting, and role-based access in minutes.
         </p>
 
         <div class="hero-actions">
@@ -402,15 +406,24 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="hero-visual">
         <div class="hero-glow"></div>
         <div class="hero-screenshot">
-          <img 
-            src="/screenshots/hero-light.png" 
-            alt="Logchef Log Explorer" 
+          <img
+            src="/screenshots/hero-light.png"
+            alt="Logchef Log Explorer"
             class="theme-img theme-img-light"
+            width="2400"
+            height="1498"
+            loading="eager"
+            decoding="async"
           />
-          <img 
-            src="/screenshots/hero-dark.png" 
-            alt="Logchef Log Explorer" 
+          <img
+            src="/screenshots/hero-dark.png"
+            alt="Logchef Log Explorer"
             class="theme-img theme-img-dark"
+            width="2400"
+            height="1494"
+            fetchpriority="high"
+            loading="eager"
+            decoding="async"
           />
         </div>
       </div>
@@ -427,8 +440,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <div class="showcase-list">
       <article class="showcase-item">
         <div class="showcase-media" style="aspect-ratio: 2400 / 1040;">
-          <img src="/screenshots/teams-light.png" class="theme-img theme-img-light" alt="Teams" />
-          <img src="/screenshots/teams-dark.png" class="theme-img theme-img-dark" alt="Teams" />
+          <img src="/screenshots/teams-light.png" class="theme-img theme-img-light" alt="Teams" width="2400" height="1040" loading="lazy" decoding="async" />
+          <img src="/screenshots/teams-dark.png" class="theme-img theme-img-dark" alt="Teams" width="2400" height="1040" loading="lazy" decoding="async" />
         </div>
         <div class="showcase-text">
           <h3>Teams & Access Control</h3>
@@ -438,19 +451,19 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
       <article class="showcase-item is-reversed">
         <div class="showcase-media" style="aspect-ratio: 2400 / 2440;">
-          <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="Alerts" />
-          <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="Alerts" />
+          <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="Alerts" width="2400" height="2430" loading="lazy" decoding="async" />
+          <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="Alerts" width="2400" height="2430" loading="lazy" decoding="async" />
         </div>
         <div class="showcase-text">
-          <h3>Real-time Alerting</h3>
+          <h3>Scheduled Alerting</h3>
           <p>Schedule native queries and deliver alerts via email or webhooks.</p>
         </div>
       </article>
 
       <article class="showcase-item">
         <div class="showcase-media" style="aspect-ratio: 1456 / 1144;">
-          <img src="/screenshots/ai-light.png" class="theme-img theme-img-light" alt="AI Query Assistant" />
-          <img src="/screenshots/ai-dark.png" class="theme-img theme-img-dark" alt="AI Query Assistant" />
+          <img src="/screenshots/ai-light.png" class="theme-img theme-img-light" alt="AI Query Assistant" width="1456" height="1144" loading="lazy" decoding="async" />
+          <img src="/screenshots/ai-dark.png" class="theme-img theme-img-dark" alt="AI Query Assistant" width="1456" height="1144" loading="lazy" decoding="async" />
         </div>
         <div class="showcase-text">
           <h3>AI Query Assistant</h3>
@@ -460,8 +473,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
       <article class="showcase-item is-reversed">
         <div class="showcase-media" style="aspect-ratio: 16 / 10;">
-          <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Compact View" />
-          <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="Compact View" />
+          <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Compact View" width="2400" height="1500" loading="lazy" decoding="async" />
+          <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="Compact View" width="2400" height="1500" loading="lazy" decoding="async" />
         </div>
         <div class="showcase-text">
           <h3>Compact View</h3>
@@ -471,8 +484,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
       <article class="showcase-item">
         <div class="showcase-media" style="aspect-ratio: 1798 / 1726;">
-          <img src="/screenshots/sidebar-light.png" class="theme-img theme-img-light" alt="Field Sidebar" />
-          <img src="/screenshots/sidebar-dark.png" class="theme-img theme-img-dark" alt="Field Sidebar" />
+          <img src="/screenshots/sidebar-light.png" class="theme-img theme-img-light" alt="Field Sidebar" width="1782" height="1728" loading="lazy" decoding="async" />
+          <img src="/screenshots/sidebar-dark.png" class="theme-img theme-img-dark" alt="Field Sidebar" width="1782" height="1728" loading="lazy" decoding="async" />
         </div>
         <div class="showcase-text">
           <h3>Field Exploration</h3>
