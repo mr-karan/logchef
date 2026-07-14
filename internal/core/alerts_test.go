@@ -360,22 +360,12 @@ func TestAlertQueryEvalWiring(t *testing.T) {
 }
 
 // TestAlertQueryNoRowsIsGraceful pins the no-rows behavior: a query that
-// matches nothing evaluates to value=0 rather than erroring out — otherwise a
-// healthy but quiet alert would fail every test-query call.
-//
-// SUSPECTED BUG (not fixed, per test-authoring instructions — pinning current
-// behavior only): TestAlertQuery's "no rows" warning
-// ("Query returned no rows. ...") is dead code. It only runs inside
-// `if err != nil { if len(result.Logs) == 0 { ... } }` (internal/core/alerts.go,
-// generateQueryWarnings block, ~line 513), but util.ExtractFirstNumeric
-// (internal/util/query.go:12-15) returns (0, nil) — a nil error — precisely
-// when len(result.Logs) == 0. So `err != nil` is never true when Logs is
-// empty, and the inner branch can never execute. Net effect: value=0 is still
-// computed correctly, but the user-facing "no matching data yet" warning
-// never appears when testing an alert query against a source with no current
-// matches. Repro: call TestAlertQuery with a provider returning
-// QueryResult{Logs: nil}; expected resp.Warnings to contain the no-rows
-// message, actual resp.Warnings is empty (verified below).
+// matches nothing evaluates to value=0 rather than erroring out (otherwise a
+// healthy but quiet alert would fail every test-query call) AND surfaces the
+// "no matching data yet" warning so the user can tell it apart from a real 0.
+// (#85: the warning used to be dead code — it lived under `if err != nil`, but
+// ExtractFirstNumeric returns (0, nil) on an empty result, so it never fired.
+// Now the row count is checked independently.)
 func TestAlertQueryNoRowsIsGraceful(t *testing.T) {
 	t.Parallel()
 	db := newTestDB(t)
@@ -406,13 +396,11 @@ func TestAlertQueryNoRowsIsGraceful(t *testing.T) {
 	if resp.ThresholdMet {
 		t.Errorf("ThresholdMet = true, want false (0 > 10 is false)")
 	}
-	// Current (buggy) behavior: the no-rows warning is dead code (see the
-	// SUSPECTED BUG note on this test), so no warning is produced here even
-	// though the query matched nothing. If this ever starts failing because
-	// warnings are non-empty, the dead-code bug above has likely been fixed —
-	// update this assertion (and report it fixed) rather than reverting.
-	if len(resp.Warnings) != 0 {
-		t.Errorf("got warnings %v, want none (current behavior — see SUSPECTED BUG comment on this test)", resp.Warnings)
+	// A query that matched nothing must surface the "no rows" warning so the
+	// user knows the alert is waiting for data rather than firing on a real 0
+	// (the dead-code bug this test originally pinned is fixed — #85).
+	if len(resp.Warnings) == 0 {
+		t.Errorf("got no warnings, want the no-rows warning for an empty result")
 	}
 }
 

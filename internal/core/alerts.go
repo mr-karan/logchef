@@ -507,17 +507,18 @@ func TestAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
-	// Extract numeric value from result (handle no rows gracefully)
+	// Extract numeric value from result. No matching rows is not an error —
+	// ExtractFirstNumeric returns (0, nil) for an empty result — so check the
+	// row count independently and surface a warning, otherwise the user can't
+	// tell "waiting for data" from a real zero. An extraction failure on a
+	// non-empty result is still a genuine error.
 	value, err := util.ExtractFirstNumeric(result)
 	var warnings []string
-	if err != nil {
-		// If no rows returned, allow test to succeed with value=0 and a warning
-		if len(result.Logs) == 0 {
-			warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
-			value = 0
-		} else {
-			return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
-		}
+	if len(result.Logs) == 0 {
+		warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
+		value = 0
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
 	}
 
 	// Check if threshold would be met

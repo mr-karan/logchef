@@ -127,6 +127,12 @@ func (s *Service) CreateSource(ctx context.Context, req *models.CreateSourceRequ
 				"delete_error", delErr,
 			)
 		}
+		// InitializeSource may have cached the connection in the provider's map
+		// before failing; drop it so a rolled-back source leaves no live entry.
+		if rmErr := provider.RemoveSource(source.ID); rmErr != nil {
+			s.log.Warn("failed to remove cached provider entry after rollback",
+				"source_id", source.ID, "error", rmErr)
+		}
 		return nil, fmt.Errorf("initialize source: %w", err)
 	}
 
