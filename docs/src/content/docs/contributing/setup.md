@@ -1,6 +1,6 @@
 ---
-title: "Logchef Development Setup: Local Build & Contributor Guide"
-description: Complete guide to setting up your Logchef development environment
+title: Development Setup
+description: Complete guide to setting up a local Logchef development environment for building and contributing to the project.
 ---
 
 This guide covers multiple ways to set up your Logchef development environment.

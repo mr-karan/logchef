@@ -1,6 +1,6 @@
 ---
-title: "Configuring Logchef: Server, Auth & Runtime Settings"
-description: Configure Logchef to match your environment
+title: Configuration
+description: Configure Logchef's server, authentication, and runtime settings using a TOML file and LOGCHEF_ environment variable overrides.
 ---
 
 Logchef uses a minimal TOML configuration file for bootstrap settings, with runtime configuration managed through the Admin Settings UI. This guide explains the essential configuration options and how to manage non-essential settings through the web interface.

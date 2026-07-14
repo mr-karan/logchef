@@ -1,5 +1,5 @@
 ---
-title: Database Backends & High Availability
+title: Database Backends
 description: Choose between the default SQLite metadata store and the opt-in Postgres backend for multi-replica deployments
 ---
 

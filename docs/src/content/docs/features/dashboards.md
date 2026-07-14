@@ -1,6 +1,6 @@
 ---
-title: "Logchef Dashboards: Multi-Panel Log & Metric Views"
-description: Group saved visualizations into a shared grid with one time range and auto-refresh.
+title: Dashboards
+description: Build multi-panel Logchef dashboards that group saved log and metric visualizations into a shared grid with one time range and auto-refresh.
 ---
 
 A dashboard is a grid of panels, each one a query rendered as a chart, sharing one

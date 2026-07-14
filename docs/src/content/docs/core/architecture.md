@@ -1,6 +1,6 @@
 ---
-title: "Logchef Architecture: How the Log Analytics Engine Works"
-description: Overview of Logchef's architecture, components, and data flow
+title: Architecture
+description: Overview of Logchef's architecture, components, and data flow powering its ClickHouse and VictoriaLogs log analytics engine.
 ---
 
 ## Architectural Overview

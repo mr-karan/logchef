@@ -1,6 +1,6 @@
 ---
-title: "Teams, Sources & Access Control in Logchef"
-description: Understanding Sources, Teams, and access control in Logchef
+title: Teams & Access Control
+description: How Logchef organizes users into Teams, controls access to log Sources, and enforces permissions across the platform.
 ---
 
 Logchef implements a team-based access control system that helps organize and secure your log data. This guide explains the core concepts of user management and how to effectively use them.

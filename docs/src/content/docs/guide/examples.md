@@ -1,6 +1,6 @@
 ---
-title: "LogchefQL Query Examples for Common Log Analytics Scenarios"
-description: Practical examples for common log analytics scenarios
+title: Query Examples
+description: Practical LogchefQL query examples for common log analytics scenarios, from basic filters to more advanced field searches.
 ---
 
 This guide provides practical examples for common log analytics scenarios using Logchef. Each example includes both the LogchefQL syntax and the equivalent SQL query.

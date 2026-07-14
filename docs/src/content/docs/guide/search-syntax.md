@@ -1,6 +1,6 @@
 ---
-title: "LogchefQL Search Syntax Reference"
-description: Learn how to use Logchef's simple yet powerful search syntax
+title: Search Syntax
+description: Learn LogchefQL, Logchef's simple yet powerful search syntax for filtering and querying logs without writing SQL.
 ---
 
 Logchef provides a simple yet powerful search syntax called **LogchefQL** that makes it easy to find exactly what you're looking for in your logs.

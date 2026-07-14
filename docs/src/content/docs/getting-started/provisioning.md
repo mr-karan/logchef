@@ -1,6 +1,6 @@
 ---
-title: "Declarative Provisioning: GitOps for Teams & Sources"
-description: Manage teams, sources, and access control via config files
+title: Declarative Provisioning
+description: Manage Logchef teams, ClickHouse and VictoriaLogs sources, and access control via version-controlled config files for GitOps workflows.
 ---
 
 Logchef supports declarative provisioning: define your teams, data sources, and access control in a TOML config file instead of (or alongside) the web UI. This enables GitOps workflows where infrastructure config is version-controlled and deployed automatically.

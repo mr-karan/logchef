@@ -1,6 +1,6 @@
 ---
-title: "Logchef Roadmap: Shipped Features & What's Next"
-description: What Logchef has shipped recently, what's being built now, and where the project is headed.
+title: Roadmap
+description: What Logchef has shipped recently, what's being built now, and where the log analytics project is headed next.
 ---
 
 This is a snapshot of where Logchef is and where it's going. Near-term items are a

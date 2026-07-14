@@ -5,7 +5,7 @@ interface Props {
   title: string;
   description?: string;
   image?: string;
-  activeNav?: 'home' | 'docs' | 'changelog' | 'demo';
+  activeNav?: 'home' | 'docs' | 'blog' | 'changelog' | 'demo';
   structuredData?: boolean;
   noindex?: boolean;
 }
@@ -188,6 +188,7 @@ const {
 
       <div class="nav-links">
         <a href="/getting-started/quickstart" class:list={[{ active: activeNav === 'docs' }, 'hide-mobile']}>Docs</a>
+        <a href="/blog" class:list={[{ active: activeNav === 'blog' }, 'hide-mobile']}>Blog</a>
         <a href="/changelog" class:list={[{ active: activeNav === 'changelog' }, 'hide-mobile']}>Changelog</a>
         <a href="https://demo.logchef.app" target="_blank" class="hide-mobile">Demo</a>
         <a href="https://github.com/mr-karan/logchef" target="_blank" class="icon-link">
