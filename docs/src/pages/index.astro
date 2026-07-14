@@ -44,7 +44,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       font-size: clamp(1.9rem, 3.2vw, 2.6rem);
       line-height: 1.15;
       letter-spacing: -0.02em;
-      max-width: 20ch;
+      max-width: 24ch;
+      text-wrap: balance;
       font-weight: 600;
       margin-bottom: 1.25rem;
     }
@@ -370,7 +371,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <img src="/logchef-wordmark.svg" alt="Logchef" />
         </div>
         
-        <h1 class="hero-title">Multi-datasource log exploration without the control-plane tax</h1>
+        <h1 class="hero-title">Fast, self-hosted log exploration for ClickHouse &amp; VictoriaLogs</h1>
         
         <p class="hero-desc">
           Logchef is an open-source, self-hosted log exploration and alerting UI that connects to the ClickHouse or VictoriaLogs data you already run —
