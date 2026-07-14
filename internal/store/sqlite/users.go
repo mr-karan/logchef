@@ -13,10 +13,20 @@ import (
 
 // User methods
 
+// normalizeEmail lowercases and trims an email address so that storage and
+// lookup are case-insensitive (#95). Uses Go's Unicode-aware ToLower, matching
+// the normalization applied to existing rows by migration 000030.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
+
 // CreateUser inserts a new user record into the database.
 // It sets default status if necessary and handles potential unique email constraint errors.
 // Populates the user ID and timestamps on the input model upon success.
 func (db *DB) CreateUser(ctx context.Context, user *models.User) error {
+
+	// Normalize the email so accounts are unique/looked-up case-insensitively.
+	user.Email = normalizeEmail(user.Email)
 
 	// Default status if not provided by caller.
 	if user.Status == "" {
@@ -87,6 +97,7 @@ func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, erro
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
 
+	email = normalizeEmail(email)
 	userRow, err := db.readQueries.GetUserByEmail(ctx, email)
 	if err != nil {
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting user email %s", email))

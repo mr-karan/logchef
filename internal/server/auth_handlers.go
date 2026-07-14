@@ -98,6 +98,30 @@ func secureCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
+// defaultPostLoginPath is where users land after a successful login when no
+// (valid) redirect path was requested.
+const defaultPostLoginPath = "/logs/explore"
+
+// isSafeLocalPath reports whether path is a safe same-origin redirect target.
+// A safe path is a local absolute path: it starts with exactly one '/', is not
+// protocol-relative ("//host" or the backslash variant "/\host" that browsers
+// normalize to "//host"), and carries no scheme ("://"). This blocks open
+// redirects where an attacker-supplied path escapes to an external origin —
+// critical because redirectToFrontend collapses an empty frontend_url to "",
+// making a "//evil.example" path a fully-qualified protocol-relative URL.
+func isSafeLocalPath(path string) bool {
+	if path == "" || path[0] != '/' {
+		return false
+	}
+	if strings.HasPrefix(path, "//") || strings.HasPrefix(path, "/\\") {
+		return false
+	}
+	if strings.Contains(path, "://") {
+		return false
+	}
+	return true
+}
+
 // redirectToFrontend redirects the user's browser to the configured frontend URL,
 // optionally appending an error code as a query parameter if an error occurred.
 func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error {
@@ -108,10 +132,12 @@ func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error 
 
 	// Ensure the base URL doesn't end with a slash and the path starts with one.
 	targetURL = strings.TrimSuffix(targetURL, "/")
-	if path == "" {
-		path = "/" // Default path if none provided.
-	} else if !strings.HasPrefix(path, "/") {
-		path = "/" + path
+	// Validate the path server-side before it becomes the redirect target. Any
+	// path that is not a safe local path (empty, relative, protocol-relative,
+	// or scheme-bearing) falls back to root so a crafted "//evil.example" can
+	// never be emitted as the Location header.
+	if !isSafeLocalPath(path) {
+		path = "/"
 	}
 
 	finalURL := targetURL + path
@@ -177,8 +203,10 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
-	// Persist the requested redirect path through the OIDC round-trip.
-	if redirectPath := c.Query("redirect", ""); redirectPath != "" {
+	// Persist the requested redirect path through the OIDC round-trip. Only
+	// safe local paths are stored; anything protocol-relative or scheme-bearing
+	// is dropped so the callback falls back to the default landing page.
+	if redirectPath := c.Query("redirect", ""); isSafeLocalPath(redirectPath) {
 		c.Cookie(&fiber.Cookie{
 			Name:     "logchef_redirect",
 			Value:    redirectPath,
@@ -255,9 +283,11 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	})
 
 	// Redirect back to the frontend, restoring the path requested before login.
+	// Re-validate the cookie value (defense in depth): a tampered or unsafe
+	// path falls back to the default landing page instead of being trusted.
 	redirectPath := c.Cookies("logchef_redirect")
-	if redirectPath == "" {
-		redirectPath = "/logs/explore"
+	if !isSafeLocalPath(redirectPath) {
+		redirectPath = defaultPostLoginPath
 	}
 	// Clear the redirect cookie
 	c.Cookie(&fiber.Cookie{Name: "logchef_redirect", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: "/"})

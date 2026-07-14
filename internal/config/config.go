@@ -167,6 +167,16 @@ type OIDCConfig struct {
 	// other means (e.g. Cloudflare Access, corporate SSO).
 	// Default: false
 	SkipEmailVerifiedCheck bool `koanf:"skip_email_verified_check"`
+
+	// AllowedIssuers optionally overrides which token issuers (the `iss` claim)
+	// are accepted during ID-token verification. When empty (the default), the
+	// verifier accepts only the single issuer advertised by the provider's
+	// discovery document (i.e. provider_url) — this is the safe default for
+	// single-provider deployments. Set this to an explicit list only for
+	// multi-realm / multi-tenant IdPs that share one JWKS across issuers, or
+	// when the discovery issuer legitimately differs from the token issuer
+	// (e.g. distinct internal vs external URLs).
+	AllowedIssuers []string `koanf:"allowed_issuers"`
 }
 
 // AuthConfig contains authentication settings

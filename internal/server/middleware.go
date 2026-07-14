@@ -114,6 +114,17 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error retrieving user data", models.GeneralErrorType)
 	}
 
+	// Re-validate the account's right to authenticate on every request, mirroring
+	// the API-token path (core.AuthenticateAPIToken). A session cookie must never
+	// outlive the account: deactivating a user (or a service account, which must
+	// not hold a browser session) is rejected immediately here rather than
+	// remaining valid until the session's natural expiry.
+	if user.Status != models.UserStatusActive || user.AccountType == models.UserAccountTypeService {
+		metrics.RecordSessionOperation("validate", false, nil)
+		s.log.Warn("session rejected for inactive or non-interactive account", "user_id", user.ID, "status", user.Status, "account_type", user.AccountType)
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "User account is inactive", models.AuthenticationErrorType)
+	}
+
 	// Record successful session validation with user context
 	metrics.RecordSessionOperation("validate", true, user)
 

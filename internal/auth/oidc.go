@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -72,6 +73,11 @@ type OIDCProvider struct {
 	oauthConf *oauth2.Config
 	log       *slog.Logger
 	oidcCfg   *config.OIDCConfig
+	// allowedIssuers, when non-empty, is the explicit set of acceptable `iss`
+	// claim values. It is populated only when the operator overrides issuer
+	// validation via config; otherwise it is nil and the go-oidc verifier
+	// enforces the single discovered issuer itself.
+	allowedIssuers []string
 }
 
 // NewOIDCProvider initializes an OIDCProvider based on the provided configuration.
@@ -111,26 +117,73 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 		Scopes:       oidcCfg.Scopes,
 	}
 
-	// Configure ID token verification.
-	// Validate audience (ClientID) to prevent token confusion attacks.
-	// Skip issuer validation to allow flexibility in provider URLs (e.g., internal vs external).
+	// Configure ID token verification. Audience (ClientID) is always validated
+	// to prevent token-confusion attacks. Issuer validation is enforced too:
+	//   - No allowed_issuers override (the default): go-oidc validates the `iss`
+	//     claim against the single issuer discovered from provider_url.
+	//   - allowed_issuers set: go-oidc's single-issuer check is disabled and we
+	//     validate `iss` against the operator-provided allow-list ourselves
+	//     (see verify), which is the only way to support multi-realm IdPs that
+	//     share one JWKS across issuers.
+	allowedIssuers := normalizeIssuers(oidcCfg.AllowedIssuers)
 	verifier := provider.Verifier(&oidc.Config{
 		ClientID:        oidcCfg.ClientID,
 		SkipExpiryCheck: false,
-		SkipIssuerCheck: true,
+		SkipIssuerCheck: len(allowedIssuers) > 0,
 	})
+	if len(allowedIssuers) > 0 {
+		log.Info("OIDC issuer validation using explicit allow-list", "allowed_issuers", allowedIssuers)
+	}
 
 	if oidcCfg.SkipEmailVerifiedCheck {
 		log.Warn("OIDC skip_email_verified_check is enabled — logins will succeed when the email_verified claim is missing")
 	}
 
 	return &OIDCProvider{
-		provider:  provider,
-		verifier:  verifier,
-		oauthConf: oauthConf,
-		log:       log,
-		oidcCfg:   oidcCfg,
+		provider:       provider,
+		verifier:       verifier,
+		oauthConf:      oauthConf,
+		log:            log,
+		oidcCfg:        oidcCfg,
+		allowedIssuers: allowedIssuers,
 	}, nil
+}
+
+// normalizeIssuers trims blanks and drops empty entries from the configured
+// issuer allow-list.
+func normalizeIssuers(issuers []string) []string {
+	var out []string
+	for _, iss := range issuers {
+		if trimmed := strings.TrimSpace(iss); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+// verify verifies a raw ID token's signature/audience/expiry and then, when an
+// issuer allow-list is configured, rejects any token whose `iss` claim is not
+// in the list. With no allow-list, the go-oidc verifier has already enforced
+// the single discovered issuer.
+func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
+	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	if err != nil {
+		return nil, err
+	}
+	if len(p.allowedIssuers) > 0 {
+		allowed := false
+		for _, iss := range p.allowedIssuers {
+			if idToken.Issuer == iss {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			p.log.Warn("OIDC token issuer not in allow-list", "issuer", idToken.Issuer)
+			return nil, fmt.Errorf("%w: issuer %q not allowed", ErrOIDCInvalidToken, idToken.Issuer)
+		}
+	}
+	return idToken, nil
 }
 
 // GetAuthURL returns the URL for the OIDC authorization endpoint with the given state.
@@ -139,8 +192,9 @@ func (p *OIDCProvider) GetAuthURL(state string) string {
 }
 
 // VerifyIDToken verifies an ID token string and returns the parsed token.
+// Issuer validation follows the configured allow-list (see verify).
 func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
-	return p.verifier.Verify(ctx, rawIDToken)
+	return p.verify(ctx, rawIDToken)
 }
 
 // GetIssuer returns the OIDC issuer URL.
@@ -151,7 +205,7 @@ func (p *OIDCProvider) GetIssuer() string {
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
-func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.StoreOps, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
+func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
 	// Exchange authorization code for OAuth2 tokens.
 	oauth2Token, err := p.oauthConf.Exchange(ctx, code)
 	if err != nil {
@@ -165,7 +219,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.StoreOps, lo
 		p.log.Error("no id_token field in oauth2 token")
 		return nil, nil, ErrOIDCInvalidToken
 	}
-	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	idToken, err := p.verify(ctx, rawIDToken)
 	if err != nil {
 		p.log.Error("failed to verify ID token", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %v", ErrOIDCInvalidToken, err)
