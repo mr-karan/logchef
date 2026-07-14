@@ -92,6 +92,11 @@ func New(opts ServerOptions) *Server {
 		ReadTimeout:           opts.Config.Server.HTTPServerTimeout,
 		WriteTimeout:          opts.Config.Server.HTTPServerTimeout,
 		IdleTimeout:           30 * time.Second, // Free idle keep-alive connection buffers quickly
+		// Request bodies here are queries and small JSON payloads, never bulk
+		// data, so a few MB is generous. This is a coarse transport-level
+		// backstop; the LogchefQL parser additionally enforces its own
+		// (much smaller) query length/nesting limits regardless of this cap.
+		BodyLimit: 4 * 1024 * 1024, // 4MB
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {

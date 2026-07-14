@@ -130,6 +130,8 @@ const (
 	ErrInvalidTimeFormat      = "INVALID_TIME_FORMAT"
 	ErrInvalidTimezone        = "INVALID_TIMEZONE"
 	ErrInvalidIdentifier      = "INVALID_IDENTIFIER"
+	ErrQueryTooLong           = "QUERY_TOO_LONG"
+	ErrQueryTooDeeplyNested   = "QUERY_TOO_DEEPLY_NESTED"
 )
 
 // ColumnInfo represents column metadata from the schema
