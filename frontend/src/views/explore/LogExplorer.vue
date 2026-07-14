@@ -171,6 +171,15 @@ const isHistogramVisible = ref(true);
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
 
+// CoordinationError retry backoff. The store returns CoordinationError while
+// source details are still catching up with the selected source id; we retry,
+// but cap attempts with exponential backoff so a source that never converges
+// can't livelock the UI re-executing ~10x/sec forever. See #101.
+const MAX_COORDINATION_RETRIES = 8;
+const COORDINATION_RETRY_BASE_MS = 100;
+const COORDINATION_RETRY_MAX_MS = 3000;
+const coordinationRetries = ref(0);
+
 // Display mode for table vs compact view (table is default)
 const displayMode = computed({
   get: () => preferences.value.display_mode,
@@ -369,6 +378,12 @@ const handleQueryExecution = async (debouncingKey = "") => {
       return;
     }
 
+    // Reset the coordination backoff whenever a fresh (non-retry) execution
+    // starts, so each new user action gets the full retry budget.
+    if (!debouncingKey.includes('-retry')) {
+      coordinationRetries.value = 0;
+    }
+
     // Set executing state
     executingQueryId.value = executionId;
     lastQueryTime.value = now;
@@ -376,13 +391,30 @@ const handleQueryExecution = async (debouncingKey = "") => {
     const result = await executeQuery();
 
     if (result && !result.success && result.error && 'error_type' in result.error && result.error.error_type === 'CoordinationError') {
+      if (coordinationRetries.value >= MAX_COORDINATION_RETRIES) {
+        // Source details never converged — stop retrying to avoid a livelock,
+        // and release the executing lock so a later user action can proceed.
+        console.warn('LogExplorer: source coordination did not converge; giving up retries');
+        coordinationRetries.value = 0;
+        if (executingQueryId.value === executionId) {
+          executingQueryId.value = null;
+        }
+        return result;
+      }
+
+      const attempt = coordinationRetries.value++;
+      const delay = Math.min(COORDINATION_RETRY_BASE_MS * 2 ** attempt, COORDINATION_RETRY_MAX_MS);
       setTimeout(() => {
         if (executingQueryId.value === executionId) {
           handleQueryExecution(`${debouncingKey}-retry`);
         }
-      }, 100);
+      }, delay);
       return result;
     }
+
+    // Any non-coordination outcome means coordination converged (or was never
+    // the issue) — clear the backoff counter.
+    coordinationRetries.value = 0;
 
     if (result && result.success && !isInitializing.value) {
       await urlState.pushHistoryEntry();

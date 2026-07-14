@@ -247,6 +247,19 @@ export const useExploreStore = defineStore("explore", () => {
 
   let suppressedSourceResetId: number | null = null;
 
+  // Monotonic token stamped on each executeQuery run. A response is only
+  // applied if it's still the latest run AND the source hasn't changed since it
+  // started — otherwise a slow response from a superseded run (or a run against
+  // a source the user has since switched away from) would clobber the current
+  // logs/columns/stats/history. See #101.
+  let executeQueryToken = 0;
+
+  // Suppresses persistDraft() side-effects while initializeFromUrl restores a
+  // saved draft. Without this, the setRelativeTimeRange/setLimit calls during
+  // init persist an empty draft (query text not yet restored) and clobber the
+  // real draft before restoreDraftForCurrentContext() reads it back. See #102.
+  let suppressDraftPersistence = false;
+
   watch(
     () => contextStore.sourceId,
     (newSourceId, oldSourceId) => {
@@ -319,6 +332,9 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function persistDraft() {
+    if (suppressDraftPersistence) {
+      return;
+    }
     const key = currentDraftKey();
     if (!key) {
       return;
@@ -646,6 +662,16 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function onSourceChange(_newSourceId: number) {
+    // Abort any query still in flight for the previous source so its response
+    // can't land under the new source. The request-token guard in executeQuery
+    // is the ultimate backstop (a response whose body already arrived before
+    // this abort is dropped there), but aborting also frees the socket early.
+    if (state.data.value.currentQueryAbortController) {
+      state.data.value.currentQueryAbortController.abort();
+      state.data.value.currentQueryAbortController = null;
+    }
+    state.data.value.currentQueryId = null;
+
     state.data.value.generatedDisplayQuery = null;
     state.data.value.logs = [];
     state.data.value.columns = [];
@@ -740,6 +766,23 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function initializeFromUrl(
+    params: Record<string, string | undefined>,
+    options?: { updateLastExecutedState?: boolean }
+  ): { needsResolve: boolean; queryId?: string; needsShareResolve?: boolean; shareToken?: string; shouldExecute: boolean } {
+    // Suppress persistDraft during init so the setRelativeTimeRange/setLimit
+    // side-effects below don't overwrite the saved draft with empty query text
+    // before restoreDraftForCurrentContext() reads it back (#102). Restoring the
+    // draft never needs to re-persist it, so keeping persistence off for the
+    // whole init is safe.
+    suppressDraftPersistence = true;
+    try {
+      return _initializeFromUrlImpl(params, options);
+    } finally {
+      suppressDraftPersistence = false;
+    }
+  }
+
+  function _initializeFromUrlImpl(
     params: Record<string, string | undefined>,
     options?: { updateLastExecutedState?: boolean }
   ): { needsResolve: boolean; queryId?: string; needsShareResolve?: boolean; shareToken?: string; shouldExecute: boolean } {
@@ -863,17 +906,25 @@ export const useExploreStore = defineStore("explore", () => {
         query_languages: sourcesStore.currentSourceDetails?.query_languages ?? [],
         saved_query_editor_modes: sourcesStore.currentSourceDetails?.saved_query_editor_modes ?? [],
       });
-      const isLogchefQL = metadata.queryLanguage === 'logchefql';
+      // Route content by the RESOLVED active mode, not the query's own
+      // language. When the source can't honour the saved language,
+      // normalizeModeForSource coerces the mode; routing by the raw language
+      // would drop the content into the hidden editor and run default SQL
+      // instead. Clear the opposite slot so no stale content lingers behind the
+      // hidden editor. See #105.
+      const resolvedMode = normalizeModeForSource(getExploreModeForQueryLanguage(metadata.queryLanguage));
 
-      state.data.value.activeMode = normalizeModeForSource(getExploreModeForQueryLanguage(metadata.queryLanguage));
+      state.data.value.activeMode = resolvedMode;
       state.data.value.activeSavedQueryName = data.name;
       state.data.value.selectedQueryId = data.id.toString();
 
       const queryContent = content.content || '';
-      if (isLogchefQL) {
+      if (resolvedMode === 'logchefql') {
         state.data.value.logchefqlCode = queryContent;
+        state.data.value.nativeQuery = '';
       } else {
         state.data.value.nativeQuery = queryContent;
+        state.data.value.logchefqlCode = '';
       }
 
       const limit = content.limit || 100;
@@ -1099,6 +1150,13 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.currentQueryAbortController.abort();
     }
 
+    // Stamp this run so late responses can be dropped if a newer run started or
+    // the source changed while this one was in flight (#101).
+    const requestToken = ++executeQueryToken;
+    const requestSourceId = sourceId.value;
+    const isStaleResponse = () =>
+      requestToken !== executeQueryToken || sourceId.value !== requestSourceId;
+
     const abortController = new AbortController();
     state.data.value.currentQueryAbortController = abortController;
     state.data.value.isCancellingQuery = false;
@@ -1170,6 +1228,13 @@ export const useExploreStore = defineStore("explore", () => {
             variables: variables.length > 0 ? variables : undefined
           }, { signal: abortController.signal, timeout: queryTimeout });
 
+          // A newer run started, or the source changed, while this request was
+          // in flight — drop the result instead of applying it under the wrong
+          // source/run (#101).
+          if (isStaleResponse()) {
+            return { success: false, data: null, error: { message: 'Superseded by a newer query', error_type: 'StaleResponse' } };
+          }
+
           if (queryResponse.data) {
             const logs = queryResponse.data.logs || [];
             state.data.value.logs = logs;
@@ -1226,9 +1291,14 @@ export const useExploreStore = defineStore("explore", () => {
           state.error.value = apiError;
           return { success: false, data: null, error: apiError };
         } finally {
-          state.data.value.currentQueryAbortController = null;
-          state.data.value.currentQueryId = null;
-          state.data.value.isCancellingQuery = false;
+          // Only tear down the shared controller/query-id if they still belong
+          // to this run. A superseded run that reaches finally after a newer
+          // run installed its own controller must not clobber it (#101).
+          if (state.data.value.currentQueryAbortController === abortController) {
+            state.data.value.currentQueryAbortController = null;
+            state.data.value.currentQueryId = null;
+            state.data.value.isCancellingQuery = false;
+          }
         }
       }
 
@@ -1306,6 +1376,12 @@ export const useExploreStore = defineStore("explore", () => {
           apiCall: async () => exploreApi.getLogs(sourceId.value, params, currentTeamId, abortController.signal),
           showToast: false, // Errors shown inline via QueryError component
           onSuccess: (data: QuerySuccessResponse | null) => {
+            // Drop a superseded/stale response so it can't populate logs,
+            // columns, stats or history under a source the user switched to
+            // mid-flight (#101).
+            if (isStaleResponse()) {
+              return;
+            }
             if (data && (data.data || data.logs)) {
               const logs = data.data || data.logs || [];
               state.data.value.logs = logs;
@@ -1371,10 +1447,14 @@ export const useExploreStore = defineStore("explore", () => {
           }
         }
       } finally {
-        state.data.value.currentQueryAbortController = null;
-        // Only clear queryId if not mid-cancellation — cancelQuery needs it for backend KILL QUERY
-        if (!state.data.value.isCancellingQuery) {
-          state.data.value.currentQueryId = null;
+        // Only tear down if the shared controller still belongs to this run —
+        // a superseded run must not clobber a newer run's controller (#101).
+        if (state.data.value.currentQueryAbortController === abortController) {
+          state.data.value.currentQueryAbortController = null;
+          // Only clear queryId if not mid-cancellation — cancelQuery needs it for backend KILL QUERY
+          if (!state.data.value.isCancellingQuery) {
+            state.data.value.currentQueryId = null;
+          }
         }
       }
 

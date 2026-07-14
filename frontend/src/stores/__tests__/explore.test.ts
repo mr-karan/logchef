@@ -446,4 +446,172 @@ describe("explore store", () => {
       expect(store.activeShareToken).toBe("tok");
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // #102 — draft persistence must survive a reload. On a fresh load
+  // initializeFromUrl runs setRelativeTimeRange/setLimit (each persists a draft)
+  // while the query text is still empty; without suppression those overwrite
+  // the saved draft before it is restored.
+  // ---------------------------------------------------------------------------
+  describe("draft round-trip on reload (#102)", () => {
+    it("preserves an unsaved query across a simulated reload", () => {
+      mocks.teamsState.currentTeamId = 1;
+      const ctx1 = useContextStore();
+      ctx1.selectTeam(1);
+      ctx1.selectSource(10);
+
+      const store1 = useExploreStore();
+      store1.setLogchefqlCode('level="error"'); // persists the draft
+
+      // Simulate an F5: fresh Pinia + stores, same team/source, re-init from URL.
+      setActivePinia(createPinia());
+      mocks.teamsState.currentTeamId = 1;
+      const ctx2 = useContextStore();
+      ctx2.selectTeam(1);
+
+      const store2 = useExploreStore();
+      store2.initializeFromUrl({ team: "1", source: "10" });
+
+      expect(store2.logchefqlCode).toBe('level="error"');
+      expect(store2.activeMode).toBe("logchefql");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // #105 — hydrated saved-query content must land in the editor slot matching
+  // the resolved (possibly coerced) active mode, not the query's raw language,
+  // and the opposite slot must be cleared so nothing lingers behind a hidden
+  // editor.
+  // ---------------------------------------------------------------------------
+  describe("saved-query hydration slot (#105)", () => {
+    it("routes logchefql content to the logchefql slot and clears native", () => {
+      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
+      const store = useExploreStore();
+      store.setNativeQuery("SELECT old"); // stale content in the other slot
+
+      store.hydrateFromResolvedQuery({
+        id: 7,
+        name: "My Query",
+        query_language: "logchefql",
+        query_content: JSON.stringify({
+          content: 'level="error"',
+          limit: 100,
+          timeRange: { relative: "15m" },
+        }),
+      });
+
+      expect(store.activeMode).toBe("logchefql");
+      expect(store.logchefqlCode).toBe('level="error"');
+      expect(store.nativeQuery).toBe(""); // opposite slot cleared
+    });
+
+    it("coerces to native and routes content there when the source can't honour logchefql", () => {
+      mocks.sourcesState.currentSourceDetails = SQL_ONLY_SOURCE;
+      const store = useExploreStore();
+
+      store.hydrateFromResolvedQuery({
+        id: 8,
+        name: "Q",
+        query_language: "logchefql",
+        query_content: JSON.stringify({
+          content: "some content",
+          limit: 100,
+          timeRange: { relative: "15m" },
+        }),
+      });
+
+      // Mode coerced to native → content lands in the visible native slot,
+      // NOT in the hidden logchefql editor.
+      expect(store.activeMode).toBe("native");
+      expect(store.nativeQuery).toBe("some content");
+      expect(store.logchefqlCode).toBe("");
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // #101 — a query in flight when the source changes must be aborted, and its
+  // late response must never populate results under the new source.
+  // ---------------------------------------------------------------------------
+  describe("async races on source switch (#101)", () => {
+    function armInFlightLogchefql() {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = CH_SOURCE; // id 1
+      mocks.sourcesState.teamSources = [CH_SOURCE];
+      const ctx = useContextStore();
+      ctx.selectTeam(1);
+      ctx.selectSource(1);
+
+      const store = useExploreStore();
+      store.setRelativeTimeRange("15m");
+      store.setLogchefqlCode('level="error"');
+
+      // The FIRST query call (this store's executeQuery, invoked synchronously
+      // below) gets a controllable deferred. Setup-store watchers from earlier
+      // tests are never disposed and share this reactive mock state, so they can
+      // fire their own executeQuery when we mutate the source — those extra
+      // calls fall through to an already-resolved default and must NOT hijack
+      // our deferred resolver.
+      let resolveQuery: (value: any) => void = () => {};
+      mocks.logchefqlQuery.mockReset();
+      mocks.logchefqlQuery.mockImplementationOnce(
+        () => new Promise((resolve) => { resolveQuery = resolve; })
+      );
+      mocks.logchefqlQuery.mockImplementation(() =>
+        Promise.resolve({ data: { logs: [], columns: [], stats: {} } })
+      );
+
+      return { ctx, store, resolveQuery: (v: any) => resolveQuery(v) };
+    }
+
+    it("aborts the in-flight query when the source changes", async () => {
+      const { ctx, resolveQuery, store } = armInFlightLogchefql();
+
+      const abortSpy = vi.spyOn(AbortController.prototype, "abort");
+      const exec = store.executeQuery();
+      await Promise.resolve();
+      await nextTick();
+
+      // Measure only the aborts triggered by the source switch (other layers
+      // may create/abort their own controllers).
+      const abortsBeforeSwitch = abortSpy.mock.calls.length;
+
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE; // id 2
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+      ctx.selectSource(2);
+      await nextTick();
+
+      // onSourceChange aborted the in-flight run's controller.
+      expect(abortSpy.mock.calls.length).toBeGreaterThan(abortsBeforeSwitch);
+
+      resolveQuery({ data: { logs: [], columns: [], stats: {} } });
+      await exec;
+      abortSpy.mockRestore();
+    });
+
+    it("drops a stale response that resolves after the source switched", async () => {
+      const { ctx, resolveQuery, store } = armInFlightLogchefql();
+
+      const exec = store.executeQuery();
+      await Promise.resolve();
+      await nextTick();
+
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE; // id 2
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+      ctx.selectSource(2);
+      await nextTick();
+
+      // Response for the OLD source (1) arrives after the switch to 2.
+      resolveQuery({
+        data: {
+          logs: [{ msg: "stale" }],
+          columns: [{ name: "msg", type: "String" }],
+          stats: {},
+        },
+      });
+      const result = await exec;
+
+      expect(store.logs).toEqual([]); // stale result never applied
+      expect(result.error?.error_type).toBe("StaleResponse");
+    });
+  });
 });
