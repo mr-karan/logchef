@@ -30,6 +30,11 @@ export default defineConfig({
           href: "https://github.com/mr-karan/logchef",
         },
       ],
+      // Header override: adds a "Blog" link next to the social icons in the
+      // top-right of the docs header (keeps it out of the sidebar).
+      components: {
+        SocialIcons: "./src/components/starlight/SocialIcons.astro",
+      },
       // "<Page title> | Logchef" for all docs pages.
       titleDelimiter: "|",
       // Show Starlight's built-in "last updated" date (derived from git history) on docs pages.

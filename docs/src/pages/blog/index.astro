@@ -6,77 +6,199 @@ const posts = (await getCollection('blog')).sort(
   (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf()
 );
 
+const [featured, ...rest] = posts;
+
 const dateFormatter = new Intl.DateTimeFormat('en-US', {
   year: 'numeric',
   month: 'long',
   day: 'numeric',
   timeZone: 'UTC',
 });
+
+const readingTime = (body?: string) =>
+  Math.max(1, Math.round((body?.split(/\s+/).filter(Boolean).length ?? 0) / 200));
 ---
 
-<BaseLayout title="Blog — Logchef" description="Guides and field notes on ClickHouse, VictoriaLogs, and log analytics from the Logchef team.">
+<BaseLayout
+  title="Blog — Logchef"
+  description="Guides and field notes on ClickHouse, VictoriaLogs, and log analytics from the Logchef team."
+  activeNav="blog"
+>
   <style>
-    main { max-width: 900px; margin: 0 auto; padding: 6rem 1.5rem 4rem; }
-
-    .page-header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border); }
-    .page-header h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 0.5rem; }
-    .page-header p { color: var(--color-text-secondary); font-size: 1.125rem; }
-
-    .post-list { display: flex; flex-direction: column; }
-    .post-card {
-      display: block; padding: 2rem 0; border-bottom: 1px solid var(--color-border);
-      text-decoration: none; color: inherit; transition: opacity 0.15s ease;
-    }
-    .post-card:last-child { border-bottom: none; }
-    .post-card:hover { text-decoration: none; opacity: 0.85; }
-    .post-meta {
-      display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.75rem;
-      font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-dim);
-    }
-    .post-card h2 {
-      font-size: 1.5rem; font-weight: 600; letter-spacing: -0.02em; color: var(--color-text);
-      margin-bottom: 0.5rem; line-height: 1.3;
-    }
-    .post-card p.description { color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; margin-bottom: 0.75rem; }
-    .post-tags { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-    .post-tags span {
-      font-family: var(--font-mono); font-size: 0.6875rem; text-transform: uppercase; letter-spacing: 0.05em;
-      padding: 0.25rem 0.5rem; border-radius: 4px;
-      background: var(--color-surface); color: var(--color-text-secondary);
+    .blog-wrap { position: relative; overflow: clip; }
+    .blog-wrap::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 50%;
+      width: min(1100px, 120vw); height: 420px;
+      transform: translateX(-50%);
+      background:
+        radial-gradient(circle at 25% 0%, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 60%),
+        radial-gradient(circle at 78% 5%, color-mix(in srgb, var(--color-purple) 11%, transparent), transparent 55%);
+      opacity: 0.7; pointer-events: none; z-index: 0;
     }
 
-    .empty-state { color: var(--color-text-secondary); padding: 2rem 0; }
+    main {
+      position: relative; z-index: 1;
+      max-width: 960px; margin: 0 auto; padding: 7rem 1.5rem 5rem;
+    }
 
-    @media (max-width: 768px) {
-      .page-header h1 { font-size: 2rem; }
-      .post-card h2 { font-size: 1.25rem; }
+    .page-header { margin-bottom: 3.5rem; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      font-family: var(--font-mono); font-size: 0.72rem;
+      text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--color-accent); margin-bottom: 1rem;
+    }
+    .eyebrow::before { content: ""; width: 18px; height: 1px; background: currentColor; opacity: 0.6; }
+    .page-header h1 {
+      font-size: clamp(2.4rem, 5vw, 3.2rem); font-weight: 700;
+      letter-spacing: -0.035em; line-height: 1.05; margin-bottom: 0.85rem;
+    }
+    .page-header p { color: var(--color-text-secondary); font-size: 1.15rem; max-width: 52ch; line-height: 1.6; }
+
+    /* Shared card meta */
+    .meta {
+      display: flex; align-items: center; gap: 0.55rem;
+      font-family: var(--font-mono); font-size: 0.76rem; color: var(--color-text-dim);
+    }
+    .meta .dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+    .tags { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+    .tags span {
+      font-family: var(--font-mono); font-size: 0.68rem; letter-spacing: 0.02em;
+      padding: 0.22rem 0.5rem; border-radius: 5px;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      color: var(--color-text-secondary);
+    }
+    .tags span::before { content: "#"; color: var(--color-text-dim); margin-right: 0.1rem; }
+
+    /* Featured post */
+    .featured {
+      position: relative; display: block;
+      border-radius: 18px; padding: 2.25rem;
+      border: 1px solid var(--color-border);
+      background:
+        radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 55%),
+        var(--color-surface);
+      color: inherit; margin-bottom: 2.5rem;
+      transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .featured:hover {
+      text-decoration: none; transform: translateY(-3px);
+      border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+      box-shadow: 0 30px 60px -50px color-mix(in srgb, var(--color-accent) 60%, black);
+    }
+    .featured-flag {
+      font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--color-accent); margin-bottom: 1rem;
+      display: inline-flex; align-items: center; gap: 0.4rem;
+    }
+    .featured-flag .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--color-accent);
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 60%, transparent); }
+    .featured h2 {
+      font-size: clamp(1.6rem, 3.5vw, 2.1rem); font-weight: 650; letter-spacing: -0.025em;
+      line-height: 1.18; color: var(--color-text); margin-bottom: 0.85rem; text-wrap: balance;
+    }
+    .featured p { color: var(--color-text-secondary); font-size: 1.03rem; line-height: 1.6;
+      max-width: 62ch; margin-bottom: 1.5rem; }
+    .featured .meta { margin-bottom: 1.25rem; }
+    .featured-more {
+      display: inline-flex; align-items: center; gap: 0.4rem; margin-top: 1.5rem;
+      font-size: 0.9rem; font-weight: 500; color: var(--color-accent);
+    }
+    .featured-more svg { width: 16px; height: 16px; transition: transform 0.2s ease; }
+    .featured:hover .featured-more svg { transform: translateX(3px); }
+
+    /* Grid of remaining posts */
+    .section-label {
+      font-family: var(--font-mono); font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.1em; color: var(--color-text-dim);
+      margin-bottom: 1.25rem; padding-bottom: 0.75rem; border-bottom: 1px solid var(--color-border);
+    }
+    .post-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.25rem; }
+    .card {
+      display: flex; flex-direction: column;
+      border-radius: 14px; padding: 1.6rem;
+      border: 1px solid var(--color-border); background: var(--color-surface);
+      color: inherit; transition: border-color 0.2s ease, transform 0.2s ease, background 0.2s ease;
+    }
+    .card:hover {
+      text-decoration: none; transform: translateY(-3px);
+      border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+      background: color-mix(in srgb, var(--color-accent) 3%, var(--color-surface));
+    }
+    .card .meta { margin-bottom: 0.9rem; }
+    .card h3 {
+      font-size: 1.22rem; font-weight: 600; letter-spacing: -0.02em; line-height: 1.3;
+      color: var(--color-text); margin-bottom: 0.55rem;
+    }
+    .card p { color: var(--color-text-secondary); font-size: 0.925rem; line-height: 1.6; margin-bottom: 1.15rem; flex: 1; }
+
+    .empty-state {
+      color: var(--color-text-secondary); padding: 3rem 0; text-align: center;
+      border: 1px dashed var(--color-border); border-radius: 14px;
+    }
+
+    @media (max-width: 720px) {
+      main { padding-top: 6rem; }
+      .post-grid { grid-template-columns: 1fr; }
+      .featured { padding: 1.75rem; }
     }
   </style>
 
-  <main>
-    <header class="page-header">
-      <h1>Blog</h1>
-      <p>Guides and field notes on ClickHouse, VictoriaLogs, and log analytics.</p>
-    </header>
+  <div class="blog-wrap">
+    <main>
+      <header class="page-header">
+        <div class="eyebrow">Writing</div>
+        <h1>The Logchef Blog</h1>
+        <p>Guides and field notes on ClickHouse, VictoriaLogs, and getting real answers out of your logs.</p>
+      </header>
 
-    <div class="post-list">
       {posts.length === 0 && <p class="empty-state">No posts yet — check back soon.</p>}
-      {posts.map((post) => (
-        <a class="post-card" href={`/blog/${post.id}/`}>
-          <div class="post-meta">
-            <time datetime={post.data.pubDate.toISOString()}>
-              {dateFormatter.format(post.data.pubDate)}
-            </time>
-            <span>&middot;</span>
-            <span>{post.data.author}</span>
+
+      {featured && (
+        <a class="featured" href={`/blog/${featured.id}/`}>
+          <div class="featured-flag"><span class="pulse"></span> Latest</div>
+          <h2>{featured.data.title}</h2>
+          <div class="meta">
+            <time datetime={featured.data.pubDate.toISOString()}>{dateFormatter.format(featured.data.pubDate)}</time>
+            <span class="dot"></span>
+            <span>{featured.data.author}</span>
+            <span class="dot"></span>
+            <span>{readingTime(featured.body)} min read</span>
           </div>
-          <h2>{post.data.title}</h2>
-          <p class="description">{post.data.description}</p>
-          <div class="post-tags">
-            {post.data.tags.map((tag) => <span>{tag}</span>)}
+          <p>{featured.data.description}</p>
+          <div class="tags">
+            {featured.data.tags.map((tag) => <span>{tag}</span>)}
           </div>
+          <span class="featured-more">
+            Read post
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </span>
         </a>
-      ))}
-    </div>
-  </main>
+      )}
+
+      {rest.length > 0 && (
+        <>
+          <div class="section-label">More posts</div>
+          <div class="post-grid">
+            {rest.map((post) => (
+              <a class="card" href={`/blog/${post.id}/`}>
+                <div class="meta">
+                  <time datetime={post.data.pubDate.toISOString()}>{dateFormatter.format(post.data.pubDate)}</time>
+                  <span class="dot"></span>
+                  <span>{readingTime(post.body)} min read</span>
+                </div>
+                <h3>{post.data.title}</h3>
+                <p>{post.data.description}</p>
+                <div class="tags">
+                  {post.data.tags.slice(0, 3).map((tag) => <span>{tag}</span>)}
+                </div>
+              </a>
+            ))}
+          </div>
+        </>
+      )}
+    </main>
+  </div>
 </BaseLayout>
