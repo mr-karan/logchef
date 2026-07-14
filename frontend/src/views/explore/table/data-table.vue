@@ -18,6 +18,7 @@ import {
 } from '@tanstack/vue-table'
 import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useDebounceFn } from '@vueuse/core'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -274,13 +275,18 @@ watch(() => props.data, () => {
     }
 });
 
-// Save state whenever relevant parts change
+// Save state whenever relevant parts change. Column resizing fires this watch
+// on every mousemove/touchmove, so the actual localStorage write is debounced
+// to commit once the drag settles instead of thrashing on every pixel of
+// movement.
+const debouncedSaveStateToStorage = useDebounceFn(saveStateToStorage, 300);
+
 watch([columnOrder, columnSizing, columnVisibility], () => {
     if (!storageKey.value || !isReadyToPersistState.value) return;
 
     // Make sure we have columns loaded before saving
     if (props.columns && props.columns.length > 0) {
-        saveStateToStorage({
+        debouncedSaveStateToStorage({
             columnOrder: columnOrder.value,
             columnSizing: columnSizing.value,
             columnVisibility: columnVisibility.value
@@ -452,13 +458,18 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         window.removeEventListener('touchmove', onTouchMove);
         window.removeEventListener('mouseup', onEnd);
         window.removeEventListener('touchend', onEnd);
+        window.removeEventListener('touchcancel', onEnd);
     };
 
-    // Add the event listeners
+    // Add the event listeners. touchcancel (e.g. an incoming call or the OS
+    // interrupting the gesture) must also tear the drag down - otherwise
+    // mousemove/touchmove listeners leak on the window for the rest of the
+    // page's life since onEnd would never fire.
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('touchmove', onTouchMove);
     window.addEventListener('mouseup', onEnd, { once: true });
     window.addEventListener('touchend', onEnd, { once: true });
+    window.addEventListener('touchcancel', onEnd, { once: true });
 }
 
 // Initialize table

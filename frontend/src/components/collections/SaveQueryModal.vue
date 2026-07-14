@@ -63,6 +63,18 @@ const { toast } = useToast();
 const name = ref('');
 const description = ref('');
 const saveTimestamp = ref(true);
+// Tracks whether the user actually interacted with the "Save current
+// timestamp" checkbox during this modal session, as opposed to it merely
+// reflecting the initial auto-derived state from the query being edited.
+// When editing an existing query purely to change its name/description, we
+// must not silently overwrite the saved time range/limit with whatever the
+// (unrelated) live explore store currently happens to hold - only do that
+// when the user explicitly opted in by touching this control.
+const saveTimestampUserModified = ref(false);
+function onToggleSaveTimestamp(value: boolean | 'indeterminate') {
+  saveTimestamp.value = value === true;
+  saveTimestampUserModified.value = true;
+}
 // Inline save-to-collection (new queries only); defaults to the personal collection.
 const selectedCollectionId = ref<string>('');
 const collectionOptions = computed(() => {
@@ -335,6 +347,28 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       }
     }
 
+    // `content` above resolves from props.queryContent FIRST when present -
+    // and the Explorer always passes queryContent (the live editor state,
+    // which has no timeRange/limit of its own). That makes `content.timeRange`
+    // /`content.limit` useless for "what was actually persisted" once a query
+    // is loaded in the Explorer. The metadata-only path below needs the
+    // *actual saved record*, so parse editData/initialData directly here,
+    // independent of the queryContent prop.
+    let originalSavedContent: Record<string, any> = {};
+    if (props.editData?.query_content) {
+      try {
+        originalSavedContent = JSON.parse(props.editData.query_content);
+      } catch (e) {
+        console.error("Failed to parse edit query content", e);
+      }
+    } else if (props.initialData?.query_content) {
+      try {
+        originalSavedContent = JSON.parse(props.initialData.query_content);
+      } catch (e) {
+        console.error("Failed to parse initial query content", e);
+      }
+    }
+
     // Use displayQueryContent which handles fallback from editData/initialData
     const queryContent = displayQueryContent.value;
 
@@ -342,29 +376,48 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       throw new Error(`${activeMode === 'logchefql' ? 'LogchefQL' : displayQueryLanguageLabel.value} content is required`);
     }
 
+    // Metadata-only update path: when editing an existing query, only pull
+    // time range/limit from the live explore store if the user explicitly
+    // opted in via the "Save current timestamp" checkbox this session.
+    // Otherwise (e.g. just fixing the name/description), keep whatever was
+    // already saved untouched - the live explore store may hold an unrelated
+    // or stale time range/limit that has nothing to do with this edit.
+    const useLiveExploreState = !isEditing.value || saveTimestampUserModified.value;
+
     let timeRangeValue = null;
     if (saveTimestamp) {
-      // When editing from Collections (exploreStore is empty), preserve original time range if available
-      const hasExploreStoreTimeRange = exploreStore.selectedRelativeTime || exploreStore.timeRange;
-      
-      if (hasExploreStoreTimeRange) {
-        // Use current explore store time range (user is editing from Explorer)
-        if (exploreStore.selectedRelativeTime) {
-          timeRangeValue = { relative: exploreStore.selectedRelativeTime };
+      if (useLiveExploreState) {
+        // When editing from Collections (exploreStore is empty), preserve original time range if available
+        const hasExploreStoreTimeRange = exploreStore.selectedRelativeTime || exploreStore.timeRange;
+
+        if (hasExploreStoreTimeRange) {
+          // Use current explore store time range (user is editing from Explorer)
+          if (exploreStore.selectedRelativeTime) {
+            timeRangeValue = { relative: exploreStore.selectedRelativeTime };
+          } else {
+            timeRangeValue = {
+              absolute: {
+                start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
+                end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
+              }
+            };
+          }
+        } else if (content.timeRange) {
+          // Preserve original time range from saved query (editing from Collections)
+          timeRangeValue = content.timeRange;
         } else {
+          // Fallback to default time range
           timeRangeValue = {
             absolute: {
-              start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
-              end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
+              start: Date.now() - 3600000,
+              end: Date.now()
             }
           };
         }
-      } else if (content.timeRange) {
-        // Preserve original time range from saved query (editing from Collections)
-        timeRangeValue = content.timeRange;
       } else {
-        // Fallback to default time range
-        timeRangeValue = {
+        // Metadata-only edit: keep the originally saved time range as-is
+        // (from the actual persisted record, not the live-editor `content`).
+        timeRangeValue = originalSavedContent.timeRange ?? {
           absolute: {
             start: Date.now() - 3600000,
             end: Date.now()
@@ -373,11 +426,15 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       }
     }
 
+    const limitValue = useLiveExploreState
+      ? (exploreStore.limit || content.limit || 100)
+      : (typeof originalSavedContent.limit === 'number' ? originalSavedContent.limit : 100);
+
     const simplifiedContent = {
       version: content.version || 1,
       sourceId: content.sourceId || currentSourceId.value,
       timeRange: timeRangeValue,
-      limit: exploreStore.limit || content.limit || 100,
+      limit: limitValue,
       content: queryContent,
       variables: allVariables.value?.length ? allVariables.value : (content.variables || []),
     };
@@ -589,7 +646,7 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
 
         <!-- Save Timestamp Checkbox -->
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
-          <Checkbox id="save_timestamp" v-model="saveTimestamp" />
+          <Checkbox id="save_timestamp" :model-value="saveTimestamp" @update:model-value="onToggleSaveTimestamp" />
           <div class="space-y-1 leading-none">
             <Label for="save_timestamp">Save current timestamp</Label>
             <p class="text-sm text-muted-foreground">

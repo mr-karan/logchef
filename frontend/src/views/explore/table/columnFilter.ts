@@ -35,11 +35,26 @@ export function parseNumericFilter(input: string): ParsedNumericFilter | null {
   return { operator, value };
 }
 
+// Only a plain, unambiguous decimal shape counts as "numeric" for a string
+// cell - deliberately stricter than JS's `Number()` coercion, which also
+// accepts things no user typing a numeric filter would mean:
+//   - "" / "   "        -> Number() gives 0
+//   - "0x10"             -> Number() gives 16 (hex literal)
+//   - "1e3"              -> Number() gives 1000 (exponential notation)
+//   - "Infinity"/"NaN"   -> Number() gives Infinity / NaN
+// None of those should silently make a text cell match a numeric filter.
+const NUMERIC_STRING_RE = /^-?\d+(?:\.\d+)?$/;
+
 function toComparableNumber(cellValue: unknown): number | null {
-  if (cellValue === null || cellValue === undefined || cellValue === "") return null;
-  if (typeof cellValue === "boolean") return null;
-  const num = typeof cellValue === "number" ? cellValue : Number(cellValue);
-  return Number.isNaN(num) ? null : num;
+  if (typeof cellValue === "number") {
+    return Number.isNaN(cellValue) ? null : cellValue;
+  }
+  if (typeof cellValue === "string") {
+    const trimmed = cellValue.trim();
+    if (!NUMERIC_STRING_RE.test(trimmed)) return null;
+    return Number(trimmed);
+  }
+  return null;
 }
 
 function toComparableText(cellValue: unknown): string {
@@ -81,8 +96,26 @@ export function matchesColumnFilter(cellValue: unknown, filterValue: string): bo
           return cellNumber === numericFilter.value;
       }
     }
-    // Cell isn't numeric (e.g. a text column that happens to contain digits) -
-    // fall through to a plain text contains-match below.
+
+    // Cell isn't numeric (e.g. a text column that happens to contain digits).
+    // Fall back to a text match against the bare numeric value - NOT the
+    // full `trimmed` filter string, which would still carry the operator
+    // prefix (e.g. "!=500") and could never literally appear in real data.
+    // Ordering comparisons (>, >=, <, <=) have no meaningful text analog, so
+    // they simply don't match a non-numeric cell. "=" keeps the previous
+    // plain contains-match behaviour; "!=" is handled explicitly as its
+    // negation instead of silently falling through to a literal (and always
+    // failing) contains-match on "!=<value>".
+    const valueText = String(numericFilter.value).toLowerCase();
+    const cellText = toComparableText(cellValue).toLowerCase();
+    switch (numericFilter.operator) {
+      case "=":
+        return cellText.includes(valueText);
+      case "!=":
+        return !cellText.includes(valueText);
+      default:
+        return false;
+    }
   }
 
   return toComparableText(cellValue).toLowerCase().includes(trimmed.toLowerCase());
