@@ -35,11 +35,8 @@ const {
 
   <Seo title={title} description={description} image={image} structuredData={structuredData} />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap">
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
-  <noscript><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"></noscript>
+  <!-- Self-hosted fonts (subsetted latin, matches weights actually used: Inter 400/500/600/700 via variable font, DM Mono 400/500). -->
+  <link rel="preload" href="/fonts/inter-var-latin.woff2" as="font" type="font/woff2" crossorigin>
 
   <!-- Umami Analytics -->
   <script defer src="https://um.mrkaran.dev/script.js" data-website-id="7c608903-19f6-4782-8def-c03e71ff35fc"></script>
@@ -53,6 +50,28 @@ const {
   </script>
 
   <style is:global>
+    @font-face {
+      font-family: 'Inter';
+      font-style: normal;
+      font-weight: 100 900;
+      font-display: swap;
+      src: url('/fonts/inter-var-latin.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'DM Mono';
+      font-style: normal;
+      font-weight: 400;
+      font-display: swap;
+      src: url('/fonts/dm-mono-400-latin.woff2') format('woff2');
+    }
+    @font-face {
+      font-family: 'DM Mono';
+      font-style: normal;
+      font-weight: 500;
+      font-display: swap;
+      src: url('/fonts/dm-mono-500-latin.woff2') format('woff2');
+    }
+
     :root {
       --font-sans: 'Inter', system-ui, sans-serif;
       --font-mono: 'DM Mono', 'SF Mono', monospace;
