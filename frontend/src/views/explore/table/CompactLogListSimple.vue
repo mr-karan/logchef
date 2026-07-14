@@ -351,12 +351,17 @@ const highlightLogfmt = (text: string) => {
   )
 }
 
-// Pre-computed rows for performance - compact mode should render the full
-// filtered dataset as a scrollable log stream, not the current page only.
+// Pre-computed rows for performance - only the current page is rendered.
+// At high row counts (the limit picker allows up to 100k) building
+// buildMessage()/highlightLogfmt()/v-html for the *entire* filtered dataset
+// in one synchronous computed freezes/crashes the tab. Rendering just the
+// paginated row model (same approach as the full DataTable, see
+// data-table.vue's `table.getRowModel().rows` usage) keeps this bounded to
+// one page (~100 rows) regardless of result size.
 const renderedRows = computed(() => {
-  const filteredRows = table.getFilteredRowModel().rows
-  
-  return filteredRows.map((tableRow) => {
+  const pagedRows = table.getRowModel().rows
+
+  return pagedRows.map((tableRow) => {
     const row = tableRow.original
     const ts = formatTimestamp(row[props.timestampField])
     const sev = row[props.severityField] || ''
@@ -419,7 +424,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       :stats="stats"
       :is-loading="isLoading"
       :show-column-selector="false"
-      :show-pagination="false"
+      :show-pagination="true"
       @update:timezone="displayTimezone = $event"
       @update:globalFilter="globalFilter = $event"
     />
