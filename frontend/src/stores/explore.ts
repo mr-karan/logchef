@@ -114,6 +114,7 @@ export interface ExploreState {
   liveStatus: LiveTailStatus;
   liveError: string | null;
   liveEndReason: string | null;
+  liveEndMessage: string | null;
   liveNotice: string | null;
   liveDroppedCount: number;
   liveTailAbortController: AbortController | null;
@@ -238,6 +239,7 @@ export const useExploreStore = defineStore("explore", () => {
     liveStatus: "idle",
     liveError: null,
     liveEndReason: null,
+    liveEndMessage: null,
     liveNotice: null,
     liveDroppedCount: 0,
     liveTailAbortController: null,
@@ -1469,6 +1471,7 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.liveNotice = null;
     state.data.value.liveDroppedCount = 0;
     state.data.value.liveEndReason = null;
+    state.data.value.liveEndMessage = null;
     state.data.value.liveError = null;
     state.data.value.isLive = true;
     state.data.value.liveStatus = "connecting";
@@ -1489,15 +1492,26 @@ export const useExploreStore = defineStore("explore", () => {
       onNotice: (notice) => {
         if (!isActive()) return;
         state.data.value.liveNotice = notice.message || "Live tail rate-limited";
-        const match = /(\d+)/.exec(notice.message || "");
-        if (match) state.data.value.liveDroppedCount += parseInt(match[1], 10);
+        // Prefer the server's cumulative count when present (newer backends).
+        // Older backends only send the human message, so fall back to
+        // extracting the per-notice count and accumulating client-side.
+        if (typeof notice.dropped_total === "number" && Number.isFinite(notice.dropped_total)) {
+          state.data.value.liveDroppedCount = notice.dropped_total;
+        } else {
+          const match = /(\d+)/.exec(notice.message || "");
+          if (match) state.data.value.liveDroppedCount += parseInt(match[1], 10);
+        }
       },
       onEnd: (end) => {
         if (!isActive()) return;
-        // TTL / completion: keep isLive true so the view can offer "resume",
-        // but the stream itself is finished — release the controller.
+        // TTL / completion / abnormal close: keep isLive true so the view can
+        // offer "resume", but the stream itself is finished — release the
+        // controller. `reason` may be a value this build doesn't recognize
+        // (e.g. a new VL connection-lost reason) — it's rendered as opaque
+        // text, so unknown values degrade gracefully rather than crashing.
         state.data.value.liveStatus = "ended";
         state.data.value.liveEndReason = end.reason || "ended";
+        state.data.value.liveEndMessage = end.message || null;
         state.data.value.liveTailAbortController = null;
       },
     })
@@ -1872,6 +1886,7 @@ export const useExploreStore = defineStore("explore", () => {
     liveStatus: computed(() => state.data.value.liveStatus),
     liveError: computed(() => state.data.value.liveError),
     liveEndReason: computed(() => state.data.value.liveEndReason),
+    liveEndMessage: computed(() => state.data.value.liveEndMessage),
     liveNotice: computed(() => state.data.value.liveNotice),
     liveDroppedCount: computed(() => state.data.value.liveDroppedCount),
     supportsLiveTail,

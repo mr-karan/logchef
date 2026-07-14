@@ -40,6 +40,14 @@ pub struct TailArgs {
     interval: u64,
 
     /// Maximum rows to fetch per poll.
+    ///
+    /// Each poll queries newest-first and keeps only the top --limit rows,
+    /// then advances the cursor past the newest row returned. If a single
+    /// poll has more matching rows than --limit, the OLDEST rows in that
+    /// poll's window are silently dropped (not returned by the server) and
+    /// are never re-fetched, since the cursor has already moved past them.
+    /// A warning is printed the first time this happens; raise --limit or
+    /// lower --interval to reduce the chance of a poll overflowing.
     #[arg(long, default_value = "100")]
     limit: u32,
 
@@ -85,6 +93,12 @@ struct JsonlOutput<'a> {
     entry: &'a LogEntry,
 }
 
+/// Rolling lookback margin applied when advancing the poll cursor, mirroring
+/// the server-side fix (#87 item 1): poll from `cursor - margin` rather than
+/// `cursor` so late-arriving rows (ingestion lag/batching) aren't silently
+/// missed. The existing dedup map absorbs the resulting overlap.
+const LOOKBACK_MARGIN: ChronoDuration = ChronoDuration::seconds(5);
+
 pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
     let s = session::authed(&config, &global)?;
@@ -96,6 +110,13 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
     let team_id = resolve_team_id(client, &mut cache, args.team.or(default_team)).await?;
     let source_id =
         resolve_source_id(client, &mut cache, team_id, args.source.or(default_source)).await?;
+
+    // Fetch the source's configured timestamp field once at tail start, so
+    // dedup/cursor logic uses the right key on sources with a non-default ts
+    // field (e.g. VictoriaLogs sources use `_time`). Fall back to the
+    // hardcoded _timestamp/timestamp probing (see `parse_entry_timestamp`)
+    // when the fetch fails or the field is unset.
+    let ts_field = fetch_ts_field(client, team_id, source_id).await;
 
     let is_tty = std::io::stdout().is_terminal();
     let highlighter = if args.no_highlight || !is_tty {
@@ -138,11 +159,11 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
 
         let returned = response.entries().len();
         let mut entries = response.entries().iter().collect::<Vec<_>>();
-        entries.sort_by_key(|entry| parse_entry_timestamp(entry));
+        entries.sort_by_key(|entry| parse_entry_timestamp(entry, ts_field.as_deref()));
 
         let mut newest = None;
         for entry in entries {
-            let ts = parse_entry_timestamp(entry);
+            let ts = parse_entry_timestamp(entry, ts_field.as_deref());
             let key = dedup_key(entry, ts);
             if seen.insert(key, ()).is_some() {
                 continue;
@@ -164,12 +185,20 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
         }
 
         if let Some(ts) = newest {
-            start = ts;
+            // Rolling lookback margin (mirrors the server-side fix, #87 item
+            // 1): re-poll from just before the newest seen row rather than
+            // exactly at it, so late-arriving rows with an earlier timestamp
+            // than `ts` aren't silently missed. The dedup map absorbs the
+            // resulting overlap.
+            start = ts - LOOKBACK_MARGIN;
         }
         // Evict dedup entries older than the current window start; bounded by
         // the BETWEEN range the API filters with, so anything older cannot
-        // reappear in a future poll.
-        seen.retain(|key, _| key.ts.map(|t| t >= start).unwrap_or(true));
+        // reappear in a future poll. Entries with no parseable timestamp
+        // can't be windowed this way — prune them every cycle instead of
+        // keeping them forever, so a source with an unparseable/custom ts
+        // field can't grow the map unbounded.
+        seen.retain(|key, _| key.ts.map(|t| t >= start).unwrap_or(false));
 
         if returned as u32 >= args.limit && !backpressure_warned {
             eprintln!(
@@ -236,8 +265,33 @@ fn print_entry(
     Ok(())
 }
 
-fn parse_entry_timestamp(entry: &LogEntry) -> Option<DateTime<Utc>> {
-    let value = entry.get("_timestamp").or_else(|| entry.get("timestamp"))?;
+/// Fetches the source's configured timestamp field (`_meta_ts_field`) for use
+/// as the dedup/cursor key. Returns `None` (triggering the `_timestamp`/
+/// `timestamp` fallback probing in `parse_entry_timestamp`) if the fetch
+/// fails or the source has no field configured, so a transient API hiccup
+/// degrades tail rather than aborting it.
+async fn fetch_ts_field(client: &Client, team_id: i64, source_id: i64) -> Option<String> {
+    match client.get_source(team_id, source_id).await {
+        Ok(source) => source.meta_ts_field.filter(|f| !f.is_empty()),
+        Err(err) => {
+            eprintln!(
+                "tail: could not fetch source detail ({err}); falling back to _timestamp/timestamp probing"
+            );
+            None
+        }
+    }
+}
+
+/// Extracts a row's timestamp for dedup/cursor purposes. `ts_field`, when
+/// present, is the source's configured `_meta_ts_field` and is tried first;
+/// otherwise (or if the field is absent from the row) falls back to probing
+/// the hardcoded `_timestamp`/`timestamp` keys used by older/ClickHouse-only
+/// behavior.
+fn parse_entry_timestamp(entry: &LogEntry, ts_field: Option<&str>) -> Option<DateTime<Utc>> {
+    let value = ts_field
+        .and_then(|field| entry.get(field))
+        .or_else(|| entry.get("_timestamp"))
+        .or_else(|| entry.get("timestamp"))?;
     let s = value.as_str()?;
     DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&Utc))
@@ -387,7 +441,7 @@ mod tests {
             "_timestamp".to_string(),
             serde_json::Value::String("2026-05-19T09:15:00Z".to_string()),
         );
-        assert!(parse_entry_timestamp(&entry).is_some());
+        assert!(parse_entry_timestamp(&entry, None).is_some());
     }
 
     fn entry_from(pairs: &[(&str, &str)]) -> LogEntry {
@@ -402,7 +456,7 @@ mod tests {
     fn dedup_key_is_stable_across_insertion_order() {
         let a = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "hi")]);
         let b = entry_from(&[("msg", "hi"), ("_timestamp", "2026-05-19T09:15:00Z")]);
-        let ts = parse_entry_timestamp(&a);
+        let ts = parse_entry_timestamp(&a, None);
         assert_eq!(dedup_key(&a, ts), dedup_key(&b, ts));
     }
 
@@ -410,7 +464,7 @@ mod tests {
     fn dedup_key_differs_when_value_differs() {
         let a = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "hi")]);
         let b = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "ho")]);
-        let ts = parse_entry_timestamp(&a);
+        let ts = parse_entry_timestamp(&a, None);
         assert_ne!(dedup_key(&a, ts), dedup_key(&b, ts));
     }
 
@@ -418,9 +472,88 @@ mod tests {
     fn dedup_key_differs_when_timestamp_differs() {
         let a = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "hi")]);
         let b = entry_from(&[("_timestamp", "2026-05-19T09:15:01Z"), ("msg", "hi")]);
-        let ts_a = parse_entry_timestamp(&a);
-        let ts_b = parse_entry_timestamp(&b);
+        let ts_a = parse_entry_timestamp(&a, None);
+        let ts_b = parse_entry_timestamp(&b, None);
         assert_ne!(dedup_key(&a, ts_a), dedup_key(&b, ts_b));
+    }
+
+    #[test]
+    fn parse_entry_timestamp_uses_custom_ts_field_when_present() {
+        // A VictoriaLogs-style source with `_time` as its configured field:
+        // the custom field must be tried before the hardcoded fallbacks, and
+        // preferred even when a `timestamp`-named field is also present (as
+        // an ordinary log attribute, not the actual cursor field).
+        let entry = entry_from(&[
+            ("_time", "2026-05-19T09:15:00Z"),
+            ("timestamp", "not-a-real-timestamp-field"),
+        ]);
+        let ts = parse_entry_timestamp(&entry, Some("_time"));
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn parse_entry_timestamp_falls_back_when_custom_field_absent_from_row() {
+        // ts_field configured, but this particular row doesn't have it —
+        // fall back to the hardcoded probing rather than returning None.
+        let entry = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z")]);
+        let ts = parse_entry_timestamp(&entry, Some("_time"));
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn parse_entry_timestamp_falls_back_when_no_ts_field_configured() {
+        let entry = entry_from(&[("timestamp", "2026-05-19T09:15:00Z")]);
+        let ts = parse_entry_timestamp(&entry, None);
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn parse_entry_timestamp_returns_none_when_unparseable() {
+        let entry = entry_from(&[("_time", "not-a-timestamp")]);
+        assert!(parse_entry_timestamp(&entry, Some("_time")).is_none());
+    }
+
+    #[test]
+    fn dedup_map_prunes_entries_without_a_parseable_timestamp() {
+        // Regression test for the unbounded-growth bug: rows whose timestamp
+        // can't be parsed (e.g. a custom ts field CLI doesn't yet know about,
+        // or a malformed value) must not accumulate in the dedup map forever.
+        let mut seen: HashMap<DedupKey, ()> = HashMap::new();
+        let start = DateTime::parse_from_rfc3339("2026-05-19T09:15:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Simulate one poll's worth of no-ts-field entries landing in the map.
+        for i in 0..50 {
+            seen.insert(
+                DedupKey {
+                    ts: None,
+                    fingerprint: i,
+                },
+                (),
+            );
+        }
+        // And a handful of entries with a real, in-window timestamp.
+        seen.insert(
+            DedupKey {
+                ts: Some(start),
+                fingerprint: 999,
+            },
+            (),
+        );
+
+        // This is the same retention predicate used in the poll loop.
+        seen.retain(|key, _| key.ts.map(|t| t >= start).unwrap_or(false));
+
+        assert_eq!(
+            seen.len(),
+            1,
+            "no-ts entries must be pruned, not retained forever"
+        );
+        assert!(seen.contains_key(&DedupKey {
+            ts: Some(start),
+            fingerprint: 999,
+        }));
     }
 
     #[test]

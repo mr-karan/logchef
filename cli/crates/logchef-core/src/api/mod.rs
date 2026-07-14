@@ -141,6 +141,15 @@ impl Client {
         Ok(response.data)
     }
 
+    /// Fetches full source detail (including the configured `_meta_ts_field`),
+    /// as opposed to `list_sources` which is used for name/ID resolution.
+    pub async fn get_source(&self, team_id: i64, source_id: i64) -> Result<Source> {
+        let response: ApiResponse<Source> = self
+            .get(&format!("/api/v1/teams/{}/sources/{}", team_id, source_id))
+            .await?;
+        Ok(response.data)
+    }
+
     pub async fn get_schema(&self, team_id: i64, source_id: i64) -> Result<Vec<Column>> {
         let response: ApiResponse<Vec<Column>> = self
             .get(&format!(

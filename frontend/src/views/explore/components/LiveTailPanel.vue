@@ -10,6 +10,7 @@ const props = defineProps<{
   notice: string | null;
   droppedCount: number;
   endReason: string | null;
+  endMessage?: string | null;
   error: string | null;
   timestampField?: string;
 }>();
@@ -198,7 +199,9 @@ function timestampOf(row: Record<string, any>): string {
       class="flex items-center gap-2 border-t bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
     >
       <span class="flex-1">
-        Tail ended<template v-if="endReason"> ({{ endReason }})</template>. No automatic reconnect.
+        Tail ended<template v-if="endReason"> ({{ endReason }})</template>.
+        <template v-if="endMessage"> {{ endMessage }}</template>
+        No automatic reconnect.
       </span>
       <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="emit('resume')">
         <RotateCw class="h-3.5 w-3.5" />

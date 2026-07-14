@@ -326,6 +326,12 @@ export type TailQueryLanguage = "logchefql" | "logsql";
 export interface TailNotice {
   code?: string;
   message?: string;
+  /**
+   * Cumulative dropped-row count for the whole tail session, as reported by
+   * the server. When present, prefer this over parsing `message`. Older
+   * server builds omit this field and only send the human-readable message.
+   */
+  dropped_total?: number;
 }
 
 export interface TailEnd {
@@ -424,6 +430,7 @@ export async function subscribeToTail(
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   const parser = createSSEParser();
+  let endReceived = false;
 
   try {
     while (true) {
@@ -448,6 +455,7 @@ export async function subscribeToTail(
           }
           case "end": {
             const end = parseJsonSafe<TailEnd>(event.data) ?? {};
+            endReceived = true;
             callbacks.onEnd?.(end);
             return;
           }
@@ -466,5 +474,15 @@ export async function subscribeToTail(
     } catch {
       // reader may already be released on abort
     }
+  }
+
+  // The reader loop exited via EOF (transport closed) without ever seeing a
+  // terminating `end` frame. Surface this as an abnormal end rather than
+  // resolving silently, which would leave the UI showing "Live" forever.
+  if (!endReceived && !signal.aborted) {
+    callbacks.onEnd?.({
+      reason: "connection_lost",
+      message: "Connection closed unexpectedly before the stream signaled completion.",
+    });
   }
 }

@@ -1513,6 +1513,7 @@ onMounted(async () => {
                   :notice="exploreStore.liveNotice"
                   :dropped-count="exploreStore.liveDroppedCount"
                   :end-reason="exploreStore.liveEndReason"
+                  :end-message="exploreStore.liveEndMessage"
                   :error="exploreStore.liveError"
                   :timestamp-field="sourceDetails?._meta_ts_field"
                   @stop="exploreStore.stopLiveTail()"
