@@ -148,11 +148,22 @@ func validateClickHouseConnection(connFieldPrefix string, requireTable bool, con
 }
 
 func ValidateVictoriaLogsConnection(connFieldPrefix, baseURL string) error {
-	if strings.TrimSpace(baseURL) == "" {
+	trimmed := strings.TrimSpace(baseURL)
+	if trimmed == "" {
 		return &ValidationError{Field: connFieldPrefix + "base_url", Message: "base_url is required"}
 	}
-	if _, err := url.ParseRequestURI(baseURL); err != nil {
+	parsed, err := url.ParseRequestURI(trimmed)
+	if err != nil {
 		return &ValidationError{Field: connFieldPrefix + "base_url", Message: "base_url must be a valid URL", Err: err}
+	}
+	// url.ParseRequestURI accepts path-only values like "/foo"; require an
+	// http(s) scheme and a host so a misconfigured base_url fails here rather
+	// than as a confusing error on the first upstream call.
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return &ValidationError{Field: connFieldPrefix + "base_url", Message: "base_url must use http or https"}
+	}
+	if parsed.Host == "" {
+		return &ValidationError{Field: connFieldPrefix + "base_url", Message: "base_url must include a host"}
 	}
 	return nil
 }

@@ -40,6 +40,9 @@ type HistogramBucket struct {
 type HistogramResult struct {
 	Granularity string            `json:"granularity"`
 	Data        []HistogramBucket `json:"data"`
+	// Notice carries a non-fatal message (e.g. group-by series were capped to
+	// a top-N set). Empty when there is nothing to surface.
+	Notice string `json:"notice,omitempty"`
 }
 
 type AlertQueryRequest struct {

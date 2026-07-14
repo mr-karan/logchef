@@ -20,6 +20,12 @@ import (
 const (
 	defaultDiscoveryLookback = 24 * time.Hour
 	defaultQueryLimit        = 1000
+	// defaultHistogramSeriesLimit caps the number of group-by series returned
+	// for a histogram, mirroring the ClickHouse provider's top-10 group cap. A
+	// high-cardinality group-by field (e.g. trace_id) would otherwise return
+	// one series per distinct value — a server-side memory spike and a
+	// multi-MB payload for the browser.
+	defaultHistogramSeriesLimit = 10
 )
 
 type valuesResponse struct {
@@ -97,7 +103,7 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	form := url.Values{}
 	form.Set("query", query)
 
-	limit := effectiveQueryLimit(req.Limit, req.MaxLimit)
+	limit, limitAdded, limitCapped := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
 	if limit > 0 {
 		form.Set("limit", strconv.Itoa(limit))
 	}
@@ -125,6 +131,12 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	columnSet := make(map[string]struct{})
 	columnNames := make([]string, 0)
 
+	// Enforce the response byte budget while decoding (mirrors the ClickHouse
+	// provider). A query within the row limit but with very large per-row
+	// payloads would otherwise buffer unbounded — the OOM class the byte budget
+	// exists to prevent.
+	var bytesReturned int
+	truncatedReason := ""
 	for {
 		var row map[string]interface{}
 		if err := decoder.Decode(&row); err != nil {
@@ -132,6 +144,15 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 				break
 			}
 			return nil, fmt.Errorf("decode victorialogs query response: %w", err)
+		}
+
+		if req.MaxResponseBytes > 0 {
+			rowSize := approxRowJSONSize(row)
+			if bytesReturned+rowSize > req.MaxResponseBytes {
+				truncatedReason = "byte_limit"
+				break
+			}
+			bytesReturned += rowSize
 		}
 
 		logs = append(logs, row)
@@ -152,10 +173,36 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		})
 	}
 
+	stats := statsFromHeaders(resp, len(logs))
+	stats.RowsReturned = len(logs)
+	stats.BytesReturned = bytesReturned
+	if limit > 0 {
+		stats.LimitApplied = limit
+	}
+	if truncatedReason != "" {
+		stats.Truncated = true
+		stats.TruncatedReason = truncatedReason
+	}
+
+	warnings := make([]models.QueryWarning, 0, 2)
+	if limitAdded {
+		warnings = append(warnings, models.QueryWarning{
+			Code:    "LIMIT_APPLIED",
+			Message: fmt.Sprintf("Showing first %d rows. Use download for larger results.", limit),
+		})
+	}
+	if limitCapped {
+		warnings = append(warnings, models.QueryWarning{
+			Code:    "LIMIT_CAPPED",
+			Message: fmt.Sprintf("Result limit capped at %d rows.", limit),
+		})
+	}
+
 	return &models.QueryResult{
-		Logs:    logs,
-		Columns: columns,
-		Stats:   statsFromHeaders(resp, len(logs)),
+		Logs:     logs,
+		Columns:  columns,
+		Stats:    stats,
+		Warnings: warnings,
 	}, nil
 }
 
@@ -280,8 +327,12 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	if timeout := formatTimeout(req.QueryTimeout); timeout != "" {
 		form.Set("timeout", timeout)
 	}
-	if groupBy := strings.TrimSpace(req.GroupBy); groupBy != "" {
+	groupBy := strings.TrimSpace(req.GroupBy)
+	if groupBy != "" {
 		form.Add("field", groupBy)
+		// Cap the number of returned series so a high-cardinality group-by can't
+		// blow up server memory or the response payload.
+		form.Set("fields_limit", strconv.Itoa(defaultHistogramSeriesLimit))
 	}
 	applyScopeFilters(form, conn)
 
@@ -293,8 +344,8 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	data := make([]datasource.HistogramBucket, 0)
 	for _, series := range result.Hits {
 		groupValue := ""
-		if strings.TrimSpace(req.GroupBy) != "" {
-			groupValue = series.Fields[strings.TrimSpace(req.GroupBy)]
+		if groupBy != "" {
+			groupValue = series.Fields[groupBy]
 		}
 		for i, timestampRaw := range series.Timestamps {
 			if i >= len(series.Values) {
@@ -312,9 +363,22 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 		}
 	}
 
+	// VL returns one series at a time, so a group-by result interleaves buckets
+	// across groups. Sort globally by bucket time (the activity/ClickHouse paths
+	// also emit time-ordered buckets) so the chart renders coherently.
+	slices.SortStableFunc(data, func(a, b datasource.HistogramBucket) int {
+		return a.Bucket.Compare(b.Bucket)
+	})
+
+	notice := ""
+	if groupBy != "" && len(result.Hits) >= defaultHistogramSeriesLimit {
+		notice = fmt.Sprintf("Showing top %d series by %q; additional series are not displayed.", defaultHistogramSeriesLimit, groupBy)
+	}
+
 	return &datasource.HistogramResult{
 		Granularity: defaultWindow(req.Window),
 		Data:        data,
+		Notice:      notice,
 	}, nil
 }
 
@@ -527,7 +591,9 @@ func (p *Provider) fetchLatestTimestamp(
 	}
 
 	form := url.Values{}
-	form.Set("query", "*")
+	// Sort newest-first so limit=1 returns the actual latest row, not an
+	// arbitrary one.
+	form.Set("query", "* | sort by (_time desc)")
 	form.Set("limit", "1")
 	applyScopeFilters(form, conn)
 
@@ -650,18 +716,59 @@ func applyAlertLookback(query string, lookbackSeconds int) string {
 	}
 
 	lookbackFilter := fmt.Sprintf("_time:%s", formatLookbackDuration(lookbackSeconds))
+
+	prefix := ""
+	rest := trimmed
 	if strings.HasPrefix(trimmed, "options(") {
 		if end := strings.Index(trimmed, ")"); end >= 0 {
-			prefix := strings.TrimSpace(trimmed[:end+1])
-			rest := strings.TrimSpace(trimmed[end+1:])
-			if rest == "" {
-				return fmt.Sprintf("%s %s", prefix, lookbackFilter)
-			}
-			return fmt.Sprintf("%s %s %s", prefix, lookbackFilter, rest)
+			prefix = strings.TrimSpace(trimmed[:end+1])
+			rest = strings.TrimSpace(trimmed[end+1:])
 		}
 	}
 
-	return fmt.Sprintf("%s %s", lookbackFilter, trimmed)
+	// A native LogsQL alert query may already scope _time itself. LogsQL ANDs
+	// multiple _time filters, so prepending another would silently narrow (or
+	// zero, if disjoint) the window. Leave the query's own window intact in
+	// that case rather than double-constraining it.
+	if containsTimeFilter(rest) {
+		return trimmed
+	}
+
+	if prefix != "" {
+		if rest == "" {
+			return fmt.Sprintf("%s %s", prefix, lookbackFilter)
+		}
+		return fmt.Sprintf("%s %s %s", prefix, lookbackFilter, rest)
+	}
+
+	return fmt.Sprintf("%s %s", lookbackFilter, rest)
+}
+
+// containsTimeFilter reports whether query contains a `_time:` filter at a
+// field-name boundary (so it does not match a field like `custom_time:`). It is
+// a heuristic: a `_time:` inside a quoted string literal would be a false
+// positive, but that only causes the lookback to be conservatively skipped.
+func containsTimeFilter(query string) bool {
+	const token = "_time:"
+	for i := 0; i <= len(query)-len(token); {
+		idx := strings.Index(query[i:], token)
+		if idx < 0 {
+			return false
+		}
+		pos := i + idx
+		if pos == 0 || !isFieldNameByte(query[pos-1]) {
+			return true
+		}
+		i = pos + len(token)
+	}
+	return false
+}
+
+func isFieldNameByte(b byte) bool {
+	return b == '_' ||
+		(b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }
 
 func formatLookbackDuration(seconds int) string {
@@ -935,17 +1042,59 @@ func splitTopLevelPipes(query string) []string {
 	return stages
 }
 
-func effectiveQueryLimit(limit, maxLimit int) int {
+// resolveQueryLimit mirrors the ClickHouse limit policy: a limit-less call
+// falls back to DefaultLimit (not MaxLimit), and any limit is capped at
+// MaxLimit. It reports whether a default was injected (LIMIT_APPLIED) or the
+// caller's limit was capped (LIMIT_CAPPED) so callers can surface a warning.
+func resolveQueryLimit(limit, defaultLimit, maxLimit int) (applied int, added, capped bool) {
+	if defaultLimit <= 0 {
+		defaultLimit = defaultQueryLimit
+	}
 	if maxLimit <= 0 {
-		maxLimit = defaultQueryLimit
+		maxLimit = defaultLimit
 	}
+
 	if limit <= 0 {
-		return maxLimit
+		applied = defaultLimit
+		added = true
+	} else {
+		applied = limit
 	}
-	if limit > maxLimit {
-		return maxLimit
+	if applied > maxLimit {
+		applied = maxLimit
+		capped = true
 	}
-	return limit
+	return applied, added, capped
+}
+
+// approxRowJSONSize approximates a decoded VL row's JSON-encoded byte size for
+// the soft response-byte budget, without a full per-row marshal on the hot
+// decode path. VL rows are overwhelmingly string/number scalars.
+func approxRowJSONSize(row map[string]interface{}) int {
+	size := 2 // {}
+	for key, value := range row {
+		size += len(key) + 4 // "key": plus separators
+		size += approxValueJSONSize(value)
+	}
+	return size
+}
+
+func approxValueJSONSize(value interface{}) int {
+	switch v := value.(type) {
+	case nil:
+		return 4 // null
+	case string:
+		return len(v) + 2 // surrounding quotes
+	case json.Number:
+		return len(string(v))
+	case bool:
+		return 5 // conservative (true/false)
+	default:
+		if encoded, err := json.Marshal(v); err == nil {
+			return len(encoded)
+		}
+		return 16
+	}
 }
 
 func inferColumnType(source *models.Source, name string) string {

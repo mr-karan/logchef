@@ -274,6 +274,18 @@ func (s *Source) RedactedConnectionConfig() json.RawMessage {
 		}
 		conn.Auth.Password = ""
 		conn.Auth.Token = ""
+		// Custom headers commonly hold secrets (e.g. an X-API-Key /
+		// Authorization for a fronting proxy). Blank the values while keeping
+		// the keys so the editor can show which headers exist without leaking
+		// them to source viewers. A blank value on update means "keep existing"
+		// (see UpdateSource).
+		if len(conn.Headers) > 0 {
+			redactedHeaders := make(map[string]string, len(conn.Headers))
+			for key := range conn.Headers {
+				redactedHeaders[key] = ""
+			}
+			conn.Headers = redactedHeaders
+		}
 		payload, err := json.Marshal(conn)
 		if err != nil {
 			return json.RawMessage(`{}`)

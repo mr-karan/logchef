@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +21,25 @@ import (
 const defaultHealthTimeout = 5 * time.Second
 const defaultValidationTimeout = 8 * time.Second
 
+const (
+	// dialTimeout bounds TCP connection establishment on every VL call. A
+	// black-holed / wedged endpoint (silent packet drop) fails here instead of
+	// hanging forever.
+	dialTimeout = 5 * time.Second
+	// responseHeaderTimeout bounds the wait for response headers (the first
+	// byte of the response) on every VL call. This is deliberately a transport
+	// setting rather than http.Client.Timeout: the tail path shares this client
+	// and streams an unbounded NDJSON body, so a whole-request deadline would
+	// kill live tails. VictoriaLogs returns response headers immediately (200)
+	// and only then streams the tail body, so this bound covers the pre-header
+	// phase for every call — including the tail connect — without ever
+	// interrupting an already-streaming body.
+	responseHeaderTimeout = 30 * time.Second
+	// healthCacheTTL serves recently-computed health without a live round-trip,
+	// so UI polling on a down source does not multiply blocking calls.
+	healthCacheTTL = 10 * time.Second
+)
+
 type Provider struct {
 	client  *http.Client
 	log     *slog.Logger
@@ -28,8 +49,20 @@ type Provider struct {
 }
 
 func NewProvider(log *slog.Logger) *Provider {
+	// Clone the stdlib default transport so we keep its proxy/idle-connection
+	// behaviour, then bound connection establishment and the wait for response
+	// headers. Crucially we do NOT set http.Client.Timeout — the tail path
+	// reuses this client for an infinite stream, and a whole-request deadline
+	// would sever live tails.
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.DialContext = (&net.Dialer{
+		Timeout:   dialTimeout,
+		KeepAlive: 30 * time.Second,
+	}).DialContext
+	transport.ResponseHeaderTimeout = responseHeaderTimeout
+
 	return &Provider{
-		client:  &http.Client{},
+		client:  &http.Client{Transport: transport},
 		log:     log.With("component", "victorialogs_provider"),
 		sources: make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
 		health:  make(map[models.SourceID]models.SourceHealth),
@@ -172,11 +205,30 @@ func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req 
 		// API responses redact credentials, so edit flows send them blank to
 		// mean "keep the existing ones".
 		if prev, prevErr := source.VictoriaLogsConnection(); prevErr == nil {
-			if conn.Auth.Password == "" {
-				conn.Auth.Password = prev.Auth.Password
+			if strings.EqualFold(strings.TrimSpace(conn.Auth.Mode), "none") {
+				// Auth turned off: drop any stored credentials so repointing
+				// base_url can't leak the previous host's token/password.
+				conn.Auth.Username = ""
+				conn.Auth.Password = ""
+				conn.Auth.Token = ""
+			} else {
+				if conn.Auth.Password == "" {
+					conn.Auth.Password = prev.Auth.Password
+				}
+				if conn.Auth.Token == "" {
+					conn.Auth.Token = prev.Auth.Token
+				}
 			}
-			if conn.Auth.Token == "" {
-				conn.Auth.Token = prev.Auth.Token
+			// Custom headers may hold secrets (e.g. an X-API-Key for a fronting
+			// proxy) and are redacted (blanked) in API responses, so a blank
+			// value on edit means "keep the existing one".
+			for key, value := range conn.Headers {
+				if strings.TrimSpace(value) != "" {
+					continue
+				}
+				if prevValue, ok := prev.Headers[key]; ok {
+					conn.Headers[key] = prevValue
+				}
 			}
 		}
 		if err := validateVictoriaLogsConnectionConfig("connection.", conn); err != nil {
@@ -269,6 +321,14 @@ func (p *Provider) GetSourceHealth(ctx context.Context, sourceID models.SourceID
 			Error:       "victorialogs source not initialized",
 			LastChecked: time.Now(),
 		}
+	}
+
+	// Serve fresh cached health without a live round-trip, so UI polling on a
+	// down source doesn't stack up blocking checks (each up to the dial /
+	// response-header bounds). Matches the ClickHouse provider serving cached
+	// health.
+	if hasHealth && time.Since(health.LastChecked) < healthCacheTTL {
+		return health
 	}
 
 	healthy, err := p.checkHealth(ctx, sourceID, conn)
@@ -378,6 +438,19 @@ func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.Victor
 		return &datasource.ValidationError{
 			Field:   fieldPrefix + "tenant",
 			Message: "account_id and project_id must be provided together",
+		}
+	}
+	// VictoriaLogs tenants are (uint32 AccountID, uint32 ProjectID). Reject
+	// non-numeric / out-of-range values at config time instead of surfacing a
+	// confusing upstream error on the first query.
+	if accountID != "" {
+		if _, err := strconv.ParseUint(accountID, 10, 32); err != nil {
+			return &datasource.ValidationError{Field: fieldPrefix + "tenant.account_id", Message: "account_id must be a numeric uint32 value"}
+		}
+	}
+	if projectID != "" {
+		if _, err := strconv.ParseUint(projectID, 10, 32); err != nil {
+			return &datasource.ValidationError{Field: fieldPrefix + "tenant.project_id", Message: "project_id must be a numeric uint32 value"}
 		}
 	}
 
@@ -500,6 +573,9 @@ func (p *Provider) updateHealth(sourceID models.SourceID, healthy bool, err erro
 
 func applyHeaders(req *http.Request, conn models.VictoriaLogsConnectionInfo) {
 	switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
+	case "none":
+		// Auth explicitly disabled: never send credentials, even if stale
+		// username/token values linger in the config.
 	case "basic":
 		req.SetBasicAuth(conn.Auth.Username, conn.Auth.Password)
 	case "bearer":
@@ -507,6 +583,7 @@ func applyHeaders(req *http.Request, conn models.VictoriaLogsConnectionInfo) {
 			req.Header.Set("Authorization", "Bearer "+conn.Auth.Token)
 		}
 	default:
+		// Unset mode: best-effort auto-detect (legacy behaviour).
 		if strings.TrimSpace(conn.Auth.Token) != "" {
 			req.Header.Set("Authorization", "Bearer "+conn.Auth.Token)
 		} else if strings.TrimSpace(conn.Auth.Username) != "" {
@@ -514,11 +591,11 @@ func applyHeaders(req *http.Request, conn models.VictoriaLogsConnectionInfo) {
 		}
 	}
 
-	if strings.TrimSpace(conn.Tenant.AccountID) != "" {
-		req.Header.Set("AccountID", conn.Tenant.AccountID)
+	if accountID := strings.TrimSpace(conn.Tenant.AccountID); accountID != "" {
+		req.Header.Set("AccountID", accountID)
 	}
-	if strings.TrimSpace(conn.Tenant.ProjectID) != "" {
-		req.Header.Set("ProjectID", conn.Tenant.ProjectID)
+	if projectID := strings.TrimSpace(conn.Tenant.ProjectID); projectID != "" {
+		req.Header.Set("ProjectID", projectID)
 	}
 
 	for key, value := range conn.Headers {

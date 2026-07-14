@@ -18,6 +18,13 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// alertEvaluationTimeout bounds a single alert's evaluation wall-clock time. It
+// sits above the per-query timeout (models.DefaultQueryTimeoutSeconds) with
+// headroom for result processing, so a query's own timeout normally fires
+// first; this deadline is the backstop that stops a wedged source from blocking
+// the sequential evaluation loop.
+const alertEvaluationTimeout = (models.DefaultQueryTimeoutSeconds + 30) * time.Second
+
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config      config.AlertsConfig
@@ -35,6 +42,12 @@ type Manager struct {
 	log        *slog.Logger
 	sender     AlertSender
 
+	// evalTimeout bounds a single alert's evaluation; evalFn is the function
+	// invoked per alert. Both are seams so the per-alert timeout isolation can
+	// be exercised in tests without a live datasource/store.
+	evalTimeout time.Duration
+	evalFn      func(context.Context, *models.Alert) error
+
 	stop chan struct{}
 	wg   sync.WaitGroup
 }
@@ -45,14 +58,17 @@ func NewManager(opts Options) *Manager {
 	if sender == nil {
 		sender = noopSender{}
 	}
-	return &Manager{
-		cfg:        opts.Config,
-		db:         opts.DB,
-		datasource: opts.Datasources,
-		log:        opts.Logger.With("component", "alert_manager"),
-		sender:     sender,
-		stop:       make(chan struct{}),
+	m := &Manager{
+		cfg:         opts.Config,
+		db:          opts.DB,
+		datasource:  opts.Datasources,
+		log:         opts.Logger.With("component", "alert_manager"),
+		sender:      sender,
+		evalTimeout: alertEvaluationTimeout,
+		stop:        make(chan struct{}),
 	}
+	m.evalFn = m.evaluateAlert
+	return m
 }
 
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
@@ -106,10 +122,25 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 
 	for _, alert := range alerts {
-		if err := m.evaluateAlert(ctx, alert); err != nil {
+		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
 			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
 	}
+}
+
+// evaluateAlertWithTimeout bounds a single alert's evaluation with its own
+// deadline. The manager runs on the process-lifetime context, so without this
+// a source whose endpoint wedges (stalled socket) would block the sequential
+// loop forever and freeze alerting org-wide. A per-alert deadline isolates that
+// failure to the one slow alert; the loop then advances to the rest.
+func (m *Manager) evaluateAlertWithTimeout(ctx context.Context, alert *models.Alert) error {
+	timeout := m.evalTimeout
+	if timeout <= 0 {
+		timeout = alertEvaluationTimeout
+	}
+	alertCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return m.evalFn(alertCtx, alert)
 }
 
 func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error {
