@@ -62,3 +62,4 @@ dist/*
 .DS_Store
 .claude/
 .plans/
+docs/marketing/

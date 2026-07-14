@@ -2,7 +2,7 @@
 
 <p align="center"><img src="LOGCHEF.svg" alt="Logchef Logo" /></p>
 
-<p align="center">A modern, single binary, multi-datasource log analytics platform</p>
+<p align="center">Self-hosted log analytics and log explorer for ClickHouse and VictoriaLogs — single binary, multi-datasource, open source</p>
 
 <p align="center">
   <a href="https://demo.logchef.app"><strong>Try Demo</strong></a> ·
@@ -14,7 +14,7 @@
   <img alt="Logchef Log Explorer" src="docs/public/screenshots/hero-light.png">
 </p>
 
-Logchef is a lightweight log analytics platform for teams that want a strong query and control plane on top of existing log backends. It runs as a single binary and currently supports both ClickHouse and VictoriaLogs as datasource backends, while providing a unified UI for exploration, saved queries, alerting, and access control.
+Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of existing log backends. It runs as a single binary and currently supports both ClickHouse and VictoriaLogs as datasource backends, providing a unified log explorer for exploration, saved queries, alerting, and access control — without reshaping how you store logs.
 
 If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/).
 
