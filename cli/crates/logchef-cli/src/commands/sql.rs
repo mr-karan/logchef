@@ -8,6 +8,7 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range, resolve_timezone};
 use serde::Serialize;
 use std::io::{IsTerminal, Read, Write};
 use tokio::time::{Duration, sleep};
@@ -31,15 +32,20 @@ pub struct SqlArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Apply a relative time range to SQL (e.g., 15m, 1h, 24h)
+    /// Apply a relative time range to SQL (e.g., 15m, 1h, 24h), evaluated
+    /// against now in the effective timezone: `defaults.timezone` if
+    /// configured, otherwise the system's local timezone (see `logchef
+    /// config show`).
     #[arg(long, short = 's')]
     since: Option<String>,
 
-    /// Apply an absolute start time (YYYY-MM-DD HH:MM:SS)
+    /// Apply an absolute start time (YYYY-MM-DD HH:MM:SS), interpreted as
+    /// wall-clock in the effective timezone.
     #[arg(long)]
     from: Option<String>,
 
-    /// Apply an absolute end time (YYYY-MM-DD HH:MM:SS)
+    /// Apply an absolute end time (YYYY-MM-DD HH:MM:SS), interpreted as
+    /// wall-clock in the effective timezone.
     #[arg(long)]
     to: Option<String>,
 
@@ -369,7 +375,12 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
     let request = SqlQueryRequest {
         query_text: sql,
         limit: args.limit,
-        timezone: ctx.defaults.timezone.clone(),
+        // No start_time/end_time here: any --since/--from/--to was already
+        // baked into `sql` as a literal `toDateTime(..., tz)` condition by
+        // apply_sql_time_range above. This field is still resolved (rather
+        // than left as the raw, possibly-unset, config value) for
+        // consistency with the rest of the request envelope.
+        timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
         start_time: None,
         end_time: None,
         query_timeout: Some(args.timeout),
@@ -476,24 +487,25 @@ async fn apply_sql_time_range(
         return Ok(sql);
     }
 
-    let (start_time, end_time) = parse_time_range(
+    let time_range = parse_time_range(
         args.since.as_deref(),
         args.from.as_deref(),
         args.to.as_deref(),
+        ctx.defaults.timezone.as_deref(),
     )?;
     let condition = sql_time_condition(
         &source_timestamp_field(client, team_id, source_id).await?,
-        &start_time,
-        &end_time,
-        ctx.defaults.timezone.as_deref(),
+        &time_range.start,
+        &time_range.end,
+        &time_range.timezone,
     );
 
     if sql.contains("__START__") || sql.contains("__END__") {
         if !(sql.contains("__START__") && sql.contains("__END__")) {
             anyhow::bail!("SQL time placeholders must include both __START__ and __END__");
         }
-        let start_expr = sql_datetime_expr(&start_time, ctx.defaults.timezone.as_deref());
-        let end_expr = sql_datetime_expr(&end_time, ctx.defaults.timezone.as_deref());
+        let start_expr = sql_datetime_expr(&time_range.start, &time_range.timezone);
+        let end_expr = sql_datetime_expr(&time_range.end, &time_range.timezone);
         return Ok(sql
             .replace("__START__", &start_expr)
             .replace("__END__", &end_expr));
@@ -524,21 +536,22 @@ fn parse_time_range(
     since: Option<&str>,
     from: Option<&str>,
     to: Option<&str>,
-) -> Result<(String, String)> {
-    match (from, to) {
-        (Some(from), Some(to)) => return Ok((from.to_string(), to.to_string())),
+    configured_tz: Option<&str>,
+) -> Result<logchef_core::timerange::ResolvedTimeRange> {
+    let input = match (from, to) {
+        (Some(from), Some(to)) => TimeInput::WallClock {
+            start: from,
+            end: to,
+        },
         (Some(_), None) => anyhow::bail!("--from requires --to to be specified"),
         (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
-        (None, None) => {}
-    }
-
-    let end = Utc::now();
-    let start = end - parse_duration(since.unwrap_or("15m"))?;
-    let format = "%Y-%m-%d %H:%M:%S";
-    Ok((
-        start.format(format).to_string(),
-        end.format(format).to_string(),
-    ))
+        (None, None) => {
+            let end = Utc::now();
+            let start = end - parse_duration(since.unwrap_or("15m"))?;
+            TimeInput::Instant { start, end }
+        }
+    };
+    Ok(resolve_time_range(input, configured_tz))
 }
 
 fn parse_duration(s: &str) -> Result<ChronoDuration> {
@@ -574,7 +587,7 @@ fn sql_time_condition(
     timestamp_field: &str,
     start_time: &str,
     end_time: &str,
-    timezone: Option<&str>,
+    timezone: &str,
 ) -> String {
     format!(
         "{} BETWEEN {} AND {}",
@@ -584,11 +597,12 @@ fn sql_time_condition(
     )
 }
 
-fn sql_datetime_expr(value: &str, timezone: Option<&str>) -> String {
-    match timezone.filter(|tz| !tz.trim().is_empty()) {
-        Some(tz) => format!("toDateTime('{}', '{}')", sql_string(value), sql_string(tz)),
-        None => format!("toDateTime('{}')", sql_string(value)),
-    }
+fn sql_datetime_expr(value: &str, timezone: &str) -> String {
+    format!(
+        "toDateTime('{}', '{}')",
+        sql_string(value),
+        sql_string(timezone)
+    )
 }
 
 fn sql_identifier(value: &str) -> String {
@@ -854,7 +868,7 @@ mod tests {
             "_timestamp",
             "2026-05-19 09:15:00",
             "2026-05-19 09:30:00",
-            Some("UTC"),
+            "UTC",
         );
         assert_eq!(
             condition,

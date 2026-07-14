@@ -8,6 +8,7 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::io::IsTerminal;
 
@@ -18,12 +19,19 @@ use crate::session;
 pub struct QueryArgs {
     query: Option<String>,
 
+    /// Relative lookback window (e.g. 15m, 1h, 24h) evaluated against now,
+    /// in the effective timezone: `defaults.timezone` if configured,
+    /// otherwise the system's local timezone (see `logchef config show`).
     #[arg(long, short = 's')]
     since: Option<String>,
 
+    /// Absolute start time (YYYY-MM-DD HH:MM:SS), interpreted as wall-clock
+    /// in the effective timezone. Requires --to.
     #[arg(long)]
     from: Option<String>,
 
+    /// Absolute end time (YYYY-MM-DD HH:MM:SS), interpreted as wall-clock
+    /// in the effective timezone. Requires --from.
     #[arg(long)]
     to: Option<String>,
 
@@ -195,8 +203,12 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let since = args.since.unwrap_or_else(|| ctx.defaults.since.clone());
     let limit = args.limit.unwrap_or(ctx.defaults.limit);
 
-    let (start_time, end_time) =
-        parse_time_range(&since, args.from.as_deref(), args.to.as_deref())?;
+    let time_range = parse_time_range(
+        &since,
+        args.from.as_deref(),
+        args.to.as_deref(),
+        ctx.defaults.timezone.as_deref(),
+    )?;
 
     // Resolve query (prompt in interactive mode if not provided)
     let query = if is_interactive && args.query.is_none() {
@@ -207,9 +219,9 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
 
     let request = QueryRequest {
         query,
-        start_time,
-        end_time,
-        timezone: ctx.defaults.timezone.clone(),
+        start_time: time_range.start,
+        end_time: time_range.end,
+        timezone: Some(time_range.timezone),
         limit: Some(limit),
         query_timeout: Some(args.timeout),
     };
@@ -323,22 +335,26 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     Ok(())
 }
 
-fn parse_time_range(since: &str, from: Option<&str>, to: Option<&str>) -> Result<(String, String)> {
-    let format = "%Y-%m-%d %H:%M:%S";
-
-    match (from, to) {
-        (Some(from), Some(to)) => Ok((from.to_string(), to.to_string())),
+fn parse_time_range(
+    since: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    configured_tz: Option<&str>,
+) -> Result<logchef_core::timerange::ResolvedTimeRange> {
+    let input = match (from, to) {
+        (Some(from), Some(to)) => TimeInput::WallClock {
+            start: from,
+            end: to,
+        },
         (Some(_), None) => anyhow::bail!("--from requires --to to be specified"),
         (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
         (None, None) => {
             let end = Utc::now();
             let start = end - parse_duration(since)?;
-            Ok((
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            ))
+            TimeInput::Instant { start, end }
         }
-    }
+    };
+    Ok(resolve_time_range(input, configured_tz))
 }
 
 fn parse_duration(s: &str) -> Result<Duration> {

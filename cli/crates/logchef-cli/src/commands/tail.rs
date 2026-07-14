@@ -7,6 +7,7 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::collections::HashMap;
 use std::io::IsTerminal;
@@ -28,7 +29,9 @@ pub struct TailArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Initial lookback window.
+    /// Initial lookback window, evaluated against now in the effective
+    /// timezone: `defaults.timezone` if configured, otherwise the system's
+    /// local timezone (see `logchef config show`).
     #[arg(long, short = 's', default_value = "30s")]
     since: String,
 
@@ -115,11 +118,15 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
 
     loop {
         let end = Utc::now();
+        let time_range = resolve_time_range(
+            TimeInput::Instant { start, end },
+            ctx.defaults.timezone.as_deref(),
+        );
         let request = QueryRequest {
             query: args.query.clone(),
-            start_time: format_time(start),
-            end_time: format_time(end),
-            timezone: ctx.defaults.timezone.clone(),
+            start_time: time_range.start,
+            end_time: time_range.end,
+            timezone: Some(time_range.timezone),
             limit: Some(args.limit),
             query_timeout: Some(args.timeout),
         };
@@ -236,10 +243,6 @@ fn parse_entry_timestamp(entry: &LogEntry) -> Option<DateTime<Utc>> {
         .map(|dt| dt.with_timezone(&Utc))
         .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map(|dt| dt.and_utc()))
         .ok()
-}
-
-fn format_time(value: DateTime<Utc>) -> String {
-    value.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 fn parse_duration(s: &str) -> Result<ChronoDuration> {

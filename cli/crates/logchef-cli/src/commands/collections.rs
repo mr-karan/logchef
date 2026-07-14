@@ -10,6 +10,7 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::io::IsTerminal;
 
@@ -29,7 +30,10 @@ pub struct CollectionsArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Override time range with relative time (e.g., 15m, 1h, 24h)
+    /// Override time range with relative time (e.g., 15m, 1h, 24h),
+    /// evaluated against now in the effective timezone: `defaults.timezone`
+    /// if configured, otherwise the system's local timezone (see `logchef
+    /// config show`).
     #[arg(long, short = 's')]
     since: Option<String>,
 
@@ -316,27 +320,20 @@ async fn run_collection(
         }
     }
 
-    // Determine time range
-    let (start_time, end_time) = if let Some(since) = &args.since {
+    // Determine time range: every branch below resolves to a concrete UTC
+    // instant range, which resolve_time_range then formats as wall-clock in
+    // the effective timezone (never a mix of the two, which was the bug).
+    let (start, end) = if let Some(since) = &args.since {
         // Use override
         let end = Utc::now();
         let start = end - parse_duration(since)?;
-        let format = "%Y-%m-%d %H:%M:%S";
-        (
-            start.format(format).to_string(),
-            end.format(format).to_string(),
-        )
+        (start, end)
     } else if let Some(tr) = &content.time_range {
         if let Some(rel) = &tr.relative {
             let end = Utc::now();
             let start = end - parse_duration(rel)?;
-            let format = "%Y-%m-%d %H:%M:%S";
-            (
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            )
+            (start, end)
         } else if let Some(abs) = &tr.absolute {
-            let format = "%Y-%m-%d %H:%M:%S";
             let start = Utc
                 .timestamp_millis_opt(abs.start)
                 .single()
@@ -345,30 +342,21 @@ async fn run_collection(
                 .timestamp_millis_opt(abs.end)
                 .single()
                 .ok_or_else(|| anyhow::anyhow!("Invalid end timestamp"))?;
-            (
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            )
+            (start, end)
         } else {
             // Default to last 15 minutes
             let end = Utc::now();
-            let start = end - Duration::minutes(15);
-            let format = "%Y-%m-%d %H:%M:%S";
-            (
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            )
+            (end - Duration::minutes(15), end)
         }
     } else {
         // Default to last 15 minutes
         let end = Utc::now();
-        let start = end - Duration::minutes(15);
-        let format = "%Y-%m-%d %H:%M:%S";
-        (
-            start.format(format).to_string(),
-            end.format(format).to_string(),
-        )
+        (end - Duration::minutes(15), end)
     };
+    let time_range = resolve_time_range(
+        TimeInput::Instant { start, end },
+        ctx.defaults.timezone.as_deref(),
+    );
 
     let limit = args.limit.or(content.limit).unwrap_or(100);
 
@@ -381,9 +369,9 @@ async fn run_collection(
     let response = if collection.query_language == "logchefql" {
         let request = QueryRequest {
             query: final_query,
-            start_time,
-            end_time,
-            timezone: ctx.defaults.timezone.clone(),
+            start_time: time_range.start,
+            end_time: time_range.end,
+            timezone: Some(time_range.timezone),
             limit: Some(limit),
             query_timeout: None,
         };
@@ -395,9 +383,9 @@ async fn run_collection(
         let request = SqlQueryRequest {
             query_text: final_query,
             limit: Some(limit),
-            timezone: ctx.defaults.timezone.clone(),
-            start_time: Some(start_time),
-            end_time: Some(end_time),
+            timezone: Some(time_range.timezone),
+            start_time: Some(time_range.start),
+            end_time: Some(time_range.end),
             query_timeout: Some(30),
         };
         client
