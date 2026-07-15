@@ -35,7 +35,10 @@ var ErrTailUpstreamClosed = errors.New("victorialogs tail: upstream closed the c
 // response body streams NDJSON rows as they are ingested; we decode incrementally
 // and batch-emit every tailFlushInterval or tailBatchSize rows, whichever comes
 // first. ctx cancellation closes the upstream body (via the deferred Close and
-// the request context), which unblocks the decode goroutine.
+// the request context), which unblocks the decode goroutine; a locally derived
+// runCtx (see below) additionally guarantees the goroutine unblocks even when
+// the main loop exits some other way (an emit error), and rows already
+// buffered when ctx is cancelled are flushed rather than dropped.
 func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req datasource.TailRequest, emit datasource.TailEmitter) error {
 	conn, err := p.connectionForSource(source)
 	if err != nil {
@@ -57,6 +60,17 @@ func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req data
 	}
 	defer resp.Body.Close()
 
+	// runCtx derives from ctx and adds one more trigger for its Done channel:
+	// the deferred cancel below, which fires whenever TailLogs returns for
+	// ANY reason — ctx cancellation, a decode error, or the main loop
+	// returning because flush/emit failed. The decode goroutine's send select
+	// below watches runCtx, not ctx, specifically so that an emit-error exit
+	// (main loop stops reading rowCh without ctx ever being cancelled) still
+	// unblocks a goroutine parked trying to hand off the next decoded row,
+	// instead of leaking it until the caller eventually cancels ctx.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
 	rowCh := make(chan map[string]any)
 	decodeDone := make(chan error, 1)
 	go func() {
@@ -66,10 +80,20 @@ func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req data
 			var row map[string]any
 			if err := decoder.Decode(&row); err != nil {
 				switch {
-				case ctx.Err() != nil:
-					// We asked for this: client disconnect, session TTL, or
-					// admission eviction cancelled ctx, which is what caused the
+				case runCtx.Err() != nil:
+					// We asked for this: client disconnect, session TTL,
+					// admission eviction, or the main loop's own deferred
+					// cancel on exit — any of these can be what caused the
 					// read to fail (EOF or otherwise). Clean, expected stop.
+					//
+					// Accepted race (benign): if an unrelated runCtx
+					// cancellation and a genuine unsolicited upstream EOF
+					// land within the same instant, this classifies the EOF
+					// as clean even though nobody actually asked for it.
+					// There is no signal available here to attribute the
+					// error to one cause or the other, and the window is a
+					// single decode call, so this is left as-is rather than
+					// adding machinery to resolve an inherently racy order.
 					decodeDone <- nil
 				case errors.Is(err, io.EOF):
 					// Upstream closed the stream on its own; ctx is still live, so
@@ -83,7 +107,7 @@ func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req data
 			}
 			select {
 			case rowCh <- row:
-			case <-ctx.Done():
+			case <-runCtx.Done():
 				decodeDone <- nil
 				return
 			}
@@ -102,16 +126,26 @@ func (p *Provider) TailLogs(ctx context.Context, source *models.Source, req data
 		batch = make([]map[string]any, 0, tailBatchSize)
 		return emit(out)
 	}
+	// flushThenReturn flushes whatever rows are already buffered before the
+	// loop exits, instead of dropping them silently, preferring a flush error
+	// over the given fallback when both occur.
+	flushThenReturn := func(fallback error) error {
+		if flushErr := flush(); flushErr != nil {
+			return flushErr
+		}
+		return fallback
+	}
 
 	for {
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			// This does not risk hanging on a gone consumer: the SSE
+			// handler's emit (internal/server/tail_handlers.go) selects on
+			// this same ctx alongside its output-channel send, so it returns
+			// immediately once ctx is done rather than blocking.
+			return flushThenReturn(ctx.Err())
 		case err := <-decodeDone:
-			if flushErr := flush(); flushErr != nil {
-				return flushErr
-			}
-			return err
+			return flushThenReturn(err)
 		case row := <-rowCh:
 			batch = append(batch, row)
 			if len(batch) >= tailBatchSize {
