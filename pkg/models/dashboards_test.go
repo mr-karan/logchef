@@ -40,9 +40,15 @@ func TestValidateDashboardPanels_Valid(t *testing.T) {
 	}
 
 	// The finer grid (#78) allows 2/8/9-wide panels alongside the original 3/4/6/12.
-	fineGrid := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":8,"h":2},{"id":"p2","x":8,"y":0,"w":4,"h":2},{"id":"p3","x":0,"y":2,"w":2,"h":1}],"panels":[]}`)
+	fineGrid := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":8,"h":2},{"id":"p2","x":8,"y":0,"w":4,"h":2},{"id":"p3","x":0,"y":2,"w":2,"h":1}],"panels":[{"id":"p1","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"},{"id":"p2","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"},{"id":"p3","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}]}`)
 	if err := ValidateDashboardPanels(fineGrid); err != nil {
 		t.Fatalf("fine-grid widths rejected: %v", err)
+	}
+
+	// A full options blob (chart/limit/columns/group_by) with valid values.
+	withOptions := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"timeseries","team_id":1,"source_id":1,"query":"x","query_language":"logchefql","options":{"chart":"bars","limit":100,"columns":["ts","service"],"group_by":"service"}}]}`)
+	if err := ValidateDashboardPanels(withOptions); err != nil {
+		t.Fatalf("valid options blob rejected: %v", err)
 	}
 }
 
@@ -81,6 +87,19 @@ func TestValidateDashboardPanels_Violations(t *testing.T) {
 		{"bad height", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":7}],"panels":[]}`), "invalid height"},
 		{"empty layout id", json.RawMessage(`{"version":1,"layout":[{"id":"","x":0,"y":0,"w":6,"h":2}],"panels":[]}`), "empty id"},
 		{"duplicate layout id", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2},{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[]}`), "duplicate layout id"},
+		// B3: position / off-grid / overlap / coverage.
+		{"negative x", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":-1,"y":0,"w":6,"h":2}],"panels":[]}`), "negative position"},
+		{"negative y", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":-2,"w":6,"h":2}],"panels":[]}`), "negative position"},
+		{"off grid", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":8,"y":0,"w":6,"h":2}],"panels":[]}`), "spills off the grid"},
+		{"overlapping panels", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2},{"id":"p2","x":3,"y":1,"w":6,"h":2}],"panels":[{"id":"p1","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"},{"id":"p2","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}]}`), "overlap"},
+		{"panel without layout", json.RawMessage(`{"version":1,"layout":[],"panels":[{"id":"p1","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}]}`), "no layout entry"},
+		{"layout without panel", json.RawMessage(`{"version":1,"layout":[{"id":"ghost","x":0,"y":0,"w":6,"h":2}],"panels":[]}`), "does not reference any panel"},
+		// B8: panel options contract.
+		{"bad chart", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"timeseries","team_id":1,"source_id":1,"query_language":"logchefql","options":{"chart":"pie"}}]}`), "invalid options.chart"},
+		{"negative limit", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"limit":-1}}]}`), "options.limit"},
+		{"limit too large", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"limit":9999999}}]}`), "max"},
+		{"columns as string", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"columns":"service"}}]}`), "invalid options"},
+		{"group_by as number", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"group_by":5}}]}`), "invalid options"},
 	}
 
 	for _, tc := range tests {
