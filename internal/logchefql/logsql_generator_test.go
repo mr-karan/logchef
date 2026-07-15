@@ -1,6 +1,9 @@
 package logchefql
 
-import "testing"
+import (
+	"strconv"
+	"testing"
+)
 
 func TestTranslateToLogsQL(t *testing.T) {
 	t.Run("empty query becomes star filter", func(t *testing.T) {
@@ -98,6 +101,88 @@ func TestTranslateToLogsQL(t *testing.T) {
 			t.Fatalf("expected valid result, got error: %v", result.Error)
 		}
 		expected := `* | fields _time, service, _msg`
+		if result.Query != expected {
+			t.Fatalf("expected %q, got %q", expected, result.Query)
+		}
+	})
+
+	t.Run("quotes at-prefixed field names", func(t *testing.T) {
+		result := TranslateToLogsQL(`@timestamp = "2024-01-01"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		expected := `"@timestamp":="2024-01-01"`
+		if result.Query != expected {
+			t.Fatalf("expected %q, got %q", expected, result.Query)
+		}
+	})
+
+	t.Run("quotes at-prefixed field names in fields pipe", func(t *testing.T) {
+		result := TranslateToLogsQL(`| @tenant`, &LogsQLTranslateOptions{
+			DefaultTimestampField: "@timestamp",
+		})
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		expected := `* | fields "@timestamp", "@tenant"`
+		if result.Query != expected {
+			t.Fatalf("expected %q, got %q", expected, result.Query)
+		}
+	})
+
+	t.Run("quotes reserved keyword field names", func(t *testing.T) {
+		for _, field := range []string{"not", "and", "or", "options"} {
+			query := field + ` = "value"`
+			result := TranslateToLogsQL(query, nil)
+			if !result.Valid {
+				t.Fatalf("expected valid result for %q, got error: %v", field, result.Error)
+			}
+			expected := strconv.Quote(field) + `:="value"`
+			if result.Query != expected {
+				t.Fatalf("expected %q, got %q", expected, result.Query)
+			}
+		}
+	})
+
+	t.Run("keeps plain field names bare", func(t *testing.T) {
+		result := TranslateToLogsQL(`service = "value"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		expected := `service:="value"`
+		if result.Query != expected {
+			t.Fatalf("expected %q, got %q", expected, result.Query)
+		}
+	})
+
+	t.Run("keeps dotted field names bare", func(t *testing.T) {
+		result := TranslateToLogsQL(`k8s.pod = "value"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		expected := `k8s.pod:="value"`
+		if result.Query != expected {
+			t.Fatalf("expected %q, got %q", expected, result.Query)
+		}
+	})
+
+	t.Run("quotes and escapes field names with spaces", func(t *testing.T) {
+		result := TranslateToLogsQL(`log_attributes."foo bar" = "value"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		expected := `"log_attributes.foo bar":="value"`
+		if result.Query != expected {
+			t.Fatalf("expected %q, got %q", expected, result.Query)
+		}
+	})
+
+	t.Run("quotes and escapes field names with embedded quotes", func(t *testing.T) {
+		result := TranslateToLogsQL(`log_attributes."foo\"bar" = "value"`, nil)
+		if !result.Valid {
+			t.Fatalf("expected valid result, got error: %v", result.Error)
+		}
+		expected := `"log_attributes.foo\"bar":="value"`
 		if result.Query != expected {
 			t.Fatalf("expected %q, got %q", expected, result.Query)
 		}

@@ -7,7 +7,80 @@ import (
 	"strings"
 )
 
-var safeLogsQLFieldPattern = regexp.MustCompile(`^@?[A-Za-z_][A-Za-z0-9_@.]*$`)
+// safeLogsQLFieldPattern matches field names that LogsQL accepts as a bare
+// (unquoted) compound token: a leading word (letters/digits/underscore,
+// starting with a letter or underscore) optionally followed by more word
+// segments glued together with one of LogsQL's compound-token glue
+// characters (`+ - / : . $`). Anything else -- including a leading `@`,
+// embedded `@`, whitespace, or quote characters -- must be quoted.
+//
+// This mirrors VictoriaLogs' lexer (lib/logstorage/parser.go /
+// lib/logstorage/tokenizer.go as of commit 19a73b56): `isTokenRune` accepts
+// only letters, digits and `_`; `glueCompoundTokens` is `+ - / : . $`; and a
+// compound token cannot start with any other character (notably `@`).
+var safeLogsQLFieldPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*(?:[+\-/:.$][A-Za-z0-9_]+)*$`)
+
+// logsQLReservedTokens lists the words LogsQL reserves for operators,
+// punctuation, pipe names, stats functions and math functions. A field name
+// that is otherwise a valid bare compound token still must be quoted if it
+// exactly equals one of these (case-insensitively), or VictoriaLogs parses
+// it as the keyword instead of a field reference. Sourced from
+// lib/logstorage/parser.go's `reservedKeywords`, lib/logstorage/pipe.go's
+// pipe parser registry, lib/logstorage/pipe_stats.go's stats func registry,
+// and lib/logstorage/pipe_math.go's math func registry (commit 19a73b56).
+var logsQLReservedTokens = buildLogsQLReservedTokens()
+
+func buildLogsQLReservedTokens() map[string]struct{} {
+	tokens := []string{
+		// Reserved keywords (operators, punctuation, filter functions).
+		"", "and", "or", "not", "!", "(", ")", "{", "}", "=", "!=", "=~", "!~", ",",
+		"|", ":", "*", "[", "]", "now", "offset", "-",
+		"contains_all", "contains_any", "json_array_contains_any", "contains_common_case",
+		"eq_field", "equals_common_case", "exact", "i", "in", "ipv4_range", "ipv6_range",
+		"le_field", "len_range", "lt_field", "pattern_match", "pattern_match_full",
+		"pattern_match_prefix", "pattern_match_suffix", "range", "re", "seq",
+		"string_range", "value_type", "options", "if", "by", "as", "from",
+
+		// Pipe names ('| <name> ...').
+		"block_stats", "blocks_count", "coalesce", "collapse_nums", "copy", "cp",
+		"decolorize", "del", "delete", "drop", "drop_empty_fields", "extract",
+		"extract_regexp", "eval", "facets", "field_names", "field_values", "fields",
+		"filter", "first", "format", "generate_sequence", "hash", "join",
+		"json_array_concat", "json_array_len", "head", "keep", "last", "len",
+		"limit", "math", "mv", "order", "pack_json", "pack_logfmt", "query_stats",
+		"rename", "replace", "replace_regexp", "rm", "running_stats", "sample",
+		"set_stream_fields", "skip", "sort", "split", "stats", "stats_remote",
+		"stream_context", "time_add", "top", "total_stats", "union", "uniq",
+		"unpack_json", "unpack_logfmt", "unpack_syslog", "unpack_words", "unroll",
+		"where",
+
+		// Stats function names ('stats by (...) <func>(...)').
+		"any", "avg", "count", "count_empty", "count_uniq", "count_uniq_hash",
+		"field_max", "field_min", "histogram", "json_values", "max", "median",
+		"min", "quantile", "rate", "rate_sum", "row_any", "row_max", "row_min",
+		"stddev", "sum", "sum_len", "uniq_values", "values",
+
+		// Math function names ('| math <expr>').
+		"abs", "ceil", "exp", "floor", "ln", "rand", "round",
+	}
+
+	set := make(map[string]struct{}, len(tokens))
+	for _, tok := range tokens {
+		set[tok] = struct{}{}
+	}
+	return set
+}
+
+// isSafeLogsQLFieldName reports whether name can be emitted as a bare
+// (unquoted) LogsQL field token: it must look like a valid compound token
+// AND not collide with a reserved keyword, pipe name, or function name.
+func isSafeLogsQLFieldName(name string) bool {
+	if !safeLogsQLFieldPattern.MatchString(name) {
+		return false
+	}
+	_, reserved := logsQLReservedTokens[strings.ToLower(name)]
+	return !reserved
+}
 
 type LogsQLTranslateOptions struct {
 	DefaultTimestampField string
@@ -256,7 +329,10 @@ func (g *LogsQLGenerator) formatFieldName(fieldName string) string {
 	if trimmed == "" {
 		return ""
 	}
-	if safeLogsQLFieldPattern.MatchString(trimmed) {
+	// Decide purely from the field's value -- the AST may hold the
+	// unquoted name even when the user quoted it in LogchefQL, so we can't
+	// rely on how the source query was written.
+	if isSafeLogsQLFieldName(trimmed) {
 		return trimmed
 	}
 	return strconv.Quote(trimmed)
