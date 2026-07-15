@@ -309,8 +309,39 @@ func (p *ClickHouseProvider) PopulateSourceDetails(ctx context.Context, source *
 }
 
 func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Source, req QueryRequest) (*models.QueryResult, error) {
+	client, sql, opts, err := p.buildQuery(source, req)
+	if err != nil {
+		return nil, err
+	}
+	return client.QueryWithOptions(ctx, sql, opts)
+}
+
+// QueryLogsStream executes the query and streams rows into w instead of
+// buffering the full result set. It uses the same limit policy, warnings, and
+// query settings as QueryLogs, so the streamed response is equivalent to the
+// buffered one — only the server-side memory profile differs (bounded, since no
+// []map result slice is materialized). The soft response-byte budget
+// (MaxResponseBytes) is intentionally not applied on the streaming path: it was
+// a memory mitigation for the buffered []map, which streaming removes; row
+// count is still bounded by the applied limit / max_result_rows.
+func (p *ClickHouseProvider) QueryLogsStream(ctx context.Context, source *models.Source, req QueryRequest, w StreamWriter) (models.QueryStats, error) {
+	client, sql, opts, err := p.buildQuery(source, req)
+	if err != nil {
+		return models.QueryStats{}, err
+	}
+	// Warnings are known at build time (LIMIT_APPLIED / LIMIT_CAPPED); deliver
+	// them up front so the writer can emit them alongside the streamed body.
+	w.SetWarnings(opts.Warnings)
+	return client.QueryStream(ctx, sql, opts, w)
+}
+
+// buildQuery resolves the source's ClickHouse connection and builds the raw
+// query with the caller's limit policy, returning the connection, the built
+// SQL, and the execution options (settings, limit, warnings) shared by the
+// buffered and streaming query paths.
+func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest) (*clickhouse.Client, string, clickhouse.QueryOptions, error) {
 	if source == nil {
-		return nil, fmt.Errorf("source is required")
+		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("source is required")
 	}
 
 	if req.QueryTimeout == nil {
@@ -320,16 +351,16 @@ func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Sourc
 
 	client, err := p.manager.GetConnection(source.ID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
+		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), req.MaxLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(req.RawQuery, req.Limit, req.DefaultLimit, req.MaxLimit)
 	if err != nil {
-		return nil, fmt.Errorf("invalid query syntax: %w", err)
+		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("invalid query syntax: %w", err)
 	}
 
-	return client.QueryWithOptions(ctx, buildResult.SQL, clickhouse.QueryOptions{
+	opts := clickhouse.QueryOptions{
 		TimeoutSeconds: req.QueryTimeout,
 		Settings: map[string]any{
 			"max_execution_time":   *req.QueryTimeout,
@@ -340,7 +371,8 @@ func (p *ClickHouseProvider) QueryLogs(ctx context.Context, source *models.Sourc
 		MaxRows:          buildResult.AppliedLimit,
 		MaxResponseBytes: req.MaxResponseBytes,
 		Warnings:         queryWarningsForBuildResult(buildResult),
-	})
+	}
+	return client, buildResult.SQL, opts, nil
 }
 
 func queryWarningsForBuildResult(result clickhouse.QueryBuildResult) []models.QueryWarning {

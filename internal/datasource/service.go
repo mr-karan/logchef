@@ -203,6 +203,41 @@ func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, req Q
 	return provider.QueryLogs(ctx, source, req)
 }
 
+// StreamWriter receives query results as they are read, so the response body
+// can be streamed without buffering the full result set in memory. Warnings are
+// known at query-build time and delivered up front via SetWarnings; columns
+// arrive at Begin (before any row), and final stats at Finish.
+type StreamWriter interface {
+	SetWarnings(warnings []models.QueryWarning)
+	Begin(columns []models.ColumnInfo) error
+	WriteRow(row map[string]any) error
+	Finish(stats models.QueryStats) error
+}
+
+// LogStreamer is an optional interface for providers that can stream query
+// results row-by-row instead of buffering the entire result set. Providers that
+// don't implement it are reported via ErrOperationNotSupported, so callers fall
+// back to the buffered QueryLogs path (same pattern as LogContextProvider /
+// LogTailer / LogchefQLCompiler).
+type LogStreamer interface {
+	QueryLogsStream(ctx context.Context, source *models.Source, req QueryRequest, w StreamWriter) (models.QueryStats, error)
+}
+
+// QueryLogsStream streams the query result for sources whose provider supports
+// it. Sources whose provider does not implement LogStreamer report
+// ErrOperationNotSupported; callers should fall back to QueryLogs.
+func (s *Service) QueryLogsStream(ctx context.Context, sourceID models.SourceID, req QueryRequest, w StreamWriter) (models.QueryStats, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return models.QueryStats{}, err
+	}
+	streamer, ok := provider.(LogStreamer)
+	if !ok {
+		return models.QueryStats{}, ErrOperationNotSupported
+	}
+	return streamer.QueryLogsStream(ctx, source, req, w)
+}
+
 func (s *Service) GetSourceSchema(ctx context.Context, sourceID models.SourceID) ([]models.ColumnInfo, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {

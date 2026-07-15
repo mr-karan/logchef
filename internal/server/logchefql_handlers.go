@@ -415,7 +415,35 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	// Execute the query (reuse existing query execution logic)
+	// Build query parameters for execution.
+	queryParams := datasource.QueryRequest{
+		RawQuery:         executableQuery,
+		StartTime:        queryStartTime,
+		EndTime:          queryEndTime,
+		Timezone:         req.Timezone,
+		Limit:            req.Limit,
+		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
+		MaxLimit:         s.config.Query.MaxPreviewLimit,
+		MaxResponseBytes: s.config.Query.MaxResponseBytes,
+		QueryTimeout:     req.QueryTimeout,
+	}
+
+	// ClickHouse-backed sources stream the response body row-by-row so server
+	// memory stays bounded regardless of result size. Other source types
+	// (VictoriaLogs) keep the buffered path.
+	if source.IsClickHouse() {
+		return s.streamPreviewQuery(c, sourceID, teamID, user, queryParams,
+			queryStreamConfig{
+				logsKey:           "logs",
+				includeGenerated:  true,
+				generatedSQL:      executableQuery,
+				generatedQuery:    executableQuery,
+				generatedLanguage: executableQueryLanguage,
+			},
+			executableQuery, "logchefql", req.Limit)
+	}
+
+	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
@@ -441,17 +469,6 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 	defer queryTracker.RemoveQuery(queryID)
 
 	// Execute via core function
-	queryParams := datasource.QueryRequest{
-		RawQuery:         executableQuery,
-		StartTime:        queryStartTime,
-		EndTime:          queryEndTime,
-		Timezone:         req.Timezone,
-		Limit:            req.Limit,
-		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
-		MaxLimit:         s.config.Query.MaxPreviewLimit,
-		MaxResponseBytes: s.config.Query.MaxResponseBytes,
-		QueryTimeout:     req.QueryTimeout,
-	}
 	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, queryParams)
 	if err != nil {
 		if errors.Is(err, datasource.ErrOperationNotSupported) {

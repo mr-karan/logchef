@@ -337,6 +337,43 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		processedQuery = substituted
 	}
 
+	// Prepare parameters for the core query function.
+	params := datasource.QueryRequest{
+		RawQuery:         processedQuery,
+		Timezone:         req.Timezone,
+		Limit:            req.Limit,
+		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
+		MaxLimit:         s.config.Query.MaxPreviewLimit,
+		MaxResponseBytes: s.config.Query.MaxResponseBytes,
+		QueryTimeout:     req.QueryTimeout,
+	}
+	if req.StartTime != "" || req.EndTime != "" {
+		startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+		params.StartTime = startTime
+		params.EndTime = endTime
+	}
+
+	// ClickHouse-backed sources stream the response body row-by-row so server
+	// memory stays bounded regardless of result size (the OOM this endpoint used
+	// to hit came from buffering the full result set into a []map before
+	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if source.IsClickHouse() {
+		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
+			queryStreamConfig{logsKey: "data"}, req.QueryText, "sql", req.Limit)
+	}
+
+	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
@@ -360,25 +397,6 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
 	}
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
-
-	// Prepare parameters for the core query function.
-	params := datasource.QueryRequest{
-		RawQuery:         processedQuery,
-		Timezone:         req.Timezone,
-		Limit:            req.Limit,
-		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
-		MaxLimit:         s.config.Query.MaxPreviewLimit,
-		MaxResponseBytes: s.config.Query.MaxResponseBytes,
-		QueryTimeout:     req.QueryTimeout,
-	}
-	if req.StartTime != "" || req.EndTime != "" {
-		startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		}
-		params.StartTime = startTime
-		params.EndTime = endTime
-	}
 
 	// Execute query via core function with cancellable context.
 	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, params)
