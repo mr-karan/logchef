@@ -77,7 +77,12 @@ export function parseGranularityToMilliseconds(granularity?: string | null): num
   const value = Number(match[1]);
   const unit = match[2].toLowerCase();
   const multiplier = unit === "s" ? 1000 : unit === "m" ? 60_000 : unit === "h" ? 3_600_000 : 86_400_000;
-  return value * multiplier;
+  const ms = value * multiplier;
+  // A pathologically long digit string (e.g. a 300-digit granularity) can
+  // overflow `value` to Infinity; a zero/negative value is also nonsensical.
+  // Reject rather than hand callers an unbounded/non-positive step, since
+  // fillBucketGaps loops `ts += stepMs` until it passes the last bucket.
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
 }
 
 export function getColorForGroupValue(value: string): string {
@@ -86,7 +91,11 @@ export function getColorForGroupValue(value: string): string {
   }
 
   const lowerValue = value.toLowerCase();
-  if (severityColorMapping[lowerValue]) {
+  // Object.hasOwn guards against prototype pollution via values like
+  // "__proto__" or "constructor", which would otherwise resolve through the
+  // prototype chain to a non-string (e.g. Object.prototype.constructor) and
+  // break this function's string-only contract.
+  if (Object.hasOwn(severityColorMapping, lowerValue)) {
     return severityColorMapping[lowerValue];
   }
 
@@ -184,7 +193,10 @@ function fillBucketGaps<T extends { ts: number }>(
   stepMs: number,
   makeZero: (ts: number) => T,
 ): T[] {
-  if (rows.length < 2 || stepMs <= 0) return rows;
+  // Require a finite, positive step. A non-finite (Infinity/NaN) or
+  // non-positive step would otherwise make `for (...; ts += stepMs)` below
+  // loop forever (or never advance) instead of safely skipping the fill.
+  if (rows.length < 2 || !Number.isFinite(stepMs) || stepMs <= 0) return rows;
   const first = rows[0].ts;
   const last = rows[rows.length - 1].ts;
   // Safety: never expand beyond a sane bucket count (guards against a bad
@@ -204,6 +216,24 @@ function fillBucketGaps<T extends { ts: number }>(
   }
   out.sort((left, right) => left.ts - right.ts);
   return out;
+}
+
+/**
+ * Estimate the bucket cadence from the data itself when no granularity string
+ * is available: the smallest positive gap between consecutive sorted
+ * timestamps. Using the minimum (rather than just the first pair) avoids a
+ * sparse head — e.g. a 5-minute gap before otherwise-dense 1-minute data —
+ * setting a too-large step and under-filling the rest of the series.
+ */
+function inferBucketWidthMs(sortedTimestamps: number[], fallback = 60_000): number {
+  let min = Infinity;
+  for (let index = 1; index < sortedTimestamps.length; index += 1) {
+    const diff = sortedTimestamps[index] - sortedTimestamps[index - 1];
+    if (diff > 0 && diff < min) {
+      min = diff;
+    }
+  }
+  return Number.isFinite(min) ? min : fallback;
 }
 
 export function buildHistogramChartModel(
@@ -236,9 +266,7 @@ export function buildHistogramChartModel(
   if (!isGrouped) {
     const bucketWidthMs =
       parseGranularityToMilliseconds(granularity) ??
-      (sortedBuckets.length > 1
-        ? new Date(sortedBuckets[1].bucket).getTime() - new Date(sortedBuckets[0].bucket).getTime()
-        : 60_000);
+      inferBucketWidthMs(sortedBuckets.map((bucket) => new Date(bucket.bucket).getTime()));
 
     const rawRows = sortedBuckets.map((bucket) => {
       const ts = new Date(bucket.bucket).getTime();
@@ -317,16 +345,7 @@ export function buildHistogramChartModel(
   const populatedRows = [...bucketRows.values()].sort((left, right) => left.ts - right.ts);
   const derivedBucketWidth =
     parseGranularityToMilliseconds(granularity) ??
-    (() => {
-      for (let index = 1; index < populatedRows.length; index += 1) {
-        const diff = populatedRows[index].ts - populatedRows[index - 1].ts;
-        if (diff > 0) {
-          return diff;
-        }
-      }
-
-      return 60_000;
-    })();
+    inferBucketWidthMs(populatedRows.map((row) => row.ts));
 
   // Zero-fill gaps; the forEach below then sets every series key to 0 on the
   // inserted rows and recomputes contiguous bucket ends.

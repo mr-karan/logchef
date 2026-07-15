@@ -32,6 +32,12 @@ const panelState = computed<PanelState>(
   () => props.state ?? store.panelStates[props.panel.id] ?? { status: "idle" as const }
 );
 
+// A server-redacted panel (viewer lacks source access) carries `locked` and has
+// no query to run. Treat it as locked straight from the prop so it renders the
+// locked placeholder immediately, without a loading-skeleton flash before the
+// store's refresh sets the state.
+const isLocked = computed(() => props.panel.locked === true || panelState.value.status === "locked");
+
 // Chart body height = outer height minus the header row (when shown) and the
 // body padding.
 const BODY_PADDING_PX = 16;
@@ -55,28 +61,30 @@ const typeIcon = computed(() => {
 <template>
   <div
     class="dash-panel"
-    :class="{ 'dash-panel--locked': panelState.status === 'locked', 'dash-panel--bare': !chrome }"
+    :class="{ 'dash-panel--locked': isLocked, 'dash-panel--bare': !chrome }"
   >
     <div v-if="chrome" class="dash-panel__header">
       <component :is="typeIcon" class="dash-panel__icon" />
       <span class="dash-panel__title" :title="panel.title">{{ panel.title || "Untitled" }}</span>
       <Lock
-        v-if="panelState.status === 'locked'"
+        v-if="isLocked"
         class="dash-panel__lock"
         title="You don't have access to this panel's source."
       />
     </div>
 
     <div class="dash-panel__body">
-      <!-- Loading -->
-      <div v-if="panelState.status === 'loading' || panelState.status === 'idle'" class="dash-panel__fill">
-        <Skeleton class="h-full w-full" />
-      </div>
-
-      <!-- Locked (viewer lacks team/source access) -->
-      <div v-else-if="panelState.status === 'locked'" class="dash-panel__message">
+      <!-- Locked: viewer lacks source access. Covers both the server-redacted
+           panel (panel.locked) and the query-time AuthorizationError path
+           (panelState.status === 'locked'), unified via isLocked. -->
+      <div v-if="isLocked" class="dash-panel__message">
         <Lock class="dash-panel__message-icon" />
         <span>No access to this source</span>
+      </div>
+
+      <!-- Loading -->
+      <div v-else-if="panelState.status === 'loading' || panelState.status === 'idle'" class="dash-panel__fill">
+        <Skeleton class="h-full w-full" />
       </div>
 
       <!-- Error -->
@@ -97,6 +105,7 @@ const typeIcon = computed(() => {
           :buckets="panelState.timeseries.buckets"
           :granularity="panelState.timeseries.granularity"
           :group-by="panelState.timeseries.groupBy"
+          :range="panelState.timeseries.range"
           :height="chartHeight"
           :chart="panel.options?.chart"
         />

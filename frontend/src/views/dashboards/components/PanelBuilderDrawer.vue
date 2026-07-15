@@ -88,6 +88,13 @@ const teams = computed(() => teamsStore.teams || []);
 const teamSources = computed(() => teamsStore.getTeamSourcesByTeamId(panel.value?.team_id ?? 0));
 
 const sourceDetail = ref<Source | null>(null);
+// Guards against a stale-response race: a rapid A -> B source switch can let
+// A's async detail fetch resolve after B's has already started (and even
+// after B's has landed), overwriting B's schema with A's - or forcing mode
+// back to logchefql based on A's (stale) supportsLogsql. Every call captures
+// its own token; only the call whose token still matches the latest one when
+// it resolves is allowed to apply its result.
+let sourceDetailRequestId = 0;
 
 const supportsLogsql = computed(() =>
   sourceDetail.value ? supportsQueryLanguage(sourceDetail.value, "logsql") : false
@@ -125,16 +132,20 @@ const tableName = computed(
 const fieldSuggestions = computed(() => (sourceDetail.value?.columns ?? []).map((c) => c.name));
 
 async function loadSourceDetail(teamId: number, sourceId: number) {
+  const requestId = ++sourceDetailRequestId;
   if (!teamId || !sourceId) {
     sourceDetail.value = null;
     return;
   }
   try {
     const resp = await sourcesApi.getTeamSource(teamId, sourceId);
+    if (requestId !== sourceDetailRequestId) return; // a newer call superseded this one
     sourceDetail.value = isSuccessResponse(resp) ? resp.data : null;
   } catch {
+    if (requestId !== sourceDetailRequestId) return;
     sourceDetail.value = teamSources.value.find((s) => s.id === sourceId) ?? null;
   } finally {
+    if (requestId !== sourceDetailRequestId) return;
     // A source that doesn't support LogsQL can't stay in native mode.
     if (mode.value === "native" && !supportsLogsql.value) {
       mode.value = "logchefql";
@@ -151,7 +162,12 @@ async function onTeamChange(teamId: number) {
 
 async function onSourceChange(sourceId: number) {
   const teamId = panel.value?.team_id ?? 0;
-  patchPanel({ source_id: sourceId });
+  const previousSourceId = panel.value?.source_id ?? 0;
+  // A query written against one source's schema (tables/columns) is unlikely
+  // to still be valid for a different source - clear it rather than silently
+  // keep a stale, probably-invalid query pointed at the newly picked source.
+  const shouldClearQuery = previousSourceId > 0 && previousSourceId !== sourceId;
+  patchPanel(shouldClearQuery ? { source_id: sourceId, query: "" } : { source_id: sourceId });
   store.clearPreview();
   await loadSourceDetail(teamId, sourceId);
 }
@@ -200,6 +216,9 @@ function schedulePreview(delayMs: number) {
     store.clearPreview();
     return;
   }
+  // Abort any in-flight preview immediately so a stale request can't resolve
+  // into previewState during the debounce window (keeps the last result shown).
+  store.abortPreview();
   debounceTimer = setTimeout(() => {
     debounceTimer = null;
     void store.previewPanel(p);

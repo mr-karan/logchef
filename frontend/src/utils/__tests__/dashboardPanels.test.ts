@@ -491,4 +491,71 @@ describe("validatePanelsBlob", () => {
     expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 9, h: 2 }] }))).toBeNull();
     expect(validatePanelsBlob(base({ layout: [{ id: "a", x: 0, y: 0, w: 2, h: 2 }] }))).toBeNull();
   });
+
+  // B7: mirror pkg/models/dashboards.go's query_language enum + layout id
+  // empty/duplicate checks, which this validator previously omitted.
+  it("rejects an invalid query_language", () => {
+    const panels = [panel("a", { team_id: 1, source_id: 1, query_language: "bogus" as any })];
+    expect(validatePanelsBlob(base({ panels }))).toMatch(/query language/i);
+  });
+
+  it("accepts every valid query_language", () => {
+    for (const lang of ["logchefql", "clickhouse-sql", "logsql"] as const) {
+      const panels = [panel("a", { team_id: 1, source_id: 1, query_language: lang })];
+      expect(validatePanelsBlob(base({ panels }))).toBeNull();
+    }
+  });
+
+  it("rejects a layout entry with an empty id", () => {
+    expect(validatePanelsBlob(base({ layout: [{ id: "", x: 0, y: 0, w: 6, h: 2 }] }))).toMatch(
+      /missing an id/i
+    );
+  });
+
+  it("rejects duplicate layout ids", () => {
+    const layout: DashboardLayoutItem[] = [
+      { id: "a", x: 0, y: 0, w: 6, h: 2 },
+      { id: "a", x: 6, y: 0, w: 6, h: 2 },
+    ];
+    expect(validatePanelsBlob(base({ layout }))).toMatch(/duplicate/i);
+  });
+});
+
+describe("B11: degenerate grid geometry", () => {
+  // A hidden/zero-measured canvas (getBoundingClientRect() returns all zeros,
+  // e.g. before layout/paint, or an element with display:none) must not blow
+  // up the pure grid math with NaN/Infinity from a division by zero.
+  const DEGENERATE: GridGeometry = { left: 0, top: 0, width: 0, gap: 0, rowHeight: 0 };
+
+  it("columnTrackWidth clamps to a finite, non-negative width", () => {
+    expect(columnTrackWidth(DEGENERATE)).toBe(0);
+    expect(Number.isFinite(columnTrackWidth(DEGENERATE))).toBe(true);
+  });
+
+  it("pointToCell returns a finite, clamped cell instead of NaN/Infinity", () => {
+    const cell = pointToCell(50, 50, DEGENERATE);
+    expect(Number.isFinite(cell.col)).toBe(true);
+    expect(Number.isFinite(cell.row)).toBe(true);
+    expect(cell).toEqual({ col: 0, row: 0 });
+  });
+
+  it("snapResize returns finite, clamped dimensions instead of NaN/Infinity", () => {
+    const size = snapResize(6, 2, 100, 100, DEGENERATE);
+    expect(Number.isFinite(size.w)).toBe(true);
+    expect(Number.isFinite(size.h)).toBe(true);
+    // Degenerate geometry can't inform a resize, so it's a safe no-op:
+    // the starting size passes straight through the clamp helpers.
+    expect(size).toEqual({ w: snapPanelWidth(6), h: clampPanelHeight(2) });
+  });
+
+  it("cellToMoveIndex stays finite even fed a degenerate-geometry cell", () => {
+    const items: DashboardLayoutItem[] = [
+      { id: "a", x: 0, y: 0, w: 6, h: 2 },
+      { id: "b", x: 6, y: 0, w: 6, h: 2 },
+    ];
+    const cell = pointToCell(50, 50, DEGENERATE);
+    const index = cellToMoveIndex(items, "a", cell);
+    expect(Number.isFinite(index)).toBe(true);
+    expect(index).toBe(0);
+  });
 });

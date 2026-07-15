@@ -27,6 +27,19 @@ const CHART_STYLES: { value: NonNullable<DashboardPanelOptions["chart"]>; label:
 
 const columnInput = ref("");
 
+// The <input max="1000"> attribute alone doesn't stop the browser from
+// emitting a larger typed value on every keystroke (native max-clamping only
+// kicks in on step-button use / form validation, not free typing) - clamp
+// explicitly so the panel can never end up with a limit above the enforced
+// max.
+const LIMIT_MIN = 1;
+const LIMIT_MAX = 1000;
+function clampLimit(value: unknown): number | undefined {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return undefined;
+  return Math.min(LIMIT_MAX, Math.max(LIMIT_MIN, Math.round(n)));
+}
+
 function addColumn() {
   const raw = columnInput.value.trim().replace(/,$/, "").trim();
   if (raw) {
@@ -93,7 +106,7 @@ function removeColumn(name: string) {
         max="1000"
         class="w-32"
         :model-value="options.limit ?? 50"
-        @update:model-value="(v) => emit('update:options', { limit: Number(v) || undefined })"
+        @update:model-value="(v) => emit('update:options', { limit: clampLimit(v) })"
       />
     </div>
     <div class="space-y-1.5">

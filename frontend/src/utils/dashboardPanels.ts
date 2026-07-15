@@ -4,6 +4,7 @@ import type {
   DashboardPanel,
   DashboardPanels,
   DashboardPanelType,
+  PanelQueryLanguage,
 } from "@/api/dashboards";
 
 // The dashboard grid is 12 columns wide. Panel widths are restricted to a small
@@ -19,6 +20,8 @@ export const MAX_DASHBOARD_PANELS = 24;
 export const DASHBOARD_PANELS_VERSION = 1;
 
 const VALID_PANEL_TYPES: readonly DashboardPanelType[] = ["timeseries", "stat", "table"];
+// Mirrors pkg/models.QueryLanguage's Valid() set (server: query.go).
+const VALID_QUERY_LANGUAGES: readonly PanelQueryLanguage[] = ["logchefql", "clickhouse-sql", "logsql"];
 
 export interface NormalizedPanel {
   panel: DashboardPanel;
@@ -237,8 +240,19 @@ export function validatePanelsBlob(blob: DashboardPanels): string | null {
     if (!p.source_id || p.source_id <= 0) {
       return `Panel "${p.title || p.id}" needs a source.`;
     }
+    if (!VALID_QUERY_LANGUAGES.includes(p.query_language)) {
+      return `Panel "${p.title || p.id}" has an unsupported query language.`;
+    }
   }
+  const seenLayoutIds = new Set<string>();
   for (const l of blob.layout ?? []) {
+    if (!l.id) {
+      return "A panel layout entry is missing an id.";
+    }
+    if (seenLayoutIds.has(l.id)) {
+      return `Duplicate layout id "${l.id}".`;
+    }
+    seenLayoutIds.add(l.id);
     if (!(ALLOWED_PANEL_WIDTHS as readonly number[]).includes(l.w)) {
       return `Panel layout has an invalid width (${l.w}); allowed: ${ALLOWED_PANEL_WIDTHS.join(", ")}.`;
     }
@@ -290,7 +304,11 @@ export interface PixelRect {
 
 /** Width of one column track in px (12 tracks + 11 gaps fill the canvas). */
 export function columnTrackWidth(geom: Pick<GridGeometry, "width" | "gap">): number {
-  return (geom.width - geom.gap * (DASHBOARD_GRID_COLUMNS - 1)) / DASHBOARD_GRID_COLUMNS;
+  const track = (geom.width - geom.gap * (DASHBOARD_GRID_COLUMNS - 1)) / DASHBOARD_GRID_COLUMNS;
+  // A hidden/zero-measured canvas ({width:0, gap:0}) or a bad gap can produce
+  // a non-finite or negative track width; clamp to 0 rather than let it
+  // poison downstream cell/resize math (pointToCell, cellRect, snapResize).
+  return Number.isFinite(track) ? Math.max(0, track) : 0;
 }
 
 /**
@@ -310,8 +328,11 @@ export function pointToCell(
   // both the track and the gap trailing it.
   const colStride = (geom.width + geom.gap) / DASHBOARD_GRID_COLUMNS;
   const rowStride = geom.rowHeight + geom.gap;
+  // Degenerate geometry (a hidden/zero-measured canvas: width/gap/rowHeight
+  // all 0) would otherwise divide by zero here, producing NaN/Infinity
+  // instead of a safe fallback cell.
   const col = colStride > 0 ? Math.floor((px - geom.left) / colStride) : 0;
-  const row = Math.floor((py - geom.top + scrollTop) / rowStride);
+  const row = rowStride > 0 ? Math.floor((py - geom.top + scrollTop) / rowStride) : 0;
   return {
     col: Math.min(DASHBOARD_GRID_COLUMNS - 1, Math.max(0, col)),
     row: Math.max(0, row),
@@ -344,6 +365,11 @@ export function cellRect(
  *
  * Hit-testing against the drag-START layout (not the live preview) keeps the
  * target stable — previewing a move doesn't shift the cells being tested.
+ *
+ * Safe against a degenerate/NaN `cell` (e.g. derived from a zero-measured
+ * canvas): every comparison below is false for NaN operands, so an
+ * unreadable cell just falls through to "insert at index 0" instead of
+ * producing a NaN/Infinite index.
  */
 export function cellToMoveIndex(
   items: DashboardLayoutItem[],
@@ -402,8 +428,10 @@ export function snapResize(
 ): { w: number; h: number } {
   const colStride = (geom.width + geom.gap) / DASHBOARD_GRID_COLUMNS;
   const rowStride = geom.rowHeight + geom.gap;
+  // Same degenerate-geometry guard as pointToCell: a zero stride would
+  // otherwise divide by zero and produce a NaN/Infinite unit count.
   const wUnits = colStride > 0 ? startW + dxPx / colStride : startW;
-  const hUnits = Math.max(MIN_PANEL_HEIGHT, Math.round(startH + dyPx / rowStride));
+  const hUnits = rowStride > 0 ? Math.max(MIN_PANEL_HEIGHT, Math.round(startH + dyPx / rowStride)) : startH;
   return {
     w: snapPanelWidth(Math.max(1, wUnits)),
     h: clampPanelHeight(hUnits),

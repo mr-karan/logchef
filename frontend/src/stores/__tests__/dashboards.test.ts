@@ -262,3 +262,193 @@ describe("dashboards store — panel time params (issue #80: logchefql timezone 
     expect(histBody.end_time).toMatch(RFC3339);
   });
 });
+
+describe("dashboards store — #119/#120 hardening", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "1m" } });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [] } });
+    mocks.translate.mockResolvedValue({
+      status: "success",
+      data: { valid: true, sql: "", full_sql: "SELECT 1", generated_query_language: "clickhouse-sql", conditions: [], fields_used: [] },
+    });
+  });
+
+  // --- A2: stale-load race -------------------------------------------------
+  it("discards a stale loadDashboard GET when a newer load has started (#119 A2)", async () => {
+    const store = useDashboardsStore();
+    let resolveFirst!: (v: any) => void;
+    mocks.get.mockImplementationOnce(() => new Promise((r) => { resolveFirst = r; }));
+    const first = store.loadDashboard(1);
+    // A newer load for #2 resolves immediately and wins.
+    mocks.get.mockResolvedValueOnce({ status: "success", data: makeDashboard({ id: 2, name: "Second" }) });
+    await store.loadDashboard(2);
+    expect(store.current?.id).toBe(2);
+    // The slow #1 GET lands late — it must NOT clobber the current dashboard.
+    resolveFirst({ status: "success", data: makeDashboard({ id: 1, name: "First" }) });
+    await first;
+    expect(store.current?.id).toBe(2);
+    expect(store.current?.name).toBe("Second");
+  });
+
+  it("discards a loadDashboard GET that resolves after clearCurrent (#119 A2)", async () => {
+    const store = useDashboardsStore();
+    let resolveGet!: (v: any) => void;
+    mocks.get.mockImplementationOnce(() => new Promise((r) => { resolveGet = r; }));
+    const pending = store.loadDashboard(1);
+    // View torn down / navigated away before the GET returns.
+    store.clearCurrent();
+    resolveGet({ status: "success", data: makeDashboard({ id: 1 }) });
+    await pending;
+    expect(store.current).toBeNull();
+  });
+
+  // --- A1: cross-dashboard save corruption --------------------------------
+  it("saveEdit refuses to write a draft onto a different dashboard id (#119 A1)", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ id: 1 }));
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel());
+    expect(store.isDirty).toBe(true);
+    // Simulate a param-nav that did NOT clear the draft: current switches to #2
+    // while the draft still belongs to #1.
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard({ id: 2 }) });
+    await store.loadDashboard(2);
+    const result = await store.saveEdit();
+    expect(result.success).toBe(false);
+    expect(mocks.update).not.toHaveBeenCalled();
+  });
+
+  // --- A3: optimistic-concurrency precondition ----------------------------
+  it("saveEdit sends the branched-from updated_at as a precondition (#119 A3)", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ id: 1, updated_at: "2026-07-08T00:00:00Z" }));
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel());
+    mocks.update.mockResolvedValue({ status: "success", data: makeDashboard({ id: 1, updated_at: "2026-07-08T02:00:00Z" }) });
+    await store.saveEdit();
+    const [, body] = mocks.update.mock.calls[0];
+    expect(body.updated_at).toBe("2026-07-08T00:00:00Z");
+  });
+
+  it("saveEdit surfaces a friendly conflict message on a 409 ConflictError (#119 A3)", async () => {
+    const store = await loadEditableDashboard(makeDashboard({ id: 1 }));
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel());
+    mocks.update.mockResolvedValue({ status: "error", error_type: "ConflictError", message: "modified" });
+    const result = await store.saveEdit();
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toMatch(/changed by someone else/i);
+  });
+
+  // --- A4: native LogsQL dispatch -----------------------------------------
+  it("runs a native logsql table panel through logs/query, not logchefql (#119 A4)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel({ ...tablePanel("lp"), query: "level:error", query_language: "logsql" });
+    await vi.waitFor(() => expect(mocks.logsQuery).toHaveBeenCalledTimes(1));
+    expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
+    expect(mocks.translate).not.toHaveBeenCalled();
+    const [, , body] = mocks.logsQuery.mock.calls[0];
+    expect(body.query_text).toBe("level:error");
+    expect(body.query_language).toBe("logsql");
+  });
+
+  it("runs a native logsql timeseries panel through histogram without translate (#119 A4)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel({
+      id: "lt", title: "t", type: "timeseries", team_id: 1, source_id: 1,
+      query: "*", query_language: "logsql", options: {},
+    });
+    await vi.waitFor(() => expect(mocks.histogram).toHaveBeenCalledTimes(1));
+    expect(mocks.translate).not.toHaveBeenCalled();
+    const [, , body] = mocks.histogram.mock.calls[0];
+    expect(body.query_text).toBe("*");
+    expect(body.query_language).toBe("logsql");
+  });
+
+  // --- A11: invalidate panelStates on draft type change --------------------
+  it("invalidates panelStates[id] when a draft panel's type changes (#120 A11)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    // clickhouse-sql skips the translate step so the stat result is deterministic.
+    store.upsertDraftPanel({
+      id: "p1", title: "count", type: "stat", team_id: 1, source_id: 1,
+      query: "SELECT 1", query_language: "clickhouse-sql", options: {},
+    });
+    await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("success"));
+    expect(store.getPanelState("p1").stat).toBeDefined();
+    // stat -> table: the cached stat value would render blank under a table, so
+    // it must be dropped immediately (the panel re-executes into "loading").
+    store.updateDraftPanel("p1", { type: "table" });
+    expect(store.getPanelState("p1").stat).toBeUndefined();
+    expect(store.getPanelState("p1").status).not.toBe("success");
+  });
+
+  // --- A13: table limit clamp ---------------------------------------------
+  it("clamps an oversized table limit down to the max (#120 A13)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel({
+      ...tablePanel("big"), query: "SELECT 1", query_language: "clickhouse-sql", options: { limit: 100000 },
+    });
+    await vi.waitFor(() => expect(mocks.logsQuery).toHaveBeenCalledTimes(1));
+    const [, , body] = mocks.logsQuery.mock.calls[0];
+    expect(body.limit).toBe(1000);
+  });
+});
+
+describe("dashboards store — B1 per-panel redaction (locked panels)", () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.clearAllMocks();
+    mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [] } });
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "1m" } });
+    mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
+    mocks.translate.mockResolvedValue({ status: "success", data: { valid: true, full_sql: "SELECT 1" } });
+  });
+
+  it("renders a server-locked panel as locked and fires no data fetch, while an accessible panel loads", async () => {
+    const accessible: DashboardPanel = { ...tablePanel("open"), query: "SELECT 1", query_language: "clickhouse-sql" };
+    // A redacted panel: server blanked the query and set locked.
+    const locked: DashboardPanel = {
+      id: "shut",
+      title: "Secret",
+      type: "table",
+      team_id: 2,
+      source_id: 2,
+      query: "",
+      query_language: "logchefql",
+      locked: true,
+    };
+    const dashboard = makeDashboard({
+      can_edit: false,
+      panels: {
+        version: 1,
+        layout: [
+          { id: "open", x: 0, y: 0, w: 6, h: 2 },
+          { id: "shut", x: 6, y: 0, w: 6, h: 2 },
+        ],
+        panels: [accessible, locked],
+      },
+    });
+    mocks.get.mockResolvedValue({ status: "success", data: dashboard });
+
+    const store = useDashboardsStore();
+    await store.loadDashboard(dashboard.id);
+    await vi.waitFor(() => expect(store.getPanelState("open").status).toBe("empty"));
+
+    // The locked panel is marked locked and no request was made for it.
+    expect(store.getPanelState("shut").status).toBe("locked");
+    // Only the accessible (clickhouse-sql) panel hit the logs/query endpoint;
+    // the locked panel triggered none of the panel data endpoints.
+    expect(mocks.logsQuery).toHaveBeenCalledTimes(1);
+    const [teamId, sourceId] = mocks.logsQuery.mock.calls[0];
+    expect(teamId).toBe(1);
+    expect(sourceId).toBe(1);
+    expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
+    expect(mocks.translate).not.toHaveBeenCalled();
+    expect(mocks.histogram).not.toHaveBeenCalled();
+  });
+});

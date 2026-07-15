@@ -8,6 +8,10 @@ import {
   type DashboardPanel,
   type DashboardPanels,
   type CreateDashboardRequest,
+  type UpdateDashboardRequest,
+  type HistogramRequestBody,
+  type SqlQueryRequestBody,
+  type PanelQueryLanguage,
 } from "@/api/dashboards";
 import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
@@ -20,6 +24,17 @@ import { runWithConcurrency } from "@/utils/promisePool";
 // otherwise fire 24 (or 48, counting the logchefql translate step) requests at
 // once; this keeps the backend from being stampeded on load/refresh.
 export const PANEL_FETCH_CONCURRENCY = 4;
+
+// Table panel row cap. The builder's limit option maxes at 1000; a hand-edited
+// or legacy blob could carry anything (a saved limit:100000 would try to render
+// 100k rows), so the runtime clamps into [1, TABLE_LIMIT_MAX] regardless.
+const DEFAULT_TABLE_LIMIT = 100;
+const TABLE_LIMIT_MAX = 1000;
+
+// A burst of time-picker emissions (partial date entry, quick-range flips) each
+// mutate the range; coalesce them into a single panel refresh instead of firing
+// a full refreshAllPanels per emission.
+const REFRESH_COALESCE_MS = 80;
 
 const DEFAULT_RELATIVE_TIME = "15m";
 // Panel queries run in the viewer's browser timezone (falling back to UTC if
@@ -49,6 +64,7 @@ export interface PanelState {
     buckets: HistogramData[];
     granularity: string | null;
     groupBy: string | null;
+    range: { start: number; end: number };
   };
   stat?: {
     value: number;
@@ -164,6 +180,22 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   let refreshAbort: AbortController | null = null;
   // Non-reactive: the controller aborting an in-flight panel preview.
   let previewAbort: AbortController | null = null;
+  // Non-reactive: controllers for single-panel executions (add/edit re-renders),
+  // keyed by panel id so a re-run supersedes its own prior in-flight request and
+  // teardown can cancel them all (fixes the previously-untracked controller).
+  const singlePanelAborts = new Map<string, AbortController>();
+  // Non-reactive: coalescing timer for time-range-driven refreshes.
+  let refreshCoalesceTimer: ReturnType<typeof setTimeout> | null = null;
+  // Non-reactive: monotonic load token. A loadDashboard response is applied only
+  // if its token is still current; clearCurrent/unmount and newer loads bump it
+  // so a slow/late GET can't repopulate the store for a dashboard we left.
+  let loadToken = 0;
+  // Non-reactive: identity + optimistic-concurrency baseline captured on
+  // entering edit. `editDashboardId` guards saveEdit from ever PUTting one
+  // dashboard's draft onto another id; `editBaseUpdatedAt` is the precondition
+  // sent to the server for last-writer-wins conflict detection.
+  let editDashboardId: number | null = null;
+  let editBaseUpdatedAt: string | null = null;
 
   const dashboards = computed(() => state.data.value.dashboards);
   const current = computed(() => state.data.value.current);
@@ -232,17 +264,25 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   async function loadDashboard(id: number) {
+    // Claim a load generation. The GET itself isn't abortable (shared API
+    // surface), so the token is the guard: apply the response only if it's
+    // still the newest load and the view hasn't been torn down.
+    const token = ++loadToken;
     const result = await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.get(id),
       operationKey: "loadDashboard",
       showToast: false,
-      onSuccess: (data) => {
-        state.data.value.current = data ?? null;
-        state.data.value.panelStates = {};
-      },
     });
-    if (result.success && state.data.value.current) {
-      await refreshAllPanels();
+    // A newer load started, or clearCurrent() ran (unmount / navigation).
+    // Discard this stale GET so it can't repopulate the store or fire a panel
+    // refresh for a dashboard we're no longer viewing.
+    if (token !== loadToken) return result;
+    if (result.success) {
+      state.data.value.current = result.data ?? null;
+      state.data.value.panelStates = {};
+      if (state.data.value.current) {
+        await refreshAllPanels();
+      }
     }
     return result;
   }
@@ -276,16 +316,26 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // ---- Time range + refresh interval --------------------------------------
 
+  // Collapse a burst of range changes into one refresh. refreshAllPanels still
+  // aborts any in-flight batch, so the final scheduled call wins cleanly.
+  function scheduleRefresh() {
+    if (refreshCoalesceTimer !== null) clearTimeout(refreshCoalesceTimer);
+    refreshCoalesceTimer = setTimeout(() => {
+      refreshCoalesceTimer = null;
+      void refreshAllPanels();
+    }, REFRESH_COALESCE_MS);
+  }
+
   function setRelativeTime(relative: string) {
     state.data.value.timeRelative = relative;
     state.data.value.timeAbsolute = null;
-    void refreshAllPanels();
+    scheduleRefresh();
   }
 
   function setAbsoluteRange(start: number, end: number) {
     state.data.value.timeAbsolute = { start, end };
     state.data.value.timeRelative = null;
-    void refreshAllPanels();
+    scheduleRefresh();
   }
 
   function setRefreshInterval(ms: number) {
@@ -303,16 +353,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   // Resolve a panel's query to the native query text the histogram endpoint wants
-  // (SQL for ClickHouse sources, LogsQL for VictoriaLogs). ClickHouse-SQL panels
-  // already carry native SQL. Everything else goes through the shared LogchefQL
-  // compile — exactly the multi-datasource path the explorer uses.
+  // (SQL for ClickHouse sources, LogsQL for VictoriaLogs), plus the language of
+  // that native text. ClickHouse-SQL and native LogsQL panels already carry the
+  // source's native query — run them verbatim. Only LogchefQL goes through the
+  // shared compile, exactly the multi-datasource path the explorer uses.
+  // (A logsql panel used to fall through here and get compiled as LogchefQL,
+  // silently breaking VictoriaLogs panels — see #119 A4.)
   async function resolveNativeQuery(
     panel: DashboardPanel,
     range: EffectiveRange,
     signal: AbortSignal
-  ): Promise<string> {
-    if (panel.query_language === "clickhouse-sql") {
-      return panel.query;
+  ): Promise<{ query: string; language: PanelQueryLanguage }> {
+    if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
+      return { query: panel.query, language: panel.query_language };
     }
     const resp = await dashboardPanelApi.translate(
       panel.team_id,
@@ -330,7 +383,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (translated.valid === false) {
       throw { error_type: "ValidationError", message: translated.error?.message || "Invalid query" };
     }
-    return translated.full_sql || translated.generated_query || translated.sql || panel.query;
+    const query = translated.full_sql || translated.generated_query || translated.sql || panel.query;
+    // The compiler reports the language it produced (SQL for ClickHouse, LogsQL
+    // for VictoriaLogs); default to clickhouse-sql for older server builds.
+    const language = (translated.generated_query_language as PanelQueryLanguage) || "clickhouse-sql";
+    return { query, language };
+  }
+
+  // Clamp a table panel's row cap into [1, TABLE_LIMIT_MAX]; absent/invalid
+  // falls back to the default. Guards against a legacy/hand-edited blob asking
+  // to render tens of thousands of DOM rows.
+  function clampTableLimit(value: number | undefined): number {
+    if (!value || !Number.isFinite(value) || value <= 0) return DEFAULT_TABLE_LIMIT;
+    return Math.min(Math.max(Math.floor(value), 1), TABLE_LIMIT_MAX);
   }
 
   async function fetchPanelData(
@@ -342,23 +407,23 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const endIso = msToRfc3339(range.end);
 
     if (panel.type === "timeseries" || panel.type === "stat") {
-      const queryText = await resolveNativeQuery(panel, range, signal);
+      const { query: queryText, language: nativeLanguage } = await resolveNativeQuery(panel, range, signal);
       const window = HistogramService.calculateOptimalGranularity(startIso, endIso);
       const groupBy = panel.type === "timeseries" ? panel.options?.group_by || undefined : undefined;
 
-      const resp = await dashboardPanelApi.histogram(
-        panel.team_id,
-        panel.source_id,
-        {
-          query_text: queryText,
-          window,
-          group_by: groupBy,
-          start_time: startIso,
-          end_time: endIso,
-          timezone: PANEL_QUERY_TIMEZONE,
-        },
-        signal
-      );
+      // query_language is advisory today (the native endpoints interpret
+      // query_text by source type) but is sent so a VictoriaLogs source runs
+      // native LogsQL rather than being re-parsed as ClickHouse SQL.
+      const histBody: HistogramRequestBody & { query_language?: PanelQueryLanguage } = {
+        query_text: queryText,
+        window,
+        group_by: groupBy,
+        start_time: startIso,
+        end_time: endIso,
+        timezone: PANEL_QUERY_TIMEZONE,
+        query_language: nativeLanguage,
+      };
+      const resp = await dashboardPanelApi.histogram(panel.team_id, panel.source_id, histBody, signal);
       const data = unwrap(resp);
       const buckets = data?.data ?? [];
 
@@ -371,25 +436,26 @@ export const useDashboardsStore = defineStore("dashboards", () => {
           buckets,
           granularity: data?.granularity ?? null,
           groupBy: groupBy ?? null,
+          range: { start: range.start, end: range.end },
         },
       };
     }
 
     // table
-    const limit = panel.options?.limit && panel.options.limit > 0 ? panel.options.limit : 100;
-    if (panel.query_language === "clickhouse-sql") {
-      const resp = await dashboardPanelApi.logsQuery(
-        panel.team_id,
-        panel.source_id,
-        {
-          query_text: panel.query,
-          limit,
-          start_time: startIso,
-          end_time: endIso,
-          timezone: PANEL_QUERY_TIMEZONE,
-        },
-        signal
-      );
+    const limit = clampTableLimit(panel.options?.limit);
+    // Native queries (ClickHouse SQL, VictoriaLogs LogsQL) run verbatim through
+    // the logs/query endpoint. Only LogchefQL takes the compile path below;
+    // routing a logsql panel there used to break VictoriaLogs tables (#119 A4).
+    if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
+      const sqlBody: SqlQueryRequestBody & { query_language?: PanelQueryLanguage } = {
+        query_text: panel.query,
+        limit,
+        start_time: startIso,
+        end_time: endIso,
+        timezone: PANEL_QUERY_TIMEZONE,
+        query_language: panel.query_language,
+      };
+      const resp = await dashboardPanelApi.logsQuery(panel.team_id, panel.source_id, sqlBody, signal);
       const data = unwrap(resp);
       const rows = data?.data ?? data?.logs ?? [];
       return {
@@ -419,6 +485,17 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   }
 
   async function executePanel(panel: DashboardPanel, range: EffectiveRange, signal: AbortSignal) {
+    // Server-side redaction (B1 per-panel): a panel the viewer can't reach comes
+    // back flagged `locked` with its query blanked. Render the locked state
+    // directly and never fire a request — there is no query to run.
+    if (panel.locked) {
+      setPanelState(panel.id, { status: "locked" });
+      return;
+    }
+    // Bail before writing "loading": a task pulled off the concurrency queue
+    // after its batch was superseded must not stomp a completed panel back to
+    // loading (and then never resolve because the request never fires).
+    if (signal.aborted) return;
     setPanelState(panel.id, { status: "loading" });
     try {
       const result = await fetchPanelData(panel, range, signal);
@@ -431,12 +508,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     }
   }
 
+  function abortSinglePanels() {
+    for (const controller of singlePanelAborts.values()) controller.abort();
+    singlePanelAborts.clear();
+  }
+
   async function refreshAllPanels() {
     const dashboard = state.data.value.current;
     if (!dashboard) return;
 
     // Cancel any in-flight batch so a rapid time-range change doesn't leave stale
-    // requests racing the new ones.
+    // requests racing the new ones. A full refresh also supersedes any tracked
+    // single-panel executions (add/edit re-renders).
+    abortSinglePanels();
     refreshAbort?.abort();
     const controller = new AbortController();
     refreshAbort = controller;
@@ -453,8 +537,16 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // Execute a single panel into panelStates (used after add/edit so the panel
   // renders immediately without a full-dashboard refresh).
   function executeSinglePanel(panel: DashboardPanel) {
+    // Supersede any prior in-flight execution of the SAME panel (rapid edits)
+    // and track the controller so teardown/refresh can cancel it.
+    singlePanelAborts.get(panel.id)?.abort();
     const controller = new AbortController();
-    void executePanel(panel, effectiveRange.value, controller.signal);
+    singlePanelAborts.set(panel.id, controller);
+    void executePanel(panel, effectiveRange.value, controller.signal).finally(() => {
+      if (singlePanelAborts.get(panel.id) === controller) {
+        singlePanelAborts.delete(panel.id);
+      }
+    });
   }
 
   function enterEdit() {
@@ -466,6 +558,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     state.data.value.editDraft = cloneBlob(blob);
     state.data.value.previewState = null;
     state.data.value.isEditing = true;
+    // Pin the dashboard this draft belongs to, and the version we branched from,
+    // for the save-time identity guard (#119 A1) and concurrency check (A3).
+    editDashboardId = dashboard.id;
+    editBaseUpdatedAt = dashboard.updated_at ?? null;
   }
 
   function cancelEdit() {
@@ -473,10 +569,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // the draft reverts to the last-loaded state.
     previewAbort?.abort();
     previewAbort = null;
+    abortSinglePanels();
     state.data.value.isEditing = false;
     state.data.value.editDraft = null;
     state.data.value.editSnapshotJson = null;
     state.data.value.previewState = null;
+    editDashboardId = null;
+    editBaseUpdatedAt = null;
   }
 
   function setDraft(next: DashboardPanels) {
@@ -523,6 +622,32 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const panels = [...draft.panels];
     panels[idx] = merged;
     setDraft(reflowPanels({ ...draft, panels }));
+
+    // If anything that affects the executed query/result changed (e.g. a
+    // stat→table type switch, a new query/source/limit), the cached panelState
+    // is now stale — a stat value would render blank under a table view. Drop
+    // it, then re-run the panel so the edit canvas reflects the new config.
+    if (execSignature(current) !== execSignature(merged)) {
+      const { [id]: _stale, ...rest2 } = state.data.value.panelStates;
+      state.data.value.panelStates = rest2;
+      if (merged.team_id > 0 && merged.source_id > 0) {
+        executeSinglePanel(merged);
+      }
+    }
+  }
+
+  // Signature of the fields that determine a panel's fetched result. Two panels
+  // with the same signature render identically, so panelState is reusable.
+  function execSignature(p: DashboardPanel): string {
+    return JSON.stringify([
+      p.type,
+      p.query,
+      p.query_language,
+      p.team_id,
+      p.source_id,
+      p.options?.limit ?? null,
+      p.options?.group_by ?? null,
+    ]);
   }
 
   // Create-on-canvas: push a bare panel shell into the draft immediately (so the
@@ -593,19 +718,37 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (!dashboard || !draft) {
       return { success: false, error: { message: "Nothing to save" } };
     }
+    // Identity guard (#119 A1): the draft belongs to whichever dashboard was
+    // open when edit started. If `current` has since switched (e.g. a param
+    // navigation that didn't clear the draft), refuse rather than PUT one
+    // dashboard's panels onto another's id.
+    if (editDashboardId !== null && dashboard.id !== editDashboardId) {
+      return {
+        success: false,
+        error: {
+          message:
+            "The dashboard changed while you were editing. Your unsaved changes were not saved — re-open the original dashboard to edit it.",
+        },
+      };
+    }
     // Mirror the server-side validation with a friendly, inline message; the
     // server 400 remains the authoritative backstop.
     const validationError = validatePanelsBlob(draft);
     if (validationError) {
       return { success: false, error: { message: validationError } };
     }
+    // Optimistic-concurrency precondition (#119 A3): send the updated_at we
+    // branched from so the server can reject a last-writer-wins clobber with a
+    // 409. Sent as an extension field so it works whether or not the shared
+    // request type has adopted it yet; older servers ignore the unknown field.
+    const body: UpdateDashboardRequest & { updated_at?: string | null } = {
+      name: dashboard.name,
+      description: dashboard.description,
+      panels: draft,
+    };
+    if (editBaseUpdatedAt) body.updated_at = editBaseUpdatedAt;
     const result = await state.callApi<Dashboard>({
-      apiCall: () =>
-        dashboardsApi.update(dashboard.id, {
-          name: dashboard.name,
-          description: dashboard.description,
-          panels: draft,
-        }),
+      apiCall: () => dashboardsApi.update(dashboard.id, body),
       operationKey: "saveDashboard",
       successMessage: "Dashboard saved",
       onSuccess: (data) => {
@@ -621,11 +764,25 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         state.data.value.editDraft = null;
         state.data.value.editSnapshotJson = null;
         state.data.value.previewState = null;
+        editDashboardId = null;
+        editBaseUpdatedAt = null;
       },
     });
     if (result.success) {
       state.data.value.panelStates = {};
       await refreshAllPanels();
+      return result;
+    }
+    // Surface a concurrent-edit conflict with actionable guidance instead of the
+    // raw backend message. The draft is kept so the user can copy their work.
+    if (result.error?.error_type === "ConflictError") {
+      return {
+        success: false,
+        error: {
+          message:
+            "This dashboard was changed by someone else since you started editing. Reload the page to get the latest version, then re-apply your changes.",
+        },
+      };
     }
     return result;
   }
@@ -655,7 +812,23 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     state.data.value.previewState = null;
   }
 
+  // Abort an in-flight preview WITHOUT clearing the shown result, so a debounced
+  // re-preview can't have a stale request resolve into previewState during the
+  // debounce window; the last result stays visible until the new one lands.
+  function abortPreview() {
+    previewAbort?.abort();
+    previewAbort = null;
+  }
+
   function clearCurrent() {
+    // Bump the load token so any in-flight/late loadDashboard GET is discarded
+    // rather than repopulating the store after we've navigated away.
+    loadToken++;
+    if (refreshCoalesceTimer !== null) {
+      clearTimeout(refreshCoalesceTimer);
+      refreshCoalesceTimer = null;
+    }
+    abortSinglePanels();
     refreshAbort?.abort();
     refreshAbort = null;
     previewAbort?.abort();
@@ -666,6 +839,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     state.data.value.editDraft = null;
     state.data.value.editSnapshotJson = null;
     state.data.value.previewState = null;
+    editDashboardId = null;
+    editBaseUpdatedAt = null;
   }
 
   return {
@@ -718,5 +893,6 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     reorderDraftPanels,
     previewPanel,
     clearPreview,
+    abortPreview,
   };
 });

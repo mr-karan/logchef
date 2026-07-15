@@ -33,6 +33,14 @@ export interface DashboardPanel {
   query: string;
   query_language: PanelQueryLanguage;
   options?: DashboardPanelOptions;
+  /**
+   * Response-only redaction flag (never sent on create/update). Set true by the
+   * server when the requesting user lacks access to this panel's source: the
+   * query text / language / options are blanked and only the placeholder
+   * metadata (team_id, source_id, type, title) plus layout survive. The panel
+   * renders a "locked" state and must NOT be executed (there is no query to run).
+   */
+  locked?: boolean;
 }
 
 export interface DashboardLayoutItem {
@@ -81,7 +89,7 @@ export const dashboardsApi = {
   get: (id: number) => apiClient.get<Dashboard>(`/dashboards/${id}`),
   create: (req: CreateDashboardRequest) => apiClient.post<Dashboard>("/dashboards", req),
   update: (id: number, req: UpdateDashboardRequest) => apiClient.put<Dashboard>(`/dashboards/${id}`, req),
-  remove: (id: number) => apiClient.delete<{ id: number }>(`/dashboards/${id}`),
+  remove: (id: number) => apiClient.delete<{ message: string }>(`/dashboards/${id}`),
 };
 
 // ---------------------------------------------------------------------------
@@ -103,6 +111,11 @@ export interface HistogramRequestBody {
   end_time?: string; // RFC3339
   timezone?: string;
   limit?: number;
+  // The panel's own query language (e.g. "logsql" for a VictoriaLogs source),
+  // so the server can dispatch query_text natively instead of assuming
+  // ClickHouse SQL. Optional/forward-compatible: older server builds ignore
+  // unknown JSON fields.
+  query_language?: PanelQueryLanguage;
 }
 
 export interface SqlQueryRequestBody {
@@ -111,6 +124,8 @@ export interface SqlQueryRequestBody {
   start_time?: string;
   end_time?: string;
   timezone?: string;
+  // See HistogramRequestBody.query_language.
+  query_language?: PanelQueryLanguage;
 }
 
 export interface LogchefqlQueryRequestBody {
@@ -124,6 +139,8 @@ export interface LogchefqlQueryRequestBody {
   end_time: string;
   timezone?: string;
   limit?: number;
+  // See HistogramRequestBody.query_language.
+  query_language?: PanelQueryLanguage;
 }
 
 export interface TranslateRequestBody {
@@ -135,6 +152,8 @@ export interface TranslateRequestBody {
   end_time?: string;
   timezone?: string;
   limit?: number;
+  // See HistogramRequestBody.query_language.
+  query_language?: PanelQueryLanguage;
 }
 
 export const dashboardPanelApi = {

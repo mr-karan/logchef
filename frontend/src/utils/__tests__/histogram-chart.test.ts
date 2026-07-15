@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildHistogramChartModel } from "@/utils/histogram-chart";
+import {
+  buildHistogramChartModel,
+  parseGranularityToMilliseconds,
+  getColorForGroupValue,
+} from "@/utils/histogram-chart";
 import type { HistogramData } from "@/services/HistogramService";
 
 const MIN = 60_000;
@@ -72,5 +76,83 @@ describe("buildHistogramChartModel zero-fill", () => {
     ];
     const model = buildHistogramChartModel(buckets, "1m");
     expect(model.rows).toHaveLength(2);
+  });
+
+  // B5: a pathological granularity digit-string overflows Number() to Infinity;
+  // parseGranularityToMilliseconds must reject it so fillBucketGaps never sees
+  // an unbounded/non-finite step (which would loop `ts += Infinity` forever).
+  it("does not hang on a pathological (overflowing) granularity", () => {
+    const pathological = `${"9".repeat(400)}s`;
+    const buckets: HistogramData[] = [
+      { bucket: iso(0), log_count: 1 },
+      { bucket: iso(1), log_count: 2 },
+      { bucket: iso(2), log_count: 3 },
+    ];
+    expect(() => buildHistogramChartModel(buckets, pathological)).not.toThrow();
+    const model = buildHistogramChartModel(buckets, pathological);
+    // The bad granularity is rejected; cadence falls back to data-inference
+    // instead of hanging, and the already-dense series is left unchanged.
+    expect(model.rows).toHaveLength(3);
+    expect(model.rows.map((r) => r.count)).toEqual([1, 2, 3]);
+  });
+
+  // B6: cadence inference must use the minimum positive gap across all
+  // buckets, not just the first pair — a sparse head shouldn't set a
+  // too-large step for the rest of the (denser) series.
+  it("infers cadence from the minimum gap, not a sparse first gap", () => {
+    // First gap is 5 minutes (0 -> 5); the rest of the data is dense at 1m.
+    const buckets: HistogramData[] = [
+      { bucket: iso(0), log_count: 1 },
+      { bucket: iso(5), log_count: 2 },
+      { bucket: iso(6), log_count: 3 },
+      { bucket: iso(7), log_count: 4 },
+    ];
+    // No granularity passed — cadence must be inferred from the data.
+    const model = buildHistogramChartModel(buckets);
+    expect(model.bucketWidthMs).toBe(MIN);
+    expect(model.rows.map((r) => r.ts)).toEqual(
+      [0, 1, 2, 3, 4, 5, 6, 7].map((m) => m * MIN),
+    );
+    expect(model.rows.map((r) => r.count)).toEqual([1, 0, 0, 0, 0, 2, 3, 4]);
+  });
+});
+
+describe("parseGranularityToMilliseconds", () => {
+  it("parses well-formed granularities", () => {
+    expect(parseGranularityToMilliseconds("5m")).toBe(5 * MIN);
+    expect(parseGranularityToMilliseconds("30s")).toBe(30_000);
+    expect(parseGranularityToMilliseconds("2h")).toBe(2 * 3_600_000);
+  });
+
+  it("rejects an overflowing (non-finite) result", () => {
+    expect(parseGranularityToMilliseconds(`${"9".repeat(400)}s`)).toBeNull();
+  });
+
+  it("rejects a zero step", () => {
+    expect(parseGranularityToMilliseconds("0s")).toBeNull();
+  });
+
+  it("returns null for missing/malformed input", () => {
+    expect(parseGranularityToMilliseconds(undefined)).toBeNull();
+    expect(parseGranularityToMilliseconds(null)).toBeNull();
+    expect(parseGranularityToMilliseconds("bogus")).toBeNull();
+  });
+});
+
+describe("getColorForGroupValue", () => {
+  // B10: no own-property check meant "__proto__"/"constructor" resolved
+  // through the prototype chain to a non-string (an object/function),
+  // breaking the function's string-only contract.
+  it("always returns a string, even for prototype-polluting values", () => {
+    expect(typeof getColorForGroupValue("__proto__")).toBe("string");
+    expect(typeof getColorForGroupValue("constructor")).toBe("string");
+  });
+
+  it("still resolves a real known severity", () => {
+    expect(getColorForGroupValue("error")).toBe("#EE6666");
+  });
+
+  it("falls back to a default color for an empty value", () => {
+    expect(getColorForGroupValue("")).toBe("#5470C6");
   });
 });

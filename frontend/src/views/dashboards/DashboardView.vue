@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
-import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
+import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import {
   ArrowLeft,
   LayoutDashboard,
@@ -108,8 +108,12 @@ function handleEditorOpenChange(open: boolean) {
   const id = editingPanelId.value;
   if (id && pendingNewPanelId.value === id) {
     const p = store.editDraft?.panels.find((pp) => pp.id === id);
-    const pristine = !!p && p.title === "New panel" && !(p.team_id > 0) && !(p.source_id > 0);
-    if (pristine) store.removeDraftPanel(id);
+    // A newly-added panel that never got a source can't execute or be saved
+    // (the blob validator rejects source_id <= 0). Drop it on close instead of
+    // leaving a half-configured shell that dead-ends Save behind a validation
+    // alert with no obvious way out (#120 A10).
+    const incomplete = !p || !(p.team_id > 0) || !(p.source_id > 0);
+    if (incomplete) store.removeDraftPanel(id);
   }
   pendingNewPanelId.value = null;
   editingPanelId.value = null;
@@ -361,7 +365,9 @@ function setupRefreshTimer() {
   }
 }
 
-watch(() => store.refreshIntervalMs, setupRefreshTimer);
+// immediate so a refresh interval already set on the store (e.g. chosen before
+// this dashboard mounted) starts ticking on mount, not only on the next change.
+watch(() => store.refreshIntervalMs, setupRefreshTimer, { immediate: true });
 
 async function load() {
   notFound.value = false;
@@ -419,6 +425,21 @@ onBeforeRouteLeave(() => {
     }
   }
   clearRefreshTimer();
+});
+
+// Param-only navigation (/dashboards/1 → /dashboards/2) reuses this component
+// instance, so the previous dashboard's edit draft would otherwise ride along
+// and Save could write #1's panels onto #2's id (#119 A1). Confirm on a dirty
+// draft, then clear the store so the incoming load() starts from a clean slate.
+onBeforeRouteUpdate((to, from) => {
+  if (to.params.id === from.params.id) return true;
+  if (store.isEditing && store.isDirty) {
+    if (!window.confirm("You have unsaved changes to this dashboard. Leave anyway?")) {
+      return false;
+    }
+  }
+  store.clearCurrent();
+  return true;
 });
 </script>
 
