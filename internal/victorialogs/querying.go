@@ -1,6 +1,8 @@
 package victorialogs
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -26,6 +28,11 @@ const (
 	// one series per distinct value — a server-side memory spike and a
 	// multi-MB payload for the browser.
 	defaultHistogramSeriesLimit = 10
+	// histogramOtherSeriesLabel is the GroupValue assigned to VL's catch-all
+	// aggregate series (the "{}" series it returns once the group count exceeds
+	// fields_limit). It is intentionally distinct so it is never confused with a
+	// genuine empty-value group.
+	histogramOtherSeriesLabel = "__other__"
 )
 
 type valuesResponse struct {
@@ -124,45 +131,9 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 	}
 	defer resp.Body.Close()
 
-	decoder := json.NewDecoder(resp.Body)
-	decoder.UseNumber()
-
-	logs := make([]map[string]interface{}, 0, limit)
-	columnSet := make(map[string]struct{})
-	columnNames := make([]string, 0)
-
-	// Enforce the response byte budget while decoding (mirrors the ClickHouse
-	// provider). A query within the row limit but with very large per-row
-	// payloads would otherwise buffer unbounded — the OOM class the byte budget
-	// exists to prevent.
-	var bytesReturned int
-	truncatedReason := ""
-	for {
-		var row map[string]interface{}
-		if err := decoder.Decode(&row); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, fmt.Errorf("decode victorialogs query response: %w", err)
-		}
-
-		if req.MaxResponseBytes > 0 {
-			rowSize := approxRowJSONSize(row)
-			if bytesReturned+rowSize > req.MaxResponseBytes {
-				truncatedReason = "byte_limit"
-				break
-			}
-			bytesReturned += rowSize
-		}
-
-		logs = append(logs, row)
-		for key := range row {
-			if _, ok := columnSet[key]; ok {
-				continue
-			}
-			columnSet[key] = struct{}{}
-			columnNames = append(columnNames, key)
-		}
+	logs, columnNames, bytesReturned, truncatedReason, err := readQueryRows(resp.Body, req.MaxResponseBytes, limit)
+	if err != nil {
+		return nil, err
 	}
 
 	columns := make([]models.ColumnInfo, 0, len(columnNames))
@@ -204,6 +175,64 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		Stats:    stats,
 		Warnings: warnings,
 	}, nil
+}
+
+// readQueryRows reads VL's newline-delimited JSON query response (one row
+// object per line) and enforces the response byte budget while reading, so a
+// single very large row cannot allocate beyond the budget. Byte accounting uses
+// the raw wire length (the escaped JSON actually transferred), not the decoded
+// string length. It returns the decoded rows, the column names in first-seen
+// order, the bytes accounted, and a truncation reason ("" if none).
+func readQueryRows(body io.Reader, maxResponseBytes, limitHint int) (logs []map[string]interface{}, columnNames []string, bytesReturned int, truncatedReason string, err error) {
+	logs = make([]map[string]interface{}, 0, limitHint)
+	columnSet := make(map[string]struct{})
+	columnNames = make([]string, 0)
+
+	reader := body
+	if maxResponseBytes > 0 {
+		// Cap the bytes pulled off the socket at the budget so even an oversized
+		// row cannot be buffered in full. The +1 byte of headroom lets the
+		// budget check below distinguish a row that exactly meets the budget
+		// from one that overflows it, and guarantees any line the LimitReader
+		// truncates trips that check rather than being decoded as partial JSON.
+		reader = io.LimitReader(body, int64(maxResponseBytes)+1)
+	}
+	lineReader := bufio.NewReader(reader)
+	for {
+		line, readErr := lineReader.ReadBytes('\n')
+		if trimmed := bytes.TrimSpace(line); len(trimmed) > 0 {
+			lineSize := len(line)
+			if maxResponseBytes > 0 && bytesReturned+lineSize > maxResponseBytes {
+				return logs, columnNames, bytesReturned, "byte_limit", nil
+			}
+
+			var row map[string]interface{}
+			dec := json.NewDecoder(bytes.NewReader(trimmed))
+			dec.UseNumber()
+			if decErr := dec.Decode(&row); decErr != nil {
+				return nil, nil, 0, "", fmt.Errorf("decode victorialogs query response: %w", decErr)
+			}
+
+			// Count bytes unconditionally (even when unbounded) so
+			// Stats.BytesReturned reflects the real payload size.
+			bytesReturned += lineSize
+			logs = append(logs, row)
+			for key := range row {
+				if _, ok := columnSet[key]; ok {
+					continue
+				}
+				columnSet[key] = struct{}{}
+				columnNames = append(columnNames, key)
+			}
+		}
+
+		if readErr != nil {
+			if readErr == io.EOF {
+				return logs, columnNames, bytesReturned, truncatedReason, nil
+			}
+			return nil, nil, 0, "", fmt.Errorf("read victorialogs query response: %w", readErr)
+		}
+	}
 }
 
 // translateLogchefQLToLogsQL is the single point where LogchefQL is compiled
@@ -342,10 +371,25 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	}
 
 	data := make([]datasource.HistogramBucket, 0)
+	// truncated tracks whether VL returned its catch-all aggregate series, which
+	// it emits only when the real group count exceeded fields_limit (see
+	// getTopHitsSeries in VL app/vlselect/logsql/logsql.go).
+	truncated := false
 	for _, series := range result.Hits {
 		groupValue := ""
 		if groupBy != "" {
-			groupValue = series.Fields[groupBy]
+			value, hasGroupField := series.Fields[groupBy]
+			if !hasGroupField {
+				// VL's top-hits cap folds every series beyond fields_limit into a
+				// single catch-all series keyed "{}", serialized with an empty
+				// `fields` object. It lacks the group-by field, so it must not be
+				// rendered as a genuine empty-value group; label it as the
+				// aggregate "other" bucket and note that truncation occurred.
+				groupValue = histogramOtherSeriesLabel
+				truncated = true
+			} else {
+				groupValue = value
+			}
 		}
 		for i, timestampRaw := range series.Timestamps {
 			if i >= len(series.Values) {
@@ -370,9 +414,14 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 		return a.Bucket.Compare(b.Bucket)
 	})
 
+	// Only warn when VL actually truncated (i.e. it returned the catch-all
+	// aggregate). Exactly defaultHistogramSeriesLimit real series is NOT a
+	// truncation. The remaining series' counts are still shown, aggregated into
+	// the "other" bucket, so the notice says so rather than claiming they are
+	// hidden.
 	notice := ""
-	if groupBy != "" && len(result.Hits) >= defaultHistogramSeriesLimit {
-		notice = fmt.Sprintf("Showing top %d series by %q; additional series are not displayed.", defaultHistogramSeriesLimit, groupBy)
+	if groupBy != "" && truncated {
+		notice = fmt.Sprintf("Showing top %d series by %q; the rest are aggregated into an \"other\" bucket.", defaultHistogramSeriesLimit, groupBy)
 	}
 
 	return &datasource.HistogramResult{
@@ -686,10 +735,12 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	}
 
 	rows := make([]map[string]interface{}, 0, len(result.Data.Result))
+	labelSet := make(map[string]struct{})
 	for _, item := range result.Data.Result {
 		row := map[string]interface{}{}
 		for key, value := range item.Metric {
 			row[key] = value
+			labelSet[key] = struct{}{}
 		}
 		if len(item.Value) >= 2 {
 			row["value"] = item.Value[1]
@@ -697,11 +748,24 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 		rows = append(rows, row)
 	}
 
+	// Declare a column per metric label (sorted for determinism) plus the
+	// numeric value, so the schema matches the rows. Hardcoding only "value"
+	// dropped the group-by labels that the rows actually carry.
+	labelNames := make([]string, 0, len(labelSet))
+	for name := range labelSet {
+		labelNames = append(labelNames, name)
+	}
+	slices.Sort(labelNames)
+
+	columns := make([]models.ColumnInfo, 0, len(labelNames)+1)
+	for _, name := range labelNames {
+		columns = append(columns, models.ColumnInfo{Name: name, Type: "String"})
+	}
+	columns = append(columns, models.ColumnInfo{Name: "value", Type: "Float64"})
+
 	return &models.QueryResult{
-		Logs: rows,
-		Columns: []models.ColumnInfo{
-			{Name: "value", Type: "Float64"},
-		},
+		Logs:    rows,
+		Columns: columns,
 		Stats: models.QueryStats{
 			ExecutionTimeMs: 0,
 			RowsRead:        len(rows),
@@ -720,7 +784,11 @@ func applyAlertLookback(query string, lookbackSeconds int) string {
 	prefix := ""
 	rest := trimmed
 	if strings.HasPrefix(trimmed, "options(") {
-		if end := strings.Index(trimmed, ")"); end >= 0 {
+		// Split off the options(...) prefix at its MATCHING close paren, not the
+		// first ")": a real option value such as
+		// options(global_filter=(service:="api")) contains nested parens.
+		open := strings.IndexByte(trimmed, '(')
+		if end := matchingParen(trimmed, open); end >= 0 {
 			prefix = strings.TrimSpace(trimmed[:end+1])
 			rest = strings.TrimSpace(trimmed[end+1:])
 		}
@@ -728,45 +796,223 @@ func applyAlertLookback(query string, lookbackSeconds int) string {
 
 	// A native LogsQL alert query may already scope _time itself. LogsQL ANDs
 	// multiple _time filters, so prepending another would silently narrow (or
-	// zero, if disjoint) the window. Leave the query's own window intact in
-	// that case rather than double-constraining it.
-	if containsTimeFilter(rest) {
+	// zero, if disjoint) the window. Leave the query's own window intact only
+	// when it is genuinely bounded — see isAlreadyTimeBounded.
+	if isAlreadyTimeBounded(rest) {
 		return trimmed
 	}
 
-	if prefix != "" {
-		if rest == "" {
-			return fmt.Sprintf("%s %s", prefix, lookbackFilter)
-		}
-		return fmt.Sprintf("%s %s %s", prefix, lookbackFilter, rest)
+	// The injected filter binds by AND, which is tighter than OR. If the query
+	// has a top-level OR (e.g. `_time:5m OR level:critical`), a bare prepend
+	// would bind only to the first branch and leave the rest unbounded, so wrap
+	// the query in parens to bound every branch.
+	toBound := rest
+	if hasTopLevelOr(rest) {
+		toBound = "(" + rest + ")"
 	}
 
-	return fmt.Sprintf("%s %s", lookbackFilter, rest)
+	if prefix != "" {
+		if toBound == "" {
+			return fmt.Sprintf("%s %s", prefix, lookbackFilter)
+		}
+		return fmt.Sprintf("%s %s %s", prefix, lookbackFilter, toBound)
+	}
+
+	return fmt.Sprintf("%s %s", lookbackFilter, toBound)
 }
 
-// containsTimeFilter reports whether query contains a `_time:` filter at a
-// field-name boundary (so it does not match a field like `custom_time:`). It is
-// a heuristic: a `_time:` inside a quoted string literal would be a false
-// positive, but that only causes the lookback to be conservatively skipped.
-func containsTimeFilter(query string) bool {
+// isAlreadyTimeBounded reports whether query is already constrained by a
+// top-level, non-negated `_time:` filter, in which case alert lookback must not
+// be re-injected. It is a deliberate structural heuristic, NOT a full LogsQL
+// parser. Rules:
+//   - A `_time:` is only counted at paren depth 0 (a `_time:` inside a group is
+//     not guaranteed to bound the whole query).
+//   - A `_time:` directly under NOT (e.g. `NOT _time:1h`) does not bound the
+//     window, so it is ignored. (A `-_time:` negation is also ignored, since
+//     `-` is a field-name glue byte and breaks the field boundary below.)
+//   - A top-level OR means no single `_time:` bounds every branch, so the query
+//     is treated as unbounded.
+//
+// Known conservative limits: a `_time:` inside a quoted string literal is a
+// false match at the field-boundary level but is only a conservative skip
+// (lookback still injected). Compound field names ending in `_time` (e.g.
+// `custom._time:`) are correctly NOT matched because glue bytes extend the
+// field boundary.
+func isAlreadyTimeBounded(query string) bool {
+	if hasTopLevelOr(query) {
+		return false
+	}
+
 	const token = "_time:"
-	for i := 0; i <= len(query)-len(token); {
-		idx := strings.Index(query[i:], token)
-		if idx < 0 {
-			return false
+	depth := 0
+	var quote byte
+	escaped := false
+	for i := 0; i < len(query); i++ {
+		c := query[i]
+		if escaped {
+			escaped = false
+			continue
 		}
-		pos := i + idx
-		if pos == 0 || !isFieldNameByte(query[pos-1]) {
-			return true
+		if quote != 0 {
+			switch c {
+			case '\\':
+				escaped = true
+			case quote:
+				quote = 0
+			}
+			continue
 		}
-		i = pos + len(token)
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+			continue
+		case '(':
+			depth++
+			continue
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+			continue
+		}
+		if depth != 0 || c != '_' || !strings.HasPrefix(query[i:], token) {
+			continue
+		}
+		if i > 0 && isFieldNameByte(query[i-1]) {
+			continue // part of a longer compound field name
+		}
+		if precededByNegation(query, i) {
+			continue
+		}
+		return true
 	}
 	return false
 }
 
+// hasTopLevelOr reports whether query contains an `OR` boolean operator at paren
+// depth 0, outside any quoted literal. LogsQL requires whitespace/paren
+// boundaries around the keyword, so `error` (containing "or") is not matched.
+func hasTopLevelOr(query string) bool {
+	depth := 0
+	var quote byte
+	escaped := false
+	for i := 0; i < len(query); i++ {
+		c := query[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			switch c {
+			case '\\':
+				escaped = true
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		default:
+			if depth == 0 && (c == 'o' || c == 'O') &&
+				i+2 <= len(query) && strings.EqualFold(query[i:i+2], "or") &&
+				isKeywordBoundary(query, i-1) && isKeywordBoundary(query, i+2) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isKeywordBoundary reports whether the byte at index i is a boundary for a
+// LogsQL boolean keyword: the start/end of the string, whitespace, or a paren.
+func isKeywordBoundary(query string, i int) bool {
+	if i < 0 || i >= len(query) {
+		return true
+	}
+	switch query[i] {
+	case ' ', '\t', '\n', '\r', '(', ')':
+		return true
+	}
+	return false
+}
+
+// precededByNegation reports whether the token immediately before pos is the
+// LogsQL `NOT` keyword.
+func precededByNegation(query string, pos int) bool {
+	j := pos - 1
+	for j >= 0 && (query[j] == ' ' || query[j] == '\t') {
+		j--
+	}
+	end := j + 1
+	for j >= 0 && isKeywordLetter(query[j]) {
+		j--
+	}
+	return strings.EqualFold(query[j+1:end], "not")
+}
+
+func isKeywordLetter(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+// matchingParen returns the index of the `)` matching the `(` at index open,
+// or -1 if there is none. It counts paren depth while skipping quoted string
+// literals so a paren inside a quoted value is not miscounted.
+func matchingParen(s string, open int) int {
+	if open < 0 || open >= len(s) || s[open] != '(' {
+		return -1
+	}
+	depth := 0
+	var quote byte
+	escaped := false
+	for i := open; i < len(s); i++ {
+		c := s[i]
+		if escaped {
+			escaped = false
+			continue
+		}
+		if quote != 0 {
+			switch c {
+			case '\\':
+				escaped = true
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '"', '\'', '`':
+			quote = c
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// isFieldNameByte reports whether b can appear inside an unquoted LogsQL field
+// name. Beyond alphanumerics and `_`, VictoriaLogs glues compound tokens on
+// `. - / : $ +` (see glueCompoundTokens in VL lib/logstorage/parser.go), so a
+// name like `custom._time` or `custom-_time` is a single field — and must not
+// be detected as the `_time` filter.
 func isFieldNameByte(b byte) bool {
-	return b == '_' ||
-		(b >= 'a' && b <= 'z') ||
+	switch b {
+	case '_', '.', '-', '/', ':', '$', '+':
+		return true
+	}
+	return (b >= 'a' && b <= 'z') ||
 		(b >= 'A' && b <= 'Z') ||
 		(b >= '0' && b <= '9')
 }
@@ -831,7 +1077,15 @@ func joinBaseURL(baseURL, path string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("invalid victorialogs base_url: %w", err)
 	}
+	// Preserve any percent-encoding in the configured base path (e.g. an
+	// encoded %2F segment) by updating RawPath alongside Path. Mutating only
+	// Path lets url.String() re-derive the escaped form from the decoded Path
+	// and silently drop the encoding. EscapedPath() must be read BEFORE Path is
+	// mutated so it reflects the original encoding. path is a fixed ASCII
+	// literal, so appending it verbatim needs no escaping.
+	escapedBase := strings.TrimRight(parsed.EscapedPath(), "/")
 	parsed.Path = strings.TrimRight(parsed.Path, "/") + path
+	parsed.RawPath = escapedBase + path
 	return parsed.String(), nil
 }
 
@@ -991,7 +1245,7 @@ func statsFromHeaders(resp *http.Response, rowCount int) models.QueryStats {
 func appendDefaultSort(query string) string {
 	stages := splitTopLevelPipes(query)
 	for _, stage := range stages[1:] {
-		if !strings.HasPrefix(strings.TrimSpace(stage), "fields ") {
+		if !isProjectionStage(stage) {
 			return query
 		}
 	}
@@ -1002,15 +1256,28 @@ func appendDefaultSort(query string) string {
 	return out
 }
 
+// isProjectionStage reports whether a pipe stage is a field projection, i.e.
+// the `fields` pipe or its `keep` alias (VL pipe.go maps `keep` →
+// parsePipeFields). Matching is case-insensitive since LogsQL pipe names are
+// not case-sensitive.
+func isProjectionStage(stage string) bool {
+	trimmed := strings.TrimSpace(stage)
+	name := trimmed
+	if idx := strings.IndexAny(trimmed, " \t("); idx >= 0 {
+		name = trimmed[:idx]
+	}
+	name = strings.ToLower(name)
+	return name == "fields" || name == "keep"
+}
+
 // splitTopLevelPipes splits a LogsQL query on `|` pipe stages. The scan is
-// quote-aware: a `|` inside a double-quoted string literal (e.g. `_msg:"a|b"`)
-// is not a stage boundary. Single-/backtick-quoted literals are not tracked,
-// so a pipe inside one conservatively splits — the query then merely stays
-// unsorted, which is harmless.
+// quote-aware across all three LogsQL quote styles (double, single, and
+// backtick), so a `|` inside any quoted string literal (e.g. `_msg:"a|b"`,
+// `_msg:'a|b'`) is not treated as a stage boundary.
 func splitTopLevelPipes(query string) []string {
 	var stages []string
 	var current strings.Builder
-	inQuote := false
+	var quote rune
 	escaped := false
 	for _, r := range query {
 		if escaped {
@@ -1018,22 +1285,23 @@ func splitTopLevelPipes(query string) []string {
 			current.WriteRune(r)
 			continue
 		}
-		switch r {
-		case '\\':
-			if inQuote {
+		switch {
+		case r == '\\':
+			if quote != 0 {
 				escaped = true
 			}
 			current.WriteRune(r)
-		case '"':
-			inQuote = !inQuote
-			current.WriteRune(r)
-		case '|':
-			if inQuote {
-				current.WriteRune(r)
-			} else {
-				stages = append(stages, current.String())
-				current.Reset()
+		case quote != 0:
+			if r == quote {
+				quote = 0
 			}
+			current.WriteRune(r)
+		case r == '"' || r == '\'' || r == '`':
+			quote = r
+			current.WriteRune(r)
+		case r == '|':
+			stages = append(stages, current.String())
+			current.Reset()
 		default:
 			current.WriteRune(r)
 		}
@@ -1067,36 +1335,12 @@ func resolveQueryLimit(limit, defaultLimit, maxLimit int) (applied int, added, c
 	return applied, added, capped
 }
 
-// approxRowJSONSize approximates a decoded VL row's JSON-encoded byte size for
-// the soft response-byte budget, without a full per-row marshal on the hot
-// decode path. VL rows are overwhelmingly string/number scalars.
-func approxRowJSONSize(row map[string]interface{}) int {
-	size := 2 // {}
-	for key, value := range row {
-		size += len(key) + 4 // "key": plus separators
-		size += approxValueJSONSize(value)
-	}
-	return size
-}
-
-func approxValueJSONSize(value interface{}) int {
-	switch v := value.(type) {
-	case nil:
-		return 4 // null
-	case string:
-		return len(v) + 2 // surrounding quotes
-	case json.Number:
-		return len(string(v))
-	case bool:
-		return 5 // conservative (true/false)
-	default:
-		if encoded, err := json.Marshal(v); err == nil {
-			return len(encoded)
-		}
-		return 16
-	}
-}
-
+// inferColumnType maps a field name to a display type. VictoriaLogs is
+// schemaless — the field discovery API returns names only, with no per-field
+// type — so this uses name heuristics rather than the returned values. Value
+// inference was considered but rejected: the same field can appear with
+// different value shapes across rows/queries, which would make a column's type
+// flap between requests. A name-based guess is stable and deterministic.
 func inferColumnType(source *models.Source, name string) string {
 	if name == "" {
 		return "String"
