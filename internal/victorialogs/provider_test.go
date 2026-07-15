@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -46,6 +47,22 @@ func TestValidateConnectionUsesHeadersAcrossHealthAndQueryValidation(t *testing.
 				t.Fatalf("unexpected ignore_pipes: %q", got)
 			}
 			_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":1}]}`))
+		case "/select/logsql/query":
+			if err := r.ParseForm(); err != nil {
+				t.Fatalf("parse form: %v", err)
+			}
+			if got := r.Form.Get("limit"); got != "1" {
+				t.Fatalf("unexpected query probe limit: %q", got)
+			}
+			// Reserved auth/tenant headers must be present on the real query
+			// probe too, proving both validation calls carry them.
+			if got := r.Header.Get("Authorization"); got != "Bearer secret-token" {
+				t.Fatalf("unexpected authorization header on query probe: %q", got)
+			}
+			if got := r.Header.Get("AccountID"); got != "12" {
+				t.Fatalf("unexpected account header on query probe: %q", got)
+			}
+			_, _ = w.Write([]byte(`{"_time":"2026-04-08T10:00:00Z","_msg":"probe"}` + "\n"))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -575,6 +592,244 @@ func TestAppendDefaultSort(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newPermissiveVLServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		case "/select/logsql/field_names":
+			_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":1}]}`))
+		case "/select/logsql/query":
+			_, _ = w.Write([]byte(`{"_time":"2026-04-08T10:00:00Z","_msg":"probe"}` + "\n"))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+}
+
+// Finding #16: custom headers must never override the provider-computed
+// auth/tenant headers. Reject the collision at validation time.
+func TestValidateConnectionRejectsReservedCustomHeaders(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"Authorization", "authorization", "AccountID", "accountid", "ProjectID", "projectid"} {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			provider := newTestProvider(nil)
+			_, err := provider.ValidateConnection(context.Background(), &models.ValidateConnectionRequest{
+				SourceType: models.SourceTypeVictoriaLogs,
+				Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{
+					BaseURL: "https://logs.example.com",
+					Headers: map[string]string{key: "attacker-value"},
+				}),
+			})
+			if err == nil {
+				t.Fatalf("expected reserved header %q to be rejected", key)
+			}
+			if !strings.Contains(err.Error(), "reserved") {
+				t.Fatalf("unexpected error for %q: %v", key, err)
+			}
+		})
+	}
+}
+
+// Finding #16: even if a reserved header somehow reaches applyHeaders, the
+// computed auth/tenant values must win on the wire.
+func TestApplyHeadersSkipsReservedCustomHeaders(t *testing.T) {
+	t.Parallel()
+
+	conn := models.VictoriaLogsConnectionInfo{
+		BaseURL: "https://logs.example.com",
+		Auth: models.VictoriaLogsAuth{
+			Mode:  "bearer",
+			Token: "real-token",
+		},
+		Tenant: models.VictoriaLogsTenant{
+			AccountID: "12",
+			ProjectID: "34",
+		},
+		Headers: map[string]string{
+			"Authorization": "Bearer forged",
+			"accountid":     "999",
+			"ProjectID":     "888",
+			"X-Api-Key":     "keep-me",
+		},
+	}
+
+	req, err := http.NewRequest(http.MethodGet, conn.BaseURL, http.NoBody)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	applyHeaders(req, conn)
+
+	if got := req.Header.Get("Authorization"); got != "Bearer real-token" {
+		t.Fatalf("reserved Authorization header was overridden: %q", got)
+	}
+	if got := req.Header.Get("AccountID"); got != "12" {
+		t.Fatalf("reserved AccountID header was overridden: %q", got)
+	}
+	if got := req.Header.Get("ProjectID"); got != "34" {
+		t.Fatalf("reserved ProjectID header was overridden: %q", got)
+	}
+	if got := req.Header.Get("X-Api-Key"); got != "keep-me" {
+		t.Fatalf("legitimate custom header was dropped: %q", got)
+	}
+}
+
+// Finding #15: switching auth mode must only carry over the credential the NEW
+// mode uses, so a stale token/password cannot be resurrected via a later switch.
+func TestUpdateSourceCarriesOnlyActiveModeCredential(t *testing.T) {
+	t.Parallel()
+
+	server := newPermissiveVLServer(t)
+	defer server.Close()
+	provider := newTestProvider(server)
+
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{
+		BaseURL: server.URL,
+		Auth: models.VictoriaLogsAuth{
+			Mode:  "bearer",
+			Token: "old-token",
+		},
+	})
+
+	// bearer -> basic: the bearer token must be dropped, not carried over.
+	if _, err := provider.UpdateSource(context.Background(), source, &models.UpdateSourceRequest{
+		Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{
+			BaseURL: server.URL,
+			Auth: models.VictoriaLogsAuth{
+				Mode:     "basic",
+				Username: "user",
+				Password: "pass",
+			},
+		}),
+	}); err != nil {
+		t.Fatalf("switch to basic failed: %v", err)
+	}
+	afterBasic, err := source.VictoriaLogsConnection()
+	if err != nil {
+		t.Fatalf("read connection after basic switch: %v", err)
+	}
+	if afterBasic.Auth.Token != "" {
+		t.Fatalf("bearer token survived switch to basic: %q", afterBasic.Auth.Token)
+	}
+	if afterBasic.Auth.Password != "pass" {
+		t.Fatalf("unexpected password after basic switch: %q", afterBasic.Auth.Password)
+	}
+
+	// basic -> bearer with a blank (redacted) token: the old token must NOT be
+	// resurrected, so bearer validation fails for lack of a token.
+	_, err = provider.UpdateSource(context.Background(), source, &models.UpdateSourceRequest{
+		Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{
+			BaseURL: server.URL,
+			Auth: models.VictoriaLogsAuth{
+				Mode: "bearer",
+			},
+		}),
+	})
+	if err == nil {
+		t.Fatal("expected bearer switch with blank token to fail (no token to resurrect)")
+	}
+	if !strings.Contains(err.Error(), "token is required") {
+		t.Fatalf("unexpected error switching back to bearer: %v", err)
+	}
+}
+
+// Regression guard for Finding #15: within the same mode, a blank redacted
+// credential still means "keep the existing one".
+func TestUpdateSourceKeepsActiveModeCredentialOnBlank(t *testing.T) {
+	t.Parallel()
+
+	server := newPermissiveVLServer(t)
+	defer server.Close()
+	provider := newTestProvider(server)
+
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{
+		BaseURL: server.URL,
+		Auth: models.VictoriaLogsAuth{
+			Mode:  "bearer",
+			Token: "keep-token",
+		},
+	})
+
+	if _, err := provider.UpdateSource(context.Background(), source, &models.UpdateSourceRequest{
+		Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{
+			BaseURL: server.URL,
+			Auth:    models.VictoriaLogsAuth{Mode: "bearer"},
+		}),
+	}); err != nil {
+		t.Fatalf("same-mode bearer update failed: %v", err)
+	}
+	got, err := source.VictoriaLogsConnection()
+	if err != nil {
+		t.Fatalf("read connection: %v", err)
+	}
+	if got.Auth.Token != "keep-token" {
+		t.Fatalf("blank token should keep existing, got %q", got.Auth.Token)
+	}
+}
+
+// Finding #17: validation must probe the real query path, not just field_names.
+func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
+	t.Parallel()
+
+	var queryProbed bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/health":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte("ok"))
+		case "/select/logsql/field_names":
+			// A proxy that allows field_names but denies /query.
+			_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":1}]}`))
+		case "/select/logsql/query":
+			queryProbed = true
+			http.Error(w, "forbidden", http.StatusForbidden)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	provider := newTestProvider(server)
+	_, err := provider.ValidateConnection(context.Background(), &models.ValidateConnectionRequest{
+		SourceType: models.SourceTypeVictoriaLogs,
+		Connection: mustJSON(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL}),
+	})
+	if err == nil {
+		t.Fatal("expected validation to fail when the query path is denied")
+	}
+	if !queryProbed {
+		t.Fatal("validation did not probe the real query path")
+	}
+	if !strings.Contains(err.Error(), "denied access") {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+// Finding #18: lifecycle operations for the same source ID must be serialised so
+// concurrent init/remove/health calls cannot deadlock or interleave unsafely.
+func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
+	t.Parallel()
+
+	server := newPermissiveVLServer(t)
+	defer server.Close()
+	provider := newTestProvider(server)
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(4)
+		go func() { defer wg.Done(); _ = provider.InitializeSource(context.Background(), source) }()
+		go func() { defer wg.Done(); _ = provider.RemoveSource(source.ID) }()
+		go func() { defer wg.Done(); _ = provider.GetSourceHealth(context.Background(), source.ID) }()
+		go func() { defer wg.Done(); _ = provider.CheckSourceConnectionStatus(context.Background(), source) }()
+	}
+	wg.Wait()
 }
 
 func TestOrderFieldNamesPrioritizesMetadata(t *testing.T) {

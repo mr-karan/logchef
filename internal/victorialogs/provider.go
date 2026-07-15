@@ -40,12 +40,66 @@ const (
 	healthCacheTTL = 10 * time.Second
 )
 
+// reservedHeaderKeys are HTTP headers the provider computes from validated
+// auth/tenant config. They must never be overridable via user-supplied custom
+// headers, otherwise a custom "Authorization" would replace the validated
+// Basic/Bearer credential and a custom "AccountID"/"ProjectID" would replace the
+// validated VictoriaLogs tenant scope. Keys are stored lower-cased and compared
+// case-insensitively, matching Go's header canonicalisation. "AccountID" and
+// "ProjectID" are the exact tenant header names VictoriaLogs reads.
+var reservedHeaderKeys = map[string]struct{}{
+	"authorization": {},
+	"accountid":     {},
+	"projectid":     {},
+}
+
+// isReservedHeaderKey reports whether a custom header key collides with a
+// provider-computed auth/tenant header.
+func isReservedHeaderKey(key string) bool {
+	_, ok := reservedHeaderKeys[strings.ToLower(strings.TrimSpace(key))]
+	return ok
+}
+
 type Provider struct {
 	client  *http.Client
 	log     *slog.Logger
 	mu      sync.RWMutex
 	sources map[models.SourceID]models.VictoriaLogsConnectionInfo
 	health  map[models.SourceID]models.SourceHealth
+	// opLocks serialises lifecycle operations (initialize / remove / health
+	// refresh) per source ID. Each of those operations is a read-modify sequence
+	// over the sources+health maps; the maps are individually mutex-guarded, but
+	// without per-ID serialisation two concurrent operations for the SAME source
+	// can interleave and leave stale state (e.g. health cached for a source that
+	// a concurrent remove already deleted).
+	opLocks keyedMutex
+}
+
+// keyedMutex hands out one mutex per key, so callers can serialise operations
+// for the same key while operations for different keys proceed concurrently.
+// Per-key mutexes are created on demand and intentionally never reclaimed: the
+// key space here is the set of source IDs, which is small and bounded.
+type keyedMutex struct {
+	mu    sync.Mutex
+	locks map[models.SourceID]*sync.Mutex
+}
+
+// lock acquires the mutex for id and returns its unlock function, so callers can
+// write `defer p.opLocks.lock(id)()`.
+func (k *keyedMutex) lock(id models.SourceID) func() {
+	k.mu.Lock()
+	if k.locks == nil {
+		k.locks = make(map[models.SourceID]*sync.Mutex)
+	}
+	m, ok := k.locks[id]
+	if !ok {
+		m = &sync.Mutex{}
+		k.locks[id] = m
+	}
+	k.mu.Unlock()
+
+	m.Lock()
+	return m.Unlock
 }
 
 func NewProvider(log *slog.Logger) *Provider {
@@ -205,31 +259,7 @@ func (p *Provider) UpdateSource(ctx context.Context, source *models.Source, req 
 		// API responses redact credentials, so edit flows send them blank to
 		// mean "keep the existing ones".
 		if prev, prevErr := source.VictoriaLogsConnection(); prevErr == nil {
-			if strings.EqualFold(strings.TrimSpace(conn.Auth.Mode), "none") {
-				// Auth turned off: drop any stored credentials so repointing
-				// base_url can't leak the previous host's token/password.
-				conn.Auth.Username = ""
-				conn.Auth.Password = ""
-				conn.Auth.Token = ""
-			} else {
-				if conn.Auth.Password == "" {
-					conn.Auth.Password = prev.Auth.Password
-				}
-				if conn.Auth.Token == "" {
-					conn.Auth.Token = prev.Auth.Token
-				}
-			}
-			// Custom headers may hold secrets (e.g. an X-API-Key for a fronting
-			// proxy) and are redacted (blanked) in API responses, so a blank
-			// value on edit means "keep the existing one".
-			for key, value := range conn.Headers {
-				if strings.TrimSpace(value) != "" {
-					continue
-				}
-				if prevValue, ok := prev.Headers[key]; ok {
-					conn.Headers[key] = prevValue
-				}
-			}
+			mergeRedactedConnectionSecrets(&conn, prev)
 		}
 		if err := validateVictoriaLogsConnectionConfig("connection.", conn); err != nil {
 			return nil, err
@@ -262,6 +292,8 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 		return fmt.Errorf("source is required")
 	}
 
+	defer p.opLocks.lock(source.ID)()
+
 	conn, err := source.VictoriaLogsConnection()
 	if err != nil {
 		return err
@@ -281,6 +313,8 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 }
 
 func (p *Provider) RemoveSource(sourceID models.SourceID) error {
+	defer p.opLocks.lock(sourceID)()
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -294,6 +328,8 @@ func (p *Provider) CheckSourceConnectionStatus(ctx context.Context, source *mode
 		return false
 	}
 
+	defer p.opLocks.lock(source.ID)()
+
 	conn, err := p.connectionForSource(source)
 	if err != nil {
 		p.updateHealth(source.ID, false, err)
@@ -306,6 +342,8 @@ func (p *Provider) CheckSourceConnectionStatus(ctx context.Context, source *mode
 }
 
 func (p *Provider) GetSourceHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
+	defer p.opLocks.lock(sourceID)()
+
 	p.mu.RLock()
 	conn, ok := p.sources[sourceID]
 	health, hasHealth := p.health[sourceID]
@@ -409,6 +447,55 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 	return true, nil
 }
 
+// mergeRedactedConnectionSecrets carries over credentials and custom headers
+// that the edit flow sent blank (redacted) from the previous stored config.
+// Credentials honour the NEW auth mode: only the credential that mode uses is
+// preserved, so switching modes (e.g. bearer->basic->bearer) cannot resurrect a
+// stale token or password, and switching to "none" drops all of them.
+func mergeRedactedConnectionSecrets(conn *models.VictoriaLogsConnectionInfo, prev models.VictoriaLogsConnectionInfo) {
+	switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
+	case "none":
+		// Auth turned off: drop any stored credentials so repointing base_url
+		// can't leak the previous host's token/password.
+		conn.Auth.Username = ""
+		conn.Auth.Password = ""
+		conn.Auth.Token = ""
+	case "basic":
+		// Basic auth never sends a bearer token; keep the password (blank means
+		// "keep existing") and drop any carried-over token.
+		if conn.Auth.Password == "" {
+			conn.Auth.Password = prev.Auth.Password
+		}
+		conn.Auth.Token = ""
+	case "bearer":
+		if conn.Auth.Token == "" {
+			conn.Auth.Token = prev.Auth.Token
+		}
+		conn.Auth.Password = ""
+	default:
+		// Unset/auto-detect mode may use either credential, so preserve
+		// blank-means-keep semantics for both.
+		if conn.Auth.Password == "" {
+			conn.Auth.Password = prev.Auth.Password
+		}
+		if conn.Auth.Token == "" {
+			conn.Auth.Token = prev.Auth.Token
+		}
+	}
+
+	// Custom headers may hold secrets (e.g. an X-API-Key for a fronting proxy)
+	// and are redacted (blanked) in API responses, so a blank value on edit
+	// means "keep the existing one".
+	for key, value := range conn.Headers {
+		if strings.TrimSpace(value) != "" {
+			continue
+		}
+		if prevValue, ok := prev.Headers[key]; ok {
+			conn.Headers[key] = prevValue
+		}
+	}
+}
+
 func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.VictoriaLogsConnectionInfo) error {
 	if err := datasource.ValidateVictoriaLogsConnection(fieldPrefix, conn.BaseURL); err != nil {
 		return err
@@ -454,6 +541,18 @@ func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.Victor
 		}
 	}
 
+	// Reserved headers are set automatically from auth/tenant config. Reject any
+	// custom header that would collide with them so credentials/tenant scope
+	// cannot be silently overridden via the headers map.
+	for key := range conn.Headers {
+		if isReservedHeaderKey(key) {
+			return &datasource.ValidationError{
+				Field:   fieldPrefix + "headers",
+				Message: fmt.Sprintf("custom header %q is reserved and set automatically from auth/tenant config; remove it", strings.TrimSpace(key)),
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -475,20 +574,46 @@ func (p *Provider) validateQueryAccess(ctx context.Context, conn models.Victoria
 		defer cancel()
 	}
 
-	endpoint, err := joinBaseURL(conn.BaseURL, "/select/logsql/field_names")
+	now := time.Now().UTC()
+	start := formatAPITime(now.Add(-5 * time.Minute))
+	end := formatAPITime(now)
+
+	// Prove metadata access via field_names.
+	fieldForm := url.Values{}
+	fieldForm.Set("query", "*")
+	fieldForm.Set("start", start)
+	fieldForm.Set("end", end)
+	fieldForm.Set("ignore_pipes", "1")
+	applyScopeFilters(fieldForm, conn)
+	if err := p.probeQueryEndpoint(validationCtx, conn, "/select/logsql/field_names", fieldForm); err != nil {
+		return err
+	}
+
+	// Prove real query access. A proxy ACL can allow /field_names while denying
+	// /query, so field_names alone does not guarantee the source is usable.
+	// Probe the actual query path with a tiny bounded window and limit=1 (which
+	// VictoriaLogs short-circuits) so the failure surfaces at validation instead
+	// of on the user's first query. Shares the validation deadline above.
+	queryForm := url.Values{}
+	queryForm.Set("query", "*")
+	queryForm.Set("start", start)
+	queryForm.Set("end", end)
+	queryForm.Set("limit", "1")
+	applyScopeFilters(queryForm, conn)
+	return p.probeQueryEndpoint(validationCtx, conn, "/select/logsql/query", queryForm)
+}
+
+// probeQueryEndpoint POSTs a form-encoded request to a VictoriaLogs query
+// endpoint and maps a non-2xx response to a helpful validation error. A 2xx
+// response is treated as success; the body is drained (bounded) so the
+// connection can be reused.
+func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaLogsConnectionInfo, path string, form url.Values) error {
+	endpoint, err := joinBaseURL(conn.BaseURL, path)
 	if err != nil {
 		return &datasource.ValidationError{Field: "connection.base_url", Message: "invalid VictoriaLogs base URL", Err: err}
 	}
 
-	now := time.Now().UTC()
-	form := url.Values{}
-	form.Set("query", "*")
-	form.Set("start", formatAPITime(now.Add(-5*time.Minute)))
-	form.Set("end", formatAPITime(now))
-	form.Set("ignore_pipes", "1")
-	applyScopeFilters(form, conn)
-
-	req, err := http.NewRequestWithContext(validationCtx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, strings.NewReader(form.Encode()))
 	if err != nil {
 		return &datasource.ValidationError{Field: "connection.base_url", Message: "failed to create VictoriaLogs validation request", Err: err}
 	}
@@ -502,6 +627,9 @@ func (p *Provider) validateQueryAccess(ctx context.Context, conn models.Victoria
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		// Drain a bounded amount so the keep-alive connection can be reused; the
+		// probe only cares about the status code, not the streamed rows.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
 		return nil
 	}
 
@@ -600,6 +728,12 @@ func applyHeaders(req *http.Request, conn models.VictoriaLogsConnectionInfo) {
 
 	for key, value := range conn.Headers {
 		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		// Defence in depth: reserved keys carry provider-computed auth/tenant
+		// values and are rejected at save time, but skip them here too so a
+		// custom header can never override validated auth/tenant on the wire.
+		if isReservedHeaderKey(key) {
 			continue
 		}
 		req.Header.Set(key, value)
