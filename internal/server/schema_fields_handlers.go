@@ -15,6 +15,10 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// SchemaTimeout is the maximum time to wait for a source schema inspection
+// query against the configured datasource before aborting.
+const SchemaTimeout = 20 * time.Second
+
 // handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
@@ -24,9 +28,20 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
 
-	// Get schema via core function.
-	schema, err := core.GetSourceSchema(c.Context(), s.datasources, sourceID)
+	// Get schema via core function, bounded by SchemaTimeout so a
+	// slow/misbehaving datasource can't hang the request indefinitely.
+	ctx, cancel := context.WithTimeout(c.Context(), SchemaTimeout)
+	defer cancel()
+
+	schema, err := core.GetSourceSchema(ctx, s.datasources, sourceID)
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("schema request timed out", "source_id", sourceID, "timeout", SchemaTimeout)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}

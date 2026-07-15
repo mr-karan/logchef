@@ -3,6 +3,7 @@ package server
 // Histogram data handler and its request-parsing helpers.
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -15,6 +16,12 @@ import (
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+// HistogramTimeout is the maximum time to wait for a histogram query against
+// the configured datasource (ClickHouse or VictoriaLogs) before aborting.
+// Bounds both slow ClickHouse queries and VictoriaLogs response bodies that
+// may otherwise be read without a deadline.
+const HistogramTimeout = 30 * time.Second
 
 // handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
@@ -46,9 +53,20 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, errMsg, models.ValidationErrorType)
 	}
 
-	// Execute histogram query via core function.
-	result, err := core.GetHistogramData(c.Context(), s.datasources, sourceID, params)
+	// Execute histogram query via core function, bounded by HistogramTimeout so
+	// a slow/misbehaving datasource can't hang the request indefinitely.
+	ctx, cancel := context.WithTimeout(c.Context(), HistogramTimeout)
+	defer cancel()
+
+	result, err := core.GetHistogramData(ctx, s.datasources, sourceID, params)
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("histogram request timed out", "source_id", sourceID, "timeout", HistogramTimeout)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
 		return s.handleHistogramError(c, sourceID, err)
 	}
 

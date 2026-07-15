@@ -1,10 +1,12 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -12,6 +14,12 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// TestAlertTimeout is the maximum time to wait for an ad-hoc "test alert
+// query" run against the configured datasource before aborting. This is
+// separate from the 90s deadline the scheduled alert evaluator applies to
+// EvaluateAlert.
+const TestAlertTimeout = 30 * time.Second
 
 // requireAlertsEnabled is route-group middleware that short-circuits with 503
 // when the alerts subsystem is disabled in config, and otherwise passes the
@@ -282,8 +290,20 @@ func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
 
-	result, err := core.TestAlertQuery(c.Context(), s.sqlite, s.datasources, req.SourceID, &req.TestAlertQueryRequest)
+	// Bound by TestAlertTimeout so a slow/misbehaving datasource can't hang
+	// the request indefinitely.
+	ctx, cancel := context.WithTimeout(c.Context(), TestAlertTimeout)
+	defer cancel()
+
+	result, err := core.TestAlertQuery(ctx, s.sqlite, s.datasources, req.SourceID, &req.TestAlertQueryRequest)
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("test alert query timed out", "source_id", req.SourceID, "timeout", TestAlertTimeout)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
 		if errors.Is(err, datasource.ErrOperationNotSupported) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Alert evaluation is not supported for this source type yet", models.ValidationErrorType)
 		}
