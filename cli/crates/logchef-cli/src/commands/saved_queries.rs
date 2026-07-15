@@ -10,13 +10,21 @@ use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
 use serde::Serialize;
-use std::io::IsTerminal;
 use url::Url;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # List all saved queries you can see
+  logchef saved-queries
+
+  # Run a saved query by id, name, or an explorer URL
+  logchef saved-queries 14
+  logchef saved-queries 'Checkout 5xx' --since 1h
+  logchef saved-queries 'https://logs.example.com/logs/explore?team=8&source=11&id=14'")]
 pub struct SavedQueriesArgs {
     /// Saved-query name, numeric ID, or explorer URL. Lists saved queries if omitted.
     query: Option<String>,
@@ -149,6 +157,7 @@ pub async fn run(args: SavedQueriesArgs, global: GlobalArgs) -> Result<()> {
         &resolved.query,
         &args,
         ctx,
+        global.quiet,
     )
     .await
 }
@@ -202,6 +211,7 @@ fn list_saved_queries(queries: &[Collection], args: &SavedQueriesArgs) -> Result
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_saved_query(
     config: &Config,
     client: &Client,
@@ -210,6 +220,7 @@ async fn run_saved_query(
     query: &Collection,
     args: &SavedQueriesArgs,
     ctx: &logchef_core::config::Context,
+    quiet: bool,
 ) -> Result<()> {
     let content: CollectionQueryContent =
         serde_json::from_str(&query.query_content).context("Failed to parse query content")?;
@@ -235,7 +246,10 @@ async fn run_saved_query(
         return Ok(());
     }
 
-    eprintln!("Running saved query: {} ({})", query.name, query.query_language);
+    eprintln!(
+        "Running saved query: {} ({})",
+        query.name, query.query_language
+    );
 
     let response = if query.query_language != "logchefql" {
         let request = SqlQueryRequest {
@@ -265,7 +279,7 @@ async fn run_saved_query(
             .context("Query failed")?
     };
 
-    print_query_response(config, query, args, &response)
+    print_query_response(config, query, args, &response, quiet)
 }
 
 fn print_query_response(
@@ -273,9 +287,9 @@ fn print_query_response(
     _query: &Collection,
     args: &SavedQueriesArgs,
     response: &logchef_core::api::QueryResponse,
+    quiet: bool,
 ) -> Result<()> {
     let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
@@ -293,20 +307,34 @@ fn print_query_response(
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
-            print_stats_if_tty(is_tty, entries.len(), &response.stats);
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
-            print_stats_if_tty(is_tty, entries.len(), &response.stats);
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::Msg => {
-            print_msg(entries, &response.columns, _query.query_language != "logchefql");
+            print_msg(
+                entries,
+                &response.columns,
+                _query.query_language != "logchefql",
+            );
         }
         OutputFormat::Text => {
-            let highlighter = if args.no_highlight || !is_tty {
+            let highlighter = if args.no_highlight || !ui::human(quiet) {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -328,7 +356,12 @@ fn print_query_response(
                     println!("{}", line);
                 }
             }
-            print_stats_if_tty(is_tty, entries.len(), &response.stats);
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
     }
 
@@ -384,15 +417,6 @@ fn json_value_to_line(value: &serde_json::Value) -> String {
         serde_json::Value::String(s) => s.clone(),
         serde_json::Value::Null => String::new(),
         _ => value.to_string(),
-    }
-}
-
-fn print_stats_if_tty(is_tty: bool, count: usize, stats: &QueryStats) {
-    if is_tty {
-        eprintln!(
-            "\n{} logs | {}ms | {} rows read",
-            count, stats.execution_time_ms, stats.rows_read
-        );
     }
 }
 

@@ -91,6 +91,25 @@ pub fn resolve_time_range(input: TimeInput<'_>, configured_tz: Option<&str>) -> 
     }
 }
 
+/// Parse a wall-clock `YYYY-MM-DD HH:MM:SS` string, interpreted in the
+/// effective timezone, into epoch **milliseconds** (UTC). Returns `None` if
+/// the string does not parse or the local time is invalid/ambiguous (e.g. a
+/// DST gap).
+///
+/// Used by `open` to build the web explorer's absolute-time `start`/`end`
+/// query params, which the frontend reads as epoch-ms integers
+/// (`parseInt` -> `timestampToCalendarDateTime`). Going through this shared
+/// helper keeps the wall-clock-in-effective-timezone invariant consistent
+/// with the rest of the CLI's time handling.
+pub fn wall_clock_to_epoch_millis(wall_clock: &str, configured_tz: Option<&str>) -> Option<i64> {
+    let tz = resolve_timezone(configured_tz);
+    chrono::NaiveDateTime::parse_from_str(wall_clock.trim(), WALL_CLOCK_FORMAT)
+        .ok()?
+        .and_local_timezone(tz)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc).timestamp_millis())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -177,6 +196,28 @@ mod tests {
     fn empty_configured_zone_falls_back_to_injected_system_zone() {
         let tz = resolve_timezone_with(Some(""), Some("Asia/Kolkata"));
         assert_eq!(tz, kolkata());
+    }
+
+    #[test]
+    fn wall_clock_to_epoch_millis_interprets_string_in_effective_zone() {
+        // 04:58:42 in Asia/Kolkata (UTC+5:30) is 23:28:42 UTC the day before.
+        let ms = wall_clock_to_epoch_millis("2026-07-14 04:58:42", Some("Asia/Kolkata"))
+            .expect("valid wall clock");
+        let expected = Utc.with_ymd_and_hms(2026, 7, 13, 23, 28, 42).unwrap();
+        assert_eq!(ms, expected.timestamp_millis());
+    }
+
+    #[test]
+    fn wall_clock_to_epoch_millis_utc_is_naive() {
+        let ms =
+            wall_clock_to_epoch_millis("2026-07-14 04:58:42", Some("UTC")).expect("valid wall clock");
+        let expected = Utc.with_ymd_and_hms(2026, 7, 14, 4, 58, 42).unwrap();
+        assert_eq!(ms, expected.timestamp_millis());
+    }
+
+    #[test]
+    fn wall_clock_to_epoch_millis_rejects_garbage() {
+        assert!(wall_clock_to_epoch_millis("not a time", Some("UTC")).is_none());
     }
 
     #[test]

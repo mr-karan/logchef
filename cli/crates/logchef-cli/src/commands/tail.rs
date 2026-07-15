@@ -10,13 +10,22 @@ use logchef_core::highlight::{
 use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::IsTerminal;
 use tokio::time::{Duration, sleep};
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Follow errors from the api service live (native SSE stream)
+  logchef tail 'level=\"error\" and service=\"api\"' -t platform -S app-logs
+
+  # Follow as JSON lines, stop after 100 rows, pipe to jq
+  logchef tail 'status>=500' --output jsonl --max-lines 100 | jq .
+
+  # Fall back to client-side polling where SSE is unavailable
+  logchef tail 'service=\"worker\"' --poll --interval 2")]
 pub struct TailArgs {
     /// LogChefQL query to follow.
     query: String,
@@ -31,15 +40,23 @@ pub struct TailArgs {
 
     /// Initial lookback window, evaluated against now in the effective
     /// timezone: `defaults.timezone` if configured, otherwise the system's
-    /// local timezone (see `logchef config show`).
+    /// local timezone (see `logchef config show`). Only used by `--poll`; the
+    /// native SSE stream always follows from now.
     #[arg(long, short = 's', default_value = "30s")]
     since: String,
 
-    /// Poll interval in seconds.
+    /// Poll interval in seconds. Only used with `--poll`; the native SSE
+    /// stream is push-based and ignores it.
     #[arg(long, default_value = "2")]
     interval: u64,
 
-    /// Maximum rows to fetch per poll.
+    /// Use the legacy client-side polling loop instead of the server's native
+    /// live-tail SSE stream. SSE is the default; `--poll` is a fallback for
+    /// environments where the streaming endpoint is unavailable.
+    #[arg(long)]
+    poll: bool,
+
+    /// Maximum rows to fetch per poll (only used with `--poll`).
     ///
     /// Each poll queries newest-first and keeps only the top --limit rows,
     /// then advances the cursor past the newest row returned. If a single
@@ -75,7 +92,9 @@ pub struct TailArgs {
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
 
-    /// Query timeout in seconds per poll.
+    /// Query timeout in seconds. With `--poll` this bounds each poll; with the
+    /// SSE stream it is used as an idle read timeout (reconnect if no data,
+    /// including heartbeats, arrives within this window).
     #[arg(long, default_value = "30")]
     timeout: u32,
 }
@@ -107,19 +126,16 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
     let mut cache = Cache::new(&ctx.server_url);
     let default_team = ctx.defaults.team_with_env();
     let default_source = ctx.defaults.source_with_env();
-    let team_id = resolve_team_id(client, &mut cache, args.team.or(default_team)).await?;
-    let source_id =
-        resolve_source_id(client, &mut cache, team_id, args.source.or(default_source)).await?;
+    let team_id = resolve_team_id(client, &mut cache, args.team.clone().or(default_team)).await?;
+    let source_id = resolve_source_id(
+        client,
+        &mut cache,
+        team_id,
+        args.source.clone().or(default_source),
+    )
+    .await?;
 
-    // Fetch the source's configured timestamp field once at tail start, so
-    // dedup/cursor logic uses the right key on sources with a non-default ts
-    // field (e.g. VictoriaLogs sources use `_time`). Fall back to the
-    // hardcoded _timestamp/timestamp probing (see `parse_entry_timestamp`)
-    // when the fetch fails or the field is unset.
-    let ts_field = fetch_ts_field(client, team_id, source_id).await;
-
-    let is_tty = std::io::stdout().is_terminal();
-    let highlighter = if args.no_highlight || !is_tty {
+    let highlighter = if args.no_highlight || !ui::human(global.quiet) {
         None
     } else {
         let hl_options = HighlightOptions {
@@ -131,6 +147,287 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
     let fmt_options = FormatOptions {
         show_timestamp: !args.no_timestamp,
     };
+
+    if args.poll {
+        run_poll(
+            client,
+            ctx,
+            team_id,
+            source_id,
+            &args,
+            highlighter.as_ref(),
+            &fmt_options,
+        )
+        .await
+    } else {
+        run_sse(
+            client,
+            team_id,
+            source_id,
+            &args,
+            highlighter.as_ref(),
+            &fmt_options,
+        )
+        .await
+    }
+}
+
+/// Follows the backend's native live-tail SSE stream (`GET .../logs/tail`).
+/// The server handles ClickHouse polling and VictoriaLogs native streaming
+/// internally, so the client just renders frames and reconnects on drop.
+///
+/// The tail endpoint has no resume cursor — it always follows from now — so a
+/// reconnect resumes from the current instant. Clean session rollovers
+/// (ttl_expired/completed) reconnect immediately; failures back off.
+async fn run_sse(
+    client: &Client,
+    team_id: i64,
+    source_id: i64,
+    args: &TailArgs,
+    highlighter: Option<&Highlighter>,
+    fmt_options: &FormatOptions,
+) -> Result<()> {
+    let mut printed = 0usize;
+    let mut backoff = Duration::from_millis(500);
+    let max_backoff = Duration::from_secs(5);
+    // Idle read timeout: the server heartbeats every 15s, so a longer silence
+    // means a dead connection. Keep it comfortably above the heartbeat.
+    let idle = Duration::from_secs(u64::from(args.timeout).max(20));
+
+    // A single Ctrl-C future, reused across selects so tail exits cleanly (no
+    // task leaks) whether it is blocked connecting, reading, or backing off.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    loop {
+        // LogchefQL is the tail language (empty query_language → server default);
+        // the server compiles it per source (ClickHouse WHERE-fragment or VL
+        // LogsQL) — see resolveTailQuery in tail_handlers.go.
+        let connect = client.tail_stream(team_id, source_id, &args.query, "");
+        tokio::pin!(connect);
+        let mut resp = tokio::select! {
+            _ = &mut ctrl_c => return Ok(()),
+            r = &mut connect => match r {
+                Ok(resp) => {
+                    backoff = Duration::from_millis(500);
+                    resp
+                }
+                Err(err) => {
+                    eprintln!("tail: connection failed ({err}); reconnecting");
+                    tokio::select! {
+                        _ = &mut ctrl_c => return Ok(()),
+                        _ = sleep(backoff) => {}
+                    }
+                    backoff = (backoff * 2).min(max_backoff);
+                    continue;
+                }
+            },
+        };
+
+        let mut parser = SseParser::new();
+        let mut backoff_needed = false;
+        'read: loop {
+            let chunk = tokio::select! {
+                _ = &mut ctrl_c => return Ok(()),
+                c = tokio::time::timeout(idle, resp.chunk()) => c,
+            };
+            let bytes = match chunk {
+                Err(_elapsed) => {
+                    eprintln!("tail: no data for {}s; reconnecting", idle.as_secs());
+                    backoff_needed = true;
+                    break 'read;
+                }
+                Ok(Ok(Some(bytes))) => bytes,
+                Ok(Ok(None)) => break 'read, // server closed the stream cleanly
+                Ok(Err(err)) => {
+                    eprintln!("tail: stream error ({err}); reconnecting");
+                    backoff_needed = true;
+                    break 'read;
+                }
+            };
+            for event in parser.feed(&bytes) {
+                match event {
+                    SseEvent::Rows(rows) => {
+                        for entry in &rows {
+                            let columns = columns_from_entry(entry);
+                            print_entry(&args.output, entry, &columns, fmt_options, highlighter)?;
+                            printed += 1;
+                            if let Some(max_lines) = args.max_lines
+                                && printed >= max_lines
+                            {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    SseEvent::Notice(message) => {
+                        eprintln!("tail: {message}");
+                    }
+                    SseEvent::End { reason, message } => {
+                        // ttl_expired/completed are normal session rollovers —
+                        // reconnect to keep following. An error end is surfaced
+                        // and backed off before reconnecting.
+                        if reason == "error" {
+                            let detail = message.unwrap_or_else(|| "stream error".to_string());
+                            eprintln!("tail: stream ended ({detail}); reconnecting");
+                            backoff_needed = true;
+                        }
+                        break 'read;
+                    }
+                }
+            }
+        }
+
+        // Backoff on failures; reconnect promptly after a clean end/close (with
+        // a small floor to avoid a hot loop if the server ends immediately).
+        let wait = if backoff_needed {
+            let w = backoff;
+            backoff = (backoff * 2).min(max_backoff);
+            w
+        } else {
+            backoff = Duration::from_millis(500);
+            Duration::from_millis(250)
+        };
+        tokio::select! {
+            _ = &mut ctrl_c => return Ok(()),
+            _ = sleep(wait) => {}
+        }
+    }
+}
+
+/// The SSE frames the tail endpoint emits (see tail_handlers.go). Heartbeat
+/// comment lines (`: hb`) carry no event and are dropped by the parser.
+#[derive(Debug, PartialEq)]
+enum SseEvent {
+    /// `event: rows` — a JSON array of log rows.
+    Rows(Vec<LogEntry>),
+    /// `event: notice` — a server notice (e.g. rate-limited); carries a message.
+    Notice(String),
+    /// `event: end` — the stream ended; carries a reason and optional message.
+    End {
+        reason: String,
+        message: Option<String>,
+    },
+}
+
+/// Incremental parser for the tail SSE wire format. Frames are separated by a
+/// blank line (`\n\n`); each frame is `event: <name>` + `data: <json>`, or a
+/// bare `: comment` heartbeat. `feed` buffers partial frames across chunk
+/// boundaries and returns whatever complete events are available.
+struct SseParser {
+    buf: Vec<u8>,
+}
+
+impl SseParser {
+    fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    fn feed(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
+        self.buf.extend_from_slice(chunk);
+        let mut events = Vec::new();
+        while let Some(end) = self
+            .buf
+            .windows(2)
+            .position(|w| w == b"\n\n")
+            .map(|i| i + 2)
+        {
+            let block: Vec<u8> = self.buf.drain(..end).collect();
+            if let Some(event) = parse_sse_block(&block) {
+                events.push(event);
+            }
+        }
+        events
+    }
+}
+
+fn parse_sse_block(block: &[u8]) -> Option<SseEvent> {
+    let text = String::from_utf8_lossy(block);
+    let mut event_type: Option<String> = None;
+    let mut data = String::new();
+
+    for raw_line in text.split('\n') {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() || line.starts_with(':') {
+            // Blank line (frame padding) or comment/heartbeat — ignore.
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("event:") {
+            event_type = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            // SSE allows multiple data: lines, joined by newline. The server
+            // emits one per frame, but handle multiples defensively.
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
+        }
+    }
+
+    match event_type?.as_str() {
+        "rows" => serde_json::from_str::<Vec<LogEntry>>(&data)
+            .ok()
+            .map(SseEvent::Rows),
+        "notice" => {
+            let value: serde_json::Value = serde_json::from_str(&data).ok()?;
+            let message = value
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("rate limited")
+                .to_string();
+            Some(SseEvent::Notice(message))
+        }
+        "end" => {
+            let value: serde_json::Value =
+                serde_json::from_str(&data).unwrap_or(serde_json::Value::Null);
+            let reason = value
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("completed")
+                .to_string();
+            let message = value
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string());
+            Some(SseEvent::End { reason, message })
+        }
+        _ => None,
+    }
+}
+
+/// Synthesizes column metadata from a streamed row's keys (sorted for a stable
+/// field order). The SSE stream sends rows without schema, and the text
+/// formatter needs columns to render non-priority fields.
+fn columns_from_entry(entry: &LogEntry) -> Vec<Column> {
+    let mut names: Vec<&String> = entry.keys().collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| Column {
+            name: name.clone(),
+            column_type: "String".to_string(),
+            description: None,
+        })
+        .collect()
+}
+
+/// The legacy client-side polling loop (used with `--poll`). Repeatedly queries
+/// LogchefQL newest-first, dedups against a rolling window, and advances a
+/// cursor. Preserves VictoriaLogs `_meta_ts_field` awareness for the
+/// dedup/cursor key via `fetch_ts_field`.
+async fn run_poll(
+    client: &Client,
+    ctx: &logchef_core::config::Context,
+    team_id: i64,
+    source_id: i64,
+    args: &TailArgs,
+    highlighter: Option<&Highlighter>,
+    fmt_options: &FormatOptions,
+) -> Result<()> {
+    // Fetch the source's configured timestamp field once, so dedup/cursor logic
+    // uses the right key on sources with a non-default ts field (e.g.
+    // VictoriaLogs uses `_time`). Falls back to `_timestamp`/`timestamp`
+    // probing (see `parse_entry_timestamp`) when the fetch fails or it's unset.
+    let ts_field = fetch_ts_field(client, team_id, source_id).await;
 
     let mut start = Utc::now() - parse_duration(&args.since)?;
     let mut seen: HashMap<DedupKey, ()> = HashMap::new();
@@ -173,8 +470,8 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
                 &args.output,
                 entry,
                 &response.columns,
-                &fmt_options,
-                highlighter.as_ref(),
+                fmt_options,
+                highlighter,
             )?;
             printed += 1;
             if let Some(max_lines) = args.max_lines
@@ -561,5 +858,66 @@ mod tests {
         assert_eq!(parse_duration("30").unwrap(), ChronoDuration::seconds(30));
         assert_eq!(parse_duration("30s").unwrap(), ChronoDuration::seconds(30));
         assert_eq!(parse_duration("5m").unwrap(), ChronoDuration::minutes(5));
+    }
+
+    #[test]
+    fn sse_parser_reads_a_rows_frame() {
+        let mut parser = SseParser::new();
+        let events = parser.feed(b"event: rows\ndata: [{\"msg\":\"hello\"}]\n\n");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SseEvent::Rows(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].get("msg").unwrap().as_str(), Some("hello"));
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_parser_ignores_comments_and_heartbeats() {
+        let mut parser = SseParser::new();
+        // Initial ": ok" open comment, then a heartbeat, carry no event.
+        assert!(parser.feed(b": ok\n\n").is_empty());
+        assert!(parser.feed(b": hb\n\n").is_empty());
+    }
+
+    #[test]
+    fn sse_parser_reads_notice_and_end_frames() {
+        let mut parser = SseParser::new();
+        let events = parser.feed(
+            b"event: notice\ndata: {\"code\":\"rate_limited\",\"message\":\"dropped 5 rows\"}\n\nevent: end\ndata: {\"reason\":\"ttl_expired\"}\n\n",
+        );
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], SseEvent::Notice("dropped 5 rows".to_string()));
+        assert_eq!(
+            events[1],
+            SseEvent::End {
+                reason: "ttl_expired".to_string(),
+                message: None,
+            }
+        );
+    }
+
+    #[test]
+    fn sse_parser_buffers_frames_split_across_chunks() {
+        let mut parser = SseParser::new();
+        // First chunk holds only part of the frame — no complete event yet.
+        assert!(parser.feed(b"event: rows\ndata: [{\"a\":").is_empty());
+        // Remainder completes the frame.
+        let events = parser.feed(b"\"b\"}]\n\n");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SseEvent::Rows(rows) => assert_eq!(rows[0].get("a").unwrap().as_str(), Some("b")),
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn columns_from_entry_covers_all_keys_sorted() {
+        let entry = entry_from(&[("service", "api"), ("_time", "t"), ("msg", "hi")]);
+        let cols = columns_from_entry(&entry);
+        let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["_time", "msg", "service"]);
     }
 }

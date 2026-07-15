@@ -25,6 +25,10 @@ serde_json = "1"
 
 # CLI
 clap = { version = "4", features = ["derive", "env", "string"] }
+clap_complete = "4"
+
+# Embedded skill content
+include_dir = "0.7"
 
 # Log highlighting
 tailspin = "5"

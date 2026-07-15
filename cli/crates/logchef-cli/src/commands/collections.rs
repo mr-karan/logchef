@@ -16,8 +16,18 @@ use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # List saved collections for a source
+  logchef collections -t platform -S app-logs
+
+  # Run a collection by name over the last hour
+  logchef collections 'Error Dashboard' --since 1h
+
+  # Run one with a variable override, as JSON
+  logchef collections 'By Service' --var service=api --output json")]
 pub struct CollectionsArgs {
     /// Collection name to run (optional - lists collections if not provided)
     name: Option<String>,
@@ -219,7 +229,17 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
     };
 
     // Run the collection
-    run_collection(&config, client, team_id, source_id, &collection, &args, ctx).await
+    run_collection(
+        &config,
+        client,
+        team_id,
+        source_id,
+        &collection,
+        &args,
+        ctx,
+        global.quiet,
+    )
+    .await
 }
 
 fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Result<()> {
@@ -288,6 +308,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_collection(
     config: &Config,
     client: &Client,
@@ -296,6 +317,7 @@ async fn run_collection(
     collection: &Collection,
     args: &CollectionsArgs,
     ctx: &logchef_core::config::Context,
+    quiet: bool,
 ) -> Result<()> {
     // Parse the query content
     let content: CollectionQueryContent =
@@ -395,7 +417,6 @@ async fn run_collection(
     };
 
     let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
@@ -415,34 +436,34 @@ async fn run_collection(
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::Msg => {
-            print_msg(entries, &response.columns, collection.query_language != "logchefql");
+            print_msg(
+                entries,
+                &response.columns,
+                collection.query_language != "logchefql",
+            );
         }
         OutputFormat::Text | OutputFormat::List => {
-            let highlighter = if args.no_highlight || !is_tty {
+            let highlighter = if args.no_highlight || !ui::human(quiet) {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -464,14 +485,12 @@ async fn run_collection(
                     println!("{}", line);
                 }
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
     }
 

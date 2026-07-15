@@ -14,8 +14,19 @@ use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Errors from the api service in the last hour (LogchefQL)
+  logchef query 'level=\"error\" and service=\"api\"' --since 1h
+
+  # All logs in an absolute window, newest 500, as JSON lines for jq
+  logchef query --from '2026-07-14 09:00:00' --to '2026-07-14 10:00:00' \\
+    --limit 500 --output jsonl | jq 'select(.status >= 500)'
+
+  # See the ClickHouse SQL / LogsQL a query compiles to, then run it
+  logchef query 'status>=500' --since 15m --show-sql")]
 pub struct QueryArgs {
     query: Option<String>,
 
@@ -226,16 +237,20 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         query_timeout: Some(args.timeout),
     };
 
-    let response = client
-        .query_logchefql(team_id, source_id, &request)
-        .await
-        .context("Query failed")?;
+    let spinner = ui::Spinner::start(global.quiet, "querying");
+    let result = client.query_logchefql(team_id, source_id, &request).await;
+    spinner.finish();
+    let response = result.context("Query failed")?;
 
     if args.dry_run {
-        if let Some(sql) = &response.generated_sql {
-            println!("{}", sql);
-        } else {
-            anyhow::bail!("Server did not return generated SQL; cannot --dry-run.");
+        // Print the generated backend query to stdout (clean, pipeable) and
+        // exit. `generated_query()` falls back to `generated_sql`, so this
+        // works for both engines: ClickHouse returns `generated_sql`, while
+        // VictoriaLogs returns `generated_query` + `generated_query_language:
+        // "logsql"`. Never error just because the source is VictoriaLogs.
+        match response.generated_query() {
+            Some(query) => println!("{}", query),
+            None => anyhow::bail!("Server did not return a generated query; cannot --dry-run."),
         }
         return Ok(());
     }
@@ -248,11 +263,15 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
             Some("clickhouse-sql") => "Generated SQL",
             _ => "Generated query",
         };
-        eprintln!("{}: {}\n", label, query);
+        let rendered = ui::highlight_query(
+            query,
+            response.generated_query_language(),
+            ui::stderr_human(global.quiet),
+        );
+        eprintln!("{}: {}\n", label, rendered);
     }
 
     let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
@@ -272,34 +291,30 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::Msg => {
             print_msg(entries, &response.columns, false);
         }
         OutputFormat::Text => {
-            let highlighter = if args.no_highlight || !is_tty {
+            let highlighter = if args.no_highlight || !ui::human(global.quiet) {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -321,14 +336,12 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                     println!("{}", line);
                 }
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
     }
 

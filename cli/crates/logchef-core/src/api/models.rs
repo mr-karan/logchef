@@ -208,6 +208,158 @@ pub struct ExportJobResponse {
     pub download_url: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TranslateRequest {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TranslateResponse {
+    #[serde(default)]
+    pub sql: String,
+    #[serde(default)]
+    pub full_sql: String,
+    #[serde(default)]
+    pub generated_query: String,
+    #[serde(default)]
+    pub generated_query_language: Option<String>,
+    #[serde(default)]
+    pub valid: bool,
+    #[serde(default)]
+    pub error: Option<QueryParseError>,
+}
+
+impl TranslateResponse {
+    /// The most complete generated query available: the full executable SQL
+    /// when a time range was supplied, otherwise the filter-only translation
+    /// (ClickHouse) or the native query (VictoriaLogs).
+    pub fn generated_query(&self) -> &str {
+        if !self.full_sql.is_empty() {
+            &self.full_sql
+        } else if !self.generated_query.is_empty() {
+            &self.generated_query
+        } else {
+            &self.sql
+        }
+    }
+
+    /// Human-readable label for the generated query language.
+    pub fn language_label(&self) -> &'static str {
+        match self.generated_query_language.as_deref() {
+            Some("logsql") => "LogsQL",
+            Some("clickhouse-sql") => "ClickHouse SQL",
+            _ => "query",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ValidateRequest {
+    pub query: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ValidateResponse {
+    #[serde(default)]
+    pub valid: bool,
+    #[serde(default)]
+    pub error: Option<QueryParseError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryParseError {
+    #[serde(default)]
+    pub code: String,
+    pub message: String,
+    #[serde(default)]
+    pub position: Option<QueryParsePosition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryParsePosition {
+    pub line: i32,
+    pub column: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HistogramRequest {
+    pub query_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_timestamp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_timestamp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_timeout: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistogramResponse {
+    #[serde(default)]
+    pub granularity: String,
+    #[serde(default)]
+    pub data: Vec<HistogramBucket>,
+    #[serde(default)]
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistogramBucket {
+    pub bucket: String,
+    #[serde(default)]
+    pub log_count: i64,
+    #[serde(default)]
+    pub group_value: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FieldValuesResult {
+    #[serde(default)]
+    pub field_name: String,
+    #[serde(default)]
+    pub field_type: String,
+    #[serde(default)]
+    pub is_low_cardinality: bool,
+    #[serde(default)]
+    pub values: Vec<FieldValueInfo>,
+    #[serde(default)]
+    pub total_distinct: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FieldValueInfo {
+    pub value: String,
+    #[serde(default)]
+    pub count: i64,
+}
+
+/// Query parameters for [`crate::api::Client::get_field_values`]. The field
+/// `type` (from the source schema) and an RFC3339 `start`/`end` window are
+/// required by the server for performance.
+pub struct FieldValuesQuery<'a> {
+    pub field_name: &'a str,
+    pub field_type: &'a str,
+    pub start: &'a str,
+    pub end: &'a str,
+    pub timezone: &'a str,
+    pub limit: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct QueryResponse {
     #[serde(default)]
