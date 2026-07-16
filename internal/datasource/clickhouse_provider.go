@@ -630,6 +630,9 @@ func (p *ClickHouseProvider) connectionFromConfig(raw json.RawMessage) (models.C
 	if err := json.Unmarshal(raw, &conn); err != nil {
 		return conn, &ValidationError{Field: "connection", Message: "invalid clickhouse connection payload", Err: err}
 	}
+	if err := conn.Settings.Validate(); err != nil {
+		return conn, &ValidationError{Field: "connection.settings", Message: err.Error()}
+	}
 	return conn, nil
 }
 

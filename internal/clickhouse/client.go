@@ -50,6 +50,9 @@ type Client struct {
 	sourceID   string              // Source ID for metrics tracking
 	source     *models.Source      // Source model for metrics with meaningful labels
 	metrics    *metrics.ClickHouseMetrics
+	// querySettings holds per-source ClickHouse settings applied to every query
+	// context (e.g. max_result_rows, readonly). Nil when the source configures none.
+	querySettings clickhouse.Settings
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -62,6 +65,10 @@ type ClientOptions struct {
 	SourceID  string         // Source ID for metrics tracking.
 	Source    *models.Source // Source model for enhanced metrics.
 	TLSEnable bool           // Enable TLS for the connection.
+	// QuerySettings are per-source ClickHouse settings applied to every query
+	// context (not as connection defaults), so they can override LogChef's
+	// per-query defaults for caps/timeouts/read-only. Only set settings appear.
+	QuerySettings map[string]any
 }
 
 // NewClient establishes a new connection to a ClickHouse server using the native protocol.
@@ -137,6 +144,9 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		opts:       options,
 		sourceID:   opts.SourceID,
 		source:     opts.Source,
+	}
+	if len(opts.QuerySettings) > 0 {
+		client.querySettings = clickhouse.Settings(opts.QuerySettings)
 	}
 
 	// Apply a default hook for basic query logging.

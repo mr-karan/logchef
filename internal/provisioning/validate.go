@@ -128,6 +128,9 @@ func validateClickHouseSource(prefix string, src config.ProvisionSource) (errs [
 	if src.MetaSeverityField != "" && !sqlIdentifierRe.MatchString(src.MetaSeverityField) {
 		errs = append(errs, fmt.Sprintf("%s: meta_severity_field %q is not a valid identifier", prefix, src.MetaSeverityField))
 	}
+	if err := conn.Settings.Validate(); err != nil {
+		errs = append(errs, fmt.Sprintf("%s: connection.settings: %v", prefix, err))
+	}
 	return errs, true
 }
 

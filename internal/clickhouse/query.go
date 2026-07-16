@@ -259,11 +259,22 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 }
 
 func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions) context.Context {
-	settings := clickhouse.Settings{
-		"max_execution_time": *opts.TimeoutSeconds,
-	}
-	maps.Copy(settings, opts.Settings)
+	settings := buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
 	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+}
+
+// buildQuerySettings merges, in increasing precedence: the request timeout,
+// LogChef's per-query settings (perQuery), and the per-source operator settings
+// (source). Source settings are applied last so per-source caps, timeouts, and
+// read-only mode override LogChef's automatic defaults. Only settings present in
+// each map are applied.
+func buildQuerySettings(timeoutSeconds int, perQuery, source clickhouse.Settings) clickhouse.Settings {
+	settings := clickhouse.Settings{
+		"max_execution_time": timeoutSeconds,
+	}
+	maps.Copy(settings, perQuery)
+	maps.Copy(settings, source)
+	return settings
 }
 
 // ClickHouse exception codes (see clickhouse-go's lib/proto.Exception.Code)

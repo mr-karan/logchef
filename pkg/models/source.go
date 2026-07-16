@@ -44,6 +44,110 @@ type ConnectionInfo struct {
 	Database  string `json:"database"`
 	TableName string `json:"table_name"`
 	TLSEnable bool   `json:"tls_enable"`
+	// Settings carries optional per-source ClickHouse query settings applied to
+	// every query executed against this source. Nil means "no per-source
+	// settings" and is omitted from the persisted connection_config JSON.
+	Settings *ClickHouseQuerySettings `json:"settings,omitempty"`
+}
+
+// ClickHouseQuerySettings holds optional ClickHouse query settings configured per
+// source and applied to every query run against it. All fields are pointers so an
+// unset setting is distinguishable from a zero value, and only the settings that
+// are set are sent to ClickHouse. These are not secrets and are returned to the UI.
+type ClickHouseQuerySettings struct {
+	// MaxExecutionTime caps query execution time in seconds (max_execution_time).
+	MaxExecutionTime *int `json:"max_execution_time,omitempty"`
+	// MaxResultRows caps the number of rows in the result (max_result_rows).
+	MaxResultRows *int64 `json:"max_result_rows,omitempty"`
+	// MaxResultBytes caps the size of the result in bytes (max_result_bytes).
+	MaxResultBytes *int64 `json:"max_result_bytes,omitempty"`
+	// MaxRowsToRead caps the number of rows read during execution (max_rows_to_read).
+	MaxRowsToRead *int64 `json:"max_rows_to_read,omitempty"`
+	// MaxBytesToRead caps the number of bytes read during execution (max_bytes_to_read).
+	MaxBytesToRead *int64 `json:"max_bytes_to_read,omitempty"`
+	// Readonly sets the connection read-only mode (readonly): 0 (read-write),
+	// 1 (read-only, no setting changes), or 2 (read-only, setting changes allowed).
+	Readonly *int `json:"readonly,omitempty"`
+	// ResultOverflowMode controls behavior when a result cap is exceeded
+	// (result_overflow_mode): "throw" (error) or "break" (stop early).
+	ResultOverflowMode *string `json:"result_overflow_mode,omitempty"`
+}
+
+// Validate reports whether the settings hold sane values. Numeric settings must
+// be non-negative, readonly must be 0/1/2, and result_overflow_mode must be
+// "throw" or "break". A nil receiver is valid (no settings configured).
+func (s *ClickHouseQuerySettings) Validate() error {
+	if s == nil {
+		return nil
+	}
+	checkNonNegative := func(name string, v *int64) error {
+		if v != nil && *v < 0 {
+			return fmt.Errorf("%s must be non-negative", name)
+		}
+		return nil
+	}
+	if s.MaxExecutionTime != nil && *s.MaxExecutionTime < 0 {
+		return fmt.Errorf("max_execution_time must be non-negative")
+	}
+	for _, c := range []struct {
+		name string
+		v    *int64
+	}{
+		{"max_result_rows", s.MaxResultRows},
+		{"max_result_bytes", s.MaxResultBytes},
+		{"max_rows_to_read", s.MaxRowsToRead},
+		{"max_bytes_to_read", s.MaxBytesToRead},
+	} {
+		if err := checkNonNegative(c.name, c.v); err != nil {
+			return err
+		}
+	}
+	if s.Readonly != nil && (*s.Readonly < 0 || *s.Readonly > 2) {
+		return fmt.Errorf("readonly must be 0, 1, or 2")
+	}
+	if s.ResultOverflowMode != nil {
+		switch *s.ResultOverflowMode {
+		case "throw", "break":
+		default:
+			return fmt.Errorf(`result_overflow_mode must be "throw" or "break"`)
+		}
+	}
+	return nil
+}
+
+// ToSettingsMap returns the set settings as a ClickHouse settings map, keyed by
+// the ClickHouse setting name. Only settings that are set are included; a nil
+// receiver or all-unset settings yields nil.
+func (s *ClickHouseQuerySettings) ToSettingsMap() map[string]any {
+	if s == nil {
+		return nil
+	}
+	m := make(map[string]any)
+	if s.MaxExecutionTime != nil {
+		m["max_execution_time"] = *s.MaxExecutionTime
+	}
+	if s.MaxResultRows != nil {
+		m["max_result_rows"] = *s.MaxResultRows
+	}
+	if s.MaxResultBytes != nil {
+		m["max_result_bytes"] = *s.MaxResultBytes
+	}
+	if s.MaxRowsToRead != nil {
+		m["max_rows_to_read"] = *s.MaxRowsToRead
+	}
+	if s.MaxBytesToRead != nil {
+		m["max_bytes_to_read"] = *s.MaxBytesToRead
+	}
+	if s.Readonly != nil {
+		m["readonly"] = *s.Readonly
+	}
+	if s.ResultOverflowMode != nil {
+		m["result_overflow_mode"] = *s.ResultOverflowMode
+	}
+	if len(m) == 0 {
+		return nil
+	}
+	return m
 }
 
 type VictoriaLogsAuth struct {
@@ -262,6 +366,9 @@ func (s *Source) RedactedConnectionConfig() json.RawMessage {
 			TableName:   s.Connection.TableName,
 			TLSEnable:   s.Connection.TLSEnable,
 			HasPassword: s.Connection.Password != "",
+			// Settings aren't secrets: return them so the UI can display and
+			// round-trip them on edit (unlike the password, which is redacted).
+			Settings: s.Connection.Settings,
 		})
 		if err != nil {
 			return json.RawMessage(`{}`)
@@ -417,10 +524,11 @@ type ConnectionValidationResult struct {
 // Credentials are never serialized; HasPassword lets the UI show whether one
 // is set (edit forms treat a blank password as "keep existing").
 type ConnectionInfoResponse struct {
-	Host        string `json:"host"`
-	Username    string `json:"username,omitempty"`
-	Database    string `json:"database"`
-	TableName   string `json:"table_name"`
-	TLSEnable   bool   `json:"tls_enable"`
-	HasPassword bool   `json:"has_password,omitempty"`
+	Host        string                   `json:"host"`
+	Username    string                   `json:"username,omitempty"`
+	Database    string                   `json:"database"`
+	TableName   string                   `json:"table_name"`
+	TLSEnable   bool                     `json:"tls_enable"`
+	HasPassword bool                     `json:"has_password,omitempty"`
+	Settings    *ClickHouseQuerySettings `json:"settings,omitempty"`
 }

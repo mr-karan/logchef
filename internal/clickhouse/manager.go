@@ -243,13 +243,14 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 
 	// Create new client without initial ping validation
 	client, err := NewClient(ClientOptions{
-		Host:      source.Connection.Host,
-		Database:  source.Connection.Database,
-		Username:  source.Connection.Username,
-		Password:  source.Connection.Password,
-		SourceID:  strconv.FormatInt(int64(source.ID), 10), // Convert SourceID to string for metrics
-		Source:    source,                                  // Pass source for enhanced metrics
-		TLSEnable: source.Connection.TLSEnable,
+		Host:          source.Connection.Host,
+		Database:      source.Connection.Database,
+		Username:      source.Connection.Username,
+		Password:      source.Connection.Password,
+		SourceID:      strconv.FormatInt(int64(source.ID), 10), // Convert SourceID to string for metrics
+		Source:        source,                                  // Pass source for enhanced metrics
+		TLSEnable:     source.Connection.TLSEnable,
+		QuerySettings: source.Connection.Settings.ToSettingsMap(), // Per-source query settings.
 	}, m.logger)
 
 	if err != nil {

@@ -140,6 +140,41 @@ func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_ClickHouseQuerySettings(t *testing.T) {
+	withSettings := func(settings map[string]any) config.ProvisionSource {
+		return config.ProvisionSource{
+			Name:       "s",
+			SourceType: "clickhouse",
+			Connection: map[string]any{
+				"host":       "h:9000",
+				"database":   "db",
+				"table_name": "tbl",
+				"password":   "p",
+				"settings":   settings,
+			},
+		}
+	}
+	cases := []struct {
+		name     string
+		settings map[string]any
+		wantErr  bool
+	}{
+		{"valid settings accepted", map[string]any{"max_result_rows": 1000, "readonly": 2, "result_overflow_mode": "break"}, false},
+		{"negative cap rejected", map[string]any{"max_result_rows": -5}, true},
+		{"bad readonly rejected", map[string]any{"readonly": 3}, true},
+		{"bad overflow mode rejected", map[string]any{"result_overflow_mode": "halt"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{withSettings(tc.settings)}}
+			err := ValidateConfig(cfg)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateConfig() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
