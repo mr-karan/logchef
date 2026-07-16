@@ -402,7 +402,11 @@ const (
 
 // CreateExportJobRequest creates an async export job that produces a completed artifact.
 type CreateExportJobRequest struct {
+	// RawSQL is the query to export. QueryText is accepted as an alias so both
+	// the web UI (which posts query_text, like the query/histogram endpoints)
+	// and the CLI (which posts raw_sql) work; whichever is non-empty is used.
 	RawSQL       string             `json:"raw_sql"`
+	QueryText    string             `json:"query_text"`
 	Format       string             `json:"format"`
 	Limit        int                `json:"limit,omitempty"`
 	QueryTimeout *int               `json:"query_timeout,omitempty"`

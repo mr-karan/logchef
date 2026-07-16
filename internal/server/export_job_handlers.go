@@ -53,8 +53,9 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
+	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
 	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql is required", models.ValidationErrorType)
+		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql (or query_text) is required", models.ValidationErrorType)
 	}
 
 	formatInput := strings.TrimSpace(req.Format)

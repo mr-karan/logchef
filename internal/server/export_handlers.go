@@ -21,8 +21,21 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// exportQueryText resolves an export's query text: prefer raw_sql, fall back to
+// query_text. The web UI posts query_text (matching the query/histogram
+// endpoints); the CLI posts raw_sql. Whichever is non-empty is used.
+func exportQueryText(rawSQL, queryText string) string {
+	if strings.TrimSpace(rawSQL) != "" {
+		return rawSQL
+	}
+	return queryText
+}
+
 type exportLogsRequest struct {
+	// RawSQL is the query to export; QueryText is accepted as an alias (the web
+	// UI posts query_text, the CLI posts raw_sql). Whichever is non-empty wins.
 	RawSQL       string                    `json:"raw_sql"`
+	QueryText    string                    `json:"query_text"`
 	Format       string                    `json:"format"`
 	Limit        int                       `json:"limit"`
 	QueryTimeout *int                      `json:"query_timeout,omitempty"`
@@ -62,8 +75,9 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
+	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
 	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql is required", models.ValidationErrorType)
+		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql (or query_text) is required", models.ValidationErrorType)
 	}
 
 	formatInput := strings.TrimSpace(req.Format)
