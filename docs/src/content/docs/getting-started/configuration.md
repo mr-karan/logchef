@@ -46,7 +46,23 @@ frontend_url = ""
 
 # HTTP server timeout for requests (default: 30s)
 http_server_timeout = "30s"
+
+# Trusted reverse-proxy IPs/CIDRs for client-IP resolution. Empty (default)
+# trusts no proxy — the client IP is the direct connection peer. Set to your
+# reverse proxy's address(es) to resolve the real client from proxy_header.
+trusted_proxies = []
+# Forwarding header read for the client IP, ONLY when the direct peer is one of
+# trusted_proxies (otherwise ignored, so untrusted callers can't spoof it).
+proxy_header = "X-Forwarded-For"
 ```
+
+:::note[Client IP behind a proxy]
+`trusted_proxies` is what lets client-IP features (e.g. per-IP rate limiting)
+work behind a reverse proxy. List only your proxy's own address(es), and make
+sure that proxy **overwrites** the forwarding header rather than appending a
+client-supplied one — otherwise the client IP can be spoofed. Invalid entries or
+a `0.0.0.0/0` wildcard fail startup.
+:::
 
 ## Database Configuration
 

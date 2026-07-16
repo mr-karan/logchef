@@ -152,3 +152,27 @@ query_per_user_per_minute = 50
 		t.Errorf("query_per_user_per_minute = %d, want 50", rl.QueryPerUserPerMinute)
 	}
 }
+
+func TestLoad_TrustedProxiesValidAndProxyHeaderDefault(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[server]
+trusted_proxies = ["10.20.30.40/32", "192.168.1.1"]
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Server.TrustedProxies) != 2 {
+		t.Errorf("trusted_proxies = %v, want 2 entries", cfg.Server.TrustedProxies)
+	}
+	if cfg.Server.ProxyHeader != "X-Forwarded-For" {
+		t.Errorf("proxy_header = %q, want X-Forwarded-For (default)", cfg.Server.ProxyHeader)
+	}
+}
+
+func TestLoad_TrustedProxiesInvalidFailFast(t *testing.T) {
+	for _, bad := range []string{"not-an-ip", "0.0.0.0/0", "::/0", "10.0.0.0/999"} {
+		if _, err := Load(writeConfig(t, "[server]\ntrusted_proxies = [\""+bad+"\"]\n")); err == nil {
+			t.Errorf("Load with trusted_proxies=%q: want error, got nil", bad)
+		}
+	}
+}

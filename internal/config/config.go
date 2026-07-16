@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net"
 	"path/filepath"
 	"strings"
 	"time"
@@ -122,6 +123,14 @@ type ServerConfig struct {
 	// SecureCookie controls the Secure flag on auth cookies.
 	// Set to false for local development over HTTP. Defaults to true.
 	SecureCookie *bool `koanf:"secure_cookie"`
+	// TrustedProxies lists proxy IPs/CIDRs whose ProxyHeader is trusted for
+	// client-IP resolution. Empty (default) trusts no proxy, so c.IP() is the
+	// direct peer — safe out of the box. Set to your reverse proxy's address(es)
+	// to resolve the real client behind it (e.g. for per-IP rate limiting).
+	TrustedProxies []string `koanf:"trusted_proxies"`
+	// ProxyHeader is the forwarding header read for the client IP when the
+	// direct peer is a trusted proxy. Defaults to X-Forwarded-For.
+	ProxyHeader string `koanf:"proxy_header"`
 }
 
 // IsSecureCookie returns whether cookies should have the Secure flag set.
@@ -333,6 +342,8 @@ const (
 	defaultRateLimitAuthPerIPPerMinute    = 20
 	defaultRateLimitAuthGlobalPerMinute   = 300
 	defaultRateLimitQueryPerUserPerMinute = 120
+
+	defaultProxyHeader = "X-Forwarded-For"
 )
 
 var defaultExportFormats = []string{"csv", "ndjson"}
@@ -413,6 +424,27 @@ func loadProvisioningFile(cfg *Config, mainConfigPath string) error {
 
 // validateConfig checks the required/interdependent configuration fields
 // once defaults and provisioning have been applied.
+// validateTrustedProxies ensures each server.trusted_proxies entry is a valid IP
+// or CIDR and rejects the "trust everyone" wildcards (which would make the
+// forwarding header spoofable). Fiber only warns on a bad CIDR, so fail fast.
+func validateTrustedProxies(proxies []string) error {
+	for _, p := range proxies {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p == "0.0.0.0/0" || p == "::/0" {
+			return fmt.Errorf("server.trusted_proxies must not contain %q — trusting every peer makes the forwarding header spoofable", p)
+		}
+		if net.ParseIP(p) == nil {
+			if _, _, err := net.ParseCIDR(p); err != nil {
+				return fmt.Errorf("server.trusted_proxies entry %q is not a valid IP or CIDR", p)
+			}
+		}
+	}
+	return nil
+}
+
 func validateConfig(cfg *Config) error {
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
@@ -424,6 +456,10 @@ func validateConfig(cfg *Config) error {
 		}
 	default:
 		return fmt.Errorf("database.driver must be \"sqlite\" or \"postgres\", got %q", cfg.Database.Driver)
+	}
+
+	if err := validateTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return err
 	}
 
 	// Validate required configurations
@@ -686,6 +722,10 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.Shares.MaxQueryTextBytes <= 0 {
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+
+	if !k.Exists("server.proxy_header") || strings.TrimSpace(cfg.Server.ProxyHeader) == "" {
+		cfg.Server.ProxyHeader = defaultProxyHeader
 	}
 
 	if !k.Exists("rate_limit.enabled") {

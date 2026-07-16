@@ -97,6 +97,16 @@ func New(opts ServerOptions) *Server {
 		// backstop; the LogchefQL parser additionally enforces its own
 		// (much smaller) query length/nesting limits regardless of this cap.
 		BodyLimit: 4 * 1024 * 1024, // 4MB
+		// Client-IP resolution behind a reverse proxy. The check is always on:
+		// with an empty TrustedProxies list Fiber returns the direct peer IP
+		// (default/current behavior); it reads ProxyHeader only when the direct
+		// peer is a configured trusted proxy, so an untrusted caller can't spoof
+		// it. EnableIPValidation makes c.IP() return the first *valid* header
+		// entry (falling back to the peer) rather than the raw header string.
+		EnableTrustedProxyCheck: true,
+		TrustedProxies:          opts.Config.Server.TrustedProxies,
+		ProxyHeader:             opts.Config.Server.ProxyHeader,
+		EnableIPValidation:      true,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
