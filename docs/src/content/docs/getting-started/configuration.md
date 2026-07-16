@@ -252,6 +252,33 @@ max_rows_per_sec = 100
 
 **Environment variables:** `LOGCHEF_TAIL__MAX_PER_USER=4`, `LOGCHEF_TAIL__SESSION_TTL=20m`
 
+### Rate limiting
+
+Fixed-window request limits: per-IP (plus an optional global cap) on the
+unauthenticated auth/token endpoints, and per-user on the query endpoints.
+**Off by default** — enable it deliberately (see the proxy note below).
+
+```toml
+[rate_limit]
+enabled = false
+auth_per_ip_per_minute    = 20     # /auth/login, /auth/callback, /cli/token, ...
+auth_global_per_minute    = 300    # 0 disables the global cap
+query_per_user_per_minute = 120    # /logs/query, /logs/histogram, field values
+```
+
+**Environment variables:** `LOGCHEF_RATE_LIMIT__ENABLED=true`, `LOGCHEF_RATE_LIMIT__AUTH_PER_IP_PER_MINUTE=30`
+
+Rejections return HTTP 429 and increment the `logchef_rate_limit_rejections_total{scope}` metric.
+
+:::caution[Behind a reverse proxy]
+The per-IP limiter keys on the client IP. Logchef does not yet read
+`X-Forwarded-For`, so behind a reverse proxy every request appears to come from
+the proxy — per-IP limiting then collapses to a single shared bucket and would
+throttle *all* auth traffic together. That's why this is off by default. Until
+trusted-proxy support lands, rely on the global cap (`auth_global_per_minute`)
+and the per-user query limit (which key on the authenticated user, not the IP).
+:::
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
