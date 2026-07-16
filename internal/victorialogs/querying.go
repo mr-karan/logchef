@@ -1242,6 +1242,11 @@ func statsFromHeaders(resp *http.Response, rowCount int) models.QueryStats {
 // BEFORE the first projection, since projecting away `_time` first would
 // break the sort. Anything with other pipe stages (stats, existing sort,
 // limit, ...) is power-user territory and passes through untouched.
+//
+// The explicit sort is deliberate: we do NOT rely on VictoriaLogs' implicit
+// ordering. A bare LogsQL query with a limit returns some N matching rows, not
+// necessarily the newest N in time order, so dropping this would break the
+// explorer's newest-first contract and the tests that encode it. Kept per #107.
 func appendDefaultSort(query string) string {
 	stages := splitTopLevelPipes(query)
 	for _, stage := range stages[1:] {
