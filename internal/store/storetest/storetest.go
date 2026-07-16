@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -26,6 +27,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
+	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
@@ -374,6 +376,86 @@ func verifyDashboardUpdateAndDelete(t *testing.T, ctx context.Context, s store.S
 	}
 	if err := s.UpdateDashboard(ctx, got); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("UpdateDashboard(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+func testQueryHistory(t *testing.T, ctx context.Context, s store.Store) {
+	user := mkUser(t, ctx, s, "qh-user@test.dev")
+	src := mkSource(t, ctx, s, "qh")
+
+	// A fresh user has no history.
+	if h, err := s.ListQueryHistory(ctx, user.ID, 10); err != nil || len(h) != 0 {
+		t.Fatalf("ListQueryHistory(empty) = %d / %v, want 0", len(h), err)
+	}
+
+	// Record round-trips every field and populates the entry ID.
+	entry := &models.QueryHistory{
+		UserID:        user.ID,
+		TeamID:        models.TeamID(7),
+		SourceID:      src.ID,
+		QueryText:     "status>=500",
+		QueryLanguage: models.QueryLanguageLogchefQL,
+		DurationMs:    42,
+		RowCount:      13,
+	}
+	if err := s.RecordQueryHistory(ctx, entry); err != nil || entry.ID == 0 {
+		t.Fatalf("RecordQueryHistory: %v / id=%d", err, entry.ID)
+	}
+	got, err := s.ListQueryHistory(ctx, user.ID, 10)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListQueryHistory = %d / %v, want 1", len(got), err)
+	}
+	assertQueryHistoryRow(t, got[0], src.ID)
+
+	// History is scoped per user: another user sees none of the above.
+	other := mkUser(t, ctx, s, "qh-other@test.dev")
+	if h, err := s.ListQueryHistory(ctx, other.ID, 10); err != nil || len(h) != 0 {
+		t.Errorf("ListQueryHistory(other) = %d / %v, want 0", len(h), err)
+	}
+
+	verifyQueryHistoryPruning(t, ctx, s, user.ID, src.ID)
+}
+
+// assertQueryHistoryRow checks the round-tripped fields of the seed row.
+func assertQueryHistoryRow(t *testing.T, g *models.QueryHistory, sourceID models.SourceID) {
+	t.Helper()
+	if g.QueryText != "status>=500" || g.QueryLanguage != models.QueryLanguageLogchefQL ||
+		g.DurationMs != 42 || g.RowCount != 13 || g.TeamID != 7 || g.SourceID != sourceID || g.CreatedAt.IsZero() {
+		t.Fatalf("history row did not round-trip: %+v", g)
+	}
+}
+
+// verifyQueryHistoryPruning records more than the per-user cap and confirms the
+// store keeps only the newest cap rows, newest-first, and honors a smaller limit.
+func verifyQueryHistoryPruning(t *testing.T, ctx context.Context, s store.Store, userID models.UserID, sourceID models.SourceID) {
+	t.Helper()
+	total := models.QueryHistoryPerUserCap + 3
+	for i := 1; i < total; i++ { // the seed row above was #0
+		e := &models.QueryHistory{
+			UserID:        userID,
+			TeamID:        models.TeamID(7),
+			SourceID:      sourceID,
+			QueryText:     "q" + strconv.Itoa(i),
+			QueryLanguage: models.QueryLanguageClickHouseSQL,
+		}
+		if err := s.RecordQueryHistory(ctx, e); err != nil {
+			t.Fatalf("RecordQueryHistory(#%d): %v", i, err)
+		}
+	}
+
+	all, err := s.ListQueryHistory(ctx, userID, models.QueryHistoryPerUserCap+100)
+	if err != nil {
+		t.Fatalf("ListQueryHistory(all): %v", err)
+	}
+	if len(all) != models.QueryHistoryPerUserCap {
+		t.Fatalf("history not capped: got %d, want %d", len(all), models.QueryHistoryPerUserCap)
+	}
+	if all[0].QueryText != "q"+strconv.Itoa(total-1) {
+		t.Errorf("ListQueryHistory[0] = %q, want newest %q", all[0].QueryText, "q"+strconv.Itoa(total-1))
+	}
+
+	if h, err := s.ListQueryHistory(ctx, userID, 5); err != nil || len(h) != 5 {
+		t.Errorf("ListQueryHistory(limit 5) = %d / %v, want 5", len(h), err)
 	}
 }
 

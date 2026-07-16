@@ -115,6 +115,18 @@ type ExportJob struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type QueryHistory struct {
+	ID            int64              `json:"id"`
+	UserID        int64              `json:"user_id"`
+	TeamID        int64              `json:"team_id"`
+	SourceID      int64              `json:"source_id"`
+	QueryText     string             `json:"query_text"`
+	QueryLanguage string             `json:"query_language"`
+	DurationMs    int64              `json:"duration_ms"`
+	RowCount      int64              `json:"row_count"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type QueryShare struct {
 	Token          string             `json:"token"`
 	SourceID       int64              `json:"source_id"`

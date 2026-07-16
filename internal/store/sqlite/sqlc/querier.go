@@ -138,6 +138,9 @@ type Querier interface {
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
+	// Query history ---------------------------------------------------------------
+	// Record one executed query and return its id.
+	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (int64, error)
 	// Check if a team is managed
@@ -177,6 +180,8 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
+	// List one user's recent history, newest first.
+	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
 	// List every saved query the user can see (any source attached to any of their teams)
 	ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error)
 	// List saved queries for a specific source, scoped to a user that has access to it
@@ -210,6 +215,9 @@ type Querier interface {
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares
 	PruneExpiredQueryShares(ctx context.Context, expiresAt time.Time) error
+	// Delete a user's history rows beyond the newest `offset` (the per-user cap),
+	// keeping history bounded on every insert.
+	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection

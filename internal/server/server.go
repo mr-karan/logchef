@@ -217,6 +217,7 @@ func (s *Server) setupRoutes() {
 	api.Get("/me/teams", s.requireAuth, s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListCurrentUserTeams)
 	api.Get("/me/preferences", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetUserPreferences)
 	api.Put("/me/preferences", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileWrite), s.handleUpdateUserPreferences)
+	api.Get("/me/query-history", s.requireAuth, s.requireTokenScope(models.TokenScopeLogsRead), s.handleListQueryHistory)
 
 	// Share links for ad hoc queries. Share payload access is still scoped by
 	// team membership and source linkage in the handler.

@@ -240,6 +240,8 @@ func (s *Server) streamPreviewQuery(
 	trackerQueryText string,
 	logMode string,
 	requestedLimit int,
+	historyQueryText string,
+	historyLanguage models.QueryLanguage,
 ) error {
 	queryID := uuid.New().String()
 	streamCtx, cancel := context.WithCancel(c.Context())
@@ -291,6 +293,10 @@ func (s *Server) streamPreviewQuery(
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
+		// Fire-and-forget with its own background context on purpose: the stream
+		// context is canceled once the response finishes writing.
+		s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage, //nolint:contextcheck // detached best-effort write
+			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
 		_ = w.Flush()
 	})
 

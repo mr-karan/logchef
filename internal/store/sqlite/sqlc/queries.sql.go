@@ -1471,6 +1471,40 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 	return i, err
 }
 
+const insertQueryHistory = `-- name: InsertQueryHistory :one
+
+INSERT INTO query_history (user_id, team_id, source_id, query_text, query_language, duration_ms, row_count)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id
+`
+
+type InsertQueryHistoryParams struct {
+	UserID        int64  `json:"user_id"`
+	TeamID        int64  `json:"team_id"`
+	SourceID      int64  `json:"source_id"`
+	QueryText     string `json:"query_text"`
+	QueryLanguage string `json:"query_language"`
+	DurationMs    int64  `json:"duration_ms"`
+	RowCount      int64  `json:"row_count"`
+}
+
+// Query history ---------------------------------------------------------------
+// Record one executed query and return its id.
+func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error) {
+	row := q.queryRow(ctx, q.insertQueryHistoryStmt, insertQueryHistory,
+		arg.UserID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.QueryText,
+		arg.QueryLanguage,
+		arg.DurationMs,
+		arg.RowCount,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const isSourceManaged = `-- name: IsSourceManaged :one
 SELECT managed FROM sources WHERE id = ?
 `
@@ -2295,6 +2329,62 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listQueryHistory = `-- name: ListQueryHistory :many
+SELECT
+    id,
+    user_id,
+    team_id,
+    source_id,
+    query_text,
+    query_language,
+    duration_ms,
+    row_count,
+    created_at
+FROM query_history
+WHERE user_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT ?
+`
+
+type ListQueryHistoryParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int64 `json:"limit"`
+}
+
+// List one user's recent history, newest first.
+func (q *Queries) ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error) {
+	rows, err := q.query(ctx, q.listQueryHistoryStmt, listQueryHistory, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryHistory{}
+	for rows.Next() {
+		var i QueryHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.QueryText,
+			&i.QueryLanguage,
+			&i.DurationMs,
+			&i.RowCount,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSavedQueriesForUser = `-- name: ListSavedQueriesForUser :many
 SELECT
     sq.id,
@@ -3081,6 +3171,28 @@ WHERE expires_at < ?
 // Delete expired query shares
 func (q *Queries) PruneExpiredQueryShares(ctx context.Context, expiresAt time.Time) error {
 	_, err := q.exec(ctx, q.pruneExpiredQuerySharesStmt, pruneExpiredQueryShares, expiresAt)
+	return err
+}
+
+const pruneQueryHistoryForUser = `-- name: PruneQueryHistoryForUser :exec
+DELETE FROM query_history
+WHERE id IN (
+    SELECT qh.id FROM query_history qh
+    WHERE qh.user_id = ?
+    ORDER BY qh.created_at DESC, qh.id DESC
+    LIMIT -1 OFFSET ?
+)
+`
+
+type PruneQueryHistoryForUserParams struct {
+	UserID int64 `json:"user_id"`
+	Offset int64 `json:"offset"`
+}
+
+// Delete a user's history rows beyond the newest `offset` (the per-user cap),
+// keeping history bounded on every insert.
+func (q *Queries) PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error {
+	_, err := q.exec(ctx, q.pruneQueryHistoryForUserStmt, pruneQueryHistoryForUser, arg.UserID, arg.Offset)
 	return err
 }
 

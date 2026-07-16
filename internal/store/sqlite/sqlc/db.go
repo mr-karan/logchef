@@ -198,6 +198,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
 	}
+	if q.insertQueryHistoryStmt, err = db.PrepareContext(ctx, insertQueryHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query InsertQueryHistory: %w", err)
+	}
 	if q.isSourceManagedStmt, err = db.PrepareContext(ctx, isSourceManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query IsSourceManaged: %w", err)
 	}
@@ -251,6 +254,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listManagedUsersStmt, err = db.PrepareContext(ctx, listManagedUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedUsers: %w", err)
+	}
+	if q.listQueryHistoryStmt, err = db.PrepareContext(ctx, listQueryHistory); err != nil {
+		return nil, fmt.Errorf("error preparing query ListQueryHistory: %w", err)
 	}
 	if q.listSavedQueriesForUserStmt, err = db.PrepareContext(ctx, listSavedQueriesForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSavedQueriesForUser: %w", err)
@@ -308,6 +314,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.pruneExpiredQuerySharesStmt, err = db.PrepareContext(ctx, pruneExpiredQueryShares); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneExpiredQueryShares: %w", err)
+	}
+	if q.pruneQueryHistoryForUserStmt, err = db.PrepareContext(ctx, pruneQueryHistoryForUser); err != nil {
+		return nil, fmt.Errorf("error preparing query PruneQueryHistoryForUser: %w", err)
 	}
 	if q.removeCollectionItemStmt, err = db.PrepareContext(ctx, removeCollectionItem); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveCollectionItem: %w", err)
@@ -679,6 +688,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
 		}
 	}
+	if q.insertQueryHistoryStmt != nil {
+		if cerr := q.insertQueryHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing insertQueryHistoryStmt: %w", cerr)
+		}
+	}
 	if q.isSourceManagedStmt != nil {
 		if cerr := q.isSourceManagedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing isSourceManagedStmt: %w", cerr)
@@ -767,6 +781,11 @@ func (q *Queries) Close() error {
 	if q.listManagedUsersStmt != nil {
 		if cerr := q.listManagedUsersStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedUsersStmt: %w", cerr)
+		}
+	}
+	if q.listQueryHistoryStmt != nil {
+		if cerr := q.listQueryHistoryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listQueryHistoryStmt: %w", cerr)
 		}
 	}
 	if q.listSavedQueriesForUserStmt != nil {
@@ -862,6 +881,11 @@ func (q *Queries) Close() error {
 	if q.pruneExpiredQuerySharesStmt != nil {
 		if cerr := q.pruneExpiredQuerySharesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing pruneExpiredQuerySharesStmt: %w", cerr)
+		}
+	}
+	if q.pruneQueryHistoryForUserStmt != nil {
+		if cerr := q.pruneQueryHistoryForUserStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing pruneQueryHistoryForUserStmt: %w", cerr)
 		}
 	}
 	if q.removeCollectionItemStmt != nil {
@@ -1086,6 +1110,7 @@ type Queries struct {
 	getUserPreferencesStmt              *sql.Stmt
 	getUserTeamForSourceStmt            *sql.Stmt
 	insertAlertHistoryStmt              *sql.Stmt
+	insertQueryHistoryStmt              *sql.Stmt
 	isSourceManagedStmt                 *sql.Stmt
 	isTeamManagedStmt                   *sql.Stmt
 	isUserManagedStmt                   *sql.Stmt
@@ -1104,6 +1129,7 @@ type Queries struct {
 	listManagedSourcesStmt              *sql.Stmt
 	listManagedTeamsStmt                *sql.Stmt
 	listManagedUsersStmt                *sql.Stmt
+	listQueryHistoryStmt                *sql.Stmt
 	listSavedQueriesForUserStmt         *sql.Stmt
 	listSavedQueriesForUserBySourceStmt *sql.Stmt
 	listServiceAccountsStmt             *sql.Stmt
@@ -1123,6 +1149,7 @@ type Queries struct {
 	markAlertTriggeredStmt              *sql.Stmt
 	pruneAlertHistoryStmt               *sql.Stmt
 	pruneExpiredQuerySharesStmt         *sql.Stmt
+	pruneQueryHistoryForUserStmt        *sql.Stmt
 	removeCollectionItemStmt            *sql.Stmt
 	removeCollectionMemberStmt          *sql.Stmt
 	removeTeamMemberStmt                *sql.Stmt
@@ -1212,6 +1239,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserPreferencesStmt:              q.getUserPreferencesStmt,
 		getUserTeamForSourceStmt:            q.getUserTeamForSourceStmt,
 		insertAlertHistoryStmt:              q.insertAlertHistoryStmt,
+		insertQueryHistoryStmt:              q.insertQueryHistoryStmt,
 		isSourceManagedStmt:                 q.isSourceManagedStmt,
 		isTeamManagedStmt:                   q.isTeamManagedStmt,
 		isUserManagedStmt:                   q.isUserManagedStmt,
@@ -1230,6 +1258,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listManagedSourcesStmt:              q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                q.listManagedTeamsStmt,
 		listManagedUsersStmt:                q.listManagedUsersStmt,
+		listQueryHistoryStmt:                q.listQueryHistoryStmt,
 		listSavedQueriesForUserStmt:         q.listSavedQueriesForUserStmt,
 		listSavedQueriesForUserBySourceStmt: q.listSavedQueriesForUserBySourceStmt,
 		listServiceAccountsStmt:             q.listServiceAccountsStmt,
@@ -1249,6 +1278,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		markAlertTriggeredStmt:              q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:               q.pruneAlertHistoryStmt,
 		pruneExpiredQuerySharesStmt:         q.pruneExpiredQuerySharesStmt,
+		pruneQueryHistoryForUserStmt:        q.pruneQueryHistoryForUserStmt,
 		removeCollectionItemStmt:            q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:          q.removeCollectionMemberStmt,
 		removeTeamMemberStmt:                q.removeTeamMemberStmt,

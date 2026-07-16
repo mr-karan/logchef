@@ -222,6 +222,41 @@ func (s *Server) handleListCurrentUserTeams(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, userTeamDetails)
 }
 
+// --- Current User Query History Handlers ---
+
+// handleListQueryHistory returns the authenticated user's recent query history,
+// newest first. Supports ?limit= (default models.QueryHistoryDefaultLimit,
+// capped at models.QueryHistoryMaxLimit).
+// URL: GET /api/v1/me/query-history
+// Requires: User authentication (requireAuth middleware)
+func (s *Server) handleListQueryHistory(c *fiber.Ctx) error {
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		s.log.Error("user not found in context despite requireAuth middleware")
+		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
+	}
+
+	limit := models.QueryHistoryDefaultLimit
+	if raw := c.Query("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid limit", models.ValidationErrorType)
+		}
+		limit = parsed
+	}
+	if limit > models.QueryHistoryMaxLimit {
+		limit = models.QueryHistoryMaxLimit
+	}
+
+	history, err := s.sqlite.ListQueryHistory(c.Context(), user.ID, limit)
+	if err != nil {
+		s.log.Error("failed to list query history", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Error listing query history")
+	}
+
+	return SendSuccess(c, fiber.StatusOK, history)
+}
+
 // --- API Token Management Handlers ---
 
 // handleListAPITokens lists all API tokens for the authenticated user.

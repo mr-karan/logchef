@@ -31,6 +31,7 @@ sql:
       - "internal/store/sqlite/migrations/000027_remove_legacy_query_type.up.sql"
       - "internal/store/sqlite/migrations/000028_add_local_auth.up.sql"
       - "internal/store/sqlite/migrations/000029_add_dashboards.up.sql"
+      - "internal/store/sqlite/migrations/000031_add_query_history.up.sql"
     gen:
       go:
         package: "sqlc"
@@ -48,6 +49,7 @@ sql:
       - "internal/store/postgres/migrations/000002_datasource_multibackend.up.sql"
       - "internal/store/postgres/migrations/000003_add_local_auth.up.sql"
       - "internal/store/postgres/migrations/000004_add_dashboards.up.sql"
+      - "internal/store/postgres/migrations/000006_add_query_history.up.sql"
     gen:
       go:
         package: "sqlc"

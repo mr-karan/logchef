@@ -370,7 +370,8 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	}
 	if source.IsClickHouse() {
 		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
-			queryStreamConfig{logsKey: "data"}, req.QueryText, "sql", req.Limit)
+			queryStreamConfig{logsKey: "data"}, req.QueryText, "sql", req.Limit,
+			req.QueryText, models.QueryLanguageClickHouseSQL)
 	}
 
 	// Buffered fallback for non-streaming providers.
@@ -429,6 +430,8 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 			"limit_applied", result.Stats.LimitApplied,
 			"truncated", result.Stats.Truncated,
 		)
+		s.recordQueryHistory(user, teamID, sourceID, req.QueryText, models.QueryLanguageClickHouseSQL,
+			int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
 	}
 
 	// Add query ID to the response for frontend tracking

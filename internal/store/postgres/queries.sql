@@ -943,3 +943,39 @@ RETURNING id;
 -- Delete a dashboard; RETURNING lets callers detect not-found.
 DELETE FROM dashboards WHERE id = $1
 RETURNING id;
+
+-- Query history ---------------------------------------------------------------
+
+-- name: InsertQueryHistory :one
+-- Record one executed query and return its id.
+INSERT INTO query_history (user_id, team_id, source_id, query_text, query_language, duration_ms, row_count)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id;
+
+-- name: PruneQueryHistoryForUser :exec
+-- Delete a user's history rows beyond the newest `offset` (the per-user cap),
+-- keeping history bounded on every insert.
+DELETE FROM query_history
+WHERE id IN (
+    SELECT qh.id FROM query_history qh
+    WHERE qh.user_id = $1
+    ORDER BY qh.created_at DESC, qh.id DESC
+    OFFSET $2
+);
+
+-- name: ListQueryHistory :many
+-- List one user's recent history, newest first.
+SELECT
+    id,
+    user_id,
+    team_id,
+    source_id,
+    query_text,
+    query_language,
+    duration_ms,
+    row_count,
+    created_at
+FROM query_history
+WHERE user_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2;

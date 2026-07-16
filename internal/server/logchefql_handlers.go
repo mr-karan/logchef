@@ -440,7 +440,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 				generatedQuery:    executableQuery,
 				generatedLanguage: executableQueryLanguage,
 			},
-			executableQuery, "logchefql", req.Limit)
+			executableQuery, "logchefql", req.Limit,
+			req.Query, models.QueryLanguageLogchefQL)
 	}
 
 	// Buffered fallback for non-streaming providers.
@@ -493,6 +494,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 			"limit_applied", result.Stats.LimitApplied,
 			"truncated", result.Stats.Truncated,
 		)
+		s.recordQueryHistory(user, teamID, sourceID, req.Query, models.QueryLanguageLogchefQL,
+			int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
 	}
 
 	// Add query_id and generated SQL to response

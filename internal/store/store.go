@@ -142,6 +142,14 @@ type AlertStore interface {
 	PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error
 }
 
+// QueryHistoryStore persists per-user query execution history. Recording is
+// best-effort (callers fire-and-forget on the query path) and self-pruning:
+// RecordQueryHistory caps each user's history at models.QueryHistoryPerUserCap.
+type QueryHistoryStore interface {
+	RecordQueryHistory(ctx context.Context, entry *models.QueryHistory) error
+	ListQueryHistory(ctx context.Context, userID models.UserID, limit int) ([]*models.QueryHistory, error)
+}
+
 // ExportJobStore persists asynchronous CSV/export job records.
 type ExportJobStore interface {
 	CreateExportJob(ctx context.Context, job *models.ExportJob) error
@@ -254,6 +262,7 @@ type StoreOps interface {
 	CollectionStore
 	DashboardStore
 	AlertStore
+	QueryHistoryStore
 	ExportJobStore
 	QueryShareStore
 	ProvisioningStore
