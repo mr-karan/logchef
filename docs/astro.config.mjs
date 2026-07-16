@@ -1,5 +1,6 @@
 import { defineConfig } from "astro/config";
 import starlight from "@astrojs/starlight";
+import sitemap from "@astrojs/sitemap";
 import { passthroughImageService } from "astro/config";
 import starlightLlmsTxt from "starlight-llms-txt";
 
@@ -72,6 +73,16 @@ Key areas of the docs:
       // doesn't already provide: a shared OG/Twitter preview image, plus static
       // JSON-LD describing the site/organization.
       head: [
+        // RSS autodiscovery for the blog feed (generated at /rss.xml).
+        {
+          tag: "link",
+          attrs: {
+            rel: "alternate",
+            type: "application/rss+xml",
+            title: "Logchef Blog",
+            href: "/rss.xml",
+          },
+        },
         // OG image (Starlight has no default og:image).
         {
           tag: "meta",
@@ -233,5 +244,8 @@ Key areas of the docs:
         },
       ],
     }),
+    // Emits sitemap-index.xml + sitemap-0.xml at build time (needs `site`,
+    // set above). robots.txt points crawlers at /sitemap-index.xml.
+    sitemap(),
   ],
 });
