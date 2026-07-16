@@ -29,7 +29,25 @@ type Config struct {
 	Export       ExportConfig       `koanf:"export"`
 	Tail         TailConfig         `koanf:"tail"`
 	Shares       SharesConfig       `koanf:"shares"`
+	RateLimit    RateLimitConfig    `koanf:"rate_limit"`
 	Provisioning ProvisioningConfig `koanf:"provisioning"`
+}
+
+// RateLimitConfig controls fixed-window request rate limiting for the
+// unauthenticated auth/token endpoints (per client IP, plus an optional global
+// cap) and the authenticated query endpoints (per user). Limiting is skipped
+// entirely when Enabled is false.
+type RateLimitConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// AuthPerIPPerMinute caps requests per client IP per minute on the
+	// unauthenticated auth/token endpoints.
+	AuthPerIPPerMinute int `koanf:"auth_per_ip_per_minute"`
+	// AuthGlobalPerMinute caps total requests per minute across all clients on
+	// the auth/token endpoints. 0 disables the global cap.
+	AuthGlobalPerMinute int `koanf:"auth_global_per_minute"`
+	// QueryPerUserPerMinute caps query-endpoint requests per authenticated user
+	// per minute.
+	QueryPerUserPerMinute int `koanf:"query_per_user_per_minute"`
 }
 
 // QueryConfig contains settings for query execution
@@ -306,6 +324,15 @@ const (
 
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
+
+	// Opt-in: the per-IP auth limiter needs the real client IP, which requires
+	// trusted-proxy / X-Forwarded-For config when running behind a reverse proxy
+	// (e.g. Warpgate). Defaulting on there would collapse all traffic to one IP
+	// bucket and throttle auth globally. Operators enable it deliberately.
+	defaultRateLimitEnabled               = false
+	defaultRateLimitAuthPerIPPerMinute    = 20
+	defaultRateLimitAuthGlobalPerMinute   = 300
+	defaultRateLimitQueryPerUserPerMinute = 120
 )
 
 var defaultExportFormats = []string{"csv", "ndjson"}
@@ -659,5 +686,29 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.Shares.MaxQueryTextBytes <= 0 {
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+
+	if !k.Exists("rate_limit.enabled") {
+		cfg.RateLimit.Enabled = defaultRateLimitEnabled
+	}
+	if !k.Exists("rate_limit.auth_per_ip_per_minute") {
+		cfg.RateLimit.AuthPerIPPerMinute = defaultRateLimitAuthPerIPPerMinute
+	}
+	if !k.Exists("rate_limit.auth_global_per_minute") {
+		cfg.RateLimit.AuthGlobalPerMinute = defaultRateLimitAuthGlobalPerMinute
+	}
+	if !k.Exists("rate_limit.query_per_user_per_minute") {
+		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
+	}
+	if cfg.RateLimit.AuthPerIPPerMinute <= 0 {
+		cfg.RateLimit.AuthPerIPPerMinute = defaultRateLimitAuthPerIPPerMinute
+	}
+	// AuthGlobalPerMinute == 0 intentionally disables the global cap; only a
+	// negative value is invalid and falls back to the default.
+	if cfg.RateLimit.AuthGlobalPerMinute < 0 {
+		cfg.RateLimit.AuthGlobalPerMinute = defaultRateLimitAuthGlobalPerMinute
+	}
+	if cfg.RateLimit.QueryPerUserPerMinute <= 0 {
+		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
 	}
 }

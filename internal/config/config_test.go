@@ -105,3 +105,50 @@ func TestLoad_AutoProvisionDisabledByDefault(t *testing.T) {
 		t.Error("auto_provision.enabled should default to false")
 	}
 }
+
+func TestLoad_RateLimitDefaults(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	rl := cfg.RateLimit
+	if rl.Enabled {
+		t.Error("rate_limit.enabled should default to false (opt-in; per-IP needs trusted-proxy config)")
+	}
+	if rl.AuthPerIPPerMinute != 20 {
+		t.Errorf("auth_per_ip_per_minute = %d, want 20", rl.AuthPerIPPerMinute)
+	}
+	if rl.AuthGlobalPerMinute != 300 {
+		t.Errorf("auth_global_per_minute = %d, want 300", rl.AuthGlobalPerMinute)
+	}
+	if rl.QueryPerUserPerMinute != 120 {
+		t.Errorf("query_per_user_per_minute = %d, want 120", rl.QueryPerUserPerMinute)
+	}
+}
+
+func TestLoad_RateLimitOverrides(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[rate_limit]
+enabled = false
+auth_per_ip_per_minute = 5
+auth_global_per_minute = 0
+query_per_user_per_minute = 50
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	rl := cfg.RateLimit
+	if rl.Enabled {
+		t.Error("rate_limit.enabled = true, want false (explicitly set)")
+	}
+	if rl.AuthPerIPPerMinute != 5 {
+		t.Errorf("auth_per_ip_per_minute = %d, want 5", rl.AuthPerIPPerMinute)
+	}
+	// 0 is a valid value meaning "no global cap" and must be preserved.
+	if rl.AuthGlobalPerMinute != 0 {
+		t.Errorf("auth_global_per_minute = %d, want 0 (global cap disabled)", rl.AuthGlobalPerMinute)
+	}
+	if rl.QueryPerUserPerMinute != 50 {
+		t.Errorf("query_per_user_per_minute = %d, want 50", rl.QueryPerUserPerMinute)
+	}
+}

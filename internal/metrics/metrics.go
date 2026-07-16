@@ -174,6 +174,14 @@ func RecordAuthorizationFailure(endpoint string, user *models.User, reason strin
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
+// RecordRateLimitRejection records a request rejected by a rate limiter.
+// scope is "auth" (unauthenticated auth/token endpoints) or "query"
+// (per-user query endpoints).
+func RecordRateLimitRejection(scope string) {
+	labels := fmt.Sprintf(`logchef_rate_limit_rejections_total{scope=%q}`, scope)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
 func IncrementActiveRequests() {
 	metrics.GetOrCreateGauge("logchef_http_active_requests", nil).Inc()
 }

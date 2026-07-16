@@ -173,18 +173,44 @@ func (s *Server) setupRoutes() {
 
 	api := s.app.Group("/api/v1")
 
+	// Build rate-limit middleware once so limiter state persists across
+	// requests. When disabled, both helpers below register no middleware.
+	var authLimiter, queryLimiter fiber.Handler
+	if s.config.RateLimit.Enabled {
+		authLimiter = authRateLimitMiddleware(s.config.RateLimit.AuthPerIPPerMinute, s.config.RateLimit.AuthGlobalPerMinute)
+		queryLimiter = queryRateLimitMiddleware(s.config.RateLimit.QueryPerUserPerMinute)
+	}
+	// withAuthLimit / withQueryLimit prepend the relevant limiter to a route's
+	// handler chain when limiting is enabled, and are no-ops otherwise. The
+	// query limiter runs after the group-level requireAuth, so the user context
+	// is populated when it computes its per-user key.
+	withAuthLimit := func(handlers ...fiber.Handler) []fiber.Handler {
+		if authLimiter != nil {
+			return append([]fiber.Handler{authLimiter}, handlers...)
+		}
+		return handlers
+	}
+	withQueryLimit := func(handlers ...fiber.Handler) []fiber.Handler {
+		if queryLimiter != nil {
+			return append([]fiber.Handler{queryLimiter}, handlers...)
+		}
+		return handlers
+	}
+
 	// --- Public Routes ---
 	api.Get("/health", s.handleHealth)
 	api.Get("/meta", s.handleGetMeta)
 
 	// --- Authentication Routes ---
-	api.Get("/auth/login", s.handleLogin)
-	api.Post("/auth/local/login", s.handleLocalLogin)
-	api.Get("/auth/callback", s.handleCallback)
+	// The unauthenticated auth/token endpoints are rate-limited per client IP
+	// (plus an optional global cap) to blunt credential-stuffing / brute force.
+	api.Get("/auth/login", withAuthLimit(s.handleLogin)...)
+	api.Post("/auth/local/login", withAuthLimit(s.handleLocalLogin)...)
+	api.Get("/auth/callback", withAuthLimit(s.handleCallback)...)
 	api.Post("/auth/logout", s.handleLogout)
 
 	// --- CLI Authentication ---
-	api.Post("/cli/token", s.handleCLITokenExchange)
+	api.Post("/cli/token", withAuthLimit(s.handleCLITokenExchange)...)
 
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetCurrentUser)
@@ -318,8 +344,10 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
 	teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
 
-	// Query and explore logs
-	teamSourceOps.Post("/logs/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
+	// Query and explore logs. The heavy query/exploration endpoints are
+	// rate-limited per authenticated user (queryLimiter runs after the group's
+	// requireAuth, so the user context is available).
+	teamSourceOps.Post("/logs/query", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)...)
 	teamSourceOps.Get("/logs/tail", s.requireTokenScope(models.TokenScopeLogsRead), s.handleTailLogs)
 	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
 	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
@@ -327,7 +355,7 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
 	teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
 	teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
-	teamSourceOps.Post("/logs/histogram", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
+	teamSourceOps.Post("/logs/histogram", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)...)
 	teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
 	teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
 	teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
@@ -338,8 +366,8 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 	// Field value exploration for sidebar
-	teamSourceOps.Get("/fields/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
-	teamSourceOps.Get("/fields/:fieldName/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
+	teamSourceOps.Get("/fields/values", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)...)         // Get all LowCardinality field values
+	teamSourceOps.Get("/fields/:fieldName/values", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues)...) // Get values for a specific field
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin
