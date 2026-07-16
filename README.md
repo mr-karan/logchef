@@ -31,7 +31,7 @@ If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs gu
 - **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
 - **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
-- **CLI**: Query logs from your terminal with syntax highlighting and multi-context support.
+- **CLI**: Query logs from your terminal with syntax highlighting and multi-context support (query, explain, histogram, tail, doctor, and more).
 
 ## Quick Start
 
@@ -53,20 +53,24 @@ Logchef includes a powerful CLI for querying logs directly from your terminal.
 
 ### Install
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true):
+Find the latest CLI version on the [releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true), then set `CLI_VERSION` and download the build for your platform:
 
 ```bash
+# Set to the latest cli-v* tag from the releases page (e.g. cli-v0.2.0)
+CLI_VERSION=cli-vX.Y.Z
+BASE=https://github.com/mr-karan/logchef/releases/download/$CLI_VERSION
+
 # macOS (Apple Silicon)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-darwin-arm64.tar.gz
+curl -LO $BASE/logchef-darwin-arm64.tar.gz
 
 # macOS (Intel)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-darwin-amd64.tar.gz
+curl -LO $BASE/logchef-darwin-amd64.tar.gz
 
 # Linux (x86_64)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-linux-amd64.tar.gz
+curl -LO $BASE/logchef-linux-amd64.tar.gz
 
 # Linux (ARM64)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-linux-arm64.tar.gz
+curl -LO $BASE/logchef-linux-arm64.tar.gz
 
 # Extract and install
 tar -xzf logchef-*.tar.gz
@@ -80,7 +84,16 @@ sudo mv logchef /usr/local/bin/
 logchef auth --server https://logs.example.com
 
 # Query logs with LogchefQL
-logchef query "level:error" --since 1h
+logchef query 'level="error"' --since 1h
+
+# See the generated SQL/LogsQL without running it
+logchef explain 'level="error"'
+
+# Counts over time (terminal bar chart)
+logchef histogram 'level="error"' --since 1h
+
+# Diagnose your setup (config, auth, server, defaults)
+logchef doctor
 
 # Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs)
 logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"

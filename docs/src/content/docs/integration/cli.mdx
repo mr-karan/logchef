@@ -54,23 +54,25 @@ Download the latest CLI release for your platform from [GitHub Releases](https:/
 | macOS Intel | `logchef-cli_<version>_macos-x86_64.tar.gz` |
 | Windows x86_64 | `logchef-cli_<version>_windows-x86_64.zip` |
 
+Grab the latest version tag from the [CLI releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true) (e.g. `0.2.0`), set it once, then download:
+
 ```bash
-# Example: Download and install (replace VERSION with actual version)
-VERSION="0.1.6"
+# Set to the latest version from the releases page above
+CLI_VERSION="0.2.0"
 
 # Linux x86_64
-curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${VERSION}/logchef-cli_${VERSION}_linux-x86_64-musl.tar.gz"
-tar xzf logchef-cli_${VERSION}_linux-x86_64-musl.tar.gz
+curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${CLI_VERSION}/logchef-cli_${CLI_VERSION}_linux-x86_64-musl.tar.gz"
+tar xzf logchef-cli_${CLI_VERSION}_linux-x86_64-musl.tar.gz
 sudo mv logchef /usr/local/bin/
 
 # macOS Apple Silicon
-curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${VERSION}/logchef-cli_${VERSION}_macos-aarch64.tar.gz"
-tar xzf logchef-cli_${VERSION}_macos-aarch64.tar.gz
+curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${CLI_VERSION}/logchef-cli_${CLI_VERSION}_macos-aarch64.tar.gz"
+tar xzf logchef-cli_${CLI_VERSION}_macos-aarch64.tar.gz
 sudo mv logchef /usr/local/bin/
 ```
 
-:::tip[Check Latest Version]
-Visit the [CLI releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true) to find the latest version number.
+:::tip[Match the CLI to your server]
+Run `logchef doctor` after installing to confirm the CLI and server versions line up. A mismatch is a warning, not a hard failure.
 :::
 
 ### From Source
@@ -179,6 +181,10 @@ Generate API tokens from the Logchef web UI under your profile settings, or see
 [Service Tokens](/features/service-tokens) for non-login automation accounts.
 
 ## Command Reference
+
+:::note[Works on both engines]
+`query`, `sql`, `tail`, `find`, `explain`, `fields`, and `histogram` all run against ClickHouse **and** VictoriaLogs sources. LogchefQL (`query`, `tail`) compiles to whichever language the source speaks; `sql` sends ClickHouse SQL or LogsQL verbatim; `explain` shows exactly what a filter compiles to. For a VictoriaLogs walkthrough, see the [VictoriaLogs tutorial](/tutorials/victorialogs/).
+:::
 
 ### Query Logs
 
@@ -368,9 +374,122 @@ logchef sql "SELECT host, count() as cnt FROM logs.app GROUP BY host" --output j
 `--since` / `--from` / `--to` work on the top-level SELECT. The CLI walks the SQL skipping string literals, quoted identifiers, and parenthesized subqueries, then injects the predicate before the first top-level `GROUP BY` / `ORDER BY` / `LIMIT` / `HAVING` / `SETTINGS` / `FORMAT`. For CTEs (`WITH ... AS (...)`) or any case where you want full control, use the `__START__` / `__END__` placeholders explicitly.
 :::
 
+### Explain a Query
+
+The `explain` command translates a LogchefQL filter into the source's native query language and validates it **without running anything**. It's the go-to for "what will this actually run?" and "is this filter valid?" — the translation happens server-side, but no logs are read.
+
+For ClickHouse sources it prints the generated SQL; for VictoriaLogs sources it prints the generated LogsQL.
+
+```bash
+logchef explain 'level="error" and service="api"' -t production -S app-logs
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--output` | | Output format (`text`, `json`, `jsonl`) | `text` |
+
+#### Explain Examples
+
+```bash
+# See the ClickHouse SQL / LogsQL a filter compiles to
+logchef explain 'status>=500'
+
+# Validate a filter's syntax in a script (exit stays 0; check the JSON)
+logchef explain 'status>=500' --output json | jq '.valid'
+```
+
+:::tip[`explain` vs `--explain`/`--show-sql`]
+`explain` is a translate-and-validate step that **never executes**. The `--explain` / `--show-sql` flags on `query` and `sql` trace the generated backend query on stderr but **still run** it. Use `explain` when you only want to see or check the query; use the flags when you want the results and the query.
+:::
+
+### Fields
+
+The `fields` command is for field discovery. With no argument it lists the source's fields and types; pass a field name to list its observed values (with counts) over a lookback window.
+
+```bash
+# List every field in a source
+logchef fields -t production -S app-logs
+
+# Top observed values for `service` in the last hour
+logchef fields service --since 1h
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--since` | `-s` | Lookback window for value enumeration (e.g. "15m", "1h", "24h") | (from config, `15m`) |
+| `--limit` | | Max number of values to return (when a field is given) | `20` |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+
+#### Fields Examples
+
+```bash
+# List fields and types
+logchef fields
+
+# Top 50 values for `status`, machine-readable
+logchef fields status --limit 50 --output jsonl
+
+# What levels have we seen in the last 24h?
+logchef fields level --since 24h
+```
+
+### Histogram
+
+The `histogram` command buckets log counts over time. In text mode it renders a terminal bar chart; in `json`/`jsonl`/`table` mode it emits the raw buckets for plotting elsewhere. Works against both ClickHouse and VictoriaLogs sources. Pass an optional LogchefQL query to bucket only matching logs, and `--group-by` to break each bucket into the top series.
+
+```bash
+logchef histogram 'level="error"' --since 24h -t production -S app-logs
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--since` | `-s` | Relative lookback window (e.g. "15m", "1h", "24h") | (from config, `15m`) |
+| `--from` | | Absolute start (`YYYY-MM-DD HH:MM:SS`, effective timezone). Requires `--to` | |
+| `--to` | | Absolute end (`YYYY-MM-DD HH:MM:SS`, effective timezone). Requires `--from` | |
+| `--interval` | | Bucket size (e.g. "1m", "5m", "1h"). `auto` sizes it from the range | `auto` |
+| `--group-by` | | Field to break each bucket down by (top 10 series) | |
+| `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+| `--timeout` | | Query timeout in seconds | `30` |
+
+#### Histogram Examples
+
+```bash
+# Error rate over 24h, auto-sized buckets
+logchef histogram 'level="error"' --since 24h
+
+# Total volume in 5-minute buckets, broken down by service (top 10)
+logchef histogram --since 6h --interval 5m --group-by service
+
+# Machine-readable buckets for plotting elsewhere
+logchef histogram 'status>=500' --since 1h --output jsonl
+```
+
+Text output looks like:
+
+```text
+span 07-15 00:00:00 → 07-16 00:00:00 · bucket 30m
+07-15 00:00:00               │████████▍                       1,204
+07-15 00:30:00               │██████████████████████████████ 4,417
+07-15 01:00:00               │███████▏                          998
+...
+48 buckets · 82,341 logs · peak 4,417
+```
+
 ### Source Discovery
 
-The `find` command searches accessible sources for a service, job, host, or message pattern and prints the sources with recent matches.
+The `find` command searches accessible sources (ClickHouse and VictoriaLogs) for a service, job, host, or message pattern and prints the sources with recent matches.
 
 ```bash
 logchef find payments-api
@@ -404,12 +523,14 @@ Sources that fail to inspect (permissions, schema fetch, or query errors) are si
 
 ### Tail
 
-The `tail` command follows matching LogchefQL results by polling for new rows and streaming them until Ctrl-C or `--max-lines` is reached.
+The `tail` command follows matching LogchefQL results live until Ctrl-C or `--max-lines` is reached. It streams **natively over Server-Sent Events (SSE)**: the server handles the live push for both backends (polling under the hood for ClickHouse, VictoriaLogs' native tail for VL), so the ClickHouse-vs-VictoriaLogs difference is invisible to you.
 
 ```bash
 logchef tail 'service="payments-api" and msg~"error"' -t production -S app-logs
 logchef tail 'level="error"' --output jsonl --max-lines 20
 ```
+
+For environments where the streaming endpoint is unavailable (e.g. a proxy that buffers SSE), pass `--poll` to fall back to the legacy client-side polling loop. Under `--poll`, the CLI repeatedly queries newest-first on `--interval`; `--since`, `--interval`, and `--limit` only apply in this mode (the SSE stream is push-based and always follows from now).
 
 #### Tail Options
 
@@ -417,14 +538,17 @@ logchef tail 'level="error"' --output jsonl --max-lines 20
 | :--- | :--- | :--- | :--- |
 | `--team` | `-t` | Team name or ID | (from env/config) |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from env/config) |
-| `--since` | `-s` | Initial lookback window | `30s` |
-| `--interval` | | Poll interval in seconds | `2` |
-| `--limit` | | Maximum rows fetched per poll | `100` |
+| `--poll` | | Use the legacy client-side polling loop instead of the native SSE stream | `false` |
+| `--since` | `-s` | Initial lookback window (`--poll` only) | `30s` |
+| `--interval` | | Poll interval in seconds (`--poll` only) | `2` |
+| `--limit` | | Maximum rows fetched per poll (`--poll` only) | `100` |
 | `--max-lines` | | Stop after printing this many rows | |
+| `--timeout` | | Query timeout in seconds. Bounds each poll under `--poll`; acts as an idle read timeout (reconnect) on the SSE stream | `30` |
 | `--output` | | Output format (`text`, `jsonl`, `msg`) | `text` |
 | `--no-highlight` | | Disable syntax highlighting (auto-disabled when piped) | `false` |
+| `--no-timestamp` | | Hide timestamp from text output | `false` |
 
-If a single poll returns at `--limit`, tail prints a one-shot stderr warning: between polls, more rows may have arrived than fit in one fetch. Raise `--limit` or shrink `--interval` to keep up.
+Under `--poll`, if a single poll returns at `--limit`, tail prints a one-shot stderr warning: between polls, more rows may have arrived than fit in one fetch. Raise `--limit` or shrink `--interval` to keep up. The native SSE stream doesn't have this limit.
 
 Highlighting is auto-disabled when stdout is not a TTY, so `logchef tail '...' | jq` and `... > log.txt` produce clean output without `--no-highlight`. The flag still works as an explicit override.
 
@@ -445,6 +569,42 @@ The highlighting includes:
 - **Key=value pairs** with dimmed keys
 - **Numbers** in cyan
 - **Log levels** color-coded (ERROR=red, WARN=yellow, INFO=green, DEBUG=blue)
+
+### Open in Web Explorer
+
+The `open` command builds a web explorer URL for the current team/source (and optional query) and opens it in your browser — the reverse of the "copy CLI command" button in the UI. Handy when a terminal investigation is easier to keep digging into visually. Pass `--print` to print the URL instead of launching a browser.
+
+```bash
+# Open a filter in the explorer with a relative window
+logchef open 'status>=500' -t production -S app-logs --since 1h
+
+# Print the URL instead of opening it
+logchef open 'level="error"' --since 15m --print
+```
+
+#### Options
+
+| Option | Shorthand | Description | Default |
+| :--- | :--- | :--- | :--- |
+| `--team` | `-t` | Team name (or ID) | (from config) |
+| `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
+| `--sql` | | Treat the query as a raw native query (ClickHouse SQL / VictoriaLogs LogsQL) | `false` |
+| `--since` | `-s` | Relative time range to preselect (ignored if `--from`/`--to` given) | |
+| `--from` | | Absolute start (`YYYY-MM-DD HH:MM:SS`, effective timezone). Requires `--to` | |
+| `--to` | | Absolute end (`YYYY-MM-DD HH:MM:SS`, effective timezone). Requires `--from` | |
+| `--limit` | `-l` | Row limit to preselect | |
+| `--print` | | Print the URL instead of opening a browser | `false` |
+
+#### Open Examples
+
+```bash
+# Hand off a native query to the explorer
+logchef open 'SELECT * FROM logs.app WHERE level=' --sql -t production -S app-logs
+
+# Open an absolute-range investigation
+logchef open 'recipient~"user@example.com"' \
+  --from '2026-06-30 00:00:00' --to '2026-06-30 23:59:59'
+```
 
 ### Saved Queries
 
@@ -616,6 +776,70 @@ logchef schema --team "production" --source "nginx-logs"
 | `--team` | `-t` | Team name (or ID) | (from config) |
 | `--source` | `-S` | Source name, `database.table_name`, or ID | (from config) |
 | `--output` | | Output format (`text`, `json`, `jsonl`, `table`) | `text` |
+
+### Doctor
+
+The `doctor` command runs a one-shot health check of your setup, so it's a good first step when something isn't working. It checks: the config file, current context, server reachability, CLI auth availability, the token and its expiry, whether the CLI and server versions match, and whether your default team/source actually resolve. Each line is `✓` (ok), `⚠` (warning), or `✗` (problem); every warning or problem prints an actionable `→` fix. It exits `0` when there are no problems (warnings are fine) and `1` otherwise.
+
+```bash
+logchef doctor
+```
+
+#### Options
+
+| Option | Description | Default |
+| :--- | :--- | :--- |
+| `--json` | Emit the checks as a JSON array of `{check, status, detail, hint}` | `false` |
+
+#### Doctor Examples
+
+```bash
+# Human-readable health report
+logchef doctor
+
+# Machine-readable — surface only failures in CI
+logchef doctor --json | jq '.[] | select(.status == "fail")'
+
+# Diagnose a specific server without switching contexts
+logchef doctor --server https://logs.example.com
+```
+
+### Skills
+
+The CLI bundles its own usage skill, embedded at build time so its content always matches your installed binary. `skills list` shows what's available; `skills get core` prints the guide. This is the best way to get usage instructions that match your version — point an agent (or yourself) at it instead of guessing at flags.
+
+```bash
+# List the bundled skills
+logchef skills list
+
+# Print the core usage guide (LogchefQL / SQL / LogsQL, workflows)
+logchef skills get core
+
+# Include every reference file (full syntax reference)
+logchef skills get core --full
+
+# Feed the guide to an agent as JSON
+logchef skills get core --json
+```
+
+:::tip[For agents]
+If you're driving Logchef from an AI agent or script, run `logchef skills get core` first. The output is version-matched to the binary, so the flags and behaviors it describes are guaranteed to exist.
+:::
+
+### Completions
+
+Generate a shell completion script for `bash`, `zsh`, `fish`, or `powershell`:
+
+```bash
+# Bash (add to ~/.bashrc)
+logchef completions bash > /etc/bash_completion.d/logchef
+
+# Zsh (place on your $fpath)
+logchef completions zsh > ~/.zfunc/_logchef
+
+# Fish
+logchef completions fish > ~/.config/fish/completions/logchef.fish
+```
 
 ### Configuration
 
@@ -899,7 +1123,14 @@ The following options can be used with any command:
 | `--token` | `LOGCHEF_AUTH_TOKEN` | Override API token |
 | | `LOGCHEF_DEFAULT_TEAM` | Default team when `--team` is omitted |
 | | `LOGCHEF_DEFAULT_SOURCE` | Default source when `--source` is omitted |
+| `--quiet` / `-q` | | Suppress stats, highlighting, and spinners (data still goes to stdout) |
 | `--debug` / `-d` | | Enable detailed debug output |
+
+`--quiet` is the flag to reach for in scripts and agents: it strips the stderr stats line, ANSI highlighting, and progress spinners, leaving just the data on stdout. Pair it with `--output jsonl` for clean, parseable output:
+
+```bash
+logchef query 'level="error"' --quiet --output jsonl | jq .msg
+```
 
 ## Environment Variables
 
@@ -975,5 +1206,6 @@ done
 ## Next steps
 
 - Learn the filter syntax the `query` command accepts in [Search Syntax](/guide/search-syntax)
+- Query a VictoriaLogs source end to end in the [VictoriaLogs tutorial](/tutorials/victorialogs/)
 - Connect an AI assistant to the same data with the [MCP Server](/integration/mcp-server)
 - Configure the `oidc.cli_client_id` prerequisite in [Configuration](/getting-started/configuration/#openid-connect-oidc)

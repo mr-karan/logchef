@@ -86,6 +86,10 @@ editing, a full-height panel builder, line/area/bar chart styles), and
 - **Dashboard timezone handling.** Time-series panels align histogram buckets to
   the viewer's local timezone; table/stat panels are pinned to a UTC query
   internally so their time window no longer shifts for non-UTC viewers.
+- **Streaming large query responses.** Preview query responses for ClickHouse
+  sources now stream row-by-row instead of buffering the full JSON result in
+  memory, removing a memory-spike path on large result sets. The response shape
+  is unchanged. VictoriaLogs keeps the buffered path. (Closes #51)
 
 ### Fixed
 - **Deleting a user now deletes their sessions too**: previously a removed
@@ -110,6 +114,28 @@ editing, a full-height panel builder, line/area/bar chart styles), and
   that don't support them, instead of a 500 or a job that fails asynchronously
   after returning 202.
 
+### Security
+- **Dashboards hardening.** Fixes a stored XSS in the time-series crosshair
+  tooltip, where grouped-series labels are attacker-controllable log values —
+  they are now escaped. Cross-dashboard save corruption is isolated, and the
+  concurrent-save clobber is closed with an optimistic-concurrency precondition
+  (an `updated_at` mismatch returns `409` instead of overwriting a newer save).
+  Panel LogsQL is dispatched per panel. Cross-team authorization is reworked:
+  dashboards are visible from any team with per-panel redaction (a viewer sees
+  only panels whose source they can reach), cross-team edits are blocked, and
+  dangling team/source references and corrupt panel blobs are rejected and
+  isolated rather than failing the whole dashboard. (Closes #119, #120)
+- **VictoriaLogs provider hardening.** Custom headers can no longer override the
+  computed auth/tenant headers or survive a switch to auth mode `none`
+  (credential-leak fix), and switching auth mode no longer resurrects a stale
+  credential. Connection validation now probes the real query path, not just
+  field listing. LogsQL generation quotes the field names VictoriaLogs requires
+  quoting (`@timestamp`, reserved words), and histogram series cap/labeling is
+  corrected. The alert-lookback heuristic handles compound field names, nested
+  `options(...)`, and top-level `OR` / negated `_time:`. A live-tail goroutine
+  leak and a dropped-batch-on-cancel are fixed, and read deadlines are added to
+  the histogram, schema, and test-alert request paths.
+
 ### Removed
 - **Dead chip-based column filter component** in the results table, superseded
   by the new column-header filters. (Closes #32)
@@ -124,6 +150,10 @@ editing, a full-height panel builder, line/area/bar chart styles), and
   fixed for the v0.33+ array format.
 - VictoriaLogs real-instance integration suite and CI job; VictoriaLogs browser
   e2e scenario; host-network Docker Compose variant for local testing.
+- **Dependency sweep.** Go and frontend dependencies bumped to latest — Go:
+  `x/crypto`, `go-oidc`, Fiber 2.52.14, `clickhouse-sql-parser`; frontend: Pinia
+  4, `vue`/`vue-router`/`reka-ui`/`vite`/`vitest`/`tailwind`/`zod`. Swept manually for this
+  release; Renovate keeps them current afterward.
 
 ### Migration notes
 | Backend | Migration | What it does |
@@ -263,6 +293,49 @@ SQLite migration, `000024`, applies automatically). To adopt Postgres for HA,
 read the [Database Backends & HA guide](https://logchef.app/operations/database-backends/)
 first. Note the current caveat that alert evaluation must run on **exactly one**
 replica until leader election lands.
+
+## [CLI v0.2.0] - Unreleased
+
+Logchef CLI 0.2.0 is the VictoriaLogs release: `query`, `sql`, `find`, and
+`tail` all work against VictoriaLogs sources, and `tail` follows both backends
+over a native SSE stream (with a `--poll` fallback) instead of the old polling
+loop. It also adds a batch of inspection and setup commands — `explain`,
+`fields`, `histogram`, `open`, `doctor`, `skills`, and `completions` — plus a
+global `--quiet`, syntax-highlighted generated queries, and actionable error
+hints.
+
+### Added
+- **`explain` command**: Print the generated ClickHouse SQL / VictoriaLogs
+  LogsQL for a LogchefQL query without executing it. Syntax-highlighted.
+- **`fields` command**: Discover fields on a source and their top values, for
+  building a query without opening the explorer.
+- **`histogram` command**: Counts-over-time buckets rendered as a terminal bar
+  chart. Works against both ClickHouse and VictoriaLogs sources.
+- **`open` command**: Open the current query in the web explorer. Accepts a
+  relative `--since` or an absolute `--from` / `--to`, `--sql` for a native
+  query, and `--print` to emit the URL instead of launching a browser.
+- **`doctor` command**: Diagnose your setup — config, auth, server
+  reachability, version compatibility, and resolved defaults — with fix hints
+  for each failing check. `--json` for machine-readable output.
+- **`skills` command**: Serve the bundled, version-matched CLI skill for AI
+  agents: `logchef skills get core [--full]`.
+- **`completions` command**: Generate shell completions for bash, zsh, fish,
+  and powershell.
+- **Native SSE `tail`**: `tail` follows both ClickHouse and VictoriaLogs sources
+  over a server-sent-events stream, replacing the old bounded-polling loop. Use
+  `--poll` to fall back to polling.
+- **Global `--quiet` / `-q`**: Suppress progress and diagnostic output on any
+  command for clean scripting.
+
+### Changed
+- **VictoriaLogs parity**: `query`, `sql`, `find`, and `tail` now work against
+  VictoriaLogs sources, not just ClickHouse. `sql --since` / `--from` / `--to`
+  time injection and `query --dry-run` are fixed for VictoriaLogs.
+- **Syntax-highlighted generated queries**: `explain` and the `--show-sql`
+  trace on `query` / `sql` are syntax-highlighted on a TTY.
+- **Actionable error hints**: Command failures now suggest the likely fix
+  (wrong source, missing auth, unsupported capability) instead of just
+  surfacing the raw server error.
 
 ## [CLI v0.1.6] - 2026-05-20
 

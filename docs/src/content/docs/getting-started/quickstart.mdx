@@ -39,12 +39,14 @@ After starting, you can access the Logchef UI at `http://localhost:8125`.
 For production deployments or running without Docker, you can download pre-built binaries:
 
 ```bash
-# Download the latest release for your platform (example for Linux amd64)
-# Check latest version at https://github.com/mr-karan/logchef/releases
-curl -L -O https://github.com/mr-karan/logchef/releases/download/v1.6.1/logchef_1.6.1_linux_amd64.tar.gz
+# Grab the latest version tag from https://github.com/mr-karan/logchef/releases/latest (e.g. 2.0.0), set it once, then download:
+VERSION="2.0.0"
+
+# Download the release for your platform (example for Linux amd64)
+curl -L -O https://github.com/mr-karan/logchef/releases/download/v${VERSION}/logchef_${VERSION}_linux_amd64.tar.gz
 
 # Extract the archive
-tar xzf logchef_1.6.1_linux_amd64.tar.gz
+tar xzf logchef_${VERSION}_linux_amd64.tar.gz
 
 # Make the binary executable
 chmod +x logchef
