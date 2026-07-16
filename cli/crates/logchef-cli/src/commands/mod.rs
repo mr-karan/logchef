@@ -7,6 +7,7 @@ pub mod explain;
 pub mod fields;
 pub mod find;
 pub mod histogram;
+pub mod history;
 pub mod open;
 pub mod query;
 pub mod saved_queries;

@@ -3,8 +3,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    auth, collections, completions, config, doctor, explain, fields, find, histogram, open, query,
-    saved_queries, schema, skills, sources, sql, tail, teams, whoami,
+    auth, collections, completions, config, doctor, explain, fields, find, histogram, history,
+    open, query, saved_queries, schema, skills, sources, sql, tail, teams, whoami,
 };
 
 const LONG_ABOUT: &str = "\
@@ -100,6 +100,9 @@ enum Commands {
     #[command(about = "Show log counts over time as a terminal bar chart")]
     Histogram(histogram::HistogramArgs),
 
+    #[command(about = "Show your recent query history")]
+    History(history::HistoryArgs),
+
     #[command(about = "Open the current team/source (and optional query) in the web explorer")]
     Open(open::OpenArgs),
 
@@ -174,6 +177,7 @@ impl Cli {
             Some(Commands::Explain(args)) => explain::run(args, global).await,
             Some(Commands::Fields(args)) => fields::run(args, global).await,
             Some(Commands::Histogram(args)) => histogram::run(args, global).await,
+            Some(Commands::History(args)) => history::run(args, global).await,
             Some(Commands::Open(args)) => open::run(args, global).await,
             Some(Commands::Collections(args)) => collections::run(args, global).await,
             Some(Commands::SavedQueries(args)) => saved_queries::run(args, global).await,

@@ -492,4 +492,13 @@ impl Client {
         let response: ApiResponse<ResolvedSavedQuery> = self.get(&path).await?;
         Ok(response.data)
     }
+
+    /// Fetches the caller's recent query history, newest first. The server
+    /// defaults `limit` to 50 and caps it at 200.
+    pub async fn get_query_history(&self, limit: u32) -> Result<Vec<QueryHistoryEntry>> {
+        let response: ApiResponse<Vec<QueryHistoryEntry>> = self
+            .get(&format!("/api/v1/me/query-history?limit={}", limit))
+            .await?;
+        Ok(response.data)
+    }
 }

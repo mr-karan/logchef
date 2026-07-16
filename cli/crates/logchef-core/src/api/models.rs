@@ -500,6 +500,22 @@ pub struct CollectionAbsoluteTime {
     pub end: i64,
 }
 
+/// One persisted record of a query the caller executed against a source,
+/// returned newest-first by `GET /api/v1/me/query-history`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryHistoryEntry {
+    pub id: i64,
+    #[serde(default)]
+    pub user_id: Option<i64>,
+    pub team_id: i64,
+    pub source_id: i64,
+    pub query_text: String,
+    pub query_language: String,
+    pub duration_ms: i64,
+    pub row_count: i64,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct CollectionVariable {
     pub name: String,
