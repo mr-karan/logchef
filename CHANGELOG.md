@@ -167,6 +167,36 @@ Full details below.
   4, `vue`/`vue-router`/`reka-ui`/`vite`/`vitest`/`tailwind`/`zod`. Swept manually for this
   release; Renovate keeps them current afterward.
 
+### Breaking changes
+- **`provisioning.toml` source format changed.** Each `[[sources]]` now requires
+  a `source_type` and a nested `[sources.connection]` block. The old flat layout
+  (connection fields at the top level of `[[sources]]`) no longer parses, and the
+  server **exits on startup** if it finds it (with a message pointing you here).
+  If you provision sources via config, convert them before upgrading — teams,
+  members, and non-connection fields (`description`, `ttl_days`, `meta_ts_field`)
+  are unchanged:
+
+  ```toml
+  # Before (pre-2.0)
+  [[sources]]
+  name = "Production Logs"
+  host = "clickhouse.internal:9000"
+  database = "logs"
+  table_name = "otel_logs"
+
+  # After (2.0)
+  [[sources]]
+  name = "Production Logs"
+  source_type = "clickhouse"
+
+  [sources.connection]
+  host = "clickhouse.internal:9000"
+  database = "logs"
+  table_name = "otel_logs"
+  ```
+
+  See the [provisioning guide](https://logchef.app/getting-started/provisioning/).
+
 ### Migration notes
 | Backend | Migration | What it does |
 |---------|-----------|---------------|

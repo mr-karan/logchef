@@ -49,6 +49,15 @@ members = [
 ]
 ```
 
+:::caution[Upgrading from a version before 2.0]
+The source format changed in 2.0: each `[[sources]]` now needs a `source_type`
+and a nested `[sources.connection]` block. If your `provisioning.toml` still puts
+`host` / `database` / `table_name` at the top level of a `[[sources]]` entry, the
+server refuses to start until you move those fields under `[sources.connection]`
+and add `source_type = "clickhouse"` (as shown above). Teams, members, and the
+non-connection fields (`description`, `ttl_days`, `meta_ts_field`) are unchanged.
+:::
+
 ### 2. Point config.toml to it
 
 ```toml
