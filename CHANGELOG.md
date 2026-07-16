@@ -7,17 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-This release makes **VictoriaLogs a first-class datasource** alongside ClickHouse:
-add a VictoriaLogs source, query it in LogchefQL (compiled to LogsQL) or raw
-LogsQL, and build alerts and live tails against it. Under the hood, sources moved
-from a ClickHouse-shaped schema to a generic datasource-provider model with an
-explicit capability set (schema inspection, histogram, field values, AI SQL
-generation, log context, exports, live tail) so each backend only claims what it
-actually supports. Alongside VictoriaLogs, this release adds **built-in local
-authentication** (run without an external OIDC provider), **live tail** (stream
-logs in real time), a big **Dashboards** upgrade (direct-manipulation grid
-editing, a full-height panel builder, line/area/bar chart styles), and
-**client-side column filters** in the results table.
+Logchef v2.0 is a big release, and it starts with one thing: **VictoriaLogs is
+now a first-class datasource.** Point Logchef at a VictoriaLogs instance and
+explore it exactly like ClickHouse — same query box (LogchefQL or raw LogsQL),
+the same live tail, the same alerts — with no separate tooling to learn.
+
+There's a lot more in the box:
+
+- **Run Logchef without an external login provider.** Built-in email + password
+  auth means you can stand it up with zero OIDC setup — and if you do use SSO, it
+  can now create users automatically on their first login.
+- **Watch logs live.** Turn on live tail and matching rows stream in as they
+  arrive, on either backend.
+- **Better dashboards.** Build multi-panel views by dragging and resizing panels
+  right on the grid, with time-series, stat, and table panels and line/area/bar
+  chart styles.
+- **A much stronger CLI (v0.2.0).** New `explain`, `histogram`, `fields`,
+  `doctor`, and `open` commands, live-tail streaming in your terminal, and full
+  VictoriaLogs support — see the CLI v0.2.0 notes below.
+- **Faster on big results, and hardened throughout.** Large query results now
+  stream instead of buffering in memory, and a broad security and reliability
+  pass tightened dashboards, the VictoriaLogs connector, and query handling.
+
+Full details below.
 
 ### Added
 - **VictoriaLogs datasource.** Add a VictoriaLogs source (base URL, auth mode:
