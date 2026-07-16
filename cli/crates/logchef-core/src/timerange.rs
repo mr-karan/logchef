@@ -209,8 +209,8 @@ mod tests {
 
     #[test]
     fn wall_clock_to_epoch_millis_utc_is_naive() {
-        let ms =
-            wall_clock_to_epoch_millis("2026-07-14 04:58:42", Some("UTC")).expect("valid wall clock");
+        let ms = wall_clock_to_epoch_millis("2026-07-14 04:58:42", Some("UTC"))
+            .expect("valid wall clock");
         let expected = Utc.with_ymd_and_hms(2026, 7, 14, 4, 58, 42).unwrap();
         assert_eq!(ms, expected.timestamp_millis());
     }

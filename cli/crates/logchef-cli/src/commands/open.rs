@@ -87,7 +87,12 @@ pub async fn run(args: OpenArgs, global: GlobalArgs) -> Result<()> {
         ("source", source_id.to_string()),
     ];
 
-    if let Some(query) = args.query.as_deref().map(str::trim).filter(|q| !q.is_empty()) {
+    if let Some(query) = args
+        .query
+        .as_deref()
+        .map(str::trim)
+        .filter(|q| !q.is_empty())
+    {
         pairs.push((if args.sql { "sql" } else { "q" }, query.to_string()));
     }
 
@@ -97,15 +102,19 @@ pub async fn run(args: OpenArgs, global: GlobalArgs) -> Result<()> {
             let start = wall_clock_to_epoch_millis(from, tz).with_context(|| {
                 format!("Invalid --from '{from}' (expected 'YYYY-MM-DD HH:MM:SS')")
             })?;
-            let end = wall_clock_to_epoch_millis(to, tz).with_context(|| {
-                format!("Invalid --to '{to}' (expected 'YYYY-MM-DD HH:MM:SS')")
-            })?;
+            let end = wall_clock_to_epoch_millis(to, tz)
+                .with_context(|| format!("Invalid --to '{to}' (expected 'YYYY-MM-DD HH:MM:SS')"))?;
             pairs.push(("start", start.to_string()));
             pairs.push(("end", end.to_string()));
         }
         (Some(_), None) | (None, Some(_)) => bail!("--from and --to must be provided together"),
         (None, None) => {
-            if let Some(since) = args.since.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            if let Some(since) = args
+                .since
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
                 pairs.push(("t", since.to_string()));
             }
         }
