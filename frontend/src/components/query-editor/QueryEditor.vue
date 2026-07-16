@@ -46,12 +46,8 @@
           </Tooltip>
         </TooltipProvider>
 
-        <!-- Query History Button -->
-        <QueryHistoryDropdown
-          :team-id="props.teamId"
-          :source-id="props.sourceId"
-          @load-query="handleLoadQueryFromHistory"
-        />
+        <!-- Query History Button (server-backed, cross-device) -->
+        <QueryHistoryPanel />
 
         <!-- Table name indicator - hidden on small screens -->
         <div class="text-xs text-muted-foreground ml-3 hidden md:block">
@@ -458,7 +454,7 @@ import {
 } from "@/components/ui/hover-card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import SavedQueriesDropdown from "@/components/collections/SavedQueriesDropdown.vue";
-import QueryHistoryDropdown from "./QueryHistoryDropdown.vue";
+import QueryHistoryPanel from "./QueryHistoryPanel.vue";
 import AiSqlDialog from "./AiSqlDialog.vue";
 import VariableConfigSheet from "./VariableConfigSheet.vue";
 import VariablesPanel from "./VariablesPanel.vue";
@@ -937,22 +933,6 @@ const route = useRoute();
 const router = useRouter();
 
 const isEditingExistingQuery = computed(() => !!route.query.id);
-
-const handleLoadQueryFromHistory = (mode: 'logchefql' | 'native', query: string) => {
-  const editorMode = mode === 'logchefql' ? 'logchefql' : 'clickhouse-sql';
-
-  emit('change', {
-    query: query,
-    mode: editorMode,
-    isUserInput: false,
-  });
-
-  if (editorMode !== props.activeMode) {
-    nextTick(() => {
-      emit('update:activeMode', editorMode, true);
-    });
-  }
-};
 
 const handleNewQueryClick = () => {
   const currentQuery = { ...route.query };

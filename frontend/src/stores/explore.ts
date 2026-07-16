@@ -30,7 +30,6 @@ import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
-import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
 import { asClickHouseConnection } from '@/api/sources';
 import {
@@ -1254,18 +1253,8 @@ export const useExploreStore = defineStore("explore", () => {
             _updateLastExecutedState();
             persistDraft();
 
-            try {
-              if (currentTeamId && sourceId.value) {
-                queryHistoryService.addQueryEntry({
-                  teamId: currentTeamId,
-                  sourceId: sourceId.value,
-                  query: state.data.value.logchefqlCode,
-                  mode: 'logchefql'
-                });
-              }
-            } catch (historyError) {
-              console.warn("Failed to add query to history:", historyError);
-            }
+            // Query history is recorded server-side on execution and surfaced
+            // via GET /me/query-history (see QueryHistoryPanel) — no local write.
 
             if (relativeTime) {
               state.data.value.selectedRelativeTime = relativeTime;
@@ -1408,25 +1397,8 @@ export const useExploreStore = defineStore("explore", () => {
             _updateLastExecutedState();
             persistDraft();
 
-            try {
-              const teamsStore = useTeamsStore();
-              const currentTeamId = teamsStore.currentTeamId;
-              if (currentTeamId && sourceId.value) {
-                const queryContent = state.data.value.activeMode === 'logchefql'
-                  ? state.data.value.logchefqlCode
-                  : sql;
-
-                queryHistoryService.addQueryEntry({
-                  teamId: currentTeamId,
-                  sourceId: sourceId.value,
-                  mode: state.data.value.activeMode,
-                  query: queryContent,
-                  title: state.data.value.activeSavedQueryName || undefined
-                });
-              }
-            } catch (error) {
-              console.warn('Failed to save query to history:', error);
-            }
+            // Query history is recorded server-side on execution and surfaced
+            // via GET /me/query-history (see QueryHistoryPanel) — no local write.
 
             if (relativeTime) {
               state.data.value.selectedRelativeTime = relativeTime;

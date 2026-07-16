@@ -180,6 +180,22 @@ export interface QueryShareResponse {
   created_by: number;
 }
 
+// Persistent, server-backed query history (cross-device). Backed by
+// GET /api/v1/me/query-history, which returns the caller's recent queries
+// across all teams/sources, newest-first. See issue #58.
+export type QueryHistoryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+
+export interface QueryHistoryRecord {
+  id: number;
+  team_id: number;
+  source_id: number;
+  query_text: string;
+  query_language: QueryHistoryLanguage;
+  duration_ms: number;
+  row_count: number;
+  created_at: string;
+}
+
 export const exploreApi = {
   getLogs: (sourceId: number, params: QueryParams, teamId: number, signal?: AbortSignal) => {
     if (!teamId) {
@@ -308,6 +324,13 @@ export const exploreApi = {
       throw new Error("Share token is required");
     }
     return apiClient.get<QueryShareResponse>(`/query-shares/${encodeURIComponent(token)}`);
+  },
+
+  // Fetch the caller's recent query history (newest-first). limit is clamped
+  // server-side (default 50, max 200).
+  getMyQueryHistory: (limit?: number) => {
+    const search = typeof limit === "number" ? `?limit=${limit}` : "";
+    return apiClient.get<QueryHistoryRecord[]>(`/me/query-history${search}`);
   }
 };
 
