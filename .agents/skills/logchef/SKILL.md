@@ -1,6 +1,6 @@
 ---
 name: logchef
-version: 0.1.6
+version: 0.2.0
 description: >-
   Query logs from the terminal with the Logchef CLI. Covers LogchefQL search
   filters (`query`, `tail`), raw ClickHouse SQL and VictoriaLogs LogsQL (`sql`),
