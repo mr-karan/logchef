@@ -67,10 +67,34 @@ type ProvisionSource struct {
 	TTLDays           int    `koanf:"ttl_days" json:"ttl_days,omitempty"`
 	MetaTSField       string `koanf:"meta_ts_field" json:"meta_ts_field,omitempty"`
 	MetaSeverityField string `koanf:"meta_severity_field" json:"meta_severity_field,omitempty"`
+
+	// Legacy detection fields (pre-v2.0 flat schema). These mirror the old
+	// top-level connection keys that v2.0 moved under [sources.connection].
+	// They exist ONLY so the startup guard can detect an un-migrated config and
+	// emit a clear migration error — do NOT use them for connection building.
+	Host      string `koanf:"host" json:"-"`
+	Username  string `koanf:"username" json:"-"`
+	Password  string `koanf:"password" json:"-"`
+	Database  string `koanf:"database" json:"-"`
+	TableName string `koanf:"table_name" json:"-"`
+	TLSEnable bool   `koanf:"tls_enable" json:"-"`
 }
 
 func (s *ProvisionSource) NormalizedSourceType() models.SourceType {
 	return models.NormalizeSourceType(s.SourceType)
+}
+
+// HasLegacyFlatConnectionFields reports whether this source carries any pre-v2.0
+// flat connection fields at the top level. koanf silently drops these keys when
+// building the connection (the connection lives under [sources.connection] now),
+// so their presence signals an un-migrated config.
+func (s *ProvisionSource) HasLegacyFlatConnectionFields() bool {
+	return s.Host != "" ||
+		s.Username != "" ||
+		s.Password != "" ||
+		s.Database != "" ||
+		s.TableName != "" ||
+		s.TLSEnable
 }
 
 func (s *ProvisionSource) ClickHouseConnection() (models.ConnectionInfo, error) {

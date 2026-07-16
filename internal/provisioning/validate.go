@@ -62,6 +62,20 @@ func validateOneSource(i int, src config.ProvisionSource, seen map[string]bool) 
 		return append(errs, fmt.Sprintf("%s: unsupported source_type %q", prefix, src.SourceType))
 	}
 
+	// Detect the pre-v2.0 flat provisioning format. koanf silently drops the old
+	// top-level connection keys, so the connection block reads as empty and the
+	// per-type validation below would emit a bare "requires a connection block"
+	// with no hint that the format changed. Return a clear migration error and
+	// skip the confusing downstream noise for this source.
+	if src.HasLegacyFlatConnectionFields() {
+		return append(errs, fmt.Sprintf(
+			"%s: uses the pre-v2.0 flat provisioning format (top-level host/database/table_name/…). "+
+				"v2.0 requires a nested [sources.connection] block and a source_type. "+
+				"Move the connection fields under [sources.connection] and set source_type = %q. "+
+				"See https://logchef.app/getting-started/provisioning/",
+			prefix, models.SourceTypeClickHouse))
+	}
+
 	var connOK bool
 	switch sourceType {
 	case models.SourceTypeClickHouse:

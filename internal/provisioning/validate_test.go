@@ -1,6 +1,7 @@
 package provisioning
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -52,6 +53,30 @@ func TestValidateConfig_ValidSourceWithNestedClickHouseConnection(t *testing.T) 
 	}
 	if err := ValidateConfig(cfg); err != nil {
 		t.Errorf("valid nested clickhouse source config should pass: %v", err)
+	}
+}
+
+func TestValidateConfig_LegacyFlatSourceFormat(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				// Pre-v2.0 flat format: connection fields at the top level,
+				// no [sources.connection] block and no source_type.
+				Name:      "Production Logs",
+				Host:      "clickhouse.internal:9000",
+				Database:  "logs",
+				TableName: "otel_logs",
+			},
+		},
+	}
+	err := ValidateConfig(cfg)
+	if err == nil {
+		t.Fatal("flat pre-v2.0 source format should fail validation")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "flat provisioning format") || !strings.Contains(msg, "[sources.connection]") {
+		t.Errorf("error should mention the flat format and [sources.connection]; got: %v", err)
 	}
 }
 
