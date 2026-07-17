@@ -52,6 +52,10 @@ type DashboardCacheConfig struct {
 	MaxEntryBytes int `koanf:"max_entry_bytes"`
 	// MaxEntries caps the number of cached entries.
 	MaxEntries int `koanf:"max_entries"`
+	// MaxConcurrentFills bounds concurrent distinct datasource fills, capping
+	// worst-case in-flight buffering at MaxConcurrentFills × MaxEntryBytes so a
+	// burst of unique cache-directive queries cannot exhaust memory.
+	MaxConcurrentFills int `koanf:"max_concurrent_fills"`
 }
 
 // RateLimitConfig controls fixed-window request rate limiting for the
@@ -363,12 +367,13 @@ const (
 	defaultRateLimitAuthGlobalPerMinute   = 300
 	defaultRateLimitQueryPerUserPerMinute = 120
 
-	defaultDashboardCacheEnabled       = true
-	defaultDashboardCacheDefaultTTL    = 10 * time.Minute
-	defaultDashboardCacheMaxTTL        = time.Hour
-	defaultDashboardCacheMaxBytes      = 64 * 1024 * 1024 // 64 MiB
-	defaultDashboardCacheMaxEntryBytes = 4 * 1024 * 1024  // 4 MiB
-	defaultDashboardCacheMaxEntries    = 1024
+	defaultDashboardCacheEnabled            = true
+	defaultDashboardCacheDefaultTTL         = 10 * time.Minute
+	defaultDashboardCacheMaxTTL             = time.Hour
+	defaultDashboardCacheMaxBytes           = 64 * 1024 * 1024 // 64 MiB
+	defaultDashboardCacheMaxEntryBytes      = 4 * 1024 * 1024  // 4 MiB
+	defaultDashboardCacheMaxEntries         = 1024
+	defaultDashboardCacheMaxConcurrentFills = 8
 
 	defaultProxyHeader = "X-Forwarded-For"
 )
@@ -798,5 +803,8 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.DashboardCache.MaxEntries <= 0 {
 		cfg.DashboardCache.MaxEntries = defaultDashboardCacheMaxEntries
+	}
+	if cfg.DashboardCache.MaxConcurrentFills <= 0 {
+		cfg.DashboardCache.MaxConcurrentFills = defaultDashboardCacheMaxConcurrentFills
 	}
 }

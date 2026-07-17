@@ -54,6 +54,13 @@ type Config struct {
 	MaxBytes      int64
 	MaxEntryBytes int
 	MaxEntries    int
+	// MaxConcurrentFills bounds how many distinct datasource fills may run at
+	// once. singleflight already collapses identical keys, but DISTINCT keys
+	// each buffer up to MaxEntryBytes; without this cap a client spraying many
+	// unique cache-directive queries could hold MaxEntryBytes × (unbounded) in
+	// flight, well past MaxBytes (which is only enforced on insertion). <=0
+	// disables the cap.
+	MaxConcurrentFills int
 }
 
 type entry struct {
@@ -77,6 +84,9 @@ type Cache struct {
 
 	stop     chan struct{}
 	stopOnce sync.Once
+
+	// fillSem bounds concurrent distinct fills (nil when the cap is disabled).
+	fillSem chan struct{}
 }
 
 // New builds a Cache and, when enabled, starts its background expiry sweep.
@@ -86,6 +96,9 @@ func New(cfg Config) *Cache {
 		entries: make(map[[32]byte]*entry),
 		lru:     list.New(),
 		stop:    make(chan struct{}),
+	}
+	if cfg.MaxConcurrentFills > 0 {
+		c.fillSem = make(chan struct{}, cfg.MaxConcurrentFills)
 	}
 	if cfg.Enabled {
 		go c.sweepLoop()
@@ -214,8 +227,25 @@ func (c *Cache) GetOrFill(
 	//nolint:contextcheck // the shared fill runs under its OWN bounded context by
 	// design, so one caller disconnecting cannot cancel everyone's query.
 	fn := func() (interface{}, error) {
+		// Re-check under the flight: a concurrent caller may have filled this
+		// key in the window between our Get miss and entering singleflight.
+		// Returning the cached bytes here (filled stays false) surfaces to the
+		// waiter as a coalesced hit and avoids a redundant datasource query.
+		if d, _, ok := c.Get(key); ok {
+			return d, nil
+		}
 		fillCtx, cancel := context.WithTimeout(context.Background(), fillTimeout)
 		defer cancel()
+		// Bound concurrent distinct fills so a burst of unique cache-directive
+		// queries cannot hold unbounded MaxEntryBytes buffers in flight.
+		if c.fillSem != nil {
+			select {
+			case c.fillSem <- struct{}{}:
+				defer func() { <-c.fillSem }()
+			case <-fillCtx.Done():
+				return nil, fillCtx.Err()
+			}
+		}
 		b, e := fill(fillCtx)
 		if e != nil {
 			return nil, e

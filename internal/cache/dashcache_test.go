@@ -193,6 +193,55 @@ func TestCacheSingleflightCollapse(t *testing.T) {
 	}
 }
 
+// TestCacheFillConcurrencyCap proves distinct fills are bounded by
+// MaxConcurrentFills, so a burst of unique cache-directive queries cannot hold
+// unbounded MaxEntryBytes buffers in flight (review finding #1).
+func TestCacheFillConcurrencyCap(t *testing.T) {
+	cfg := testConfig()
+	cfg.MaxConcurrentFills = 2
+	c := New(cfg)
+	defer c.Close()
+
+	const n = 20
+	var inFlight, maxInFlight int32
+	release := make(chan struct{})
+	start := make(chan struct{})
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(id byte) {
+			defer wg.Done()
+			<-start
+			_, _, _, err := c.GetOrFill(context.Background(), keyN(id), time.Minute, 5*time.Second,
+				func(context.Context) ([]byte, error) {
+					cur := atomic.AddInt32(&inFlight, 1)
+					for {
+						m := atomic.LoadInt32(&maxInFlight)
+						if cur <= m || atomic.CompareAndSwapInt32(&maxInFlight, m, cur) {
+							break
+						}
+					}
+					<-release
+					atomic.AddInt32(&inFlight, -1)
+					return []byte("x"), nil
+				})
+			if err != nil {
+				t.Errorf("GetOrFill: %v", err)
+			}
+		}(byte(i + 1)) // distinct keys 1..n
+	}
+
+	close(start)
+	time.Sleep(75 * time.Millisecond) // let fills saturate the semaphore
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&maxInFlight); got > 2 {
+		t.Fatalf("max concurrent fills = %d, want <= 2 (cap not enforced)", got)
+	}
+}
+
 func TestComputeKeyDeterministicAndDistinct(t *testing.T) {
 	base := KeyInput{
 		EndpointKind:   "logs",

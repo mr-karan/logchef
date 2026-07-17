@@ -72,10 +72,14 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 					CanonicalStart:   canonCacheTime(params.StartTime),
 					CanonicalEnd:     canonCacheTime(params.EndTime),
 					Timezone:         params.Timezone,
-					EffectiveLimit:   int64(req.Limit),
+					EffectiveLimit:   0, // histogram ignores limit; keep it out of the key
 					HistogramWindow:  params.Window,
 					HistogramGroupBy: params.GroupBy,
-					QueryTimeoutSecs: int64(HistogramTimeout / time.Second),
+					// Key on the effective per-request execution timeout (what
+					// actually governs the query), not the fixed outer wrapper —
+					// otherwise requests with different timeouts collide. Limit
+					// is omitted: histogram execution ignores it.
+					QueryTimeoutSecs: int64(*params.QueryTimeout),
 				})
 				fill := func(ctx context.Context) ([]byte, error) {
 					result, err := core.GetHistogramData(ctx, s.datasources, sourceID, params)

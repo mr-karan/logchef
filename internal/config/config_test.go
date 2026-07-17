@@ -178,6 +178,9 @@ func TestLoad_DashboardCacheDefaults(t *testing.T) {
 	if dc.MaxEntries != 1024 {
 		t.Errorf("max_entries = %d, want 1024", dc.MaxEntries)
 	}
+	if dc.MaxConcurrentFills != 8 {
+		t.Errorf("max_concurrent_fills = %d, want 8", dc.MaxConcurrentFills)
+	}
 }
 
 func TestLoad_DashboardCacheOverrides(t *testing.T) {
