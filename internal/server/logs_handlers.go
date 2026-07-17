@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -12,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
+	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
@@ -368,10 +370,74 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
+	// Dashboard panel requests may opt into the per-dashboard result cache. The
+	// cache key is computed from the finalized (post-substitution) executable
+	// query and the resolved parameters; source.UpdatedAt invalidates entries on
+	// a source config change. Explorer/ad-hoc requests carry no directive and
+	// stay uncached, preserving the streaming path exactly.
+	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
+	var cacheKey [32]byte
+	if cacheable {
+		effLimit := req.Limit
+		if effLimit <= 0 {
+			effLimit = s.config.Query.DefaultPreviewLimit
+		}
+		if s.config.Query.MaxPreviewLimit > 0 && effLimit > s.config.Query.MaxPreviewLimit {
+			effLimit = s.config.Query.MaxPreviewLimit
+		}
+		cacheKey = dashcache.ComputeKey(dashcache.KeyInput{
+			EndpointKind:     "logs",
+			TeamID:           int64(teamID),
+			SourceID:         int64(sourceID),
+			SourceRevision:   source.UpdatedAt.UnixNano(),
+			EffTTLSeconds:    int64(effTTL / time.Second),
+			Language:         string(models.QueryLanguageClickHouseSQL),
+			FinalizedQuery:   processedQuery,
+			CanonicalStart:   canonCacheTime(params.StartTime),
+			CanonicalEnd:     canonCacheTime(params.EndTime),
+			Timezone:         req.Timezone,
+			EffectiveLimit:   int64(effLimit),
+			QueryTimeoutSecs: int64(*req.QueryTimeout),
+		})
+	}
+
 	if source.IsClickHouse() {
+		cfg := queryStreamConfig{logsKey: "data"}
+		// OOM guardrail: only the dashboard-directive path buffers (bounded by
+		// max_entry_bytes); on overflow the fill errors and we fall through to the
+		// unbuffered streaming path below, which is left byte-for-byte unchanged.
+		if cacheable {
+			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(sourceID, params, cfg)); handled {
+				return err
+			}
+		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
-			queryStreamConfig{logsKey: "data"}, req.QueryText, "sql", req.Limit,
+			cfg, req.QueryText, "sql", req.Limit,
 			req.QueryText, models.QueryLanguageClickHouseSQL)
+	}
+
+	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
+	// panels from the cache when eligible.
+	if cacheable {
+		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+		fill := func(ctx context.Context) ([]byte, error) {
+			result, err := core.QueryLogs(ctx, s.datasources, sourceID, params)
+			if err != nil {
+				return nil, err
+			}
+			resp := map[string]any{
+				"query_id": uuid.New().String(),
+				"data":     result.Logs,
+				"stats":    result.Stats,
+				"columns":  normalizeResultColumns(nil, result),
+				"warnings": result.Warnings,
+			}
+			return json.Marshal(NewSuccessResponse(resp))
+		}
+		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
+			return err
+		}
 	}
 
 	// Buffered fallback for non-streaming providers.

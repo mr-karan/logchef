@@ -18,6 +18,9 @@ export const DEFAULT_PANEL_WIDTH = 6;
 export const DEFAULT_PANEL_HEIGHT = 2;
 export const MAX_DASHBOARD_PANELS = 24;
 export const DASHBOARD_PANELS_VERSION = 1;
+// Sanity bound on the blob's cache_ttl_seconds (server also clamps to max_ttl at
+// request time); mirrors the validation in internal/core/dashboards.go.
+export const MAX_DASHBOARD_CACHE_TTL_SECONDS = 86400;
 
 const VALID_PANEL_TYPES: readonly DashboardPanelType[] = ["timeseries", "stat", "table"];
 // Mirrors pkg/models.QueryLanguage's Valid() set (server: query.go).
@@ -217,6 +220,12 @@ export function reflowPanels(blob: DashboardPanels): DashboardPanels {
 export function validatePanelsBlob(blob: DashboardPanels): string | null {
   if (!blob || blob.version !== DASHBOARD_PANELS_VERSION) {
     return `Unsupported dashboard version (expected ${DASHBOARD_PANELS_VERSION}).`;
+  }
+  const ttl = blob.cache_ttl_seconds;
+  if (ttl !== undefined) {
+    if (typeof ttl !== "number" || !Number.isFinite(ttl) || ttl < 0 || ttl > MAX_DASHBOARD_CACHE_TTL_SECONDS) {
+      return `Cache TTL must be between 0 and ${MAX_DASHBOARD_CACHE_TTL_SECONDS} seconds.`;
+    }
   }
   const panels = blob.panels ?? [];
   if (panels.length > MAX_DASHBOARD_PANELS) {

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // baseConfig is a minimal config that passes all the non-database validation,
@@ -150,6 +151,66 @@ query_per_user_per_minute = 50
 	}
 	if rl.QueryPerUserPerMinute != 50 {
 		t.Errorf("query_per_user_per_minute = %d, want 50", rl.QueryPerUserPerMinute)
+	}
+}
+
+func TestLoad_DashboardCacheDefaults(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	dc := cfg.DashboardCache
+	if !dc.Enabled {
+		t.Error("dashboard_cache.enabled should default to true")
+	}
+	if dc.DefaultTTL != 10*time.Minute {
+		t.Errorf("default_ttl = %s, want 10m", dc.DefaultTTL)
+	}
+	if dc.MaxTTL != time.Hour {
+		t.Errorf("max_ttl = %s, want 1h", dc.MaxTTL)
+	}
+	if dc.MaxBytes != 64*1024*1024 {
+		t.Errorf("max_bytes = %d, want %d", dc.MaxBytes, 64*1024*1024)
+	}
+	if dc.MaxEntryBytes != 4*1024*1024 {
+		t.Errorf("max_entry_bytes = %d, want %d", dc.MaxEntryBytes, 4*1024*1024)
+	}
+	if dc.MaxEntries != 1024 {
+		t.Errorf("max_entries = %d, want 1024", dc.MaxEntries)
+	}
+}
+
+func TestLoad_DashboardCacheOverrides(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[dashboard_cache]
+enabled = false
+default_ttl = "5m"
+max_ttl = "30m"
+max_bytes = 1048576
+max_entry_bytes = 262144
+max_entries = 16
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	dc := cfg.DashboardCache
+	if dc.Enabled {
+		t.Error("dashboard_cache.enabled = true, want false (explicitly set)")
+	}
+	if dc.DefaultTTL != 5*time.Minute {
+		t.Errorf("default_ttl = %s, want 5m", dc.DefaultTTL)
+	}
+	if dc.MaxTTL != 30*time.Minute {
+		t.Errorf("max_ttl = %s, want 30m", dc.MaxTTL)
+	}
+	if dc.MaxBytes != 1048576 {
+		t.Errorf("max_bytes = %d, want 1048576", dc.MaxBytes)
+	}
+	if dc.MaxEntryBytes != 262144 {
+		t.Errorf("max_entry_bytes = %d, want 262144", dc.MaxEntryBytes)
+	}
+	if dc.MaxEntries != 16 {
+		t.Errorf("max_entries = %d, want 16", dc.MaxEntries)
 	}
 }
 

@@ -12,6 +12,7 @@ import {
   type HistogramRequestBody,
   type SqlQueryRequestBody,
   type PanelQueryLanguage,
+  type CacheDirective,
 } from "@/api/dashboards";
 import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
@@ -37,6 +38,10 @@ const TABLE_LIMIT_MAX = 1000;
 const REFRESH_COALESCE_MS = 80;
 
 const DEFAULT_RELATIVE_TIME = "15m";
+
+// Per-dashboard result-cache TTL used when the blob carries no cache_ttl_seconds.
+// Mirrors the backend's DEFAULT_DASHBOARD_CACHE_TTL_SECONDS (config) — keep equal.
+export const DEFAULT_DASHBOARD_CACHE_TTL_SECONDS = 600;
 // Panel queries run in the viewer's browser timezone (falling back to UTC if
 // it can't be resolved). This used to be hardcoded to UTC because the
 // VictoriaLogs histogram path mis-formatted a non-UTC zone as an
@@ -150,6 +155,19 @@ function isAbort(err: unknown): boolean {
     (err instanceof Error && err.name === "AbortError") ||
     (typeof err === "object" && err !== null && (err as { error_type?: string }).error_type === "CanceledError")
   );
+}
+
+// Resolve a dashboard's effective cache TTL (seconds) from its panels blob:
+// absent => the default (600); 0 => caching OFF; >0 => that value. A malformed
+// value (negative/non-finite) falls back to the default rather than caching with
+// a nonsense TTL.
+function resolveCacheTtlSeconds(blob: DashboardPanels | null | undefined): number {
+  const raw = blob?.cache_ttl_seconds;
+  if (raw === undefined || raw === null) return DEFAULT_DASHBOARD_CACHE_TTL_SECONDS;
+  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
+    return DEFAULT_DASHBOARD_CACHE_TTL_SECONDS;
+  }
+  return raw;
 }
 
 function classifyPanelError(err: unknown): { locked: boolean; message: string } {
@@ -401,7 +419,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   async function fetchPanelData(
     panel: DashboardPanel,
     range: EffectiveRange,
-    signal: AbortSignal
+    signal: AbortSignal,
+    // Result-cache directive attached to the (cacheable) panel request bodies.
+    // Undefined => caching off for this refresh; the `cache` field is omitted.
+    cache?: CacheDirective
   ): Promise<PanelState> {
     const startIso = msToRfc3339(range.start);
     const endIso = msToRfc3339(range.end);
@@ -414,7 +435,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       // query_language is advisory today (the native endpoints interpret
       // query_text by source type) but is sent so a VictoriaLogs source runs
       // native LogsQL rather than being re-parsed as ClickHouse SQL.
-      const histBody: HistogramRequestBody & { query_language?: PanelQueryLanguage } = {
+      const histBody: HistogramRequestBody = {
         query_text: queryText,
         window,
         group_by: groupBy,
@@ -422,6 +443,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         end_time: endIso,
         timezone: PANEL_QUERY_TIMEZONE,
         query_language: nativeLanguage,
+        ...(cache ? { cache } : {}),
       };
       const resp = await dashboardPanelApi.histogram(panel.team_id, panel.source_id, histBody, signal);
       const data = unwrap(resp);
@@ -447,13 +469,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // the logs/query endpoint. Only LogchefQL takes the compile path below;
     // routing a logsql panel there used to break VictoriaLogs tables (#119 A4).
     if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
-      const sqlBody: SqlQueryRequestBody & { query_language?: PanelQueryLanguage } = {
+      const sqlBody: SqlQueryRequestBody = {
         query_text: panel.query,
         limit,
         start_time: startIso,
         end_time: endIso,
         timezone: PANEL_QUERY_TIMEZONE,
         query_language: panel.query_language,
+        ...(cache ? { cache } : {}),
       };
       const resp = await dashboardPanelApi.logsQuery(panel.team_id, panel.source_id, sqlBody, signal);
       const data = unwrap(resp);
@@ -473,6 +496,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         end_time: msToSqlDateTime(range.end),
         timezone: LOGCHEFQL_TIME_TIMEZONE,
         limit,
+        ...(cache ? { cache } : {}),
       },
       signal
     );
@@ -484,7 +508,12 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     };
   }
 
-  async function executePanel(panel: DashboardPanel, range: EffectiveRange, signal: AbortSignal) {
+  async function executePanel(
+    panel: DashboardPanel,
+    range: EffectiveRange,
+    signal: AbortSignal,
+    cache?: CacheDirective
+  ) {
     // Server-side redaction (B1 per-panel): a panel the viewer can't reach comes
     // back flagged `locked` with its query blanked. Render the locked state
     // directly and never fire a request — there is no query to run.
@@ -498,7 +527,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (signal.aborted) return;
     setPanelState(panel.id, { status: "loading" });
     try {
-      const result = await fetchPanelData(panel, range, signal);
+      const result = await fetchPanelData(panel, range, signal, cache);
       if (signal.aborted) return;
       setPanelState(panel.id, result);
     } catch (err) {
@@ -525,10 +554,32 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const controller = new AbortController();
     refreshAbort = controller;
     const signal = controller.signal;
-    const range = effectiveRange.value;
+
+    // Resolve the dashboard's effective cache TTL once for the whole refresh.
+    const effTTL = resolveCacheTtlSeconds(dashboard.panels);
+    const cache: CacheDirective | undefined =
+      effTTL > 0 ? { scope: "dashboard", ttl_seconds: effTTL } : undefined;
+
+    // Compute the panel range ONCE so every panel in this refresh shares an
+    // identical window — a prerequisite for cross-panel/-viewer cache collapse.
+    // When caching is on AND the selected range is RELATIVE, snap the window to
+    // the current TTL bucket so successive refreshes within a bucket produce a
+    // byte-identical query (and thus the same cache key). This MUST happen here,
+    // upstream of resolveNativeQuery/translate, because ClickHouse bakes the
+    // start/end timestamps into the compiled SQL — a snap applied only at request
+    // time (after translation) would never reach the executed query. Absolute
+    // ranges are already stable, so they pass through unchanged.
+    let range = effectiveRange.value;
+    if (effTTL > 0 && state.data.value.timeRelative !== null) {
+      const durationMs = range.end - range.start;
+      const ttlMs = effTTL * 1000;
+      const bucketEnd = Math.floor(Date.now() / ttlMs) * ttlMs;
+      const bucketStart = bucketEnd - durationMs;
+      range = { start: bucketStart, end: bucketEnd };
+    }
 
     const panels = dashboard.panels?.panels ?? [];
-    const tasks = panels.map((panel) => () => executePanel(panel, range, signal));
+    const tasks = panels.map((panel) => () => executePanel(panel, range, signal, cache));
     await runWithConcurrency(tasks, PANEL_FETCH_CONCURRENCY);
   }
 
@@ -580,6 +631,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   function setDraft(next: DashboardPanels) {
     state.data.value.editDraft = next;
+  }
+
+  // Set the draft's per-dashboard cache TTL (seconds). 0 = off. Persisted in the
+  // panels blob on save; no reflow needed since layout is unaffected.
+  function setDraftCacheTtl(seconds: number) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
+    setDraft({ ...draft, cache_ttl_seconds: seconds });
   }
 
   // Add or replace a panel in the draft (by id), then reflow the layout so the
@@ -887,6 +946,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     saveEdit,
     upsertDraftPanel,
     updateDraftPanel,
+    setDraftCacheTtl,
     createDraftShell,
     removeDraftPanel,
     resizeDraftPanel,

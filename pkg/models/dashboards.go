@@ -72,6 +72,10 @@ const (
 	// (negative, zero, absurd) rather than to enforce a UI-render budget
 	// (finding B8).
 	MaxDashboardPanelOptionLimit = 100_000
+	// MaxDashboardCacheTTLSeconds is the sanity bound on a dashboard's
+	// cache_ttl_seconds blob field (1 day). The server also clamps to
+	// dashboard_cache.max_ttl at request time; this is just a stored-value bound.
+	MaxDashboardCacheTTLSeconds = 86_400
 )
 
 // DashboardPanelChart enumerates the chart styles a panel's options may request.
@@ -149,6 +153,10 @@ type dashboardPanels struct {
 	Version int                    `json:"version"`
 	Layout  []dashboardPanelLayout `json:"layout"`
 	Panels  []dashboardPanel       `json:"panels"`
+	// CacheTTLSeconds is the dashboard-wide result-cache TTL. Absent => client
+	// uses the default (600s); 0 => caching off; >0 => that TTL. The server
+	// additionally clamps to dashboard_cache.max_ttl at request time.
+	CacheTTLSeconds *int `json:"cache_ttl_seconds,omitempty"`
 }
 
 // dashboardPanelOptions is the validated contract for a panel's `options` blob
@@ -243,6 +251,12 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 
 	if blob.Version != DashboardPanelsVersion {
 		return fmt.Errorf("unsupported panels version %d, expected %d", blob.Version, DashboardPanelsVersion)
+	}
+
+	if blob.CacheTTLSeconds != nil {
+		if *blob.CacheTTLSeconds < 0 || *blob.CacheTTLSeconds > MaxDashboardCacheTTLSeconds {
+			return fmt.Errorf("cache_ttl_seconds %d is out of range (allowed: 0-%d)", *blob.CacheTTLSeconds, MaxDashboardCacheTTLSeconds)
+		}
 	}
 
 	if len(blob.Panels) > MaxDashboardPanels {

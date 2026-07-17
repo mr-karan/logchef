@@ -10,12 +10,20 @@ import {
   Save,
   X,
   GripVertical,
+  Database,
+  ChevronDown,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "@/components/ui/dropdown-menu";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
-import { useDashboardsStore } from "@/stores/dashboards";
+import { useDashboardsStore, DEFAULT_DASHBOARD_CACHE_TTL_SECONDS } from "@/stores/dashboards";
 import {
   normalizeDashboardLayout,
   cellRect,
@@ -121,6 +129,29 @@ function handleEditorOpenChange(open: boolean) {
 }
 function removePanel(id: string) {
   store.removeDraftPanel(id);
+}
+
+// --- Cache TTL (edit mode) ---------------------------------------------------
+// Presets for the per-dashboard result-cache TTL, persisted in the panels blob
+// as cache_ttl_seconds. Off (0) disables caching; the default is 10m.
+const CACHE_TTL_OPTIONS = [
+  { label: "Off", seconds: 0 },
+  { label: "1m", seconds: 60 },
+  { label: "5m", seconds: 300 },
+  { label: "10m", seconds: 600 },
+  { label: "30m", seconds: 1800 },
+  { label: "1h", seconds: 3600 },
+];
+
+const cacheTtlSeconds = computed(
+  () => store.editDraft?.cache_ttl_seconds ?? DEFAULT_DASHBOARD_CACHE_TTL_SECONDS
+);
+const cacheTtlLabel = computed(
+  () => CACHE_TTL_OPTIONS.find((o) => o.seconds === cacheTtlSeconds.value)?.label ?? "Custom"
+);
+
+function selectCacheTtl(seconds: number) {
+  store.setDraftCacheTtl(seconds);
 }
 
 // --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
@@ -483,6 +514,31 @@ onBeforeRouteUpdate((to, from) => {
           </Button>
         </template>
         <template v-else-if="dashboard && isEditing">
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button
+                variant="outline"
+                size="sm"
+                class="h-8 gap-1.5 text-xs"
+                title="Per-dashboard result cache TTL"
+              >
+                <Database class="h-3.5 w-3.5" />
+                <span>Cache: {{ cacheTtlLabel }}</span>
+                <ChevronDown class="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="w-28">
+              <DropdownMenuItem
+                v-for="opt in CACHE_TTL_OPTIONS"
+                :key="opt.seconds"
+                class="text-xs"
+                :class="{ 'font-semibold': opt.seconds === cacheTtlSeconds }"
+                @click="selectCacheTtl(opt.seconds)"
+              >
+                {{ opt.label }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="openAddPanel">
             <Plus class="h-3.5 w-3.5" />
             Add panel

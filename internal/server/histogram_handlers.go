@@ -4,6 +4,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 
+	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
@@ -51,6 +53,42 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	params, errMsg := buildHistogramParams(req, processedQuery)
 	if errMsg != "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, errMsg, models.ValidationErrorType)
+	}
+
+	// Dashboard panel requests may opt into the per-dashboard result cache.
+	// Histogram results always buffer (no streaming path), so the whole response
+	// is a cache candidate. Any source/team resolution hiccup just falls through
+	// to the uncached path below. Explorer requests carry no directive.
+	if effTTL, ok := s.dashboardCacheParams(req.Cache); ok {
+		if source, serr := core.GetSource(c.Context(), s.datasources, sourceID); serr == nil {
+			if teamID, terr := core.ParseTeamID(c.Params("teamID")); terr == nil {
+				key := dashcache.ComputeKey(dashcache.KeyInput{
+					EndpointKind:     "histogram",
+					TeamID:           int64(teamID),
+					SourceID:         int64(sourceID),
+					SourceRevision:   source.UpdatedAt.UnixNano(),
+					EffTTLSeconds:    int64(effTTL / time.Second),
+					FinalizedQuery:   processedQuery,
+					CanonicalStart:   canonCacheTime(params.StartTime),
+					CanonicalEnd:     canonCacheTime(params.EndTime),
+					Timezone:         params.Timezone,
+					EffectiveLimit:   int64(req.Limit),
+					HistogramWindow:  params.Window,
+					HistogramGroupBy: params.GroupBy,
+					QueryTimeoutSecs: int64(HistogramTimeout / time.Second),
+				})
+				fill := func(ctx context.Context) ([]byte, error) {
+					result, err := core.GetHistogramData(ctx, s.datasources, sourceID, params)
+					if err != nil {
+						return nil, err
+					}
+					return json.Marshal(NewSuccessResponse(result))
+				}
+				if handled, err := s.tryServeDashboardCache(c, key, effTTL, HistogramTimeout, fill); handled {
+					return err
+				}
+			}
+		}
 	}
 
 	// Execute histogram query via core function, bounded by HistogramTimeout so

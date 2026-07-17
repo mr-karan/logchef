@@ -81,6 +81,17 @@ func (l QueryLanguage) String() string {
 	return string(NormalizeQueryLanguage(l))
 }
 
+// CacheDirective opts a request into the dashboard result cache. Only dashboard
+// panel requests send it; explorer/ad-hoc queries never do (so they stay
+// uncached).
+type CacheDirective struct {
+	// Scope must be "dashboard" to enable caching. Any other value => no caching.
+	Scope string `json:"scope"`
+	// TTLSeconds is the requested cache TTL (already resolved to a concrete value
+	// by the client). Server clamps to [0, dashboard_cache.max_ttl]. <=0 => bypass.
+	TTLSeconds int `json:"ttl_seconds"`
+}
+
 // TemplateVariable represents a variable for SQL template substitution.
 // Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
 type TemplateVariable struct {
@@ -102,6 +113,9 @@ type APIQueryRequest struct {
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
+	// Cache opts this request into the dashboard result cache. Omitted for
+	// explorer/ad-hoc queries so they are never cached.
+	Cache *CacheDirective `json:"cache,omitempty"`
 	// Sort and other general query params could be added here if needed later.
 }
 
@@ -120,6 +134,9 @@ type APIHistogramRequest struct {
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
+	// Cache opts this request into the dashboard result cache. Omitted for
+	// explorer/ad-hoc queries so they are never cached.
+	Cache *CacheDirective `json:"cache,omitempty"`
 }
 
 // LogQueryResult represents the result of a log query

@@ -2,12 +2,15 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 
+	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
@@ -284,6 +287,9 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		Limit        int                       `json:"limit"`         // Result limit
 		QueryTimeout *int                      `json:"query_timeout"` // Optional timeout in seconds
 		Variables    []models.TemplateVariable `json:"variables,omitempty"`
+		// Cache opts this request into the dashboard result cache. Omitted for
+		// explorer/ad-hoc queries so they are never cached.
+		Cache *models.CacheDirective `json:"cache,omitempty"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -428,20 +434,78 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		QueryTimeout:     req.QueryTimeout,
 	}
 
+	// Dashboard panel requests may opt into the per-dashboard result cache. The
+	// key uses the finalized executable query (post-substitution + compilation);
+	// for VictoriaLogs the time range is passed separately and folded into the
+	// key, for ClickHouse it is already baked into the compiled SQL.
+	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
+	var cacheKey [32]byte
+	if cacheable {
+		cacheKey = dashcache.ComputeKey(dashcache.KeyInput{
+			EndpointKind:     "logchefql-logs",
+			TeamID:           int64(teamID),
+			SourceID:         int64(sourceID),
+			SourceRevision:   source.UpdatedAt.UnixNano(),
+			EffTTLSeconds:    int64(effTTL / time.Second),
+			Language:         string(executableQueryLanguage),
+			FinalizedQuery:   executableQuery,
+			CanonicalStart:   canonCacheTime(queryStartTime),
+			CanonicalEnd:     canonCacheTime(queryEndTime),
+			Timezone:         req.Timezone,
+			EffectiveLimit:   int64(req.Limit),
+			QueryTimeoutSecs: int64(*req.QueryTimeout),
+		})
+	}
+
 	// ClickHouse-backed sources stream the response body row-by-row so server
 	// memory stays bounded regardless of result size. Other source types
 	// (VictoriaLogs) keep the buffered path.
 	if source.IsClickHouse() {
+		cfg := queryStreamConfig{
+			logsKey:           "logs",
+			includeGenerated:  true,
+			generatedSQL:      executableQuery,
+			generatedQuery:    executableQuery,
+			generatedLanguage: executableQueryLanguage,
+		}
+		// OOM guardrail: only the dashboard-directive path buffers (bounded by
+		// max_entry_bytes); on overflow the fill errors and we fall through to the
+		// unbuffered streaming path below, which is left byte-for-byte unchanged.
+		if cacheable {
+			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(sourceID, queryParams, cfg)); handled {
+				return err
+			}
+		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, queryParams,
-			queryStreamConfig{
-				logsKey:           "logs",
-				includeGenerated:  true,
-				generatedSQL:      executableQuery,
-				generatedQuery:    executableQuery,
-				generatedLanguage: executableQueryLanguage,
-			},
-			executableQuery, "logchefql", req.Limit,
+			cfg, executableQuery, "logchefql", req.Limit,
 			req.Query, models.QueryLanguageLogchefQL)
+	}
+
+	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
+	// panels from the cache when eligible.
+	if cacheable {
+		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+		fill := func(ctx context.Context) ([]byte, error) {
+			result, err := core.QueryLogs(ctx, s.datasources, sourceID, queryParams)
+			if err != nil {
+				return nil, err
+			}
+			resp := map[string]any{
+				"logs":                     result.Logs,
+				"columns":                  normalizeResultColumns(source, result),
+				"stats":                    result.Stats,
+				"query_id":                 uuid.New().String(),
+				"generated_sql":            executableQuery,
+				"generated_query":          executableQuery,
+				"generated_query_language": executableQueryLanguage,
+				"warnings":                 result.Warnings,
+			}
+			return json.Marshal(NewSuccessResponse(resp))
+		}
+		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
+			return err
+		}
 	}
 
 	// Buffered fallback for non-streaming providers.

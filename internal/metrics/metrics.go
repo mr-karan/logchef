@@ -182,6 +182,31 @@ func RecordRateLimitRejection(scope string) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
+// RecordDashboardCacheRequest records a dashboard result-cache lookup outcome.
+// result is "hit", "miss", "coalesced", or "bypass".
+func RecordDashboardCacheRequest(result string) {
+	labels := fmt.Sprintf(`logchef_dashboard_cache_requests_total{result=%q}`, result)
+	metrics.GetOrCreateCounter(labels).Inc()
+}
+
+// RecordDashboardCacheEviction records an entry evicted from the dashboard
+// result cache under the byte/entry budget.
+func RecordDashboardCacheEviction() {
+	metrics.GetOrCreateCounter("logchef_dashboard_cache_evictions_total").Inc()
+}
+
+// SetDashboardCacheBytes reports the current total bytes held by the dashboard
+// result cache.
+func SetDashboardCacheBytes(n int64) {
+	metrics.GetOrCreateGauge("logchef_dashboard_cache_bytes", nil).Set(float64(n))
+}
+
+// SetDashboardCacheEntries reports the current number of entries in the
+// dashboard result cache.
+func SetDashboardCacheEntries(n int) {
+	metrics.GetOrCreateGauge("logchef_dashboard_cache_entries", nil).Set(float64(n))
+}
+
 func IncrementActiveRequests() {
 	metrics.GetOrCreateGauge("logchef_http_active_requests", nil).Inc()
 }

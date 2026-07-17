@@ -12,6 +12,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
+	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -58,6 +59,7 @@ type Server struct {
 	log           *slog.Logger
 	buildInfo     string
 	version       string
+	dashCache     *dashcache.Cache // per-dashboard TTL result cache
 
 	stop chan struct{} // closed by Shutdown to stop background maintenance loops
 	wg   sync.WaitGroup
@@ -149,7 +151,15 @@ func New(opts ServerOptions) *Server {
 		log:           opts.Logger,
 		buildInfo:     opts.BuildInfo,
 		version:       opts.Version,
-		stop:          make(chan struct{}),
+		dashCache: dashcache.New(dashcache.Config{
+			Enabled:       opts.Config.DashboardCache.Enabled,
+			DefaultTTL:    opts.Config.DashboardCache.DefaultTTL,
+			MaxTTL:        opts.Config.DashboardCache.MaxTTL,
+			MaxBytes:      opts.Config.DashboardCache.MaxBytes,
+			MaxEntryBytes: opts.Config.DashboardCache.MaxEntryBytes,
+			MaxEntries:    opts.Config.DashboardCache.MaxEntries,
+		}),
+		stop: make(chan struct{}),
 	}
 
 	// Register all application routes.
@@ -434,6 +444,9 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
 	close(s.stop)
+	if s.dashCache != nil {
+		s.dashCache.Close()
+	}
 	s.wg.Wait()
 	return s.app.ShutdownWithContext(ctx)
 }

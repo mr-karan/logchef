@@ -16,22 +16,42 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server       ServerConfig       `koanf:"server"`
-	Database     DatabaseConfig     `koanf:"database"`
-	SQLite       SQLiteConfig       `koanf:"sqlite"`
-	Postgres     PostgresConfig     `koanf:"postgres"`
-	Clickhouse   ClickhouseConfig   `koanf:"clickhouse"`
-	OIDC         OIDCConfig         `koanf:"oidc"`
-	Auth         AuthConfig         `koanf:"auth"`
-	Logging      LoggingConfig      `koanf:"logging"`
-	AI           AIConfig           `koanf:"ai"`
-	Alerts       AlertsConfig       `koanf:"alerts"`
-	Query        QueryConfig        `koanf:"query"`
-	Export       ExportConfig       `koanf:"export"`
-	Tail         TailConfig         `koanf:"tail"`
-	Shares       SharesConfig       `koanf:"shares"`
-	RateLimit    RateLimitConfig    `koanf:"rate_limit"`
-	Provisioning ProvisioningConfig `koanf:"provisioning"`
+	Server         ServerConfig         `koanf:"server"`
+	Database       DatabaseConfig       `koanf:"database"`
+	SQLite         SQLiteConfig         `koanf:"sqlite"`
+	Postgres       PostgresConfig       `koanf:"postgres"`
+	Clickhouse     ClickhouseConfig     `koanf:"clickhouse"`
+	OIDC           OIDCConfig           `koanf:"oidc"`
+	Auth           AuthConfig           `koanf:"auth"`
+	Logging        LoggingConfig        `koanf:"logging"`
+	AI             AIConfig             `koanf:"ai"`
+	Alerts         AlertsConfig         `koanf:"alerts"`
+	Query          QueryConfig          `koanf:"query"`
+	Export         ExportConfig         `koanf:"export"`
+	Tail           TailConfig           `koanf:"tail"`
+	Shares         SharesConfig         `koanf:"shares"`
+	RateLimit      RateLimitConfig      `koanf:"rate_limit"`
+	DashboardCache DashboardCacheConfig `koanf:"dashboard_cache"`
+	Provisioning   ProvisioningConfig   `koanf:"provisioning"`
+}
+
+// DashboardCacheConfig controls the per-dashboard server-side result cache, a
+// byte-bounded LRU+TTL that collapses N panels x M viewers into one backend
+// query per TTL window. Only requests carrying a dashboard cache directive are
+// eligible; explorer/ad-hoc queries are never cached. Caching is skipped
+// entirely when Enabled is false.
+type DashboardCacheConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// DefaultTTL mirrors the client default; informational + fallback.
+	DefaultTTL time.Duration `koanf:"default_ttl"`
+	// MaxTTL is the hard clamp applied to any client-requested TTL.
+	MaxTTL time.Duration `koanf:"max_ttl"`
+	// MaxBytes caps the total encoded bytes held across all entries.
+	MaxBytes int64 `koanf:"max_bytes"`
+	// MaxEntryBytes caps a single cached response; larger results bypass the cache.
+	MaxEntryBytes int `koanf:"max_entry_bytes"`
+	// MaxEntries caps the number of cached entries.
+	MaxEntries int `koanf:"max_entries"`
 }
 
 // RateLimitConfig controls fixed-window request rate limiting for the
@@ -342,6 +362,13 @@ const (
 	defaultRateLimitAuthPerIPPerMinute    = 20
 	defaultRateLimitAuthGlobalPerMinute   = 300
 	defaultRateLimitQueryPerUserPerMinute = 120
+
+	defaultDashboardCacheEnabled       = true
+	defaultDashboardCacheDefaultTTL    = 10 * time.Minute
+	defaultDashboardCacheMaxTTL        = time.Hour
+	defaultDashboardCacheMaxBytes      = 64 * 1024 * 1024 // 64 MiB
+	defaultDashboardCacheMaxEntryBytes = 4 * 1024 * 1024  // 4 MiB
+	defaultDashboardCacheMaxEntries    = 1024
 
 	defaultProxyHeader = "X-Forwarded-For"
 )
@@ -750,5 +777,26 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.RateLimit.QueryPerUserPerMinute <= 0 {
 		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
+	}
+
+	// enabled defaults to true, so only override when the key is absent (an
+	// explicit false must be preserved).
+	if !k.Exists("dashboard_cache.enabled") {
+		cfg.DashboardCache.Enabled = defaultDashboardCacheEnabled
+	}
+	if cfg.DashboardCache.DefaultTTL <= 0 {
+		cfg.DashboardCache.DefaultTTL = defaultDashboardCacheDefaultTTL
+	}
+	if cfg.DashboardCache.MaxTTL <= 0 {
+		cfg.DashboardCache.MaxTTL = defaultDashboardCacheMaxTTL
+	}
+	if cfg.DashboardCache.MaxBytes <= 0 {
+		cfg.DashboardCache.MaxBytes = defaultDashboardCacheMaxBytes
+	}
+	if cfg.DashboardCache.MaxEntryBytes <= 0 {
+		cfg.DashboardCache.MaxEntryBytes = defaultDashboardCacheMaxEntryBytes
+	}
+	if cfg.DashboardCache.MaxEntries <= 0 {
+		cfg.DashboardCache.MaxEntries = defaultDashboardCacheMaxEntries
 	}
 }

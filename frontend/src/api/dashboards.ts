@@ -56,6 +56,13 @@ export interface DashboardPanels {
   version: number;
   layout: DashboardLayoutItem[];
   panels: DashboardPanel[];
+  /**
+   * Per-dashboard result-cache TTL in seconds (mirrors pkg/models
+   * dashboardPanels.CacheTTLSeconds). Absent = the client default (600).
+   * 0 = caching OFF. >0 = that TTL. The blob is JSON-serialized verbatim, so
+   * this stays snake_case to match the server's `cache_ttl_seconds` JSON tag.
+   */
+  cache_ttl_seconds?: number;
 }
 
 export interface Dashboard {
@@ -103,6 +110,15 @@ export const dashboardsApi = {
 
 const PANEL_TIMEOUT_SECONDS = 30;
 
+// Opts a panel request into the per-dashboard server-side result cache. Only
+// dashboard panel requests send it (never explorer/ad-hoc queries). Omitted
+// entirely when caching is off for the dashboard. Mirrors pkg/models
+// CacheDirective; the server clamps ttl_seconds to its configured max_ttl.
+export interface CacheDirective {
+  scope: string;
+  ttl_seconds: number;
+}
+
 export interface HistogramRequestBody {
   query_text: string;
   window?: string;
@@ -116,6 +132,8 @@ export interface HistogramRequestBody {
   // ClickHouse SQL. Optional/forward-compatible: older server builds ignore
   // unknown JSON fields.
   query_language?: PanelQueryLanguage;
+  // Dashboard result-cache directive; omitted when caching is off.
+  cache?: CacheDirective;
 }
 
 export interface SqlQueryRequestBody {
@@ -126,6 +144,8 @@ export interface SqlQueryRequestBody {
   timezone?: string;
   // See HistogramRequestBody.query_language.
   query_language?: PanelQueryLanguage;
+  // Dashboard result-cache directive; omitted when caching is off.
+  cache?: CacheDirective;
 }
 
 export interface LogchefqlQueryRequestBody {
@@ -141,6 +161,8 @@ export interface LogchefqlQueryRequestBody {
   limit?: number;
   // See HistogramRequestBody.query_language.
   query_language?: PanelQueryLanguage;
+  // Dashboard result-cache directive; omitted when caching is off.
+  cache?: CacheDirective;
 }
 
 export interface TranslateRequestBody {
