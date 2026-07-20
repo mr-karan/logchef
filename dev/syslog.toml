@@ -1,3 +1,5 @@
+data_dir = "/tmp/logchef-vector-syslog"
+
 [sources.generate_syslog]
 type = "demo_logs"
 format = "syslog"

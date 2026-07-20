@@ -1,9 +1,17 @@
 ---
 title: Query Interface
-description: Two query modes, time controls, and result views.
+description: Explore Logchef's Log Explorer UI, LogchefQL and native SQL/LogsQL query modes, time range controls, and result views.
 ---
 
-Logchef has two query modes: **LogchefQL** for quick filtering and **SQL** for full ClickHouse access.
+Logchef has two query modes:
+
+- **LogchefQL** for quick filtering across supported log sources
+- **Native mode** for the source's native query language
+
+The native mode label depends on the datasource:
+
+- **SQL** for ClickHouse sources
+- **LogsQL** for VictoriaLogs sources
 
 ## LogchefQL Mode
 
@@ -15,11 +23,18 @@ service = "api" and status_code >= 500
 body ~ "timeout"
 ```
 
+LogchefQL compiles to the backend's native query language before execution:
+
+- ClickHouse sources compile to SQL
+- VictoriaLogs sources compile to LogsQL
+
 See [Search Syntax](/guide/search-syntax) for the full reference.
 
-## SQL Mode
+## Native Mode
 
-Write raw ClickHouse SQL. You control everything — time filters, aggregations, joins, CTEs.
+### ClickHouse SQL
+
+Write raw ClickHouse SQL. You control everything: time filters, aggregations, joins, CTEs.
 
 ```sql
 SELECT
@@ -32,20 +47,52 @@ GROUP BY bucket
 ORDER BY bucket DESC
 ```
 
-Switch between modes using the **Search / SQL** tabs in the editor.
+### VictoriaLogs LogsQL
+
+Write raw LogsQL when you want VictoriaLogs-specific pipes and capabilities directly.
+
+```text
+service:="api" level:="error" | fields _time, _msg, service, level
+```
+
+Switch between modes using the **LogchefQL / SQL** tabs for ClickHouse or the **LogchefQL / LogsQL** tabs for VictoriaLogs.
+
+If you are running VictoriaLogs specifically, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).
 
 ## Time Controls
 
-- **Quick ranges** — Last 5m, 15m, 1h, 24h, 7d, etc.
-- **Absolute range** — Type dates directly or pick from the calendar
-- **Relative syntax** — `now-1h`, `now-7d` in the input fields
-- **Timezone** — Toggle between browser local and UTC
+- **Quick ranges**: Last 5m, 15m, 1h, 24h, 7d, etc.
+- **Absolute range**: Type dates directly or pick from the calendar
+- **Relative syntax**: `now-1h`, `now-7d` in the input fields
+- **Timezone**: Toggle between browser local and UTC
 
-In LogchefQL mode, the time range is applied automatically. In SQL mode, the time picker is informational — you manage time filters in your SQL.
+In LogchefQL mode, the time range is applied automatically.
+
+In native mode:
+
+- ClickHouse SQL treats the time picker as informational: you manage time filters in your SQL.
+- VictoriaLogs LogsQL applies the selected time range outside the query text.
 
 ## Query Cancellation
 
-Press **Esc** or click **Cancel** to stop a running query. This cancels the query in ClickHouse too, not just the HTTP request.
+Press **Esc** or click **Cancel** to stop a running query. This cancels the backend query, not just the HTTP request.
+
+## Live Tail
+
+Click **Live** to stream matching rows as they arrive, instead of running one-shot
+queries. Live tail is available in LogchefQL mode on any source, and in native mode
+on VictoriaLogs sources (LogsQL); it is not available for raw ClickHouse SQL. While
+a tail is running, the time range and row limit are controlled by the stream, not
+the toolbar. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs) for how
+tailing differs between backends.
+
+**Limitations:** on ClickHouse sources, live tail polls rather than subscribes, with
+a short trailing re-scan window to catch rows that finish ingesting slightly behind
+the poll cursor. Two log rows that are byte-for-byte identical across every column,
+including the timestamp, cannot be told apart and are shown only once. ClickHouse
+rows have no unique row ID to distinguish genuine duplicates from a re-fetch of the
+same row. A stream also ends automatically after a fixed session lifetime; reopen
+**Live** to start a new one.
 
 ## Results
 
@@ -54,7 +101,22 @@ Press **Esc** or click **Cancel** to stop a running query. This cancels the quer
 - Click any cell to copy its value
 - Double-click a column header divider to auto-fit width
 - Expand rows with the chevron to see full log details
-- Toggle between standard and compact (terminal-style) view
+- Best when you want explicit columns and field-level scanning
+- **Column filters**: click the filter icon in a column header to narrow the
+  currently-loaded rows by that column. Type text for a contains match, or a
+  comparison like `>500`, `>=500`, `<500`, or `=500` on numeric columns.
+  Filtering is client-side only (no new query is sent) and resets whenever you
+  run a new query. The toolbar shows how many rows match out of the total.
+
+### Compact View
+
+- Dense, terminal-style rendering for fast visual scanning
+- Useful when the log message matters more than the full field set
+
+### JSON View
+
+- Shows the raw structured result payload
+- Useful when you want to inspect the exact event shape without column curation
 
 ### Histogram
 
@@ -62,11 +124,13 @@ The time histogram shows log volume distribution. Click and drag to zoom into a 
 
 ### Export
 
-Export results as CSV — all rows, visible rows, filtered rows, or current page.
+Export results as CSV: all rows, visible rows, filtered rows, or current page.
+The **Download** button (a backend-streamed export job, for very large result
+sets) only appears for sources that support it: currently ClickHouse only.
 
 ## Query Variables
 
-Use `{{variable_name}}` in SQL to create input fields:
+Use `{{variable_name}}` in native SQL to create input fields:
 
 ```sql
 SELECT * FROM logs
@@ -77,10 +141,18 @@ LIMIT {{ limit }}
 
 Variables support text, number, date, dropdown, and multi-select input types. Wrap optional clauses in `[[ ]]` to auto-remove them when the variable is empty.
 
+Variable support is currently designed around SQL-native workflows.
+
 ## Query History
 
 The editor dropdown shows your 10 most recent queries per source. Click any to reload it.
 
 ## Saved Queries
 
-Save frequently used queries to your team's collection via the **Save** button. Saved queries preserve the time range, variables, and mode.
+Save frequently used queries to your team's collection via the **Save** button. Saved queries preserve the time range, variables, and mode. See [Collections & Saved Queries](/features/collections) for roles and sharing.
+
+## Next steps
+
+- Pin saved queries to a shared [Dashboard](/features/dashboards)
+- Explore fields visually with the [Field Values Sidebar](/features/field-sidebar)
+- Set up [Alerting](/features/alerting) on a query instead of watching it manually

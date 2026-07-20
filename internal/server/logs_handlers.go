@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"sort"
 	"strings"
 	"sync"
@@ -14,9 +13,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 
-	"github.com/mr-karan/logchef/internal/ai"
-	"github.com/mr-karan/logchef/internal/clickhouse"
+	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -48,6 +47,7 @@ type QueryClass string
 const (
 	QueryClassPreview QueryClass = "preview"
 	QueryClassExport  QueryClass = "export"
+	QueryClassTail    QueryClass = "tail"
 )
 
 type QueryAdmissionError struct {
@@ -66,7 +66,7 @@ type ActiveQuery struct {
 	SourceID  models.SourceID
 	TeamID    models.TeamID
 	StartTime time.Time
-	SQL       string
+	QueryText string
 	Cancel    context.CancelFunc
 }
 
@@ -217,7 +217,7 @@ func (qt *QueryTracker) StartQueryWithID(queryID string, class QueryClass, userI
 		SourceID:  sourceID,
 		TeamID:    teamID,
 		StartTime: time.Now(),
-		SQL:       sql,
+		QueryText: sql,
 		Cancel:    cancel,
 	}
 	return nil
@@ -309,8 +309,8 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	// Check if SQL contains variable placeholders.
-	requiredVars := template.ExtractVariableNames(req.RawSQL)
+	// Check if the query contains variable placeholders.
+	requiredVars := template.ExtractVariableNames(req.QueryText)
 
 	// Validate that all required variables are provided.
 	if len(requiredVars) > 0 && len(req.Variables) == 0 {
@@ -320,7 +320,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	}
 
 	// Perform template variable substitution if variables are provided.
-	processedSQL := req.RawSQL
+	processedQuery := req.QueryText
 	if len(req.Variables) > 0 {
 		vars := make([]template.Variable, len(req.Variables))
 		for i, v := range req.Variables {
@@ -331,14 +331,116 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 			}
 		}
 
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
+		substituted, err := template.SubstituteVariables(req.QueryText, vars)
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest,
 				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
 		}
-		processedSQL = substituted
+		processedQuery = substituted
 	}
 
+	// Prepare parameters for the core query function.
+	params := datasource.QueryRequest{
+		RawQuery:         processedQuery,
+		Timezone:         req.Timezone,
+		Limit:            req.Limit,
+		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
+		MaxLimit:         s.config.Query.MaxPreviewLimit,
+		MaxResponseBytes: s.config.Query.MaxResponseBytes,
+		QueryTimeout:     req.QueryTimeout,
+	}
+	if req.StartTime != "" || req.EndTime != "" {
+		startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
+		if err != nil {
+			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		}
+		params.StartTime = startTime
+		params.EndTime = endTime
+	}
+
+	// ClickHouse-backed sources stream the response body row-by-row so server
+	// memory stays bounded regardless of result size (the OOM this endpoint used
+	// to hit came from buffering the full result set into a []map before
+	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	// Dashboard panel requests may opt into the per-dashboard result cache. The
+	// cache key is computed from the finalized (post-substitution) executable
+	// query and the resolved parameters; source.UpdatedAt invalidates entries on
+	// a source config change. Explorer/ad-hoc requests carry no directive and
+	// stay uncached, preserving the streaming path exactly.
+	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
+	var cacheKey [32]byte
+	if cacheable {
+		effLimit := req.Limit
+		if effLimit <= 0 {
+			effLimit = s.config.Query.DefaultPreviewLimit
+		}
+		if s.config.Query.MaxPreviewLimit > 0 && effLimit > s.config.Query.MaxPreviewLimit {
+			effLimit = s.config.Query.MaxPreviewLimit
+		}
+		cacheKey = dashcache.ComputeKey(dashcache.KeyInput{
+			EndpointKind:     "logs",
+			TeamID:           int64(teamID),
+			SourceID:         int64(sourceID),
+			SourceRevision:   source.UpdatedAt.UnixNano(),
+			EffTTLSeconds:    int64(effTTL / time.Second),
+			Language:         string(models.QueryLanguageClickHouseSQL),
+			FinalizedQuery:   processedQuery,
+			CanonicalStart:   canonCacheTime(params.StartTime),
+			CanonicalEnd:     canonCacheTime(params.EndTime),
+			Timezone:         req.Timezone,
+			EffectiveLimit:   int64(effLimit),
+			QueryTimeoutSecs: int64(*req.QueryTimeout),
+		})
+	}
+
+	if source.IsClickHouse() {
+		cfg := queryStreamConfig{logsKey: "data"}
+		// OOM guardrail: only the dashboard-directive path buffers (bounded by
+		// max_entry_bytes); on overflow the fill errors and we fall through to the
+		// unbuffered streaming path below, which is left byte-for-byte unchanged.
+		if cacheable {
+			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(sourceID, params, cfg)); handled {
+				return err
+			}
+		}
+		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
+			cfg, req.QueryText, "sql", req.Limit,
+			req.QueryText, models.QueryLanguageClickHouseSQL)
+	}
+
+	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
+	// panels from the cache when eligible.
+	if cacheable {
+		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+		fill := func(ctx context.Context) ([]byte, error) {
+			result, err := core.QueryLogs(ctx, s.datasources, sourceID, params)
+			if err != nil {
+				return nil, err
+			}
+			resp := map[string]any{
+				"query_id": uuid.New().String(),
+				"data":     result.Logs,
+				"stats":    result.Stats,
+				"columns":  normalizeResultColumns(nil, result),
+				"warnings": result.Warnings,
+			}
+			return json.Marshal(NewSuccessResponse(resp))
+		}
+		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
+			return err
+		}
+	}
+
+	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
@@ -349,7 +451,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		user.ID,
 		sourceID,
 		teamID,
-		req.RawSQL,
+		req.QueryText,
 		cancel,
 		s.config.Query.MaxConcurrentPerUser,
 		s.config.Query.MaxConcurrentGlobal,
@@ -363,25 +465,16 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	}
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
 
-	// Prepare parameters for the core query function.
-	params := clickhouse.LogQueryParams{
-		RawSQL:           processedSQL,
-		Limit:            req.Limit,
-		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
-		MaxLimit:         s.config.Query.MaxPreviewLimit,
-		MaxResponseBytes: s.config.Query.MaxResponseBytes,
-		QueryTimeout:     req.QueryTimeout, // Always non-nil now
-	}
-	// StartTime, EndTime, and Timezone are no longer passed here;
-	// they are expected to be baked into the RawSQL by the frontend.
-
 	// Execute query via core function with cancellable context.
-	result, err := core.QueryLogs(queryCtx, s.sqlite, s.clickhouse, s.log, sourceID, params)
+	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, params)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 		}
-		if clickhouse.IsValidationError(err) {
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
+		}
+		if datasource.IsValidationError(err) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
 		}
 		s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
@@ -403,6 +496,8 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 			"limit_applied", result.Stats.LimitApplied,
 			"truncated", result.Stats.Truncated,
 		)
+		s.recordQueryHistory(user, teamID, sourceID, req.QueryText, models.QueryLanguageClickHouseSQL,
+			int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
 	}
 
 	// Add query ID to the response for frontend tracking
@@ -448,577 +543,4 @@ func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
 		"message":  "Query cancelled successfully",
 		"query_id": queryID,
 	})
-}
-
-// handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
-
-	// Get schema via core function.
-	schema, err := core.GetSourceSchema(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source schema", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve source schema: %v", err), models.DatabaseErrorType)
-	}
-
-	return SendSuccess(c, fiber.StatusOK, schema)
-}
-
-// handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
-
-	// Parse request body containing time range, window, groupBy and optional filter query
-	var req models.APIHistogramRequest
-	if err := c.BodyParser(&req); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-
-	// Validate raw_sql parameter - empty SQL is not allowed
-	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql parameter is required", models.ValidationErrorType)
-	}
-
-	// Check if SQL contains variable placeholders.
-	requiredVars := template.ExtractVariableNames(req.RawSQL)
-
-	// Validate that all required variables are provided.
-	if len(requiredVars) > 0 && len(req.Variables) == 0 {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Query contains template variables (%s) but no variables were provided. Please define variable values before executing.", strings.Join(requiredVars, ", ")),
-			models.ValidationErrorType)
-	}
-
-	// Perform template variable substitution if variables are provided.
-	processedSQL := req.RawSQL
-	if len(req.Variables) > 0 {
-		vars := make([]template.Variable, len(req.Variables))
-		for i, v := range req.Variables {
-			vars[i] = template.Variable{
-				Name:  v.Name,
-				Type:  template.VariableType(v.Type),
-				Value: v.Value,
-			}
-		}
-
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest,
-				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
-		}
-		processedSQL = substituted
-	}
-
-	// Use window from the request body or default to 1 minute
-	window := req.Window
-	if window == "" {
-		window = "1m" // Default to 1 minute if not specified
-	}
-
-	// Prepare parameters for the core histogram function.
-	params := core.HistogramParams{
-		Window: window,
-		Query:  processedSQL, // Pass processed SQL containing filters and time conditions
-	}
-
-	// Only add groupBy if it's not empty
-	if req.GroupBy != "" && strings.TrimSpace(req.GroupBy) != "" {
-		params.GroupBy = req.GroupBy
-	}
-
-	// Use the provided timezone or default to UTC
-	if req.Timezone != "" {
-		params.Timezone = req.Timezone
-	} else {
-		params.Timezone = "UTC"
-	}
-
-	// Apply default timeout if not specified
-	if req.QueryTimeout == nil {
-		defaultTimeout := models.DefaultQueryTimeoutSeconds
-		req.QueryTimeout = &defaultTimeout
-	}
-
-	// Validate timeout
-	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	}
-
-	// Pass the query timeout (always non-nil now)
-	params.QueryTimeout = req.QueryTimeout
-
-	// Execute histogram query via core function.
-	result, err := core.GetHistogramData(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-
-		// Check for specific error types
-		switch {
-		case strings.Contains(err.Error(), "query parameter is required"):
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Query parameter is required for histogram data", models.ValidationErrorType)
-		case strings.Contains(err.Error(), "invalid histogram window"):
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		case strings.Contains(err.Error(), "invalid"):
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		default:
-			// Handle other errors
-			s.log.Error("failed to get histogram data", "error", err, "source_id", sourceID)
-			// Pass the actual error message to the client for better debugging
-			return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to generate histogram data: %v", err), models.DatabaseErrorType)
-		}
-	}
-
-	return SendSuccess(c, fiber.StatusOK, result)
-}
-
-// handleGenerateAISQL handles the generation of SQL from natural language queries
-func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
-	if err := s.validateAIConfig(); err != nil {
-		return err(c)
-	}
-
-	sourceID, teamID, err := s.parseSourceTeamIDs(c)
-	if err != nil {
-		return err
-	}
-
-	user := c.Locals("user").(*models.User)
-	if user == nil {
-		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized", models.AuthenticationErrorType)
-	}
-
-	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, teamID, sourceID)
-	if accessErr != nil {
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
-	}
-	if !hasAccess {
-		return SendErrorWithType(c, http.StatusForbidden, "You don't have access to this source", models.AuthorizationErrorType)
-	}
-
-	var req models.GenerateSQLRequest
-	if err := c.BodyParser(&req); err != nil {
-		return SendErrorWithType(c, http.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-	if req.NaturalLanguageQuery == "" {
-		return SendErrorWithType(c, http.StatusBadRequest, "Natural language query is required", models.ValidationErrorType)
-	}
-
-	source, schemaJSON, tableName, err := s.getSourceSchemaForAI(c, sourceID)
-	if err != nil {
-		return err
-	}
-	_ = source
-
-	generatedSQL, err := s.callAIToGenerateSQL(c.Context(), req, schemaJSON, tableName)
-	if err != nil {
-		return err
-	}
-
-	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{SQLQuery: generatedSQL})
-}
-
-func (s *Server) validateAIConfig() func(*fiber.Ctx) error {
-	if !s.config.AI.Enabled {
-		return func(c *fiber.Ctx) error {
-			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not enabled", models.GeneralErrorType)
-		}
-	}
-	if s.config.AI.APIKey == "" {
-		return func(c *fiber.Ctx) error {
-			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not configured (missing API key)", models.GeneralErrorType)
-		}
-	}
-	return nil
-}
-
-func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamID, error) {
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
-	}
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
-	}
-	return sourceID, teamID, nil
-}
-
-func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.Context(), s.sqlite, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
-	}
-	if source == nil {
-		return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
-	}
-
-	if !source.IsConnected {
-		health := s.clickhouse.GetCachedHealth(sourceID)
-		if health.Status != models.HealthStatusHealthy {
-			return nil, "", "", SendErrorWithType(c, http.StatusServiceUnavailable,
-				fmt.Sprintf("Source is not currently connected: %s", health.Error), models.ExternalServiceErrorType)
-		}
-	}
-
-	var client *clickhouse.Client
-	client, err = s.clickhouse.GetConnection(sourceID)
-	if err != nil {
-		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
-	}
-
-	var tableInfo *clickhouse.TableInfo
-	tableInfo, err = client.GetTableInfo(c.Context(), source.Connection.Database, source.Connection.TableName)
-	if err != nil {
-		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
-	}
-
-	schemaJSON = formatSchemaForAI(tableInfo)
-	tableName = source.GetFullTableName()
-	return source, schemaJSON, tableName, nil
-}
-
-func formatSchemaForAI(tableInfo *clickhouse.TableInfo) string {
-	columns := make([]map[string]any, 0, len(tableInfo.Columns))
-	for _, col := range tableInfo.Columns {
-		columns = append(columns, map[string]any{"name": col.Name, "type": col.Type})
-	}
-	if len(tableInfo.SortKeys) > 0 {
-		columns = append(columns, map[string]any{
-			"name": "_sort_keys", "keys": tableInfo.SortKeys,
-			"note": "The columns above are sort keys. Queries filtered by these columns will be faster.",
-		})
-	}
-	schemaJSON, _ := json.MarshalIndent(columns, "", "  ")
-	return string(schemaJSON)
-}
-
-func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, schemaJSON, tableName string) (string, error) {
-	aiCtx, cancel := context.WithTimeout(ctx, OpenAIRequestTimeout)
-	defer cancel()
-
-	aiClient, err := ai.NewClient(ai.ClientOptions{
-		APIKey:      s.config.AI.APIKey,
-		Model:       s.config.AI.Model,
-		MaxTokens:   s.config.AI.MaxTokens,
-		Temperature: s.config.AI.Temperature,
-		Timeout:     OpenAIRequestTimeout,
-		BaseURL:     s.config.AI.BaseURL,
-	}, s.log)
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize AI client: %w", err)
-	}
-
-	generatedSQL, err := aiClient.GenerateSQL(aiCtx, req.NaturalLanguageQuery, schemaJSON, tableName, req.CurrentQuery)
-	if err != nil {
-		if errors.Is(err, ai.ErrInvalidSQLGeneratedByAI) {
-			return "", fmt.Errorf("AI could not generate valid SQL: %w", err)
-		}
-		return "", fmt.Errorf("failed to generate SQL: %w", err)
-	}
-	return generatedSQL, nil
-}
-
-// handleGetLogContext retrieves surrounding logs around a specific timestamp.
-// This is similar to grep -C, showing N logs before and M logs after a target log.
-// Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
-
-	// Parse request body
-	var req models.LogContextRequest
-	if err := c.BodyParser(&req); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-
-	// Validate required fields
-	if req.Timestamp <= 0 {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Timestamp is required and must be positive", models.ValidationErrorType)
-	}
-
-	// Apply defaults for limits if not specified
-	beforeLimit := req.BeforeLimit
-	if beforeLimit <= 0 {
-		beforeLimit = 10
-	}
-	afterLimit := req.AfterLimit
-	if afterLimit <= 0 {
-		afterLimit = 10
-	}
-
-	// Cap limits to prevent excessive queries
-	if beforeLimit > 100 {
-		beforeLimit = 100
-	}
-	if afterLimit > 100 {
-		afterLimit = 100
-	}
-
-	// Prepare parameters for the core function
-	params := core.LogContextParams{
-		TargetTimestamp: req.Timestamp,
-		BeforeLimit:     beforeLimit,
-		AfterLimit:      afterLimit,
-		BeforeOffset:    req.BeforeOffset,
-		AfterOffset:     req.AfterOffset,
-		ExcludeBoundary: req.ExcludeBoundary,
-	}
-
-	// Execute context query via core function
-	result, err := core.GetLogContext(c.Context(), s.sqlite, s.clickhouse, s.log, sourceID, params)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get log context", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to retrieve log context: %v", err), models.DatabaseErrorType)
-	}
-
-	// Return the context response
-	return SendSuccess(c, fiber.StatusOK, models.LogContextResponse{
-		TargetTimestamp: result.TargetTimestamp,
-		BeforeLogs:      result.BeforeLogs,
-		TargetLogs:      result.TargetLogs,
-		AfterLogs:       result.AfterLogs,
-		Stats:           result.Stats,
-	})
-}
-
-// handleGetFieldValues retrieves distinct values for a specific field within a time range.
-// This is optimized for LowCardinality fields but works for any field.
-// Access is controlled by the requireSourceAccess middleware.
-// Query params:
-//   - limit: max number of values to return (default 10, max 100)
-//   - type: the field type from source schema (required)
-//   - start_time: ISO8601 start time (required for performance)
-//   - end_time: ISO8601 end time (required for performance)
-//   - timezone: timezone for time conversion (optional, defaults to UTC)
-//   - logchefql: LogchefQL query string (optional, filters field values by user's query)
-func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
-
-	fieldName := c.Params("fieldName")
-	if fieldName == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Field name is required", models.ValidationErrorType)
-	}
-
-	// Get field type from query param (frontend already has this from source details)
-	fieldType := c.Query("type", "")
-	if fieldType == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Field type is required (pass from source schema)", models.ValidationErrorType)
-	}
-
-	// Parse time range parameters (required for performance)
-	startTimeStr := c.Query("start_time", "")
-	endTimeStr := c.Query("end_time", "")
-	if startTimeStr == "" || endTimeStr == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Time range (start_time, end_time) is required for performance", models.ValidationErrorType)
-	}
-
-	startTime, err := time.Parse(time.RFC3339, startTimeStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid start_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
-	}
-	endTime, err := time.Parse(time.RFC3339, endTimeStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid end_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
-	}
-
-	timezone := c.Query("timezone", "UTC")
-
-	// Parse optional limit query parameter (default 10, max 100)
-	limit := c.QueryInt("limit", 10)
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
-	// Get optional LogchefQL query - parsed on backend for proper SQL generation
-	logchefqlQuery := c.Query("logchefql", "")
-
-	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source for field values", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
-	}
-
-	// Get ClickHouse client
-	client, err := s.clickhouse.GetConnection(sourceID)
-	if err != nil {
-		s.log.Error("failed to get clickhouse client for field values", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
-	}
-
-	// Create timeout context - this propagates to ClickHouse as max_execution_time
-	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
-	defer cancel()
-
-	// Fetch field values with time range filter and user's LogchefQL query
-	result, err := client.GetFieldDistinctValues(
-		ctx,
-		source.Connection.Database,
-		source.Connection.TableName,
-		clickhouse.FieldValuesParams{
-			FieldName:      fieldName,
-			FieldType:      fieldType,
-			TimestampField: source.MetaTSField,
-			StartTime:      startTime,
-			EndTime:        endTime,
-			Timezone:       timezone,
-			Limit:          limit,
-			Timeout:        nil,            // Let context deadline handle timeout
-			LogchefQL:      logchefqlQuery, // Apply user's query filters
-		},
-	)
-	if err != nil {
-		// Check if the error was due to context cancellation (client disconnected)
-		if ctx.Err() == context.Canceled {
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", FieldValuesTimeout)
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-		}
-		if clickhouse.IsValidationError(err) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
-		}
-		s.log.Error("failed to get field values", "error", err, "source_id", sourceID, "field", fieldName)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
-	}
-
-	return SendSuccess(c, fiber.StatusOK, result)
-}
-
-// handleGetAllFieldValues retrieves distinct values for all filterable fields within a time range.
-// This is useful for populating the field sidebar with filterable values.
-// Access is controlled by the requireSourceAccess middleware.
-// Query params:
-//   - limit: max number of values per field (default 10, max 100)
-//   - start_time: ISO8601 start time (required for performance)
-//   - end_time: ISO8601 end time (required for performance)
-//   - timezone: timezone for time conversion (optional, defaults to UTC)
-//   - logchefql: LogchefQL query string (optional, filters field values by user's query)
-func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
-
-	// Parse time range parameters (required for performance)
-	startTimeStr := c.Query("start_time", "")
-	endTimeStr := c.Query("end_time", "")
-	if startTimeStr == "" || endTimeStr == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Time range (start_time, end_time) is required for performance", models.ValidationErrorType)
-	}
-
-	startTime, err := time.Parse(time.RFC3339, startTimeStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid start_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
-	}
-	endTime, err := time.Parse(time.RFC3339, endTimeStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid end_time format (use ISO8601/RFC3339)", models.ValidationErrorType)
-	}
-
-	timezone := c.Query("timezone", "UTC")
-
-	// Parse optional limit query parameter (default 10, max 100)
-	limit := c.QueryInt("limit", 10)
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100
-	}
-
-	// Get optional LogchefQL query - parsed on backend for proper SQL generation
-	logchefqlQuery := c.Query("logchefql", "")
-
-	// Get source information
-	source, err := core.GetSource(c.Context(), s.sqlite, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
-	}
-
-	// Get ClickHouse client
-	client, err := s.clickhouse.GetConnection(sourceID)
-	if err != nil {
-		s.log.Error("failed to get clickhouse client", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to connect to source", models.ExternalServiceErrorType)
-	}
-
-	// Create timeout context - this propagates to ClickHouse as max_execution_time
-	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
-	defer cancel()
-
-	// Fetch all filterable field values with time range filter and user's LogchefQL query
-	result, err := client.GetAllLowCardinalityFieldValues(
-		ctx,
-		source.Connection.Database,
-		source.Connection.TableName,
-		clickhouse.AllFieldValuesParams{
-			TimestampField: source.MetaTSField,
-			StartTime:      startTime,
-			EndTime:        endTime,
-			Timezone:       timezone,
-			Limit:          limit,
-			Timeout:        nil,            // Let context deadline handle timeout
-			LogchefQL:      logchefqlQuery, // Apply user's query filters
-		},
-	)
-	if err != nil {
-		// Check if the error was due to context cancellation (client disconnected)
-		if ctx.Err() == context.Canceled {
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", FieldValuesTimeout)
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-		}
-		if clickhouse.IsValidationError(err) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
-		}
-		s.log.Error("failed to get field values", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to get field values: %v", err), models.DatabaseErrorType)
-	}
-
-	return SendSuccess(c, fiber.StatusOK, result)
 }

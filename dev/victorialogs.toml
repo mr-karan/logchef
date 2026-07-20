@@ -1,0 +1,46 @@
+data_dir = "/tmp/logchef-vector-victorialogs"
+
+[sources.generate_victorialogs]
+type = "demo_logs"
+format = "json"
+interval = 0.1
+
+[transforms.remap_victorialogs]
+type = "remap"
+inputs = ["generate_victorialogs"]
+source = '''
+ts = .timestamp
+event = parse_json!(.message)
+
+. = event
+.timestamp = format_timestamp!(ts, format: "%+")
+.service = "victorialogs-vector"
+.env = "dev"
+.pipeline = "vector"
+.message = .request
+
+status_code = to_int!(.status)
+.level = if status_code >= 500 {
+  "error"
+} else if status_code >= 400 {
+  "warn"
+} else {
+  "info"
+}
+'''
+
+[sinks.victorialogs]
+type = "elasticsearch"
+inputs = ["remap_victorialogs"]
+endpoints = ["http://localhost:9428/insert/elasticsearch/"]
+mode = "bulk"
+api_version = "v8"
+compression = "gzip"
+
+[sinks.victorialogs.healthcheck]
+enabled = false
+
+[sinks.victorialogs.request.headers]
+VL-Stream-Fields = "service,env,pipeline"
+VL-Time-Field = "timestamp"
+VL-Msg-Field = "message,msg,_msg"

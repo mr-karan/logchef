@@ -110,6 +110,7 @@ async function loadContextLogs() {
         const timestamp = new Date(tsValue).getTime()
         targetTimestamp.value = timestamp
         const result = await exploreApi.getLogContext(parseInt(props.sourceId), {
+            source_id: parseInt(props.sourceId),
             timestamp,
             before_limit: batchSize.value,
             after_limit: batchSize.value
@@ -166,6 +167,7 @@ async function loadMore(direction: 'before' | 'after') {
             : 0
 
         const result = await exploreApi.getLogContext(parseInt(props.sourceId), {
+            source_id: parseInt(props.sourceId),
             timestamp: targetTimestamp.value,  // Always use the original target timestamp
             before_limit: direction === 'before' ? batchSize.value : 0,
             after_limit: direction === 'after' ? batchSize.value : 0,

@@ -1,6 +1,7 @@
 package provisioning
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -17,7 +18,15 @@ func TestValidateConfig_ValidSources(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl", Password: "pass"},
+			{
+				Name: "src1",
+				Connection: map[string]any{
+					"host":       "host:9000",
+					"database":   "db",
+					"table_name": "tbl",
+					"password":   "pass",
+				},
+			},
 		},
 	}
 	if err := ValidateConfig(cfg); err != nil {
@@ -25,15 +34,101 @@ func TestValidateConfig_ValidSources(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_ValidSourceWithNestedClickHouseConnection(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				Name:       "src1",
+				SourceType: "clickhouse",
+				Connection: map[string]any{
+					"host":       "host:9000",
+					"database":   "db",
+					"table_name": "tbl",
+					"username":   "default",
+					"password":   "pass",
+				},
+			},
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("valid nested clickhouse source config should pass: %v", err)
+	}
+}
+
+func TestValidateConfig_LegacyFlatSourceFormat(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				// Pre-v2.0 flat format: connection fields at the top level,
+				// no [sources.connection] block and no source_type.
+				Name:      "Production Logs",
+				Host:      "clickhouse.internal:9000",
+				Database:  "logs",
+				TableName: "otel_logs",
+			},
+		},
+	}
+	err := ValidateConfig(cfg)
+	if err == nil {
+		t.Fatal("flat pre-v2.0 source format should fail validation")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, "flat provisioning format") || !strings.Contains(msg, "[sources.connection]") {
+		t.Errorf("error should mention the flat format and [sources.connection]; got: %v", err)
+	}
+}
+
+func TestValidateConfig_ValidVictoriaLogsSource(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				Name:       "payments",
+				SourceType: "victorialogs",
+				Connection: map[string]any{
+					"base_url": "https://logs.example.com",
+					"auth": map[string]any{
+						"mode":  "bearer",
+						"token": "secret",
+					},
+					"tenant": map[string]any{
+						"account_id": "12",
+						"project_id": "34",
+					},
+				},
+			},
+		},
+	}
+	if err := ValidateConfig(cfg); err != nil {
+		t.Errorf("valid victorialogs source config should pass: %v", err)
+	}
+}
+
 func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
+	chSource := func(database, table, tsField, sevField string) config.ProvisionSource {
+		return config.ProvisionSource{
+			Name:              "s",
+			SourceType:        "clickhouse",
+			MetaTSField:       tsField,
+			MetaSeverityField: sevField,
+			Connection: map[string]any{
+				"host":       "h:9000",
+				"database":   database,
+				"table_name": table,
+				"password":   "p",
+			},
+		}
+	}
 	cases := []struct {
 		name string
 		src  config.ProvisionSource
 	}{
-		{"bad database", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db; DROP TABLE x", TableName: "tbl", Password: "p"}},
-		{"bad table", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db", TableName: "tbl`)--", Password: "p"}},
-		{"bad ts field", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db", TableName: "tbl", MetaTSField: "ts field", Password: "p"}},
-		{"bad severity field", config.ProvisionSource{Name: "s", Host: "h:9000", Database: "db", TableName: "tbl", MetaSeverityField: "sev-field", Password: "p"}},
+		{"bad database", chSource("db; DROP TABLE x", "tbl", "", "")},
+		{"bad table", chSource("db", "tbl`)--", "", "")},
+		{"bad ts field", chSource("db", "tbl", "ts field", "")},
+		{"bad severity field", chSource("db", "tbl", "", "sev-field")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -45,12 +140,47 @@ func TestValidateConfig_InvalidSQLIdentifiers(t *testing.T) {
 	}
 }
 
+func TestValidateConfig_ClickHouseQuerySettings(t *testing.T) {
+	withSettings := func(settings map[string]any) config.ProvisionSource {
+		return config.ProvisionSource{
+			Name:       "s",
+			SourceType: "clickhouse",
+			Connection: map[string]any{
+				"host":       "h:9000",
+				"database":   "db",
+				"table_name": "tbl",
+				"password":   "p",
+				"settings":   settings,
+			},
+		}
+	}
+	cases := []struct {
+		name     string
+		settings map[string]any
+		wantErr  bool
+	}{
+		{"valid settings accepted", map[string]any{"max_result_rows": 1000, "readonly": 2, "result_overflow_mode": "break"}, false},
+		{"negative cap rejected", map[string]any{"max_result_rows": -5}, true},
+		{"bad readonly rejected", map[string]any{"readonly": 3}, true},
+		{"bad overflow mode rejected", map[string]any{"result_overflow_mode": "halt"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{ManageSources: true, Sources: []config.ProvisionSource{withSettings(tc.settings)}}
+			err := ValidateConfig(cfg)
+			if (err != nil) != tc.wantErr {
+				t.Errorf("ValidateConfig() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
 func TestValidateConfig_DuplicateSourceNames(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl1", Password: "pass"},
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl2", Password: "pass"},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl1", "password": "pass"}},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl2", "password": "pass"}},
 		},
 	}
 	if err := ValidateConfig(cfg); err == nil {
@@ -75,7 +205,7 @@ func TestValidateConfig_EmptySourceName(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
-			{Name: "", Host: "host:9000", Database: "db", TableName: "tbl"},
+			{Name: "", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl"}},
 		},
 	}
 	err := ValidateConfig(cfg)
@@ -89,7 +219,7 @@ func TestValidateConfig_ValidTeams(t *testing.T) {
 		ManageSources: true,
 		ManageTeams:   true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl", Password: "pass"},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl", "password": "pass"}},
 		},
 		Teams: []config.ProvisionTeam{
 			{
@@ -125,7 +255,7 @@ func TestValidateConfig_InvalidSourceRef(t *testing.T) {
 		ManageSources: true,
 		ManageTeams:   true,
 		Sources: []config.ProvisionSource{
-			{Name: "src1", Host: "host:9000", Database: "db", TableName: "tbl", Password: "pass"},
+			{Name: "src1", Connection: map[string]any{"host": "host:9000", "database": "db", "table_name": "tbl", "password": "pass"}},
 		},
 		Teams: []config.ProvisionTeam{
 			{Name: "team1", Sources: []string{"nonexistent"}},
@@ -259,6 +389,25 @@ func TestResolveSecrets_DefaultMetaTSField(t *testing.T) {
 	ResolveSecrets(cfg)
 	if cfg.Sources[0].MetaTSField != "timestamp" {
 		t.Errorf("expected default MetaTSField 'timestamp', got %q", cfg.Sources[0].MetaTSField)
+	}
+}
+
+func TestResolveSecrets_DefaultVictoriaLogsMetaTSField(t *testing.T) {
+	cfg := &config.ProvisioningConfig{
+		ManageSources: true,
+		Sources: []config.ProvisionSource{
+			{
+				Name:       "payments",
+				SourceType: "victorialogs",
+				Connection: map[string]any{
+					"base_url": "https://logs.example.com",
+				},
+			},
+		},
+	}
+	ResolveSecrets(cfg)
+	if cfg.Sources[0].MetaTSField != "_time" {
+		t.Errorf("expected default MetaTSField '_time', got %q", cfg.Sources[0].MetaTSField)
 	}
 }
 

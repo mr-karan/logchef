@@ -32,7 +32,8 @@ func savedQueryToModel(r sqlc.SavedQuery) *models.SavedQuery {
 		SourceID:          models.SourceID(r.SourceID),
 		Name:              r.Name,
 		Description:       textStr(r.Description),
-		QueryType:         models.SavedQueryType(r.QueryType),
+		QueryLanguage:     models.QueryLanguage(r.QueryLanguage),
+		EditorMode:        models.SavedQueryEditorMode(r.EditorMode),
 		QueryContent:      r.QueryContent,
 		CreatedBy:         userIDPtr(r.CreatedBy),
 		CreatedFromTeamID: teamIDPtr(r.CreatedFromTeamID),
@@ -42,13 +43,14 @@ func savedQueryToModel(r sqlc.SavedQuery) *models.SavedQuery {
 }
 
 // CreateSavedQuery inserts a new saved query and returns the persisted record.
-func (s *Store) CreateSavedQuery(ctx context.Context, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryType, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error) {
+func (s *Store) CreateSavedQuery(ctx context.Context, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error) {
 	params := sqlc.CreateSavedQueryParams{
-		SourceID:     int64(sourceID),
-		Name:         name,
-		Description:  text(description),
-		QueryType:    queryType,
-		QueryContent: queryContent,
+		SourceID:      int64(sourceID),
+		Name:          name,
+		Description:   text(description),
+		QueryLanguage: string(queryLanguage),
+		EditorMode:    string(editorMode),
+		QueryContent:  queryContent,
 	}
 	if createdFromTeamID != nil {
 		params.CreatedFromTeamID = int8Val(int64(*createdFromTeamID))
@@ -78,13 +80,14 @@ func (s *Store) GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQu
 }
 
 // UpdateSavedQuery overwrites the mutable fields of a saved query.
-func (s *Store) UpdateSavedQuery(ctx context.Context, queryID int, name, description, queryType, queryContent string) error {
+func (s *Store) UpdateSavedQuery(ctx context.Context, queryID int, name, description string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, queryContent string) error {
 	err := s.q.UpdateSavedQuery(ctx, sqlc.UpdateSavedQueryParams{
-		Name:         name,
-		Description:  text(description),
-		QueryType:    queryType,
-		QueryContent: queryContent,
-		ID:           int64(queryID),
+		Name:          name,
+		Description:   text(description),
+		QueryLanguage: string(queryLanguage),
+		EditorMode:    string(editorMode),
+		QueryContent:  queryContent,
+		ID:            int64(queryID),
 	})
 	if err != nil {
 		s.log.Error("failed to update saved query", "error", err, "query_id", queryID)
@@ -118,7 +121,8 @@ func (s *Store) ListSavedQueriesForUser(ctx context.Context, userID models.UserI
 			CreatedFromTeamID: teamIDPtr(r.CreatedFromTeamID),
 			Name:              r.Name,
 			Description:       textStr(r.Description),
-			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryLanguage:     models.QueryLanguage(r.QueryLanguage),
+			EditorMode:        models.SavedQueryEditorMode(r.EditorMode),
 			QueryContent:      r.QueryContent,
 			CreatedBy:         userIDPtr(r.CreatedBy),
 			CreatedAt:         r.CreatedAt.Time,
@@ -148,7 +152,8 @@ func (s *Store) ListSavedQueriesForUserBySource(ctx context.Context, userID mode
 			CreatedFromTeamID: teamIDPtr(r.CreatedFromTeamID),
 			Name:              r.Name,
 			Description:       textStr(r.Description),
-			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryLanguage:     models.QueryLanguage(r.QueryLanguage),
+			EditorMode:        models.SavedQueryEditorMode(r.EditorMode),
 			QueryContent:      r.QueryContent,
 			CreatedBy:         userIDPtr(r.CreatedBy),
 			CreatedAt:         r.CreatedAt.Time,
@@ -175,7 +180,8 @@ func (s *Store) ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, 
 			CreatedFromTeamID: teamIDPtr(r.CreatedFromTeamID),
 			Name:              r.Name,
 			Description:       textStr(r.Description),
-			QueryType:         models.SavedQueryType(r.QueryType),
+			QueryLanguage:     models.QueryLanguage(r.QueryLanguage),
+			EditorMode:        models.SavedQueryEditorMode(r.EditorMode),
 			QueryContent:      r.QueryContent,
 			CreatedBy:         userIDPtr(r.CreatedBy),
 			CreatedAt:         r.CreatedAt.Time,

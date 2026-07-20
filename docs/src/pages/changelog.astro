@@ -79,6 +79,60 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- Unreleased -->
+    <article class="version">
+      <div class="version-header">
+        <span class="version-tag unreleased">Unreleased</span>
+        <span class="version-badge">In development</span>
+        <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md" class="version-link" target="_blank">Full changelog &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        This release makes <strong>VictoriaLogs a first-class datasource</strong> alongside ClickHouse: add a VictoriaLogs source, query it in LogchefQL (compiled to LogsQL) or raw LogsQL, and build alerts and live tails against it. Sources now advertise an explicit <strong>capability set</strong> (histogram, field values, exports, live tail, &hellip;) instead of hardcoded backend checks. Alongside VictoriaLogs, this release adds <strong>built-in local authentication</strong> (run without an external OIDC provider), <strong>live tail</strong> (stream logs in real time), a <strong>Dashboards</strong> upgrade (direct-manipulation grid editing, a full-height panel builder, line/area/bar chart styles), and <strong>client-side column filters</strong> in the results table.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>VictoriaLogs datasource</strong>: Add a source with a base URL, auth mode (none / basic / bearer), optional multi-tenant account &amp; project IDs, and an immutable scope query applied to every request. Query in LogchefQL (compiled to LogsQL) or native LogsQL. Alerts support both a condition builder and native <code>stats_query</code>. AI SQL generation, log context, and streamed exports remain ClickHouse-only for now. <a href="/tutorials/victorialogs/">VictoriaLogs guide &rarr;</a></li>
+          <li><strong>Built-in local authentication</strong>: Run Logchef with email+password login, with or without OIDC. Configure via <code>[auth.local]</code> (<code>enabled</code>, <code>admin_email</code>, <code>admin_password</code>). Rate-limited per IP and per email. <a href="/getting-started/configuration/#local-authentication-run-without-oidc">Learn more &rarr;</a></li>
+          <li><strong>SSO auto-provisioning</strong>: A first-time OIDC login from an allowed email domain creates the user automatically instead of failing with "user not found". Configure via <code>[auth.auto_provision]</code> (<code>enabled</code>, <code>allowed_domains</code>, <code>default_team_ids</code>); off by default, exact case-insensitive domain match, new users are always regular members and stay unmanaged by declarative provisioning. <a href="/getting-started/configuration/#sso-auto-provisioning-jit-user-creation">Learn more &rarr;</a></li>
+          <li><strong>Live tail</strong>: A <strong>Live</strong> toggle in the explorer streams matching rows over SSE. ClickHouse is polled (<code>[tail] poll_interval</code>); VictoriaLogs proxies its native tail stream directly. Works in LogchefQL mode on any source, and in native LogsQL mode on VictoriaLogs.</li>
+          <li><strong>Dashboards: grid-canvas editing</strong>: Drag a panel by its header to move it, drag its corner to resize. A full-height panel builder drawer (with a live query preview) replaces the old form sheet.</li>
+          <li><strong>Dashboards: chart styles</strong>: Time series panels render as bars, line, or area, set per panel.</li>
+          <li><strong>Client-side column filters</strong>: Click a column header's filter icon to narrow currently-loaded rows by a contains match or a numeric comparison (<code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>=</code>). No extra query is sent.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Source credentials are never echoed back</strong> in API responses. A <code>has_password</code> flag replaces the stored credential; blank on update means "keep existing".</li>
+          <li><strong>Sparse and grouped histograms render as continuous charts</strong>: gaps between the first and last bucket are now zero-filled, in both the explorer and dashboard panels.</li>
+          <li><strong>Dashboard panels are timezone-correct for every viewer</strong>: time-series buckets align to your local timezone; table/stat panels use an internally UTC-pinned query so their window doesn't shift.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Deleting a user deletes their sessions too</strong>: a removed user's session no longer keeps working until natural expiry.</li>
+          <li><strong>Condition-mode alerts aggregate over a real field</strong>: <code>sum</code>/<code>avg</code>/<code>min</code>/<code>max</code> now use a field you pick, instead of a hardcoded column that didn't exist on most datasets.</li>
+          <li><strong>ClickHouse query results no longer lose their columns</strong> on the alert-evaluation path, fixing alerts whose query returned rows failing to evaluate.</li>
+          <li><strong>Exports return a clean 400</strong> (and the Download button hides) on sources that don't support them, instead of a 500 or a silently-failing background job.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.7.0 -->
     <article class="version">
       <div class="version-header">
@@ -89,7 +143,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        Logchef 1.7 makes the metadata store <strong>pluggable</strong>. Alongside the default single-binary SQLite, you can now run an <strong>opt-in Postgres backend</strong> so multiple Logchef replicas share state behind a load balancer &mdash; the groundwork for high availability. SQLite stays the default, so single-instance setups are unchanged. The release also lets you <strong>switch alerting off</strong> server-wide, opens <strong>collection curation</strong> to any participant, adds an admin <strong>"All Queries"</strong> browse view, and brings <strong>type-to-filter pickers and searchable, sortable tables</strong> to the member and resource pages.
+        Logchef 1.7 makes the metadata store <strong>pluggable</strong>. Alongside the default single-binary SQLite, you can now run an <strong>opt-in Postgres backend</strong> so multiple Logchef replicas share state behind a load balancer. That's the groundwork for high availability. SQLite stays the default, so single-instance setups are unchanged. The release also lets you <strong>switch alerting off</strong> server-wide, opens <strong>collection curation</strong> to any participant, adds an admin <strong>"All Queries"</strong> browse view, and brings <strong>type-to-filter pickers and searchable, sortable tables</strong> to the member and resource pages.
       </p>
 
       <div class="change-section">
@@ -98,14 +152,14 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Opt-in Postgres metadata backend</strong> &mdash; Store users, teams, sources, saved queries, collections, alerts, tokens, and settings in Postgres instead of SQLite, so several Logchef replicas can serve any request off shared state. Set <code>database.driver = "postgres"</code> with a <code>[postgres]</code> DSN (or the matching env vars). SQLite remains the default and the single-binary start is unchanged; your logs always stay in ClickHouse. <a href="/operations/database-backends/">Database backends &amp; HA &rarr;</a></li>
-          <li><strong>Turn alerting off server-wide</strong> &mdash; Set <code>alerts.enabled = false</code> and the UI hides alerting entirely while every alert endpoint returns a clean <code>503</code>. Useful when you run Logchef purely for exploration, or want a single alert-evaluating instance.</li>
-          <li><strong>"All Queries" browse for admins</strong> &mdash; Global admins can now see every saved query, including ones not pinned to any collection. Queries on sources you can't reach show as locked.</li>
-          <li><strong>Redesigned Library</strong> &mdash; Saved queries and collections merge into a single <code>/logs/library</code> (collections rail + detail pane). Collections gain an <strong>editor</strong> role, and editing a saved query is delegated to its creator, a global admin, or an owner/editor of a shared collection that contains it. The Save dialog gets an inline collection picker, and the UI only offers Edit/Delete actions you're actually allowed to take.</li>
-          <li><strong>Curate shared collections as a member</strong> &mdash; Any participant (owner, editor, or member) can pin, move, and remove queries in a shared collection. Renaming, deleting, and managing members stays owner-only.</li>
-          <li><strong>Collection detail upgrades</strong> &mdash; Pin an existing saved query with an "Add query" search picker, move a query to another collection, and see each query's author in a new "Created by" column.</li>
-          <li><strong>Searchable pickers &amp; tables</strong> &mdash; Type-to-filter dropdowns for inviting collection members and adding service accounts to teams, plus a search box and sortable columns on Manage Sources and team-member lists.</li>
-          <li><strong>Token expiry everywhere</strong> &mdash; The service-tokens admin page now shows the same expiry status as the profile API-token list (never expires / expires / expiring soon / expired), and the CLI flags an expired saved token in <code>logchef auth current</code>.</li>
+          <li><strong>Opt-in Postgres metadata backend</strong>: Store users, teams, sources, saved queries, collections, alerts, tokens, and settings in Postgres instead of SQLite, so several Logchef replicas can serve any request off shared state. Set <code>database.driver = "postgres"</code> with a <code>[postgres]</code> DSN (or the matching env vars). SQLite remains the default and the single-binary start is unchanged; your logs always stay in ClickHouse. <a href="/operations/database-backends/">Database backends &amp; HA &rarr;</a></li>
+          <li><strong>Turn alerting off server-wide</strong>: Set <code>alerts.enabled = false</code> and the UI hides alerting entirely while every alert endpoint returns a clean <code>503</code>. Useful when you run Logchef purely for exploration, or want a single alert-evaluating instance.</li>
+          <li><strong>"All Queries" browse for admins</strong>: Global admins can now see every saved query, including ones not pinned to any collection. Queries on sources you can't reach show as locked.</li>
+          <li><strong>Redesigned Library</strong>: Saved queries and collections merge into a single <code>/logs/library</code> (collections rail + detail pane). Collections gain an <strong>editor</strong> role, and editing a saved query is delegated to its creator, a global admin, or an owner/editor of a shared collection that contains it. The Save dialog gets an inline collection picker, and the UI only offers Edit/Delete actions you're actually allowed to take.</li>
+          <li><strong>Curate shared collections as a member</strong>: Any participant (owner, editor, or member) can pin, move, and remove queries in a shared collection. Renaming, deleting, and managing members stays owner-only.</li>
+          <li><strong>Collection detail upgrades</strong>: Pin an existing saved query with an "Add query" search picker, move a query to another collection, and see each query's author in a new "Created by" column.</li>
+          <li><strong>Searchable pickers &amp; tables</strong>: Type-to-filter dropdowns for inviting collection members and adding service accounts to teams, plus a search box and sortable columns on Manage Sources and team-member lists.</li>
+          <li><strong>Token expiry everywhere</strong>: The service-tokens admin page now shows the same expiry status as the profile API-token list (never expires / expires / expiring soon / expired), and the CLI flags an expired saved token in <code>logchef auth current</code>.</li>
         </ul>
       </div>
 
@@ -115,9 +169,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Pluggable store architecture</strong> &mdash; The metadata layer now sits behind a backend-agnostic contract with a shared conformance suite that runs against both SQLite and Postgres in CI, so the two backends stay in lockstep.</li>
+          <li><strong>Pluggable store architecture</strong>: The metadata layer now sits behind a backend-agnostic contract with a shared conformance suite that runs against both SQLite and Postgres in CI, so the two backends stay in lockstep.</li>
           <li><strong>Upgraded to Go 1.26</strong> with hot-path optimizations across query handling.</li>
-          <li><strong>Collection member list is owner-only</strong> &mdash; now enforced on the server, not just hidden in the UI.</li>
+          <li><strong>Collection member list is owner-only</strong>: now enforced on the server, not just hidden in the UI.</li>
         </ul>
       </div>
 
@@ -127,12 +181,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Inline permission errors show a toast</strong> instead of bouncing you to a full-page Forbidden view &mdash; toggles, saves, and deletes stay put on a 403.</li>
-          <li><strong>Dead toggles work again</strong> &mdash; several Switch/Checkbox controls (admin Active toggle, alert enable/disable, source TLS/auth, column selector, variable multi-selects) were silently no-op'd by a binding mismatch and now respond.</li>
-          <li><strong>Saved-query resolver no longer crashes</strong> on certain resolve paths &mdash; it returns a clean error instead.</li>
-          <li><strong>Accurate access errors</strong> for exports and shared queries &mdash; <code>404</code> only when something's missing, <code>403</code> when you lack team access.</li>
+          <li><strong>Inline permission errors show a toast</strong> instead of bouncing you to a full-page Forbidden view. Toggles, saves, and deletes stay put on a 403.</li>
+          <li><strong>Dead toggles work again</strong>: several Switch/Checkbox controls (admin Active toggle, alert enable/disable, source TLS/auth, column selector, variable multi-selects) were silently no-op'd by a binding mismatch and now respond.</li>
+          <li><strong>Saved-query resolver no longer crashes</strong> on certain resolve paths; it returns a clean error instead.</li>
+          <li><strong>Accurate access errors</strong> for exports and shared queries: <code>404</code> only when something's missing, <code>403</code> when you lack team access.</li>
           <li><strong>Tighter memory accounting</strong> on large responses (fixes an under-count from the performance pass), cancellable field-value loading, and identifier validation on provisioned sources.</li>
-          <li><strong>UI polish</strong> &mdash; the add-query dialog no longer overflows, the Library "All queries" view survives navigation, and the date picker's type drift is fixed (TypeScript checks are green and enforced in CI again).</li>
+          <li><strong>UI polish</strong>: the add-query dialog no longer overflows, the Library "All queries" view survives navigation, and the date picker's type drift is fixed (TypeScript checks are green and enforced in CI again).</li>
         </ul>
       </div>
     </article>
@@ -146,7 +200,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        Patch release. Adds <strong>Service accounts</strong> &mdash; non-login principals you can add to teams and issue scoped API tokens for. Every token now carries an explicit scope list (e.g. <code>logs:read</code>, <code>alerts:write</code>) enforced by middleware, with presets and an active-preset highlight in the picker. The team member dialog distinguishes humans from service accounts, and service principals get a clear badge in team rosters. Also surfaces ClickHouse column comments through the schema API for the new LogChef CLI v0.1.6 to consume.
+        Patch release. Adds <strong>Service accounts</strong>: non-login principals you can add to teams and issue scoped API tokens for. Every token now carries an explicit scope list (e.g. <code>logs:read</code>, <code>alerts:write</code>) enforced by middleware, with presets and an active-preset highlight in the picker. The team member dialog distinguishes humans from service accounts, and service principals get a clear badge in team rosters. Also surfaces ClickHouse column comments through the schema API for the new Logchef CLI v0.1.6 to consume.
       </p>
 
       <div class="change-section">
@@ -155,12 +209,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Service accounts</strong> &mdash; Non-login principals managed at <strong>Administration &rarr; Service Tokens</strong>. Cannot authenticate via OIDC or CLI exchange; exist only to own tokens and team memberships. <a href="/features/service-tokens/">Learn more &rarr;</a></li>
-          <li><strong>Scoped API tokens</strong> &mdash; Tokens now carry an explicit list of scopes (<code>logs:read</code>, <code>alerts:write</code>, &hellip;). Presets in the picker: Read-only, Logs viewer, Logs analyst, Alerts manager, Source admin, Full access. The active preset stays highlighted while the selection matches.</li>
-          <li><strong>Account-type toggle in Add Team Member</strong> &mdash; Pick Human user or Service account; the dropdown filters to that type and shows the principal's name with email as a subtitle instead of the raw service-account email.</li>
-          <li><strong>Service account badge</strong> in team member tables &mdash; bot icon + "Service account" pill so automation principals are visually distinct from humans.</li>
-          <li><strong>Manage teams on each service account card</strong> &mdash; team chips, a destructive warning when an account is in zero teams (its tokens won't reach any source), and an in-place add/remove dialog.</li>
-          <li><strong>Schema column descriptions</strong> &mdash; The schema API now surfaces ClickHouse column comments. Consumed by LogChef CLI v0.1.6's <code>schema</code> command.</li>
+          <li><strong>Service accounts</strong>: Non-login principals managed at <strong>Administration &rarr; Service Tokens</strong>. Cannot authenticate via OIDC or CLI exchange; exist only to own tokens and team memberships. <a href="/features/service-tokens/">Learn more &rarr;</a></li>
+          <li><strong>Scoped API tokens</strong>: Tokens now carry an explicit list of scopes (<code>logs:read</code>, <code>alerts:write</code>, &hellip;). Presets in the picker: Read-only, Logs viewer, Logs analyst, Alerts manager, Source admin, Full access. The active preset stays highlighted while the selection matches.</li>
+          <li><strong>Account-type toggle in Add Team Member</strong>: Pick Human user or Service account; the dropdown filters to that type and shows the principal's name with email as a subtitle instead of the raw service-account email.</li>
+          <li><strong>Service account badge</strong> in team member tables: a bot icon and "Service account" pill so automation principals are visually distinct from humans.</li>
+          <li><strong>Manage teams on each service account card</strong>: team chips, a destructive warning when an account is in zero teams (its tokens won't reach any source), and an in-place add/remove dialog.</li>
+          <li><strong>Schema column descriptions</strong>: The schema API now surfaces ClickHouse column comments. Consumed by Logchef CLI v0.1.6's <code>schema</code> command.</li>
         </ul>
       </div>
 
@@ -207,18 +261,18 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong><code>saved-queries</code></strong> &mdash; List and run saved queries by name, numeric ID, or a pasted explorer URL. <code>--var</code>, <code>--limit</code>, <code>--show-sql</code>, and all output-format overrides supported.</li>
-          <li><strong><code>find &lt;pattern&gt;</code></strong> &mdash; Discover sources with recent matches for a service, job, host, or message pattern. Each match line is followed by per-column samples: label-shaped columns (service/host/job_name) get the top 3 values with counts; free-form text columns (msg) get one truncated sample row. Suppress with <code>--no-samples</code>. Per-source timeout defaults to 30s.</li>
-          <li><strong><code>tail &lt;query&gt;</code></strong> &mdash; Follow matching LogChefQL rows by polling. <code>text</code>, <code>jsonl</code>, or <code>msg</code> output; stable dedup across column-order changes; one-shot stderr warning when a poll returns at <code>--limit</code>.</li>
-          <li><strong><code>whoami</code></strong> &mdash; Print the authenticated user and accessible teams.</li>
-          <li><strong><code>auth current</code></strong> &mdash; Offline subcommand that prints the active context, server URL, and token source (config vs env), plus the token expiry when it came from saved config. No network call. Useful for "is my <code>LOGCHEF_AUTH_TOKEN</code> even set?" diagnostics.</li>
-          <li><strong>SQL time flags on <code>sql</code></strong> &mdash; <code>--since</code> / <code>--from</code> / <code>--to</code> inject a timestamp predicate before the first top-level <code>GROUP BY</code> / <code>ORDER BY</code> / <code>LIMIT</code> / <code>HAVING</code> / <code>SETTINGS</code> / <code>FORMAT</code>. The scanner skips string literals, quoted identifiers, comments, and parenthesized subqueries; use <code>__START__</code> / <code>__END__</code> placeholders for full control (e.g. CTEs).</li>
-          <li><strong><code>--explain</code> / <code>--show-sql</code> on <code>query</code> and <code>sql</code></strong> &mdash; Print <code>Generated SQL: &lt;sql&gt;</code> to stderr, then continue executing. Plays cleanly with <code>--output jsonl | jq</code> pipes.</li>
-          <li><strong><code>--dry-run</code> on <code>query</code> and <code>sql</code></strong> &mdash; Print the resolved SQL to stdout (no prefix) and exit without keeping results. <code>sql --dry-run</code> is fully offline; <code>query --dry-run</code> calls the server once for LogChefQL translation.</li>
-          <li><strong><code>--output msg</code></strong> &mdash; Print only the message column (one row per line) on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>. Falls back to the first selected column when <code>msg</code> isn't projected.</li>
-          <li><strong><code>--output json-flat</code></strong> &mdash; Hoist JSON-shaped <code>msg</code> fields to top-level JSON rows on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>.</li>
-          <li><strong><code>LOGCHEF_DEFAULT_TEAM</code> / <code>LOGCHEF_DEFAULT_SOURCE</code></strong> &mdash; Env defaults when <code>--team</code> / <code>--source</code> are omitted. Precedence: flag &rarr; env &rarr; saved config.</li>
-          <li><strong>Schema column descriptions</strong> &mdash; <code>schema --output text</code> shows a new DESCRIPTION column when the source's ClickHouse columns carry comments; <code>schema --output json</code> includes them inline.</li>
+          <li><strong><code>saved-queries</code></strong>: List and run saved queries by name, numeric ID, or a pasted explorer URL. <code>--var</code>, <code>--limit</code>, <code>--show-sql</code>, and all output-format overrides supported.</li>
+          <li><strong><code>find &lt;pattern&gt;</code></strong>: Discover sources with recent matches for a service, job, host, or message pattern. Each match line is followed by per-column samples: label-shaped columns (service/host/job_name) get the top 3 values with counts; free-form text columns (msg) get one truncated sample row. Suppress with <code>--no-samples</code>. Per-source timeout defaults to 30s.</li>
+          <li><strong><code>tail &lt;query&gt;</code></strong>: Follow matching LogchefQL rows by polling. <code>text</code>, <code>jsonl</code>, or <code>msg</code> output; stable dedup across column-order changes; one-shot stderr warning when a poll returns at <code>--limit</code>.</li>
+          <li><strong><code>whoami</code></strong>: Print the authenticated user and accessible teams.</li>
+          <li><strong><code>auth current</code></strong>: Offline subcommand that prints the active context, server URL, and token source (config vs env), plus the token expiry when it came from saved config. No network call. Useful for "is my <code>LOGCHEF_AUTH_TOKEN</code> even set?" diagnostics.</li>
+          <li><strong>SQL time flags on <code>sql</code></strong>: <code>--since</code> / <code>--from</code> / <code>--to</code> inject a timestamp predicate before the first top-level <code>GROUP BY</code> / <code>ORDER BY</code> / <code>LIMIT</code> / <code>HAVING</code> / <code>SETTINGS</code> / <code>FORMAT</code>. The scanner skips string literals, quoted identifiers, comments, and parenthesized subqueries; use <code>__START__</code> / <code>__END__</code> placeholders for full control (e.g. CTEs).</li>
+          <li><strong><code>--explain</code> / <code>--show-sql</code> on <code>query</code> and <code>sql</code></strong>: Print <code>Generated SQL: &lt;sql&gt;</code> to stderr, then continue executing. Plays cleanly with <code>--output jsonl | jq</code> pipes.</li>
+          <li><strong><code>--dry-run</code> on <code>query</code> and <code>sql</code></strong>: Print the resolved SQL to stdout (no prefix) and exit without keeping results. <code>sql --dry-run</code> is fully offline; <code>query --dry-run</code> calls the server once for LogchefQL translation.</li>
+          <li><strong><code>--output msg</code></strong>: Print only the message column (one row per line) on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>. Falls back to the first selected column when <code>msg</code> isn't projected.</li>
+          <li><strong><code>--output json-flat</code></strong>: Hoist JSON-shaped <code>msg</code> fields to top-level JSON rows on <code>query</code>, <code>sql</code>, <code>collections</code>, and <code>saved-queries</code>.</li>
+          <li><strong><code>LOGCHEF_DEFAULT_TEAM</code> / <code>LOGCHEF_DEFAULT_SOURCE</code></strong>: Env defaults when <code>--team</code> / <code>--source</code> are omitted. Precedence: flag &rarr; env &rarr; saved config.</li>
+          <li><strong>Schema column descriptions</strong>: <code>schema --output text</code> shows a new DESCRIPTION column when the source's ClickHouse columns carry comments; <code>schema --output json</code> includes them inline.</li>
         </ul>
       </div>
 
@@ -247,8 +301,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>CSV export & streaming SQL</strong> &mdash; New <code>--output csv</code> and <code>--stream</code> flags on <code>logchef sql</code>. Stream large result sets directly without timing out, or pipe them to a CSV file.</li>
-          <li><strong>v1.6.0 API compatibility</strong> &mdash; CLI now works with Logchef 1.6's de-teamed collections API. Saved queries resolve from your team membership automatically.</li>
+          <li><strong>CSV export & streaming SQL</strong>: New <code>--output csv</code> and <code>--stream</code> flags on <code>logchef sql</code>. Stream large result sets directly without timing out, or pipe them to a CSV file.</li>
+          <li><strong>v1.6.0 API compatibility</strong>: CLI now works with Logchef 1.6's de-teamed collections API. Saved queries resolve from your team membership automatically.</li>
         </ul>
       </div>
 
@@ -258,7 +312,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Product name standardized</strong> &mdash; "LogChef" &rarr; "Logchef" throughout all CLI help text, prompts, and auth pages.</li>
+          <li><strong>Product name standardized</strong>: "LogChef" &rarr; "Logchef" throughout all CLI help text, prompts, and auth pages.</li>
         </ul>
       </div>
     </article>
@@ -273,7 +327,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        Logchef 1.6 reorganizes saved queries around <strong>Collections</strong> &mdash; cross-team curation lists you can share with teammates. Teams now exist purely for access control. A new <strong>Editor</strong> team role sits between Member and Admin: editors can save queries and manage collections without getting full admin rights.
+        Logchef 1.6 reorganizes saved queries around <strong>Collections</strong>: cross-team curation lists you can share with teammates. Teams now exist purely for access control. A new <strong>Editor</strong> team role sits between Member and Admin: editors can save queries and manage collections without getting full admin rights.
       </p>
 
       <div class="change-section">
@@ -282,15 +336,15 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Collections</strong> &mdash; Group saved queries into shareable lists. Everyone gets a personal collection automatically. Shared collections are invite-only; queries you can't run show with a lock icon.</li>
-          <li><strong>Unified Saved Queries page</strong> &mdash; One place to browse, search, and pin queries. Pick "All Queries", your personal collection, or any shared collection from a dropdown at the top.</li>
-          <li><strong>"Add to Collection" drawer</strong> &mdash; Open the menu on any saved query and tick the collections you want it pinned to. Create new collections inline.</li>
-          <li><strong>Editor team role</strong> &mdash; A new role for teammates who curate queries and collections. Editors can save queries, create collections, and invite collection members. They can't invite team members or link sources &mdash; those stay admin-only.</li>
-          <li><strong>Share a saved query with a link</strong> &mdash; <code>/logs/saved/:queryId</code> resolves the right team and source automatically, so the recipient lands directly on the query.</li>
+          <li><strong>Collections</strong>: Group saved queries into shareable lists. Everyone gets a personal collection automatically. Shared collections are invite-only; queries you can't run show with a lock icon.</li>
+          <li><strong>Unified Saved Queries page</strong>: One place to browse, search, and pin queries. Pick "All Queries", your personal collection, or any shared collection from a dropdown at the top.</li>
+          <li><strong>"Add to Collection" drawer</strong>: Open the menu on any saved query and tick the collections you want it pinned to. Create new collections inline.</li>
+          <li><strong>Editor team role</strong>: A new role for teammates who curate queries and collections. Editors can save queries, create collections, and invite collection members. They can't invite team members or link sources; those stay admin-only.</li>
+          <li><strong>Share a saved query with a link</strong>: <code>/logs/saved/:queryId</code> resolves the right team and source automatically, so the recipient lands directly on the query.</li>
           <li><strong>CSV / JSON downloads</strong> stream from the backend with admission control, so very large exports don't tip the server over.</li>
           <li><strong>Calendar month/year drill-down</strong> in the date picker.</li>
-          <li><strong>OIDC <code>skip_email_verified_check</code></strong> &mdash; Skip the email-verified claim on providers that don't pass it through (e.g. Cloudflare Access in front of an upstream IdP). (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>)</li>
-          <li><strong>Native ClickHouse TLS</strong> &mdash; Configure TLS directly in the source connection instead of relying on stunnel/sidecars. (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>)</li>
+          <li><strong>OIDC <code>skip_email_verified_check</code></strong>: Skip the email-verified claim on providers that don't pass it through (e.g. Cloudflare Access in front of an upstream IdP). (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>)</li>
+          <li><strong>Native ClickHouse TLS</strong>: Configure TLS directly in the source connection instead of relying on stunnel/sidecars. (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>)</li>
         </ul>
       </div>
 
@@ -302,9 +356,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <ul class="change-list">
           <li><strong>Save your own queries.</strong> The Save button is now visible to every team member (it was hidden from non-admins by mistake). Editing or deleting a saved query still requires the original creator or a global admin.</li>
           <li><strong>Distinct icons for LogchefQL and SQL</strong> in the saved queries list, so you can tell them apart at a glance.</li>
-          <li><strong>Cleaner admin and settings pages</strong> &mdash; consistent header, sections, and empty-state styling across Users, Teams, Sources, System Settings, Profile, and Preferences.</li>
+          <li><strong>Cleaner admin and settings pages</strong>: consistent header, sections, and empty-state styling across Users, Teams, Sources, System Settings, Profile, and Preferences.</li>
           <li><strong>Saved queries belong to a source, not a team.</strong> Anyone with source access can see and run them. The team you saved from is just a hint used to pick the right access path.</li>
-          <li><strong>Explore UI polish</strong> &mdash; quieter top bar, concrete query placeholders, Local|UTC timezone toggle.</li>
+          <li><strong>Explore UI polish</strong>: quieter top bar, concrete query placeholders, Local|UTC timezone toggle.</li>
         </ul>
       </div>
 
@@ -314,8 +368,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Removed
         </div>
         <ul class="change-list">
-          <li><strong>Query Folders</strong> &mdash; replaced by Collections.</li>
-          <li><strong>Bookmarks</strong> &mdash; your starred queries automatically move to your personal collection.</li>
+          <li><strong>Query Folders</strong>: replaced by Collections.</li>
+          <li><strong>Bookmarks</strong>: your starred queries automatically move to your personal collection.</li>
         </ul>
       </div>
 
@@ -327,16 +381,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <ul class="change-list">
           <li><strong>Very large query results</strong> are now capped (<code>[query] max_limit</code>, default 100k rows) so the browser doesn't run out of memory.</li>
           <li><strong>Long raw SQL in the URL</strong> no longer trips the server's HTTP header size limit.</li>
-          <li><strong>Switching sources is race-free</strong> &mdash; the explorer waits for the new source's schema before running a query, and a slower in-flight response can't overwrite a faster one.</li>
-          <li><strong>Saved queries open against the right source</strong> &mdash; the query's source overrides any stale source param in the URL.</li>
-          <li><strong>Export job pruner is crash-safe</strong> &mdash; interrupted prunes no longer leave orphaned download files.</li>
+          <li><strong>Switching sources is race-free</strong>: the explorer waits for the new source's schema before running a query, and a slower in-flight response can't overwrite a faster one.</li>
+          <li><strong>Saved queries open against the right source</strong>: the query's source overrides any stale source param in the URL.</li>
+          <li><strong>Export job pruner is crash-safe</strong>: interrupted prunes no longer leave orphaned download files.</li>
           <li><strong>Translate API errors</strong> are surfaced to the editor instead of failing silently.</li>
           <li><strong>Export download URLs are relative</strong>, so downloads work behind reverse proxies that rewrite hostnames.</li>
         </ul>
       </div>
 
       <div class="contributors">
-        <strong>Contributors:</strong> <a href="https://github.com/m0nikasingh" target="_blank">@m0nikasingh</a> &mdash; OIDC email verification skip (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), native ClickHouse TLS (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>), AI SQL insert mode fix (<a href="https://github.com/mr-karan/logchef/pull/89" target="_blank">#89</a>)
+        <strong>Contributors:</strong> <a href="https://github.com/m0nikasingh" target="_blank">@m0nikasingh</a>: OIDC email verification skip (<a href="https://github.com/mr-karan/logchef/pull/86" target="_blank">#86</a>), native ClickHouse TLS (<a href="https://github.com/mr-karan/logchef/pull/88" target="_blank">#88</a>), AI SQL insert mode fix (<a href="https://github.com/mr-karan/logchef/pull/89" target="_blank">#89</a>)
       </div>
     </article>
 
@@ -354,8 +408,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Smart value autocomplete</strong> &mdash; Type <code>host=</code> in LogchefQL and get instant value suggestions with occurrence counts from the field sidebar. Works inside quotes, auto-wraps strings, and escapes special characters.</li>
-          <li><strong>Numeric field exploration</strong> &mdash; Fields like <code>status</code> (UInt16) now auto-load their top values in the sidebar, just like LowCardinality fields.</li>
+          <li><strong>Smart value autocomplete</strong>: Type <code>host=</code> in LogchefQL and get instant value suggestions with occurrence counts from the field sidebar. Works inside quotes, auto-wraps strings, and escapes special characters.</li>
+          <li><strong>Numeric field exploration</strong>: Fields like <code>status</code> (UInt16) now auto-load their top values in the sidebar, just like LowCardinality fields.</li>
         </ul>
       </div>
 
@@ -365,11 +419,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>New visual theme</strong> &mdash; Upgraded to Tailwind CSS v4 with Vega/Zinc/Blue theme, sharper borders, and bolder chart colors</li>
-          <li><strong>Sidebar collapsed by default</strong> &mdash; More screen space for logs. Expand via rail hover or <code>Cmd+B</code></li>
-          <li><strong>Theme toggle</strong> &mdash; One-click light/dark/system cycle in the sidebar footer</li>
-          <li><strong>Histogram redesign</strong> &mdash; New Unovis-based charts with brush-drag zoom and crosshair tooltips</li>
-          <li><strong>Lazy-loaded Monaco editor</strong> &mdash; SQL editor loads on demand for faster initial page load</li>
+          <li><strong>New visual theme</strong>: Upgraded to Tailwind CSS v4 with Vega/Zinc/Blue theme, sharper borders, and bolder chart colors</li>
+          <li><strong>Sidebar collapsed by default</strong>: More screen space for logs. Expand via rail hover or <code>Cmd+B</code></li>
+          <li><strong>Theme toggle</strong>: One-click light/dark/system cycle in the sidebar footer</li>
+          <li><strong>Histogram redesign</strong>: New Unovis-based charts with brush-drag zoom and crosshair tooltips</li>
+          <li><strong>Lazy-loaded Monaco editor</strong>: SQL editor loads on demand for faster initial page load</li>
         </ul>
       </div>
 
@@ -379,11 +433,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Hyphenated field names</strong> &mdash; Fields like <code>user-identifier</code> now work correctly in all queries (was causing SQL subtraction errors)</li>
-          <li><strong>Better error codes</strong> &mdash; Invalid field names and query parameters now return HTTP 400 instead of 500</li>
-          <li><strong>Histogram reliability</strong> &mdash; Fixed tooltip styling, null data crashes, 1-second bucket support, and brush zoom interaction</li>
-          <li><strong>Team admin permissions</strong> &mdash; Team admins can now manage members on provisioned teams</li>
-          <li><strong>Connection cleanup</strong> &mdash; Added idle timeout and periodic query tracker cleanup</li>
+          <li><strong>Hyphenated field names</strong>: Fields like <code>user-identifier</code> now work correctly in all queries (was causing SQL subtraction errors)</li>
+          <li><strong>Better error codes</strong>: Invalid field names and query parameters now return HTTP 400 instead of 500</li>
+          <li><strong>Histogram reliability</strong>: Fixed tooltip styling, null data crashes, 1-second bucket support, and brush zoom interaction</li>
+          <li><strong>Team admin permissions</strong>: Team admins can now manage members on provisioned teams</li>
+          <li><strong>Connection cleanup</strong>: Added idle timeout and periodic query tracker cleanup</li>
         </ul>
       </div>
     </article>
@@ -402,7 +456,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Canonical request logging &amp; activity logs</strong> &mdash; Every API request emits a structured line with method, path, status, latency, user, and team. A companion activity log tracks user-visible state changes for audit.</li>
+          <li><strong>Canonical request logging &amp; activity logs</strong>: Every API request emits a structured line with method, path, status, latency, user, and team. A companion activity log tracks user-visible state changes for audit.</li>
         </ul>
       </div>
 
@@ -412,9 +466,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Product name standardized to "Logchef"</strong> &mdash; Lingering "LogChef" casing replaced across the UI, docs, and log lines.</li>
-          <li><strong>Session-management logs dropped to DEBUG</strong> &mdash; Only <code>user.login</code> stays at INFO; the rest was audit-grade noise.</li>
-          <li><strong><code>slog</code> source field flattened to <code>file:line</code></strong> &mdash; Easier to grep, fewer bytes per line.</li>
+          <li><strong>Product name standardized to "Logchef"</strong>: Lingering "LogChef" casing replaced across the UI, docs, and log lines.</li>
+          <li><strong>Session-management logs dropped to DEBUG</strong>: Only <code>user.login</code> stays at INFO; the rest was audit-grade noise.</li>
+          <li><strong><code>slog</code> source field flattened to <code>file:line</code></strong>: Easier to grep, fewer bytes per line.</li>
         </ul>
       </div>
 
@@ -425,7 +479,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
         <ul class="change-list">
           <li><strong>Team admins can manage members on provisioned teams.</strong> The managed flag was locking them out of all membership edits.</li>
-          <li><strong>Idle ClickHouse connection cleanup</strong> &mdash; Added <code>IdleTimeout</code> and a periodic <code>QueryTracker</code> sweep so leaked connections don't accumulate.</li>
+          <li><strong>Idle ClickHouse connection cleanup</strong>: Added <code>IdleTimeout</code> and a periodic <code>QueryTracker</code> sweep so leaked connections don't accumulate.</li>
           <li><strong>Provisioning docs moved into the sidebar</strong> with a clearer "Getting started" sub-section.</li>
         </ul>
       </div>
@@ -445,8 +499,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Declarative provisioning</strong> &mdash; Define teams, sources, and access control in a TOML config file for GitOps workflows. Supports dry-run mode, managed vs unmanaged resources, and a separate <code>provisioning.toml</code> file. <a href="/getting-started/provisioning/">Learn more &rarr;</a></li>
-          <li><strong>All Teams collections</strong> &mdash; Browse saved queries across all your teams from a single page with the new "All Teams" option in the team dropdown.</li>
+          <li><strong>Declarative provisioning</strong>: Define teams, sources, and access control in a TOML config file for GitOps workflows. Supports dry-run mode, managed vs unmanaged resources, and a separate <code>provisioning.toml</code> file. <a href="/getting-started/provisioning/">Learn more &rarr;</a></li>
+          <li><strong>All Teams collections</strong>: Browse saved queries across all your teams from a single page with the new "All Teams" option in the team dropdown.</li>
         </ul>
       </div>
 
@@ -456,12 +510,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Query cancellation</strong> &mdash; LogchefQL queries now properly cancel end-to-end (was a no-op)</li>
-          <li><strong>SQL mode integrity</strong> &mdash; Time/limit changes no longer silently rewrite raw SQL queries</li>
-          <li><strong>Histogram accuracy</strong> &mdash; Timestamp field detection limited to SELECT clause only</li>
-          <li><strong>Post-login redirect</strong> &mdash; Users return to their original page after OIDC login</li>
-          <li><strong>Calendar UX</strong> &mdash; Date picker highlights today with default times (00:00:00 / 23:59:59)</li>
-          <li><strong>No duplicate queries</strong> &mdash; Page load no longer fires the same query twice</li>
+          <li><strong>Query cancellation</strong>: LogchefQL queries now properly cancel end-to-end (was a no-op)</li>
+          <li><strong>SQL mode integrity</strong>: Time/limit changes no longer silently rewrite raw SQL queries</li>
+          <li><strong>Histogram accuracy</strong>: Timestamp field detection limited to SELECT clause only</li>
+          <li><strong>Post-login redirect</strong>: Users return to their original page after OIDC login</li>
+          <li><strong>Calendar UX</strong>: Date picker highlights today with default times (00:00:00 / 23:59:59)</li>
+          <li><strong>No duplicate queries</strong>: Page load no longer fires the same query twice</li>
         </ul>
       </div>
     </article>
@@ -480,9 +534,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>CLI team discovery</strong> — New <code>logchef teams</code> command to list teams and IDs</li>
-          <li><strong>CLI source discovery</strong> — New <code>logchef sources</code> command to list sources for a team</li>
-          <li><strong>CLI schema view</strong> — New <code>logchef schema</code> command to show columns and types for a source</li>
+          <li><strong>CLI team discovery</strong>: New <code>logchef teams</code> command to list teams and IDs</li>
+          <li><strong>CLI source discovery</strong>: New <code>logchef sources</code> command to list sources for a team</li>
+          <li><strong>CLI schema view</strong>: New <code>logchef schema</code> command to show columns and types for a source</li>
         </ul>
       </div>
 
@@ -492,7 +546,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>CLI guidance</strong> — Missing team/source errors now suggest <code>logchef teams</code> and <code>logchef sources --team &lt;team&gt;</code></li>
+          <li><strong>CLI guidance</strong>: Missing team/source errors now suggest <code>logchef teams</code> and <code>logchef sources --team &lt;team&gt;</code></li>
         </ul>
       </div>
     </article>
@@ -511,10 +565,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Configurable query result limit</strong> — New <code>[query] max_limit</code> config option (default: 1M rows). Export up to 1 million rows when your infrastructure supports it.</li>
-          <li><strong>User preferences persistence</strong> — Your theme, timezone, display mode, and fields panel state now persist across sessions. No more re-setting preferences after every login.</li>
-          <li><strong>Team admins can manage their teams</strong> — Team admins now have access to team settings and member management without needing global admin privileges.</li>
-          <li><strong>Source editing and duplication</strong> — Edit existing source configurations and quickly duplicate sources for similar setups.</li>
+          <li><strong>Configurable query result limit</strong>: New <code>[query] max_limit</code> config option (default: 1M rows). Export up to 1 million rows when your infrastructure supports it.</li>
+          <li><strong>User preferences persistence</strong>: Your theme, timezone, display mode, and fields panel state now persist across sessions. No more re-setting preferences after every login.</li>
+          <li><strong>Team admins can manage their teams</strong>: Team admins now have access to team settings and member management without needing global admin privileges.</li>
+          <li><strong>Source editing and duplication</strong>: Edit existing source configurations and quickly duplicate sources for similar setups.</li>
         </ul>
       </div>
 
@@ -524,7 +578,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>SQL editor max height</strong> — Editor now caps at 300px with scrollbar for lengthy queries, leaving more room for results</li>
+          <li><strong>SQL editor max height</strong>: Editor now caps at 300px with scrollbar for lengthy queries, leaving more room for results</li>
         </ul>
       </div>
 
@@ -534,10 +588,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Histogram Group By</strong> — Histogram now auto-refreshes when changing the Group By column</li>
-          <li><strong>Dark mode date picker</strong> — Time icon now visible in dark mode</li>
-          <li><strong>Date picker improvements</strong> — Now button auto-applies and initial date format issues resolved</li>
-          <li><strong>JSON auto-parsing</strong> — JSON strings embedded in log fields now display as formatted objects</li>
+          <li><strong>Histogram Group By</strong>: Histogram now auto-refreshes when changing the Group By column</li>
+          <li><strong>Dark mode date picker</strong>: Time icon now visible in dark mode</li>
+          <li><strong>Date picker improvements</strong>: Now button auto-applies and initial date format issues resolved</li>
+          <li><strong>JSON auto-parsing</strong>: JSON strings embedded in log fields now display as formatted objects</li>
         </ul>
       </div>
     </article>
@@ -556,8 +610,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Version sidebar matches the running binary</strong> &mdash; The <code>versionString</code> linker flag is wired through to the UI, so the version badge no longer falls back to <code>unknown</code>.</li>
-          <li><strong>Alertmanager UI settings removed</strong> &mdash; Obsolete after the SMTP / webhook alert delivery work in v1.2.0.</li>
+          <li><strong>Version sidebar matches the running binary</strong>: The <code>versionString</code> linker flag is wired through to the UI, so the version badge no longer falls back to <code>unknown</code>.</li>
+          <li><strong>Alertmanager UI settings removed</strong>: Obsolete after the SMTP / webhook alert delivery work in v1.2.0.</li>
         </ul>
       </div>
 
@@ -567,8 +621,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>TLS migration description corrected</strong> &mdash; The migration description for the alert-TLS toggle was misleading.</li>
-          <li><strong>Changelog template syntax escaped</strong> &mdash; <code>{"{{ ... }}"}</code> examples now render literally instead of being interpolated.</li>
+          <li><strong>TLS migration description corrected</strong>: The migration description for the alert-TLS toggle was misleading.</li>
+          <li><strong>Changelog template syntax escaped</strong>: <code>{"{{ ... }}"}</code> examples now render literally instead of being interpolated.</li>
         </ul>
       </div>
     </article>
@@ -587,9 +641,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong><code>--timeout</code> on <code>query</code></strong> &mdash; Override the server-side query timeout from the CLI.</li>
-          <li><strong>Timezone auto-detection on <code>auth</code></strong> &mdash; <code>logchef auth</code> records your local IANA timezone in the saved context so subsequent queries use it by default. Config gained a <code>version</code> field for future schema migrations.</li>
-          <li><strong>Pre-built binary install docs</strong> &mdash; <code>docs/integration/cli</code> now lists download URLs for Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows.</li>
+          <li><strong><code>--timeout</code> on <code>query</code></strong>: Override the server-side query timeout from the CLI.</li>
+          <li><strong>Timezone auto-detection on <code>auth</code></strong>: <code>logchef auth</code> records your local IANA timezone in the saved context so subsequent queries use it by default. Config gained a <code>version</code> field for future schema migrations.</li>
+          <li><strong>Pre-built binary install docs</strong>: <code>docs/integration/cli</code> now lists download URLs for Linux x86_64/aarch64, macOS x86_64/aarch64, and Windows.</li>
         </ul>
       </div>
 
@@ -599,7 +653,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>LogchefQL prompt example</strong> &mdash; Interactive mode now shows <code>level="error"</code> instead of the older unquoted form.</li>
+          <li><strong>LogchefQL prompt example</strong>: Interactive mode now shows <code>level="error"</code> instead of the older unquoted form.</li>
         </ul>
       </div>
     </article>
@@ -618,9 +672,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Run saved queries from CLI</strong> &mdash; New <code>logchef collections</code> command to list and execute your saved queries directly from the terminal.</li>
-          <li><strong>Interactive CLI mode</strong> &mdash; Run <code>logchef query</code> or <code>logchef sql</code> without arguments and get guided prompts to select your team, source, and enter your query.</li>
-          <li><strong>Copy CLI command from web</strong> &mdash; Click the terminal icon in the explore toolbar to copy the equivalent CLI command for your current query.</li>
+          <li><strong>Run saved queries from CLI</strong>: New <code>logchef collections</code> command to list and execute your saved queries directly from the terminal.</li>
+          <li><strong>Interactive CLI mode</strong>: Run <code>logchef query</code> or <code>logchef sql</code> without arguments and get guided prompts to select your team, source, and enter your query.</li>
+          <li><strong>Copy CLI command from web</strong>: Click the terminal icon in the explore toolbar to copy the equivalent CLI command for your current query.</li>
         </ul>
       </div>
     </article>
@@ -639,7 +693,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>Explore history URL hydration</strong> &mdash; Browser back/forward now correctly restores the previous query and results.</li>
+          <li><strong>Explore history URL hydration</strong>: Browser back/forward now correctly restores the previous query and results.</li>
         </ul>
       </div>
     </article>
@@ -658,12 +712,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Logchef CLI</strong> — Query your logs from the terminal with syntax highlighting, multi-context support, and all the features of the web UI. <a href="/integration/cli/">Learn more →</a></li>
-          <li><strong>Multi-select variables</strong> — Select multiple values for a variable and they expand to <code>IN (...)</code> clauses. Great for filtering by multiple hosts or services at once.</li>
-          <li><strong>Optional SQL clauses</strong> — Wrap SQL clauses in <code>[[ ... ]]</code> and they're automatically removed when the variable is empty. No more "WHERE 1=1" hacks.</li>
-          <li><strong>Variable dropdowns</strong> — Configure variables as text inputs, dropdowns, or multi-selects with default values.</li>
-          <li><strong>Browse all saved queries</strong> — New "All Sources" view in Collections to see saved queries across your entire team.</li>
-          <li><strong>Direct email & webhook alerts</strong> — Send alert notifications via SMTP or webhooks without needing Alertmanager.</li>
+          <li><strong>Logchef CLI</strong>: Query your logs from the terminal with syntax highlighting, multi-context support, and all the features of the web UI. <a href="/integration/cli/">Learn more →</a></li>
+          <li><strong>Multi-select variables</strong>: Select multiple values for a variable and they expand to <code>IN (...)</code> clauses. Great for filtering by multiple hosts or services at once.</li>
+          <li><strong>Optional SQL clauses</strong>: Wrap SQL clauses in <code>[[ ... ]]</code> and they're automatically removed when the variable is empty. No more "WHERE 1=1" hacks.</li>
+          <li><strong>Variable dropdowns</strong>: Configure variables as text inputs, dropdowns, or multi-selects with default values.</li>
+          <li><strong>Browse all saved queries</strong>: New "All Sources" view in Collections to see saved queries across your entire team.</li>
+          <li><strong>Direct email & webhook alerts</strong>: Send alert notifications via SMTP or webhooks without needing Alertmanager.</li>
         </ul>
       </div>
 
@@ -673,7 +727,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
-          <li><strong>No more database lock errors</strong> — Fixed intermittent "SQLITE_BUSY" errors that could occur during high traffic</li>
+          <li><strong>No more database lock errors</strong>: Fixed intermittent "SQLITE_BUSY" errors that could occur during high traffic</li>
           <li>Time ranges now refresh before each query (relative times like "last 1 hour" update correctly)</li>
           <li>Collections load reliably on first visit</li>
         </ul>
@@ -700,8 +754,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Bookmark your favorite queries</strong> — Star saved queries for quick access. Bookmarked queries appear at the top of the collections dropdown.</li>
-          <li><strong>Shareable query links</strong> — Copy a direct link to any saved query to share with teammates.</li>
+          <li><strong>Bookmark your favorite queries</strong>: Star saved queries for quick access. Bookmarked queries appear at the top of the collections dropdown.</li>
+          <li><strong>Shareable query links</strong>: Copy a direct link to any saved query to share with teammates.</li>
         </ul>
       </div>
 
@@ -711,8 +765,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Better error messages</strong> — Query errors now show exactly where the problem is with helpful suggestions.</li>
-          <li><strong>Faster builds</strong> — Development builds are now 25x faster (2s vs 55s).</li>
+          <li><strong>Better error messages</strong>: Query errors now show exactly where the problem is with helpful suggestions.</li>
+          <li><strong>Faster builds</strong>: Development builds are now 25x faster (2s vs 55s).</li>
         </ul>
       </div>
 
@@ -746,9 +800,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Field explorer sidebar</strong> — Browse all fields in your logs, see the most common values, and click to add filters. Just like Kibana's Discover.</li>
-          <li><strong>Cancel running queries</strong> — Press Escape or click Cancel to stop long-running queries. Actually cancels in ClickHouse, not just the UI.</li>
-          <li><strong>Auto-fit columns</strong> — Double-click a column header border to automatically fit the column to its content.</li>
+          <li><strong>Field explorer sidebar</strong>: Browse all fields in your logs, see the most common values, and click to add filters. Just like Kibana's Discover.</li>
+          <li><strong>Cancel running queries</strong>: Press Escape or click Cancel to stop long-running queries. Actually cancels in ClickHouse, not just the UI.</li>
+          <li><strong>Auto-fit columns</strong>: Double-click a column header border to automatically fit the column to its content.</li>
         </ul>
       </div>
 
@@ -758,7 +812,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Cleaner log table</strong> — Compact rows, click any cell to copy, and action buttons appear on hover.</li>
+          <li><strong>Cleaner log table</strong>: Compact rows, click any cell to copy, and action buttons appear on hover.</li>
         </ul>
       </div>
     </article>
@@ -777,9 +831,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Alerting</strong> — Create alerts based on your log queries. Get notified via email, Slack, PagerDuty, or any webhook when conditions are met.</li>
-          <li><strong>Admin settings UI</strong> — Configure AI, authentication, and alert settings from the web interface instead of config files.</li>
-          <li><strong>Duplicate sources</strong> — Quickly create a new source by copying an existing one.</li>
+          <li><strong>Alerting</strong>: Create alerts based on your log queries. Get notified via email, Slack, PagerDuty, or any webhook when conditions are met.</li>
+          <li><strong>Admin settings UI</strong>: Configure AI, authentication, and alert settings from the web interface instead of config files.</li>
+          <li><strong>Duplicate sources</strong>: Quickly create a new source by copying an existing one.</li>
         </ul>
       </div>
     </article>
@@ -798,10 +852,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Select specific columns</strong> — Use the pipe operator to show only the columns you care about: <code>status="500" | timestamp method path</code></li>
-          <li><strong>Query nested JSON</strong> — Filter on deeply nested fields: <code>user.address.city = "NYC"</code></li>
-          <li><strong>Query history</strong> — Quickly access your 10 most recent queries from the editor.</li>
-          <li><strong>Source details</strong> — View table schema, TTL settings, and sort keys for any source.</li>
+          <li><strong>Select specific columns</strong>: Use the pipe operator to show only the columns you care about: <code>status="500" | timestamp method path</code></li>
+          <li><strong>Query nested JSON</strong>: Filter on deeply nested fields: <code>user.address.city = "NYC"</code></li>
+          <li><strong>Query history</strong>: Quickly access your 10 most recent queries from the editor.</li>
+          <li><strong>Source details</strong>: View table schema, TTL settings, and sort keys for any source.</li>
         </ul>
       </div>
     </article>
@@ -820,10 +874,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Query variables</strong> — Use <code>{"{{variable}}"}</code> in your queries and get input fields to fill in values. Great for reusable dashboards.</li>
-          <li><strong>Prometheus metrics</strong> — Monitor Logchef performance with built-in metrics endpoint.</li>
-          <li><strong>Grafana dashboard</strong> — Pre-built dashboard for monitoring Logchef in production.</li>
-          <li><strong>Compact view</strong> — Terminal-style log display for viewing more logs at once.</li>
+          <li><strong>Query variables</strong>: Use <code>{"{{variable}}"}</code> in your queries and get input fields to fill in values. Great for reusable dashboards.</li>
+          <li><strong>Prometheus metrics</strong>: Monitor Logchef performance with built-in metrics endpoint.</li>
+          <li><strong>Grafana dashboard</strong>: Pre-built dashboard for monitoring Logchef in production.</li>
+          <li><strong>Compact view</strong>: Terminal-style log display for viewing more logs at once.</li>
         </ul>
       </div>
 
@@ -846,7 +900,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>AI assistant integration</strong> — Connect Claude or other AI assistants to query your logs using Model Context Protocol (MCP).</li>
+          <li><strong>AI assistant integration</strong>: Connect Claude or other AI assistants to query your logs using Model Context Protocol (MCP).</li>
         </ul>
       </div>
     </article>
@@ -865,8 +919,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>AI SQL assistant</strong> — Describe what you want in plain English and get a ClickHouse SQL query. Works with OpenAI, Claude, and compatible APIs.</li>
-          <li><strong>API tokens</strong> — Generate API tokens for programmatic access to Logchef from scripts and automation.</li>
+          <li><strong>AI SQL assistant</strong>: Describe what you want in plain English and get a ClickHouse SQL query. Works with OpenAI, Claude, and compatible APIs.</li>
+          <li><strong>API tokens</strong>: Generate API tokens for programmatic access to Logchef from scripts and automation.</li>
         </ul>
       </div>
 
@@ -892,13 +946,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Initial Release
         </div>
         <ul class="change-list">
-          <li><strong>Log Explorer</strong> — Search and filter your logs in real-time with an intuitive interface.</li>
-          <li><strong>LogchefQL</strong> — Simple query language for filtering logs: <code>level="error" service="api"</code></li>
-          <li><strong>Full SQL mode</strong> — Write raw ClickHouse SQL for advanced queries, aggregations, and joins.</li>
-          <li><strong>Saved queries</strong> — Save your frequently used queries and share them with your team.</li>
-          <li><strong>Team workspaces</strong> — Organize users and sources into teams with role-based access control.</li>
-          <li><strong>Time histogram</strong> — Visual chart showing log volume over time.</li>
-          <li><strong>Dark & light themes</strong> — Choose your preferred appearance.</li>
+          <li><strong>Log Explorer</strong>: Search and filter your logs in real-time with an intuitive interface.</li>
+          <li><strong>LogchefQL</strong>: Simple query language for filtering logs: <code>level="error" service="api"</code></li>
+          <li><strong>Full SQL mode</strong>: Write raw ClickHouse SQL for advanced queries, aggregations, and joins.</li>
+          <li><strong>Saved queries</strong>: Save your frequently used queries and share them with your team.</li>
+          <li><strong>Team workspaces</strong>: Organize users and sources into teams with role-based access control.</li>
+          <li><strong>Time histogram</strong>: Visual chart showing log volume over time.</li>
+          <li><strong>Dark & light themes</strong>: Choose your preferred appearance.</li>
         </ul>
       </div>
     </article>

@@ -227,15 +227,16 @@ func (db *DB) ListCollectionItems(ctx context.Context, collectionID int) ([]*mod
 	for i := range rows {
 		r := rows[i]
 		query := models.SavedQuery{
-			ID:           int(r.QueryID),
-			SourceID:     models.SourceID(r.SourceID),
-			Name:         r.QueryName,
-			Description:  r.QueryDescription.String,
-			QueryType:    models.SavedQueryType(r.QueryType),
-			QueryContent: r.QueryContent,
-			CreatedAt:    r.QueryCreatedAt,
-			UpdatedAt:    r.QueryUpdatedAt,
-			SourceName:   r.SourceName,
+			ID:            int(r.QueryID),
+			SourceID:      models.SourceID(r.SourceID),
+			Name:          r.QueryName,
+			Description:   r.QueryDescription.String,
+			QueryLanguage: models.QueryLanguage(r.QueryLanguage),
+			EditorMode:    models.SavedQueryEditorMode(r.EditorMode),
+			QueryContent:  r.QueryContent,
+			CreatedAt:     r.QueryCreatedAt,
+			UpdatedAt:     r.QueryUpdatedAt,
+			SourceName:    r.SourceName,
 		}
 		if r.QueryCreatedBy.Valid {
 			uid := models.UserID(r.QueryCreatedBy.Int64)

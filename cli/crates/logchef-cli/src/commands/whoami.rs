@@ -8,6 +8,12 @@ use crate::cli::GlobalArgs;
 use crate::session;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Show your identity, role, and teams
+  logchef whoami
+
+  # One-line JSON record (user + teams) for scripting
+  logchef whoami --output jsonl | jq '.teams[].name'")]
 pub struct WhoamiArgs {
     /// Output format.
     #[arg(long, default_value = "text")]
@@ -18,6 +24,7 @@ pub struct WhoamiArgs {
 enum OutputFormat {
     Text,
     Json,
+    Jsonl,
 }
 
 #[derive(Serialize)]
@@ -60,6 +67,7 @@ pub async fn run(args: WhoamiArgs, global: GlobalArgs) -> Result<()> {
 
     match args.output {
         OutputFormat::Json => println!("{}", serde_json::to_string_pretty(&output)?),
+        OutputFormat::Jsonl => println!("{}", serde_json::to_string(&output)?),
         OutputFormat::Text => {
             println!(
                 "{}{}",

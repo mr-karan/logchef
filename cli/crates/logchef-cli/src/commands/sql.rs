@@ -1,26 +1,42 @@
-use anyhow::{Context, Result};
-use chrono::{Duration as ChronoDuration, Utc};
+use anyhow::{Context as _, Result};
+use chrono::{DateTime, Duration as ChronoDuration, NaiveDateTime, SecondsFormat, Utc};
 use clap::Args;
 use inquire::{Select, Text};
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, ExportSqlRequest, QueryStats, SqlQueryRequest};
+use logchef_core::api::{Client, Column, ExportSqlRequest, QueryStats, Source, SqlQueryRequest};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
+use logchef_core::config::Context;
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range, resolve_timezone};
 use serde::Serialize;
 use std::io::{IsTerminal, Read, Write};
 use tokio::time::{Duration, sleep};
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 const STREAMING_SQL_MIN_TIMEOUT_SECS: u32 = 120;
 const SQL_HTTP_TIMEOUT_HEADROOM_SECS: u64 = 60;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Top services by volume (ClickHouse SQL); time window auto-spliced
+  logchef sql 'SELECT service, count() c FROM logs.app GROUP BY service ORDER BY c DESC' \\
+    --since 24h -t platform -S app-logs
+
+  # LogsQL against a VictoriaLogs source
+  logchef sql '_time:1h error | stats by (service) count()' -S vl-logs
+
+  # Stream a large result straight to a file (NDJSON), no memory spike
+  logchef sql 'SELECT * FROM logs.app' --since 6h --stream --output jsonl > out.ndjson
+
+  # Read the query from stdin, export as CSV
+  echo 'SELECT * FROM logs.app LIMIT 1000' | logchef sql - --output csv > rows.csv")]
 pub struct SqlArgs {
-    /// Raw SQL query to execute. Use '-' to read from stdin.
+    /// Raw native query to execute. Use SQL for ClickHouse and LogsQL for VictoriaLogs. Use '-' to read from stdin.
     sql: Option<String>,
 
     /// Team ID or name
@@ -31,15 +47,20 @@ pub struct SqlArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Apply a relative time range to SQL (e.g., 15m, 1h, 24h)
+    /// Apply a relative time range to SQL (e.g., 15m, 1h, 24h), evaluated
+    /// against now in the effective timezone: `defaults.timezone` if
+    /// configured, otherwise the system's local timezone (see `logchef
+    /// config show`).
     #[arg(long, short = 's')]
     since: Option<String>,
 
-    /// Apply an absolute start time (YYYY-MM-DD HH:MM:SS)
+    /// Apply an absolute start time (YYYY-MM-DD HH:MM:SS), interpreted as
+    /// wall-clock in the effective timezone.
     #[arg(long)]
     from: Option<String>,
 
-    /// Apply an absolute end time (YYYY-MM-DD HH:MM:SS)
+    /// Apply an absolute end time (YYYY-MM-DD HH:MM:SS), interpreted as
+    /// wall-clock in the effective timezone.
     #[arg(long)]
     to: Option<String>,
 
@@ -75,13 +96,13 @@ pub struct SqlArgs {
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
 
-    /// Trace the resolved SQL on stderr before executing the query. Use
-    /// `--dry-run` instead to print the SQL and exit without running it.
+    /// Trace the resolved query on stderr before executing it. Use `--dry-run`
+    /// instead to print the query and exit without running it.
     #[arg(long, visible_alias = "explain")]
     show_sql: bool,
 
-    /// Print the resolved SQL (after --since/--from/--to injection) to stdout
-    /// and exit without executing the query. Pipes cleanly to other tools.
+    /// Print the resolved query (after --since/--from/--to handling) to stdout
+    /// and exit without executing it. Pipes cleanly to other tools.
     #[arg(long)]
     dry_run: bool,
 }
@@ -190,8 +211,8 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                     let mut cache_entries: Vec<(String, i64)> =
                         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                     for s in &sources {
-                        if let Some(table_ref) = s.table_ref() {
-                            cache_entries.push((table_ref, s.id));
+                        if let Some(target_ref) = s.target_ref() {
+                            cache_entries.push((target_ref, s.id));
                         }
                     }
                     cache.set_sources(team_id, &cache_entries);
@@ -201,7 +222,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                         .find(|s| s.name.eq_ignore_ascii_case(&name))
                         .or_else(|| {
                             sources.iter().find(|s| {
-                                s.table_ref()
+                                s.target_ref()
                                     .map(|r| r.eq_ignore_ascii_case(&name))
                                     .unwrap_or(false)
                             })
@@ -228,28 +249,56 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             Some(s) => s,
             None => {
                 anyhow::bail!(
-                    "SQL query required. Provide as argument or use '-' to read from stdin."
+                    "Raw query required. Provide as argument or use '-' to read from stdin."
                 )
             }
         }
     };
 
     if sql.is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+        anyhow::bail!("Raw query cannot be empty");
     }
 
-    let sql = apply_sql_time_range(client, team_id, source_id, sql, &args, ctx).await?;
+    // Fetch the source once: we need its engine (to pick the time-range
+    // strategy) and its timestamp field (for the ClickHouse injection).
+    let source = client
+        .get_source(team_id, source_id)
+        .await
+        .context("Failed to fetch source")?;
+    let is_victorialogs = source.source_type.eq_ignore_ascii_case("victorialogs");
 
-    // --dry-run: print resolved SQL to stdout (clean for piping) and exit.
+    // Time-range handling differs by engine:
+    //   ClickHouse   — splice a `toDateTime(...) BETWEEN` condition into the
+    //                  SQL string (or fill __START__/__END__ placeholders).
+    //   VictoriaLogs — leave the LogsQL untouched and pass an absolute RFC3339
+    //                  window via the request's start_time/end_time, which the
+    //                  VL provider applies as the query's `start`/`end` bounds
+    //                  (see internal/victorialogs/querying.go QueryLogs).
+    //                  Splicing ClickHouse SQL into LogsQL would be invalid.
+    let (sql, vl_window) = if is_victorialogs {
+        (sql, vl_time_window(&args, ctx)?)
+    } else {
+        (apply_clickhouse_time_range(&source, sql, &args, ctx)?, None)
+    };
+
+    // --dry-run: print resolved query to stdout (clean for piping) and exit.
+    // For VictoriaLogs this is the raw LogsQL (the time window rides in the
+    // request fields, never spliced into the query) — never ClickHouse SQL.
     if args.dry_run {
         println!("{}", sql);
         return Ok(());
     }
 
-    // --explain / --show-sql: print to stderr with prefix, then continue
-    // executing the query (matches the LogChefQL `query` command).
+    // --explain / --show-sql: trace to stderr with an engine-accurate label,
+    // then continue executing (matches the LogChefQL `query` command).
     if args.show_sql {
-        eprintln!("Generated SQL: {}\n", sql);
+        let (label, lang) = if is_victorialogs {
+            ("Generated LogsQL", Some("logsql"))
+        } else {
+            ("Generated ClickHouse SQL", Some("clickhouse-sql"))
+        };
+        let rendered = ui::highlight_query(&sql, lang, ui::stderr_human(global.quiet));
+        eprintln!("{}: {}\n", label, rendered);
     }
 
     if matches!(args.output, OutputFormat::Csv) {
@@ -366,22 +415,29 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         return Ok(());
     }
 
+    let (start_time, end_time) = match &vl_window {
+        Some((start, end)) => (Some(start.clone()), Some(end.clone())),
+        None => (None, None),
+    };
     let request = SqlQueryRequest {
-        raw_sql: sql,
+        query_text: sql,
         limit: args.limit,
-        timezone: ctx.defaults.timezone.clone(),
-        start_time: None,
-        end_time: None,
+        // For ClickHouse, any --since/--from/--to was baked into `sql` as a
+        // literal `toDateTime(..., tz)` condition above, so no window rides
+        // here. For VictoriaLogs, the resolved RFC3339 window is passed
+        // through and the server bounds the raw LogsQL query with it.
+        timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
+        start_time,
+        end_time,
         query_timeout: Some(args.timeout),
     };
 
-    let response = client
-        .query_sql(team_id, source_id, &request)
-        .await
-        .context("SQL query failed")?;
+    let spinner = ui::Spinner::start(global.quiet, "querying");
+    let result = client.query_sql(team_id, source_id, &request).await;
+    spinner.finish();
+    let response = result.context("Raw query failed")?;
 
     let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
@@ -398,28 +454,24 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::Csv => {
             anyhow::bail!("Use --stream --output csv for CSV output");
@@ -428,7 +480,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
             print_msg(entries, &response.columns, true);
         }
         OutputFormat::Text => {
-            let highlighter = if args.no_highlight || !is_tty {
+            let highlighter = if args.no_highlight || !ui::human(global.quiet) {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -450,50 +502,100 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
                     println!("{}", line);
                 }
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
     }
 
     Ok(())
 }
 
-async fn apply_sql_time_range(
-    client: &Client,
-    team_id: i64,
-    source_id: i64,
+/// Resolves an absolute RFC3339 UTC time window for a VictoriaLogs `sql` query
+/// from --since/--from/--to. Returns None when no time flag is set.
+///
+/// VictoriaLogs bounds a raw LogsQL query by the request's start/end params
+/// (see internal/victorialogs/querying.go QueryLogs), so — unlike ClickHouse
+/// — the window must NOT be spliced into the query string. We resolve it to
+/// absolute instants and let the server pass them to VL as `start`/`end`.
+fn vl_time_window(args: &SqlArgs, ctx: &Context) -> Result<Option<(String, String)>> {
+    if args.since.is_none() && args.from.is_none() && args.to.is_none() {
+        return Ok(None);
+    }
+
+    let (start, end) = match (args.from.as_deref(), args.to.as_deref()) {
+        (Some(from), Some(to)) => {
+            let tz = resolve_timezone(ctx.defaults.timezone.as_deref());
+            (wall_clock_to_utc(from, tz)?, wall_clock_to_utc(to, tz)?)
+        }
+        (Some(_), None) => anyhow::bail!("--from requires --to to be specified"),
+        (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
+        (None, None) => {
+            let end = Utc::now();
+            let start = end - parse_duration(args.since.as_deref().unwrap_or("15m"))?;
+            (start, end)
+        }
+    };
+
+    Ok(Some((
+        start.to_rfc3339_opts(SecondsFormat::Secs, true),
+        end.to_rfc3339_opts(SecondsFormat::Secs, true),
+    )))
+}
+
+/// Parses a `YYYY-MM-DD HH:MM:SS` wall-clock string, interpreted in `tz`, into
+/// a UTC instant. Generic over the timezone so this file needs no direct
+/// chrono-tz dependency (the concrete zone comes from `resolve_timezone`).
+fn wall_clock_to_utc<Tz: chrono::TimeZone>(value: &str, tz: Tz) -> Result<DateTime<Utc>> {
+    let naive = NaiveDateTime::parse_from_str(value.trim(), "%Y-%m-%d %H:%M:%S")
+        .context("Invalid time format (expected YYYY-MM-DD HH:MM:SS)")?;
+    naive
+        .and_local_timezone(tz)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc))
+        .ok_or_else(|| anyhow::anyhow!("Ambiguous or invalid local time '{}'", value))
+}
+
+/// ClickHouse time-range injection: splices a `toDateTime(...) BETWEEN` filter
+/// into the SQL string, or fills __START__/__END__ placeholders. This path is
+/// ClickHouse-only — VictoriaLogs uses [`vl_time_window`] instead.
+fn apply_clickhouse_time_range(
+    source: &Source,
     sql: String,
     args: &SqlArgs,
-    ctx: &logchef_core::config::Context,
+    ctx: &Context,
 ) -> Result<String> {
     if args.since.is_none() && args.from.is_none() && args.to.is_none() {
         return Ok(sql);
     }
 
-    let (start_time, end_time) = parse_time_range(
+    let time_range = parse_time_range(
         args.since.as_deref(),
         args.from.as_deref(),
         args.to.as_deref(),
-    )?;
-    let condition = sql_time_condition(
-        &source_timestamp_field(client, team_id, source_id).await?,
-        &start_time,
-        &end_time,
         ctx.defaults.timezone.as_deref(),
+    )?;
+    let timestamp_field = source
+        .meta_ts_field
+        .as_deref()
+        .filter(|field| !field.trim().is_empty())
+        .unwrap_or("_timestamp");
+    let condition = sql_time_condition(
+        timestamp_field,
+        &time_range.start,
+        &time_range.end,
+        &time_range.timezone,
     );
 
     if sql.contains("__START__") || sql.contains("__END__") {
         if !(sql.contains("__START__") && sql.contains("__END__")) {
             anyhow::bail!("SQL time placeholders must include both __START__ and __END__");
         }
-        let start_expr = sql_datetime_expr(&start_time, ctx.defaults.timezone.as_deref());
-        let end_expr = sql_datetime_expr(&end_time, ctx.defaults.timezone.as_deref());
+        let start_expr = sql_datetime_expr(&time_range.start, &time_range.timezone);
+        let end_expr = sql_datetime_expr(&time_range.end, &time_range.timezone);
         return Ok(sql
             .replace("__START__", &start_expr)
             .replace("__END__", &end_expr));
@@ -502,43 +604,26 @@ async fn apply_sql_time_range(
     Ok(inject_sql_condition(&sql, &condition))
 }
 
-async fn source_timestamp_field(client: &Client, team_id: i64, source_id: i64) -> Result<String> {
-    let sources = client
-        .list_sources(team_id)
-        .await
-        .context("Failed to list sources for timestamp field")?;
-    let source = sources
-        .iter()
-        .find(|source| source.id == source_id)
-        .ok_or_else(|| anyhow::anyhow!("Source {} not found for team {}", source_id, team_id))?;
-
-    Ok(source
-        .meta_ts_field
-        .as_deref()
-        .filter(|field| !field.trim().is_empty())
-        .unwrap_or("_timestamp")
-        .to_string())
-}
-
 fn parse_time_range(
     since: Option<&str>,
     from: Option<&str>,
     to: Option<&str>,
-) -> Result<(String, String)> {
-    match (from, to) {
-        (Some(from), Some(to)) => return Ok((from.to_string(), to.to_string())),
+    configured_tz: Option<&str>,
+) -> Result<logchef_core::timerange::ResolvedTimeRange> {
+    let input = match (from, to) {
+        (Some(from), Some(to)) => TimeInput::WallClock {
+            start: from,
+            end: to,
+        },
         (Some(_), None) => anyhow::bail!("--from requires --to to be specified"),
         (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
-        (None, None) => {}
-    }
-
-    let end = Utc::now();
-    let start = end - parse_duration(since.unwrap_or("15m"))?;
-    let format = "%Y-%m-%d %H:%M:%S";
-    Ok((
-        start.format(format).to_string(),
-        end.format(format).to_string(),
-    ))
+        (None, None) => {
+            let end = Utc::now();
+            let start = end - parse_duration(since.unwrap_or("15m"))?;
+            TimeInput::Instant { start, end }
+        }
+    };
+    Ok(resolve_time_range(input, configured_tz))
 }
 
 fn parse_duration(s: &str) -> Result<ChronoDuration> {
@@ -574,7 +659,7 @@ fn sql_time_condition(
     timestamp_field: &str,
     start_time: &str,
     end_time: &str,
-    timezone: Option<&str>,
+    timezone: &str,
 ) -> String {
     format!(
         "{} BETWEEN {} AND {}",
@@ -584,11 +669,12 @@ fn sql_time_condition(
     )
 }
 
-fn sql_datetime_expr(value: &str, timezone: Option<&str>) -> String {
-    match timezone.filter(|tz| !tz.trim().is_empty()) {
-        Some(tz) => format!("toDateTime('{}', '{}')", sql_string(value), sql_string(tz)),
-        None => format!("toDateTime('{}')", sql_string(value)),
-    }
+fn sql_datetime_expr(value: &str, timezone: &str) -> String {
+    format!(
+        "toDateTime('{}', '{}')",
+        sql_string(value),
+        sql_string(timezone)
+    )
 }
 
 fn sql_identifier(value: &str) -> String {
@@ -788,141 +874,6 @@ fn sql_transport_timeout_secs(context_timeout_secs: u64, query_timeout_secs: u32
     context_timeout_secs.max(u64::from(query_timeout_secs) + SQL_HTTP_TIMEOUT_HEADROOM_SECS)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn effective_timeout_keeps_preview_timeout_for_buffered_queries() {
-        assert_eq!(
-            effective_query_timeout_secs(45, &OutputFormat::Json, false),
-            45
-        );
-    }
-
-    #[test]
-    fn effective_timeout_enforces_streaming_minimum() {
-        assert_eq!(
-            effective_query_timeout_secs(30, &OutputFormat::Jsonl, true),
-            120
-        );
-    }
-
-    #[test]
-    fn effective_timeout_enforces_csv_export_minimum() {
-        assert_eq!(
-            effective_query_timeout_secs(30, &OutputFormat::Csv, false),
-            120
-        );
-    }
-
-    #[test]
-    fn transport_timeout_never_undercuts_query_timeout() {
-        assert_eq!(sql_transport_timeout_secs(30, 120), 180);
-        assert_eq!(sql_transport_timeout_secs(300, 120), 300);
-    }
-
-    #[test]
-    fn injects_time_condition_into_existing_where() {
-        let sql = "SELECT count() FROM logs.app WHERE service = 'api' GROUP BY service";
-        let out = inject_sql_condition(
-            sql,
-            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
-        );
-        assert_eq!(
-            out,
-            "SELECT count() FROM logs.app WHERE service = 'api' AND `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') GROUP BY service"
-        );
-    }
-
-    #[test]
-    fn injects_time_condition_without_where() {
-        let sql = "SELECT count() FROM logs.app ORDER BY count() DESC";
-        let out = inject_sql_condition(
-            sql,
-            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
-        );
-        assert_eq!(
-            out,
-            "SELECT count() FROM logs.app WHERE `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') ORDER BY count() DESC"
-        );
-    }
-
-    #[test]
-    fn formats_time_condition_with_timezone() {
-        let condition = sql_time_condition(
-            "_timestamp",
-            "2026-05-19 09:15:00",
-            "2026-05-19 09:30:00",
-            Some("UTC"),
-        );
-        assert_eq!(
-            condition,
-            "`_timestamp` BETWEEN toDateTime('2026-05-19 09:15:00', 'UTC') AND toDateTime('2026-05-19 09:30:00', 'UTC')"
-        );
-    }
-
-    #[test]
-    fn ignores_where_inside_string_literal() {
-        let sql = "SELECT msg FROM logs.app WHERE msg = 'request WHERE matters' GROUP BY msg";
-        let out = inject_sql_condition(
-            sql,
-            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
-        );
-        // Should detect the real WHERE (after msg =), not the WHERE inside the literal.
-        assert_eq!(
-            out,
-            "SELECT msg FROM logs.app WHERE msg = 'request WHERE matters' AND `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') GROUP BY msg"
-        );
-    }
-
-    #[test]
-    fn ignores_limit_inside_string_literal() {
-        let sql = "SELECT * FROM logs.app WHERE msg = 'LIMIT exceeded'";
-        let out = inject_sql_condition(sql, "X");
-        // The LIMIT inside the literal should not be treated as a clause boundary;
-        // the AND should be appended at end of body.
-        assert_eq!(
-            out,
-            "SELECT * FROM logs.app WHERE msg = 'LIMIT exceeded' AND X"
-        );
-    }
-
-    #[test]
-    fn ignores_where_inside_subquery() {
-        let sql = "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t WHERE x = 1) GROUP BY id";
-        let out = inject_sql_condition(sql, "X");
-        // Top-level WHERE found; inner WHERE inside the parenthesized subquery
-        // is ignored, so we append "AND X" before GROUP BY.
-        assert_eq!(
-            out,
-            "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t WHERE x = 1) AND X GROUP BY id"
-        );
-    }
-
-    #[test]
-    fn ignores_clause_keywords_in_subquery() {
-        let sql = "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s";
-        let out = inject_sql_condition(sql, "X");
-        // The inner LIMIT inside the subquery must not become the top-level
-        // clause boundary; injection appends WHERE at end of body.
-        assert_eq!(
-            out,
-            "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s WHERE X"
-        );
-    }
-
-    #[test]
-    fn skips_line_comment_when_scanning() {
-        let sql = "SELECT * FROM logs.app -- WHERE never\n WHERE level='error'";
-        let out = inject_sql_condition(sql, "X");
-        assert_eq!(
-            out,
-            "SELECT * FROM logs.app -- WHERE never\n WHERE level='error' AND X"
-        );
-    }
-}
-
 fn parse_highlight_args(args: &[String]) -> Vec<(String, Vec<String>)> {
     args.iter()
         .filter_map(|arg| {
@@ -1065,10 +1016,7 @@ async fn prompt_source_interactive(
         anyhow::bail!("No sources available for this team");
     }
 
-    let options: Vec<String> = sources
-        .iter()
-        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
-        .collect();
+    let options: Vec<String> = sources.iter().map(|s| s.display_name()).collect();
     let selection = Select::new("Select source:", options)
         .prompt()
         .context("Failed to select source")?;
@@ -1081,8 +1029,8 @@ async fn prompt_source_interactive(
     let mut cache_entries: Vec<(String, i64)> =
         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
     for s in &sources {
-        if let Some(table_ref) = s.table_ref() {
-            cache_entries.push((table_ref, s.id));
+        if let Some(target_ref) = s.target_ref() {
+            cache_entries.push((target_ref, s.id));
         }
     }
     cache.set_sources(team_id, &cache_entries);
@@ -1091,13 +1039,163 @@ async fn prompt_source_interactive(
 }
 
 fn prompt_sql_interactive() -> Result<String> {
-    let sql = Text::new("SQL query:")
-        .with_help_message("Full ClickHouse SQL including time filters")
+    let sql = Text::new("Raw query:")
+        .with_help_message(
+            "Enter a source-native query (SQL for ClickHouse, LogsQL for VictoriaLogs)",
+        )
         .prompt()
-        .context("Failed to read SQL query")?;
+        .context("Failed to read raw query")?;
 
     if sql.trim().is_empty() {
-        anyhow::bail!("SQL query cannot be empty");
+        anyhow::bail!("Raw query cannot be empty");
     }
     Ok(sql)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn effective_timeout_keeps_preview_timeout_for_buffered_queries() {
+        assert_eq!(
+            effective_query_timeout_secs(45, &OutputFormat::Json, false),
+            45
+        );
+    }
+
+    #[test]
+    fn effective_timeout_enforces_streaming_minimum() {
+        assert_eq!(
+            effective_query_timeout_secs(30, &OutputFormat::Jsonl, true),
+            120
+        );
+    }
+
+    #[test]
+    fn effective_timeout_enforces_csv_export_minimum() {
+        assert_eq!(
+            effective_query_timeout_secs(30, &OutputFormat::Csv, false),
+            120
+        );
+    }
+
+    #[test]
+    fn transport_timeout_never_undercuts_query_timeout() {
+        assert_eq!(sql_transport_timeout_secs(30, 120), 180);
+        assert_eq!(sql_transport_timeout_secs(300, 120), 300);
+    }
+
+    #[test]
+    fn injects_time_condition_into_existing_where() {
+        let sql = "SELECT count() FROM logs.app WHERE service = 'api' GROUP BY service";
+        let out = inject_sql_condition(
+            sql,
+            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
+        );
+        assert_eq!(
+            out,
+            "SELECT count() FROM logs.app WHERE service = 'api' AND `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') GROUP BY service"
+        );
+    }
+
+    #[test]
+    fn injects_time_condition_without_where() {
+        let sql = "SELECT count() FROM logs.app ORDER BY count() DESC";
+        let out = inject_sql_condition(
+            sql,
+            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
+        );
+        assert_eq!(
+            out,
+            "SELECT count() FROM logs.app WHERE `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') ORDER BY count() DESC"
+        );
+    }
+
+    #[test]
+    fn formats_time_condition_with_timezone() {
+        let condition = sql_time_condition(
+            "_timestamp",
+            "2026-05-19 09:15:00",
+            "2026-05-19 09:30:00",
+            "UTC",
+        );
+        assert_eq!(
+            condition,
+            "`_timestamp` BETWEEN toDateTime('2026-05-19 09:15:00', 'UTC') AND toDateTime('2026-05-19 09:30:00', 'UTC')"
+        );
+    }
+
+    #[test]
+    fn ignores_where_inside_string_literal() {
+        let sql = "SELECT msg FROM logs.app WHERE msg = 'request WHERE matters' GROUP BY msg";
+        let out = inject_sql_condition(
+            sql,
+            "`_timestamp` BETWEEN toDateTime('a') AND toDateTime('b')",
+        );
+        // Should detect the real WHERE (after msg =), not the WHERE inside the literal.
+        assert_eq!(
+            out,
+            "SELECT msg FROM logs.app WHERE msg = 'request WHERE matters' AND `_timestamp` BETWEEN toDateTime('a') AND toDateTime('b') GROUP BY msg"
+        );
+    }
+
+    #[test]
+    fn ignores_limit_inside_string_literal() {
+        let sql = "SELECT * FROM logs.app WHERE msg = 'LIMIT exceeded'";
+        let out = inject_sql_condition(sql, "X");
+        // The LIMIT inside the literal should not be treated as a clause boundary;
+        // the AND should be appended at end of body.
+        assert_eq!(
+            out,
+            "SELECT * FROM logs.app WHERE msg = 'LIMIT exceeded' AND X"
+        );
+    }
+
+    #[test]
+    fn ignores_where_inside_subquery() {
+        let sql = "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t WHERE x = 1) GROUP BY id";
+        let out = inject_sql_condition(sql, "X");
+        // Top-level WHERE found; inner WHERE inside the parenthesized subquery
+        // is ignored, so we append "AND X" before GROUP BY.
+        assert_eq!(
+            out,
+            "SELECT * FROM logs.app WHERE id IN (SELECT id FROM t WHERE x = 1) AND X GROUP BY id"
+        );
+    }
+
+    #[test]
+    fn ignores_clause_keywords_in_subquery() {
+        let sql = "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s";
+        let out = inject_sql_condition(sql, "X");
+        // The inner LIMIT inside the subquery must not become the top-level
+        // clause boundary; injection appends WHERE at end of body.
+        assert_eq!(
+            out,
+            "SELECT * FROM (SELECT * FROM logs.app LIMIT 5) AS s WHERE X"
+        );
+    }
+
+    #[test]
+    fn skips_line_comment_when_scanning() {
+        let sql = "SELECT * FROM logs.app -- WHERE never\n WHERE level='error'";
+        let out = inject_sql_condition(sql, "X");
+        assert_eq!(
+            out,
+            "SELECT * FROM logs.app -- WHERE never\n WHERE level='error' AND X"
+        );
+    }
+
+    #[test]
+    fn wall_clock_to_utc_converts_from_zone() {
+        // Obtain the concrete zone via resolve_timezone so this test needs no
+        // direct chrono-tz dependency.
+        let tz = resolve_timezone(Some("Asia/Kolkata"));
+        // 09:15 IST (UTC+5:30) == 03:45 UTC.
+        let utc = wall_clock_to_utc("2026-05-19 09:15:00", tz).unwrap();
+        assert_eq!(
+            utc.to_rfc3339_opts(SecondsFormat::Secs, true),
+            "2026-05-19T03:45:00Z"
+        );
+    }
 }

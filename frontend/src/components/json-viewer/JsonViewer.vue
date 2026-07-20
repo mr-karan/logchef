@@ -4,18 +4,13 @@ import hljs from 'highlight.js/lib/core'
 import json from 'highlight.js/lib/languages/json'
 import 'highlight.js/styles/stackoverflow-light.css'
 import { Button } from '@/components/ui/button'
-import { Copy, History, Check } from 'lucide-vue-next'
+import { Copy, Check } from 'lucide-vue-next'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 
 const props = defineProps<{
     value: any
     expanded?: boolean
-    showContextButton?: boolean
-}>()
-
-const emit = defineEmits<{
-    (e: 'showContext'): void
 }>()
 
 const { toast } = useToast()
@@ -114,13 +109,6 @@ async function copyToClipboard() {
                 <Check v-if="isCopied" class="h-3 w-3 mr-1 transition-transform duration-200 animate-in zoom-in" />
                 <Copy v-else class="h-3 w-3 mr-1" />
                 {{ isCopied ? 'Copied!' : 'Copy' }}
-            </Button>
-
-            <!-- Context button -->
-            <Button v-if="showContextButton" variant="secondary" size="sm" @click.stop.prevent="emit('showContext')"
-                class="h-5 px-1.5 shadow-sm transition-all duration-200 hover:shadow hover:bg-muted active:scale-95 cursor-pointer text-xs">
-                <History class="h-3 w-3 mr-0.5" />
-                Show Context
             </Button>
         </div>
 

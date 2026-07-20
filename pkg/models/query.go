@@ -36,6 +36,62 @@ func (e ErrInvalidTimeout) Error() string {
 	return e.Message
 }
 
+type ErrInvalidSavedQueryConfiguration struct {
+	Message string
+}
+
+func (e ErrInvalidSavedQueryConfiguration) Error() string {
+	return e.Message
+}
+
+// QueryLanguage captures the executable language of a query across datasources.
+type QueryLanguage string
+
+const (
+	QueryLanguageLogchefQL     QueryLanguage = "logchefql"
+	QueryLanguageClickHouseSQL QueryLanguage = "clickhouse-sql"
+	QueryLanguageLogsQL        QueryLanguage = "logsql"
+)
+
+func NormalizeQueryLanguage(language QueryLanguage) QueryLanguage {
+	switch QueryLanguage(string(language)) {
+	case QueryLanguage("sql"):
+		return QueryLanguageClickHouseSQL
+	case QueryLanguageLogchefQL:
+		return QueryLanguageLogchefQL
+	case QueryLanguageClickHouseSQL:
+		return QueryLanguageClickHouseSQL
+	case QueryLanguageLogsQL:
+		return QueryLanguageLogsQL
+	default:
+		return language
+	}
+}
+
+func (l QueryLanguage) Valid() bool {
+	switch NormalizeQueryLanguage(l) {
+	case QueryLanguageLogchefQL, QueryLanguageClickHouseSQL, QueryLanguageLogsQL:
+		return true
+	default:
+		return false
+	}
+}
+
+func (l QueryLanguage) String() string {
+	return string(NormalizeQueryLanguage(l))
+}
+
+// CacheDirective opts a request into the dashboard result cache. Only dashboard
+// panel requests send it; explorer/ad-hoc queries never do (so they stay
+// uncached).
+type CacheDirective struct {
+	// Scope must be "dashboard" to enable caching. Any other value => no caching.
+	Scope string `json:"scope"`
+	// TTLSeconds is the requested cache TTL (already resolved to a concrete value
+	// by the client). Server clamps to [0, dashboard_cache.max_ttl]. <=0 => bypass.
+	TTLSeconds int `json:"ttl_seconds"`
+}
+
 // TemplateVariable represents a variable for SQL template substitution.
 // Variables in the SQL query (e.g., {{from_date}}) will be replaced with their values.
 type TemplateVariable struct {
@@ -46,13 +102,20 @@ type TemplateVariable struct {
 
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
 type APIQueryRequest struct {
-	Limit  int    `json:"limit"`
-	RawSQL string `json:"raw_sql"`
-	// Variables for template substitution in the SQL query.
+	Limit     int    `json:"limit"`
+	QueryText string `json:"query_text"`
+	// Optional ISO8601/RFC3339 time range for datasource-native query execution.
+	StartTime string `json:"start_time,omitempty"`
+	EndTime   string `json:"end_time,omitempty"`
+	Timezone  string `json:"timezone,omitempty"`
+	// Variables for template substitution in the query text.
 	// Example: {"name": "from_date", "type": "date", "value": "2026-01-01T00:00:00Z"}
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
+	// Cache opts this request into the dashboard result cache. Omitted for
+	// explorer/ad-hoc queries so they are never cached.
+	Cache *CacheDirective `json:"cache,omitempty"`
 	// Sort and other general query params could be added here if needed later.
 }
 
@@ -60,15 +123,20 @@ type APIQueryRequest struct {
 type APIHistogramRequest struct {
 	StartTimestamp int64  `json:"start_timestamp,omitempty"` // Legacy - Unix timestamp in milliseconds
 	EndTimestamp   int64  `json:"end_timestamp,omitempty"`   // Legacy - Unix timestamp in milliseconds
+	StartTime      string `json:"start_time,omitempty"`      // ISO8601/RFC3339 time range start
+	EndTime        string `json:"end_time,omitempty"`        // ISO8601/RFC3339 time range end
 	Limit          int    `json:"limit"`                     // Limit might influence histogram sampling/performance
-	RawSQL         string `json:"raw_sql"`                   // Contains non-time filters
+	QueryText      string `json:"query_text"`                // Contains non-time filters
 	Window         string `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"
 	GroupBy        string `json:"group_by,omitempty"`        // For histogram queries: field to group by
 	Timezone       string `json:"timezone,omitempty"`        // Kept for histogram, optional otherwise
-	// Variables for template substitution in the SQL query.
+	// Variables for template substitution in the query text.
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int `json:"query_timeout,omitempty"`
+	// Cache opts this request into the dashboard result cache. Omitted for
+	// explorer/ad-hoc queries so they are never cached.
+	Cache *CacheDirective `json:"cache,omitempty"`
 }
 
 // LogQueryResult represents the result of a log query
@@ -106,8 +174,8 @@ const (
 	// SavedQueryTabFilters represents the filters tab
 	SavedQueryTabFilters SavedQueryTab = "filters"
 
-	// SavedQueryTabRawSQL represents the raw SQL tab
-	SavedQueryTabRawSQL SavedQueryTab = "raw_sql"
+	// SavedQueryTabNativeQuery represents the datasource-native query tab.
+	SavedQueryTabNativeQuery SavedQueryTab = "native_query"
 )
 
 // SavedQueryTimeRange represents a time range for a saved query
@@ -121,16 +189,75 @@ type SavedQueryTimeRange struct {
 	} `json:"absolute"`
 }
 
-// SavedQueryType represents the type of saved query
-type SavedQueryType string
+// SavedQueryEditorMode captures the UI/editor that authored the saved query.
+type SavedQueryEditorMode string
 
 const (
-	// SavedQueryTypeLogchefQL represents a query saved in LogchefQL format
-	SavedQueryTypeLogchefQL SavedQueryType = "logchefql"
-
-	// SavedQueryTypeSQL represents a query saved in SQL format
-	SavedQueryTypeSQL SavedQueryType = "sql"
+	SavedQueryEditorModeBuilder SavedQueryEditorMode = "builder"
+	SavedQueryEditorModeNative  SavedQueryEditorMode = "native"
 )
+
+func NormalizeSavedQueryEditorMode(mode SavedQueryEditorMode) SavedQueryEditorMode {
+	switch mode {
+	case SavedQueryEditorModeBuilder:
+		return SavedQueryEditorModeBuilder
+	case SavedQueryEditorModeNative:
+		return SavedQueryEditorModeNative
+	default:
+		return mode
+	}
+}
+
+func (m SavedQueryEditorMode) Valid() bool {
+	switch NormalizeSavedQueryEditorMode(m) {
+	case SavedQueryEditorModeBuilder, SavedQueryEditorModeNative:
+		return true
+	default:
+		return false
+	}
+}
+
+func DefaultSavedQueryEditorModeForLanguage(language QueryLanguage) SavedQueryEditorMode {
+	if NormalizeQueryLanguage(language) == QueryLanguageLogchefQL {
+		return SavedQueryEditorModeBuilder
+	}
+	return SavedQueryEditorModeNative
+}
+
+func ResolveSavedQueryMetadata(language QueryLanguage, mode SavedQueryEditorMode) (QueryLanguage, SavedQueryEditorMode, error) {
+	normalizedLanguage := NormalizeQueryLanguage(language)
+	normalizedMode := NormalizeSavedQueryEditorMode(mode)
+
+	if normalizedLanguage == "" {
+		switch normalizedMode {
+		case SavedQueryEditorModeBuilder:
+			normalizedLanguage = QueryLanguageLogchefQL
+		default:
+			return "", "", ErrInvalidSavedQueryConfiguration{Message: "query_language is required"}
+		}
+	}
+
+	if !normalizedLanguage.Valid() {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query language"}
+	}
+
+	if normalizedMode == "" {
+		normalizedMode = DefaultSavedQueryEditorModeForLanguage(normalizedLanguage)
+	}
+
+	if !normalizedMode.Valid() {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "invalid saved query editor mode"}
+	}
+
+	if normalizedMode == SavedQueryEditorModeBuilder && normalizedLanguage != QueryLanguageLogchefQL {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "builder mode requires LogchefQL"}
+	}
+	if normalizedMode == SavedQueryEditorModeNative && normalizedLanguage == QueryLanguageLogchefQL {
+		return "", "", ErrInvalidSavedQueryConfiguration{Message: "native mode requires a datasource-native query language"}
+	}
+
+	return normalizedLanguage, normalizedMode, nil
+}
 
 type SavedQueryVariableOption struct {
 	Value string `json:"value"`
@@ -167,17 +294,18 @@ type SavedQueryContent struct {
 // (each user has an auto-created personal collection that takes the role
 // bookmarks used to play).
 type SavedQuery struct {
-	ID                int            `json:"id" db:"id"`
-	SourceID          SourceID       `json:"source_id" db:"source_id"`
-	CreatedFromTeamID *TeamID        `json:"created_from_team_id,omitempty" db:"created_from_team_id"`
-	Name              string         `json:"name" db:"name"`
-	Description       string         `json:"description" db:"description"`
-	QueryType         SavedQueryType `json:"query_type" db:"query_type"`
-	QueryContent      string         `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
-	CreatedBy         *UserID        `json:"created_by,omitempty" db:"created_by"`
-	CreatedAt         time.Time      `json:"created_at" db:"created_at"`
-	UpdatedAt         time.Time      `json:"updated_at" db:"updated_at"`
-	SourceName        string         `json:"source_name,omitempty"`
+	ID                int                  `json:"id" db:"id"`
+	SourceID          SourceID             `json:"source_id" db:"source_id"`
+	CreatedFromTeamID *TeamID              `json:"created_from_team_id,omitempty" db:"created_from_team_id"`
+	Name              string               `json:"name" db:"name"`
+	Description       string               `json:"description" db:"description"`
+	QueryLanguage     QueryLanguage        `json:"query_language" db:"query_language"`
+	EditorMode        SavedQueryEditorMode `json:"editor_mode" db:"editor_mode"`
+	QueryContent      string               `json:"query_content" db:"query_content"` // JSON string of SavedQueryContent
+	CreatedBy         *UserID              `json:"created_by,omitempty" db:"created_by"`
+	CreatedAt         time.Time            `json:"created_at" db:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at" db:"updated_at"`
+	SourceName        string               `json:"source_name,omitempty"`
 	// CreatedByName / CreatedByEmail identify the query's creator for display.
 	// Populated where the server joins the users table (e.g. collection items);
 	// empty for legacy queries with a NULL created_by.
@@ -206,22 +334,24 @@ type ResolvedSavedQuery struct {
 
 // CreateSavedQueryRequest is the JSON body for POST /api/v1/saved-queries.
 type CreateSavedQueryRequest struct {
-	Name              string         `json:"name" validate:"required"`
-	Description       string         `json:"description"`
-	SourceID          SourceID       `json:"source_id" validate:"required"`
-	CreatedFromTeamID *TeamID        `json:"created_from_team_id,omitempty"`
-	QueryType         SavedQueryType `json:"query_type" validate:"required"`
-	QueryContent      string         `json:"query_content" validate:"required"`
+	Name              string               `json:"name" validate:"required"`
+	Description       string               `json:"description"`
+	SourceID          SourceID             `json:"source_id" validate:"required"`
+	CreatedFromTeamID *TeamID              `json:"created_from_team_id,omitempty"`
+	QueryLanguage     QueryLanguage        `json:"query_language,omitempty"`
+	EditorMode        SavedQueryEditorMode `json:"editor_mode,omitempty"`
+	QueryContent      string               `json:"query_content" validate:"required"`
 }
 
 // UpdateSavedQueryRequest is the JSON body for PUT /api/v1/saved-queries/:id.
 // SourceID is intentionally not updatable — re-targeting a query to a new source
 // is equivalent to creating a new one.
 type UpdateSavedQueryRequest struct {
-	Name         string         `json:"name"`
-	Description  string         `json:"description"`
-	QueryType    SavedQueryType `json:"query_type"`
-	QueryContent string         `json:"query_content"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description"`
+	QueryLanguage QueryLanguage        `json:"query_language,omitempty"`
+	EditorMode    SavedQueryEditorMode `json:"editor_mode,omitempty"`
+	QueryContent  string               `json:"query_content"`
 }
 
 // GenerateSQLRequest defines the request body for SQL generation from natural language.
@@ -289,7 +419,11 @@ const (
 
 // CreateExportJobRequest creates an async export job that produces a completed artifact.
 type CreateExportJobRequest struct {
+	// RawSQL is the query to export. QueryText is accepted as an alias so both
+	// the web UI (which posts query_text, like the query/histogram endpoints)
+	// and the CLI (which posts raw_sql) work; whichever is non-empty is used.
 	RawSQL       string             `json:"raw_sql"`
+	QueryText    string             `json:"query_text"`
 	Format       string             `json:"format"`
 	Limit        int                `json:"limit,omitempty"`
 	QueryTimeout *int               `json:"query_timeout,omitempty"`

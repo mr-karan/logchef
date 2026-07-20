@@ -118,6 +118,7 @@ const (
 	ErrUnterminatedString     = "UNTERMINATED_STRING"
 	ErrUnexpectedEnd          = "UNEXPECTED_END"
 	ErrUnexpectedToken        = "UNEXPECTED_TOKEN"
+	ErrUnsupportedFeature     = "UNSUPPORTED_FEATURE"
 	ErrExpectedOperator       = "EXPECTED_OPERATOR"
 	ErrExpectedValue          = "EXPECTED_VALUE"
 	ErrExpectedClosingParen   = "EXPECTED_CLOSING_PAREN"
@@ -129,6 +130,8 @@ const (
 	ErrInvalidTimeFormat      = "INVALID_TIME_FORMAT"
 	ErrInvalidTimezone        = "INVALID_TIMEZONE"
 	ErrInvalidIdentifier      = "INVALID_IDENTIFIER"
+	ErrQueryTooLong           = "QUERY_TOO_LONG"
+	ErrQueryTooDeeplyNested   = "QUERY_TOO_DEEPLY_NESTED"
 )
 
 // ColumnInfo represents column metadata from the schema

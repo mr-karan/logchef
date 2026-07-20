@@ -7,6 +7,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // ExportConfig reads the current database state and produces a ProvisioningConfig.
@@ -26,25 +27,57 @@ func ExportConfig(ctx context.Context, db store.StoreOps) (*config.ProvisioningC
 	}
 
 	for _, src := range sources {
-		secretRef := src.SecretRef
-		if secretRef == "" {
-			secretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
-		}
-
-		cfg.Sources = append(cfg.Sources, config.ProvisionSource{
+		provisioned := config.ProvisionSource{
 			Name:              src.Name,
-			Host:              src.Connection.Host,
-			Username:          src.Connection.Username,
-			Password:          "", // Never export passwords
-			SecretRef:         secretRef,
-			Database:          src.Connection.Database,
-			TableName:         src.Connection.TableName,
-			TLSEnable:         src.Connection.TLSEnable,
+			SourceType:        models.NormalizeSourceType(src.SourceType),
 			Description:       src.Description,
 			TTLDays:           src.TTLDays,
 			MetaTSField:       src.MetaTSField,
 			MetaSeverityField: src.MetaSeverityField,
-		})
+		}
+
+		switch models.NormalizeSourceType(src.SourceType) {
+		case models.SourceTypeVictoriaLogs:
+			conn, err := src.VictoriaLogsConnection()
+			if err != nil {
+				return nil, fmt.Errorf("failed to decode victorialogs source %q: %w", src.Name, err)
+			}
+
+			if src.SecretRef != "" {
+				provisioned.SecretRef = src.SecretRef
+			} else {
+				switch strings.ToLower(strings.TrimSpace(conn.Auth.Mode)) {
+				case "bearer":
+					if conn.Auth.Token != "" {
+						provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_TOKEN", sanitizeEnvName(src.Name))
+					}
+				case "basic":
+					if conn.Auth.Password != "" {
+						provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
+					}
+				}
+			}
+
+			conn.Auth.Password = ""
+			conn.Auth.Token = ""
+			if err := provisioned.SetConnectionConfig(conn); err != nil {
+				return nil, fmt.Errorf("failed to encode victorialogs source %q: %w", src.Name, err)
+			}
+		default:
+			conn := src.Connection
+			if src.SecretRef != "" {
+				provisioned.SecretRef = src.SecretRef
+			} else if conn.Password != "" {
+				provisioned.SecretRef = fmt.Sprintf("LOGCHEF_SOURCE_%s_PASSWORD", sanitizeEnvName(src.Name))
+			}
+
+			conn.Password = ""
+			if err := provisioned.SetConnectionConfig(conn); err != nil {
+				return nil, fmt.Errorf("failed to encode clickhouse source %q: %w", src.Name, err)
+			}
+		}
+
+		cfg.Sources = append(cfg.Sources, provisioned)
 	}
 
 	// Export teams

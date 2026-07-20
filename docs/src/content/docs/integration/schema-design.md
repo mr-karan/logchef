@@ -1,9 +1,9 @@
 ---
 title: Schema Design
-description: Understanding Logchef's log schema design and optimization
+description: Understand ClickHouse schema design and optimization for fast, storage-efficient log analytics with Logchef.
 ---
 
-Logchef provides optimized schemas for different types of logs while maintaining the flexibility to work with any Clickhouse table structure. Logchef is designed to work with any Clickhouse schema, requiring only a timestamp field. However, if you don't have an existing schema or wish to quickly start ingesting logs without worrying about the schema details, you can use the built-in schemas Logchef provides.
+Logchef works with any ClickHouse table that has a timestamp field. If you don't have an existing schema, or want to start ingesting logs quickly without worrying about the details, you can use the optimized built-in schemas Logchef provides.
 
 ## OpenTelemetry Schema
 
@@ -76,13 +76,13 @@ ORDER BY (namespace, service_name, timestamp)
 
 ## Using Custom Schemas
 
-Logchef works with any Clickhouse table structure. When connecting to an existing table:
+Logchef works with any ClickHouse table structure. When connecting to an existing table:
 
 1. Logchef automatically detects the schema
 2. Adapts its query interface to your fields
 3. Provides appropriate operators based on field types
 
-Remember, you are **not required** to use Logchef's schemas. Logchef can connect to any existing Clickhouse table as long as it has a `timestamp` column (`DateTime` or `DateTime64`). For optimal query performance with custom schemas, consider using `LowCardinality(String)` for frequently repeated text fields and a `Map` type for flexible attributes.
+Remember, you are **not required** to use Logchef's schemas. Logchef can connect to any existing ClickHouse table as long as it has a `timestamp` column (`DateTime` or `DateTime64`). For optimal query performance with custom schemas, consider using `LowCardinality(String)` for frequently repeated text fields and a `Map` type for flexible attributes.
 
 ## Best Practices
 
@@ -108,3 +108,9 @@ Remember, you are **not required** to use Logchef's schemas. Logchef can connect
    - Partition by date for easy data management
    - Choose partition size based on data volume
    - Consider TTL policies for data retention
+
+## Next steps
+
+- See [Shipping Logs with Vector](/integration/vector) to ship logs into a table with this schema
+- Follow [Shipping NGINX Logs to ClickHouse](/tutorials/nginx-logs) for a purpose-built schema example
+- Review [Search Syntax](/guide/search-syntax) for how LogchefQL maps to Map and JSON columns

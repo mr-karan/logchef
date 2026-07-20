@@ -1,10 +1,30 @@
 package logchefql
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/alecthomas/participle/v2"
 	"github.com/alecthomas/participle/v2/lexer"
+)
+
+const (
+	// maxQueryLength bounds the raw query string. LogchefQL queries are short
+	// filter expressions, not documents; 64KiB is generous headroom while
+	// keeping pathological inputs (e.g. hundreds of KB of nested parens) out
+	// of the parser entirely.
+	maxQueryLength = 64 * 1024
+
+	// maxParenNestingDepth bounds how deeply "(...)" groups may nest.
+	//
+	// PTerm.Group is mutually recursive with POrExpr (POrExpr -> PAndExpr ->
+	// PTerm -> Group -> POrExpr -> ...), so parsing a query recurses one Go
+	// stack frame per level of paren nesting. Without a bound, a query with
+	// enough nested parens overflows the goroutine stack, which is an
+	// unrecoverable runtime crash (not a panic) that Fiber's recover
+	// middleware cannot catch and takes down the whole process. 100 levels is
+	// far beyond any legitimate query and is trivially safe for the stack.
+	maxParenNestingDepth = 100
 )
 
 var logchefQLLexer = lexer.MustSimple([]lexer.SimpleRule{
@@ -95,9 +115,66 @@ var logchefQLParser = participle.MustBuild[PQuery](
 	participle.UseLookahead(2),
 )
 
-// ParseLogchefQL parses a LogchefQL query string into the Participle AST
+// ParseLogchefQL parses a LogchefQL query string into the Participle AST.
+//
+// Before invoking the (mutually recursive, stack-depth-bound) participle
+// parser, it rejects queries that are too long or whose paren nesting is too
+// deep, so that pathological input never reaches the recursive-descent parse
+// itself. See maxQueryLength and maxParenNestingDepth.
 func ParseLogchefQL(input string) (*PQuery, error) {
+	if err := checkQueryLimits(input); err != nil {
+		return nil, err
+	}
 	return logchefQLParser.ParseString("", input)
+}
+
+// checkQueryLimits performs a cheap pre-parse scan that bounds the raw query
+// length and the maximum "(" nesting depth, returning a clean *ParseError
+// (never panicking) when a limit is exceeded. Parens inside quoted string
+// literals are not counted, matching how the lexer/grammar treat them.
+func checkQueryLimits(input string) *ParseError {
+	if len(input) > maxQueryLength {
+		return &ParseError{
+			Code:    ErrQueryTooLong,
+			Message: fmt.Sprintf("query too long: %d bytes exceeds the maximum of %d bytes", len(input), maxQueryLength),
+		}
+	}
+
+	depth := 0
+	inString := false
+	var quote byte
+
+	for i := 0; i < len(input); i++ {
+		c := input[i]
+
+		if inString {
+			switch c {
+			case '\\':
+				i++ // Skip the escaped character; safe even if it's the last byte.
+			case quote:
+				inString = false
+			}
+			continue
+		}
+
+		switch c {
+		case '"', '\'':
+			inString = true
+			quote = c
+		case '(':
+			depth++
+			if depth > maxParenNestingDepth {
+				return &ParseError{
+					Code:    ErrQueryTooDeeplyNested,
+					Message: fmt.Sprintf("query too deeply nested: exceeds the maximum nesting depth of %d", maxParenNestingDepth),
+				}
+			}
+		case ')':
+			depth--
+		}
+	}
+
+	return nil
 }
 
 // ConvertToAST converts the Participle AST to the existing AST types

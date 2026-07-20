@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
-import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Share2 } from 'lucide-vue-next'
+import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Braces, Share2 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
 import GroupBySelector from './GroupBySelector.vue'
 import {
@@ -21,18 +21,19 @@ interface FieldInfo {
 interface Props {
   isHistogramVisible: boolean
   availableFields: FieldInfo[]
-  displayMode: 'table' | 'compact'
+  displayMode: 'table' | 'compact' | 'json'
   logsCount: number
   queryTimeMs?: number
   isLoading?: boolean
   isExporting?: boolean
+  canExport?: boolean
 }
 
 defineProps<Props>()
 
 const emit = defineEmits<{
   (e: 'toggle-histogram'): void
-  (e: 'update:displayMode', mode: 'table' | 'compact'): void
+  (e: 'update:displayMode', mode: 'table' | 'compact' | 'json'): void
   (e: 'export'): void
   (e: 'share'): void
   (e: 'copy-cli'): void
@@ -41,6 +42,7 @@ const emit = defineEmits<{
 const exploreStore = useExploreStore()
 
 const queryStats = computed(() => exploreStore.queryStats)
+const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
 const queryWarnings = computed(() => exploreStore.queryWarnings)
 
 const formattedQueryTime = computed(() => {
@@ -69,7 +71,8 @@ const warningText = computed(() => {
     <!-- Left: Histogram toggle + Stats -->
     <div class="flex items-center gap-3">
       <!-- Histogram Toggle -->
-      <button 
+      <button
+        v-if="isHistogramEligible"
         class="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
         @click="emit('toggle-histogram')"
         :title="isHistogramVisible ? 'Hide histogram' : 'Show histogram'"
@@ -79,7 +82,7 @@ const warningText = computed(() => {
         <span class="font-medium">Histogram</span>
       </button>
 
-      <div class="h-4 w-px bg-border" />
+      <div v-if="isHistogramEligible" class="h-4 w-px bg-border" />
 
       <!-- Stats -->
       <div class="flex items-center gap-2 text-muted-foreground">
@@ -100,9 +103,10 @@ const warningText = computed(() => {
     </div>
 
     <!-- Center: Group By -->
-    <div class="flex items-center">
+    <div v-if="isHistogramEligible" class="flex items-center">
       <GroupBySelector :available-fields="availableFields" />
     </div>
+    <div v-else />
 
     <!-- Right: Share + Export + View Toggles -->
     <div class="flex items-center gap-1">
@@ -146,8 +150,8 @@ const warningText = computed(() => {
         </Tooltip>
       </TooltipProvider>
 
-      <!-- Download Button -->
-      <TooltipProvider>
+      <!-- Download Button (only for sources advertising the exports capability) -->
+      <TooltipProvider v-if="canExport">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
@@ -183,6 +187,23 @@ const warningText = computed(() => {
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <p class="text-xs">Compact view</p>
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                class="h-6 w-6 rounded flex items-center justify-center transition-colors"
+                :class="displayMode === 'json' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
+                @click="emit('update:displayMode', 'json')"
+              >
+                <Braces class="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">
+              <p class="text-xs">JSON view</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

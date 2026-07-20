@@ -14,21 +14,24 @@ import {
     type PaginationState,
     type ColumnSizingState,
     type ColumnResizeMode,
+    type ColumnFiltersState,
 } from '@tanstack/vue-table'
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import { useDebounceFn } from '@vueuse/core'
 import { Button } from '@/components/ui/button'
-import { GripVertical, Copy, Equal, EqualNot, Clock, ChevronUp, ChevronDown } from 'lucide-vue-next'
+import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
-import { useExploreStore } from '@/stores/explore'
+import { getDefaultColumnVisibility } from './defaultColumnVisibility'
 import type { Source } from '@/api/sources'
-import { useSourcesStore } from '@/stores/sources'
+import { hasSourceCapability } from '@/lib/queryMetadata'
 import TableControls from './TableControls.vue'
+import ColumnFilterButton from './ColumnFilterButton.vue'
 import { usePreferencesStore } from '@/stores/preferences'
 
 interface Props {
@@ -37,13 +40,13 @@ interface Props {
     stats: QueryStats
     sourceId: string
     teamId: number | null
+    source?: Pick<Source, 'source_type' | 'capabilities'> | null
     displayMode?: 'table' | 'compact'
     timestampField?: string
     severityField?: string
-    timezone?: 'local' | 'utc'
     queryFields?: string[] // Fields used in the query for column indicators
     regexHighlights?: Record<string, { pattern: string, isNegated: boolean }> // Column-specific regex patterns
-    activeMode?: 'logchefql' | 'clickhouse-sql' | 'sql' // Current query mode
+    activeMode?: 'logchefql' | 'clickhouse-sql' | 'native' // Current query mode
     isLoading?: boolean // Prop to indicate loading state
 }
 
@@ -57,7 +60,6 @@ interface DataTableState {
 const props = withDefaults(defineProps<Props>(), {
     timestampField: 'timestamp',
     severityField: 'severity_text',
-    timezone: 'local',
     queryFields: () => [],
     regexHighlights: () => ({}),
     activeMode: 'logchefql',
@@ -77,23 +79,28 @@ const tableColumns = ref<CustomColumnDef[]>([])
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
-
-// Context modal state
+// Context modal state (only for sources advertising the log_context capability;
+// the backend 400s otherwise, e.g. VictoriaLogs)
+const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
-
 
 // Open context modal for a log
 const openContextModal = (log: Record<string, any>) => {
     contextLog.value = log
     showContextModal.value = true
 }
+
 const columnVisibility = ref<VisibilityState>({})
 const pagination = ref<PaginationState>({
     pageIndex: 0,
     pageSize: 50,
 })
 const globalFilter = ref('')
+// Column filters are local to this table (client-side filtering of the
+// currently loaded result page only) and reset whenever a new query runs -
+// see the watch on props.data below. They are intentionally not persisted.
+const columnFilters = ref<ColumnFiltersState>([])
 const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
@@ -108,6 +115,8 @@ const displayTimezone = computed({
 const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
+const isReadyToPersistState = ref(false)
+const sourceType = computed(() => props.source?.source_type ?? null)
 
 const enforceTimestampFirst = (order: string[]): string[] => {
     const tsField = timestampFieldName.value;
@@ -149,14 +158,15 @@ function saveStateToStorage(state: DataTableState) {
 }
 
 // Initialize state from localStorage or defaults
-function initializeState(columns: ColumnDef<Record<string, any>>[]) {
+function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { ignoreSavedState?: boolean }) {
     const currentColumnIds = columns.map(c => c.id!).filter(Boolean);
     let initialOrder: string[] = [];
     let initialSizing: ColumnSizingState = {};
     let initialVisibility: VisibilityState = {};
 
     // Try to load from storage
-    const savedState = loadStateFromStorage();
+    const savedState = options?.ignoreSavedState ? null : loadStateFromStorage();
+    const hasResolvedSourceType = Boolean(sourceType.value);
 
     if (savedState && savedState.columnOrder && savedState.columnOrder.length > 0) {
         // --- Use Saved State ---
@@ -183,6 +193,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
             // Handle visibility (prioritize saved state)
             initialVisibility[id] = savedVisibility[id] !== undefined ? savedVisibility[id] : true;
         });
+        isReadyToPersistState.value = true;
     } else {
         // --- Generate Default State ---
         // Generate default order with timestamp first
@@ -200,8 +211,15 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
         currentColumnIds.forEach(id => {
             const columnDef = columns.find(c => c.id === id);
             initialSizing[id] = columnDef?.size ?? defaultColumn.size;
-            initialVisibility[id] = true; // Default all columns to visible
         });
+
+        initialVisibility = getDefaultColumnVisibility(
+            columns,
+            props.source,
+            timestampFieldName.value,
+            severityFieldName.value
+        );
+        isReadyToPersistState.value = hasResolvedSourceType || currentColumnIds.length === 0;
     }
 
     return { initialOrder, initialSizing, initialVisibility };
@@ -209,7 +227,7 @@ function initializeState(columns: ColumnDef<Record<string, any>>[]) {
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value, props.timestampField], // Also watch timestampField changes
+    () => [props.columns, displayTimezone.value, props.timestampField, sourceType.value], // Also watch timestampField changes
     ([newColumns, newTimezone]) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
@@ -217,6 +235,7 @@ watch(
             columnOrder.value = [];
             columnSizing.value = {};
             columnVisibility.value = {};
+            isReadyToPersistState.value = false;
             return;
         }
 
@@ -247,19 +266,52 @@ watch(
     { immediate: true, deep: true } // Use deep watch for searchTerms array changes
 );
 
-// Save state whenever relevant parts change
+// Reset column filters whenever a new query runs. A new query replaces
+// props.data with a fresh array reference, so any change here means the
+// previously loaded result page is gone and stale filters no longer apply.
+watch(() => props.data, () => {
+    if (columnFilters.value.length > 0) {
+        columnFilters.value = [];
+    }
+});
+
+// Save state whenever relevant parts change. Column resizing fires this watch
+// on every mousemove/touchmove, so the actual localStorage write is debounced
+// to commit once the drag settles instead of thrashing on every pixel of
+// movement.
+const debouncedSaveStateToStorage = useDebounceFn(saveStateToStorage, 300);
+
 watch([columnOrder, columnSizing, columnVisibility], () => {
-    if (!storageKey.value) return;
+    if (!storageKey.value || !isReadyToPersistState.value) return;
 
     // Make sure we have columns loaded before saving
     if (props.columns && props.columns.length > 0) {
-        saveStateToStorage({
+        debouncedSaveStateToStorage({
             columnOrder: columnOrder.value,
             columnSizing: columnSizing.value,
             columnVisibility: columnVisibility.value
         });
     }
 }, { deep: true });
+
+function resetTableStateToDefaults() {
+    if (storageKey.value) {
+        localStorage.removeItem(storageKey.value);
+    }
+
+    if (!tableColumns.value.length) {
+        return;
+    }
+
+    const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value, {
+        ignoreSavedState: true,
+    });
+
+    columnOrder.value = initialOrder;
+    columnSizing.value = initialSizing;
+    columnVisibility.value = initialVisibility;
+    isReadyToPersistState.value = true;
+}
 
 // Save timezone preference via preferences store
 
@@ -406,13 +458,18 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         window.removeEventListener('touchmove', onTouchMove);
         window.removeEventListener('mouseup', onEnd);
         window.removeEventListener('touchend', onEnd);
+        window.removeEventListener('touchcancel', onEnd);
     };
 
-    // Add the event listeners
+    // Add the event listeners. touchcancel (e.g. an incoming call or the OS
+    // interrupting the gesture) must also tear the drag down - otherwise
+    // mousemove/touchmove listeners leak on the window for the rest of the
+    // page's life since onEnd would never fire.
     window.addEventListener('mousemove', onMouseMove);
     window.addEventListener('touchmove', onTouchMove);
     window.addEventListener('mouseup', onEnd, { once: true });
     window.addEventListener('touchend', onEnd, { once: true });
+    window.addEventListener('touchcancel', onEnd, { once: true });
 }
 
 // Initialize table
@@ -440,6 +497,9 @@ const table = useVueTable({
         get globalFilter() {
             return globalFilter.value
         },
+        get columnFilters() {
+            return columnFilters.value
+        },
         get columnSizing() {
             return columnSizing.value
         },
@@ -455,6 +515,7 @@ const table = useVueTable({
     onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
     onPaginationChange: updaterOrValue => valueUpdater(updaterOrValue, pagination),
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
+    onColumnFiltersChange: updaterOrValue => valueUpdater(updaterOrValue, columnFilters),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
     onColumnOrderChange: updaterOrValue => {
         const nextValue = typeof updaterOrValue === 'function'
@@ -521,28 +582,6 @@ onMounted(() => {
     }
 })
 
-// Add refs for DOM elements
-const tableContainerRef = ref<HTMLElement | null>(null)
-
-onMounted(() => {
-    if (!tableContainerRef.value) return
-
-    const resizeObserver = new ResizeObserver(() => {
-        // Track container width for flex-grow calculations
-        // Actual column resizing is handled via CSS flex on the last column
-        // This avoids mutating columnSizing state which would persist unwanted changes
-    })
-
-    resizeObserver.observe(tableContainerRef.value)
-
-    return () => {
-        resizeObserver.disconnect()
-    }
-})
-
-const exploreStore = useExploreStore()
-const sourcesStore = useSourcesStore()
-
 // Add type for column meta
 interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
     className?: string;
@@ -552,31 +591,6 @@ interface CustomColumnMeta extends ColumnMeta<Record<string, any>, unknown> {
 type CustomColumnDef = ColumnDef<Record<string, any>> & {
     meta?: CustomColumnMeta;
 }
-
-// Source details ref
-const sourceDetails = ref<Source | null>(null);
-
-// Use a computed property to get source details from the store instead of making API calls
-const storeSourceDetails = computed(() => sourcesStore.currentSourceDetails);
-
-// Watch for source details changes in the store
-watch(
-    storeSourceDetails,
-    (newSourceDetails) => {
-        sourceDetails.value = newSourceDetails;
-    },
-    { immediate: true }
-)
-
-// Watch for source ID changes and clear details when there's no source
-watch(
-    () => exploreStore.sourceId,
-    (newSourceId) => {
-        if (!newSourceId) {
-            sourceDetails.value = null; // Clear if sourceId is null/0
-        }
-    }
-)
 
 // --- Native Drag and Drop Implementation ---
 
@@ -680,14 +694,16 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             v-if="table"
             :table="table"
             :stats="stats"
-            :is-loading="props.isLoading"
+            :is-loading="isLoading"
+            :show-reset-columns="true"
             @update:timezone="displayTimezone = $event"
             @update:globalFilter="globalFilter = $event"
+            @reset-columns="resetTableStateToDefaults"
         />
 
         <!-- Table Section with full-height scrolling -->
-        <div class="flex-1 relative overflow-hidden" ref="tableContainerRef"
-            :class="{ 'opacity-60 pointer-events-none': props.isLoading }"> <!-- Dim table during load -->
+        <div class="flex-1 relative overflow-hidden"
+            :class="{ 'opacity-60 pointer-events-none': isLoading }"> <!-- Dim table during load -->
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
@@ -732,6 +748,13 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             <FlexRender v-if="!header.isPlaceholder && header.column.columnDef.header"
                                                 :render="header.column.columnDef.header" :props="header.getContext()" />
                                         </div>
+
+                                        <!-- Column Filter (client-side, filters the currently loaded page only) -->
+                                        <ColumnFilterButton
+                                            v-if="header.column.getCanFilter()"
+                                            :column="header.column"
+                                            class="mr-1"
+                                        />
 
                                         <!-- Column Resizer (Absolute Positioned) - Double-click to auto-fit -->
                                         <div v-if="header.column.getCanResize()"
@@ -831,6 +854,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     <span>Collapse</span>
                                                 </button>
                                                 <Button 
+                                                    v-if="supportsLogContext"
                                                     variant="outline" 
                                                     size="sm" 
                                                     class="h-7 text-xs"

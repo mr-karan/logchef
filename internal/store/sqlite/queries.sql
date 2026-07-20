@@ -3,17 +3,17 @@
 -- name: CreateSource :one
 -- Create a new source entry
 INSERT INTO sources (
-    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, tls_enable, created_at, updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), strftime('%Y-%m-%dT%H:%M:%SZ', 'now'), ?, ?)
 RETURNING id;
 
 -- name: GetSource :one
 -- Get a single source by ID
 SELECT * FROM sources WHERE id = ?;
 
--- name: GetSourceByName :one
--- Get a single source by table name and database
-SELECT * FROM sources WHERE database = ? AND table_name = ?;
+-- name: GetSourceByIdentityKey :one
+-- Get a single source by provider-computed identity key
+SELECT * FROM sources WHERE identity_key = ?;
 
 -- name: ListSources :many
 -- Get all sources ordered by creation date
@@ -24,16 +24,15 @@ SELECT * FROM sources ORDER BY created_at DESC;
 UPDATE sources
 SET name = ?,
     _meta_is_auto_created = ?,
+    source_type = ?,
     _meta_ts_field = ?,
     _meta_severity_field = ?,
-    host = ?,
-    username = ?,
-    password = ?,
-    database = ?,
-    table_name = ?,
+    connection_config = ?,
+    identity_key = ?,
     description = ?,
     ttl_days = ?,
-    tls_enable = ?,
+    managed = ?,
+    secret_ref = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
@@ -56,6 +55,10 @@ SELECT * FROM users WHERE id = ?;
 -- name: GetUserByEmail :one
 -- Get a user by email
 SELECT * FROM users WHERE email = ?;
+
+-- name: SetUserPasswordHash :exec
+-- Set (or clear) a user's local-auth bcrypt hash
+UPDATE users SET password_hash = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
 
 -- name: UpdateUser :exec
 -- Update a user
@@ -121,6 +124,10 @@ DELETE FROM sessions WHERE user_id = ?;
 -- name: CountUserSessions :one
 -- Count active sessions for a user
 SELECT COUNT(*) FROM sessions WHERE user_id = ? AND expires_at > ?;
+
+-- name: DeleteExpiredSessions :exec
+-- Delete all sessions whose expiry is at or before the given time
+DELETE FROM sessions WHERE expires_at <= ?;
 
 -- Teams
 
@@ -230,8 +237,8 @@ ORDER BY t.name;
 
 -- name: CreateSavedQuery :one
 -- Insert a new saved query and return its id
-INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_type, query_content, created_by)
-VALUES (?, ?, ?, ?, ?, ?, ?)
+INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_language, editor_mode, query_content, created_by)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING id;
 
 -- name: GetSavedQuery :one
@@ -243,7 +250,8 @@ SELECT * FROM saved_queries WHERE id = ?;
 UPDATE saved_queries
 SET name = ?,
     description = ?,
-    query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query_content = ?,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
@@ -260,7 +268,8 @@ SELECT
     sq.created_from_team_id,
     sq.name,
     sq.description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_at,
     sq.updated_at,
@@ -284,7 +293,8 @@ SELECT
     sq.created_from_team_id,
     sq.name,
     sq.description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_at,
     sq.updated_at,
@@ -310,7 +320,8 @@ SELECT
     sq.created_from_team_id,
     sq.name,
     sq.description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_at,
     sq.updated_at,
@@ -555,7 +566,8 @@ INSERT INTO alerts (
     source_id,
     name,
     description,
-    query_type,
+    query_language,
+    editor_mode,
     query,
     condition_json,
     lookback_seconds,
@@ -571,7 +583,7 @@ INSERT INTO alerts (
     is_active,
     created_by
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 RETURNING *;
 
 -- name: GetAlert :one
@@ -598,7 +610,8 @@ ORDER BY a.updated_at DESC, a.created_at DESC;
 UPDATE alerts
 SET name = ?,
     description = ?,
-    query_type = ?,
+    query_language = ?,
+    editor_mode = ?,
     query = ?,
     condition_json = ?,
     lookback_seconds = ?,
@@ -858,7 +871,8 @@ SELECT
     sq.source_id,
     sq.name AS query_name,
     sq.description AS query_description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
@@ -885,3 +899,165 @@ WHERE ci.saved_query_id = ?
   AND cm.user_id = ?
   AND c.is_personal = 0
   AND cm.role IN ('owner', 'editor');
+
+-- Dashboards -----------------------------------------------------------------
+
+-- name: CreateDashboard :one
+-- Insert a new dashboard and return its id.
+INSERT INTO dashboards (name, description, panels_json, created_by)
+VALUES (?, ?, ?, ?)
+RETURNING id;
+
+-- name: GetDashboard :one
+-- Look up one dashboard by id, with creator identity like ListDashboards.
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+WHERE d.id = ?;
+
+-- name: ListDashboards :many
+-- List every dashboard, newest-updated first, with the creator's email/name via
+-- a LEFT JOIN (NULL for dashboards whose author was deleted).
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+ORDER BY d.updated_at DESC, d.id DESC;
+
+-- name: UpdateDashboard :one
+-- Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+UPDATE dashboards
+SET name = ?,
+    description = ?,
+    panels_json = ?,
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?
+RETURNING id;
+
+-- name: DeleteDashboard :one
+-- Delete a dashboard; RETURNING lets callers detect not-found.
+DELETE FROM dashboards WHERE id = ?
+RETURNING id;
+
+-- Query history ---------------------------------------------------------------
+
+-- name: InsertQueryHistory :one
+-- Record one executed query and return its id.
+INSERT INTO query_history (user_id, team_id, source_id, query_text, query_language, duration_ms, row_count)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+RETURNING id;
+
+-- name: PruneQueryHistoryForUser :exec
+-- Delete a user's history rows beyond the newest `offset` (the per-user cap),
+-- keeping history bounded on every insert.
+DELETE FROM query_history
+WHERE id IN (
+    SELECT qh.id FROM query_history qh
+    WHERE qh.user_id = ?
+    ORDER BY qh.created_at DESC, qh.id DESC
+    LIMIT -1 OFFSET ?
+);
+
+-- name: ListQueryHistory :many
+-- List one user's recent history, newest first.
+SELECT
+    id,
+    user_id,
+    team_id,
+    source_id,
+    query_text,
+    query_language,
+    duration_ms,
+    row_count,
+    created_at
+FROM query_history
+WHERE user_id = ?
+ORDER BY created_at DESC, id DESC
+LIMIT ?;
+
+-- name: ListQueryActivity :many
+-- Most recent query_history rows across all users, newest first, enriched with
+-- the executing user's email and the source's display name. LEFT JOIN on
+-- sources so history survives a deleted source (source_name is NULL then).
+-- Backs the admin recent-activity view; the table is capped per user, so this
+-- is a recent window, not all-time analytics.
+SELECT
+    qh.*,
+    u.email AS user_email,
+    s.name AS source_name
+FROM query_history qh
+JOIN users u ON u.id = qh.user_id
+LEFT JOIN sources s ON s.id = qh.source_id
+ORDER BY qh.created_at DESC, qh.id DESC
+LIMIT ?;
+
+-- Query stats daily rollup -----------------------------------------------------
+
+-- name: IncrementQueryStats :exec
+-- Upsert one executed query into the non-pruned daily rollup: add 1 to
+-- query_count and the given duration to total_duration_ms for the composite key.
+INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
+VALUES (?, ?, ?, ?, ?, 1, ?)
+ON CONFLICT (bucket_date, user_id, team_id, source_id, query_language)
+DO UPDATE SET
+    query_count = query_count + 1,
+    total_duration_ms = total_duration_ms + excluded.total_duration_ms;
+
+-- name: TopSourcesByQueries :many
+-- Top sources by total query count over rollup rows on/after `since`, with the
+-- source display name (LEFT JOIN so a deleted source yields ''), and integer
+-- average duration (0 when count is 0).
+SELECT
+    qsd.source_id AS source_id,
+    COALESCE(s.name, '') AS source_name,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count,
+    CAST(CASE WHEN SUM(qsd.query_count) > 0
+        THEN SUM(qsd.total_duration_ms) / SUM(qsd.query_count)
+        ELSE 0 END AS INTEGER) AS avg_duration_ms
+FROM query_stats_daily qsd
+LEFT JOIN sources s ON s.id = qsd.source_id
+WHERE qsd.bucket_date >= ?
+GROUP BY qsd.source_id, s.name
+ORDER BY query_count DESC, qsd.source_id ASC
+LIMIT ?;
+
+-- name: TopUsersByQueries :many
+-- Top users by total query count over rollup rows on/after `since`, joined to
+-- users for the email.
+SELECT
+    qsd.user_id AS user_id,
+    u.email AS user_email,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
+FROM query_stats_daily qsd
+JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= ?
+GROUP BY qsd.user_id, u.email
+ORDER BY query_count DESC, qsd.user_id ASC
+LIMIT ?;
+
+-- name: QueryVolumeByDay :many
+-- Per-day total query count over rollup rows on/after `since`, ascending by day.
+SELECT
+    qsd.bucket_date AS bucket_date,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
+FROM query_stats_daily qsd
+WHERE qsd.bucket_date >= ?
+GROUP BY qsd.bucket_date
+ORDER BY qsd.bucket_date ASC;

@@ -4,8 +4,8 @@ description: Save queries to your Library and share them with teammates through 
 ---
 
 Your **Library** holds saved queries; **collections** are shared playlists for organizing
-them. Members run queries, editors change the shared query, owners manage the collection —
-but a collection never grants access to log data.
+them. Members run queries, editors change the shared query, and owners manage the
+collection, but a collection never grants access to log data.
 
 Open the Library from the sidebar. Collections sit in the left rail; selecting one shows its
 queries and members on the right.
@@ -16,20 +16,20 @@ A saved query is a named, reusable query bound to a single source. It stores the
 (LogchefQL or SQL), and optionally the time range, limit, and variables.
 
 Save one from the explorer with **Save**. The dialog asks for a name and lets you pick a
-collection in the same step (defaulting to your personal collection) — so saving and
-organizing are one action.
+collection in the same step (defaulting to your personal collection), so saving and
+organizing happen in one action.
 
 Visibility follows **source access**: anyone who can reach the query's source (through any
-team they belong to) can see and run it. Editing is more restricted — see
+team they belong to) can see and run it. Editing is more restricted; see
 [Who can edit](#who-can-edit-a-query).
 
 ## Collections
 
 A collection is a curated list of saved queries with its own members.
 
-- **Personal collection** — every user has one, created automatically. It's private and can't
+- **Personal collection**: every user has one, created automatically. It's private and can't
   be shared, renamed, or deleted. Think of it as your bookmarks.
-- **Shared collections** — anyone can create one. You become its owner and can invite
+- **Shared collections**: anyone can create one. You become its owner and can invite
   teammates. Use them for on-call runbooks, incident playbooks, or a team's go-to queries.
 
 Create a collection with **New** in the Library rail, then **Invite** teammates and pin
@@ -45,7 +45,7 @@ Shared collections have three roles:
 | **Editor** | ✓ | ✓ | — | — | — |
 | **Owner**  | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-Running and editing always also require **source access** — a role in a collection never
+Running and editing always also require **source access**: a role in a collection never
 grants access to the underlying logs. A query you can't run shows with a lock icon.
 
 ## Who can edit a query
@@ -57,7 +57,7 @@ A saved query can be edited by:
 3. an **owner or editor** of a shared collection that contains it (still requiring source access).
 
 Because a saved query is a single shared row, **editing it changes it everywhere it
-appears** — in every collection and for every viewer. To make a variant instead of changing
+appears**, in every collection and for every viewer. To make a variant instead of changing
 the shared one, save a new query rather than editing.
 
 Deleting a query is more restricted than editing: only the **creator** or a **global admin**
@@ -74,4 +74,10 @@ can delete it, since deletion removes it from every collection at once.
 **Hand a query to a teammate to maintain**
 
 Add them to a shared collection containing the query as an **Editor**. They can now open it,
-change it, and re-save — no global-admin rights needed.
+change it, and re-save without needing global-admin rights.
+
+## Next steps
+
+- Run saved queries from the terminal with the [CLI's `collections` command](/integration/cli/#collections)
+- See [Query Examples](/guide/examples) for LogchefQL patterns worth saving
+- Pin a saved query's results to a [Dashboard](/features/dashboards) panel

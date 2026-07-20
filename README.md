@@ -2,7 +2,7 @@
 
 <p align="center"><img src="LOGCHEF.svg" alt="Logchef Logo" /></p>
 
-<p align="center">A modern, single binary, high-performance log analytics platform</p>
+<p align="center">Self-hosted log analytics and log explorer for ClickHouse and VictoriaLogs — single binary, multi-datasource, open source</p>
 
 <p align="center">
   <a href="https://demo.logchef.app"><strong>Try Demo</strong></a> ·
@@ -14,20 +14,24 @@
   <img alt="Logchef Log Explorer" src="docs/public/screenshots/hero-light.png">
 </p>
 
-Logchef is a lightweight, powerful log analytics platform designed for efficient log management and analysis. It operates as a single binary, utilizing ClickHouse for high-performance log storage and querying. Logchef provides an intuitive interface for exploring log data, making it suitable for development teams seeking a robust and scalable solution.
+Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of existing log backends. It runs as a single binary and currently supports both ClickHouse and VictoriaLogs as datasource backends, providing a unified log explorer for exploration, saved queries, alerting, and access control — without reshaping how you store logs.
+
+If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/).
 
 ## Features
 
-- **Query-first log exploration**: Fast filtering with both LogchefQL and ClickHouse SQL.
-- **AI Query Assistant**: Turn natural language into SQL instantly.
+- **Query-first log exploration**: Fast filtering with LogchefQL plus native SQL or LogsQL depending on the source.
+- **Live tail**: Stream matching logs in real time from the explorer.
+- **Dashboards**: Multi-panel views (time series, stat, table) on a shared time range, with a direct-manipulation grid editor.
+- **AI Query Assistant**: Turn natural language into ClickHouse SQL instantly.
 - **Real-time alerting**: Schedule rules and send email or webhook notifications.
-- **OIDC + RBAC included**: SSO and team-based access out of the box.
-- **Schema-agnostic**: Point at any ClickHouse table without migrations.
+- **OIDC or local auth + RBAC**: SSO out of the box, or run without an external identity provider using built-in email+password authentication.
+- **Datasource-first**: Connect ClickHouse tables or VictoriaLogs instances without reshaping your storage layer.
 - **Single binary**: One executable, no runtime dependencies.
 - **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
 - **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
-- **CLI**: Query logs from your terminal with syntax highlighting and multi-context support.
+- **CLI**: Query logs from your terminal with syntax highlighting and multi-context support (query, explain, histogram, tail, doctor, and more).
 
 ## Quick Start
 
@@ -49,20 +53,24 @@ Logchef includes a powerful CLI for querying logs directly from your terminal.
 
 ### Install
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true):
+Find the latest CLI version on the [releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true), then set `CLI_VERSION` and download the build for your platform:
 
 ```bash
+# Set to the latest cli-v* tag from the releases page (e.g. cli-v0.2.0)
+CLI_VERSION=cli-vX.Y.Z
+BASE=https://github.com/mr-karan/logchef/releases/download/$CLI_VERSION
+
 # macOS (Apple Silicon)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-darwin-arm64.tar.gz
+curl -LO $BASE/logchef-darwin-arm64.tar.gz
 
 # macOS (Intel)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-darwin-amd64.tar.gz
+curl -LO $BASE/logchef-darwin-amd64.tar.gz
 
 # Linux (x86_64)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-linux-amd64.tar.gz
+curl -LO $BASE/logchef-linux-amd64.tar.gz
 
 # Linux (ARM64)
-curl -LO https://github.com/mr-karan/logchef/releases/download/cli-v0.1.1/logchef-linux-arm64.tar.gz
+curl -LO $BASE/logchef-linux-arm64.tar.gz
 
 # Extract and install
 tar -xzf logchef-*.tar.gz
@@ -76,10 +84,20 @@ sudo mv logchef /usr/local/bin/
 logchef auth --server https://logs.example.com
 
 # Query logs with LogchefQL
-logchef query "level:error" --since 1h
+logchef query 'level="error"' --since 1h
 
-# Execute raw SQL
+# See the generated SQL/LogsQL without running it
+logchef explain 'level="error"'
+
+# Counts over time (terminal bar chart)
+logchef histogram 'level="error"' --since 1h
+
+# Diagnose your setup (config, auth, server, defaults)
+logchef doctor
+
+# Execute a raw native query (SQL for ClickHouse, LogsQL for VictoriaLogs)
 logchef sql "SELECT * FROM logs.app WHERE level='error' LIMIT 10"
+logchef sql 'level:="error" | fields _time, _msg, service'
 ```
 
 For full documentation, see the [CLI Guide](https://logchef.app/integration/cli/).

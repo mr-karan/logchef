@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -36,11 +36,6 @@ var validSeverities = map[models.AlertSeverity]struct{}{
 	models.AlertSeverityInfo:     {},
 	models.AlertSeverityWarning:  {},
 	models.AlertSeverityCritical: {},
-}
-
-var validQueryTypes = map[models.AlertQueryType]struct{}{
-	models.AlertQueryTypeSQL:       {},
-	models.AlertQueryTypeCondition: {},
 }
 
 func sanitizeStringMap(in map[string]string) map[string]string {
@@ -133,54 +128,64 @@ func validateWebhookURLs(urls []string) error {
 	return nil
 }
 
-func validateAlertRequest(req *models.CreateAlertRequest) error {
-	if req.Name == "" {
+func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert) error {
+	if alert == nil {
+		return fmt.Errorf("alert payload is required")
+	}
+	if strings.TrimSpace(alert.Name) == "" {
 		return fmt.Errorf("name is required")
 	}
-	queryType := req.QueryType
-	if queryType == "" {
-		queryType = models.AlertQueryTypeSQL
+
+	queryLanguage, editorMode, err := models.ResolveAlertMetadata(alert.QueryLanguage, alert.EditorMode)
+	if err != nil {
+		return err
 	}
-	if _, ok := validQueryTypes[queryType]; !ok {
-		return fmt.Errorf("invalid query_type %q", req.QueryType)
+	if ds == nil {
+		return fmt.Errorf("datasource service is required")
 	}
-	switch queryType {
-	case models.AlertQueryTypeSQL:
-		if strings.TrimSpace(req.Query) == "" {
-			return fmt.Errorf("query is required for sql query_type")
+	if err := ds.ValidateAlertSupport(ctx, sourceID, queryLanguage, editorMode); err != nil {
+		return err
+	}
+
+	alert.QueryLanguage = queryLanguage
+	alert.EditorMode = editorMode
+	alert.Name = strings.TrimSpace(alert.Name)
+	alert.Description = strings.TrimSpace(alert.Description)
+	alert.Query = strings.TrimSpace(alert.Query)
+	alert.ConditionJSON = strings.TrimSpace(alert.ConditionJSON)
+
+	switch alert.EditorMode {
+	case models.AlertEditorModeNative:
+		if alert.Query == "" {
+			return fmt.Errorf("query is required for native alerts")
 		}
-	case models.AlertQueryTypeCondition:
-		if strings.TrimSpace(req.ConditionJSON) == "" {
-			return fmt.Errorf("condition_json is required for condition query_type")
+	case models.AlertEditorModeCondition:
+		if alert.ConditionJSON == "" {
+			return fmt.Errorf("condition_json is required for condition alerts")
+		}
+		if alert.Query == "" {
+			return fmt.Errorf("query is required for condition alerts")
 		}
 	}
-	if _, ok := validOperators[req.ThresholdOperator]; !ok {
-		return fmt.Errorf("invalid threshold_operator %q", req.ThresholdOperator)
+	if _, ok := validOperators[alert.ThresholdOperator]; !ok {
+		return fmt.Errorf("invalid threshold_operator %q", alert.ThresholdOperator)
 	}
-	if req.FrequencySeconds <= 0 {
+	if alert.FrequencySeconds <= 0 {
 		return fmt.Errorf("frequency_seconds must be greater than zero")
 	}
-	if req.LookbackSeconds <= 0 {
+	if alert.LookbackSeconds <= 0 {
 		return fmt.Errorf("lookback_seconds must be greater than zero")
 	}
-	if _, ok := validSeverities[req.Severity]; !ok {
-		return fmt.Errorf("invalid severity %q", req.Severity)
+	if _, ok := validSeverities[alert.Severity]; !ok {
+		return fmt.Errorf("invalid severity %q", alert.Severity)
 	}
 	return nil
 }
 
 // CreateAlert creates a new alert rule for the specified source, owned by createdBy.
-func CreateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
+func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdBy models.UserID, req *models.CreateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
-	}
-	if err := validateAlertRequest(req); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
-	}
-
-	queryType := req.QueryType
-	if queryType == "" {
-		queryType = models.AlertQueryTypeSQL
 	}
 	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
 	if err := validateRecipientUserIDs(ctx, db, recipientUserIDs); err != nil {
@@ -193,11 +198,12 @@ func CreateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, sourc
 	owner := createdBy
 	alert := &models.Alert{
 		SourceID:          sourceID,
-		Name:              strings.TrimSpace(req.Name),
-		Description:       strings.TrimSpace(req.Description),
-		QueryType:         queryType,
-		Query:             strings.TrimSpace(req.Query),
-		ConditionJSON:     strings.TrimSpace(req.ConditionJSON),
+		Name:              req.Name,
+		Description:       req.Description,
+		QueryLanguage:     req.QueryLanguage,
+		EditorMode:        req.EditorMode,
+		Query:             req.Query,
+		ConditionJSON:     req.ConditionJSON,
 		LookbackSeconds:   req.LookbackSeconds,
 		ThresholdOperator: req.ThresholdOperator,
 		ThresholdValue:    req.ThresholdValue,
@@ -210,6 +216,9 @@ func CreateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, sourc
 		GeneratorURL:      strings.TrimSpace(req.GeneratorURL),
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
+	}
+	if err := validateAlertModel(ctx, ds, sourceID, alert); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
 
 	if err := db.CreateAlert(ctx, alert); err != nil {
@@ -234,7 +243,7 @@ func GetAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID 
 }
 
 // UpdateAlert updates an existing alert rule.
-func UpdateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
+func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, alertID models.AlertID, req *models.UpdateAlertRequest) (*models.Alert, error) {
 	if req == nil {
 		return nil, ErrInvalidAlertConfiguration
 	}
@@ -261,6 +270,9 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alert
 			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 		}
 	}
+	if err := validateAlertModel(ctx, ds, existing.SourceID, existing); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
 		if models.IsNotFound(err) {
@@ -280,10 +292,10 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alert
 
 func applyAlertUpdates(alert *models.Alert, req *models.UpdateAlertRequest) error {
 	if req.Name != nil {
-		alert.Name = strings.TrimSpace(*req.Name)
+		alert.Name = *req.Name
 	}
 	if req.Description != nil {
-		alert.Description = strings.TrimSpace(*req.Description)
+		alert.Description = *req.Description
 	}
 
 	if err := applyQueryTypeUpdate(alert, req); err != nil {
@@ -298,30 +310,17 @@ func applyAlertUpdates(alert *models.Alert, req *models.UpdateAlertRequest) erro
 }
 
 func applyQueryTypeUpdate(alert *models.Alert, req *models.UpdateAlertRequest) error {
-	if req.QueryType != nil {
-		if _, ok := validQueryTypes[*req.QueryType]; !ok {
-			return fmt.Errorf("%w: invalid query_type %q", ErrInvalidAlertConfiguration, *req.QueryType)
-		}
-		alert.QueryType = *req.QueryType
+	if req.QueryLanguage != nil {
+		alert.QueryLanguage = *req.QueryLanguage
+	}
+	if req.EditorMode != nil {
+		alert.EditorMode = *req.EditorMode
 	}
 	if req.Query != nil {
-		if alert.QueryType == models.AlertQueryTypeSQL && strings.TrimSpace(*req.Query) == "" {
-			return fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
-		}
-		alert.Query = strings.TrimSpace(*req.Query)
+		alert.Query = *req.Query
 	}
 	if req.ConditionJSON != nil {
-		if alert.QueryType == models.AlertQueryTypeCondition && strings.TrimSpace(*req.ConditionJSON) == "" {
-			return fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
-		}
-		alert.ConditionJSON = strings.TrimSpace(*req.ConditionJSON)
-	}
-
-	if alert.QueryType == models.AlertQueryTypeSQL && alert.Query == "" {
-		return fmt.Errorf("%w: query is required for sql query_type", ErrInvalidAlertConfiguration)
-	}
-	if alert.QueryType == models.AlertQueryTypeCondition && alert.ConditionJSON == "" {
-		return fmt.Errorf("%w: condition_json is required for condition query_type", ErrInvalidAlertConfiguration)
+		alert.ConditionJSON = *req.ConditionJSON
 	}
 	return nil
 }
@@ -453,20 +452,9 @@ func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, aler
 }
 
 // TestAlertQuery executes a test query to validate alert configuration and show performance metrics.
-func TestAlertQuery(ctx context.Context, db store.StoreOps, ch *clickhouse.Manager, log *slog.Logger, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
+func TestAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
-	}
-	queryType := req.QueryType
-	if queryType == "" {
-		queryType = models.AlertQueryTypeSQL
-	}
-	if _, ok := validQueryTypes[queryType]; !ok {
-		return nil, fmt.Errorf("invalid query_type %q", req.QueryType)
-	}
-	query := strings.TrimSpace(req.Query)
-	if query == "" {
-		return nil, fmt.Errorf("query is required")
 	}
 	if req.LookbackSeconds == 0 {
 		req.LookbackSeconds = 300
@@ -475,49 +463,69 @@ func TestAlertQuery(ctx context.Context, db store.StoreOps, ch *clickhouse.Manag
 		return nil, fmt.Errorf("lookback_seconds must be greater than zero")
 	}
 
+	if ds == nil {
+		return nil, fmt.Errorf("datasource service is required")
+	}
+
 	// Load source to verify access
-	_, err := db.GetSource(ctx, sourceID)
-	if err != nil {
+	if _, err := db.GetSource(ctx, sourceID); err != nil {
 		if models.IsNotFound(err) {
 			return nil, fmt.Errorf("source not found")
 		}
 		return nil, fmt.Errorf("failed to load source: %w", err)
 	}
 
-	// Get ClickHouse connection
-	client, err := ch.GetConnection(sourceID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to obtain ClickHouse connection: %w", err)
+	tempAlert := &models.Alert{
+		SourceID:          sourceID,
+		Name:              "test-alert",
+		QueryLanguage:     req.QueryLanguage,
+		EditorMode:        req.EditorMode,
+		Query:             req.Query,
+		ConditionJSON:     req.ConditionJSON,
+		LookbackSeconds:   req.LookbackSeconds,
+		ThresholdOperator: req.ThresholdOperator,
+		ThresholdValue:    req.ThresholdValue,
+		FrequencySeconds:  60,
+		Severity:          models.AlertSeverityWarning,
+	}
+	if err := validateAlertModel(ctx, ds, sourceID, tempAlert); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
 	}
 
 	// Execute query with timing
 	timeout := models.DefaultQueryTimeoutSeconds
 	startTime := time.Now()
-	result, err := client.QueryWithTimeout(ctx, query, &timeout)
+	result, err := ds.EvaluateAlert(ctx, sourceID, datasource.AlertQueryRequest{
+		Language:        tempAlert.QueryLanguage,
+		Query:           tempAlert.Query,
+		LookbackSeconds: tempAlert.LookbackSeconds,
+		QueryTimeout:    &timeout,
+	})
 	executionTime := time.Since(startTime)
 
 	if err != nil {
 		return nil, fmt.Errorf("query execution failed: %w", err)
 	}
 
-	// Extract numeric value from result (handle no rows gracefully)
+	// Extract numeric value from result. No matching rows is not an error —
+	// ExtractFirstNumeric returns (0, nil) for an empty result — so check the
+	// row count independently and surface a warning, otherwise the user can't
+	// tell "waiting for data" from a real zero. An extraction failure on a
+	// non-empty result is still a genuine error.
 	value, err := util.ExtractFirstNumeric(result)
 	var warnings []string
-	if err != nil {
-		// If no rows returned, allow test to succeed with value=0 and a warning
-		if len(result.Logs) == 0 {
-			warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
-			value = 0
-		} else {
-			return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
-		}
+	if len(result.Logs) == 0 {
+		warnings = append(warnings, "Query returned no rows. The alert will be evaluated when matching data exists. Using value 0 for threshold comparison.")
+		value = 0
+	} else if err != nil {
+		return nil, fmt.Errorf("failed to extract numeric value from result: %w", err)
 	}
 
 	// Check if threshold would be met
 	thresholdMet := compareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 
 	// Generate additional warnings
-	warnings = append(warnings, generateQueryWarnings(query, executionTime, result)...)
+	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result)...)
 
 	return &models.TestAlertQueryResponse{
 		Value:           value,

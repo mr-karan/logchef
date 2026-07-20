@@ -1,0 +1,418 @@
+---
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = (await getCollection('blog')).sort(
+    (a, b) => b.data.pubDate.valueOf() - a.data.pubDate.valueOf()
+  );
+  return posts.map((post, index) => ({
+    params: { slug: post.id },
+    props: {
+      post,
+      // Sorted newest-first, so "newer" is the previous index.
+      newer: posts[index - 1] ?? null,
+      older: posts[index + 1] ?? null,
+    },
+  }));
+}
+
+const { post, newer, older } = Astro.props;
+const { Content } = await render(post);
+
+const dateFormatter = new Intl.DateTimeFormat('en-US', {
+  year: 'numeric',
+  month: 'long',
+  day: 'numeric',
+  timeZone: 'UTC',
+});
+
+// Rough reading time from the raw markdown body (~200 wpm).
+const wordCount = post.body?.split(/\s+/).filter(Boolean).length ?? 0;
+const readingTime = Math.max(1, Math.round(wordCount / 200));
+
+// Author monogram for the byline avatar.
+const initials = post.data.author
+  .split(/\s+/)
+  .map((w) => w[0])
+  .slice(0, 2)
+  .join('')
+  .toUpperCase();
+
+const canonicalUrl = new URL(`/blog/${post.id}/`, Astro.site).toString();
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'BlogPosting',
+  headline: post.data.title,
+  description: post.data.description,
+  datePublished: post.data.pubDate.toISOString(),
+  author: {
+    '@type': 'Organization',
+    name: post.data.author,
+  },
+  mainEntityOfPage: {
+    '@type': 'WebPage',
+    '@id': canonicalUrl,
+  },
+  url: canonicalUrl,
+};
+---
+
+<BaseLayout
+  title={`${post.data.title} — Logchef Blog`}
+  description={post.data.description}
+  activeNav="blog"
+>
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+
+  <style>
+    /* ---- Layout & reading measure ---- */
+    .article-wrap { position: relative; overflow: clip; }
+    .article-wrap::before {
+      content: "";
+      position: absolute;
+      top: 0; left: 50%;
+      width: min(1100px, 120vw);
+      height: 460px;
+      transform: translateX(-50%);
+      background:
+        radial-gradient(circle at 30% 0%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 60%),
+        radial-gradient(circle at 75% 10%, color-mix(in srgb, var(--color-purple) 12%, transparent), transparent 55%);
+      opacity: 0.7;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    main {
+      position: relative;
+      z-index: 1;
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 6.5rem 1.5rem 5rem;
+    }
+
+    /* ---- Breadcrumb / back ---- */
+    .crumb {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      font-family: var(--font-mono); font-size: 0.78rem;
+      letter-spacing: 0.02em; color: var(--color-text-dim);
+      margin-bottom: 2rem; transition: color 0.15s ease;
+    }
+    .crumb svg { width: 14px; height: 14px; }
+    .crumb:hover { color: var(--color-accent); text-decoration: none; }
+
+    /* ---- Article header ---- */
+    .post-header { margin-bottom: 3.5rem; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      font-family: var(--font-mono); font-size: 0.72rem;
+      text-transform: uppercase; letter-spacing: 0.12em;
+      color: var(--color-accent); margin-bottom: 1.25rem;
+    }
+    .eyebrow::before {
+      content: ""; width: 18px; height: 1px;
+      background: currentColor; opacity: 0.6;
+    }
+    .post-header h1 {
+      font-size: clamp(2rem, 5vw, 2.85rem);
+      font-weight: 700; letter-spacing: -0.033em; line-height: 1.12;
+      color: var(--color-text); margin-bottom: 1.1rem;
+      text-wrap: balance;
+    }
+    .standfirst {
+      font-size: 1.2rem; line-height: 1.6;
+      color: var(--color-text-secondary);
+      max-width: 40ch; margin-bottom: 2rem;
+      text-wrap: pretty;
+    }
+
+    /* ---- Byline ---- */
+    .byline {
+      display: flex; align-items: center; gap: 0.85rem;
+      padding-top: 1.5rem; border-top: 1px solid var(--color-border);
+    }
+    .avatar {
+      flex-shrink: 0;
+      width: 40px; height: 40px; border-radius: 50%;
+      display: grid; place-items: center;
+      font-family: var(--font-mono); font-size: 0.8rem; font-weight: 500;
+      color: var(--color-accent);
+      background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+      border: 1px solid color-mix(in srgb, var(--color-accent) 25%, transparent);
+    }
+    .byline-meta { display: flex; flex-direction: column; gap: 0.15rem; }
+    .byline-author { font-size: 0.9rem; font-weight: 600; color: var(--color-text); }
+    .byline-sub {
+      font-family: var(--font-mono); font-size: 0.76rem;
+      color: var(--color-text-dim); display: flex; align-items: center; gap: 0.5rem;
+    }
+    .byline-sub .dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
+
+    /* ---- Prose ----
+       NOTE: <Content /> renders the post markdown, whose elements do NOT carry
+       this component's scope hash. So every DESCENDANT selector must be wrapped
+       in :global() to actually reach the rendered h2/p/li/etc. The .prose
+       container itself keeps the scope hash (it's authored in this template). */
+    .prose {
+      color: color-mix(in srgb, var(--color-text) 88%, var(--color-text-secondary));
+      font-size: 1.075rem; line-height: 1.78;
+    }
+    /* Baseline inter-block rhythm (paragraph-to-paragraph, block-to-block). */
+    .prose > :global(* + *) { margin-top: 1.6rem; }
+    .prose :global(p) { text-wrap: pretty; }
+
+    /* Section headings: generous space ABOVE (clear section break), tight
+       space BELOW so the heading reads as belonging to its first paragraph. */
+    .prose :global(h2) {
+      font-size: 1.7rem; font-weight: 650; letter-spacing: -0.022em; line-height: 1.2;
+      color: var(--color-text);
+      margin-top: 3.75rem; margin-bottom: 0;
+      scroll-margin-top: 5rem;
+    }
+    .prose :global(h2 + *) { margin-top: 1rem; }
+    .prose :global(h3) {
+      font-size: 1.25rem; font-weight: 600; letter-spacing: -0.012em; line-height: 1.3;
+      color: var(--color-text);
+      margin-top: 2.75rem; margin-bottom: 0; scroll-margin-top: 5rem;
+    }
+    .prose :global(h3 + *) { margin-top: 0.7rem; }
+
+    .prose :global(strong) { color: var(--color-text); font-weight: 600; }
+    .prose :global(em) { color: var(--color-text); }
+
+    .prose :global(a) {
+      color: var(--color-accent); font-weight: 500;
+      text-decoration: underline;
+      text-decoration-color: color-mix(in srgb, var(--color-accent) 40%, transparent);
+      text-underline-offset: 0.2em; text-decoration-thickness: 1px;
+      transition: text-decoration-color 0.15s ease;
+    }
+    .prose :global(a:hover) { text-decoration-color: currentColor; }
+
+    /* Lists */
+    .prose :global(ul), .prose :global(ol) { padding-left: 1.4rem; }
+    .prose :global(li) { margin-top: 0.5rem; padding-left: 0.3rem; }
+    .prose :global(li::marker) { color: var(--color-accent); }
+    .prose :global(ul) { list-style: none; padding-left: 0; }
+    .prose :global(ul > li) {
+      position: relative; padding-left: 1.5rem;
+    }
+    .prose :global(ul > li::before) {
+      content: ""; position: absolute; left: 0.15rem; top: 0.72em;
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--color-accent); opacity: 0.7;
+    }
+    .prose :global(li > ul), .prose :global(li > ol) { margin-top: 0.5rem; }
+
+    /* Inline code */
+    .prose :global(:not(pre) > code) {
+      font-family: var(--font-mono); font-size: 0.86em;
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      padding: 0.12em 0.4em; border-radius: 5px;
+      color: var(--color-accent);
+      word-break: break-word;
+    }
+
+    /* Code blocks (expressive-code renders these; just space + frame them) */
+    .prose :global(.expressive-code) { margin-top: 1.6rem; margin-bottom: 1.6rem; }
+    .prose :global(pre) {
+      margin: 0; padding: 1.15rem 1.25rem; border-radius: 10px; overflow-x: auto;
+      border: 1px solid var(--color-border);
+      font-size: 0.86rem; line-height: 1.65;
+      background: var(--color-surface);
+    }
+    .prose :global(pre code) { background: none; border: none; padding: 0; color: inherit; font-size: 1em; }
+
+    /* Blockquote */
+    .prose :global(blockquote) {
+      border-left: 3px solid var(--color-accent);
+      padding: 0.4rem 0 0.4rem 1.25rem;
+      color: var(--color-text-secondary); font-style: italic;
+      background: linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 5%, transparent), transparent);
+    }
+    .prose :global(blockquote p) { margin-top: 0; }
+
+    /* Tables — scrollable on narrow screens */
+    .prose :global(table) {
+      display: block; width: 100%; max-width: 100%; overflow-x: auto;
+      border-collapse: collapse; font-size: 0.92rem;
+      border: 1px solid var(--color-border); border-radius: 10px;
+    }
+    .prose :global(thead) { background: var(--color-surface); }
+    .prose :global(th), .prose :global(td) {
+      text-align: left; padding: 0.6rem 0.9rem; white-space: nowrap;
+      border-bottom: 1px solid var(--color-border);
+    }
+    .prose :global(th) { color: var(--color-text); font-weight: 600; font-size: 0.82rem;
+      text-transform: uppercase; letter-spacing: 0.04em; }
+    .prose :global(td) { color: var(--color-text-secondary); }
+    .prose :global(tbody tr:last-child td) { border-bottom: none; }
+    .prose :global(td code), .prose :global(th code) { white-space: nowrap; }
+
+    /* Rule */
+    .prose :global(hr) {
+      border: none; height: 1px; margin: 2.75rem 0;
+      background: linear-gradient(90deg, transparent, var(--color-border) 20%, var(--color-border) 80%, transparent);
+    }
+
+    /* Images */
+    .prose :global(img) {
+      max-width: 100%; height: auto; border-radius: 12px;
+      border: 1px solid var(--color-border); margin-top: 1.6rem;
+    }
+
+    /* ---- Article footer ---- */
+    .post-footer { margin-top: 4rem; padding-top: 2rem; border-top: 1px solid var(--color-border); }
+
+    .post-tags { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-bottom: 2.5rem; }
+    .post-tags a {
+      font-family: var(--font-mono); font-size: 0.72rem;
+      letter-spacing: 0.02em;
+      padding: 0.3rem 0.65rem; border-radius: 6px;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      color: var(--color-text-secondary); transition: all 0.15s ease;
+    }
+    .post-tags a::before { content: "#"; color: var(--color-text-dim); margin-right: 0.15rem; }
+    .post-tags a:hover { color: var(--color-text); border-color: var(--color-text-dim); text-decoration: none; }
+
+    /* Prev / next */
+    .post-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2.5rem; }
+    .nav-card {
+      display: flex; flex-direction: column; gap: 0.4rem;
+      padding: 1.1rem 1.25rem; border-radius: 12px;
+      border: 1px solid var(--color-border); background: var(--color-surface);
+      transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+      color: inherit;
+    }
+    .nav-card:hover {
+      text-decoration: none; transform: translateY(-2px);
+      border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
+      background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface));
+    }
+    .nav-card.is-next { text-align: right; align-items: flex-end; }
+    .nav-card .label {
+      font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase;
+      letter-spacing: 0.08em; color: var(--color-text-dim);
+      display: flex; align-items: center; gap: 0.4rem;
+    }
+    .nav-card .label svg { width: 13px; height: 13px; }
+    .nav-card .nav-title {
+      font-size: 0.95rem; font-weight: 600; color: var(--color-text); line-height: 1.35;
+    }
+    .nav-card.placeholder { visibility: hidden; }
+
+    /* CTA */
+    .post-cta {
+      position: relative; overflow: hidden;
+      border-radius: 16px; padding: 2rem;
+      border: 1px solid var(--color-border);
+      background:
+        radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 55%),
+        radial-gradient(circle at 90% 120%, color-mix(in srgb, var(--color-purple) 12%, transparent), transparent 50%),
+        var(--color-surface);
+    }
+    .post-cta h3 { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
+    .post-cta p { color: var(--color-text-secondary); font-size: 0.95rem; margin-bottom: 1.25rem; max-width: 46ch; }
+    .cta-actions { display: flex; flex-wrap: wrap; gap: 0.75rem; }
+    .cta-btn {
+      display: inline-flex; align-items: center; gap: 0.45rem;
+      font-size: 0.875rem; font-weight: 500;
+      padding: 0.6rem 1.2rem; border-radius: 8px;
+      border: 1px solid transparent; transition: all 0.15s ease;
+    }
+    .cta-btn svg { width: 16px; height: 16px; }
+    .cta-btn.primary { background: var(--color-accent); color: #fff; }
+    .cta-btn.primary:hover { background: var(--color-accent-hover); text-decoration: none; }
+    .cta-btn.ghost { background: transparent; color: var(--color-text); border-color: var(--color-border); }
+    .cta-btn.ghost:hover { border-color: var(--color-text-dim); background: color-mix(in srgb, var(--color-bg) 40%, transparent); text-decoration: none; }
+
+    @media (max-width: 640px) {
+      main { padding-top: 5.5rem; }
+      .standfirst { font-size: 1.08rem; }
+      .post-nav { grid-template-columns: 1fr; }
+      .nav-card.is-next { text-align: left; align-items: flex-start; }
+      .nav-card.placeholder { display: none; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .nav-card, .cta-btn { transition: none; }
+    }
+  </style>
+
+  <div class="article-wrap">
+    <main>
+      <a href="/blog/" class="crumb">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M19 12H5M12 19l-7-7 7-7"/>
+        </svg>
+        The Logchef Blog
+      </a>
+
+      <header class="post-header">
+        {post.data.tags.length > 0 && <div class="eyebrow">{post.data.tags[0]}</div>}
+        <h1>{post.data.title}</h1>
+        <p class="standfirst">{post.data.description}</p>
+
+        <div class="byline">
+          <div class="avatar" aria-hidden="true">{initials}</div>
+          <div class="byline-meta">
+            <span class="byline-author">{post.data.author}</span>
+            <span class="byline-sub">
+              <time datetime={post.data.pubDate.toISOString()}>{dateFormatter.format(post.data.pubDate)}</time>
+              <span class="dot"></span>
+              <span>{readingTime} min read</span>
+            </span>
+          </div>
+        </div>
+      </header>
+
+      <article class="prose">
+        <Content />
+      </article>
+
+      <div class="post-footer">
+        {post.data.tags.length > 0 && (
+          <div class="post-tags">
+            {post.data.tags.map((tag) => <a href="/blog/">{tag}</a>)}
+          </div>
+        )}
+
+        <div class="post-nav" role="navigation" aria-label="More posts">
+          {older ? (
+            <a class="nav-card" href={`/blog/${older.id}/`}>
+              <span class="label">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
+                Older
+              </span>
+              <span class="nav-title">{older.data.title}</span>
+            </a>
+          ) : <span class="nav-card placeholder" aria-hidden="true"></span>}
+
+          {newer ? (
+            <a class="nav-card is-next" href={`/blog/${newer.id}/`}>
+              <span class="label">
+                Newer
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+              </span>
+              <span class="nav-title">{newer.data.title}</span>
+            </a>
+          ) : <span class="nav-card placeholder" aria-hidden="true"></span>}
+        </div>
+
+        <div class="post-cta">
+          <h3>Query your own logs with Logchef</h3>
+          <p>Open-source, self-hosted log exploration and alerting for ClickHouse and VictoriaLogs. One binary, no per-seat pricing.</p>
+          <div class="cta-actions">
+            <a class="cta-btn primary" href="https://demo.logchef.app" target="_blank" rel="noopener">
+              Try the live demo
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </a>
+            <a class="cta-btn ghost" href="/getting-started/quickstart">Read the docs</a>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+</BaseLayout>

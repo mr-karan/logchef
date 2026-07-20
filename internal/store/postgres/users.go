@@ -3,10 +3,18 @@ package postgres
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+// normalizeEmail lowercases and trims an email address so that storage and
+// lookup are case-insensitive (#95). Uses Go's Unicode-aware ToLower, matching
+// the normalization applied to existing rows by migration 000005.
+func normalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
+}
 
 func userToModel(r sqlc.User) *models.User {
 	return &models.User{
@@ -18,6 +26,7 @@ func userToModel(r sqlc.User) *models.User {
 		AccountType:  models.UserAccountType(r.AccountType),
 		LastLoginAt:  tsPtr(r.LastLoginAt),
 		LastActiveAt: tsPtr(r.LastActiveAt),
+		PasswordHash: r.PasswordHash.String,
 		Managed:      r.Managed,
 		Timestamps: models.Timestamps{
 			CreatedAt: r.CreatedAt.Time,
@@ -29,6 +38,7 @@ func userToModel(r sqlc.User) *models.User {
 // CreateUser inserts a new user, defaulting status/account_type, and populates
 // the model's ID and timestamps on success.
 func (s *Store) CreateUser(ctx context.Context, user *models.User) error {
+	user.Email = normalizeEmail(user.Email)
 	if user.Status == "" {
 		user.Status = models.UserStatusActive
 	}
@@ -74,6 +84,7 @@ func (s *Store) GetUser(ctx context.Context, id models.UserID) (*models.User, er
 
 // GetUserByEmail retrieves a user by email. Returns models.ErrUserNotFound if absent.
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
+	email = normalizeEmail(email)
 	row, err := s.q.GetUserByEmail(ctx, email)
 	if err != nil {
 		if notFound(err) {
@@ -154,6 +165,17 @@ func (s *Store) DeleteUser(ctx context.Context, id models.UserID) error {
 	if err := s.q.DeleteUser(ctx, int64(id)); err != nil {
 		s.log.Error("failed to delete user record from db", "error", err, "user_id", id)
 		return fmt.Errorf("failed to delete user: %w", err)
+	}
+	return nil
+}
+
+// SetUserPasswordHash stores (or clears, with "") the local-auth bcrypt hash.
+func (s *Store) SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error {
+	if err := s.q.SetUserPasswordHash(ctx, sqlc.SetUserPasswordHashParams{
+		PasswordHash: text(hash),
+		ID:           int64(id),
+	}); err != nil {
+		return fmt.Errorf("error setting user password hash: %w", err)
 	}
 	return nil
 }

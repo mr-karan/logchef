@@ -1,28 +1,26 @@
 ---
 title: Documentation
-description: LogChef documentation - setup, configuration, and usage guides
+description: Logchef is a fast, lightweight log analytics platform for ClickHouse and VictoriaLogs. Browse setup, configuration, and usage guides.
 ---
 
 import { Card, CardGrid, LinkCard } from "@astrojs/starlight/components";
 
-# LogChef Documentation
-
-Welcome to the LogChef documentation. Get started with the guides below.
+This is the Logchef documentation. Start with the guides below.
 
 <CardGrid>
   <LinkCard
     title="Quick Start"
-    description="Get LogChef running in under 5 minutes"
+    description="Get Logchef running in under 5 minutes"
     href="/getting-started/quickstart"
   />
   <LinkCard
     title="Architecture"
-    description="Understand how LogChef works"
+    description="Understand how Logchef works"
     href="/core/architecture"
   />
   <LinkCard
     title="Configuration"
-    description="Configure LogChef for your environment"
+    description="Configure Logchef for your environment"
     href="/getting-started/configuration"
   />
   <LinkCard
@@ -34,8 +32,10 @@ Welcome to the LogChef documentation. Get started with the guides below.
 
 ## Popular Topics
 
-- [AI SQL Generation](/features/ai-sql-generation) — Ask questions in plain English
-- [Field Sidebar](/features/field-sidebar) — Visual field discovery and filtering
-- [Alerting](/features/alerting) — Set up real-time log alerts
-- [CLI](/integration/cli) — Query logs from your terminal
-- [MCP Server](/integration/mcp-server) — Integrate with Claude and other AI assistants
+- [Using VictoriaLogs with Logchef](/tutorials/victorialogs): connect a VictoriaLogs datasource
+- [Dashboards](/features/dashboards): multi-panel views with a shared time range
+- [AI SQL Generation](/features/ai-sql-generation): ask questions in plain English
+- [Field Sidebar](/features/field-sidebar): visual field discovery and filtering
+- [Alerting](/features/alerting): set up real-time log alerts
+- [CLI](/integration/cli): query logs from your terminal
+- [MCP Server](/integration/mcp-server): integrate with Claude and other AI assistants

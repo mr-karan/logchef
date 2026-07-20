@@ -17,7 +17,7 @@ type LogQueryParams struct {
 	DefaultLimit     int
 	MaxLimit         int
 	MaxResponseBytes int
-	RawSQL           string
+	QueryText        string
 	// Query execution timeout in seconds. If not specified, uses default timeout.
 	QueryTimeout *int
 }

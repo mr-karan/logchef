@@ -16,6 +16,9 @@ import {
 } from '@tanstack/vue-table'
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
+import type { Source } from '@/api/sources'
+import { hasSourceCapability } from '@/lib/queryMetadata'
+import { isPrimaryMessageField } from './fieldSemantics'
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
@@ -24,6 +27,7 @@ interface Props {
   isLoading?: boolean
   sourceId?: string | number
   teamId?: string | number
+  source?: Pick<Source, 'source_type' | 'capabilities'> | null
   timestampField?: string
   severityField?: string
   timezone?: 'local' | 'utc'
@@ -204,12 +208,17 @@ const formatLogfmtValue = (value: any): string => {
 // Build message from log entry in logfmt format (returns raw text for tooltips/matching)
 const buildMessage = (row: Record<string, any>) => {
   // Try common message fields first
-  const messageFields = ['message', 'msg', 'log', 'text', 'body']
   let primaryMessage = ''
+  let primaryMessageField: string | null = null
   
-  for (const field of messageFields) {
+  for (const field of Object.keys(row)) {
+    if (!isPrimaryMessageField(field)) {
+      continue
+    }
+
     if (row[field] && typeof row[field] === 'string') {
       primaryMessage = row[field]
+      primaryMessageField = field
       break
     }
   }
@@ -220,7 +229,7 @@ const buildMessage = (row: Record<string, any>) => {
     .filter(([key, value]) => {
       // Skip timestamp/severity and already used message field
       if (skipFields.has(key)) return false
-      if (primaryMessage && messageFields.includes(key)) return false
+      if (primaryMessageField && key === primaryMessageField) return false
       return value !== null && value !== undefined
     })
     .map(([key, value]) => `${key}=${formatLogfmtValue(value)}`)
@@ -342,12 +351,17 @@ const highlightLogfmt = (text: string) => {
   )
 }
 
-// Pre-computed rows for performance - compact mode should render the full
-// filtered dataset as a scrollable log stream, not the current page only.
+// Pre-computed rows for performance - only the current page is rendered.
+// At high row counts (the limit picker allows up to 100k) building
+// buildMessage()/highlightLogfmt()/v-html for the *entire* filtered dataset
+// in one synchronous computed freezes/crashes the tab. Rendering just the
+// paginated row model (same approach as the full DataTable, see
+// data-table.vue's `table.getRowModel().rows` usage) keeps this bounded to
+// one page (~100 rows) regardless of result size.
 const renderedRows = computed(() => {
-  const filteredRows = table.getFilteredRowModel().rows
-  
-  return filteredRows.map((tableRow) => {
+  const pagedRows = table.getRowModel().rows
+
+  return pagedRows.map((tableRow) => {
     const row = tableRow.original
     const ts = formatTimestamp(row[props.timestampField])
     const sev = row[props.severityField] || ''
@@ -371,7 +385,9 @@ const renderedRows = computed(() => {
 // Handle row click interactions
 const expandedRowId = ref<string | null>(null)
 
-// Context modal state
+// Context modal state (only for sources advertising the log_context capability;
+// the backend 400s otherwise, e.g. VictoriaLogs)
+const supportsLogContext = computed(() => hasSourceCapability(props.source, 'log_context'))
 const showContextModal = ref(false)
 const contextLog = ref<Record<string, any> | null>(null)
 
@@ -408,7 +424,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       :stats="stats"
       :is-loading="isLoading"
       :show-column-selector="false"
-      :show-pagination="false"
+      :show-pagination="true"
       @update:timezone="displayTimezone = $event"
       @update:globalFilter="globalFilter = $event"
     />
@@ -450,7 +466,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
               :title="expandedRowId === row.id ? '' : row.rawMessage"
             ></span>
             <!-- Show Context button when expanded -->
-            <div v-if="expandedRowId === row.id" class="flex items-center gap-2 mt-1">
+            <div v-if="expandedRowId === row.id && supportsLogContext" class="flex items-center gap-2 mt-1">
               <Button 
                 variant="outline" 
                 size="sm" 

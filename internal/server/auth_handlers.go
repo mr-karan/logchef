@@ -98,6 +98,30 @@ func secureCompare(a, b string) bool {
 	return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1
 }
 
+// defaultPostLoginPath is where users land after a successful login when no
+// (valid) redirect path was requested.
+const defaultPostLoginPath = "/logs/explore"
+
+// isSafeLocalPath reports whether path is a safe same-origin redirect target.
+// A safe path is a local absolute path: it starts with exactly one '/', is not
+// protocol-relative ("//host" or the backslash variant "/\host" that browsers
+// normalize to "//host"), and carries no scheme ("://"). This blocks open
+// redirects where an attacker-supplied path escapes to an external origin —
+// critical because redirectToFrontend collapses an empty frontend_url to "",
+// making a "//evil.example" path a fully-qualified protocol-relative URL.
+func isSafeLocalPath(path string) bool {
+	if path == "" || path[0] != '/' {
+		return false
+	}
+	if strings.HasPrefix(path, "//") || strings.HasPrefix(path, "/\\") {
+		return false
+	}
+	if strings.Contains(path, "://") {
+		return false
+	}
+	return true
+}
+
 // redirectToFrontend redirects the user's browser to the configured frontend URL,
 // optionally appending an error code as a query parameter if an error occurred.
 func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error {
@@ -108,10 +132,12 @@ func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error 
 
 	// Ensure the base URL doesn't end with a slash and the path starts with one.
 	targetURL = strings.TrimSuffix(targetURL, "/")
-	if path == "" {
-		path = "/" // Default path if none provided.
-	} else if !strings.HasPrefix(path, "/") {
-		path = "/" + path
+	// Validate the path server-side before it becomes the redirect target. Any
+	// path that is not a safe local path (empty, relative, protocol-relative,
+	// or scheme-bearing) falls back to root so a crafted "//evil.example" can
+	// never be emitted as the Location header.
+	if !isSafeLocalPath(path) {
+		path = "/"
 	}
 
 	finalURL := targetURL + path
@@ -177,8 +203,10 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 		Path:     "/",
 	})
 
-	// Persist the requested redirect path through the OIDC round-trip.
-	if redirectPath := c.Query("redirect", ""); redirectPath != "" {
+	// Persist the requested redirect path through the OIDC round-trip. Only
+	// safe local paths are stored; anything protocol-relative or scheme-bearing
+	// is dropped so the callback falls back to the default landing page.
+	if redirectPath := c.Query("redirect", ""); isSafeLocalPath(redirectPath) {
 		c.Cookie(&fiber.Cookie{
 			Name:     "logchef_redirect",
 			Value:    redirectPath,
@@ -255,9 +283,11 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	})
 
 	// Redirect back to the frontend, restoring the path requested before login.
+	// Re-validate the cookie value (defense in depth): a tampered or unsafe
+	// path falls back to the default landing page instead of being trusted.
 	redirectPath := c.Cookies("logchef_redirect")
-	if redirectPath == "" {
-		redirectPath = "/logs/explore"
+	if !isSafeLocalPath(redirectPath) {
+		redirectPath = defaultPostLoginPath
 	}
 	// Clear the redirect cookie
 	c.Cookie(&fiber.Cookie{Name: "logchef_redirect", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: "/"})
@@ -408,4 +438,71 @@ func (s *Server) handleGetCurrentUser(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)
+}
+
+// localLoginLimiter guards the local login endpoint against brute force:
+// 10 attempts/min per IP, 5 attempts/min per email.
+var localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
+
+// handleLocalLogin authenticates a user with email+password (local auth).
+// Failures are indistinguishable (unknown email, wrong password, inactive,
+// service account) and the endpoint 404s when local auth is disabled.
+func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
+	if !s.config.Auth.Local.Enabled {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Local authentication is not enabled", models.NotFoundErrorType)
+	}
+
+	var req struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := c.BodyParser(&req); err != nil || req.Email == "" || req.Password == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "email and password are required", models.ValidationErrorType)
+	}
+
+	if !localLoginLimiter.Allow(c.IP(), req.Email) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many login attempts, try again shortly", models.ValidationErrorType)
+	}
+
+	invalid := func() error {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
+	}
+
+	user, err := s.sqlite.GetUserByEmail(c.Context(), req.Email)
+	if err != nil || user == nil {
+		// Burn a bcrypt comparison so unknown emails aren't timing-distinguishable.
+		auth.VerifyLocalPassword("", req.Password)
+		return invalid()
+	}
+	if user.Status != models.UserStatusActive || user.AccountType != models.UserAccountTypeHuman {
+		auth.VerifyLocalPassword("", req.Password)
+		return invalid()
+	}
+	if !auth.VerifyLocalPassword(user.PasswordHash, req.Password) {
+		return invalid()
+	}
+
+	session, err := core.CreateSession(c.Context(), s.sqlite, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
+	if err != nil {
+		s.log.Error("failed to create session for local login", "error", err, "user_id", user.ID)
+		return SendError(c, fiber.StatusInternalServerError, "Failed to create session")
+	}
+
+	s.log.Info("user.login", "email", user.Email, "user_id", user.ID, "method", "local")
+
+	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, user); err != nil {
+		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", user.ID)
+	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:     sessionCookieName,
+		Value:    string(session.ID),
+		Expires:  session.ExpiresAt,
+		HTTPOnly: true,
+		Secure:   s.config.Server.IsSecureCookie(),
+		SameSite: fiber.CookieSameSiteLaxMode,
+		Path:     "/",
+	})
+
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"user": user})
 }

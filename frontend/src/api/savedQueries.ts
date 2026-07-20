@@ -1,5 +1,6 @@
 import { apiClient } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
+import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 
 export interface SavedQueryContent {
   version: number;
@@ -29,7 +30,8 @@ export interface SavedQuery {
   created_from_team_id?: number | null;
   name: string;
   description: string;
-  query_type: string;
+  query_language: QueryLanguage;
+  editor_mode: SavedQueryEditorMode;
   query_content: string; // JSON string of SavedQueryContent
   created_by?: number | null;
   // Creator identity for display. Populated where the server joins users
@@ -89,7 +91,8 @@ export const savedQueriesApi = {
     created_from_team_id?: number | null;
     name: string;
     description: string;
-    query_type: string;
+    query_language: QueryLanguage;
+    editor_mode: SavedQueryEditorMode;
     query_content: string;
   }) => apiClient.post<SavedQuery>("/saved-queries", query),
 

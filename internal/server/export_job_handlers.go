@@ -15,6 +15,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -33,12 +34,28 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
+	// Gate exports behind the source capability before persisting a job or
+	// spawning the async worker. Non-supporting sources (e.g. VictoriaLogs) get
+	// a clean 400 instead of an async job failure.
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	if err != nil {
+		if errors.Is(err, core.ErrSourceNotFound) {
+			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		}
+		s.log.Error("failed to get source for export job", "source_id", sourceID, "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	}
+	if !source.HasCapability(string(datasource.CapabilityExports)) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Exports are not supported for this source type yet", models.ValidationErrorType)
+	}
+
 	var req models.CreateExportJobRequest
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
+	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
 	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql is required", models.ValidationErrorType)
+		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql (or query_text) is required", models.ValidationErrorType)
 	}
 
 	formatInput := strings.TrimSpace(req.Format)
@@ -222,6 +239,15 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req exportLogsRequest) {
 	defer cancel()
 	defer queryTracker.RemoveQuery(jobID)
+	// This runs in its own goroutine: a panic here would crash the whole
+	// process (Fiber's recover middleware only guards request handlers).
+	// Recover, log, and mark the job failed instead.
+	defer func() {
+		if r := recover(); r != nil {
+			s.log.Error("export job panicked", "job_id", jobID, "panic", r)
+			_ = s.sqlite.FailExportJob(context.WithoutCancel(queryCtx), jobID, "internal error while running export", time.Now().UTC())
+		}
+	}()
 
 	// Job-state writes must record the outcome even if the query context is
 	// canceled, so derive a detached context that still carries request values.
@@ -386,16 +412,21 @@ func buildExportJobDownloadURL(teamID models.TeamID, job *models.ExportJob) stri
 }
 
 func (s *Server) startBackgroundCleanup() {
-	go func() {
+	s.wg.Go(func() {
 		s.cleanupExpiredBackgroundState()
 
 		ticker := time.NewTicker(15 * time.Minute)
 		defer ticker.Stop()
 
-		for range ticker.C {
-			s.cleanupExpiredBackgroundState()
+		for {
+			select {
+			case <-ticker.C:
+				s.cleanupExpiredBackgroundState()
+			case <-s.stop:
+				return
+			}
 		}
-	}()
+	})
 }
 
 func (s *Server) cleanupExpiredBackgroundState() {
@@ -422,5 +453,9 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	}
 	if err := s.sqlite.DeleteExpiredExportJobs(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired export job rows", "error", err)
+	}
+
+	if err := s.sqlite.DeleteExpiredSessions(ctx, now); err != nil {
+		s.log.Warn("failed to delete expired sessions", "error", err)
 	}
 }

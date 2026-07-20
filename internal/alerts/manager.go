@@ -11,29 +11,42 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// alertEvaluationTimeout bounds a single alert's evaluation wall-clock time. It
+// sits above the per-query timeout (models.DefaultQueryTimeoutSeconds) with
+// headroom for result processing, so a query's own timeout normally fires
+// first; this deadline is the backstop that stops a wedged source from blocking
+// the sequential evaluation loop.
+const alertEvaluationTimeout = (models.DefaultQueryTimeoutSeconds + 30) * time.Second
+
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
-	Config     config.AlertsConfig
-	DB         store.Store
-	ClickHouse *clickhouse.Manager
-	Logger     *slog.Logger
-	Sender     AlertSender
+	Config      config.AlertsConfig
+	DB          store.Store
+	Datasources *datasource.Service
+	Logger      *slog.Logger
+	Sender      AlertSender
 }
 
 // Manager coordinates alert evaluation and dispatches notifications when thresholds are met.
 type Manager struct {
 	cfg        config.AlertsConfig
 	db         store.Store
-	clickhouse *clickhouse.Manager
+	datasource *datasource.Service
 	log        *slog.Logger
 	sender     AlertSender
+
+	// evalTimeout bounds a single alert's evaluation; evalFn is the function
+	// invoked per alert. Both are seams so the per-alert timeout isolation can
+	// be exercised in tests without a live datasource/store.
+	evalTimeout time.Duration
+	evalFn      func(context.Context, *models.Alert) error
 
 	stop chan struct{}
 	wg   sync.WaitGroup
@@ -45,14 +58,17 @@ func NewManager(opts Options) *Manager {
 	if sender == nil {
 		sender = noopSender{}
 	}
-	return &Manager{
-		cfg:        opts.Config,
-		db:         opts.DB,
-		clickhouse: opts.ClickHouse,
-		log:        opts.Logger.With("component", "alert_manager"),
-		sender:     sender,
-		stop:       make(chan struct{}),
+	m := &Manager{
+		cfg:         opts.Config,
+		db:          opts.DB,
+		datasource:  opts.Datasources,
+		log:         opts.Logger.With("component", "alert_manager"),
+		sender:      sender,
+		evalTimeout: alertEvaluationTimeout,
+		stop:        make(chan struct{}),
 	}
+	m.evalFn = m.evaluateAlert
+	return m
 }
 
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
@@ -106,10 +122,25 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 
 	for _, alert := range alerts {
-		if err := m.evaluateAlert(ctx, alert); err != nil {
+		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
 			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
 	}
+}
+
+// evaluateAlertWithTimeout bounds a single alert's evaluation with its own
+// deadline. The manager runs on the process-lifetime context, so without this
+// a source whose endpoint wedges (stalled socket) would block the sequential
+// loop forever and freeze alerting org-wide. A per-alert deadline isolates that
+// failure to the one slow alert; the loop then advances to the rest.
+func (m *Manager) evaluateAlertWithTimeout(ctx context.Context, alert *models.Alert) error {
+	timeout := m.evalTimeout
+	if timeout <= 0 {
+		timeout = alertEvaluationTimeout
+	}
+	alertCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return m.evalFn(alertCtx, alert)
 }
 
 func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error {
@@ -117,24 +148,25 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return nil
 	}
 
-	// Evaluate based on the presence of a valid SQL query, not the query_type label.
-	// The frontend generates SQL for both "sql" and "condition" modes, storing it in
-	// the Query field. The query_type is informational (indicates which UI mode was used)
-	// rather than a distinct evaluation strategy.
 	query := strings.TrimSpace(alert.Query)
 	if query == "" {
-		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID, "query_type", alert.QueryType)
+		m.log.Warn("alert query is empty; skipping evaluation", "alert_id", alert.ID, "query_language", alert.QueryLanguage, "editor_mode", alert.EditorMode)
 		return nil
 	}
 
-	client, err := m.clickhouse.GetConnection(alert.SourceID)
-	if err != nil {
-		m.recordEvaluationError(ctx, alert, fmt.Errorf("failed to obtain ClickHouse connection: %w", err))
-		return fmt.Errorf("failed to obtain ClickHouse connection: %w", err)
+	if m.datasource == nil {
+		err := fmt.Errorf("datasource service is not configured")
+		m.recordEvaluationError(ctx, alert, err)
+		return err
 	}
 
 	timeout := models.DefaultQueryTimeoutSeconds
-	result, err := client.QueryWithTimeout(ctx, query, &timeout)
+	result, err := m.datasource.EvaluateAlert(ctx, alert.SourceID, datasource.AlertQueryRequest{
+		Language:        alert.QueryLanguage,
+		Query:           query,
+		LookbackSeconds: alert.LookbackSeconds,
+		QueryTimeout:    &timeout,
+	})
 	if err != nil {
 		m.recordEvaluationError(ctx, alert, fmt.Errorf("alert query failed: %w", err))
 		return fmt.Errorf("alert query failed: %w", err)
@@ -175,10 +207,11 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 
 	errorMessage := fmt.Sprintf("Evaluation failed: %v", evalErr)
 	errorPayload := map[string]any{
-		"error":      evalErr.Error(),
-		"query_type": string(alert.QueryType),
-		"query":      alert.Query,
-		"status":     string(models.AlertStatusError),
+		"error":          evalErr.Error(),
+		"query_language": string(alert.QueryLanguage),
+		"editor_mode":    string(alert.EditorMode),
+		"query":          alert.Query,
+		"status":         string(models.AlertStatusError),
 	}
 
 	_, err := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)

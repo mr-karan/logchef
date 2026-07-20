@@ -98,7 +98,7 @@ onMounted(() => {
                   class="h-4 w-4 text-muted-foreground"
                   title="You don't have access to this query's source — can't run it."
                 />
-                <Search v-else-if="q.query_type === 'logchefql'" class="h-4 w-4 text-muted-foreground" title="LogchefQL" />
+                <Search v-else-if="q.query_language === 'logchefql'" class="h-4 w-4 text-muted-foreground" title="LogchefQL" />
                 <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
               </td>
               <td class="px-4 py-3 align-middle">

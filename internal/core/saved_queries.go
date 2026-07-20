@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -20,11 +21,12 @@ func isValidRelativeTimeFormat(s string) bool {
 // --- Saved Query Error Definitions ---
 
 var (
-	ErrQueryNotFound       = fmt.Errorf("saved query not found")
-	ErrQueryTypeRequired   = fmt.Errorf("query type is required")
-	ErrInvalidQueryType    = fmt.Errorf("invalid query type: must be 'logchefql' or 'sql'")
-	ErrInvalidQueryContent = fmt.Errorf("invalid query content format or values")
-	ErrSavedQueryForbidden = fmt.Errorf("not allowed to access this saved query")
+	ErrQueryNotFound                   = fmt.Errorf("saved query not found")
+	ErrQueryLanguageRequired           = fmt.Errorf("query language is required")
+	ErrInvalidQueryDefinition          = fmt.Errorf("invalid query configuration")
+	ErrUnsupportedSavedQueryDefinition = fmt.Errorf("saved query configuration is not supported for this source")
+	ErrInvalidQueryContent             = fmt.Errorf("invalid query content format or values")
+	ErrSavedQueryForbidden             = fmt.Errorf("not allowed to access this saved query")
 )
 
 // --- Saved Query Content Validation ---
@@ -76,17 +78,23 @@ func ValidateSavedQueryContent(contentJSON string) error {
 	return nil
 }
 
-// validateSavedQueryFields runs the shared type+content checks used by create and update.
-func validateSavedQueryFields(queryType, queryContentJSON string, requireType bool) error {
-	if requireType && queryType == "" {
-		return ErrQueryTypeRequired
+// resolveSavedQueryMetadata normalizes language+mode and checks the source's
+// provider actually supports the combination.
+func resolveSavedQueryMetadata(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (models.QueryLanguage, models.SavedQueryEditorMode, error) {
+	normalizedLanguage, normalizedMode, err := models.ResolveSavedQueryMetadata(queryLanguage, editorMode)
+	if err != nil {
+		return "", "", fmt.Errorf("%w: %s", ErrInvalidQueryDefinition, err)
 	}
-	if queryType != "" {
-		t := models.SavedQueryType(queryType)
-		if t != models.SavedQueryTypeLogchefQL && t != models.SavedQueryTypeSQL {
-			return ErrInvalidQueryType
+	if ds != nil {
+		if err := ds.ValidateSavedQuerySupport(ctx, sourceID, normalizedLanguage, normalizedMode); err != nil {
+			return "", "", fmt.Errorf("%w: %s", ErrUnsupportedSavedQueryDefinition, err)
 		}
 	}
+	return normalizedLanguage, normalizedMode, nil
+}
+
+// validateSavedQueryFields runs the shared content checks used by create and update.
+func validateSavedQueryFields(queryContentJSON string) error {
 	if queryContentJSON != "" {
 		if err := ValidateSavedQueryContent(queryContentJSON); err != nil {
 			return err
@@ -96,14 +104,18 @@ func validateSavedQueryFields(queryType, queryContentJSON string, requireType bo
 }
 
 // CreateSavedQuery persists a new saved query owned by the supplied creator.
-func CreateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryContentJSON, queryType string, createdBy models.UserID) (*models.SavedQuery, error) {
-	if err := validateSavedQueryFields(queryType, queryContentJSON, true); err != nil {
+func CreateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryContentJSON string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, createdBy models.UserID) (*models.SavedQuery, error) {
+	queryLanguage, editorMode, err := resolveSavedQueryMetadata(ctx, ds, sourceID, queryLanguage, editorMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSavedQueryFields(queryContentJSON); err != nil {
 		log.Warn("invalid saved query create payload", "error", err, "source_id", sourceID, "name", name)
 		return nil, err
 	}
 
 	owner := createdBy
-	created, err := db.CreateSavedQuery(ctx, sourceID, createdFromTeamID, name, description, queryType, queryContentJSON, &owner)
+	created, err := db.CreateSavedQuery(ctx, sourceID, createdFromTeamID, name, description, queryLanguage, editorMode, queryContentJSON, &owner)
 	if err != nil {
 		log.Error("failed to create saved query", "error", err, "source_id", sourceID, "name", name)
 		return nil, fmt.Errorf("error creating saved query: %w", err)
@@ -135,13 +147,30 @@ func GetSavedQuery(ctx context.Context, db savedQueryGetter, log *slog.Logger, q
 }
 
 // UpdateSavedQuery applies new field values to an existing saved query.
-func UpdateSavedQuery(ctx context.Context, db store.StoreOps, log *slog.Logger, queryID int, name, description, queryContentJSON, queryType string) (*models.SavedQuery, error) {
-	if err := validateSavedQueryFields(queryType, queryContentJSON, false); err != nil {
+func UpdateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, queryID int, name, description, queryContentJSON string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (*models.SavedQuery, error) {
+	existing, err := db.GetSavedQuery(ctx, queryID)
+	if err != nil {
+		if models.IsNotFound(err) {
+			return nil, ErrQueryNotFound
+		}
+		return nil, fmt.Errorf("error loading saved query: %w", err)
+	}
+	if queryLanguage == "" {
+		queryLanguage = existing.QueryLanguage
+	}
+	if editorMode == "" {
+		editorMode = existing.EditorMode
+	}
+	queryLanguage, editorMode, err = resolveSavedQueryMetadata(ctx, ds, existing.SourceID, queryLanguage, editorMode)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateSavedQueryFields(queryContentJSON); err != nil {
 		log.Warn("invalid saved query update payload", "error", err, "query_id", queryID)
 		return nil, err
 	}
 
-	if err := db.UpdateSavedQuery(ctx, queryID, name, description, queryType, queryContentJSON); err != nil {
+	if err := db.UpdateSavedQuery(ctx, queryID, name, description, queryLanguage, editorMode, queryContentJSON); err != nil {
 		if models.IsNotFound(err) {
 			return nil, ErrQueryNotFound
 		}

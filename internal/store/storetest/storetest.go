@@ -5,7 +5,9 @@ package storetest
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -19,10 +21,14 @@ func Run(t *testing.T, s store.Store) {
 	ctx := context.Background()
 
 	t.Run("Users", func(t *testing.T) { testUsers(t, ctx, s) })
+	t.Run("UserPasswordHash", func(t *testing.T) { testUserPasswordHash(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
+	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
+	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
+	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
 	t.Run("Alerts", func(t *testing.T) { testAlerts(t, ctx, s) })
 	t.Run("UserPreferences", func(t *testing.T) { testUserPreferences(t, ctx, s) })
 	t.Run("QuerySharesExportJobsNotFound", func(t *testing.T) { testQuerySharesExportJobsNotFound(t, ctx, s) })
@@ -33,6 +39,26 @@ func Run(t *testing.T, s store.Store) {
 }
 
 // --- helpers ---
+
+func testUserPasswordHash(t *testing.T, ctx context.Context, s store.Store) {
+	u := mkUser(t, ctx, s, "local-auth@test.dev")
+	if u.PasswordHash != "" {
+		t.Fatalf("new user has non-empty password hash")
+	}
+	if err := s.SetUserPasswordHash(ctx, u.ID, "$2a$10$fakehashfortesting0000000000000000000000000000000000"); err != nil {
+		t.Fatalf("SetUserPasswordHash: %v", err)
+	}
+	got, err := s.GetUserByEmail(ctx, u.Email)
+	if err != nil || got.PasswordHash == "" {
+		t.Fatalf("password hash did not round-trip: %v / %+v", err, got)
+	}
+	if err := s.SetUserPasswordHash(ctx, u.ID, ""); err != nil {
+		t.Fatalf("clear password hash: %v", err)
+	}
+	if got, err = s.GetUserByEmail(ctx, u.Email); err != nil || got.PasswordHash != "" {
+		t.Fatalf("password hash not cleared: %v / %q", err, got.PasswordHash)
+	}
+}
 
 func mkUser(t *testing.T, ctx context.Context, s store.StoreOps, email string) *models.User {
 	t.Helper()
@@ -53,6 +79,9 @@ func mkSource(t *testing.T, ctx context.Context, s store.StoreOps, table string)
 		Name:        db + "." + table,
 		MetaTSField: "timestamp",
 		Connection:  models.ConnectionInfo{Host: "localhost:9000", Database: db, TableName: table},
+	}
+	if err := src.SyncConnectionConfig(); err != nil {
+		t.Fatalf("SyncConnectionConfig: %v", err)
 	}
 	if err := s.CreateSource(ctx, src); err != nil {
 		t.Fatalf("CreateSource: %v", err)
@@ -178,6 +207,26 @@ func testSessions(t *testing.T, ctx context.Context, s store.Store) {
 	if _, err := s.GetSession(ctx, sess.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("after delete GetSession err = %v, want ErrNotFound", err)
 	}
+
+	// DeleteExpiredSessions only sweeps rows whose expiry has passed; a live
+	// session must survive the sweep.
+	live := &models.Session{ID: models.SessionID("sess-live"), UserID: u.ID, ExpiresAt: time.Now().Add(time.Hour)}
+	expired := &models.Session{ID: models.SessionID("sess-expired"), UserID: u.ID, ExpiresAt: time.Now().Add(-time.Hour)}
+	if err := s.CreateSession(ctx, live); err != nil {
+		t.Fatalf("CreateSession(live): %v", err)
+	}
+	if err := s.CreateSession(ctx, expired); err != nil {
+		t.Fatalf("CreateSession(expired): %v", err)
+	}
+	if err := s.DeleteExpiredSessions(ctx, time.Now()); err != nil {
+		t.Fatalf("DeleteExpiredSessions: %v", err)
+	}
+	if _, err := s.GetSession(ctx, live.ID); err != nil {
+		t.Errorf("live session should survive sweep, got err: %v", err)
+	}
+	if _, err := s.GetSession(ctx, expired.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("expired session should be swept, got err: %v", err)
+	}
 }
 
 func testSettings(t *testing.T, ctx context.Context, s store.Store) {
@@ -207,7 +256,7 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	owner := mkUser(t, ctx, s, "sq-owner@test.dev")
 	src := mkSource(t, ctx, s, "sq")
 
-	sq, err := s.CreateSavedQuery(ctx, src.ID, nil, "errors", "5xx errors", "logchef", `{"content":"status>=500"}`, &owner.ID)
+	sq, err := s.CreateSavedQuery(ctx, src.ID, nil, "errors", "5xx errors", models.QueryLanguageLogchefQL, models.SavedQueryEditorModeBuilder, `{"content":"status>=500"}`, &owner.ID)
 	if err != nil || sq.ID == 0 {
 		t.Fatalf("CreateSavedQuery: %v / %+v", err, sq)
 	}
@@ -246,12 +295,285 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	}
 }
 
+func testDashboards(t *testing.T, ctx context.Context, s store.Store) {
+	owner := mkUser(t, ctx, s, "dash-owner@test.dev")
+
+	panels := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"5xx","type":"timeseries","team_id":1,"source_id":1,"query":"status>=500","query_language":"logchefql"}]}`)
+	d := &models.Dashboard{Name: "Ops", Description: "ops overview", PanelsJSON: panels, CreatedBy: &owner.ID}
+	if err := s.CreateDashboard(ctx, d); err != nil || d.ID == 0 {
+		t.Fatalf("CreateDashboard: %v / id=%d", err, d.ID)
+	}
+	if d.CreatedAt.IsZero() || d.UpdatedAt.IsZero() {
+		t.Fatalf("CreateDashboard did not populate timestamps: %+v", d)
+	}
+
+	got := verifyDashboardGetAndList(t, ctx, s, d, owner, panels)
+	verifyDashboardUpdateAndDelete(t, ctx, s, d.ID, got)
+}
+
+// verifyDashboardGetAndList checks GetDashboard/ListDashboards against the
+// just-created dashboard d, and returns the fetched row for further mutation.
+func verifyDashboardGetAndList(t *testing.T, ctx context.Context, s store.Store, d *models.Dashboard, owner *models.User, panels json.RawMessage) *models.Dashboard {
+	t.Helper()
+
+	got, err := s.GetDashboard(ctx, d.ID)
+	if err != nil || got.Name != "Ops" || got.Description != "ops overview" {
+		t.Fatalf("GetDashboard: %v / %+v", err, got)
+	}
+	// panels_json must round-trip byte-for-byte.
+	if string(got.PanelsJSON) != string(panels) {
+		t.Fatalf("panels did not round-trip:\n got %s\nwant %s", got.PanelsJSON, panels)
+	}
+	if got.CreatedByEmail != owner.Email {
+		t.Fatalf("GetDashboard creator identity not joined: %q", got.CreatedByEmail)
+	}
+	if got.CreatedBy == nil || *got.CreatedBy != owner.ID {
+		t.Fatalf("created_by not persisted: %+v", got.CreatedBy)
+	}
+
+	// List includes it, newest-updated first, with the creator's email joined in.
+	list, err := s.ListDashboards(ctx)
+	if err != nil || len(list) == 0 {
+		t.Fatalf("ListDashboards: %v / %d", err, len(list))
+	}
+	if list[0].ID != d.ID {
+		t.Errorf("ListDashboards[0].ID = %d, want %d (newest first)", list[0].ID, d.ID)
+	}
+	if list[0].CreatedByEmail != owner.Email {
+		t.Errorf("ListDashboards[0].CreatedByEmail = %q, want %q", list[0].CreatedByEmail, owner.Email)
+	}
+
+	return got
+}
+
+// verifyDashboardUpdateAndDelete exercises UpdateDashboard/DeleteDashboard on
+// dashboard id, then confirms all three operations report models.ErrNotFound
+// once the row is gone.
+func verifyDashboardUpdateAndDelete(t *testing.T, ctx context.Context, s store.Store, id int, got *models.Dashboard) {
+	t.Helper()
+
+	// Update mutates name + panels.
+	newPanels := json.RawMessage(`{"version":1,"layout":[],"panels":[]}`)
+	got.Name = "Ops v2"
+	got.PanelsJSON = newPanels
+	if err := s.UpdateDashboard(ctx, got); err != nil {
+		t.Fatalf("UpdateDashboard: %v", err)
+	}
+	if after, _ := s.GetDashboard(ctx, id); after.Name != "Ops v2" || string(after.PanelsJSON) != string(newPanels) {
+		t.Errorf("after update = %+v", after)
+	}
+
+	if err := s.DeleteDashboard(ctx, id); err != nil {
+		t.Fatalf("DeleteDashboard: %v", err)
+	}
+
+	// Not-found neutrality: both backends surface models.ErrNotFound (never a raw
+	// driver error) for a missing dashboard, on read and on mutation.
+	if _, err := s.GetDashboard(ctx, id); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetDashboard(deleted) err = %v, want ErrNotFound", err)
+	}
+	if err := s.DeleteDashboard(ctx, id); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("DeleteDashboard(deleted) err = %v, want ErrNotFound", err)
+	}
+	if err := s.UpdateDashboard(ctx, got); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("UpdateDashboard(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+func testQueryHistory(t *testing.T, ctx context.Context, s store.Store) {
+	user := mkUser(t, ctx, s, "qh-user@test.dev")
+	src := mkSource(t, ctx, s, "qh")
+
+	// A fresh user has no history.
+	if h, err := s.ListQueryHistory(ctx, user.ID, 10); err != nil || len(h) != 0 {
+		t.Fatalf("ListQueryHistory(empty) = %d / %v, want 0", len(h), err)
+	}
+
+	// Record round-trips every field and populates the entry ID.
+	entry := &models.QueryHistory{
+		UserID:        user.ID,
+		TeamID:        models.TeamID(7),
+		SourceID:      src.ID,
+		QueryText:     "status>=500",
+		QueryLanguage: models.QueryLanguageLogchefQL,
+		DurationMs:    42,
+		RowCount:      13,
+	}
+	if err := s.RecordQueryHistory(ctx, entry); err != nil || entry.ID == 0 {
+		t.Fatalf("RecordQueryHistory: %v / id=%d", err, entry.ID)
+	}
+	got, err := s.ListQueryHistory(ctx, user.ID, 10)
+	if err != nil || len(got) != 1 {
+		t.Fatalf("ListQueryHistory = %d / %v, want 1", len(got), err)
+	}
+	assertQueryHistoryRow(t, got[0], src.ID)
+
+	// History is scoped per user: another user sees none of the above.
+	other := mkUser(t, ctx, s, "qh-other@test.dev")
+	if h, err := s.ListQueryHistory(ctx, other.ID, 10); err != nil || len(h) != 0 {
+		t.Errorf("ListQueryHistory(other) = %d / %v, want 0", len(h), err)
+	}
+
+	verifyQueryHistoryPruning(t, ctx, s, user.ID, src.ID)
+}
+
+// assertQueryHistoryRow checks the round-tripped fields of the seed row.
+func assertQueryHistoryRow(t *testing.T, g *models.QueryHistory, sourceID models.SourceID) {
+	t.Helper()
+	if g.QueryText != "status>=500" || g.QueryLanguage != models.QueryLanguageLogchefQL ||
+		g.DurationMs != 42 || g.RowCount != 13 || g.TeamID != 7 || g.SourceID != sourceID || g.CreatedAt.IsZero() {
+		t.Fatalf("history row did not round-trip: %+v", g)
+	}
+}
+
+// verifyQueryHistoryPruning records more than the per-user cap and confirms the
+// store keeps only the newest cap rows, newest-first, and honors a smaller limit.
+func verifyQueryHistoryPruning(t *testing.T, ctx context.Context, s store.Store, userID models.UserID, sourceID models.SourceID) {
+	t.Helper()
+	total := models.QueryHistoryPerUserCap + 3
+	for i := 1; i < total; i++ { // the seed row above was #0
+		e := &models.QueryHistory{
+			UserID:        userID,
+			TeamID:        models.TeamID(7),
+			SourceID:      sourceID,
+			QueryText:     "q" + strconv.Itoa(i),
+			QueryLanguage: models.QueryLanguageClickHouseSQL,
+		}
+		if err := s.RecordQueryHistory(ctx, e); err != nil {
+			t.Fatalf("RecordQueryHistory(#%d): %v", i, err)
+		}
+	}
+
+	all, err := s.ListQueryHistory(ctx, userID, models.QueryHistoryPerUserCap+100)
+	if err != nil {
+		t.Fatalf("ListQueryHistory(all): %v", err)
+	}
+	if len(all) != models.QueryHistoryPerUserCap {
+		t.Fatalf("history not capped: got %d, want %d", len(all), models.QueryHistoryPerUserCap)
+	}
+	if all[0].QueryText != "q"+strconv.Itoa(total-1) {
+		t.Errorf("ListQueryHistory[0] = %q, want newest %q", all[0].QueryText, "q"+strconv.Itoa(total-1))
+	}
+
+	if h, err := s.ListQueryHistory(ctx, userID, 5); err != nil || len(h) != 5 {
+		t.Errorf("ListQueryHistory(limit 5) = %d / %v, want 5", len(h), err)
+	}
+}
+
+// testQueryStats verifies the non-pruned daily rollup: IncrementQueryStats on
+// the same key twice sums into one row (count 2, durations added), and the
+// aggregate reads (top sources, top users, volume by day) return the expected
+// values over a small seeded set. A ghost source_id (no sources row) exercises
+// the LEFT JOIN -> "" source_name path.
+func testQueryStats(t *testing.T, ctx context.Context, s store.Store) {
+	userA := mkUser(t, ctx, s, "qs-a@test.dev")
+	userB := mkUser(t, ctx, s, "qs-b@test.dev")
+	srcA := mkSource(t, ctx, s, "qsa")
+	srcB := mkSource(t, ctx, s, "qsb")
+	const ghostSource = models.SourceID(999999) // no sources row -> LEFT JOIN yields ""
+
+	const (
+		day1 = "2026-07-10"
+		day2 = "2026-07-11"
+	)
+	team := models.TeamID(1)
+	inc := func(bucket string, u models.UserID, src models.SourceID, lang models.QueryLanguage, dur int64) {
+		t.Helper()
+		if err := s.IncrementQueryStats(ctx, bucket, u, team, src, lang, dur); err != nil {
+			t.Fatalf("IncrementQueryStats(%s,%d,%d): %v", bucket, u, src, err)
+		}
+	}
+
+	// Same (bucket_date,user,team,source,language) key twice -> one row, count 2,
+	// total_duration_ms summed (100+50=150, avg 75).
+	inc(day1, userA.ID, srcA.ID, models.QueryLanguageLogchefQL, 100)
+	inc(day1, userA.ID, srcA.ID, models.QueryLanguageLogchefQL, 50)
+	// Different day, same source/user -> srcA totals: count 3, dur 170 (avg 56).
+	inc(day2, userA.ID, srcA.ID, models.QueryLanguageLogchefQL, 20)
+	// srcB, userB.
+	inc(day1, userB.ID, srcB.ID, models.QueryLanguageClickHouseSQL, 30)
+	// Ghost source (no sources row) -> source_name "".
+	inc(day1, userB.ID, ghostSource, models.QueryLanguageClickHouseSQL, 10)
+
+	verifyTopSources(t, ctx, s, srcA, srcB, ghostSource)
+	verifyTopUsers(t, ctx, s, userA, userB)
+	verifyQueryVolumeByDay(t, ctx, s, day1, day2)
+}
+
+func verifyTopSources(t *testing.T, ctx context.Context, s store.Store, srcA, srcB *models.Source, ghost models.SourceID) {
+	t.Helper()
+	sources, err := s.TopSourcesByQueries(ctx, "2026-07-01", 10)
+	if err != nil {
+		t.Fatalf("TopSourcesByQueries: %v", err)
+	}
+	if len(sources) != 3 {
+		t.Fatalf("TopSourcesByQueries len = %d, want 3: %+v", len(sources), sources)
+	}
+	// Ordered by count desc: srcA (3) first.
+	if sources[0].SourceID != int64(srcA.ID) || sources[0].QueryCount != 3 || sources[0].AvgDurationMs != 56 {
+		t.Fatalf("top source = %+v, want srcA count 3 avg 56", sources[0])
+	}
+	if sources[0].SourceName != srcA.Name {
+		t.Errorf("top source name = %q, want %q", sources[0].SourceName, srcA.Name)
+	}
+	byID := make(map[int64]models.SourceQueryStat, len(sources))
+	for _, r := range sources {
+		byID[r.SourceID] = r
+	}
+	if g := byID[int64(srcB.ID)]; g.QueryCount != 1 || g.AvgDurationMs != 30 || g.SourceName != srcB.Name {
+		t.Errorf("srcB stat = %+v, want count 1 avg 30 name %q", g, srcB.Name)
+	}
+	if g := byID[int64(ghost)]; g.QueryCount != 1 || g.SourceName != "" {
+		t.Errorf("ghost source stat = %+v, want count 1 empty name", g)
+	}
+}
+
+func verifyTopUsers(t *testing.T, ctx context.Context, s store.Store, userA, userB *models.User) {
+	t.Helper()
+	users, err := s.TopUsersByQueries(ctx, "2026-07-01", 10)
+	if err != nil {
+		t.Fatalf("TopUsersByQueries: %v", err)
+	}
+	if len(users) != 2 {
+		t.Fatalf("TopUsersByQueries len = %d, want 2: %+v", len(users), users)
+	}
+	if users[0].UserID != userA.ID || users[0].QueryCount != 3 || users[0].UserEmail != userA.Email {
+		t.Fatalf("top user = %+v, want userA count 3 email %q", users[0], userA.Email)
+	}
+	if users[1].UserID != userB.ID || users[1].QueryCount != 2 || users[1].UserEmail != userB.Email {
+		t.Fatalf("second user = %+v, want userB count 2 email %q", users[1], userB.Email)
+	}
+}
+
+func verifyQueryVolumeByDay(t *testing.T, ctx context.Context, s store.Store, day1, day2 string) {
+	t.Helper()
+	volume, err := s.QueryVolumeByDay(ctx, "2026-07-01")
+	if err != nil {
+		t.Fatalf("QueryVolumeByDay: %v", err)
+	}
+	if len(volume) != 2 {
+		t.Fatalf("QueryVolumeByDay len = %d, want 2: %+v", len(volume), volume)
+	}
+	// Ascending by date: day1 (4 queries) then day2 (1 query).
+	if volume[0].Date != day1 || volume[0].QueryCount != 4 {
+		t.Fatalf("volume[0] = %+v, want %s count 4", volume[0], day1)
+	}
+	if volume[1].Date != day2 || volume[1].QueryCount != 1 {
+		t.Fatalf("volume[1] = %+v, want %s count 1", volume[1], day2)
+	}
+	// Window filtering: a `since` after the data yields nothing.
+	if empty, err := s.QueryVolumeByDay(ctx, "2026-08-01"); err != nil || len(empty) != 0 {
+		t.Errorf("QueryVolumeByDay(future since) = %d / %v, want 0", len(empty), err)
+	}
+}
+
 func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	src := mkSource(t, ctx, s, "alerts")
 	a := &models.Alert{
 		SourceID:          src.ID,
 		Name:              "5xx spike",
-		QueryType:         models.AlertQueryTypeSQL,
+		QueryLanguage:     models.QueryLanguageClickHouseSQL,
+		EditorMode:        models.AlertEditorModeNative,
 		Query:             "SELECT count() FROM logs",
 		LookbackSeconds:   300,
 		ThresholdOperator: models.AlertThresholdGreaterThan,

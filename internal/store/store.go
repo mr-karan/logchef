@@ -43,6 +43,9 @@ type SessionStore interface {
 	DeleteSession(ctx context.Context, id models.SessionID) error
 	DeleteUserSessions(ctx context.Context, userID models.UserID) error
 	CountUserSessions(ctx context.Context, userID models.UserID) (int, error)
+	// DeleteExpiredSessions removes all sessions whose expiry is at or before
+	// the given time. Used by the periodic session sweeper.
+	DeleteExpiredSessions(ctx context.Context, before time.Time) error
 }
 
 // UserPreferenceStore persists per-user UI preferences as an opaque JSON blob.
@@ -60,6 +63,9 @@ type UserStore interface {
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
 	CountAdminUsers(ctx context.Context) (int, error)
+	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
+	// local email+password authentication.
+	SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error
 	DeleteUser(ctx context.Context, id models.UserID) error
 }
 
@@ -68,7 +74,7 @@ type UserStore interface {
 type SourceStore interface {
 	CreateSource(ctx context.Context, source *models.Source) error
 	GetSource(ctx context.Context, id models.SourceID) (*models.Source, error)
-	GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error)
+	GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error)
 	ListSources(ctx context.Context) ([]*models.Source, error)
 	UpdateSource(ctx context.Context, source *models.Source) error
 	DeleteSource(ctx context.Context, id models.SourceID) error
@@ -77,9 +83,9 @@ type SourceStore interface {
 // SavedQueryStore persists named, reusable queries. Visibility/edit rules are
 // enforced in core, not here — these methods are the raw persistence surface.
 type SavedQueryStore interface {
-	CreateSavedQuery(ctx context.Context, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description, queryType, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error)
+	CreateSavedQuery(ctx context.Context, sourceID models.SourceID, createdFromTeamID *models.TeamID, name, description string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, queryContent string, createdBy *models.UserID) (*models.SavedQuery, error)
 	GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQuery, error)
-	UpdateSavedQuery(ctx context.Context, queryID int, name, description, queryType, queryContent string) error
+	UpdateSavedQuery(ctx context.Context, queryID int, name, description string, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode, queryContent string) error
 	DeleteSavedQuery(ctx context.Context, queryID int) error
 	ListSavedQueriesForUser(ctx context.Context, userID models.UserID) ([]*models.SavedQuery, error)
 	ListSavedQueriesForUserBySource(ctx context.Context, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error)
@@ -105,6 +111,18 @@ type CollectionStore interface {
 	UserCanEditSavedQueryViaSharedCollection(ctx context.Context, userID models.UserID, queryID int) (bool, error)
 }
 
+// DashboardStore persists dashboards (a saved grid of visualization panels).
+// The panel blob is validated in models/core, not here — these methods are the
+// raw persistence surface. Reads/mutations on a missing id return
+// models.ErrNotFound.
+type DashboardStore interface {
+	CreateDashboard(ctx context.Context, dashboard *models.Dashboard) error
+	GetDashboard(ctx context.Context, id int) (*models.Dashboard, error)
+	ListDashboards(ctx context.Context) ([]*models.Dashboard, error)
+	UpdateDashboard(ctx context.Context, dashboard *models.Dashboard) error
+	DeleteDashboard(ctx context.Context, id int) error
+}
+
 // AlertStore persists alert definitions and their evaluation history.
 type AlertStore interface {
 	CreateAlert(ctx context.Context, alert *models.Alert) error
@@ -122,6 +140,37 @@ type AlertStore interface {
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)
 	PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error
+}
+
+// QueryHistoryStore persists per-user query execution history. Recording is
+// best-effort (callers fire-and-forget on the query path) and self-pruning:
+// RecordQueryHistory caps each user's history at models.QueryHistoryPerUserCap.
+type QueryHistoryStore interface {
+	RecordQueryHistory(ctx context.Context, entry *models.QueryHistory) error
+	ListQueryHistory(ctx context.Context, userID models.UserID, limit int) ([]*models.QueryHistory, error)
+	// ListQueryActivity returns the most recent query_history rows across all
+	// users (newest first, capped at limit), enriched with user email and
+	// source name. It backs the admin recent-activity view; because
+	// query_history is capped per user, this is a recent window, not all-time.
+	ListQueryActivity(ctx context.Context, limit int) ([]models.QueryActivityRecord, error)
+
+	// IncrementQueryStats upserts one executed query into the non-pruned
+	// query_stats_daily rollup: it adds 1 to query_count and durationMs to
+	// total_duration_ms for the (bucketDate,userID,teamID,sourceID,language)
+	// key. bucketDate is 'YYYY-MM-DD' (UTC). Called at record time (best-effort)
+	// so all-time usage analytics stay correct despite query_history pruning.
+	IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error
+	// TopSourcesByQueries returns sources ordered by total query count desc
+	// (capped at limit) over rollup rows with bucket_date >= since. source_name
+	// is "" when the source row is gone (LEFT JOIN); avg_duration_ms is
+	// total_duration_ms/query_count (integer, 0 when count 0).
+	TopSourcesByQueries(ctx context.Context, since string, limit int) ([]models.SourceQueryStat, error)
+	// TopUsersByQueries returns users ordered by total query count desc (capped
+	// at limit) over rollup rows with bucket_date >= since.
+	TopUsersByQueries(ctx context.Context, since string, limit int) ([]models.UserQueryStat, error)
+	// QueryVolumeByDay returns per-day total query counts (ascending by date)
+	// over rollup rows with bucket_date >= since.
+	QueryVolumeByDay(ctx context.Context, since string) ([]models.DailyQueryVolume, error)
 }
 
 // ExportJobStore persists asynchronous CSV/export job records.
@@ -224,7 +273,7 @@ type TokenStore interface {
 // callback receives, and what consumers should accept when they don't manage
 // the connection lifecycle themselves.
 //
-// It composes one interface per domain; together they cover all 13 metadata
+// It composes one interface per domain; together they cover all 14 metadata
 // domains. Every method speaks pkg/models types — no sqlc or driver types leak
 // through.
 type StoreOps interface {
@@ -234,7 +283,9 @@ type StoreOps interface {
 	SourceStore
 	SavedQueryStore
 	CollectionStore
+	DashboardStore
 	AlertStore
+	QueryHistoryStore
 	ExportJobStore
 	QueryShareStore
 	ProvisioningStore

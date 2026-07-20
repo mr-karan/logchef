@@ -14,7 +14,8 @@ type Alert struct {
 	SourceID             int64          `json:"source_id"`
 	Name                 string         `json:"name"`
 	Description          sql.NullString `json:"description"`
-	QueryType            string         `json:"query_type"`
+	QueryLanguage        string         `json:"query_language"`
+	EditorMode           string         `json:"editor_mode"`
 	Query                sql.NullString `json:"query"`
 	ConditionJson        sql.NullString `json:"condition_json"`
 	LookbackSeconds      int64          `json:"lookback_seconds"`
@@ -87,6 +88,16 @@ type CollectionMember struct {
 	CreatedAt    time.Time     `json:"created_at"`
 }
 
+type Dashboard struct {
+	ID          int64          `json:"id"`
+	Name        string         `json:"name"`
+	Description sql.NullString `json:"description"`
+	PanelsJson  string         `json:"panels_json"`
+	CreatedBy   sql.NullInt64  `json:"created_by"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+}
+
 type ExportJob struct {
 	ID           string         `json:"id"`
 	SourceID     int64          `json:"source_id"`
@@ -105,6 +116,18 @@ type ExportJob struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
+type QueryHistory struct {
+	ID            int64     `json:"id"`
+	UserID        int64     `json:"user_id"`
+	TeamID        int64     `json:"team_id"`
+	SourceID      int64     `json:"source_id"`
+	QueryText     string    `json:"query_text"`
+	QueryLanguage string    `json:"query_language"`
+	DurationMs    int64     `json:"duration_ms"`
+	RowCount      int64     `json:"row_count"`
+	CreatedAt     time.Time `json:"created_at"`
+}
+
 type QueryShare struct {
 	Token          string        `json:"token"`
 	SourceID       int64         `json:"source_id"`
@@ -116,12 +139,23 @@ type QueryShare struct {
 	TeamID         sql.NullInt64 `json:"team_id"`
 }
 
+type QueryStatsDaily struct {
+	BucketDate      string `json:"bucket_date"`
+	UserID          int64  `json:"user_id"`
+	TeamID          int64  `json:"team_id"`
+	SourceID        int64  `json:"source_id"`
+	QueryLanguage   string `json:"query_language"`
+	QueryCount      int64  `json:"query_count"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
+}
+
 type SavedQuery struct {
 	ID                int64          `json:"id"`
 	SourceID          int64          `json:"source_id"`
 	Name              string         `json:"name"`
 	Description       sql.NullString `json:"description"`
-	QueryType         string         `json:"query_type"`
+	QueryLanguage     string         `json:"query_language"`
+	EditorMode        string         `json:"editor_mode"`
 	QueryContent      string         `json:"query_content"`
 	CreatedBy         sql.NullInt64  `json:"created_by"`
 	CreatedAt         time.Time      `json:"created_at"`
@@ -140,20 +174,17 @@ type Source struct {
 	ID                int64          `json:"id"`
 	Name              string         `json:"name"`
 	MetaIsAutoCreated int64          `json:"_meta_is_auto_created"`
+	SourceType        string         `json:"source_type"`
 	MetaTsField       string         `json:"_meta_ts_field"`
 	MetaSeverityField sql.NullString `json:"_meta_severity_field"`
-	Host              string         `json:"host"`
-	Username          string         `json:"username"`
-	Password          string         `json:"password"`
-	Database          string         `json:"database"`
-	TableName         string         `json:"table_name"`
+	ConnectionConfig  string         `json:"connection_config"`
+	IdentityKey       string         `json:"identity_key"`
 	Description       sql.NullString `json:"description"`
 	TtlDays           int64          `json:"ttl_days"`
 	CreatedAt         time.Time      `json:"created_at"`
 	UpdatedAt         time.Time      `json:"updated_at"`
 	Managed           int64          `json:"managed"`
 	SecretRef         sql.NullString `json:"secret_ref"`
-	TlsEnable         int64          `json:"tls_enable"`
 }
 
 type SystemSetting struct {
@@ -190,17 +221,18 @@ type TeamSource struct {
 }
 
 type User struct {
-	ID           int64        `json:"id"`
-	Email        string       `json:"email"`
-	FullName     string       `json:"full_name"`
-	Role         string       `json:"role"`
-	Status       string       `json:"status"`
-	LastLoginAt  sql.NullTime `json:"last_login_at"`
-	LastActiveAt sql.NullTime `json:"last_active_at"`
-	CreatedAt    time.Time    `json:"created_at"`
-	UpdatedAt    time.Time    `json:"updated_at"`
-	Managed      int64        `json:"managed"`
-	AccountType  string       `json:"account_type"`
+	ID           int64          `json:"id"`
+	Email        string         `json:"email"`
+	FullName     string         `json:"full_name"`
+	Role         string         `json:"role"`
+	Status       string         `json:"status"`
+	LastLoginAt  sql.NullTime   `json:"last_login_at"`
+	LastActiveAt sql.NullTime   `json:"last_active_at"`
+	CreatedAt    time.Time      `json:"created_at"`
+	UpdatedAt    time.Time      `json:"updated_at"`
+	Managed      int64          `json:"managed"`
+	AccountType  string         `json:"account_type"`
+	PasswordHash sql.NullString `json:"password_hash"`
 }
 
 type UserPreference struct {

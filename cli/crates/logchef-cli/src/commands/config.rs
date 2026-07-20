@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
+use logchef_core::timerange::resolve_timezone;
 
 #[derive(Args)]
 pub struct ConfigArgs {
@@ -162,8 +163,13 @@ fn show_config() -> Result<()> {
     }
     println!("  limit:    {}", ctx.defaults.limit);
     println!("  since:    {}", ctx.defaults.since);
-    if let Some(ref tz) = ctx.defaults.timezone {
-        println!("  timezone: {}", tz);
+    let effective_tz = resolve_timezone(ctx.defaults.timezone.as_deref());
+    match &ctx.defaults.timezone {
+        Some(tz) => println!("  timezone: {}", tz),
+        None => println!(
+            "  timezone: (not set, using detected system zone '{}')",
+            effective_tz
+        ),
     }
 
     Ok(())

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,20 +16,63 @@ import (
 
 // Config represents the application configuration
 type Config struct {
-	Server       ServerConfig       `koanf:"server"`
-	Database     DatabaseConfig     `koanf:"database"`
-	SQLite       SQLiteConfig       `koanf:"sqlite"`
-	Postgres     PostgresConfig     `koanf:"postgres"`
-	Clickhouse   ClickhouseConfig   `koanf:"clickhouse"`
-	OIDC         OIDCConfig         `koanf:"oidc"`
-	Auth         AuthConfig         `koanf:"auth"`
-	Logging      LoggingConfig      `koanf:"logging"`
-	AI           AIConfig           `koanf:"ai"`
-	Alerts       AlertsConfig       `koanf:"alerts"`
-	Query        QueryConfig        `koanf:"query"`
-	Export       ExportConfig       `koanf:"export"`
-	Shares       SharesConfig       `koanf:"shares"`
-	Provisioning ProvisioningConfig `koanf:"provisioning"`
+	Server         ServerConfig         `koanf:"server"`
+	Database       DatabaseConfig       `koanf:"database"`
+	SQLite         SQLiteConfig         `koanf:"sqlite"`
+	Postgres       PostgresConfig       `koanf:"postgres"`
+	Clickhouse     ClickhouseConfig     `koanf:"clickhouse"`
+	OIDC           OIDCConfig           `koanf:"oidc"`
+	Auth           AuthConfig           `koanf:"auth"`
+	Logging        LoggingConfig        `koanf:"logging"`
+	AI             AIConfig             `koanf:"ai"`
+	Alerts         AlertsConfig         `koanf:"alerts"`
+	Query          QueryConfig          `koanf:"query"`
+	Export         ExportConfig         `koanf:"export"`
+	Tail           TailConfig           `koanf:"tail"`
+	Shares         SharesConfig         `koanf:"shares"`
+	RateLimit      RateLimitConfig      `koanf:"rate_limit"`
+	DashboardCache DashboardCacheConfig `koanf:"dashboard_cache"`
+	Provisioning   ProvisioningConfig   `koanf:"provisioning"`
+}
+
+// DashboardCacheConfig controls the per-dashboard server-side result cache, a
+// byte-bounded LRU+TTL that collapses N panels x M viewers into one backend
+// query per TTL window. Only requests carrying a dashboard cache directive are
+// eligible; explorer/ad-hoc queries are never cached. Caching is skipped
+// entirely when Enabled is false.
+type DashboardCacheConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// DefaultTTL mirrors the client default; informational + fallback.
+	DefaultTTL time.Duration `koanf:"default_ttl"`
+	// MaxTTL is the hard clamp applied to any client-requested TTL.
+	MaxTTL time.Duration `koanf:"max_ttl"`
+	// MaxBytes caps the total encoded bytes held across all entries.
+	MaxBytes int64 `koanf:"max_bytes"`
+	// MaxEntryBytes caps a single cached response; larger results bypass the cache.
+	MaxEntryBytes int `koanf:"max_entry_bytes"`
+	// MaxEntries caps the number of cached entries.
+	MaxEntries int `koanf:"max_entries"`
+	// MaxConcurrentFills bounds concurrent distinct datasource fills, capping
+	// worst-case in-flight buffering at MaxConcurrentFills × MaxEntryBytes so a
+	// burst of unique cache-directive queries cannot exhaust memory.
+	MaxConcurrentFills int `koanf:"max_concurrent_fills"`
+}
+
+// RateLimitConfig controls fixed-window request rate limiting for the
+// unauthenticated auth/token endpoints (per client IP, plus an optional global
+// cap) and the authenticated query endpoints (per user). Limiting is skipped
+// entirely when Enabled is false.
+type RateLimitConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// AuthPerIPPerMinute caps requests per client IP per minute on the
+	// unauthenticated auth/token endpoints.
+	AuthPerIPPerMinute int `koanf:"auth_per_ip_per_minute"`
+	// AuthGlobalPerMinute caps total requests per minute across all clients on
+	// the auth/token endpoints. 0 disables the global cap.
+	AuthGlobalPerMinute int `koanf:"auth_global_per_minute"`
+	// QueryPerUserPerMinute caps query-endpoint requests per authenticated user
+	// per minute.
+	QueryPerUserPerMinute int `koanf:"query_per_user_per_minute"`
 }
 
 // QueryConfig contains settings for query execution
@@ -62,6 +106,32 @@ type ExportConfig struct {
 	Formats               []string      `koanf:"formats"`
 }
 
+// TailConfig contains settings for live log tailing (SSE streams).
+type TailConfig struct {
+	// PollInterval is the ClickHouse poll cadence; VictoriaLogs streams natively.
+	PollInterval time.Duration `koanf:"poll_interval"`
+	// MaxPerUser limits concurrent active tail streams per user.
+	MaxPerUser int `koanf:"max_per_user"`
+	// MaxGlobal limits concurrent active tail streams globally.
+	MaxGlobal int `koanf:"max_global"`
+	// SessionTTL is the hard lifetime of a tail stream before it is closed.
+	// The practical upper bound is [server] http_server_timeout: fasthttp sets
+	// a single write deadline for the entire streamed response when it starts
+	// writing, so a Flush blocked on a slow/stalled client can still hold the
+	// connection open past SessionTTL — but never past http_server_timeout.
+	// Keep SessionTTL comfortably under http_server_timeout so the TTL is the
+	// one that normally fires.
+	SessionTTL time.Duration `koanf:"session_ttl"`
+	// MaxRowsPerSec is the per-stream row-rate ceiling; excess rows are dropped.
+	MaxRowsPerSec int `koanf:"max_rows_per_sec"`
+	// LookbackMargin re-scans this trailing window behind the poll cursor on
+	// every ClickHouse tail poll, so rows that finish ingesting slightly behind
+	// the cursor (ingestion lag, batched inserts) are not silently missed. The
+	// window never reaches before the tail session started. VictoriaLogs
+	// streams natively and ignores this.
+	LookbackMargin time.Duration `koanf:"lookback_margin"`
+}
+
 // SharesConfig contains settings for ad hoc query share links.
 type SharesConfig struct {
 	DefaultTTL        time.Duration `koanf:"default_ttl"`
@@ -77,6 +147,14 @@ type ServerConfig struct {
 	// SecureCookie controls the Secure flag on auth cookies.
 	// Set to false for local development over HTTP. Defaults to true.
 	SecureCookie *bool `koanf:"secure_cookie"`
+	// TrustedProxies lists proxy IPs/CIDRs whose ProxyHeader is trusted for
+	// client-IP resolution. Empty (default) trusts no proxy, so c.IP() is the
+	// direct peer — safe out of the box. Set to your reverse proxy's address(es)
+	// to resolve the real client behind it (e.g. for per-IP rate limiting).
+	TrustedProxies []string `koanf:"trusted_proxies"`
+	// ProxyHeader is the forwarding header read for the client IP when the
+	// direct peer is a trusted proxy. Defaults to X-Forwarded-For.
+	ProxyHeader string `koanf:"proxy_header"`
 }
 
 // IsSecureCookie returns whether cookies should have the Secure flag set.
@@ -140,6 +218,16 @@ type OIDCConfig struct {
 	// other means (e.g. Cloudflare Access, corporate SSO).
 	// Default: false
 	SkipEmailVerifiedCheck bool `koanf:"skip_email_verified_check"`
+
+	// AllowedIssuers optionally overrides which token issuers (the `iss` claim)
+	// are accepted during ID-token verification. When empty (the default), the
+	// verifier accepts only the single issuer advertised by the provider's
+	// discovery document (i.e. provider_url) — this is the safe default for
+	// single-provider deployments. Set this to an explicit list only for
+	// multi-realm / multi-tenant IdPs that share one JWKS across issuers, or
+	// when the discovery issuer legitimately differs from the token issuer
+	// (e.g. distinct internal vs external URLs).
+	AllowedIssuers []string `koanf:"allowed_issuers"`
 }
 
 // AuthConfig contains authentication settings
@@ -149,6 +237,39 @@ type AuthConfig struct {
 	MaxConcurrentSessions int           `koanf:"max_concurrent_sessions"`
 	APITokenSecret        string        `koanf:"api_token_secret"`
 	DefaultTokenExpiry    time.Duration `koanf:"default_token_expiry"`
+	// Local enables email+password authentication alongside (or instead of)
+	// OIDC — so Logchef can run without an external identity provider.
+	Local LocalAuthConfig `koanf:"local"`
+	// AutoProvision enables just-in-time user creation on first OIDC login
+	// from an allowed company domain, instead of failing with "user not found".
+	AutoProvision AutoProvisionConfig `koanf:"auto_provision"`
+}
+
+// AutoProvisionConfig controls JIT (just-in-time) user provisioning on first
+// OIDC login. When Enabled, a user authenticating via OIDC for the first time
+// from an allowed domain is created automatically (as a regular, unmanaged
+// member) instead of being rejected as "user not found".
+type AutoProvisionConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// AllowedDomains is the list of email domains eligible for auto-provisioning.
+	// Matching is an exact, case-insensitive comparison against the domain part
+	// of the OIDC email claim — no subdomain/wildcard matching. Required
+	// (non-empty) when Enabled is true.
+	AllowedDomains []string `koanf:"allowed_domains"`
+	// DefaultTeamIDs are the team IDs an auto-provisioned user is added to as
+	// role "member". Best-effort: a nonexistent team ID is logged and skipped,
+	// it never fails the login.
+	DefaultTeamIDs []int `koanf:"default_team_ids"`
+}
+
+// LocalAuthConfig configures built-in email+password authentication.
+type LocalAuthConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// AdminEmail/AdminPassword bootstrap a local admin at startup (idempotent).
+	// Typically supplied via LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD rather than
+	// checked into a config file.
+	AdminEmail    string `koanf:"admin_email"`
+	AdminPassword string `koanf:"admin_password"`
 }
 
 // LoggingConfig contains logging settings
@@ -227,8 +348,34 @@ const (
 	defaultExportMaxConcurrentGlobal  = 5
 	defaultExportArtifactTTL          = 24 * time.Hour
 
+	defaultTailPollInterval   = 2 * time.Second
+	defaultTailMaxPerUser     = 2
+	defaultTailMaxGlobal      = 20
+	defaultTailSessionTTL     = 14 * time.Minute
+	defaultTailMaxRowsPerSec  = 100
+	defaultTailLookbackMargin = 5 * time.Second
+
 	defaultSharesDefaultTTL        = 720 * time.Hour
 	defaultSharesMaxQueryTextBytes = 1024 * 1024
+
+	// Opt-in: the per-IP auth limiter needs the real client IP, which requires
+	// trusted-proxy / X-Forwarded-For config when running behind a reverse proxy
+	// (e.g. Warpgate). Defaulting on there would collapse all traffic to one IP
+	// bucket and throttle auth globally. Operators enable it deliberately.
+	defaultRateLimitEnabled               = false
+	defaultRateLimitAuthPerIPPerMinute    = 20
+	defaultRateLimitAuthGlobalPerMinute   = 300
+	defaultRateLimitQueryPerUserPerMinute = 120
+
+	defaultDashboardCacheEnabled            = true
+	defaultDashboardCacheDefaultTTL         = 10 * time.Minute
+	defaultDashboardCacheMaxTTL             = time.Hour
+	defaultDashboardCacheMaxBytes           = 64 * 1024 * 1024 // 64 MiB
+	defaultDashboardCacheMaxEntryBytes      = 4 * 1024 * 1024  // 4 MiB
+	defaultDashboardCacheMaxEntries         = 1024
+	defaultDashboardCacheMaxConcurrentFills = 8
+
+	defaultProxyHeader = "X-Forwarded-For"
 )
 
 var defaultExportFormats = []string{"csv", "ndjson"}
@@ -272,68 +419,128 @@ func Load(path string) (*Config, error) {
 
 	// Load separate provisioning file if specified.
 	if cfg.Provisioning.File != "" {
-		provPath := cfg.Provisioning.File
-		// Resolve relative paths against the config file directory.
-		if !filepath.IsAbs(provPath) {
-			provPath = filepath.Join(filepath.Dir(path), provPath)
+		if err := loadProvisioningFile(&cfg, path); err != nil {
+			return nil, err
 		}
-		pk := koanf.New(".")
-		if err := pk.Load(file.Provider(provPath), toml.Parser()); err != nil {
-			return nil, fmt.Errorf("error loading provisioning file %q: %w", provPath, err)
-		}
-		log.Printf("loaded provisioning config from: %s", provPath)
-		// Unmarshal from root — the standalone file uses top-level keys
-		// (manage_sources, [[sources]], [[teams]]) without a [provisioning] prefix.
-		if err := pk.Unmarshal("", &cfg.Provisioning); err != nil {
-			return nil, fmt.Errorf("error parsing provisioning file: %w", err)
-		}
-		// Preserve the file path
-		cfg.Provisioning.File = provPath
 	}
 
+	if err := validateConfig(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
+}
+
+// loadProvisioningFile loads cfg.Provisioning.File (resolved relative to the
+// main config file's directory) and unmarshals it into cfg.Provisioning.
+func loadProvisioningFile(cfg *Config, mainConfigPath string) error {
+	provPath := cfg.Provisioning.File
+	// Resolve relative paths against the config file directory.
+	if !filepath.IsAbs(provPath) {
+		provPath = filepath.Join(filepath.Dir(mainConfigPath), provPath)
+	}
+	pk := koanf.New(".")
+	if err := pk.Load(file.Provider(provPath), toml.Parser()); err != nil {
+		return fmt.Errorf("error loading provisioning file %q: %w", provPath, err)
+	}
+	log.Printf("loaded provisioning config from: %s", provPath)
+	// Unmarshal from root — the standalone file uses top-level keys
+	// (manage_sources, [[sources]], [[teams]]) without a [provisioning] prefix.
+	if err := pk.Unmarshal("", &cfg.Provisioning); err != nil {
+		return fmt.Errorf("error parsing provisioning file: %w", err)
+	}
+	// Preserve the file path
+	cfg.Provisioning.File = provPath
+	return nil
+}
+
+// validateConfig checks the required/interdependent configuration fields
+// once defaults and provisioning have been applied.
+// validateTrustedProxies ensures each server.trusted_proxies entry is a valid IP
+// or CIDR and rejects the "trust everyone" wildcards (which would make the
+// forwarding header spoofable). Fiber only warns on a bad CIDR, so fail fast.
+func validateTrustedProxies(proxies []string) error {
+	for _, p := range proxies {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		if p == "0.0.0.0/0" || p == "::/0" {
+			return fmt.Errorf("server.trusted_proxies must not contain %q — trusting every peer makes the forwarding header spoofable", p)
+		}
+		if net.ParseIP(p) == nil {
+			if _, _, err := net.ParseCIDR(p); err != nil {
+				return fmt.Errorf("server.trusted_proxies entry %q is not a valid IP or CIDR", p)
+			}
+		}
+	}
+	return nil
+}
+
+func validateConfig(cfg *Config) error {
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
 	case "sqlite":
 		// SQLite path defaults are always applied; nothing further required.
 	case "postgres":
 		if cfg.Postgres.DSN == "" {
-			return nil, fmt.Errorf("postgres.dsn is required when database.driver is \"postgres\" (set it in file or %sPOSTGRES__DSN)", envPrefix)
+			return fmt.Errorf("postgres.dsn is required when database.driver is \"postgres\" (set it in file or %sPOSTGRES__DSN)", envPrefix)
 		}
 	default:
-		return nil, fmt.Errorf("database.driver must be \"sqlite\" or \"postgres\", got %q", cfg.Database.Driver)
+		return fmt.Errorf("database.driver must be \"sqlite\" or \"postgres\", got %q", cfg.Database.Driver)
+	}
+
+	if err := validateTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		return err
 	}
 
 	// Validate required configurations
 	if len(cfg.Auth.AdminEmails) == 0 {
-		return nil, fmt.Errorf("admin_emails is required in auth configuration (either in file or %sAUTH__ADMIN_EMAILS)", envPrefix)
+		return fmt.Errorf("admin_emails is required in auth configuration (either in file or %sAUTH__ADMIN_EMAILS)", envPrefix)
 	}
 
 	// Validate API token secret
 	if cfg.Auth.APITokenSecret == "" {
-		return nil, fmt.Errorf("api_token_secret is required in auth configuration (either in file or %sAUTH__API_TOKEN_SECRET)", envPrefix)
+		return fmt.Errorf("api_token_secret is required in auth configuration (either in file or %sAUTH__API_TOKEN_SECRET)", envPrefix)
 	}
 	if len(cfg.Auth.APITokenSecret) < 32 {
-		return nil, fmt.Errorf("api_token_secret must be at least 32 characters long for security")
+		return fmt.Errorf("api_token_secret must be at least 32 characters long for security")
 	}
 
-	// Validate OIDC configuration
+	// Validate local auth configuration
+	if cfg.Auth.Local.Enabled && cfg.Auth.Local.AdminEmail != "" && len(cfg.Auth.Local.AdminPassword) < 10 {
+		return fmt.Errorf("auth.local.admin_password must be at least 10 characters (set it via %sAUTH__LOCAL__ADMIN_PASSWORD)", envPrefix)
+	}
+
+	// Validate auto-provisioning configuration: an allowed domain list is
+	// required when enabled, otherwise every OIDC domain would be eligible.
+	if cfg.Auth.AutoProvision.Enabled && len(cfg.Auth.AutoProvision.AllowedDomains) == 0 {
+		return fmt.Errorf("auth.auto_provision.allowed_domains must be non-empty when auth.auto_provision.enabled is true (either in file or %sAUTH__AUTO_PROVISION__ALLOWED_DOMAINS)", envPrefix)
+	}
+
+	// Validate OIDC configuration. When local auth is enabled, OIDC becomes
+	// optional: skip these checks entirely if no provider_url is set, so
+	// Logchef can run without an external identity provider.
+	if cfg.Auth.Local.Enabled && cfg.OIDC.ProviderURL == "" {
+		return nil
+	}
 	if cfg.OIDC.ProviderURL == "" {
-		return nil, fmt.Errorf("provider_url is required in OIDC configuration (either in file or %sOIDC__PROVIDER_URL)", envPrefix)
+		return fmt.Errorf("provider_url is required in OIDC configuration (either in file or %sOIDC__PROVIDER_URL; alternatively enable [auth.local] to run without OIDC)", envPrefix)
 	}
 	if cfg.OIDC.AuthURL == "" {
-		return nil, fmt.Errorf("auth_url is required in OIDC configuration (either in file or %sOIDC__AUTH_URL)", envPrefix)
+		return fmt.Errorf("auth_url is required in OIDC configuration (either in file or %sOIDC__AUTH_URL)", envPrefix)
 	}
 	if cfg.OIDC.TokenURL == "" {
-		return nil, fmt.Errorf("token_url is required in OIDC configuration (either in file or %sOIDC__TOKEN_URL)", envPrefix)
+		return fmt.Errorf("token_url is required in OIDC configuration (either in file or %sOIDC__TOKEN_URL)", envPrefix)
 	}
 	if cfg.OIDC.ClientID == "" {
-		return nil, fmt.Errorf("client_id is required in OIDC configuration (either in file or %sOIDC__CLIENT_ID)", envPrefix)
+		return fmt.Errorf("client_id is required in OIDC configuration (either in file or %sOIDC__CLIENT_ID)", envPrefix)
 	}
 	if cfg.OIDC.RedirectURL == "" {
-		return nil, fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
+		return fmt.Errorf("redirect_url is required in OIDC configuration (either in file or %sOIDC__REDIRECT_URL)", envPrefix)
 	}
 
-	return &cfg, nil
+	return nil
 }
 
 func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config defaults are a flat per-key table
@@ -499,6 +706,43 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
 	}
 
+	if !k.Exists("tail.poll_interval") {
+		cfg.Tail.PollInterval = defaultTailPollInterval
+	}
+	if !k.Exists("tail.max_per_user") {
+		cfg.Tail.MaxPerUser = defaultTailMaxPerUser
+	}
+	if !k.Exists("tail.max_global") {
+		cfg.Tail.MaxGlobal = defaultTailMaxGlobal
+	}
+	if !k.Exists("tail.session_ttl") {
+		cfg.Tail.SessionTTL = defaultTailSessionTTL
+	}
+	if !k.Exists("tail.max_rows_per_sec") {
+		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
+	}
+	if cfg.Tail.PollInterval <= 0 {
+		cfg.Tail.PollInterval = defaultTailPollInterval
+	}
+	if cfg.Tail.MaxPerUser <= 0 {
+		cfg.Tail.MaxPerUser = defaultTailMaxPerUser
+	}
+	if cfg.Tail.MaxGlobal <= 0 {
+		cfg.Tail.MaxGlobal = defaultTailMaxGlobal
+	}
+	if cfg.Tail.SessionTTL <= 0 {
+		cfg.Tail.SessionTTL = defaultTailSessionTTL
+	}
+	if cfg.Tail.MaxRowsPerSec <= 0 {
+		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
+	}
+	if !k.Exists("tail.lookback_margin") {
+		cfg.Tail.LookbackMargin = defaultTailLookbackMargin
+	}
+	if cfg.Tail.LookbackMargin < 0 {
+		cfg.Tail.LookbackMargin = defaultTailLookbackMargin
+	}
+
 	if !k.Exists("shares.default_ttl") {
 		cfg.Shares.DefaultTTL = defaultSharesDefaultTTL
 	}
@@ -510,5 +754,57 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.Shares.MaxQueryTextBytes <= 0 {
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
+	}
+
+	if !k.Exists("server.proxy_header") || strings.TrimSpace(cfg.Server.ProxyHeader) == "" {
+		cfg.Server.ProxyHeader = defaultProxyHeader
+	}
+
+	if !k.Exists("rate_limit.enabled") {
+		cfg.RateLimit.Enabled = defaultRateLimitEnabled
+	}
+	if !k.Exists("rate_limit.auth_per_ip_per_minute") {
+		cfg.RateLimit.AuthPerIPPerMinute = defaultRateLimitAuthPerIPPerMinute
+	}
+	if !k.Exists("rate_limit.auth_global_per_minute") {
+		cfg.RateLimit.AuthGlobalPerMinute = defaultRateLimitAuthGlobalPerMinute
+	}
+	if !k.Exists("rate_limit.query_per_user_per_minute") {
+		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
+	}
+	if cfg.RateLimit.AuthPerIPPerMinute <= 0 {
+		cfg.RateLimit.AuthPerIPPerMinute = defaultRateLimitAuthPerIPPerMinute
+	}
+	// AuthGlobalPerMinute == 0 intentionally disables the global cap; only a
+	// negative value is invalid and falls back to the default.
+	if cfg.RateLimit.AuthGlobalPerMinute < 0 {
+		cfg.RateLimit.AuthGlobalPerMinute = defaultRateLimitAuthGlobalPerMinute
+	}
+	if cfg.RateLimit.QueryPerUserPerMinute <= 0 {
+		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
+	}
+
+	// enabled defaults to true, so only override when the key is absent (an
+	// explicit false must be preserved).
+	if !k.Exists("dashboard_cache.enabled") {
+		cfg.DashboardCache.Enabled = defaultDashboardCacheEnabled
+	}
+	if cfg.DashboardCache.DefaultTTL <= 0 {
+		cfg.DashboardCache.DefaultTTL = defaultDashboardCacheDefaultTTL
+	}
+	if cfg.DashboardCache.MaxTTL <= 0 {
+		cfg.DashboardCache.MaxTTL = defaultDashboardCacheMaxTTL
+	}
+	if cfg.DashboardCache.MaxBytes <= 0 {
+		cfg.DashboardCache.MaxBytes = defaultDashboardCacheMaxBytes
+	}
+	if cfg.DashboardCache.MaxEntryBytes <= 0 {
+		cfg.DashboardCache.MaxEntryBytes = defaultDashboardCacheMaxEntryBytes
+	}
+	if cfg.DashboardCache.MaxEntries <= 0 {
+		cfg.DashboardCache.MaxEntries = defaultDashboardCacheMaxEntries
+	}
+	if cfg.DashboardCache.MaxConcurrentFills <= 0 {
+		cfg.DashboardCache.MaxConcurrentFills = defaultDashboardCacheMaxConcurrentFills
 	}
 }

@@ -1,6 +1,6 @@
 ---
 title: Query Examples
-description: Practical examples for common log analytics scenarios
+description: Practical LogchefQL query examples for common log analytics scenarios, from basic filters to more advanced field searches.
 ---
 
 This guide provides practical examples for common log analytics scenarios using Logchef. Each example includes both the LogchefQL syntax and the equivalent SQL query.
@@ -561,7 +561,7 @@ trace_id!="" and span_id!="" and level="error"
    - `response_time>1000` is cleaner than text matching
    - Works well with numeric fields like status codes, durations, counts
 
-3. **Leverage Nested Field Access**
+3. **Use Nested Field Access**
 
    - Query Map and JSON columns directly: `log_attributes.user_id="123"`
    - No need to flatten your log schema
@@ -584,3 +584,9 @@ trace_id!="" and span_id!="" and level="error"
 
 7. **Switch to SQL Mode for Aggregations**
    - LogchefQL is for filtering; use SQL mode for `COUNT`, `GROUP BY`, etc.
+
+## Next steps
+
+- Read the full [Search Syntax](/guide/search-syntax) reference for every operator
+- Save queries you use often to a [Collection](/features/collections) for your team
+- See the [Query Interface](/user-guide/query-interface) guide for time controls and result views

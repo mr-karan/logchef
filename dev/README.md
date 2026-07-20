@@ -2,6 +2,23 @@
 
 Local development setup for Logchef.
 
+## VictoriaLogs Reference
+
+The local VictoriaLogs setup here is aligned with VictoriaMetrics' official Docker deployment examples:
+
+- Official deployment guide: [VictoriaLogs Docker deployment](https://github.com/VictoriaMetrics/VictoriaLogs/tree/master/deployment/docker)
+- Official single-node compose: [compose-vl-single.yml](https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/compose-vl-single.yml)
+- Official Vector example: [vector-vl-single.yml](https://github.com/VictoriaMetrics/VictoriaLogs/blob/master/deployment/docker/vector-vl-single.yml)
+
+The upstream single-node example exposes VictoriaLogs on `http://localhost:9428`, routes VMUI through `vmauth` on `http://localhost:8427/select/vmui/`, and uses Vector to push logs over HTTP into VictoriaLogs.
+
+Logchef's local dev environment intentionally keeps this lighter:
+
+- it runs the VictoriaLogs server itself on `:9428`
+- it does not run the full upstream `vmauth`, Grafana, `vmalert`, and VictoriaMetrics sidecar stack
+- it seeds a LogChef datasource pointing at the local VictoriaLogs instance
+- it ships a tiny ingestion helper for sample data instead of mirroring the full upstream Vector topology
+
 ## Prerequisites
 
 - [Docker](https://docs.docker.com/get-docker/)
@@ -11,21 +28,26 @@ Local development setup for Logchef.
 ## Quick Start
 
 ```bash
-# One-time setup (starts docker, creates tables, seeds data)
+# One-time setup (starts docker and creates ClickHouse tables)
 just dev-setup
 
-# Run backend (terminal 1)
+# Run backend (terminal 1) - creates local.db and provisions teams/sources
 just run-backend
+
+# Optional: add a local API user/token after local.db exists
+just dev-seed
 
 # Run frontend (terminal 2)
 just run-frontend
 
-# Ingest sample logs (terminal 3)
+# Ingest sample logs through Vector into ClickHouse and VictoriaLogs (terminal 3)
 just dev-ingest-logs
 ```
 
 Open http://localhost:5173 and login with `admin@logchef.internal` / `password`.
 Mailpit UI is available at http://localhost:8025.
+VictoriaLogs health should be available at http://localhost:9428/health.
+This local setup does not expose the upstream VMUI path on `:8427`, because `vmauth` is not part of Logchef's dev compose.
 
 To test email delivery locally, configure SMTP settings to:
 - Host: `mailpit`
@@ -46,8 +68,14 @@ The `init-clickhouse.sql` script creates two tables on first startup:
 Running `just dev-seed` creates:
 
 - **User**: `dev@localhost` (admin)
+- **API token**: a stable local development token for CLI or API testing
+- **Team membership**: links `dev@localhost` to "Dev Team" if provisioning has already created it
+
+Backend startup provisioning creates:
+
 - **Team**: "Dev Team"
-- **Sources**: HTTP Access Logs, Syslog Logs (both linked to Dev Team)
+- **Sources**: HTTP Access Logs, Syslog Logs, VictoriaLogs Demo (all linked to Dev Team)
+- **VictoriaLogs sample data**: `just dev-ingest-logs` now uses Vector to send demo logs into the local VictoriaLogs instance in addition to the ClickHouse demo streams
 
 ## Services
 
@@ -55,6 +83,7 @@ Running `just dev-seed` creates:
 |---------|------|-------------|
 | ClickHouse HTTP | 8123 | HTTP interface |
 | ClickHouse Native | 9000 | Native protocol |
+| VictoriaLogs | 9428 | Local VictoriaLogs API |
 | Dex | 5556 | OIDC provider |
 | Webhook Receiver | 8888 | Test webhook endpoint |
 | Mailpit UI | 8025 | Email inbox UI |
@@ -90,13 +119,13 @@ The data lives in the `postgres-data` volume; `just dev-clean` removes it.
 ## Useful Commands
 
 ```bash
-# Quick reset (truncate logs, recreate SQLite data)
+# Quick reset (truncate ClickHouse logs, wipe VictoriaLogs data, recreate SQLite data)
 just dev-reset
 
 # Full clean (stop docker, remove volumes, delete DB)
 just dev-clean
 
-# Re-seed without full reset
+# Re-create the local API user/token after backend has created local.db
 just dev-seed
 
 # View webhook receiver logs (for testing alerts)
@@ -112,7 +141,10 @@ just dev-test-webhook
 |------|---------|
 | `docker-compose.yml` | Infrastructure services |
 | `init-clickhouse.sql` | Creates ClickHouse tables |
-| `seed.sh` | Creates team, sources, user (idempotent) |
+| `seed.sh` | Creates the local API user/token and optionally links it to the provisioned dev team |
+| `provisioning.toml` | Example datasource-aware provisioning config for dev |
+| `victorialogs.toml` | Vector config for the local VictoriaLogs demo stream |
+| `ingest-victorialogs.sh` | Fallback helper that sends sample JSONL logs directly to VictoriaLogs |
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
 | `dex/config.yaml` | Dex OIDC configuration |
@@ -126,10 +158,20 @@ just dev-init-tables
 ```
 
 **Seed script fails?**
-- Ensure backend is running (`just run-backend`)
+- Ensure backend has started at least once (`just run-backend`)
 - Check the database path matches your config
 - Run with: `LOGCHEF_DB_PATH=./logchef.db ./dev/seed.sh`
 
 **Vector can't connect?**
 - Ensure ClickHouse is healthy: `curl http://localhost:8123/ping`
 - Check table exists: `curl "http://localhost:8123/?query=SHOW+TABLES"`
+
+**VictoriaLogs source is empty?**
+- Run `just dev-ingest-logs` to send demo logs through Vector into VictoriaLogs and ClickHouse.
+- Validate the service is up with: `curl http://localhost:9428/health`
+- Re-send only the VictoriaLogs sample payload without Vector with: `cd dev && ./ingest-victorialogs.sh`
+- If you want the full upstream VictoriaLogs demo stack with VMUI, Grafana, `vmauth`, and `vmalert`, use the official compose files linked above instead of Logchef's trimmed local dev compose.
+
+**VictoriaLogs still has old dev data?**
+- Run `just dev-reset` to clear ClickHouse tables, wipe VictoriaLogs data, and remove `local.db`.
+- Then restart the app with `just run-backend`, optionally `just dev-seed`, and re-ingest with `just dev-ingest-logs`.

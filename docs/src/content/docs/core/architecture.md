@@ -1,29 +1,30 @@
 ---
 title: Architecture
-description: Comprehensive overview of Logchef's architecture, components, and data flow
+description: Overview of Logchef's architecture, components, and data flow powering its ClickHouse and VictoriaLogs log analytics engine.
 ---
 
 ## Architectural Overview
 
-Logchef is architected as a specialized query and visualization layer on top of ClickHouse. Its design emphasizes a clear separation of concerns:
+Logchef is a specialized query and visualization layer on top of external log storage backends. Its design keeps a clear separation of concerns:
 
-- **Query Engine**: Core focus on transforming user queries into optimized ClickHouse SQL
-- **No Ingestion Pipeline**: The architecture intentionally excludes log collection, focusing exclusively on the query interface
-- **ClickHouse Integration**: Deep integration with ClickHouse's query capabilities while maintaining schema flexibility
+- **Query Engine**: Core focus on transforming user intent into the selected datasource's native query language
+- **No Ingestion Pipeline**: The architecture intentionally excludes log collection and focuses only on the query interface
+- **Datasource Providers**: Backend-specific provider layers for ClickHouse and VictoriaLogs while keeping a shared application control plane
 
-This architectural approach allows Logchef to leverage the existing ecosystem of log collection tools while providing a specialized interface for exploring logs once they're in ClickHouse.
+This means Logchef can reuse the existing ecosystem of log collection tools while giving you a dedicated interface for exploring logs once they land in ClickHouse, VictoriaLogs, or future supported backends.
 
 ## System Overview
 
-![Logchef Architecture Diagram](./logchef-architecture.png)
+![Diagram of Logchef's query engine, datasource providers, and SQLite metadata store](./logchef-architecture.png)
 
 ### Technology Stack
 
 #### Backend
 
-- **Go**: Logchef's core backend is written in Go, providing high performance, concurrency, and efficient resource utilization
+- **Go**: Logchef's core backend is written in Go for performance and concurrency
 - **SQLite**: Lightweight database used for metadata storage of users, teams, sources, and saved queries
 - **ClickHouse**: High-performance columnar database optimized for analytical queries on log data
+- **VictoriaLogs**: Log-native storage engine accessed via LogsQL and HTTP APIs
 
 #### Frontend
 
@@ -34,9 +35,9 @@ This architectural approach allows Logchef to leverage the existing ecosystem of
 
 ### 1. Query Engine
 
-- Converts simple search syntax to optimized ClickHouse SQL
+- Converts LogchefQL to the selected datasource's native query language
 - Manages query execution across multiple sources
-- Supports both simple search syntax and raw SQL for complex queries
+- Supports both simple search syntax and datasource-native query modes for complex queries
 
 ### 2. Authentication Service
 
@@ -46,7 +47,7 @@ This architectural approach allows Logchef to leverage the existing ecosystem of
 
 ### 3. Source Manager
 
-- Manages connections to remote ClickHouse instances
+- Manages connections to remote datasource backends
 - Handles source registration and validation
 - Provides connection pooling mechanisms
 
@@ -54,14 +55,14 @@ This architectural approach allows Logchef to leverage the existing ecosystem of
 
 1. **Log Ingestion** (external to Logchef):
 
-   - Various collectors (Vector, Filebeat, etc.) send logs to ClickHouse
+   - Various collectors (Vector, Filebeat, etc.) send logs to ClickHouse, VictoriaLogs, or other storage systems outside Logchef
    - Each collector handles its own schema mapping and transformations
 
 2. **Log Querying** (Logchef's domain):
-   - Users construct queries via the UI (simple syntax or SQL)
-   - Logchef translates simple syntax to optimized ClickHouse SQL
-   - Queries are executed against the appropriate ClickHouse source(s)
-   - Results are processed, formatted, and displayed in the UI
+   - Users construct queries via the UI (LogchefQL or native mode)
+   - Logchef translates LogchefQL to SQL for ClickHouse or LogsQL for VictoriaLogs
+   - Queries are executed against the appropriate datasource source(s)
+   - Logchef processes, formats, and displays the results in the UI
 
 ## Data Storage
 
@@ -69,24 +70,33 @@ This architectural approach allows Logchef to leverage the existing ecosystem of
 
 SQLite manages all system configuration and relationships:
 
-- **Sources**: Connection details to remote ClickHouse databases
+- **Sources**: Connection details and metadata for remote datasource backends
 - **Users**: Account information and authentication data
 - **Teams**: Organizational units with role-based access
-- **Saved Queries**: Team-specific saved queries (supports both simple syntax and raw SQL)
+- **Saved Queries**: Team-specific saved queries with explicit query language and editor mode metadata
 
-### ClickHouse Log Storage
+### Datasource Backends
 
-Logchef connects to multiple remote ClickHouse databases as sources:
+Logchef connects to remote datasource backends as sources:
 
-- **Schema Flexibility**: Sources can:
+- **ClickHouse sources** can:
 
   - Use the default OTEL schema as-is
   - Customize the built-in OpenTelemetry (OTEL) schema
   - Use custom schemas
 
-- **Requirements**: Only a `timestamp` field (DateTime/DateTime64) is mandatory
+- **VictoriaLogs sources** can:
 
-- **Schema Agnostic**: Beyond `timestamp`, any column structure is supported
+  - Connect directly to a VictoriaLogs base URL
+  - Apply tenant headers and immutable scope filters
+  - Use dynamically discovered fields instead of a fixed SQL schema
+
+- **Requirements**:
+
+  - ClickHouse requires a timestamp field (DateTime/DateTime64)
+  - VictoriaLogs defaults to `_time`
+
+- **Schema Agnostic**: Beyond the timestamp field, Logchef works with provider-specific field discovery and schema metadata
 
 ## Deployment Considerations
 
@@ -94,10 +104,8 @@ Logchef connects to multiple remote ClickHouse databases as sources:
 - **Stateless Operation**: Core application is stateless for horizontal scaling (only SQLite metadata is persistent)
 - **Proxying**: Can be deployed behind reverse proxies like Nginx or Caddy
 
-This architecture ensures:
+## Next steps
 
-- Fast log querying across multiple data sources
-- Efficient metadata management
-- Scalable log storage and retrieval
-- Robust access controls
-- Clean and responsive user experience
+- See [Database Backends & High Availability](/operations/database-backends) for running more than one replica
+- Review [ClickHouse Schema Design](/integration/schema-design) for the log table schema Logchef expects
+- Check [Teams, Sources & Access Control](/core/user-management) for how access is scoped

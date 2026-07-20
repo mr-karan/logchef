@@ -15,6 +15,9 @@ pub enum Error {
     Api {
         status: Option<u16>,
         message: String,
+        /// The server's `error_type` from `ApiErrorResponse`, when present.
+        /// Used to select an actionable CLI hint (see `ui::hint_for_error`).
+        error_type: Option<String>,
     },
 
     #[error("Network error: {0}")]
@@ -57,6 +60,19 @@ impl Error {
         Self::Api {
             status,
             message: msg.into(),
+            error_type: None,
+        }
+    }
+
+    pub fn api_with_type(
+        status: Option<u16>,
+        msg: impl Into<String>,
+        error_type: Option<String>,
+    ) -> Self {
+        Self::Api {
+            status,
+            message: msg.into(),
+            error_type,
         }
     }
 

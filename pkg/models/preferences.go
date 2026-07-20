@@ -23,6 +23,7 @@ type DisplayModePreference string
 const (
 	DisplayModeTable   DisplayModePreference = "table"
 	DisplayModeCompact DisplayModePreference = "compact"
+	DisplayModeJSON    DisplayModePreference = "json"
 )
 
 // UserPreferences represents persisted user preferences.

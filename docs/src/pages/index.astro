@@ -2,7 +2,11 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 ---
 
-<BaseLayout title="Logchef — Log Explorer for ClickHouse" activeNav="home">
+<BaseLayout
+  title="Logchef — Multi-Datasource Log Explorer"
+  description="Logchef is an open-source, self-hosted log exploration and alerting UI for ClickHouse and VictoriaLogs. Single binary, no per-seat pricing, no vendor lock-in."
+  activeNav="home"
+>
   <style>
     main { max-width: 1200px; margin: 0 auto; overflow: clip; }
 
@@ -37,9 +41,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     }
     .hero-copy { text-align: left; }
     .hero-title {
-      font-size: clamp(2.25rem, 4.6vw, 3.4rem);
-      line-height: 1.1;
-      letter-spacing: -0.03em;
+      font-size: clamp(1.9rem, 3.2vw, 2.6rem);
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      max-width: 24ch;
+      text-wrap: balance;
       font-weight: 600;
       margin-bottom: 1.25rem;
     }
@@ -365,11 +371,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <img src="/logchef-wordmark.svg" alt="Logchef" />
         </div>
         
-        <h1 class="hero-title">Log Explorer for ClickHouse</h1>
+        <h1 class="hero-title">Fast, self-hosted log exploration for ClickHouse &amp; VictoriaLogs</h1>
         
         <p class="hero-desc">
-          Query billions of logs in milliseconds. Single binary, no dependencies.
-          Point it at your ClickHouse cluster and start exploring.
+          Logchef is an open-source, self-hosted log exploration and alerting UI that connects to the ClickHouse or VictoriaLogs data you already run —
+          no proprietary ingestion pipeline, no forced schema. Ship it as a single binary and give your team fast search, saved queries, scheduled alerting, and role-based access in minutes.
         </p>
 
         <div class="hero-actions">
@@ -393,8 +399,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
 
         <div class="hero-highlights">
-          <span>ClickHouse-native</span>
-          <span>SQL + LogchefQL</span>
+          <span>ClickHouse + VictoriaLogs</span>
+          <span>LogchefQL + Native Queries</span>
           <span>Alerting + AI Query</span>
         </div>
       </div>
@@ -402,16 +408,33 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="hero-visual">
         <div class="hero-glow"></div>
         <div class="hero-screenshot">
-          <img 
-            src="/screenshots/hero-light.png" 
-            alt="Logchef Log Explorer" 
-            class="theme-img theme-img-light"
-          />
-          <img 
-            src="/screenshots/hero-dark.png" 
-            alt="Logchef Log Explorer" 
-            class="theme-img theme-img-dark"
-          />
+          <picture>
+            <source srcset="/screenshots/hero-light.avif" type="image/avif" />
+            <source srcset="/screenshots/hero-light.webp" type="image/webp" />
+            <img
+              src="/screenshots/hero-light.png"
+              alt="Logchef Log Explorer"
+              class="theme-img theme-img-light"
+              width="1800"
+              height="1124"
+              loading="lazy"
+              decoding="async"
+            />
+          </picture>
+          <picture>
+            <source srcset="/screenshots/hero-dark.avif" type="image/avif" />
+            <source srcset="/screenshots/hero-dark.webp" type="image/webp" />
+            <img
+              src="/screenshots/hero-dark.png"
+              alt="Logchef Log Explorer"
+              class="theme-img theme-img-dark"
+              width="1800"
+              height="1121"
+              fetchpriority="high"
+              loading="eager"
+              decoding="async"
+            />
+          </picture>
         </div>
       </div>
     </div>
@@ -427,8 +450,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     <div class="showcase-list">
       <article class="showcase-item">
         <div class="showcase-media" style="aspect-ratio: 2400 / 1040;">
-          <img src="/screenshots/teams-light.png" class="theme-img theme-img-light" alt="Teams" />
-          <img src="/screenshots/teams-dark.png" class="theme-img theme-img-dark" alt="Teams" />
+          <picture>
+            <source srcset="/screenshots/teams-light.avif" type="image/avif" />
+            <source srcset="/screenshots/teams-light.webp" type="image/webp" />
+            <img src="/screenshots/teams-light.png" class="theme-img theme-img-light" alt="Teams" width="1800" height="782" loading="lazy" decoding="async" />
+          </picture>
+          <picture>
+            <source srcset="/screenshots/teams-dark.avif" type="image/avif" />
+            <source srcset="/screenshots/teams-dark.webp" type="image/webp" />
+            <img src="/screenshots/teams-dark.png" class="theme-img theme-img-dark" alt="Teams" width="1800" height="776" loading="lazy" decoding="async" />
+          </picture>
         </div>
         <div class="showcase-text">
           <h3>Teams & Access Control</h3>
@@ -438,30 +469,54 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
       <article class="showcase-item is-reversed">
         <div class="showcase-media" style="aspect-ratio: 2400 / 2440;">
-          <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="Alerts" />
-          <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="Alerts" />
+          <picture>
+            <source srcset="/screenshots/alerts-light.avif" type="image/avif" />
+            <source srcset="/screenshots/alerts-light.webp" type="image/webp" />
+            <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="Alerts" width="1800" height="1823" loading="lazy" decoding="async" />
+          </picture>
+          <picture>
+            <source srcset="/screenshots/alerts-dark.avif" type="image/avif" />
+            <source srcset="/screenshots/alerts-dark.webp" type="image/webp" />
+            <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="Alerts" width="1800" height="1832" loading="lazy" decoding="async" />
+          </picture>
         </div>
         <div class="showcase-text">
-          <h3>Real-time Alerting</h3>
-          <p>Schedule SQL rules and deliver via email or webhooks.</p>
+          <h3>Scheduled Alerting</h3>
+          <p>Schedule native queries and deliver alerts via email or webhooks.</p>
         </div>
       </article>
 
       <article class="showcase-item">
         <div class="showcase-media" style="aspect-ratio: 1456 / 1144;">
-          <img src="/screenshots/ai-light.png" class="theme-img theme-img-light" alt="AI Query Assistant" />
-          <img src="/screenshots/ai-dark.png" class="theme-img theme-img-dark" alt="AI Query Assistant" />
+          <picture>
+            <source srcset="/screenshots/ai-light.avif" type="image/avif" />
+            <source srcset="/screenshots/ai-light.webp" type="image/webp" />
+            <img src="/screenshots/ai-light.png" class="theme-img theme-img-light" alt="AI Query Assistant" width="1456" height="1144" loading="lazy" decoding="async" />
+          </picture>
+          <picture>
+            <source srcset="/screenshots/ai-dark.avif" type="image/avif" />
+            <source srcset="/screenshots/ai-dark.webp" type="image/webp" />
+            <img src="/screenshots/ai-dark.png" class="theme-img theme-img-dark" alt="AI Query Assistant" width="1454" height="1130" loading="lazy" decoding="async" />
+          </picture>
         </div>
         <div class="showcase-text">
           <h3>AI Query Assistant</h3>
-          <p>Ask in plain English and get SQL instantly.</p>
+          <p>Ask in plain English and generate queries faster for supported sources.</p>
         </div>
       </article>
 
       <article class="showcase-item is-reversed">
         <div class="showcase-media" style="aspect-ratio: 16 / 10;">
-          <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Compact View" />
-          <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="Compact View" />
+          <picture>
+            <source srcset="/screenshots/compact-light.avif" type="image/avif" />
+            <source srcset="/screenshots/compact-light.webp" type="image/webp" />
+            <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Compact View" width="1800" height="1125" loading="lazy" decoding="async" />
+          </picture>
+          <picture>
+            <source srcset="/screenshots/compact-dark.avif" type="image/avif" />
+            <source srcset="/screenshots/compact-dark.webp" type="image/webp" />
+            <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="Compact View" width="1800" height="1124" loading="lazy" decoding="async" />
+          </picture>
         </div>
         <div class="showcase-text">
           <h3>Compact View</h3>
@@ -471,8 +526,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
       <article class="showcase-item">
         <div class="showcase-media" style="aspect-ratio: 1798 / 1726;">
-          <img src="/screenshots/sidebar-light.png" class="theme-img theme-img-light" alt="Field Sidebar" />
-          <img src="/screenshots/sidebar-dark.png" class="theme-img theme-img-dark" alt="Field Sidebar" />
+          <picture>
+            <source srcset="/screenshots/sidebar-light.avif" type="image/avif" />
+            <source srcset="/screenshots/sidebar-light.webp" type="image/webp" />
+            <img src="/screenshots/sidebar-light.png" class="theme-img theme-img-light" alt="Field Sidebar" width="1782" height="1728" loading="lazy" decoding="async" />
+          </picture>
+          <picture>
+            <source srcset="/screenshots/sidebar-dark.avif" type="image/avif" />
+            <source srcset="/screenshots/sidebar-dark.webp" type="image/webp" />
+            <img src="/screenshots/sidebar-dark.png" class="theme-img theme-img-dark" alt="Field Sidebar" width="1798" height="1726" loading="lazy" decoding="async" />
+          </picture>
         </div>
         <div class="showcase-text">
           <h3>Field Exploration</h3>
@@ -491,6 +554,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             <path d="M21.333 10H24v4h-2.667zM16 1.335h2.667v21.33H16zm-5.333 0h2.666v21.33h-2.666zM0 22.665V1.335h2.667v21.33zm5.333-21.33H8v21.33H5.333z"/>
           </svg>
           ClickHouse
+        </a>
+        <a href="https://victoriametrics.com/products/victorialogs/" target="_blank">
+          <svg viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.8 3.4L12 11 5.2 7.6 12 4.2zm-7 5.1 6 3v7l-6-3V9.3zm8 10v-7l6-3v7l-6 3z"/>
+          </svg>
+          VictoriaLogs
         </a>
         <a href="https://vector.dev" target="_blank">
           <svg viewBox="0 0 24 24" fill="currentColor">
@@ -537,7 +606,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           </svg>
         </div>
         <h3>Schema Agnostic</h3>
-        <p>Query any ClickHouse table without schema changes.</p>
+        <p>Point Logchef at existing ClickHouse tables or VictoriaLogs datasets without reshaping storage first.</p>
       </div>
 
       <div class="feature">
@@ -547,7 +616,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           </svg>
         </div>
         <h3>AI Query Assistant</h3>
-        <p>Describe the question and get SQL or LogchefQL instantly.</p>
+        <p>Describe the question and generate LogchefQL or backend-native queries faster.</p>
       </div>
 
       <div class="feature">
@@ -571,7 +640,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           </svg>
         </div>
         <h3>Alerting Pipeline</h3>
-        <p>Schedule SQL rules and route notifications via email or webhooks.</p>
+        <p>Schedule source-aware alert queries and route notifications via email or webhooks.</p>
       </div>
 
       <div class="feature">
@@ -602,7 +671,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <button class="copy-btn">Copy</button>
       </div>
       <div class="code-content" id="code-docker">
-        <pre><span class="code-comment"># Start Logchef with ClickHouse</span>
+        <pre><span class="code-comment"># Start Logchef and connect your log backend</span>
 curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/deployment/docker/docker-compose.yml
 
 docker compose up -d

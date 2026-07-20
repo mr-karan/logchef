@@ -56,8 +56,10 @@ frontend/.pnpm-home/
 # Docs
 docs/dist/*
 docs/node_modules/*
+docs/.astro/
 
 dist/*
 .DS_Store
 .claude/
 .plans/
+docs/marketing/

@@ -14,6 +14,7 @@ import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
 import { getLocalTimeZone, CalendarDateTime, type DateValue } from '@internationalized/date'
 import type { Source } from "@/api/sources";
+import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
 function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
   if (!dateTime) return null;
@@ -81,7 +82,7 @@ export function useSavedQueries(
   async function handleSaveQueryClick() {
     const query = exploreStore.activeMode === 'logchefql'
         ? exploreStore.logchefqlCode
-        : exploreStore.rawSql
+        : exploreStore.nativeQuery
 
     if (!query?.trim()) {
       toast({
@@ -137,7 +138,8 @@ export function useSavedQueries(
         response = await savedQueriesStore.update(queryId, {
           name: formData.name,
           description: formData.description,
-          query_type: formData.query_type,
+          query_language: formData.query_language,
+          editor_mode: formData.editor_mode,
           query_content: formData.query_content,
         });
       } else {
@@ -157,7 +159,8 @@ export function useSavedQueries(
           response = await savedQueriesStore.update(existingQuery.id, {
             name: formData.name,
             description: formData.description,
-            query_type: formData.query_type,
+            query_language: formData.query_language,
+            editor_mode: formData.editor_mode,
             query_content: formData.query_content,
           });
         } else {
@@ -175,7 +178,8 @@ export function useSavedQueries(
               formData.name,
               formData.description,
               parsedContent,
-              formData.query_type,
+              formData.query_language,
+              formData.editor_mode,
           );
         }
       }
@@ -239,11 +243,20 @@ export function useSavedQueries(
 
     try {
       const content = JSON.parse(queryData.query_content)
-      const isLogchefQL = queryData.query_type === 'logchefql'
+      const metadata = resolveSavedQueryMetadata({
+        query_language: queryData.query_language,
+        editor_mode: queryData.editor_mode,
+        source_type: _currentSource?.value?.source_type,
+        query_languages: _currentSource?.value?.query_languages,
+        saved_query_editor_modes: _currentSource?.value?.saved_query_editor_modes,
+      })
+      const isLogchefQL = metadata.queryLanguage === 'logchefql'
       const queryToLoad = content.content || ''
 
       exploreStore.clearError()
-      exploreStore.setActiveMode(isLogchefQL ? 'logchefql' : 'sql')
+
+      // Set the correct mode based on the saved query language
+      exploreStore.setActiveMode(getExploreModeForQueryLanguage(metadata.queryLanguage))
 
       const resolvedTeamId = 'resolved_team_id' in queryData
         ? Number((queryData as SavedQuery & { resolved_team_id?: number }).resolved_team_id)
@@ -261,7 +274,7 @@ export function useSavedQueries(
       if (isLogchefQL) {
         exploreStore.setLogchefqlCode(queryToLoad)
       } else {
-        exploreStore.setRawSql(queryToLoad)
+        exploreStore.setNativeQuery(queryToLoad)
       }
 
       if (content.limit) exploreStore.setLimit(content.limit)
@@ -517,7 +530,8 @@ export function useSavedQueries(
         name?: string;
         description?: string;
         query_content: string;
-        query_type: 'logchefql' | 'sql';
+        query_language: 'logchefql' | 'clickhouse-sql' | 'logsql';
+        editor_mode: 'builder' | 'native';
       }
   ) {
     isLoading.value = true;
@@ -526,7 +540,8 @@ export function useSavedQueries(
         name: updateData.name,
         description: updateData.description,
         query_content: updateData.query_content,
-        query_type: updateData.query_type,
+        query_language: updateData.query_language,
+        editor_mode: updateData.editor_mode,
       });
 
       if (result.success) {

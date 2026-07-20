@@ -1,0 +1,11 @@
+---
+// Overrides Starlight's SocialIcons (top-right of the docs header) to add a
+// tasteful "Blog" link alongside the existing social icons, giving docs
+// readers a clear path back to the marketing site's writing. Rendering the
+// default component afterwards preserves the GitHub icon and any future
+// social links configured in astro.config.mjs.
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+---
+
+<a href="/blog" class="lc-header-link">Blog</a>
+<Default><slot /></Default>

@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: Configure Logchef to match your environment
+description: Configure Logchef's server, authentication, and runtime settings using a TOML file and LOGCHEF_ environment variable overrides.
 ---
 
 Logchef uses a minimal TOML configuration file for bootstrap settings, with runtime configuration managed through the Admin Settings UI. This guide explains the essential configuration options and how to manage non-essential settings through the web interface.
@@ -46,7 +46,23 @@ frontend_url = ""
 
 # HTTP server timeout for requests (default: 30s)
 http_server_timeout = "30s"
+
+# Trusted reverse-proxy IPs/CIDRs for client-IP resolution. Empty (default)
+# trusts no proxy — the client IP is the direct connection peer. Set to your
+# reverse proxy's address(es) to resolve the real client from proxy_header.
+trusted_proxies = []
+# Forwarding header read for the client IP, ONLY when the direct peer is one of
+# trusted_proxies (otherwise ignored, so untrusted callers can't spoof it).
+proxy_header = "X-Forwarded-For"
 ```
+
+:::note[Client IP behind a proxy]
+`trusted_proxies` is what lets client-IP features (e.g. per-IP rate limiting)
+work behind a reverse proxy. List only your proxy's own address(es), and make
+sure that proxy **overwrites** the forwarding header rather than appending a
+client-supplied one — otherwise the client IP can be spoofed. Invalid entries or
+a `0.0.0.0/0` wildcard fail startup.
+:::
 
 ## Database Configuration
 
@@ -101,6 +117,77 @@ If you plan to use the CLI, create a public OIDC client with loopback redirect U
 
 `oidc.skip_email_verified_check` is useful for providers such as Cloudflare Access that do not emit
 the `email_verified` claim. It does not bypass an explicit `email_verified=false` response.
+
+### Local authentication (run without OIDC)
+
+Logchef can run without an external identity provider. Enable built-in
+email+password authentication and bootstrap an admin at startup:
+
+```toml
+[auth.local]
+enabled = true
+admin_email = "admin@example.com"
+# Prefer the environment variable below over committing a password to a file.
+# Minimum 10 characters. Stored as a bcrypt hash; the plaintext is never logged.
+admin_password = "change-me-please"
+```
+
+Or via environment variables:
+
+```bash
+LOGCHEF_AUTH__LOCAL__ENABLED=true
+LOGCHEF_AUTH__LOCAL__ADMIN_EMAIL=admin@example.com
+LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD=change-me-please
+```
+
+When local auth is enabled the whole `[oidc]` section becomes optional. The
+login page shows an email/password form (and the SSO button too, if OIDC is
+also configured). The bootstrap admin is created (or its password updated)
+on every startup, so rotating the password is just a config change + restart.
+The login endpoint is rate limited per IP and per email.
+
+### SSO auto-provisioning (JIT user creation)
+
+By default, an OIDC login from a user who doesn't already exist in Logchef is
+rejected with "user not found": someone has to create the user first (via the
+admin UI or [declarative provisioning](/getting-started/provisioning/)).
+**Auto-provisioning** removes that step for your own company domain: a
+first-time OIDC login from an allowed email domain creates the user on the
+spot.
+
+```toml
+[auth.auto_provision]
+# Off by default.
+enabled = true
+# Email domains eligible for auto-provisioning. Matching is an exact,
+# case-insensitive comparison against the domain part of the OIDC email
+# claim — no subdomain or wildcard matching. Required (non-empty) when enabled;
+# startup fails otherwise.
+allowed_domains = ["example.com"]
+# Optional: team IDs the new user is added to, as role "member". Best-effort —
+# a nonexistent team ID is logged and skipped, it never fails the login.
+default_team_ids = [1]
+```
+
+Or via environment variables:
+
+```bash
+LOGCHEF_AUTH__AUTO_PROVISION__ENABLED=true
+LOGCHEF_AUTH__AUTO_PROVISION__ALLOWED_DOMAINS="example.com"
+LOGCHEF_AUTH__AUTO_PROVISION__DEFAULT_TEAM_IDS="1"
+```
+
+Behavior notes:
+
+- Auto-provisioned users are always created as regular, active **members**,
+  never admins. Admin access still comes only from `auth.admin_emails`.
+- Provisioning runs **after** the `email_verified` claim check, so an
+  unverified email can never mint a user.
+- The created users are **unmanaged** with respect to
+  [declarative provisioning](/getting-started/provisioning/): the reconciler
+  never adopts, updates, or prunes them, and admins can edit them freely.
+- Applies to the **browser OIDC login** only. The CLI token exchange still
+  requires the user to already exist. Run the web login once first.
 
 ### Auth Settings
 
@@ -162,11 +249,91 @@ The UI uses preview limits for Run and export limits for Download.
 
 **Environment variables:** `LOGCHEF_QUERY__MAX_PREVIEW_LIMIT=100000`, `LOGCHEF_EXPORT__MAX_ROWS=1000000`
 
+### Live tail settings
+
+Controls the `/logs/tail` SSE streams that power the explorer's **Live** toggle.
+ClickHouse sources are polled every `poll_interval`; VictoriaLogs sources stream
+natively. The other settings are admission guardrails shared by both backends.
+
+```toml
+[tail]
+poll_interval = "2s"
+max_per_user = 2
+max_global = 20
+# Kept under [server] http_server_timeout (15m default) — the write deadline
+# caps any single response, tails included. Clients re-arm on end.
+session_ttl = "14m"
+max_rows_per_sec = 100
+```
+
+**Environment variables:** `LOGCHEF_TAIL__MAX_PER_USER=4`, `LOGCHEF_TAIL__SESSION_TTL=20m`
+
+### Rate limiting
+
+Fixed-window request limits: per-IP (plus an optional global cap) on the
+unauthenticated auth/token endpoints, and per-user on the query endpoints.
+**Off by default** — enable it deliberately (see the proxy note below).
+
+```toml
+[rate_limit]
+enabled = false
+auth_per_ip_per_minute    = 20     # /auth/login, /auth/callback, /cli/token, ...
+auth_global_per_minute    = 300    # 0 disables the global cap
+query_per_user_per_minute = 120    # /logs/query, /logs/histogram, field values
+```
+
+**Environment variables:** `LOGCHEF_RATE_LIMIT__ENABLED=true`, `LOGCHEF_RATE_LIMIT__AUTH_PER_IP_PER_MINUTE=30`
+
+Rejections return HTTP 429 and increment the `logchef_rate_limit_rejections_total{scope}` metric.
+
+### Dashboard result cache
+
+Dashboards auto-refresh every panel on an interval, so a dashboard with *N*
+panels open by *M* viewers can generate up to *N×M* backend queries per refresh
+cycle. A shared, server-side result cache collapses that into one backend hit
+per panel per TTL window: the first request fills the cache, and every other
+request in that window is served the stored result.
+
+Caching is **per dashboard**: each dashboard's TTL lives in its own settings
+(default 10m; `0` disables caching for that dashboard). Only dashboard panel
+requests are cached — explorer and other ad-hoc queries are never cached. The
+`[dashboard_cache]` section sets the server-wide switch and bounds.
+
+```toml
+[dashboard_cache]
+# Master switch for the per-dashboard result cache.
+enabled = true
+# Default TTL applied when a dashboard does not set its own (client default mirror).
+default_ttl = "10m"
+# Hard clamp on any dashboard's requested TTL.
+max_ttl = "1h"
+# Total encoded bytes held across all cache entries (64 MiB).
+max_bytes = 67108864
+# Per-response cap; responses larger than this bypass the cache instead of being stored (4 MiB).
+max_entry_bytes = 4194304
+# Maximum number of cache entries.
+max_entries = 1024
+# Bounds concurrent distinct datasource fills. Worst-case in-flight buffering is
+# max_concurrent_fills × max_entry_bytes.
+max_concurrent_fills = 8
+```
+
+**Environment variables:** `LOGCHEF_DASHBOARD_CACHE__ENABLED=false`, `LOGCHEF_DASHBOARD_CACHE__MAX_TTL=30m`
+
+:::caution[Behind a reverse proxy]
+The per-IP limiter keys on the client IP. Logchef does not yet read
+`X-Forwarded-For`, so behind a reverse proxy every request appears to come from
+the proxy — per-IP limiting then collapses to a single shared bucket and would
+throttle *all* auth traffic together. That's why this is off by default. Until
+trusted-proxy support lands, rely on the global cap (`auth_global_per_minute`)
+and the per-user query limit (which key on the authenticated user, not the IP).
+:::
+
 ## Runtime Configuration (Admin Settings UI)
 
 The following settings are managed through the web interface at **Administration → System Settings** after first boot. You can optionally set initial values in `config.toml` which will be seeded to the database on first boot.
 
-![Admin Settings UI](/screenshots/settings.gif)
+![Animated walkthrough of the Admin Settings UI across the AI, alerting, and authentication tabs](/screenshots/settings.gif)
 
 ### AI SQL Generation
 

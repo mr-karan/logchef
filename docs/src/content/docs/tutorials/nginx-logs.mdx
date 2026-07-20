@@ -3,11 +3,11 @@ title: Shipping NGINX Logs to ClickHouse
 description: How to collect, parse, and store NGINX logs in ClickHouse for analysis with Logchef
 ---
 
-This tutorial demonstrates how to set up a custom schema in ClickHouse for NGINX access logs and configure Vector to collect, parse, and ship these logs. Unlike the OpenTelemetry example, this tutorial shows how to work with your own custom schema designed specifically for NGINX logs.
+This tutorial sets up a custom ClickHouse schema for NGINX access logs and configures Vector to collect, parse, and ship them. Unlike the OpenTelemetry example, it uses a schema built specifically for NGINX logs instead of a general-purpose one.
 
 ## Overview
 
-Logchef works with any ClickHouse table structure, not just standardized schemas. This flexibility allows you to create purpose-built schemas for specific log types like NGINX access logs.
+Logchef works with any ClickHouse table structure, not just standardized schemas, so you can build purpose-built schemas for specific log types like NGINX access logs.
 
 In this tutorial, we'll:
 
@@ -249,13 +249,12 @@ To ensure your log pipeline is working correctly:
 
 ## Conclusion
 
-This tutorial has shown how to:
+A schema tailored to NGINX logs, like the one built here, can be more efficient for NGINX-specific analysis than a generic schema such as OpenTelemetry, but it's less flexible if you later need to analyze logs from multiple sources together.
 
-1. Create a custom schema in ClickHouse specific for NGINX logs
-2. Configure Vector to collect, parse, and ship these logs
-3. Add optional enrichment for better analysis
-4. Set up Logchef to query these logs
+Logchef only queries your logs in ClickHouse - it doesn't handle collection. Use a tool like Vector to collect and parse the logs, and Logchef to explore and analyze them.
 
-This approach focuses on a schema tailored specifically for NGINX logs rather than a generic schema like OpenTelemetry. This design can be more efficient for NGINX-specific analysis but may be less flexible if you later need to analyze logs from multiple sources together.
+## Next steps
 
-Remember that Logchef functions as a query interface for your logs in ClickHouse - it doesn't handle log collection. This separation of concerns allows you to use specialized tools like Vector for collection and parsing while using Logchef's intuitive interface for exploration and analysis.
+- Compare this custom schema against the [built-in OpenTelemetry schema](/integration/schema-design)
+- See [Query Examples](/guide/examples) for more LogchefQL patterns
+- Review [Search Syntax](/guide/search-syntax) for the full operator reference

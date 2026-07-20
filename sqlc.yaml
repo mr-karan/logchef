@@ -26,6 +26,13 @@ sql:
       - "internal/store/sqlite/migrations/000022_add_team_id_to_query_shares.up.sql"
       - "internal/store/sqlite/migrations/000023_add_service_token_scopes.up.sql"
       - "internal/store/sqlite/migrations/000024_add_collection_editor_role.up.sql"
+      - "internal/store/sqlite/migrations/000025_datasource_sources.up.sql"
+      - "internal/store/sqlite/migrations/000026_query_languages.up.sql"
+      - "internal/store/sqlite/migrations/000027_remove_legacy_query_type.up.sql"
+      - "internal/store/sqlite/migrations/000028_add_local_auth.up.sql"
+      - "internal/store/sqlite/migrations/000029_add_dashboards.up.sql"
+      - "internal/store/sqlite/migrations/000031_add_query_history.up.sql"
+      - "internal/store/sqlite/migrations/000032_add_query_stats_daily.up.sql"
     gen:
       go:
         package: "sqlc"
@@ -40,6 +47,11 @@ sql:
     queries: "internal/store/postgres/queries.sql"
     schema:
       - "internal/store/postgres/migrations/000001_init.up.sql"
+      - "internal/store/postgres/migrations/000002_datasource_multibackend.up.sql"
+      - "internal/store/postgres/migrations/000003_add_local_auth.up.sql"
+      - "internal/store/postgres/migrations/000004_add_dashboards.up.sql"
+      - "internal/store/postgres/migrations/000006_add_query_history.up.sql"
+      - "internal/store/postgres/migrations/000007_add_query_stats_daily.up.sql"
     gen:
       go:
         package: "sqlc"

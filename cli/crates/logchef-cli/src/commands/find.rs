@@ -1,12 +1,13 @@
 use anyhow::{Context, Result};
 use clap::Args;
 use logchef_core::Config;
-use logchef_core::api::{Client, Column, SqlQueryRequest, Team};
+use logchef_core::api::{Client, Column, QueryResponse, SqlQueryRequest, Team};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use serde::Serialize;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 const DEFAULT_COLUMNS: &[&str] = &["service", "service_name", "job_name", "app", "host", "msg"];
 /// Columns that are treated as free-form text — a single sample row is more
@@ -15,6 +16,15 @@ const SAMPLE_ONLY_COLUMNS: &[&str] = &["msg", "message", "body"];
 const SAMPLE_VALUE_TRUNCATE: usize = 80;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Which source holds logs mentioning `checkout`? (searches all teams)
+  logchef find checkout
+
+  # Narrow to one team and a longer window
+  logchef find payment-gateway -t platform --since 7d
+
+  # Just the match counts, no per-column samples, as JSON
+  logchef find nginx --no-samples --output jsonl")]
 pub struct FindArgs {
     /// Service, job, host, or message pattern to search for.
     pattern: String,
@@ -115,8 +125,20 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
             if !source_matches_filter(&source, args.source.as_deref()) {
                 continue;
             }
-            let Some(table) = source.table_ref() else {
-                continue;
+
+            // VictoriaLogs sources have no ClickHouse-style `db.table` ref, so
+            // they took the old `table_ref()` early-`continue` and were skipped
+            // entirely. Branch on the engine instead: use the `db.table` for
+            // ClickHouse and the base_url (falling back to the source name) as
+            // the display target for VictoriaLogs.
+            let is_vl = source.source_type.eq_ignore_ascii_case("victorialogs");
+            let target = if is_vl {
+                source.target_ref().unwrap_or_else(|| source.name.clone())
+            } else {
+                match source.table_ref() {
+                    Some(table) => table,
+                    None => continue,
+                }
             };
 
             let schema = match client.get_schema(team.id, source.id).await {
@@ -141,15 +163,22 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
                 .as_deref()
                 .filter(|field| !field.trim().is_empty())
                 .unwrap_or("_timestamp");
-            let sql = find_sql(
-                &table,
-                timestamp_field,
-                &searchable,
-                &args.pattern,
-                &args.since,
-            );
+            // Count matches through the same `/logs/query` path for both
+            // engines (raw ClickHouse SQL vs. raw LogsQL); only the query text
+            // differs by engine.
+            let count_query = if is_vl {
+                vl_find_query(&searchable, &args.pattern, &args.since)
+            } else {
+                find_sql(
+                    &target,
+                    timestamp_field,
+                    &searchable,
+                    &args.pattern,
+                    &args.since,
+                )
+            };
             let request = SqlQueryRequest {
-                raw_sql: sql,
+                query_text: count_query,
                 limit: Some(1),
                 timezone: ctx.defaults.timezone.clone(),
                 start_time: None,
@@ -178,12 +207,23 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
             if matches > 0 {
                 let samples = if args.no_samples {
                     Vec::new()
+                } else if is_vl {
+                    vl_fetch_samples(
+                        client,
+                        team.id,
+                        source.id,
+                        &searchable,
+                        &args.pattern,
+                        &args.since,
+                        args.timeout,
+                    )
+                    .await
                 } else {
                     fetch_samples(
                         client,
                         team.id,
                         source.id,
-                        &table,
+                        &target,
                         timestamp_field,
                         &searchable,
                         &schema,
@@ -198,7 +238,7 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
                     team_name: team.name.clone(),
                     source_id: source.id,
                     source_name: source.name.clone(),
-                    table,
+                    table: target,
                     matches,
                     columns: searchable,
                     lookback: args.since.clone(),
@@ -231,7 +271,7 @@ fn print_results(results: &[FindResult], output: &OutputFormat, skipped: usize) 
                         result.team_id,
                         result.source_id,
                         result.table,
-                        result.matches,
+                        ui::thousands(result.matches),
                         result.lookback,
                         result.columns.join(",")
                     );
@@ -240,7 +280,7 @@ fn print_results(results: &[FindResult], output: &OutputFormat, skipped: usize) 
                             .values
                             .iter()
                             .map(|v| match v.count {
-                                Some(c) => format!("\"{}\" ({})", v.value, c),
+                                Some(c) => format!("\"{}\" ({})", v.value, ui::thousands(c)),
                                 None => format!("\"{}\" (sample)", v.value),
                             })
                             .collect::<Vec<_>>()
@@ -373,7 +413,7 @@ async fn fetch_samples(
         // bake into sample-only-column SQL.
         let request_limit = if with_count { 3 } else { 1 };
         let request = SqlQueryRequest {
-            raw_sql: sql,
+            query_text: sql,
             limit: Some(request_limit),
             timezone: None,
             start_time: None,
@@ -392,20 +432,7 @@ async fn fetch_samples(
                 continue;
             }
         };
-        let values: Vec<SampleValue> = response
-            .entries()
-            .iter()
-            .filter_map(|entry| {
-                let raw = entry.get(column)?;
-                let value = truncate(json_value_to_string(raw), SAMPLE_VALUE_TRUNCATE);
-                let count = if with_count {
-                    entry.get("c").and_then(json_to_i64)
-                } else {
-                    None
-                };
-                Some(SampleValue { value, count })
-            })
-            .collect();
+        let values = extract_sample_values(&response, column, with_count);
         if !values.is_empty() {
             out.push(ColumnSamples {
                 column: column.clone(),
@@ -414,6 +441,169 @@ async fn fetch_samples(
         }
     }
     out
+}
+
+/// Extracts sample values for `column` from a query response, shared by the
+/// ClickHouse and VictoriaLogs sample fetchers. `with_count` rows carry a
+/// frequency under the `c` alias; single-sample rows do not.
+fn extract_sample_values(
+    response: &QueryResponse,
+    column: &str,
+    with_count: bool,
+) -> Vec<SampleValue> {
+    response
+        .entries()
+        .iter()
+        .filter_map(|entry| {
+            let raw = entry.get(column)?;
+            let value = truncate(json_value_to_string(raw), SAMPLE_VALUE_TRUNCATE);
+            let count = if with_count {
+                entry.get("c").and_then(json_to_i64)
+            } else {
+                None
+            };
+            Some(SampleValue { value, count })
+        })
+        .collect()
+}
+
+/// Builds a LogsQL count query for `find` on a VictoriaLogs source, mirroring
+/// the ClickHouse branch: a case-insensitive substring match on any candidate
+/// column, bounded by the lookback window, aggregated to a single `matches`
+/// count.
+///
+/// VictoriaLogs has no ClickHouse-style `toDateTime(...) BETWEEN`, so the
+/// window is a LogsQL `_time:<lookback>` filter and the substring match uses a
+/// RE2 `(?i)` regexp filter per column, OR-combined. VL-specific limits: the
+/// match is a regexp scan over the raw field value (no ClickHouse
+/// `positionCaseInsensitive`), and the lookback granularity is whatever
+/// `_time:` accepts (s/m/h/d/w/y — anything else falls back to 24h).
+fn vl_find_query(columns: &[String], pattern: &str, since: &str) -> String {
+    format!(
+        "_time:{} {} | stats count() as matches",
+        vl_lookback(since),
+        vl_pattern_filter(columns, pattern)
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn vl_fetch_samples(
+    client: &Client,
+    team_id: i64,
+    source_id: i64,
+    matched_columns: &[String],
+    pattern: &str,
+    since: &str,
+    timeout: u32,
+) -> Vec<ColumnSamples> {
+    let mut out = Vec::new();
+    let lookback = vl_lookback(since);
+    for column in matched_columns {
+        let with_count = !is_sample_only_column(column);
+        let filter = vl_pattern_filter(std::slice::from_ref(column), pattern);
+        let query = if with_count {
+            // Top-3 distinct values by frequency, mirroring the ClickHouse
+            // `GROUP BY col ORDER BY count() DESC LIMIT 3`.
+            format!(
+                "_time:{} {} | stats by ({}) count() as c | sort by (c desc) | limit 3",
+                lookback,
+                filter,
+                vl_field(column)
+            )
+        } else {
+            // Free-form text (msg/message/body): one sample row is more useful
+            // than a frequency table of unique strings.
+            format!(
+                "_time:{} {} | fields {} | limit 1",
+                lookback,
+                filter,
+                vl_field(column)
+            )
+        };
+        let request_limit = if with_count { 3 } else { 1 };
+        let request = SqlQueryRequest {
+            query_text: query,
+            limit: Some(request_limit),
+            timezone: None,
+            start_time: None,
+            end_time: None,
+            query_timeout: Some(timeout),
+        };
+        let response = match client.query_sql(team_id, source_id, &request).await {
+            Ok(r) => r,
+            Err(err) => {
+                tracing::debug!(
+                    team = team_id,
+                    source = source_id,
+                    column = %column,
+                    "vl sample fetch failed: {err:#}"
+                );
+                continue;
+            }
+        };
+        let values = extract_sample_values(&response, column, with_count);
+        if !values.is_empty() {
+            out.push(ColumnSamples {
+                column: column.clone(),
+                values,
+            });
+        }
+    }
+    out
+}
+
+/// OR-combines a case-insensitive substring regexp filter across `columns`,
+/// wrapped in parens so it ANDs cleanly with the surrounding `_time:` filter.
+fn vl_pattern_filter(columns: &[String], pattern: &str) -> String {
+    let content = vl_regex_literal_ci(pattern);
+    let terms: Vec<String> = columns
+        .iter()
+        .map(|column| format!("{}:~\"{}\"", vl_field(column), content))
+        .collect();
+    format!("({})", terms.join(" OR "))
+}
+
+/// Renders the double-quoted CONTENT of a LogsQL regexp filter (`field:~"…"`)
+/// that matches `pattern` as a literal, case-insensitive substring. The
+/// pattern is first RE2-escaped (so metacharacters match literally), then the
+/// result is escaped for the surrounding LogsQL double-quoted string literal.
+fn vl_regex_literal_ci(pattern: &str) -> String {
+    let mut regex = String::from("(?i)");
+    for ch in pattern.chars() {
+        if "\\.+*?()|[]{}^$".contains(ch) {
+            regex.push('\\');
+        }
+        regex.push(ch);
+    }
+    regex.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Renders a LogsQL field name: bare for simple identifiers, double-quoted
+/// (with escaping) otherwise.
+fn vl_field(name: &str) -> String {
+    let simple = !name.is_empty()
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.');
+    if simple {
+        name.to_string()
+    } else {
+        format!("\"{}\"", name.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
+/// Sanitizes a lookback string for a LogsQL `_time:` filter, which accepts
+/// s/m/h/d/w/y suffixes. Anything else falls back to 24h.
+fn vl_lookback(since: &str) -> String {
+    let t = since.trim();
+    let valid = t.len() >= 2
+        && t.ends_with(|c: char| "smhdwy".contains(c))
+        && t[..t.len() - 1].chars().all(|c| c.is_ascii_digit());
+    if valid {
+        t.to_string()
+    } else {
+        "24h".to_string()
+    }
 }
 
 fn sample_sql(
@@ -607,5 +797,38 @@ mod tests {
     fn source_filter_passes_when_no_filter() {
         let src = make_source(11, "app-logs", "logs", "app");
         assert!(source_matches_filter(&src, None));
+    }
+
+    #[test]
+    fn vl_find_query_bounds_time_and_ors_columns() {
+        let q = vl_find_query(&["service".to_string(), "msg".to_string()], "api", "1h");
+        assert_eq!(
+            q,
+            "_time:1h (service:~\"(?i)api\" OR msg:~\"(?i)api\") | stats count() as matches"
+        );
+    }
+
+    #[test]
+    fn vl_regex_literal_escapes_metachars_and_quotes() {
+        // `.` is a regex metachar → escaped to `\.` in the regex, then the
+        // backslash is doubled for the LogsQL string literal.
+        assert_eq!(vl_regex_literal_ci("a.b"), "(?i)a\\\\.b");
+        // A double quote must be escaped for the string literal.
+        assert_eq!(vl_regex_literal_ci("a\"b"), "(?i)a\\\"b");
+    }
+
+    #[test]
+    fn vl_lookback_sanitizes_units() {
+        assert_eq!(vl_lookback("15m"), "15m");
+        assert_eq!(vl_lookback("2w"), "2w");
+        assert_eq!(vl_lookback("garbage"), "24h");
+        assert_eq!(vl_lookback(""), "24h");
+    }
+
+    #[test]
+    fn vl_field_quotes_only_when_needed() {
+        assert_eq!(vl_field("service_name"), "service_name");
+        assert_eq!(vl_field("app.version"), "app.version");
+        assert_eq!(vl_field("weird field"), "\"weird field\"");
     }
 }

@@ -206,7 +206,7 @@ func (c *OpenAIClient) GenerateSQL(
 
 	validatedSQL, err := validateAndFormatSQL(cleanedSQL)
 	if err != nil {
-		c.logger.Error("AI generated SQL failed validation", "raw_sql", cleanedSQL, "error", err)
+		c.logger.Error("AI generated SQL failed validation", "query_text", cleanedSQL, "error", err)
 		// err from validateAndFormatSQL is already ErrInvalidSQLGeneratedByAI if parsing failed
 		return "", err
 	}

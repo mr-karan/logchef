@@ -12,6 +12,8 @@ staticClients:
   - id: logchef
     redirectURIs:
       - "http://localhost:8125/api/v1/auth/callback"
+      # Ad hoc backend instance used to validate issue #34 (auto-provisioning). Safe to remove after.
+      - "http://localhost:8130/api/v1/auth/callback"
     name: "Logchef"
     secret: logchef-secret
 
@@ -38,3 +40,11 @@ staticPasswords:
     hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
     username: "demo"
     userID: "08a8684b-db88-4b73-90a9-3cd1661f5467"
+
+  # Ad hoc test user used to validate issue #34 (JIT auto-provisioning): this
+  # email is intentionally NOT pre-provisioned in logchef's DB. Same dev
+  # password as the users above ("password"). Safe to remove after.
+  - email: "newhire@example.com"
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: "newhire"
+    userID: "08a8684b-db88-4b73-90a9-3cd1661f5468"

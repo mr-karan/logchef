@@ -119,21 +119,26 @@ test-cli-query server_url="" team="" source="":
 run-frontend:
     cd frontend && bun run dev
 
-# Run the documentation server locally
-run-docs:
-    @echo "Starting documentation development server..."
-    cd docs && npm run dev
-
-# Build the documentation
-build-docs:
-    @echo "Building documentation site..."
-    cd docs && npm install && npm run build
-
 # Setup docs custom domain (only run once after creating GitHub Pages)
 setup-docs-domain:
     @echo "Setting up custom domain for documentation..."
     echo "logchef.app" > docs/public/CNAME
     @echo "Created CNAME file. Make sure to set up DNS records pointing to GitHub Pages."
+
+# Run the docs site (Astro dev server) with bun
+docs-dev:
+    @echo "Starting docs dev server..."
+    cd docs && bun run dev
+
+# Build the docs site with bun
+docs-build:
+    @echo "Building docs site..."
+    cd docs && bun run build
+
+# Build and preview the production docs site with bun
+docs-preview:
+    @echo "Building and previewing docs site..."
+    cd docs && bun run build && bun run preview
 
 dev-docker:
     cd dev && docker compose up
@@ -145,7 +150,7 @@ dev-init-tables:
     @echo "Creating ClickHouse tables..."
     docker exec -i dev-clickhouse-local-1 clickhouse-client -n < dev/init-clickhouse.sql
 
-dev-seed: dev-init-tables
+dev-seed:
     cd dev && ./seed.sh
 
 dev-setup:
@@ -162,12 +167,22 @@ dev-setup:
       fi
       sleep 1
     done
+    echo "Waiting for VictoriaLogs..."
+    for i in {1..30}; do
+      if curl -fsS http://localhost:9428/health > /dev/null 2>&1; then
+        echo "VictoriaLogs ready"
+        break
+      fi
+      sleep 1
+    done
     cd ..
-    just dev-seed
+    just dev-init-tables
     echo ""
     echo "=== Setup Complete ==="
-    echo "Run: just run-backend   (terminal 1)"
+    echo "Run: just run-backend   (terminal 1)  # creates local.db and provisions teams/sources"
+    echo "Run: just dev-seed      (optional)    # adds dev@localhost API user/token after local.db exists"
     echo "Run: just run-frontend  (terminal 2)"
+    echo "Run: just dev-ingest-logs (terminal 3)"
     echo "Open: http://localhost:5173"
 
 dev-reset:
@@ -177,6 +192,17 @@ dev-reset:
     echo "Truncating ClickHouse tables..."
     docker exec dev-clickhouse-local-1 clickhouse-client --query "TRUNCATE TABLE IF EXISTS default.http"
     docker exec dev-clickhouse-local-1 clickhouse-client --query "TRUNCATE TABLE IF EXISTS default.syslogs"
+    echo "Resetting VictoriaLogs data..."
+    docker exec dev-victorialogs-local-1 sh -c 'rm -rf /victoria-logs-data/*'
+    docker restart dev-victorialogs-local-1 > /dev/null
+    echo "Waiting for VictoriaLogs to come back..."
+    for i in {1..30}; do
+      if curl -fsS http://localhost:9428/health > /dev/null 2>&1; then
+        echo "VictoriaLogs ready"
+        break
+      fi
+      sleep 1
+    done
     echo "Resetting SQLite data..."
     rm -f local.db local.db-shm local.db-wal
     echo "Re-seeding requires backend to create DB first."
@@ -193,10 +219,12 @@ dev-ingest-logs duration="60":
     #!/usr/bin/env bash
     echo "Ingesting logs for {{duration}}s..."
     cd dev
+    mkdir -p /tmp/logchef-vector-http /tmp/logchef-vector-syslog /tmp/logchef-vector-victorialogs
+    vector -c victorialogs.toml & pid0=$!
     vector -c http.toml & pid1=$!
     vector -c syslog.toml & pid2=$!
     sleep {{duration}}
-    kill $pid1 $pid2 2>/dev/null
+    kill $pid0 $pid1 $pid2 2>/dev/null
     echo "Done."
 
 # View webhook receiver logs (for testing alerts)

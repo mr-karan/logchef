@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd frontend && bun run build
 
 # --- Backend builder stage (Go) ---
-FROM golang:1.26-bullseye AS builder
+FROM golang:1.26-bookworm AS builder
 
 # Declare build arguments
 ARG APP_VERSION=unknown
@@ -30,7 +30,7 @@ ARG TARGETOS=linux
 ARG TARGETARCH=amd64
 
 # Install build prerequisites
-ENV SQLC_VERSION=1.29.0
+ENV SQLC_VERSION=1.31.1
 RUN apt-get update \
     && apt-get install -y curl wget xz-utils libsqlite3-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -67,7 +67,7 @@ ENV GOCACHE=/root/.cache/go-build
 RUN --mount=type=cache,target=/go/pkg/mod \
     --mount=type=cache,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build \
-    -ldflags="-s -w -X 'main.buildString=${APP_VERSION}'" \
+    -ldflags="-s -w -X 'main.buildString=${APP_VERSION}' -X 'main.versionString=${APP_VERSION}'" \
     -o bin/logchef \
     ./cmd/server
 

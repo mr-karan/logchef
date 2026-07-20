@@ -8,22 +8,41 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Errors from the api service in the last hour (LogchefQL)
+  logchef query 'level=\"error\" and service=\"api\"' --since 1h
+
+  # All logs in an absolute window, newest 500, as JSON lines for jq
+  logchef query --from '2026-07-14 09:00:00' --to '2026-07-14 10:00:00' \\
+    --limit 500 --output jsonl | jq 'select(.status >= 500)'
+
+  # See the ClickHouse SQL / LogsQL a query compiles to, then run it
+  logchef query 'status>=500' --since 15m --show-sql")]
 pub struct QueryArgs {
     query: Option<String>,
 
+    /// Relative lookback window (e.g. 15m, 1h, 24h) evaluated against now,
+    /// in the effective timezone: `defaults.timezone` if configured,
+    /// otherwise the system's local timezone (see `logchef config show`).
     #[arg(long, short = 's')]
     since: Option<String>,
 
+    /// Absolute start time (YYYY-MM-DD HH:MM:SS), interpreted as wall-clock
+    /// in the effective timezone. Requires --to.
     #[arg(long)]
     from: Option<String>,
 
+    /// Absolute end time (YYYY-MM-DD HH:MM:SS), interpreted as wall-clock
+    /// in the effective timezone. Requires --from.
     #[arg(long)]
     to: Option<String>,
 
@@ -45,9 +64,13 @@ pub struct QueryArgs {
     #[arg(long)]
     no_timestamp: bool,
 
-    /// Trace the server-generated SQL on stderr after executing. Use
-    /// `--dry-run` to print the SQL and exit without keeping the results.
-    #[arg(long, visible_alias = "explain")]
+    /// Trace the server-generated query on stderr after executing. Use
+    /// `--dry-run` to print the query and exit without keeping the results.
+    #[arg(
+        long,
+        visible_alias = "explain",
+        help = "Show the generated backend query (SQL for ClickHouse, LogsQL for VictoriaLogs)"
+    )]
     show_sql: bool,
 
     /// Print the server-generated SQL to stdout and exit. (The server is
@@ -84,6 +107,10 @@ struct JsonOutput<'a> {
     query_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     generated_sql: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_query: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_query_language: Option<&'a str>,
     columns: &'a [Column],
 }
 
@@ -161,8 +188,8 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                     let mut cache_entries: Vec<(String, i64)> =
                         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                     for s in &sources {
-                        if let Some(table_ref) = s.table_ref() {
-                            cache_entries.push((table_ref, s.id));
+                        if let Some(target_ref) = s.target_ref() {
+                            cache_entries.push((target_ref, s.id));
                         }
                     }
                     cache.set_sources(team_id, &cache_entries);
@@ -172,7 +199,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                         .find(|s| s.name.eq_ignore_ascii_case(&name))
                         .or_else(|| {
                             sources.iter().find(|s| {
-                                s.table_ref()
+                                s.target_ref()
                                     .map(|r| r.eq_ignore_ascii_case(&name))
                                     .unwrap_or(false)
                             })
@@ -187,8 +214,12 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
     let since = args.since.unwrap_or_else(|| ctx.defaults.since.clone());
     let limit = args.limit.unwrap_or(ctx.defaults.limit);
 
-    let (start_time, end_time) =
-        parse_time_range(&since, args.from.as_deref(), args.to.as_deref())?;
+    let time_range = parse_time_range(
+        &since,
+        args.from.as_deref(),
+        args.to.as_deref(),
+        ctx.defaults.timezone.as_deref(),
+    )?;
 
     // Resolve query (prompt in interactive mode if not provided)
     let query = if is_interactive && args.query.is_none() {
@@ -199,35 +230,48 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
 
     let request = QueryRequest {
         query,
-        start_time,
-        end_time,
-        timezone: ctx.defaults.timezone.clone(),
+        start_time: time_range.start,
+        end_time: time_range.end,
+        timezone: Some(time_range.timezone),
         limit: Some(limit),
         query_timeout: Some(args.timeout),
     };
 
-    let response = client
-        .query_logchefql(team_id, source_id, &request)
-        .await
-        .context("Query failed")?;
+    let spinner = ui::Spinner::start(global.quiet, "querying");
+    let result = client.query_logchefql(team_id, source_id, &request).await;
+    spinner.finish();
+    let response = result.context("Query failed")?;
 
     if args.dry_run {
-        if let Some(sql) = &response.generated_sql {
-            println!("{}", sql);
-        } else {
-            anyhow::bail!("Server did not return generated SQL; cannot --dry-run.");
+        // Print the generated backend query to stdout (clean, pipeable) and
+        // exit. `generated_query()` falls back to `generated_sql`, so this
+        // works for both engines: ClickHouse returns `generated_sql`, while
+        // VictoriaLogs returns `generated_query` + `generated_query_language:
+        // "logsql"`. Never error just because the source is VictoriaLogs.
+        match response.generated_query() {
+            Some(query) => println!("{}", query),
+            None => anyhow::bail!("Server did not return a generated query; cannot --dry-run."),
         }
         return Ok(());
     }
 
     if args.show_sql
-        && let Some(sql) = &response.generated_sql
+        && let Some(query) = response.generated_query()
     {
-        eprintln!("Generated SQL: {}\n", sql);
+        let label = match response.generated_query_language() {
+            Some("logsql") => "Generated LogsQL",
+            Some("clickhouse-sql") => "Generated SQL",
+            _ => "Generated query",
+        };
+        let rendered = ui::highlight_query(
+            query,
+            response.generated_query_language(),
+            ui::stderr_human(global.quiet),
+        );
+        eprintln!("{}: {}\n", label, rendered);
     }
 
     let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
@@ -237,6 +281,8 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                 stats: &response.stats,
                 query_id: response.query_id.as_deref(),
                 generated_sql: response.generated_sql.as_deref(),
+                generated_query: response.generated_query(),
+                generated_query_language: response.generated_query_language(),
                 columns: &response.columns,
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -245,34 +291,30 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::Msg => {
             print_msg(entries, &response.columns, false);
         }
         OutputFormat::Text => {
-            let highlighter = if args.no_highlight || !is_tty {
+            let highlighter = if args.no_highlight || !ui::human(global.quiet) {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -294,36 +336,38 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
                     println!("{}", line);
                 }
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                global.quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
     }
 
     Ok(())
 }
 
-fn parse_time_range(since: &str, from: Option<&str>, to: Option<&str>) -> Result<(String, String)> {
-    let format = "%Y-%m-%d %H:%M:%S";
-
-    match (from, to) {
-        (Some(from), Some(to)) => Ok((from.to_string(), to.to_string())),
+fn parse_time_range(
+    since: &str,
+    from: Option<&str>,
+    to: Option<&str>,
+    configured_tz: Option<&str>,
+) -> Result<logchef_core::timerange::ResolvedTimeRange> {
+    let input = match (from, to) {
+        (Some(from), Some(to)) => TimeInput::WallClock {
+            start: from,
+            end: to,
+        },
         (Some(_), None) => anyhow::bail!("--from requires --to to be specified"),
         (None, Some(_)) => anyhow::bail!("--to requires --from to be specified"),
         (None, None) => {
             let end = Utc::now();
             let start = end - parse_duration(since)?;
-            Ok((
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            ))
+            TimeInput::Instant { start, end }
         }
-    }
+    };
+    Ok(resolve_time_range(input, configured_tz))
 }
 
 fn parse_duration(s: &str) -> Result<Duration> {
@@ -497,10 +541,7 @@ async fn prompt_source_interactive(
         anyhow::bail!("No sources available for this team");
     }
 
-    let options: Vec<String> = sources
-        .iter()
-        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
-        .collect();
+    let options: Vec<String> = sources.iter().map(|s| s.display_name()).collect();
     let selection = Select::new("Select source:", options)
         .prompt()
         .context("Failed to select source")?;
@@ -513,8 +554,8 @@ async fn prompt_source_interactive(
     let mut cache_entries: Vec<(String, i64)> =
         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
     for s in &sources {
-        if let Some(table_ref) = s.table_ref() {
-            cache_entries.push((table_ref, s.id));
+        if let Some(target_ref) = s.target_ref() {
+            cache_entries.push((target_ref, s.id));
         }
     }
     cache.set_sources(team_id, &cache_entries);

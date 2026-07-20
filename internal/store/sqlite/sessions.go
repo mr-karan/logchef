@@ -104,3 +104,14 @@ func (db *DB) CountUserSessions(ctx context.Context, userID models.UserID) (int,
 
 	return int(count), nil
 }
+
+// DeleteExpiredSessions removes all sessions whose expiry is at or before the
+// given time. Used by the periodic session sweeper.
+func (db *DB) DeleteExpiredSessions(ctx context.Context, before time.Time) error {
+
+	if err := db.writeQueries.DeleteExpiredSessions(ctx, before); err != nil {
+		db.log.Error("failed to delete expired sessions from db", "error", err)
+		return fmt.Errorf("error deleting expired sessions: %w", err)
+	}
+	return nil
+}

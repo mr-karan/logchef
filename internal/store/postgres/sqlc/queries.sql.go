@@ -237,7 +237,8 @@ INSERT INTO alerts (
     source_id,
     name,
     description,
-    query_type,
+    query_language,
+    editor_mode,
     query,
     condition_json,
     lookback_seconds,
@@ -253,15 +254,16 @@ INSERT INTO alerts (
     is_active,
     created_by
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
-RETURNING id, source_id, name, description, query_type, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+RETURNING id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode
 `
 
 type CreateAlertParams struct {
 	SourceID             int64       `json:"source_id"`
 	Name                 string      `json:"name"`
 	Description          pgtype.Text `json:"description"`
-	QueryType            string      `json:"query_type"`
+	QueryLanguage        string      `json:"query_language"`
+	EditorMode           string      `json:"editor_mode"`
 	Query                pgtype.Text `json:"query"`
 	ConditionJson        pgtype.Text `json:"condition_json"`
 	LookbackSeconds      int64       `json:"lookback_seconds"`
@@ -284,7 +286,8 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		arg.SourceID,
 		arg.Name,
 		arg.Description,
-		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.Query,
 		arg.ConditionJson,
 		arg.LookbackSeconds,
@@ -306,7 +309,6 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.SourceID,
 		&i.Name,
 		&i.Description,
-		&i.QueryType,
 		&i.Query,
 		&i.ConditionJson,
 		&i.LookbackSeconds,
@@ -326,6 +328,8 @@ func (q *Queries) CreateAlert(ctx context.Context, arg CreateAlertParams) (Alert
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueryLanguage,
+		&i.EditorMode,
 	)
 	return i, err
 }
@@ -362,6 +366,34 @@ func (q *Queries) CreateCollection(ctx context.Context, arg CreateCollectionPara
 	var i CreateCollectionRow
 	err := row.Scan(&i.ID, &i.CreatedAt, &i.UpdatedAt)
 	return i, err
+}
+
+const createDashboard = `-- name: CreateDashboard :one
+
+INSERT INTO dashboards (name, description, panels_json, created_by)
+VALUES ($1, $2, $3, $4)
+RETURNING id
+`
+
+type CreateDashboardParams struct {
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+	PanelsJson  string      `json:"panels_json"`
+	CreatedBy   pgtype.Int8 `json:"created_by"`
+}
+
+// Dashboards -----------------------------------------------------------------
+// Insert a new dashboard and return its id.
+func (q *Queries) CreateDashboard(ctx context.Context, arg CreateDashboardParams) (int64, error) {
+	row := q.db.QueryRow(ctx, createDashboard,
+		arg.Name,
+		arg.Description,
+		arg.PanelsJson,
+		arg.CreatedBy,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const createExportJob = `-- name: CreateExportJob :exec
@@ -445,8 +477,8 @@ func (q *Queries) CreateQueryShare(ctx context.Context, arg CreateQuerySharePara
 
 const createSavedQuery = `-- name: CreateSavedQuery :one
 
-INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_type, query_content, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO saved_queries (source_id, created_from_team_id, name, description, query_language, editor_mode, query_content, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id
 `
 
@@ -455,7 +487,8 @@ type CreateSavedQueryParams struct {
 	CreatedFromTeamID pgtype.Int8 `json:"created_from_team_id"`
 	Name              string      `json:"name"`
 	Description       pgtype.Text `json:"description"`
-	QueryType         string      `json:"query_type"`
+	QueryLanguage     string      `json:"query_language"`
+	EditorMode        string      `json:"editor_mode"`
 	QueryContent      string      `json:"query_content"`
 	CreatedBy         pgtype.Int8 `json:"created_by"`
 }
@@ -468,7 +501,8 @@ func (q *Queries) CreateSavedQuery(ctx context.Context, arg CreateSavedQueryPara
 		arg.CreatedFromTeamID,
 		arg.Name,
 		arg.Description,
-		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.QueryContent,
 		arg.CreatedBy,
 	)
@@ -505,24 +539,23 @@ func (q *Queries) CreateSession(ctx context.Context, arg CreateSessionParams) er
 const createSource = `-- name: CreateSource :one
 
 INSERT INTO sources (
-    name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, tls_enable, created_at, updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, now(), now())
+    name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, managed, secret_ref, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
 RETURNING id
 `
 
 type CreateSourceParams struct {
 	Name              string      `json:"name"`
 	MetaIsAutoCreated bool        `json:"_meta_is_auto_created"`
+	SourceType        string      `json:"source_type"`
 	MetaTsField       string      `json:"_meta_ts_field"`
 	MetaSeverityField pgtype.Text `json:"_meta_severity_field"`
-	Host              string      `json:"host"`
-	Username          string      `json:"username"`
-	Password          string      `json:"password"`
-	Database          string      `json:"database"`
-	TableName         string      `json:"table_name"`
+	ConnectionConfig  []byte      `json:"connection_config"`
+	IdentityKey       string      `json:"identity_key"`
 	Description       pgtype.Text `json:"description"`
 	TtlDays           int64       `json:"ttl_days"`
-	TlsEnable         bool        `json:"tls_enable"`
+	Managed           bool        `json:"managed"`
+	SecretRef         pgtype.Text `json:"secret_ref"`
 }
 
 // Sources
@@ -531,16 +564,15 @@ func (q *Queries) CreateSource(ctx context.Context, arg CreateSourceParams) (int
 	row := q.db.QueryRow(ctx, createSource,
 		arg.Name,
 		arg.MetaIsAutoCreated,
+		arg.SourceType,
 		arg.MetaTsField,
 		arg.MetaSeverityField,
-		arg.Host,
-		arg.Username,
-		arg.Password,
-		arg.Database,
-		arg.TableName,
+		arg.ConnectionConfig,
+		arg.IdentityKey,
 		arg.Description,
 		arg.TtlDays,
-		arg.TlsEnable,
+		arg.Managed,
+		arg.SecretRef,
 	)
 	var id int64
 	err := row.Scan(&id)
@@ -637,6 +669,19 @@ func (q *Queries) DeleteCollection(ctx context.Context, id int64) error {
 	return err
 }
 
+const deleteDashboard = `-- name: DeleteDashboard :one
+DELETE FROM dashboards WHERE id = $1
+RETURNING id
+`
+
+// Delete a dashboard; RETURNING lets callers detect not-found.
+func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) {
+	row := q.db.QueryRow(ctx, deleteDashboard, id)
+	var id_2 int64
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
 WHERE expires_at < $1
@@ -645,6 +690,16 @@ WHERE expires_at < $1
 // Delete expired export jobs
 func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, deleteExpiredExportJobs, expiresAt)
+	return err
+}
+
+const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
+DELETE FROM sessions WHERE expires_at <= $1
+`
+
+// Delete all sessions whose expiry is at or before the given time
+func (q *Queries) DeleteExpiredSessions(ctx context.Context, expiresAt pgtype.Timestamptz) error {
+	_, err := q.db.Exec(ctx, deleteExpiredSessions, expiresAt)
 	return err
 }
 
@@ -812,7 +867,7 @@ func (q *Queries) GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiT
 }
 
 const getAlert = `-- name: GetAlert :one
-SELECT id, source_id, name, description, query_type, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts WHERE id = $1
+SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode FROM alerts WHERE id = $1
 `
 
 func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
@@ -823,7 +878,6 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.SourceID,
 		&i.Name,
 		&i.Description,
-		&i.QueryType,
 		&i.Query,
 		&i.ConditionJson,
 		&i.LookbackSeconds,
@@ -843,6 +897,8 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueryLanguage,
+		&i.EditorMode,
 	)
 	return i, err
 }
@@ -888,6 +944,52 @@ func (q *Queries) GetCollectionMember(ctx context.Context, arg GetCollectionMemb
 		&i.Role,
 		&i.AddedBy,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getDashboard = `-- name: GetDashboard :one
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+WHERE d.id = $1
+`
+
+type GetDashboardRow struct {
+	ID             int64              `json:"id"`
+	Name           string             `json:"name"`
+	Description    pgtype.Text        `json:"description"`
+	PanelsJson     string             `json:"panels_json"`
+	CreatedBy      pgtype.Int8        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CreatedByEmail pgtype.Text        `json:"created_by_email"`
+	CreatedByName  pgtype.Text        `json:"created_by_name"`
+}
+
+// Look up one dashboard by id, with creator identity like ListDashboards.
+func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error) {
+	row := q.db.QueryRow(ctx, getDashboard, id)
+	var i GetDashboardRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Description,
+		&i.PanelsJson,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CreatedByEmail,
+		&i.CreatedByName,
 	)
 	return i, err
 }
@@ -1031,7 +1133,7 @@ func (q *Queries) GetQueryShare(ctx context.Context, token string) (GetQueryShar
 }
 
 const getSavedQuery = `-- name: GetSavedQuery :one
-SELECT id, source_id, name, description, query_type, query_content, created_by, created_from_team_id, created_at, updated_at FROM saved_queries WHERE id = $1
+SELECT id, source_id, name, description, query_content, created_by, created_from_team_id, created_at, updated_at, query_language, editor_mode FROM saved_queries WHERE id = $1
 `
 
 // Look up one saved query by id
@@ -1043,12 +1145,13 @@ func (q *Queries) GetSavedQuery(ctx context.Context, id int64) (SavedQuery, erro
 		&i.SourceID,
 		&i.Name,
 		&i.Description,
-		&i.QueryType,
 		&i.QueryContent,
 		&i.CreatedBy,
 		&i.CreatedFromTeamID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.QueryLanguage,
+		&i.EditorMode,
 	)
 	return i, err
 }
@@ -1071,7 +1174,7 @@ func (q *Queries) GetSession(ctx context.Context, id string) (Session, error) {
 }
 
 const getSource = `-- name: GetSource :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, managed, secret_ref, tls_enable, created_at, updated_at FROM sources WHERE id = $1
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE id = $1
 `
 
 // Get a single source by ID
@@ -1084,34 +1187,26 @@ func (q *Queries) GetSource(ctx context.Context, id int64) (Source, error) {
 		&i.MetaIsAutoCreated,
 		&i.MetaTsField,
 		&i.MetaSeverityField,
-		&i.Host,
-		&i.Username,
-		&i.Password,
-		&i.Database,
-		&i.TableName,
 		&i.Description,
 		&i.TtlDays,
 		&i.Managed,
 		&i.SecretRef,
-		&i.TlsEnable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceType,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
 	)
 	return i, err
 }
 
-const getSourceByName = `-- name: GetSourceByName :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, managed, secret_ref, tls_enable, created_at, updated_at FROM sources WHERE database = $1 AND table_name = $2
+const getSourceByIdentityKey = `-- name: GetSourceByIdentityKey :one
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE identity_key = $1
 `
 
-type GetSourceByNameParams struct {
-	Database  string `json:"database"`
-	TableName string `json:"table_name"`
-}
-
-// Get a single source by table name and database
-func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams) (Source, error) {
-	row := q.db.QueryRow(ctx, getSourceByName, arg.Database, arg.TableName)
+// Get a single source by provider-computed identity key
+func (q *Queries) GetSourceByIdentityKey(ctx context.Context, identityKey string) (Source, error) {
+	row := q.db.QueryRow(ctx, getSourceByIdentityKey, identityKey)
 	var i Source
 	err := row.Scan(
 		&i.ID,
@@ -1119,24 +1214,21 @@ func (q *Queries) GetSourceByName(ctx context.Context, arg GetSourceByNameParams
 		&i.MetaIsAutoCreated,
 		&i.MetaTsField,
 		&i.MetaSeverityField,
-		&i.Host,
-		&i.Username,
-		&i.Password,
-		&i.Database,
-		&i.TableName,
 		&i.Description,
 		&i.TtlDays,
 		&i.Managed,
 		&i.SecretRef,
-		&i.TlsEnable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceType,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
 	)
 	return i, err
 }
 
 const getSourceByNameForProvisioning = `-- name: GetSourceByNameForProvisioning :one
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, managed, secret_ref, tls_enable, created_at, updated_at FROM sources WHERE name = $1
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE name = $1
 `
 
 // Get source by name for provisioning lookup
@@ -1149,18 +1241,15 @@ func (q *Queries) GetSourceByNameForProvisioning(ctx context.Context, name strin
 		&i.MetaIsAutoCreated,
 		&i.MetaTsField,
 		&i.MetaSeverityField,
-		&i.Host,
-		&i.Username,
-		&i.Password,
-		&i.Database,
-		&i.TableName,
 		&i.Description,
 		&i.TtlDays,
 		&i.Managed,
 		&i.SecretRef,
-		&i.TlsEnable,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceType,
+		&i.ConnectionConfig,
+		&i.IdentityKey,
 	)
 	return i, err
 }
@@ -1249,7 +1338,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 }
 
 const getUser = `-- name: GetUser :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at FROM users WHERE id = $1
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE id = $1
 `
 
 // Get a user by ID
@@ -1268,12 +1357,13 @@ func (q *Queries) GetUser(ctx context.Context, id int64) (User, error) {
 		&i.AccountType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at FROM users WHERE email = $1
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE email = $1
 `
 
 // Get a user by email
@@ -1292,6 +1382,7 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.AccountType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PasswordHash,
 	)
 	return i, err
 }
@@ -1333,6 +1424,40 @@ func (q *Queries) GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSo
 	var team_id int64
 	err := row.Scan(&team_id)
 	return team_id, err
+}
+
+const incrementQueryStats = `-- name: IncrementQueryStats :exec
+
+INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
+VALUES ($1, $2, $3, $4, $5, 1, $6)
+ON CONFLICT (bucket_date, user_id, team_id, source_id, query_language)
+DO UPDATE SET
+    query_count = query_stats_daily.query_count + 1,
+    total_duration_ms = query_stats_daily.total_duration_ms + EXCLUDED.total_duration_ms
+`
+
+type IncrementQueryStatsParams struct {
+	BucketDate      pgtype.Date `json:"bucket_date"`
+	UserID          int64       `json:"user_id"`
+	TeamID          int64       `json:"team_id"`
+	SourceID        int64       `json:"source_id"`
+	QueryLanguage   string      `json:"query_language"`
+	TotalDurationMs int64       `json:"total_duration_ms"`
+}
+
+// Query stats daily rollup -----------------------------------------------------
+// Upsert one executed query into the non-pruned daily rollup: add 1 to
+// query_count and the given duration to total_duration_ms for the composite key.
+func (q *Queries) IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error {
+	_, err := q.db.Exec(ctx, incrementQueryStats,
+		arg.BucketDate,
+		arg.UserID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.QueryLanguage,
+		arg.TotalDurationMs,
+	)
+	return err
 }
 
 const insertAlertHistory = `-- name: InsertAlertHistory :one
@@ -1378,6 +1503,40 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const insertQueryHistory = `-- name: InsertQueryHistory :one
+
+INSERT INTO query_history (user_id, team_id, source_id, query_text, query_language, duration_ms, row_count)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id
+`
+
+type InsertQueryHistoryParams struct {
+	UserID        int64  `json:"user_id"`
+	TeamID        int64  `json:"team_id"`
+	SourceID      int64  `json:"source_id"`
+	QueryText     string `json:"query_text"`
+	QueryLanguage string `json:"query_language"`
+	DurationMs    int64  `json:"duration_ms"`
+	RowCount      int64  `json:"row_count"`
+}
+
+// Query history ---------------------------------------------------------------
+// Record one executed query and return its id.
+func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertQueryHistory,
+		arg.UserID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.QueryText,
+		arg.QueryLanguage,
+		arg.DurationMs,
+		arg.RowCount,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
 }
 
 const isSourceManaged = `-- name: IsSourceManaged :one
@@ -1453,7 +1612,7 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 }
 
 const listActiveAlertsDue = `-- name: ListActiveAlertsDue :many
-SELECT id, source_id, name, description, query_type, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
+SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode FROM alerts
 WHERE is_active = true
   AND (
         last_evaluated_at IS NULL
@@ -1475,7 +1634,6 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 			&i.SourceID,
 			&i.Name,
 			&i.Description,
-			&i.QueryType,
 			&i.Query,
 			&i.ConditionJson,
 			&i.LookbackSeconds,
@@ -1495,6 +1653,8 @@ func (q *Queries) ListActiveAlertsDue(ctx context.Context) ([]Alert, error) {
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1549,7 +1709,7 @@ func (q *Queries) ListAlertHistory(ctx context.Context, arg ListAlertHistoryPara
 }
 
 const listAlertsBySource = `-- name: ListAlertsBySource :many
-SELECT id, source_id, name, description, query_type, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at FROM alerts
+SELECT id, source_id, name, description, query, condition_json, lookback_seconds, threshold_operator, threshold_value, frequency_seconds, severity, labels_json, annotations_json, generator_url, is_active, last_state, last_evaluated_at, last_triggered_at, recipient_user_ids_json, webhook_urls_json, created_by, created_at, updated_at, query_language, editor_mode FROM alerts
 WHERE source_id = $1
 ORDER BY updated_at DESC, created_at DESC
 `
@@ -1569,7 +1729,6 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 			&i.SourceID,
 			&i.Name,
 			&i.Description,
-			&i.QueryType,
 			&i.Query,
 			&i.ConditionJson,
 			&i.LookbackSeconds,
@@ -1589,6 +1748,8 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1601,7 +1762,7 @@ func (q *Queries) ListAlertsBySource(ctx context.Context, sourceID int64) ([]Ale
 }
 
 const listAlertsForUser = `-- name: ListAlertsForUser :many
-SELECT a.id, a.source_id, a.name, a.description, a.query_type, a.query, a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.recipient_user_ids_json, a.webhook_urls_json, a.created_by, a.created_at, a.updated_at FROM alerts a
+SELECT a.id, a.source_id, a.name, a.description, a.query, a.condition_json, a.lookback_seconds, a.threshold_operator, a.threshold_value, a.frequency_seconds, a.severity, a.labels_json, a.annotations_json, a.generator_url, a.is_active, a.last_state, a.last_evaluated_at, a.last_triggered_at, a.recipient_user_ids_json, a.webhook_urls_json, a.created_by, a.created_at, a.updated_at, a.query_language, a.editor_mode FROM alerts a
 WHERE a.source_id IN (
     SELECT DISTINCT ts.source_id
     FROM team_sources ts
@@ -1626,7 +1787,6 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 			&i.SourceID,
 			&i.Name,
 			&i.Description,
-			&i.QueryType,
 			&i.Query,
 			&i.ConditionJson,
 			&i.LookbackSeconds,
@@ -1646,6 +1806,8 @@ func (q *Queries) ListAlertsForUser(ctx context.Context, userID int64) ([]Alert,
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.QueryLanguage,
+			&i.EditorMode,
 		); err != nil {
 			return nil, err
 		}
@@ -1664,7 +1826,8 @@ SELECT
     sq.created_from_team_id,
     sq.name,
     sq.description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_at,
     sq.updated_at,
@@ -1681,7 +1844,8 @@ type ListAllSavedQueriesRow struct {
 	CreatedFromTeamID pgtype.Int8        `json:"created_from_team_id"`
 	Name              string             `json:"name"`
 	Description       pgtype.Text        `json:"description"`
-	QueryType         string             `json:"query_type"`
+	QueryLanguage     string             `json:"query_language"`
+	EditorMode        string             `json:"editor_mode"`
 	QueryContent      string             `json:"query_content"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
@@ -1706,7 +1870,8 @@ func (q *Queries) ListAllSavedQueries(ctx context.Context) ([]ListAllSavedQuerie
 			&i.CreatedFromTeamID,
 			&i.Name,
 			&i.Description,
-			&i.QueryType,
+			&i.QueryLanguage,
+			&i.EditorMode,
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -1734,7 +1899,8 @@ SELECT
     sq.source_id,
     sq.name AS query_name,
     sq.description AS query_description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_by AS query_created_by,
     sq.created_at AS query_created_at,
@@ -1757,7 +1923,8 @@ type ListCollectionItemsRow struct {
 	SourceID         int64              `json:"source_id"`
 	QueryName        string             `json:"query_name"`
 	QueryDescription pgtype.Text        `json:"query_description"`
-	QueryType        string             `json:"query_type"`
+	QueryLanguage    string             `json:"query_language"`
+	EditorMode       string             `json:"editor_mode"`
 	QueryContent     string             `json:"query_content"`
 	QueryCreatedBy   pgtype.Int8        `json:"query_created_by"`
 	QueryCreatedAt   pgtype.Timestamptz `json:"query_created_at"`
@@ -1785,7 +1952,8 @@ func (q *Queries) ListCollectionItems(ctx context.Context, collectionID int64) (
 			&i.SourceID,
 			&i.QueryName,
 			&i.QueryDescription,
-			&i.QueryType,
+			&i.QueryLanguage,
+			&i.EditorMode,
 			&i.QueryContent,
 			&i.QueryCreatedBy,
 			&i.QueryCreatedAt,
@@ -1913,6 +2081,66 @@ func (q *Queries) ListCollectionsForUser(ctx context.Context, userID int64) ([]L
 	return items, nil
 }
 
+const listDashboards = `-- name: ListDashboards :many
+SELECT
+    d.id,
+    d.name,
+    d.description,
+    d.panels_json,
+    d.created_by,
+    d.created_at,
+    d.updated_at,
+    u.email AS created_by_email,
+    u.full_name AS created_by_name
+FROM dashboards d
+LEFT JOIN users u ON u.id = d.created_by
+ORDER BY d.updated_at DESC, d.id DESC
+`
+
+type ListDashboardsRow struct {
+	ID             int64              `json:"id"`
+	Name           string             `json:"name"`
+	Description    pgtype.Text        `json:"description"`
+	PanelsJson     string             `json:"panels_json"`
+	CreatedBy      pgtype.Int8        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CreatedByEmail pgtype.Text        `json:"created_by_email"`
+	CreatedByName  pgtype.Text        `json:"created_by_name"`
+}
+
+// List every dashboard, newest-updated first, with the creator's email/name via
+// a LEFT JOIN (NULL for dashboards whose author was deleted).
+func (q *Queries) ListDashboards(ctx context.Context) ([]ListDashboardsRow, error) {
+	rows, err := q.db.Query(ctx, listDashboards)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardsRow{}
+	for rows.Next() {
+		var i ListDashboardsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Description,
+			&i.PanelsJson,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CreatedByEmail,
+			&i.CreatedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiredExportJobPaths = `-- name: ListExpiredExportJobPaths :many
 SELECT file_path
 FROM export_jobs
@@ -1943,7 +2171,7 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtyp
 
 const listManagedSources = `-- name: ListManagedSources :many
 
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, managed, secret_ref, tls_enable, created_at, updated_at FROM sources WHERE managed = true ORDER BY id
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE managed = true ORDER BY id
 `
 
 // Provisioning Queries
@@ -1963,18 +2191,15 @@ func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 			&i.MetaIsAutoCreated,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
 			&i.Description,
 			&i.TtlDays,
 			&i.Managed,
 			&i.SecretRef,
-			&i.TlsEnable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SourceType,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 		); err != nil {
 			return nil, err
 		}
@@ -2019,7 +2244,7 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 }
 
 const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at FROM users WHERE managed = true ORDER BY id
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE managed = true ORDER BY id
 `
 
 // Get all users managed by provisioning config
@@ -2044,6 +2269,123 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 			&i.AccountType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueryActivity = `-- name: ListQueryActivity :many
+SELECT
+    qh.id, qh.user_id, qh.team_id, qh.source_id, qh.query_text, qh.query_language, qh.duration_ms, qh.row_count, qh.created_at,
+    u.email AS user_email,
+    s.name AS source_name
+FROM query_history qh
+JOIN users u ON u.id = qh.user_id
+LEFT JOIN sources s ON s.id = qh.source_id
+ORDER BY qh.created_at DESC, qh.id DESC
+LIMIT $1
+`
+
+type ListQueryActivityRow struct {
+	ID            int64              `json:"id"`
+	UserID        int64              `json:"user_id"`
+	TeamID        int64              `json:"team_id"`
+	SourceID      int64              `json:"source_id"`
+	QueryText     string             `json:"query_text"`
+	QueryLanguage string             `json:"query_language"`
+	DurationMs    int64              `json:"duration_ms"`
+	RowCount      int64              `json:"row_count"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UserEmail     string             `json:"user_email"`
+	SourceName    pgtype.Text        `json:"source_name"`
+}
+
+// Most recent query_history rows across all users, newest first, enriched with
+// the executing user's email and the source's display name. LEFT JOIN on
+// sources so history survives a deleted source (source_name is NULL then).
+// Backs the admin recent-activity view; the table is capped per user, so this
+// is a recent window, not all-time analytics.
+func (q *Queries) ListQueryActivity(ctx context.Context, limit int32) ([]ListQueryActivityRow, error) {
+	rows, err := q.db.Query(ctx, listQueryActivity, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueryActivityRow{}
+	for rows.Next() {
+		var i ListQueryActivityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.QueryText,
+			&i.QueryLanguage,
+			&i.DurationMs,
+			&i.RowCount,
+			&i.CreatedAt,
+			&i.UserEmail,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listQueryHistory = `-- name: ListQueryHistory :many
+SELECT
+    id,
+    user_id,
+    team_id,
+    source_id,
+    query_text,
+    query_language,
+    duration_ms,
+    row_count,
+    created_at
+FROM query_history
+WHERE user_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT $2
+`
+
+type ListQueryHistoryParams struct {
+	UserID int64 `json:"user_id"`
+	Limit  int32 `json:"limit"`
+}
+
+// List one user's recent history, newest first.
+func (q *Queries) ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error) {
+	rows, err := q.db.Query(ctx, listQueryHistory, arg.UserID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryHistory{}
+	for rows.Next() {
+		var i QueryHistory
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.QueryText,
+			&i.QueryLanguage,
+			&i.DurationMs,
+			&i.RowCount,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2062,7 +2404,8 @@ SELECT
     sq.created_from_team_id,
     sq.name,
     sq.description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_at,
     sq.updated_at,
@@ -2085,7 +2428,8 @@ type ListSavedQueriesForUserRow struct {
 	CreatedFromTeamID pgtype.Int8        `json:"created_from_team_id"`
 	Name              string             `json:"name"`
 	Description       pgtype.Text        `json:"description"`
-	QueryType         string             `json:"query_type"`
+	QueryLanguage     string             `json:"query_language"`
+	EditorMode        string             `json:"editor_mode"`
 	QueryContent      string             `json:"query_content"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
@@ -2109,7 +2453,8 @@ func (q *Queries) ListSavedQueriesForUser(ctx context.Context, userID int64) ([]
 			&i.CreatedFromTeamID,
 			&i.Name,
 			&i.Description,
-			&i.QueryType,
+			&i.QueryLanguage,
+			&i.EditorMode,
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -2133,7 +2478,8 @@ SELECT
     sq.created_from_team_id,
     sq.name,
     sq.description,
-    sq.query_type,
+    sq.query_language,
+    sq.editor_mode,
     sq.query_content,
     sq.created_at,
     sq.updated_at,
@@ -2161,7 +2507,8 @@ type ListSavedQueriesForUserBySourceRow struct {
 	CreatedFromTeamID pgtype.Int8        `json:"created_from_team_id"`
 	Name              string             `json:"name"`
 	Description       pgtype.Text        `json:"description"`
-	QueryType         string             `json:"query_type"`
+	QueryLanguage     string             `json:"query_language"`
+	EditorMode        string             `json:"editor_mode"`
 	QueryContent      string             `json:"query_content"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
@@ -2185,7 +2532,8 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 			&i.CreatedFromTeamID,
 			&i.Name,
 			&i.Description,
-			&i.QueryType,
+			&i.QueryLanguage,
+			&i.EditorMode,
 			&i.QueryContent,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -2203,7 +2551,7 @@ func (q *Queries) ListSavedQueriesForUserBySource(ctx context.Context, arg ListS
 }
 
 const listServiceAccounts = `-- name: ListServiceAccounts :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at FROM users WHERE account_type = 'service' ORDER BY created_at ASC
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE account_type = 'service' ORDER BY created_at ASC
 `
 
 // List service principals
@@ -2228,6 +2576,7 @@ func (q *Queries) ListServiceAccounts(ctx context.Context) ([]User, error) {
 			&i.AccountType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -2276,7 +2625,7 @@ func (q *Queries) ListSourceTeams(ctx context.Context, sourceID int64) ([]Team, 
 }
 
 const listSources = `-- name: ListSources :many
-SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, host, username, password, database, table_name, description, ttl_days, managed, secret_ref, tls_enable, created_at, updated_at FROM sources ORDER BY created_at DESC
+SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources ORDER BY created_at DESC
 `
 
 // Get all sources ordered by creation date
@@ -2295,18 +2644,15 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 			&i.MetaIsAutoCreated,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
 			&i.Description,
 			&i.TtlDays,
 			&i.Managed,
 			&i.SecretRef,
-			&i.TlsEnable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SourceType,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 		); err != nil {
 			return nil, err
 		}
@@ -2319,7 +2665,7 @@ func (q *Queries) ListSources(ctx context.Context) ([]Source, error) {
 }
 
 const listSourcesForUser = `-- name: ListSourcesForUser :many
-SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s.database, s.table_name, s.description, s.ttl_days, s.managed, s.secret_ref, s.tls_enable, s.created_at, s.updated_at FROM sources s
+SELECT DISTINCT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.description, s.ttl_days, s.managed, s.secret_ref, s.created_at, s.updated_at, s.source_type, s.connection_config, s.identity_key FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 JOIN team_members tm ON ts.team_id = tm.team_id
 WHERE tm.user_id = $1
@@ -2342,18 +2688,15 @@ func (q *Queries) ListSourcesForUser(ctx context.Context, userID int64) ([]Sourc
 			&i.MetaIsAutoCreated,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
 			&i.Description,
 			&i.TtlDays,
 			&i.Managed,
 			&i.SecretRef,
-			&i.TlsEnable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SourceType,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 		); err != nil {
 			return nil, err
 		}
@@ -2515,7 +2858,7 @@ func (q *Queries) ListTeamMembersWithDetails(ctx context.Context, teamID int64) 
 }
 
 const listTeamSources = `-- name: ListTeamSources :many
-SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.host, s.username, s.password, s.database, s.table_name, s.description, s.ttl_days, s.managed, s.secret_ref, s.tls_enable, s.created_at, s.updated_at
+SELECT s.id, s.name, s._meta_is_auto_created, s._meta_ts_field, s._meta_severity_field, s.description, s.ttl_days, s.managed, s.secret_ref, s.created_at, s.updated_at, s.source_type, s.connection_config, s.identity_key
 FROM sources s
 JOIN team_sources ts ON s.id = ts.source_id
 WHERE ts.team_id = $1
@@ -2538,18 +2881,15 @@ func (q *Queries) ListTeamSources(ctx context.Context, teamID int64) ([]Source, 
 			&i.MetaIsAutoCreated,
 			&i.MetaTsField,
 			&i.MetaSeverityField,
-			&i.Host,
-			&i.Username,
-			&i.Password,
-			&i.Database,
-			&i.TableName,
 			&i.Description,
 			&i.TtlDays,
 			&i.Managed,
 			&i.SecretRef,
-			&i.TlsEnable,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SourceType,
+			&i.ConnectionConfig,
+			&i.IdentityKey,
 		); err != nil {
 			return nil, err
 		}
@@ -2703,7 +3043,7 @@ func (q *Queries) ListUserTeams(ctx context.Context, userID int64) ([]Team, erro
 }
 
 const listUsers = `-- name: ListUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at FROM users ORDER BY created_at ASC
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users ORDER BY created_at ASC
 `
 
 // List all users
@@ -2728,6 +3068,7 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 			&i.AccountType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}
@@ -2798,6 +3139,64 @@ WHERE expires_at < $1
 func (q *Queries) PruneExpiredQueryShares(ctx context.Context, expiresAt pgtype.Timestamptz) error {
 	_, err := q.db.Exec(ctx, pruneExpiredQueryShares, expiresAt)
 	return err
+}
+
+const pruneQueryHistoryForUser = `-- name: PruneQueryHistoryForUser :exec
+DELETE FROM query_history
+WHERE id IN (
+    SELECT qh.id FROM query_history qh
+    WHERE qh.user_id = $1
+    ORDER BY qh.created_at DESC, qh.id DESC
+    OFFSET $2
+)
+`
+
+type PruneQueryHistoryForUserParams struct {
+	UserID int64 `json:"user_id"`
+	Offset int32 `json:"offset"`
+}
+
+// Delete a user's history rows beyond the newest `offset` (the per-user cap),
+// keeping history bounded on every insert.
+func (q *Queries) PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error {
+	_, err := q.db.Exec(ctx, pruneQueryHistoryForUser, arg.UserID, arg.Offset)
+	return err
+}
+
+const queryVolumeByDay = `-- name: QueryVolumeByDay :many
+SELECT
+    qsd.bucket_date AS bucket_date,
+    SUM(qsd.query_count)::bigint AS query_count
+FROM query_stats_daily qsd
+WHERE qsd.bucket_date >= $1
+GROUP BY qsd.bucket_date
+ORDER BY qsd.bucket_date ASC
+`
+
+type QueryVolumeByDayRow struct {
+	BucketDate pgtype.Date `json:"bucket_date"`
+	QueryCount int64       `json:"query_count"`
+}
+
+// Per-day total query count over rollup rows on/after `since`, ascending by day.
+func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error) {
+	rows, err := q.db.Query(ctx, queryVolumeByDay, bucketDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryVolumeByDayRow{}
+	for rows.Next() {
+		var i QueryVolumeByDayRow
+		if err := rows.Scan(&i.BucketDate, &i.QueryCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
@@ -2928,6 +3327,21 @@ func (q *Queries) SetUserManaged(ctx context.Context, arg SetUserManagedParams) 
 	return err
 }
 
+const setUserPasswordHash = `-- name: SetUserPasswordHash :exec
+UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2
+`
+
+type SetUserPasswordHashParams struct {
+	PasswordHash pgtype.Text `json:"password_hash"`
+	ID           int64       `json:"id"`
+}
+
+// Set (or clear) a user's local-auth bcrypt hash
+func (q *Queries) SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error {
+	_, err := q.db.Exec(ctx, setUserPasswordHash, arg.PasswordHash, arg.ID)
+	return err
+}
+
 const teamHasSource = `-- name: TeamHasSource :one
 
 SELECT EXISTS(
@@ -2948,6 +3362,108 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (b
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const topSourcesByQueries = `-- name: TopSourcesByQueries :many
+SELECT
+    qsd.source_id AS source_id,
+    COALESCE(s.name, '') AS source_name,
+    SUM(qsd.query_count)::bigint AS query_count,
+    (CASE WHEN SUM(qsd.query_count) > 0
+        THEN SUM(qsd.total_duration_ms) / SUM(qsd.query_count)
+        ELSE 0 END)::bigint AS avg_duration_ms
+FROM query_stats_daily qsd
+LEFT JOIN sources s ON s.id = qsd.source_id
+WHERE qsd.bucket_date >= $1
+GROUP BY qsd.source_id, s.name
+ORDER BY query_count DESC, qsd.source_id ASC
+LIMIT $2
+`
+
+type TopSourcesByQueriesParams struct {
+	BucketDate pgtype.Date `json:"bucket_date"`
+	Limit      int32       `json:"limit"`
+}
+
+type TopSourcesByQueriesRow struct {
+	SourceID      int64  `json:"source_id"`
+	SourceName    string `json:"source_name"`
+	QueryCount    int64  `json:"query_count"`
+	AvgDurationMs int64  `json:"avg_duration_ms"`
+}
+
+// Top sources by total query count over rollup rows on/after `since`, with the
+// source display name (LEFT JOIN so a deleted source yields ”), and integer
+// average duration (0 when count is 0).
+func (q *Queries) TopSourcesByQueries(ctx context.Context, arg TopSourcesByQueriesParams) ([]TopSourcesByQueriesRow, error) {
+	rows, err := q.db.Query(ctx, topSourcesByQueries, arg.BucketDate, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopSourcesByQueriesRow{}
+	for rows.Next() {
+		var i TopSourcesByQueriesRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.SourceName,
+			&i.QueryCount,
+			&i.AvgDurationMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topUsersByQueries = `-- name: TopUsersByQueries :many
+SELECT
+    qsd.user_id AS user_id,
+    u.email AS user_email,
+    SUM(qsd.query_count)::bigint AS query_count
+FROM query_stats_daily qsd
+JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= $1
+GROUP BY qsd.user_id, u.email
+ORDER BY query_count DESC, qsd.user_id ASC
+LIMIT $2
+`
+
+type TopUsersByQueriesParams struct {
+	BucketDate pgtype.Date `json:"bucket_date"`
+	Limit      int32       `json:"limit"`
+}
+
+type TopUsersByQueriesRow struct {
+	UserID     int64  `json:"user_id"`
+	UserEmail  string `json:"user_email"`
+	QueryCount int64  `json:"query_count"`
+}
+
+// Top users by total query count over rollup rows on/after `since`, joined to
+// users for the email.
+func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error) {
+	rows, err := q.db.Query(ctx, topUsersByQueries, arg.BucketDate, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopUsersByQueriesRow{}
+	for rows.Next() {
+		var i TopUsersByQueriesRow
+		if err := rows.Scan(&i.UserID, &i.UserEmail, &i.QueryCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchQueryShare = `-- name: TouchQueryShare :exec
@@ -2984,29 +3500,31 @@ const updateAlert = `-- name: UpdateAlert :one
 UPDATE alerts
 SET name = $1,
     description = $2,
-    query_type = $3,
-    query = $4,
-    condition_json = $5,
-    lookback_seconds = $6,
-    threshold_operator = $7,
-    threshold_value = $8,
-    frequency_seconds = $9,
-    severity = $10,
-    labels_json = $11,
-    annotations_json = $12,
-    recipient_user_ids_json = $13,
-    webhook_urls_json = $14,
-    generator_url = $15,
-    is_active = $16,
+    query_language = $3,
+    editor_mode = $4,
+    query = $5,
+    condition_json = $6,
+    lookback_seconds = $7,
+    threshold_operator = $8,
+    threshold_value = $9,
+    frequency_seconds = $10,
+    severity = $11,
+    labels_json = $12,
+    annotations_json = $13,
+    recipient_user_ids_json = $14,
+    webhook_urls_json = $15,
+    generator_url = $16,
+    is_active = $17,
     updated_at = now()
-WHERE id = $17
+WHERE id = $18
 RETURNING id
 `
 
 type UpdateAlertParams struct {
 	Name                 string      `json:"name"`
 	Description          pgtype.Text `json:"description"`
-	QueryType            string      `json:"query_type"`
+	QueryLanguage        string      `json:"query_language"`
+	EditorMode           string      `json:"editor_mode"`
 	Query                pgtype.Text `json:"query"`
 	ConditionJson        pgtype.Text `json:"condition_json"`
 	LookbackSeconds      int64       `json:"lookback_seconds"`
@@ -3027,7 +3545,8 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 	row := q.db.QueryRow(ctx, updateAlert,
 		arg.Name,
 		arg.Description,
-		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.Query,
 		arg.ConditionJson,
 		arg.LookbackSeconds,
@@ -3087,6 +3606,36 @@ func (q *Queries) UpdateCollection(ctx context.Context, arg UpdateCollectionPara
 	return err
 }
 
+const updateDashboard = `-- name: UpdateDashboard :one
+UPDATE dashboards
+SET name = $1,
+    description = $2,
+    panels_json = $3,
+    updated_at = now()
+WHERE id = $4
+RETURNING id
+`
+
+type UpdateDashboardParams struct {
+	Name        string      `json:"name"`
+	Description pgtype.Text `json:"description"`
+	PanelsJson  string      `json:"panels_json"`
+	ID          int64       `json:"id"`
+}
+
+// Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+func (q *Queries) UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error) {
+	row := q.db.QueryRow(ctx, updateDashboard,
+		arg.Name,
+		arg.Description,
+		arg.PanelsJson,
+		arg.ID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateExportJobRunning = `-- name: UpdateExportJobRunning :one
 UPDATE export_jobs
 SET
@@ -3115,18 +3664,20 @@ const updateSavedQuery = `-- name: UpdateSavedQuery :exec
 UPDATE saved_queries
 SET name = $1,
     description = $2,
-    query_type = $3,
-    query_content = $4,
+    query_language = $3,
+    editor_mode = $4,
+    query_content = $5,
     updated_at = now()
-WHERE id = $5
+WHERE id = $6
 `
 
 type UpdateSavedQueryParams struct {
-	Name         string      `json:"name"`
-	Description  pgtype.Text `json:"description"`
-	QueryType    string      `json:"query_type"`
-	QueryContent string      `json:"query_content"`
-	ID           int64       `json:"id"`
+	Name          string      `json:"name"`
+	Description   pgtype.Text `json:"description"`
+	QueryLanguage string      `json:"query_language"`
+	EditorMode    string      `json:"editor_mode"`
+	QueryContent  string      `json:"query_content"`
+	ID            int64       `json:"id"`
 }
 
 // Update a saved query's mutable fields
@@ -3134,7 +3685,8 @@ func (q *Queries) UpdateSavedQuery(ctx context.Context, arg UpdateSavedQueryPara
 	_, err := q.db.Exec(ctx, updateSavedQuery,
 		arg.Name,
 		arg.Description,
-		arg.QueryType,
+		arg.QueryLanguage,
+		arg.EditorMode,
 		arg.QueryContent,
 		arg.ID,
 	)
@@ -3145,33 +3697,31 @@ const updateSource = `-- name: UpdateSource :exec
 UPDATE sources
 SET name = $1,
     _meta_is_auto_created = $2,
-    _meta_ts_field = $3,
-    _meta_severity_field = $4,
-    host = $5,
-    username = $6,
-    password = $7,
-    database = $8,
-    table_name = $9,
-    description = $10,
-    ttl_days = $11,
-    tls_enable = $12,
+    source_type = $3,
+    _meta_ts_field = $4,
+    _meta_severity_field = $5,
+    connection_config = $6,
+    identity_key = $7,
+    description = $8,
+    ttl_days = $9,
+    managed = $10,
+    secret_ref = $11,
     updated_at = now()
-WHERE id = $13
+WHERE id = $12
 `
 
 type UpdateSourceParams struct {
 	Name              string      `json:"name"`
 	MetaIsAutoCreated bool        `json:"_meta_is_auto_created"`
+	SourceType        string      `json:"source_type"`
 	MetaTsField       string      `json:"_meta_ts_field"`
 	MetaSeverityField pgtype.Text `json:"_meta_severity_field"`
-	Host              string      `json:"host"`
-	Username          string      `json:"username"`
-	Password          string      `json:"password"`
-	Database          string      `json:"database"`
-	TableName         string      `json:"table_name"`
+	ConnectionConfig  []byte      `json:"connection_config"`
+	IdentityKey       string      `json:"identity_key"`
 	Description       pgtype.Text `json:"description"`
 	TtlDays           int64       `json:"ttl_days"`
-	TlsEnable         bool        `json:"tls_enable"`
+	Managed           bool        `json:"managed"`
+	SecretRef         pgtype.Text `json:"secret_ref"`
 	ID                int64       `json:"id"`
 }
 
@@ -3180,16 +3730,15 @@ func (q *Queries) UpdateSource(ctx context.Context, arg UpdateSourceParams) erro
 	_, err := q.db.Exec(ctx, updateSource,
 		arg.Name,
 		arg.MetaIsAutoCreated,
+		arg.SourceType,
 		arg.MetaTsField,
 		arg.MetaSeverityField,
-		arg.Host,
-		arg.Username,
-		arg.Password,
-		arg.Database,
-		arg.TableName,
+		arg.ConnectionConfig,
+		arg.IdentityKey,
 		arg.Description,
 		arg.TtlDays,
-		arg.TlsEnable,
+		arg.Managed,
+		arg.SecretRef,
 		arg.ID,
 	)
 	return err

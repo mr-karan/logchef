@@ -207,8 +207,66 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 	return user, nil
 }
 
+// GetOrCreateAutoProvisionedUser gets or creates a regular (member) user for
+// JIT OIDC auto-provisioning. Unlike CreateUser, it does not pre-check
+// existence before inserting: it always attempts the insert and, on a unique
+// email conflict, re-fetches the existing row. This makes it safe for two
+// concurrent first logins from the same email to both succeed instead of
+// racing on a check-then-act window.
+//
+// The created user is left unmanaged (the DB default) so the provisioning
+// reconciler never adopts or deletes it.
+func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
+	if fullName == "" {
+		fullName = email
+	}
+	if err := validateUserCreation(email, fullName, models.UserRoleMember); err != nil {
+		return nil, err
+	}
+
+	now := time.Now().UTC()
+	user := &models.User{
+		Email:       email,
+		FullName:    fullName,
+		Role:        models.UserRoleMember,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeHuman,
+		Timestamps: models.Timestamps{
+			CreatedAt: now,
+			UpdatedAt: now,
+		},
+	}
+
+	if err := db.CreateUser(ctx, user); err != nil {
+		if models.IsConflict(err) {
+			// Another concurrent login (or a pre-existing user) won the race;
+			// re-fetch the row that now exists under the unique email constraint.
+			existing, getErr := db.GetUserByEmail(ctx, email)
+			if getErr != nil {
+				log.Error("failed to re-fetch user after auto-provision conflict", "error", getErr, "email", email)
+				return nil, fmt.Errorf("error re-fetching user after conflict: %w", getErr)
+			}
+			return existing, nil
+		}
+		log.Error("error auto-provisioning user in db", "error", err, "email", email)
+		return nil, fmt.Errorf("error auto-provisioning user: %w", err)
+	}
+
+	log.Debug("user auto-provisioned", "user_id", user.ID, "email", user.Email)
+	return user, nil
+}
+
 // UpdateUser updates an existing user's information.
-func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID models.UserID, updateData models.User) error {
+//
+// Deactivating a user (status -> inactive) is handled specially: the write, the
+// last-admin guard, and the revocation of the user's live sessions all run
+// inside a single transaction. This closes two issues at once:
+//   - #96: re-checking the admin count inside the tx (immediately before the
+//     write) prevents two concurrent deactivations from both passing a stale
+//     count and locking the org out of all admin functions.
+//   - #90: the user's sessions are revoked atomically with the status change so
+//     a deactivated account cannot keep using an already-issued session cookie.
+func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
 	}
@@ -222,7 +280,7 @@ func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID
 		return fmt.Errorf("error getting user for update: %w", err)
 	}
 
-	updated, err := applyUserUpdates(ctx, db, existing, updateData)
+	updated, deactivating, err := applyUserUpdates(existing, updateData)
 	if err != nil {
 		return err
 	}
@@ -232,6 +290,42 @@ func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID
 	}
 
 	existing.UpdatedAt = time.Now().UTC()
+
+	if deactivating {
+		if err := db.WithTx(ctx, func(tx store.StoreOps) error {
+			// #96: re-check the last-admin guard inside the write tx. On SQLite
+			// the write connection uses BEGIN IMMEDIATE, so concurrent
+			// deactivations serialize and the second one sees the decremented
+			// active-admin count here and is rejected.
+			if existing.Role == models.UserRoleAdmin {
+				count, err := tx.CountAdminUsers(ctx)
+				if err != nil {
+					return fmt.Errorf("error counting admin users: %w", err)
+				}
+				if count <= 1 {
+					return ErrCannotDeleteLastAdmin
+				}
+			}
+			if err := tx.UpdateUser(ctx, existing); err != nil {
+				return fmt.Errorf("error updating user: %w", err)
+			}
+			// #90: end the deactivated user's live sessions in the same tx.
+			if err := RevokeUserSessions(ctx, tx, log, existing.ID); err != nil {
+				return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
+			}
+			return nil
+		}); err != nil {
+			// The last-admin guard is an expected validation rejection, not a
+			// failure — don't log it at Error level.
+			if !errors.Is(err, ErrCannotDeleteLastAdmin) {
+				log.Error("failed to deactivate user", "error", err, "user_id", userID)
+			}
+			return err
+		}
+		log.Info("user.deactivated", "user_id", userID)
+		return nil
+	}
+
 	if err := db.UpdateUser(ctx, existing); err != nil {
 		log.Error("failed to update user in db", "error", err, "user_id", userID)
 		return fmt.Errorf("error updating user: %w", err)
@@ -241,24 +335,30 @@ func UpdateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, userID
 	return nil
 }
 
-func applyUserUpdates(ctx context.Context, db store.StoreOps, existing *models.User, updateData models.User) (bool, error) {
-	updated := false
-
+// applyUserUpdates mutates existing in place from the provided updateData and
+// reports whether anything changed, plus whether this update transitions the
+// user to inactive (which the caller handles transactionally). It performs
+// validation only — the last-admin guard and session revocation are the
+// caller's responsibility so they can run atomically with the write.
+func applyUserUpdates(existing *models.User, updateData models.User) (updated, deactivating bool, err error) {
 	if updateData.FullName != "" && updateData.FullName != existing.FullName {
 		existing.FullName = updateData.FullName
 		updated = true
 	}
 
 	if changed, err := applyRoleUpdate(existing, updateData); err != nil {
-		return false, err
+		return false, false, err
 	} else if changed {
 		updated = true
 	}
 
-	if changed, err := applyStatusUpdate(ctx, db, existing, updateData); err != nil {
-		return false, err
-	} else if changed {
+	changed, toInactive, err := applyStatusUpdate(existing, updateData)
+	if err != nil {
+		return false, false, err
+	}
+	if changed {
 		updated = true
+		deactivating = toInactive
 	}
 
 	if updateData.LastLoginAt != nil {
@@ -269,7 +369,7 @@ func applyUserUpdates(ctx context.Context, db store.StoreOps, existing *models.U
 		}
 	}
 
-	return updated, nil
+	return updated, deactivating, nil
 }
 
 func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error) {
@@ -283,29 +383,25 @@ func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error
 	return true, nil
 }
 
-func applyStatusUpdate(ctx context.Context, db store.StoreOps, existing *models.User, updateData models.User) (bool, error) {
+// applyStatusUpdate validates and applies a status change to existing in place.
+// It returns whether the status changed and whether the new status is inactive
+// (a deactivation). The last-admin guard is enforced by the caller inside the
+// write transaction (see UpdateUser), not here.
+func applyStatusUpdate(existing *models.User, updateData models.User) (changed, deactivating bool, err error) {
 	if updateData.Status == "" || updateData.Status == existing.Status {
-		return false, nil
+		return false, false, nil
 	}
 	if updateData.Status != models.UserStatusActive && updateData.Status != models.UserStatusInactive {
-		return false, fmt.Errorf("%w: must be '%s' or '%s'", ErrInvalidStatus, models.UserStatusActive, models.UserStatusInactive)
-	}
-
-	if updateData.Status == models.UserStatusInactive && existing.Role == models.UserRoleAdmin {
-		count, err := db.CountAdminUsers(ctx)
-		if err != nil {
-			return false, fmt.Errorf("error counting admin users: %w", err)
-		}
-		if count <= 1 {
-			return false, ErrCannotDeleteLastAdmin
-		}
+		return false, false, fmt.Errorf("%w: must be '%s' or '%s'", ErrInvalidStatus, models.UserStatusActive, models.UserStatusInactive)
 	}
 	existing.Status = updateData.Status
-	return true, nil
+	return true, updateData.Status == models.UserStatusInactive, nil
 }
 
-// DeleteUser deletes a user from the database.
-func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
+// DeleteUser deletes a user from the database, along with any sessions the
+// user holds. The user row and session rows are removed in the same
+// transaction so a deleted user can never be left with a live session.
+func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
 	// Validate user exists
 	existing, err := db.GetUser(ctx, id)
 	if err != nil {
@@ -316,26 +412,36 @@ func DeleteUser(ctx context.Context, db store.StoreOps, log *slog.Logger, id mod
 		return fmt.Errorf("error checking existing user: %w", err)
 	}
 
-	// Check if deleting the last admin
-	if existing.Role == models.UserRoleAdmin {
-		// Need to ensure CountAdminUsers counts *active* admins if status check isn't done before delete
-		count, err := db.CountAdminUsers(ctx)
-		if err != nil {
-			log.Error("failed to count admin users during delete", "error", err, "user_id", id)
-			return fmt.Errorf("error counting admin users: %w", err)
+	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		// #96: re-check the last-admin guard inside the write tx so two
+		// concurrent deletions of different admins can't both pass a stale
+		// count and leave the org with zero admins. On SQLite the write
+		// connection uses BEGIN IMMEDIATE, so these txs serialize and the
+		// second one sees the decremented active-admin count.
+		if existing.Role == models.UserRoleAdmin {
+			count, err := tx.CountAdminUsers(ctx)
+			if err != nil {
+				return fmt.Errorf("error counting admin users: %w", err)
+			}
+			if count <= 1 {
+				return ErrCannotDeleteLastAdmin
+			}
 		}
-		if count <= 1 {
-			return ErrCannotDeleteLastAdmin
+		if err := tx.DeleteUser(ctx, id); err != nil {
+			return fmt.Errorf("error deleting user: %w", err)
 		}
+		if err := tx.DeleteUserSessions(ctx, id); err != nil {
+			return fmt.Errorf("error deleting user sessions: %w", err)
+		}
+		return nil
+	}); err != nil {
+		// The last-admin guard is an expected validation rejection, not a
+		// failure — don't log it at Error level.
+		if !errors.Is(err, ErrCannotDeleteLastAdmin) {
+			log.Error("failed to delete user and sessions", "error", err, "user_id", id)
+		}
+		return err
 	}
-
-	if err := db.DeleteUser(ctx, id); err != nil {
-		log.Error("failed to delete user from db", "error", err, "user_id", id)
-		return fmt.Errorf("error deleting user: %w", err)
-	}
-
-	// TODO: Consider deleting user sessions as well?
-	// if err := db.DeleteUserSessions(ctx, id); err != nil { ... }
 
 	log.Debug("user deleted", "user_id", id)
 	return nil

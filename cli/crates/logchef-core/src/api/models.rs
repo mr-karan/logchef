@@ -77,6 +77,8 @@ pub struct Source {
     pub meta_ts_field: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default = "default_source_type")]
+    pub source_type: String,
     #[serde(default)]
     pub connection: Option<SourceConnection>,
     #[serde(default)]
@@ -91,10 +93,12 @@ pub struct SourceConnection {
     pub database: Option<String>,
     #[serde(default)]
     pub table_name: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 impl Source {
-    /// Returns the database.table_name reference if both are available
+    /// Returns the database.table_name reference if both are available.
     pub fn table_ref(&self) -> Option<String> {
         self.connection
             .as_ref()
@@ -103,6 +107,40 @@ impl Source {
                 _ => None,
             })
     }
+
+    pub fn target_ref(&self) -> Option<String> {
+        match self.source_type.as_str() {
+            "victorialogs" => self
+                .connection
+                .as_ref()
+                .and_then(|c| c.base_url.as_ref())
+                .map(|base_url| base_url.to_string()),
+            _ => self.table_ref(),
+        }
+    }
+
+    pub fn source_type_label(&self) -> &'static str {
+        match self.source_type.as_str() {
+            "victorialogs" => "VictoriaLogs",
+            _ => "ClickHouse",
+        }
+    }
+
+    pub fn display_target(&self) -> String {
+        if let Some(target) = self.target_ref() {
+            format!("{} [{}]", target, self.source_type_label())
+        } else {
+            self.source_type_label().to_string()
+        }
+    }
+
+    pub fn display_name(&self) -> String {
+        format!("{} ({})", self.name, self.display_target())
+    }
+}
+
+fn default_source_type() -> String {
+    "clickhouse".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,7 +167,7 @@ pub struct QueryRequest {
 
 #[derive(Debug, Serialize)]
 pub struct SqlQueryRequest {
-    pub raw_sql: String,
+    pub query_text: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,6 +208,158 @@ pub struct ExportJobResponse {
     pub download_url: Option<String>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct TranslateRequest {
+    pub query: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TranslateResponse {
+    #[serde(default)]
+    pub sql: String,
+    #[serde(default)]
+    pub full_sql: String,
+    #[serde(default)]
+    pub generated_query: String,
+    #[serde(default)]
+    pub generated_query_language: Option<String>,
+    #[serde(default)]
+    pub valid: bool,
+    #[serde(default)]
+    pub error: Option<QueryParseError>,
+}
+
+impl TranslateResponse {
+    /// The most complete generated query available: the full executable SQL
+    /// when a time range was supplied, otherwise the filter-only translation
+    /// (ClickHouse) or the native query (VictoriaLogs).
+    pub fn generated_query(&self) -> &str {
+        if !self.full_sql.is_empty() {
+            &self.full_sql
+        } else if !self.generated_query.is_empty() {
+            &self.generated_query
+        } else {
+            &self.sql
+        }
+    }
+
+    /// Human-readable label for the generated query language.
+    pub fn language_label(&self) -> &'static str {
+        match self.generated_query_language.as_deref() {
+            Some("logsql") => "LogsQL",
+            Some("clickhouse-sql") => "ClickHouse SQL",
+            _ => "query",
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct ValidateRequest {
+    pub query: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ValidateResponse {
+    #[serde(default)]
+    pub valid: bool,
+    #[serde(default)]
+    pub error: Option<QueryParseError>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryParseError {
+    #[serde(default)]
+    pub code: String,
+    pub message: String,
+    #[serde(default)]
+    pub position: Option<QueryParsePosition>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryParsePosition {
+    pub line: i32,
+    pub column: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct HistogramRequest {
+    pub query_text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_timestamp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_timestamp: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub window: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub group_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timezone: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_timeout: Option<u32>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistogramResponse {
+    #[serde(default)]
+    pub granularity: String,
+    #[serde(default)]
+    pub data: Vec<HistogramBucket>,
+    #[serde(default)]
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct HistogramBucket {
+    pub bucket: String,
+    #[serde(default)]
+    pub log_count: i64,
+    #[serde(default)]
+    pub group_value: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FieldValuesResult {
+    #[serde(default)]
+    pub field_name: String,
+    #[serde(default)]
+    pub field_type: String,
+    #[serde(default)]
+    pub is_low_cardinality: bool,
+    #[serde(default)]
+    pub values: Vec<FieldValueInfo>,
+    #[serde(default)]
+    pub total_distinct: i64,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FieldValueInfo {
+    pub value: String,
+    #[serde(default)]
+    pub count: i64,
+}
+
+/// Query parameters for [`crate::api::Client::get_field_values`]. The field
+/// `type` (from the source schema) and an RFC3339 `start`/`end` window are
+/// required by the server for performance.
+pub struct FieldValuesQuery<'a> {
+    pub field_name: &'a str,
+    pub field_type: &'a str,
+    pub start: &'a str,
+    pub end: &'a str,
+    pub timezone: &'a str,
+    pub limit: u32,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct QueryResponse {
     #[serde(default)]
@@ -184,6 +374,10 @@ pub struct QueryResponse {
     pub query_id: Option<String>,
     #[serde(default)]
     pub generated_sql: Option<String>,
+    #[serde(default)]
+    pub generated_query: Option<String>,
+    #[serde(default)]
+    pub generated_query_language: Option<String>,
 }
 
 impl QueryResponse {
@@ -193,6 +387,18 @@ impl QueryResponse {
         } else {
             &self.data
         }
+    }
+
+    pub fn generated_query(&self) -> Option<&str> {
+        self.generated_query
+            .as_deref()
+            .or(self.generated_sql.as_deref())
+    }
+
+    pub fn generated_query_language(&self) -> Option<&str> {
+        self.generated_query_language
+            .as_deref()
+            .or_else(|| self.generated_sql.as_ref().map(|_| "clickhouse-sql"))
     }
 }
 
@@ -242,7 +448,8 @@ pub struct Collection {
     pub name: String,
     #[serde(default)]
     pub description: Option<String>,
-    pub query_type: String,
+    pub query_language: String,
+    pub editor_mode: String,
     pub query_content: String,
     #[serde(default)]
     pub is_bookmarked: bool,
@@ -291,6 +498,22 @@ pub struct CollectionTimeRange {
 pub struct CollectionAbsoluteTime {
     pub start: i64,
     pub end: i64,
+}
+
+/// One persisted record of a query the caller executed against a source,
+/// returned newest-first by `GET /api/v1/me/query-history`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueryHistoryEntry {
+    pub id: i64,
+    #[serde(default)]
+    pub user_id: Option<i64>,
+    pub team_id: i64,
+    pub source_id: i64,
+    pub query_text: String,
+    pub query_language: String,
+    pub duration_ms: i64,
+    pub row_count: i64,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

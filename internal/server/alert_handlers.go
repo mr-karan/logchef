@@ -1,16 +1,25 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v2"
 )
+
+// TestAlertTimeout is the maximum time to wait for an ad-hoc "test alert
+// query" run against the configured datasource before aborting. This is
+// separate from the 90s deadline the scheduled alert evaluator applies to
+// EvaluateAlert.
+const TestAlertTimeout = 30 * time.Second
 
 // requireAlertsEnabled is route-group middleware that short-circuits with 503
 // when the alerts subsystem is disabled in config, and otherwise passes the
@@ -113,9 +122,6 @@ func (s *Server) handleCreateAlert(c *fiber.Ctx) error {
 	if req.SourceID == 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "source_id is required", models.ValidationErrorType)
 	}
-	if req.QueryType == "" {
-		req.QueryType = models.AlertQueryTypeSQL
-	}
 	if req.LookbackSeconds <= 0 {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
@@ -128,7 +134,7 @@ func (s *Server) handleCreateAlert(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
-	alert, err := core.CreateAlert(c.Context(), s.sqlite, s.log, req.SourceID, user.ID, &req)
+	alert, err := core.CreateAlert(c.Context(), s.sqlite, s.datasources, s.log, req.SourceID, user.ID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -163,7 +169,7 @@ func (s *Server) handleUpdateAlert(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, updateErr := core.UpdateAlert(c.Context(), s.sqlite, s.log, alert.ID, &req)
+	updated, updateErr := core.UpdateAlert(c.Context(), s.sqlite, s.datasources, s.log, alert.ID, &req)
 	if updateErr != nil {
 		switch {
 		case errors.Is(updateErr, core.ErrInvalidAlertConfiguration):
@@ -280,15 +286,27 @@ func (s *Server) handleTestAlertQuery(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
-	if req.QueryType == "" {
-		req.QueryType = models.AlertQueryTypeSQL
-	}
 	if req.LookbackSeconds <= 0 {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
 
-	result, err := core.TestAlertQuery(c.Context(), s.sqlite, s.clickhouse, s.log, req.SourceID, &req.TestAlertQueryRequest)
+	// Bound by TestAlertTimeout so a slow/misbehaving datasource can't hang
+	// the request indefinitely.
+	ctx, cancel := context.WithTimeout(c.Context(), TestAlertTimeout)
+	defer cancel()
+
+	result, err := core.TestAlertQuery(ctx, s.sqlite, s.datasources, req.SourceID, &req.TestAlertQueryRequest)
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+		}
+		if ctx.Err() == context.DeadlineExceeded {
+			s.log.Warn("test alert query timed out", "source_id", req.SourceID, "timeout", TestAlertTimeout)
+			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+		}
+		if errors.Is(err, datasource.ErrOperationNotSupported) {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "Alert evaluation is not supported for this source type yet", models.ValidationErrorType)
+		}
 		s.log.Error("failed to test alert query", "source_id", req.SourceID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
 	}

@@ -1,0 +1,101 @@
+---
+// Shared SEO block for the marketing pages (index, changelog, 404).
+// Emits canonical/OG/Twitter meta tags plus a JSON-LD @graph describing
+// Logchef as a SoftwareApplication / Organization / SoftwareSourceCode / WebSite.
+//
+// Kept as a plain component (no external schema libs) so the graph stays
+// easy to audit and update by hand.
+
+interface Props {
+  title: string;
+  description: string;
+  image?: string;
+  type?: "website" | "article";
+  structuredData?: boolean;
+}
+
+const {
+  title,
+  description,
+  image = "/screenshots/hero-light.png",
+  type = "website",
+  structuredData = true,
+} = Astro.props;
+
+const siteUrl = Astro.site ?? new URL("https://logchef.app");
+const canonicalURL = new URL(Astro.url.pathname, siteUrl);
+const ogImageURL = new URL(image, siteUrl);
+
+const githubUrl = "https://github.com/mr-karan/logchef";
+const demoUrl = "https://demo.logchef.app";
+const orgId = `${siteUrl.origin}/#organization`;
+const websiteId = `${siteUrl.origin}/#website`;
+const appId = `${siteUrl.origin}/#software`;
+const codeId = `${siteUrl.origin}/#sourcecode`;
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": orgId,
+      name: "Logchef",
+      url: siteUrl.origin,
+      logo: new URL("/logchef-wordmark.svg", siteUrl).toString(),
+      sameAs: [githubUrl],
+    },
+    {
+      "@type": "WebSite",
+      "@id": websiteId,
+      name: "Logchef",
+      url: siteUrl.origin,
+      publisher: { "@id": orgId },
+    },
+    {
+      "@type": "SoftwareApplication",
+      "@id": appId,
+      name: "Logchef",
+      applicationCategory: "DeveloperApplication",
+      operatingSystem: "Linux, macOS, Windows",
+      description:
+        "Open-source, self-hosted log exploration and alerting UI that connects to existing ClickHouse or VictoriaLogs data without owning ingestion or forcing a schema.",
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+      },
+      sameAs: [githubUrl, demoUrl],
+      publisher: { "@id": orgId },
+    },
+    {
+      "@type": "SoftwareSourceCode",
+      "@id": codeId,
+      name: "Logchef",
+      codeRepository: githubUrl,
+      license: "https://www.gnu.org/licenses/agpl-3.0.html",
+      programmingLanguage: ["Go", "TypeScript"],
+      isPartOf: { "@id": appId },
+    },
+  ],
+};
+---
+
+<link rel="canonical" href={canonicalURL} />
+
+<!-- Open Graph -->
+<meta property="og:type" content={type} />
+<meta property="og:site_name" content="Logchef" />
+<meta property="og:title" content={title} />
+<meta property="og:description" content={description} />
+<meta property="og:image" content={ogImageURL} />
+<meta property="og:url" content={canonicalURL} />
+
+<!-- Twitter -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content={title} />
+<meta name="twitter:description" content={description} />
+<meta name="twitter:image" content={ogImageURL} />
+
+{structuredData && (
+  <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
+)}

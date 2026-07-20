@@ -9,12 +9,19 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func quietLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func newTestDatasourceService(db *sqlite.DB) *datasource.Service {
+	ds := datasource.NewService(db, quietLogger())
+	ds.Register(datasource.NewClickHouseProvider(clickhouse.NewManager(quietLogger()), quietLogger()))
+	return ds
 }
 
 func newReconcileTestDB(t *testing.T) *sqlite.DB {
@@ -62,7 +69,7 @@ func TestReconcile_TeamsMembersLinks(t *testing.T) {
 		}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, clickhouse.NewManager(quietLogger()), quietLogger(), []string{"admin@example.com"}); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), []string{"admin@example.com"}); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -115,7 +122,7 @@ func TestReconcile_DryRunRollsBack(t *testing.T) {
 		Teams:       []config.ProvisionTeam{{Name: "ghost", Description: "should not persist"}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, clickhouse.NewManager(quietLogger()), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile dry-run: %v", err)
 	}
 
@@ -150,15 +157,17 @@ func TestReconcile_SourceCreate(t *testing.T) {
 		ManageSources: true,
 		Sources: []config.ProvisionSource{{
 			Name:        "newsrc",
-			Host:        "127.0.0.1:1",
-			Username:    "u",
-			Database:    "default",
-			TableName:   "logs",
 			MetaTSField: "timestamp",
+			Connection: map[string]any{
+				"host":       "127.0.0.1:1",
+				"username":   "u",
+				"database":   "default",
+				"table_name": "logs",
+			},
 		}},
 	}
 
-	if err := Reconcile(ctx, cfg, db, clickhouse.NewManager(quietLogger()), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -193,13 +202,15 @@ func TestReconcile_SourceAdopt(t *testing.T) {
 		ManageSources: true,
 		Sources: []config.ProvisionSource{{
 			Name:        "adopt",
-			Host:        "new:9000",
-			Database:    "default",
-			TableName:   "t1",
 			MetaTSField: "timestamp",
+			Connection: map[string]any{
+				"host":       "new:9000",
+				"database":   "default",
+				"table_name": "t1",
+			},
 		}},
 	}
-	if err := Reconcile(ctx, cfg, db, clickhouse.NewManager(quietLogger()), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -221,15 +232,16 @@ func TestReconcile_SourceAdopt(t *testing.T) {
 func TestReconcile_SourcePrune(t *testing.T) {
 	db := newReconcileTestDB(t)
 	ctx := context.Background()
-	chMgr := clickhouse.NewManager(quietLogger())
+	ds := newTestDatasourceService(db)
 
 	create := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{{
-			Name: "doomed", Host: "127.0.0.1:1", Database: "default", TableName: "logs", MetaTSField: "timestamp",
+			Name: "doomed", MetaTSField: "timestamp",
+			Connection: map[string]any{"host": "127.0.0.1:1", "database": "default", "table_name": "logs"},
 		}},
 	}
-	if err := Reconcile(ctx, create, db, chMgr, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, create, db, ds, quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile create: %v", err)
 	}
 	if findSource(t, db, "doomed") == nil {
@@ -237,7 +249,7 @@ func TestReconcile_SourcePrune(t *testing.T) {
 	}
 
 	prune := &config.ProvisioningConfig{ManageSources: true, Prune: true}
-	if err := Reconcile(ctx, prune, db, chMgr, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, prune, db, ds, quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile prune: %v", err)
 	}
 	if findSource(t, db, "doomed") != nil {
@@ -262,7 +274,7 @@ func TestReconcile_TeamAdopt(t *testing.T) {
 		ManageTeams: true,
 		Teams:       []config.ProvisionTeam{{Name: "adopted", Description: "new desc"}},
 	}
-	if err := Reconcile(ctx, cfg, db, clickhouse.NewManager(quietLogger()), quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, cfg, db, newTestDatasourceService(db), quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 
@@ -284,7 +296,7 @@ func TestReconcile_TeamAdopt(t *testing.T) {
 func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 	db := newReconcileTestDB(t)
 	ctx := context.Background()
-	chMgr := clickhouse.NewManager(quietLogger())
+	ds := newTestDatasourceService(db)
 
 	src := &models.Source{
 		Name:        "s",
@@ -306,7 +318,7 @@ func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 			},
 		}},
 	}
-	if err := Reconcile(ctx, pass1, db, chMgr, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, pass1, db, ds, quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile pass1: %v", err)
 	}
 
@@ -324,7 +336,7 @@ func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 			Members: []config.ProvisionMember{{Email: "alice@example.com", Role: "admin"}},
 		}},
 	}
-	if err := Reconcile(ctx, pass2, db, chMgr, quietLogger(), nil); err != nil {
+	if err := Reconcile(ctx, pass2, db, ds, quietLogger(), nil); err != nil {
 		t.Fatalf("Reconcile pass2: %v", err)
 	}
 
@@ -349,5 +361,58 @@ func TestReconcile_MemberRoleUpdateAndPrune(t *testing.T) {
 	}
 	if len(sources) != 0 {
 		t.Errorf("source should have been unlinked, got %d", len(sources))
+	}
+}
+
+// TestReconcile_IgnoresAutoProvisionedUsers guards the JIT auto-provisioning
+// contract (#34): a user created outside of provisioning (e.g. via OIDC
+// first-login auto-provisioning) is created unmanaged, and Reconcile must
+// never adopt (mark managed) or delete it as long as the provisioning config
+// doesn't reference its email — even with prune=true and an unrelated team
+// under management.
+func TestReconcile_IgnoresAutoProvisionedUsers(t *testing.T) {
+	db := newReconcileTestDB(t)
+	ctx := context.Background()
+	ds := newTestDatasourceService(db)
+
+	// Simulate a JIT auto-provisioned user: created directly, unmanaged, and
+	// never mentioned by any provisioning config.
+	autoUser := &models.User{
+		Email:       "walker@example.com",
+		FullName:    "Walker Auto",
+		Role:        models.UserRoleMember,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeHuman,
+	}
+	if err := db.CreateUser(ctx, autoUser); err != nil {
+		t.Fatalf("seed auto-provisioned user: %v", err)
+	}
+	if managed, err := db.IsUserManaged(ctx, autoUser.ID); err != nil || managed {
+		t.Fatalf("precondition: auto-provisioned user should start unmanaged (managed=%v err=%v)", managed, err)
+	}
+
+	cfg := &config.ProvisioningConfig{
+		ManageTeams: true,
+		Prune:       true,
+		Teams: []config.ProvisionTeam{{
+			Name:    "team1",
+			Members: []config.ProvisionMember{{Email: "alice@example.com", Role: "member"}},
+		}},
+	}
+
+	if err := Reconcile(ctx, cfg, db, ds, quietLogger(), nil); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	// The auto-provisioned user must survive, untouched and unmanaged.
+	got, err := db.GetUser(ctx, autoUser.ID)
+	if err != nil {
+		t.Fatalf("auto-provisioned user should still exist after reconcile: %v", err)
+	}
+	if managed, err := db.IsUserManaged(ctx, got.ID); err != nil || managed {
+		t.Fatalf("auto-provisioned user must remain unmanaged after reconcile (managed=%v err=%v)", managed, err)
+	}
+	if got.Email != autoUser.Email || got.FullName != autoUser.FullName {
+		t.Errorf("auto-provisioned user was modified by reconcile: got %+v", got)
 	}
 }

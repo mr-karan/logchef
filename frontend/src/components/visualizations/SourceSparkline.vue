@@ -8,45 +8,89 @@ interface SparklinePoint {
   rows: number
 }
 
+type BucketMode = 'auto' | 'hourly' | 'daily'
+
 interface Props {
   data: SparklinePoint[]
   height?: number
   showArea?: boolean
   color?: string
+  bucketMode?: BucketMode
 }
 
 const props = withDefaults(defineProps<Props>(), {
   height: 40,
   showArea: true,
   color: '#3b82f6', // Default blue
+  bucketMode: 'auto',
 })
 
 // Generate a unique ID for the gradient to avoid conflicts
 const gradientId = ref(`sparkline-gradient-${Math.random().toString(36).slice(2, 9)}`)
 
-// Normalize a date to start of hour and return a consistent key string
 const toHourKey = (date: Date): string => {
   const d = new Date(date)
   d.setMinutes(0, 0, 0)
   return d.toISOString().slice(0, 13)
 }
 
-// Fill in missing hourly buckets with 0 values to create a continuous time series
+const toDayKey = (date: Date): string => {
+  const d = new Date(date)
+  d.setHours(0, 0, 0, 0)
+  return d.toISOString().slice(0, 10)
+}
+
+const resolvedBucketMode = computed<Exclude<BucketMode, 'auto'>>(() => {
+  if (props.bucketMode !== 'auto') {
+    return props.bucketMode
+  }
+
+  if (props.data.length < 2) {
+    return 'hourly'
+  }
+
+  const sorted = props.data
+    .map(point => new Date(point.bucket).getTime())
+    .filter(timestamp => !Number.isNaN(timestamp))
+    .sort((a, b) => a - b)
+
+  if (sorted.length < 2) {
+    return 'hourly'
+  }
+
+  const stepMs = sorted[sorted.length - 1] - sorted[sorted.length - 2]
+  return stepMs >= 12 * 60 * 60 * 1000 ? 'daily' : 'hourly'
+})
+
 const normalizedData = computed(() => {
   if (props.data.length === 0) return []
 
   const dataMap = new Map<string, number>()
   props.data.forEach((point) => {
     const date = new Date(point.bucket)
-    dataMap.set(toHourKey(date), point.rows)
+    const key = resolvedBucketMode.value === 'daily' ? toDayKey(date) : toHourKey(date)
+    dataMap.set(key, point.rows)
   })
 
-  const now = new Date()
-  now.setMinutes(0, 0, 0)
+  const anchor = new Date()
   const buckets: { bucket: Date; rows: number }[] = []
 
+  if (resolvedBucketMode.value === 'daily') {
+    anchor.setHours(0, 0, 0, 0)
+    for (let i = 6; i >= 0; i--) {
+      const bucketTime = new Date(anchor.getTime() - i * 24 * 60 * 60 * 1000)
+      const key = toDayKey(bucketTime)
+      buckets.push({
+        bucket: bucketTime,
+        rows: dataMap.get(key) || 0,
+      })
+    }
+    return buckets
+  }
+
+  anchor.setMinutes(0, 0, 0)
   for (let i = 23; i >= 0; i--) {
-    const bucketTime = new Date(now.getTime() - i * 60 * 60 * 1000)
+    const bucketTime = new Date(anchor.getTime() - i * 60 * 60 * 1000)
     const key = toHourKey(bucketTime)
     buckets.push({
       bucket: bucketTime,
@@ -58,9 +102,7 @@ const normalizedData = computed(() => {
 })
 
 const showTime = computed(() =>
-  normalizedData.value.some((point) =>
-    point.bucket.getHours() !== 0 || point.bucket.getMinutes() !== 0
-  )
+  resolvedBucketMode.value === 'hourly'
 )
 
 const x = (d: { bucket: Date }) => d.bucket

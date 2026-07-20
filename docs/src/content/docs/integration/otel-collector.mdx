@@ -1,0 +1,203 @@
+---
+title: OpenTelemetry Collector
+description: Ship logs to ClickHouse with the OpenTelemetry Collector's clickhouseexporter, then explore the otel_logs table in Logchef.
+---
+
+The [OpenTelemetry Collector](https://opentelemetry.io/docs/collector/) can receive, process, and export logs to ClickHouse using the `clickhouseexporter` from the [collector-contrib](https://github.com/open-telemetry/opentelemetry-collector-contrib) distribution. Since Logchef reads directly from ClickHouse, the Collector is a solid choice if your services already emit OpenTelemetry logs, or if you want a single pipeline that also carries traces and metrics.
+
+## Prerequisites
+
+- ClickHouse server running and accessible
+- The `otelcol-contrib` binary (the `clickhouseexporter` ships only in the [contrib distribution](https://github.com/open-telemetry/opentelemetry-collector-releases/tree/main/distributions/otelcol-contrib), not core)
+- A Logchef instance (for querying)
+
+## Minimal Configuration
+
+A collector config that accepts OTLP logs and exports them to ClickHouse:
+
+```yaml
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch:
+    timeout: 5s
+    send_batch_size: 10000
+
+exporters:
+  clickhouse:
+    endpoint: tcp://localhost:9000?dial_timeout=10s
+    database: otel
+    logs_table_name: otel_logs
+    ttl: 72h
+    compress: lz4
+    async_insert: true
+    create_schema: true
+
+service:
+  pipelines:
+    logs:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [clickhouse]
+```
+
+Run it:
+
+```bash
+otelcol-contrib --config config.yaml
+```
+
+With `create_schema: true` (the default), the exporter creates the `otel` database and `otel_logs` table on startup — you don't need to run any DDL yourself.
+
+## Exporter Configuration Reference
+
+| Option | Default | Description |
+| :--- | :--- | :--- |
+| `endpoint` | (required) | ClickHouse address. Supports the native protocol (`tcp://host:9000`), HTTP (`http://host:8123`), or `clickhouse://host:9000` with TLS/query params |
+| `username` / `password` | empty | Authentication credentials |
+| `database` | `default` | Target database |
+| `logs_table_name` | `otel_logs` | Destination table for logs |
+| `ttl` | none | Data retention, e.g. `72h`, `30m` |
+| `compress` | `lz4` | Compression: `none`, `zstd`, `lz4`, `gzip`, `deflate`, `br` |
+| `async_insert` | `true` | Use ClickHouse async inserts for higher write throughput |
+| `create_schema` | `true` | Auto-create the database and tables on startup |
+| `table_engine` | `MergeTree()` | Override the table engine (e.g. for `ReplicatedMergeTree` in a cluster) |
+| `cluster_name` | empty | Appends `ON CLUSTER <name>` to DDL statements |
+| `timeout` | `5s` | Per-request timeout |
+| `connection_params` | `{}` | Extra native-protocol params, e.g. `{"dial_timeout": "10s"}` |
+
+For high-volume pipelines, tune the exporter's own batching instead of adding a second `batch` processor stage for it — an oversized processor-level batch plus the exporter's internal queue can double-buffer and increase the risk of data loss on crash:
+
+```yaml
+exporters:
+  clickhouse:
+    # ...
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 1000
+      batch:
+        min_size: 5000
+        flush_timeout: 5s
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 300s
+```
+
+## The `otel_logs` Schema
+
+When `create_schema` is enabled, the exporter creates a table shaped like this (columns trimmed to the ones you'll actually query from Logchef):
+
+```sql
+CREATE TABLE IF NOT EXISTS otel.otel_logs
+(
+    `Timestamp` DateTime64(9) CODEC(Delta(8), ZSTD(1)),
+    `TraceId` String CODEC(ZSTD(1)),
+    `SpanId` String CODEC(ZSTD(1)),
+    `TraceFlags` UInt8,
+    `SeverityText` LowCardinality(String) CODEC(ZSTD(1)),
+    `SeverityNumber` UInt8,
+    `ServiceName` LowCardinality(String) CODEC(ZSTD(1)),
+    `Body` String CODEC(ZSTD(1)),
+    `ResourceSchemaUrl` LowCardinality(String) CODEC(ZSTD(1)),
+    `ResourceAttributes` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+    `ScopeSchemaUrl` LowCardinality(String) CODEC(ZSTD(1)),
+    `ScopeName` String CODEC(ZSTD(1)),
+    `ScopeVersion` LowCardinality(String) CODEC(ZSTD(1)),
+    `ScopeAttributes` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+    `LogAttributes` Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+    `EventName` String CODEC(ZSTD(1)),
+
+    INDEX idx_trace_id TraceId TYPE bloom_filter(0.001) GRANULARITY 1,
+    INDEX idx_res_attr_key mapKeys(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_res_attr_value mapValues(ResourceAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_log_attr_key mapKeys(LogAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_log_attr_value mapValues(LogAttributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_lower_body lower(Body) TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 8
+)
+ENGINE = MergeTree()
+PARTITION BY toDate(Timestamp)
+ORDER BY (toStartOfFiveMinutes(Timestamp), ServiceName, Timestamp)
+SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;
+```
+
+This maps cleanly onto Logchef's [OpenTelemetry schema](/integration/schema-design): `Timestamp` is the required time column, `SeverityText`/`ServiceName` are `LowCardinality` for fast filtering, and `ResourceAttributes`/`LogAttributes` are `Map` columns for flexible key-value data. Resource-level fields like `k8s.pod.name` or `deployment.environment.name` land in `ResourceAttributes`; per-record fields set by instrumentation land in `LogAttributes`.
+
+If you'd rather use Logchef's `log_attributes`/`namespace`/`body` naming instead of the exporter's PascalCase columns, either pre-create the table yourself (set `create_schema: false`) using the schema from [Schema Design](/integration/schema-design), or add a `transform` processor to rename fields before export.
+
+## Parsing Existing Text Logs
+
+If your services write plain-text or JSON log files rather than emitting OTLP directly, use the `filelog` receiver with parsing operators to turn them into log records first:
+
+```yaml
+receivers:
+  filelog:
+    include: ["/var/log/myapp/*.log"]
+    start_at: beginning
+    operators:
+      - type: json_parser
+        timestamp:
+          parse_from: attributes.time
+          layout: "%Y-%m-%dT%H:%M:%S.%fZ"
+        severity:
+          parse_from: attributes.level
+
+processors:
+  batch:
+    timeout: 5s
+
+exporters:
+  clickhouse:
+    endpoint: tcp://localhost:9000?dial_timeout=10s
+    database: otel
+    logs_table_name: otel_logs
+    create_schema: true
+
+service:
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [batch]
+      exporters: [clickhouse]
+```
+
+`json_parser` merges parsed JSON fields into the log record's attributes (`LogAttributes` in the exported row); swap in `regex_parser` for unstructured line formats.
+
+## Connect Logchef
+
+Once logs are flowing into ClickHouse:
+
+1. Log in to Logchef
+2. Go to **Sources > Add Source**
+3. Enter the ClickHouse connection details — database `otel`, table `otel_logs`
+4. Create or select a team and assign the source
+
+Start querying:
+
+```
+SeverityText="ERROR" and ServiceName="checkout-api"
+```
+
+```
+ResourceAttributes."k8s.namespace.name"="payments" and Body~"timeout"
+```
+
+```
+LogAttributes.http_status_code>=500
+```
+
+See [Search Syntax](/guide/search-syntax) for the full dot-notation reference on `Map` columns, and [Query Examples](/guide/examples) for more.
+
+## Next steps
+
+- Collecting logs from a Kubernetes cluster? See [Kubernetes Logs](/integration/kubernetes)
+- Prefer a lighter-weight agent? See [Shipping Logs with Vector](/integration/vector)
+- Review [Schema Design](/integration/schema-design) for field types, codecs, and indexing choices

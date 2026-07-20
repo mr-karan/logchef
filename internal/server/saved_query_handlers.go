@@ -127,8 +127,11 @@ func (s *Server) handleCreateSavedQuery(c *fiber.Ctx) error {
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	if req.Name == "" || req.SourceID == 0 || req.QueryType == "" || req.QueryContent == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Missing required fields (name, source_id, query_type, query_content)", models.ValidationErrorType)
+	if req.Name == "" || req.SourceID == 0 || req.QueryContent == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Missing required fields (name, source_id, query_content)", models.ValidationErrorType)
+	}
+	if req.QueryLanguage == "" && req.EditorMode == "" {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "query_language or editor_mode is required", models.ValidationErrorType)
 	}
 
 	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
@@ -160,9 +163,9 @@ func (s *Server) handleCreateSavedQuery(c *fiber.Ctx) error {
 		}
 	}
 
-	created, err := core.CreateSavedQuery(c.Context(), s.sqlite, s.log, req.SourceID, req.CreatedFromTeamID, req.Name, req.Description, req.QueryContent, string(req.QueryType), user.ID)
+	created, err := core.CreateSavedQuery(c.Context(), s.sqlite, s.datasources, s.log, req.SourceID, req.CreatedFromTeamID, req.Name, req.Description, req.QueryContent, req.QueryLanguage, req.EditorMode, user.ID)
 	if err != nil {
-		if errors.Is(err, core.ErrQueryTypeRequired) || errors.Is(err, core.ErrInvalidQueryType) || errors.Is(err, core.ErrInvalidQueryContent) {
+		if errors.Is(err, core.ErrQueryLanguageRequired) || errors.Is(err, core.ErrInvalidQueryDefinition) || errors.Is(err, core.ErrUnsupportedSavedQueryDefinition) || errors.Is(err, core.ErrInvalidQueryContent) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create saved query", models.GeneralErrorType)
@@ -197,10 +200,11 @@ func (s *Server) handleUpdateSavedQuery(c *fiber.Ctx) error {
 	}
 
 	var req struct {
-		Name         *string `json:"name"`
-		Description  *string `json:"description"`
-		QueryType    *string `json:"query_type"`
-		QueryContent *string `json:"query_content"`
+		Name          *string                      `json:"name"`
+		Description   *string                      `json:"description"`
+		QueryLanguage *models.QueryLanguage        `json:"query_language"`
+		EditorMode    *models.SavedQueryEditorMode `json:"editor_mode"`
+		QueryContent  *string                      `json:"query_content"`
 	}
 	if err := c.BodyParser(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
@@ -214,21 +218,25 @@ func (s *Server) handleUpdateSavedQuery(c *fiber.Ctx) error {
 	if req.Description != nil {
 		description = *req.Description
 	}
-	queryType := string(query.QueryType)
-	if req.QueryType != nil {
-		queryType = *req.QueryType
+	queryLanguage := query.QueryLanguage
+	if req.QueryLanguage != nil {
+		queryLanguage = *req.QueryLanguage
+	}
+	editorMode := query.EditorMode
+	if req.EditorMode != nil {
+		editorMode = *req.EditorMode
 	}
 	queryContent := query.QueryContent
 	if req.QueryContent != nil {
 		queryContent = *req.QueryContent
 	}
 
-	updated, updateErr := core.UpdateSavedQuery(c.Context(), s.sqlite, s.log, query.ID, name, description, queryContent, queryType)
+	updated, updateErr := core.UpdateSavedQuery(c.Context(), s.sqlite, s.datasources, s.log, query.ID, name, description, queryContent, queryLanguage, editorMode)
 	if updateErr != nil {
 		if errors.Is(updateErr, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 		}
-		if errors.Is(updateErr, core.ErrInvalidQueryType) || errors.Is(updateErr, core.ErrInvalidQueryContent) {
+		if errors.Is(updateErr, core.ErrInvalidQueryDefinition) || errors.Is(updateErr, core.ErrUnsupportedSavedQueryDefinition) || errors.Is(updateErr, core.ErrInvalidQueryContent) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, updateErr.Error(), models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update saved query", models.GeneralErrorType)

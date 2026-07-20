@@ -85,6 +85,7 @@ vector -c http.toml & vector -c syslog.toml & sleep 60; kill %1 %2 2>/dev/null; 
 Or for continuous ingestion in background:
 ```bash
 cd /home/karan/Code/Personal/logchef/dev
+vector -c victorialogs.toml &
 vector -c http.toml &
 vector -c syslog.toml &
 ```
@@ -123,6 +124,7 @@ Authentication uses Dex OIDC. Static passwords configured in `dev/dex/config.yam
 | `dev/docker-compose.yml` | Infrastructure services |
 | `dev/init-clickhouse.sql` | ClickHouse table schemas |
 | `dev/seed.sh` | SQLite seed script (API tokens, dev user) |
+| `dev/victorialogs.toml` | Vector config for VictoriaLogs demo ingestion |
 | `dev/http.toml` | Vector config for HTTP demo logs |
 | `dev/syslog.toml` | Vector config for syslog demo logs |
 
@@ -150,6 +152,7 @@ Authentication uses Dex OIDC. Static passwords configured in `dev/dex/config.yam
 
 ### Reset everything
 ```bash
+just dev-reset    # Truncates ClickHouse, wipes VictoriaLogs data, deletes local.db
 just dev-clean    # Stops docker, removes volumes, deletes local.db
 just dev-setup    # Fresh start (docker + tables + seed)
 ```
@@ -206,4 +209,5 @@ ss -tlnp | grep 8125 | grep -oP 'pid=\K[0-9]+' | xargs -r kill -9
 ### No logs in explorer
 - Check ClickHouse has data: `docker exec dev-clickhouse-local-1 clickhouse-client --query "SELECT count() FROM default.http"`
 - Ingest logs with vector or direct INSERT (see step 7 above)
+- For VictoriaLogs specifically, run `nix-shell -p vector --run "vector -c victorialogs.toml"` from `dev/`
 - Check the time range in the UI covers when data was inserted

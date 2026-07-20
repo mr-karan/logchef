@@ -25,6 +25,10 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     groupByField: null,
   });
 
+  // Cancels a superseded histogram fetch so a slower earlier request can't
+  // overwrite the results of a newer one (last-writer-wins race). See #101.
+  let inFlightController: AbortController | null = null;
+
   const histogramData = computed(() => state.value.data);
   const isLoadingHistogram = computed(() => state.value.isLoading);
   const histogramError = computed(() => state.value.error);
@@ -32,6 +36,12 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
   const groupByField = computed(() => state.value.groupByField);
 
   function clearHistogramData() {
+    // Cancel any in-flight fetch so its late response can't repopulate the data
+    // we're clearing (e.g. on source change). See #101.
+    if (inFlightController) {
+      inFlightController.abort();
+      inFlightController = null;
+    }
     state.value.data = [];
     state.value.error = null;
     state.value.granularity = null;
@@ -43,19 +53,28 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
   }
 
   async function fetchHistogramData(options: {
-    sql: string;
+    queryText: string;
     timeRange: { start: any; end: any } | null;
     timezone?: string;
     queryTimeout?: number;
     granularity?: string;
   }) {
-    const { sql, timeRange, timezone, queryTimeout, granularity } = options;
+    const { queryText, timeRange, timezone, queryTimeout, granularity } = options;
 
-    if (!sql) {
+    if (!queryText) {
       clearHistogramData();
-      state.value.error = "Run a LogchefQL query first to see the histogram";
-      return { success: false, error: { message: "Run a LogchefQL query first" } };
+      state.value.error = "Run a query first to see the histogram";
+      return { success: false, error: { message: "Run a query first" } };
     }
+
+    // Supersede any earlier in-flight fetch so its response can't overwrite
+    // this newer one (#101).
+    if (inFlightController) {
+      inFlightController.abort();
+    }
+    const controller = new AbortController();
+    inFlightController = controller;
+    const isCurrent = () => inFlightController === controller && !controller.signal.aborted;
 
     state.value.isLoading = true;
     state.value.error = null;
@@ -76,20 +95,35 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       }
 
       let windowGranularity = granularity;
+      let startISO: string | undefined;
+      let endISO: string | undefined;
       if (!windowGranularity && timeRange) {
-        const startISO = new Date(
+        startISO = new Date(
           timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
           'hour' in timeRange.start ? timeRange.start.hour : 0,
           'minute' in timeRange.start ? timeRange.start.minute : 0,
           'second' in timeRange.start ? timeRange.start.second : 0
         ).toISOString();
-        const endISO = new Date(
+        endISO = new Date(
           timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
           'hour' in timeRange.end ? timeRange.end.hour : 0,
           'minute' in timeRange.end ? timeRange.end.minute : 0,
           'second' in timeRange.end ? timeRange.end.second : 0
         ).toISOString();
         windowGranularity = HistogramService.calculateOptimalGranularity(startISO, endISO);
+      } else if (timeRange) {
+        startISO = new Date(
+          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
+          'hour' in timeRange.start ? timeRange.start.hour : 0,
+          'minute' in timeRange.start ? timeRange.start.minute : 0,
+          'second' in timeRange.start ? timeRange.start.second : 0
+        ).toISOString();
+        endISO = new Date(
+          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
+          'hour' in timeRange.end ? timeRange.end.hour : 0,
+          'minute' in timeRange.end ? timeRange.end.minute : 0,
+          'second' in timeRange.end ? timeRange.end.second : 0
+        ).toISOString();
       }
 
       // Get variables for backend substitution
@@ -97,10 +131,12 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       const variables = getVariablesForApi();
 
       const params = {
-        raw_sql: sql,
+        query_text: queryText,
         limit: 100,
         window: windowGranularity || '1m',
         timezone: timezone || undefined,
+        start_time: startISO,
+        end_time: endISO,
         group_by: state.value.groupByField === "__none__" || state.value.groupByField === null
           ? undefined
           : state.value.groupByField,
@@ -108,7 +144,13 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         variables: variables.length > 0 ? variables : undefined,
       };
 
-      const response = await exploreApi.getHistogramData(sourceId, params, currentTeamId);
+      const response = await exploreApi.getHistogramData(sourceId, params, currentTeamId, controller.signal);
+
+      // A newer fetch started (or this one was cancelled) while awaiting — drop
+      // the result so it can't clobber fresher data (#101).
+      if (!isCurrent()) {
+        return { success: false, error: { message: "Superseded by a newer histogram fetch" } };
+      }
 
       if (response.data) {
         state.value.data = response.data.data || [];
@@ -122,12 +164,22 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         return { success: false, error: { message: "Failed to fetch histogram data" } };
       }
     } catch (error) {
+      // A cancelled/superseded fetch must stay silent — leave the newer fetch's
+      // state (or the cleared state) untouched.
+      if (controller.signal.aborted || inFlightController !== controller) {
+        return { success: false, error: { message: "Histogram fetch cancelled" } };
+      }
       const errorMessage = error instanceof Error ? error.message : String(error);
       clearHistogramData();
       state.value.error = errorMessage;
       return { success: false, error: { message: errorMessage } };
     } finally {
-      state.value.isLoading = false;
+      // Only clear loading/controller if this run is still the active one; a
+      // superseded run must not flip the newer run's loading flag.
+      if (inFlightController === controller) {
+        inFlightController = null;
+        state.value.isLoading = false;
+      }
     }
   }
 

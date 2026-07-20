@@ -7,7 +7,7 @@ description: Collect and ship logs to ClickHouse using Vector for querying with 
 
 ## Quick Start
 
-If you're using the [Docker quick start](/getting-started/quickstart), Vector is already included and configured — demo syslog data flows into ClickHouse automatically. Skip to [Adapting for Real Sources](#adapting-for-real-sources) when you're ready to ship your own logs.
+If you're using the [Docker quick start](/getting-started/quickstart), Vector is already included and configured: demo syslog data flows into ClickHouse automatically. Skip to [Adapting for Real Sources](#adapting-for-real-sources) when you're ready to ship your own logs.
 
 For a standalone setup, you need three things:
 
@@ -23,7 +23,7 @@ For a standalone setup, you need three things:
 
 ## Create the ClickHouse Table
 
-Logchef works with any ClickHouse table that has a timestamp column, but the built-in [OpenTelemetry schema](/integration/schema-design) gives you the best experience — severity filtering, service grouping, and flexible `log_attributes` all work out of the box.
+Logchef works with any ClickHouse table that has a timestamp column, but the built-in [OpenTelemetry schema](/integration/schema-design) gives you the best experience: severity filtering, service grouping, and flexible `log_attributes` all work out of the box.
 
 Create the table:
 

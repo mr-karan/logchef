@@ -110,34 +110,23 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function loadUserTeams() {
-    console.log("[teamsStore] loadUserTeams: Starting"); // Log start
     return await state.withLoading("loadUserTeams", async () => {
       return await state.callApi({
         apiCall: teamsApi.listUserTeams,
         operationKey: "loadUserTeams",
         onSuccess: async (response) => {
-          console.log("[teamsStore] loadUserTeams onSuccess: Raw API response:", JSON.parse(JSON.stringify(response))); // Log raw response
-
           // Simple, focused approach: Always work with the data array from the standard API response
           if (Array.isArray(response)) {
             state.data.value.userTeams = response;
-            console.log("[teamsStore] loadUserTeams onSuccess: state.data.value.userTeams after assignment:",
-              JSON.parse(JSON.stringify(state.data.value.userTeams)));
 
             if (!contextStore.teamId && response.length > 0) {
               contextStore.selectTeam(response[0].id);
-              console.log("[teamsStore] loadUserTeams onSuccess: Set currentTeamId to default:", response[0].id);
             }
             return { success: true, data: state.data.value.userTeams };
           } else {
-            console.error("[teamsStore] loadUserTeams onSuccess: Response is not an array", response);
             return { success: false, error: { message: "Failed to load user teams: Invalid response format." } };
           }
         },
-        onError: (error) => {
-          console.error("[teamsStore] loadUserTeams onError: API call failed:", JSON.parse(JSON.stringify(error)));
-          // No need to return here, callApi handles it.
-        }
       });
     });
   }
@@ -165,15 +154,12 @@ export const useTeamsStore = defineStore("teams", () => {
 
   // Load appropriate teams based on context
   async function loadTeams(forceReload = false, useAdminEndpoint = false) {
-    console.log("[teamsStore] loadTeams: Starting with useAdminEndpoint =", useAdminEndpoint);
-
     try {
       // Simple approach: just delegate to the appropriate loader function
       return useAdminEndpoint
         ? await loadAdminTeams(forceReload)
         : await loadUserTeams();
     } catch (error) {
-      console.error("[teamsStore] loadTeams: Error loading teams", error);
       return {
         success: false,
         error: {

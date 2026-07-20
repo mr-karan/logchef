@@ -1,0 +1,89 @@
+---
+title: VictoriaLogs Explorer
+description: What Logchef adds on top of VictoriaLogs' vmui — LogchefQL/LogsQL search, saved queries, alerting, RBAC, live tail, and multi-tenant scoping.
+---
+
+VictoriaLogs ships its own UI, [vmui](https://docs.victoriametrics.com/victorialogs/querying/#web-ui), for running LogsQL queries. Logchef is not a replacement for VictoriaLogs — it's a query-first log explorer that sits in front of it (and, for other sources, in front of ClickHouse) with a shared workflow: search syntax, saved queries, alerting, and access control that work the same way regardless of which backend a source points to.
+
+This page covers what Logchef adds on top of a VictoriaLogs instance, and when reaching for vmui directly still makes sense. For connecting a source, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs). For LogsQL query patterns, see [LogsQL Queries](/guide/logsql-queries).
+
+## What Logchef adds
+
+### Query-first UX: LogchefQL and native LogsQL side by side
+
+Every VictoriaLogs source in Logchef supports two query languages, switchable per query:
+
+- **LogchefQL** — the same simple `field="value"`, `field>500`, `field~"substring"` syntax Logchef uses for ClickHouse sources. Logchef compiles it to LogsQL before sending it to VictoriaLogs.
+- **LogsQL** (native mode) — write VictoriaLogs' own query language directly, including pipes like `stats`, `facets`, `unpack_json`, and `fields`.
+
+This means teams that also run ClickHouse-backed sources in Logchef get one filter language across both backends, and can still drop into raw LogsQL whenever they need something LogchefQL doesn't express.
+
+```text
+# LogchefQL — works the same on a ClickHouse or VictoriaLogs source
+service = "payments" and status_code >= 500
+
+# compiles to LogsQL for a VictoriaLogs source
+(service:="payments") AND (status_code:>=500)
+```
+
+### Saved queries and collections
+
+Queries (LogchefQL or native LogsQL) can be saved to your Library and organized into [collections](/features/collections) shared across a team. vmui has no equivalent — queries there live in the browser URL/history only.
+
+### Alerting
+
+Logchef can evaluate a VictoriaLogs LogsQL or LogchefQL-condition query on a schedule and fire email or webhook notifications when a threshold is crossed. See [Alerting](/features/alerting) and the VictoriaLogs-specific notes in [Using VictoriaLogs with Logchef](/tutorials/victorialogs#alerting). vmui has no built-in alerting; this is normally left to VictoriaMetrics' vmalert with a separate rules file.
+
+### RBAC and teams
+
+Sources, saved queries, collections, and alerts are scoped to Logchef teams, with per-team membership and role-based access. vmui itself has no concept of users, teams, or per-source access control — access is whatever the URL allows.
+
+### Live tail
+
+Logchef's Live Tail proxies VictoriaLogs' native `/select/logsql/tail` stream, so new matching rows push into the explorer as they're ingested rather than being polled on an interval. This works in both LogchefQL and native LogsQL mode. See [Live Tail](#live-tail-details) below.
+
+### Multi-tenant scoping
+
+A VictoriaLogs source in Logchef can carry:
+
+- **Tenant headers** (`AccountID` / `ProjectID`) for [multi-tenant VictoriaLogs](https://docs.victoriametrics.com/victorialogs/#multitenancy) deployments
+- An **immutable scope filter** applied server-side to every query, histogram, field-values lookup, live tail, and alert evaluation for that source — so a source can be pinned to `{app="payments"}` (a stream filter) or a filter expression like `kubernetes.namespace:="prod"`, and no query issued through Logchef can see outside that scope
+
+This lets one VictoriaLogs cluster back several narrowly-scoped Logchef sources — each team only ever queries the slice of data their source is pinned to.
+
+## When to use Logchef vs vmui
+
+| Use Logchef when... | Use vmui directly when... |
+|---|---|
+| You want the same search workflow across ClickHouse and VictoriaLogs sources | You're doing VictoriaLogs-only, ad hoc LogsQL exploration |
+| You need saved queries, collections, or alerting | You need vmui's built-in log stream / live view specifics not exposed by Logchef |
+| Multiple teams need scoped, access-controlled views into shared VictoriaLogs data | You're debugging the VictoriaLogs instance itself (ingestion, storage, retention) |
+| You want alert history and delivery tracking in one place with your other sources | You already have vmalert rules covering this data |
+
+## Live Tail details
+
+Live Tail is available from the explorer's Live toggle whenever a VictoriaLogs source is selected. The time-range and limit controls are disabled while a tail is running, since VictoriaLogs streams rows as they arrive rather than answering a bounded query.
+
+A few behaviors worth knowing:
+
+- Rows are batched for the UI (flushed in batches, or at least every 200ms if fewer rows have arrived), so a trickle of logs doesn't feel like it's stalling.
+- If VictoriaLogs closes the tail connection on its own (a restart, an idle timeout, a network drop) rather than because you stopped the tail, Logchef reports that as a dropped connection rather than a normal stop — so you can tell "I stopped this" apart from "the connection died."
+- Live Tail works in both LogchefQL and native LogsQL query modes.
+
+## Known gaps on VictoriaLogs sources
+
+A handful of Logchef features only work against ClickHouse sources today:
+
+- **AI SQL generation** — the AI query assistant only writes ClickHouse SQL, not LogsQL.
+- **Log context** ("jump to surrounding logs" from a result row).
+- **Exports / downloads** — streaming a full result set to CSV or NDJSON.
+
+Everything else described on this page and in [Using VictoriaLogs with Logchef](/tutorials/victorialogs) — explore, histograms, field values, saved queries, collections, live tail, and alerting — works the same on VictoriaLogs as it does on ClickHouse.
+
+## Next steps
+
+- [Using VictoriaLogs with Logchef](/tutorials/victorialogs) — connect a source and set up ingestion
+- [LogsQL Queries](/guide/logsql-queries) — native LogsQL patterns and how LogchefQL compiles to LogsQL
+- [Search Syntax](/guide/search-syntax) — the full LogchefQL reference
+- [Alerting](/features/alerting) — set up scheduled alerts
+- [Collections & Saved Queries](/features/collections) — share queries across a team

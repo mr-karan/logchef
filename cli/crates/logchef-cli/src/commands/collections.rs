@@ -10,13 +10,24 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # List saved collections for a source
+  logchef collections -t platform -S app-logs
+
+  # Run a collection by name over the last hour
+  logchef collections 'Error Dashboard' --since 1h
+
+  # Run one with a variable override, as JSON
+  logchef collections 'By Service' --var service=api --output json")]
 pub struct CollectionsArgs {
     /// Collection name to run (optional - lists collections if not provided)
     name: Option<String>,
@@ -29,7 +40,10 @@ pub struct CollectionsArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Override time range with relative time (e.g., 15m, 1h, 24h)
+    /// Override time range with relative time (e.g., 15m, 1h, 24h),
+    /// evaluated against now in the effective timezone: `defaults.timezone`
+    /// if configured, otherwise the system's local timezone (see `logchef
+    /// config show`).
     #[arg(long, short = 's')]
     since: Option<String>,
 
@@ -82,6 +96,10 @@ struct JsonOutput<'a> {
     query_id: Option<&'a str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     generated_sql: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_query: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    generated_query_language: Option<&'a str>,
     columns: &'a [Column],
 }
 
@@ -164,8 +182,8 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
                     let mut cache_entries: Vec<(String, i64)> =
                         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
                     for s in &sources {
-                        if let Some(table_ref) = s.table_ref() {
-                            cache_entries.push((table_ref, s.id));
+                        if let Some(target_ref) = s.target_ref() {
+                            cache_entries.push((target_ref, s.id));
                         }
                     }
                     cache.set_sources(team_id, &cache_entries);
@@ -175,7 +193,7 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
                         .find(|s| s.name.eq_ignore_ascii_case(&name))
                         .or_else(|| {
                             sources.iter().find(|s| {
-                                s.table_ref()
+                                s.target_ref()
                                     .map(|r| r.eq_ignore_ascii_case(&name))
                                     .unwrap_or(false)
                             })
@@ -211,7 +229,17 @@ pub async fn run(args: CollectionsArgs, global: GlobalArgs) -> Result<()> {
     };
 
     // Run the collection
-    run_collection(&config, client, team_id, source_id, &collection, &args, ctx).await
+    run_collection(
+        &config,
+        client,
+        team_id,
+        source_id,
+        &collection,
+        &args,
+        ctx,
+        global.quiet,
+    )
+    .await
 }
 
 fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Result<()> {
@@ -253,7 +281,7 @@ fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Resul
                     "{:<4} {:<30} {:<12} {}",
                     c.id,
                     truncate_str(&c.name, 28),
-                    c.query_type,
+                    collection_query_label(c),
                     desc_truncated
                 );
             }
@@ -264,6 +292,14 @@ fn list_collections(collections: &[Collection], args: &CollectionsArgs) -> Resul
     Ok(())
 }
 
+fn collection_query_label(collection: &Collection) -> &str {
+    match collection.query_language.as_str() {
+        "logchefql" => "logchefql",
+        "logsql" => "logsql",
+        _ => "sql",
+    }
+}
+
 fn truncate_str(s: &str, max_len: usize) -> String {
     if s.len() > max_len {
         format!("{}...", &s[..max_len.saturating_sub(3)])
@@ -272,6 +308,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_collection(
     config: &Config,
     client: &Client,
@@ -280,6 +317,7 @@ async fn run_collection(
     collection: &Collection,
     args: &CollectionsArgs,
     ctx: &logchef_core::config::Context,
+    quiet: bool,
 ) -> Result<()> {
     // Parse the query content
     let content: CollectionQueryContent =
@@ -304,27 +342,20 @@ async fn run_collection(
         }
     }
 
-    // Determine time range
-    let (start_time, end_time) = if let Some(since) = &args.since {
+    // Determine time range: every branch below resolves to a concrete UTC
+    // instant range, which resolve_time_range then formats as wall-clock in
+    // the effective timezone (never a mix of the two, which was the bug).
+    let (start, end) = if let Some(since) = &args.since {
         // Use override
         let end = Utc::now();
         let start = end - parse_duration(since)?;
-        let format = "%Y-%m-%d %H:%M:%S";
-        (
-            start.format(format).to_string(),
-            end.format(format).to_string(),
-        )
+        (start, end)
     } else if let Some(tr) = &content.time_range {
         if let Some(rel) = &tr.relative {
             let end = Utc::now();
             let start = end - parse_duration(rel)?;
-            let format = "%Y-%m-%d %H:%M:%S";
-            (
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            )
+            (start, end)
         } else if let Some(abs) = &tr.absolute {
-            let format = "%Y-%m-%d %H:%M:%S";
             let start = Utc
                 .timestamp_millis_opt(abs.start)
                 .single()
@@ -333,58 +364,36 @@ async fn run_collection(
                 .timestamp_millis_opt(abs.end)
                 .single()
                 .ok_or_else(|| anyhow::anyhow!("Invalid end timestamp"))?;
-            (
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            )
+            (start, end)
         } else {
             // Default to last 15 minutes
             let end = Utc::now();
-            let start = end - Duration::minutes(15);
-            let format = "%Y-%m-%d %H:%M:%S";
-            (
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            )
+            (end - Duration::minutes(15), end)
         }
     } else {
         // Default to last 15 minutes
         let end = Utc::now();
-        let start = end - Duration::minutes(15);
-        let format = "%Y-%m-%d %H:%M:%S";
-        (
-            start.format(format).to_string(),
-            end.format(format).to_string(),
-        )
+        (end - Duration::minutes(15), end)
     };
+    let time_range = resolve_time_range(
+        TimeInput::Instant { start, end },
+        ctx.defaults.timezone.as_deref(),
+    );
 
     let limit = args.limit.or(content.limit).unwrap_or(100);
 
     eprintln!(
         "Running collection: {} ({})",
-        collection.name, collection.query_type
+        collection.name,
+        collection_query_label(collection)
     );
 
-    let response = if collection.query_type == "sql" {
-        let request = SqlQueryRequest {
-            raw_sql: final_query,
-            limit: None, // SQL queries control their own limit
-            timezone: ctx.defaults.timezone.clone(),
-            start_time: None,
-            end_time: None,
-            query_timeout: Some(30),
-        };
-        client
-            .query_sql(team_id, source_id, &request)
-            .await
-            .context("SQL query failed")?
-    } else {
-        // logchefql
+    let response = if collection.query_language == "logchefql" {
         let request = QueryRequest {
             query: final_query,
-            start_time,
-            end_time,
-            timezone: ctx.defaults.timezone.clone(),
+            start_time: time_range.start,
+            end_time: time_range.end,
+            timezone: Some(time_range.timezone),
             limit: Some(limit),
             query_timeout: None,
         };
@@ -392,10 +401,22 @@ async fn run_collection(
             .query_logchefql(team_id, source_id, &request)
             .await
             .context("Query failed")?
+    } else {
+        let request = SqlQueryRequest {
+            query_text: final_query,
+            limit: Some(limit),
+            timezone: Some(time_range.timezone),
+            start_time: Some(time_range.start),
+            end_time: Some(time_range.end),
+            query_timeout: Some(30),
+        };
+        client
+            .query_sql(team_id, source_id, &request)
+            .await
+            .context("Native query failed")?
     };
 
     let entries = response.entries();
-    let is_tty = std::io::stdout().is_terminal();
 
     match args.output {
         OutputFormat::Json => {
@@ -405,6 +426,8 @@ async fn run_collection(
                 stats: &response.stats,
                 query_id: response.query_id.as_deref(),
                 generated_sql: response.generated_sql.as_deref(),
+                generated_query: response.generated_query(),
+                generated_query_language: response.generated_query_language(),
                 columns: &response.columns,
             };
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -413,34 +436,34 @@ async fn run_collection(
             for entry in entries {
                 println!("{}", serde_json::to_string(entry)?);
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::JsonFlat => {
             print_json_flat(entries)?;
         }
         OutputFormat::Table => {
             print_table(entries, &response.columns);
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
         OutputFormat::Msg => {
-            print_msg(entries, &response.columns, collection.query_type == "sql");
+            print_msg(
+                entries,
+                &response.columns,
+                collection.query_language != "logchefql",
+            );
         }
         OutputFormat::Text | OutputFormat::List => {
-            let highlighter = if args.no_highlight || !is_tty {
+            let highlighter = if args.no_highlight || !ui::human(quiet) {
                 None
             } else {
                 let hl_options = HighlightOptions {
@@ -462,14 +485,12 @@ async fn run_collection(
                     println!("{}", line);
                 }
             }
-            if is_tty {
-                eprintln!(
-                    "\n{} logs | {}ms | {} rows read",
-                    entries.len(),
-                    response.stats.execution_time_ms,
-                    response.stats.rows_read
-                );
-            }
+            ui::print_stats(
+                quiet,
+                entries.len(),
+                response.stats.execution_time_ms,
+                response.stats.rows_read,
+            );
         }
     }
 
@@ -667,10 +688,7 @@ async fn prompt_source_interactive(
         anyhow::bail!("No sources available for this team");
     }
 
-    let options: Vec<String> = sources
-        .iter()
-        .map(|s| format!("{} ({})", s.name, s.table_ref().unwrap_or_default()))
-        .collect();
+    let options: Vec<String> = sources.iter().map(|s| s.display_name()).collect();
     let selection = Select::new("Select source:", options)
         .prompt()
         .context("Failed to select source")?;
@@ -683,8 +701,8 @@ async fn prompt_source_interactive(
     let mut cache_entries: Vec<(String, i64)> =
         sources.iter().map(|s| (s.name.clone(), s.id)).collect();
     for s in &sources {
-        if let Some(table_ref) = s.table_ref() {
-            cache_entries.push((table_ref, s.id));
+        if let Some(target_ref) = s.target_ref() {
+            cache_entries.push((target_ref, s.id));
         }
     }
     cache.set_sources(team_id, &cache_entries);
@@ -699,7 +717,7 @@ fn prompt_collection_interactive(collections: &[Collection]) -> Result<Collectio
 
     let options: Vec<String> = collections
         .iter()
-        .map(|c| format!("{} [{}]", c.name, c.query_type))
+        .map(|c| format!("{} [{}]", c.name, collection_query_label(c)))
         .collect();
     let selection = Select::new("Select collection:", options)
         .prompt()

@@ -42,6 +42,8 @@ import {
   Wrench,
   FolderOpen,
   KeyRound,
+  LayoutDashboard,
+  Activity,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -148,6 +150,11 @@ const allMainNavItems: NavItem[] = [
     icon: Bell,
     url: "/logs/alerts",
   },
+  {
+    title: "Dashboards",
+    icon: LayoutDashboard,
+    url: "/dashboards",
+  },
 ];
 
 const mainNavItems = computed(() =>
@@ -183,6 +190,12 @@ const adminNavItems: NavItem[] = [
     title: "System Settings",
     icon: Wrench,
     url: "/admin/settings",
+    adminOnly: true,
+  },
+  {
+    title: "Query Activity",
+    icon: Activity,
+    url: "/admin/query-activity",
     adminOnly: true,
   },
 ];

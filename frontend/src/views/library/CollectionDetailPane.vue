@@ -398,7 +398,7 @@ async function handleDeleteCollection() {
                     title="You cannot run this query (no source access)."
                   />
                   <Search
-                    v-else-if="item.query.query_type === 'logchefql'"
+                    v-else-if="item.query.query_language === 'logchefql'"
                     class="h-4 w-4 text-muted-foreground"
                     title="LogchefQL"
                   />

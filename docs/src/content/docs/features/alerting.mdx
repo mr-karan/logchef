@@ -1,24 +1,25 @@
 ---
 title: Alerting
-description: SQL-based alerts with email and webhook notifications.
+description: Set up scheduled log alerts on ClickHouse or VictoriaLogs sources with email and webhook notifications when thresholds are exceeded.
 ---
 
-Logchef evaluates SQL queries on a schedule and sends notifications when thresholds are exceeded. Alerts fire via email (SMTP) and webhooks — no external alerting system required.
+Logchef evaluates alert queries on a schedule and sends notifications when thresholds are exceeded. Alerts fire via email (SMTP) and webhooks, so you don't need a separate alerting system.
 
 ## Quick Start
 
 1. Navigate to your team/source → **Alerts** → **New Alert**
-2. Write a filter condition: `severity_text = "ERROR"`
-3. Set threshold: greater than 100
-4. Set lookback: 5 minutes, frequency: 60 seconds
-5. Add recipients and/or webhook URLs
-6. Save
+2. Choose a query mode supported by the source
+3. Write a filter or native query
+4. Set threshold: greater than 100
+5. Set lookback: 5 minutes, frequency: 60 seconds
+6. Add recipients and/or webhook URLs
+7. Save
 
-Logchef generates the SQL automatically (`SELECT count(*) ... WHERE severity_text = 'ERROR' AND timestamp >= now() - toIntervalSecond(300)`), evaluates it every 60 seconds, and sends notifications when the count exceeds 100.
+For ClickHouse and VictoriaLogs sources, Logchef can generate the executable alert query automatically from a LogchefQL condition. Native mode remains available when you want to write SQL or LogsQL directly.
 
 ## Query Modes
 
-**LogchefQL mode** — Write a filter condition, pick an aggregate function. Time filter is added automatically.
+**Condition mode**: Write a LogchefQL filter condition and pick an aggregate function (`count`, `sum`, `avg`, `min`, `max`). For anything beyond `count`, also pick the field to aggregate over: schema-backed suggestions show all fields for VictoriaLogs sources and numeric columns for ClickHouse. Logchef generates the backend-native executable query and adds the alert window automatically.
 
 ```
 severity_text = "ERROR"
@@ -26,7 +27,7 @@ status_code >= 500 and service = "api"
 body ~ "timeout"
 ```
 
-**SQL mode** — Full ClickHouse SQL. Must return a single numeric column named `value`.
+**Native mode**: Write the source's native alert query. The query must return a single numeric value.
 
 ```sql
 SELECT avg(JSONExtractFloat(log_attributes, 'response_time_ms')) as value
@@ -35,13 +36,19 @@ WHERE service = 'api-gateway'
   AND timestamp >= now() - toIntervalSecond(600)
 ```
 
+For VictoriaLogs sources, native mode uses LogsQL and evaluates through `stats_query`. Logchef applies the configured lookback window automatically, so the query can stay focused on the filter and stats logic.
+
+```text
+level:="error" | stats count() as value
+```
+
 ## Alert Configuration
 
 | Field | Description |
 |-------|-------------|
 | Name | Human-readable identifier |
 | Severity | `info`, `warning`, or `critical` |
-| Query | LogchefQL condition or ClickHouse SQL |
+| Query | LogchefQL condition, ClickHouse SQL, or VictoriaLogs LogsQL depending on source |
 | Threshold | Value + operator (`>`, `>=`, `<`, `<=`, `==`, `!=`) |
 | Frequency | Evaluation interval in seconds |
 | Lookback | Time range for the query |
@@ -100,7 +107,7 @@ The alerts list shows live status for each rule:
 
 ## SMTP Configuration (First Boot)
 
-Seed initial settings via `config.toml` — after first boot, use the Admin UI:
+Seed initial settings via `config.toml`. After first boot, use the Admin UI:
 
 ```toml
 [alerts]
@@ -114,14 +121,16 @@ smtp_security = "starttls"
 
 `enabled` is the **server-wide** alerting switch. With `alerts.enabled = false`
 (or `LOGCHEF_ALERTS__ENABLED=false`) Logchef hides all alerting UI and every
-alert endpoint returns `503` — useful for exploration-only deployments, or to
-keep alert evaluation on a single instance when running multiple replicas
-against a shared [Postgres backend](/operations/database-backends/).
+alert endpoint returns `503`. That's useful for exploration-only deployments,
+or to keep alert evaluation on a single instance when running multiple
+replicas against a shared [Postgres backend](/operations/database-backends/).
 
 ## Troubleshooting
 
-**Alerts not firing:** Check the alert is enabled, test the query manually, verify the threshold makes sense for your data volume.
+**Alerts not firing:** Check the alert is enabled, test the query manually, verify the threshold makes sense for your data volume, and confirm the selected query language matches the source type.
 
 **Alerts not delivered:** Verify SMTP settings, check that recipients or webhook URLs are configured on the alert, review delivery status in alert history.
 
 **False positives:** Increase the threshold, extend the lookback window, or use `avg()` instead of `count()` for smoother signals.
+
+For VictoriaLogs-specific guidance, see [Using VictoriaLogs with Logchef](/tutorials/victorialogs).

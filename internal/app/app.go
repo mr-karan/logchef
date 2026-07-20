@@ -13,25 +13,29 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/postgres"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/logger"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // App represents the core application context, holding dependencies and configuration.
 type App struct {
-	Config     *config.Config
-	SQLite     store.Store
-	ClickHouse *clickhouse.Manager
-	Logger     *slog.Logger
-	server     *server.Server
-	WebFS      http.FileSystem
-	BuildInfo  string
-	Version    string
-	Alerts     *alerts.Manager
+	Config      *config.Config
+	SQLite      store.Store
+	ClickHouse  *clickhouse.Manager
+	Datasources *datasource.Service
+	Logger      *slog.Logger
+	server      *server.Server
+	WebFS       http.FileSystem
+	BuildInfo   string
+	Version     string
+	Alerts      *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -106,6 +110,9 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize ClickHouse connection manager.
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
+	a.Datasources = datasource.NewService(a.SQLite, a.Logger)
+	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
+	a.Datasources.Register(victorialogs.NewProvider(a.Logger))
 
 	// Initialize OIDC Provider.
 	// This is optional; if OIDC is not configured, auth features relying on it might be disabled.
@@ -119,6 +126,11 @@ func (a *App) Initialize(ctx context.Context) error {
 		}
 	}
 
+	// Bootstrap the local-auth admin when configured (idempotent).
+	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Logger); err != nil {
+		return fmt.Errorf("failed to bootstrap local auth admin: %w", err)
+	}
+
 	// Run declarative provisioning reconciliation if configured.
 	if a.Config.Provisioning.Enabled() {
 		a.Logger.Info("running provisioning reconciliation",
@@ -127,28 +139,15 @@ func (a *App) Initialize(ctx context.Context) error {
 			"prune", a.Config.Provisioning.Prune,
 			"dry_run", a.Config.Provisioning.DryRun,
 		)
-		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.ClickHouse, a.Logger, a.Config.Auth.AdminEmails); err != nil {
+		if err := provisioning.Reconcile(ctx, &a.Config.Provisioning, a.SQLite, a.Datasources, a.Logger, a.Config.Auth.AdminEmails); err != nil {
 			return fmt.Errorf("provisioning reconciliation failed: %w", err)
 		}
 	}
 
-	// Load existing sources from SQLite into the ClickHouse manager
+	// Load existing sources from SQLite into their registered datasource providers
 	// to establish connections for querying.
-	sources, err := a.SQLite.ListSources(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to list sources: %w", err)
-	}
-	for _, source := range sources {
-		a.Logger.Info("initializing source connection",
-			"source_id", source.ID,
-			"table", source.Connection.TableName)
-		if err := a.ClickHouse.AddSource(ctx, source); err != nil {
-			// Log failure but continue initialization.
-			// The health check system will attempt to recover these connections.
-			a.Logger.Warn("failed to initialize source connection, will attempt recovery via health checks",
-				"source_id", source.ID,
-				"error", err)
-		}
+	if err := a.Datasources.InitializeAllSources(ctx); err != nil {
+		return fmt.Errorf("failed to initialize datasource connections: %w", err)
 	}
 
 	// Start background health checks for the ClickHouse manager.
@@ -161,11 +160,11 @@ func (a *App) Initialize(ctx context.Context) error {
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
-		Config:     a.Config.Alerts,
-		DB:         a.SQLite,
-		ClickHouse: a.ClickHouse,
-		Logger:     a.Logger,
-		Sender:     alertSender,
+		Config:      a.Config.Alerts,
+		DB:          a.SQLite,
+		Datasources: a.Datasources,
+		Logger:      a.Logger,
+		Sender:      alertSender,
 	})
 
 	// Initialize HTTP server with alerts manager for manual resolution.
@@ -173,6 +172,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		Config:        a.Config,
 		SQLite:        a.SQLite,
 		ClickHouse:    a.ClickHouse,
+		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
 		OIDCProvider:  oidcProvider,
 		FS:            a.WebFS,
@@ -498,5 +498,45 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 	}
 
 	a.Logger.Info("system settings seeded from config.toml successfully")
+	return nil
+}
+
+// ensureLocalAdmin creates or updates the bootstrap admin for local
+// email+password auth. Idempotent: safe to run on every startup.
+func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, log *slog.Logger) error {
+	local := cfg.Auth.Local
+	if !local.Enabled || local.AdminEmail == "" {
+		return nil
+	}
+
+	user, err := db.GetUserByEmail(ctx, local.AdminEmail)
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
+		return fmt.Errorf("looking up local admin: %w", err)
+	}
+	if user == nil || errors.Is(err, models.ErrNotFound) {
+		user = &models.User{
+			Email:       local.AdminEmail,
+			FullName:    "Local Admin",
+			Role:        models.UserRoleAdmin,
+			Status:      models.UserStatusActive,
+			AccountType: models.UserAccountTypeHuman,
+		}
+		if err := db.CreateUser(ctx, user); err != nil {
+			return fmt.Errorf("creating local admin: %w", err)
+		}
+	}
+
+	// Only re-hash when the stored hash doesn't already match the configured
+	// password — bcrypt hashing on every boot is wasted work.
+	if !auth.VerifyLocalPassword(user.PasswordHash, local.AdminPassword) {
+		hash, err := auth.HashLocalPassword(local.AdminPassword)
+		if err != nil {
+			return fmt.Errorf("hashing local admin password: %w", err)
+		}
+		if err := db.SetUserPasswordHash(ctx, user.ID, hash); err != nil {
+			return err
+		}
+	}
+	log.Info("local auth admin ensured", "email", local.AdminEmail)
 	return nil
 }

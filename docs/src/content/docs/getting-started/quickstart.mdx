@@ -1,6 +1,6 @@
 ---
-title: Quick Start Guide
-description: Get started with Logchef in minutes
+title: Quick Start
+description: Install Logchef, connect a ClickHouse or VictoriaLogs source, and run your first log query in minutes.
 ---
 
 This guide will help you get Logchef up and running quickly. We'll cover installation, basic setup, and how to make your first log query.
@@ -8,14 +8,14 @@ This guide will help you get Logchef up and running quickly. We'll cover install
 ## Prerequisites
 
 - Docker (for the recommended setup) or a Linux/macOS system for binary installation
-- A Clickhouse instance (included in Docker setup)
+- A ClickHouse instance (included in Docker setup)
 - SSO Provider (Dex is included in the Docker setup)
 
 ## Installation Options
 
 ### Using Docker (Recommended)
 
-The Docker setup is the easiest way to get started with Logchef, as it includes everything you need: Logchef, Clickhouse, Dex SSO, and Vector for demo data.
+The Docker setup is the easiest way to get started with Logchef, as it includes everything you need: Logchef, ClickHouse, Dex SSO, and Vector for demo data.
 
 ```bash
 # Download the compose file
@@ -28,7 +28,7 @@ docker compose up -d
 This will start:
 
 - Logchef UI and API on port 8125 (accessible at http://localhost:8125)
-- Clickhouse for log storage (ports 8123 and 9000)
+- ClickHouse for log storage (ports 8123 and 9000)
 - Dex SSO provider on port 5556
 - Vector for generating demo logs
 
@@ -39,12 +39,14 @@ After starting, you can access the Logchef UI at `http://localhost:8125`.
 For production deployments or running without Docker, you can download pre-built binaries:
 
 ```bash
-# Download the latest release for your platform (example for Linux amd64)
-# Check latest version at https://github.com/mr-karan/logchef/releases
-curl -L -O https://github.com/mr-karan/logchef/releases/download/v1.6.1/logchef_1.6.1_linux_amd64.tar.gz
+# Grab the latest version tag from https://github.com/mr-karan/logchef/releases/latest (e.g. 2.0.0), set it once, then download:
+VERSION="2.0.0"
+
+# Download the release for your platform (example for Linux amd64)
+curl -L -O https://github.com/mr-karan/logchef/releases/download/v${VERSION}/logchef_${VERSION}_linux_amd64.tar.gz
 
 # Extract the archive
-tar xzf logchef_1.6.1_linux_amd64.tar.gz
+tar xzf logchef_${VERSION}_linux_amd64.tar.gz
 
 # Make the binary executable
 chmod +x logchef
@@ -105,7 +107,7 @@ Before you can start querying logs, you need to set up a team, create a data sou
 
 1. Navigate to Sources > Manage Sources
 2. Click "Add Source"
-3. Enter your Clickhouse connection details:
+3. Enter your ClickHouse connection details:
    ```
    Name: Demo Syslogs
    Host: localhost (or clickhouse if using Docker)
@@ -114,7 +116,7 @@ Before you can start querying logs, you need to set up a team, create a data sou
    Table: syslogs
    ```
 
-![Logchef Source Settings View](/screenshots/logchef_source.png)
+![Add Source form for connecting a ClickHouse data source](/screenshots/logchef_source.png)
 
 4. Test the connection and save
 

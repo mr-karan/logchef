@@ -74,6 +74,14 @@ func convertParticipleError(err error) *ParseError {
 		return nil
 	}
 
+	// Errors from the pre-parse length/nesting guard (see checkQueryLimits in
+	// grammar.go) are already a fully-formed *ParseError with the correct
+	// code; passing them through the participle-error heuristics below would
+	// overwrite that code with a generic ErrUnexpectedToken.
+	if pe, ok := err.(*ParseError); ok {
+		return pe
+	}
+
 	msg := err.Error()
 	lowerMsg := strings.ToLower(msg)
 

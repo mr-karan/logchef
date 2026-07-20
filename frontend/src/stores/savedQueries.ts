@@ -6,6 +6,7 @@ import {
   type Team,
   type SavedQueryContent,
 } from "@/api/savedQueries";
+import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import { useBaseStore } from "./base";
 import { useContextStore } from "./context";
 
@@ -156,7 +157,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     name: string,
     description: string,
     queryContent: SavedQueryContent,
-    queryType: string,
+    queryLanguage: QueryLanguage,
+    editorMode: SavedQueryEditorMode,
   ) {
     const key = `createSavedQuery-${sourceId}`;
     return await state.withLoading(key, async () => {
@@ -166,7 +168,8 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         created_from_team_id: createdFromTeamId ?? null,
         name,
         description,
-        query_type: queryType,
+        query_language: queryLanguage,
+        editor_mode: editorMode,
         query_content: JSON.stringify(apiQueryContent),
       };
 
@@ -253,7 +256,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   return {
     isLoading: state.isLoading,
     error: state.error,
-    data: state.data.value,
+    // Export the ref itself (not an unwrapped `.value` snapshot) - resetState()
+    // replaces `state.data.value` wholesale, and a snapshot taken here at
+    // store-setup time would keep pointing at the pre-reset object forever
+    // after that, so callers reading `store.data` post-reset would see stale
+    // data. Mirrors collections.ts, which does this correctly.
+    data: state.data,
 
     queries,
     allQueries,

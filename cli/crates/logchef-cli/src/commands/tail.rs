@@ -7,15 +7,25 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::io::IsTerminal;
 use tokio::time::{Duration, sleep};
 
 use crate::cli::GlobalArgs;
 use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(after_help = "EXAMPLES:
+  # Follow errors from the api service live (native SSE stream)
+  logchef tail 'level=\"error\" and service=\"api\"' -t platform -S app-logs
+
+  # Follow as JSON lines, stop after 100 rows, pipe to jq
+  logchef tail 'status>=500' --output jsonl --max-lines 100 | jq .
+
+  # Fall back to client-side polling where SSE is unavailable
+  logchef tail 'service=\"worker\"' --poll --interval 2")]
 pub struct TailArgs {
     /// LogChefQL query to follow.
     query: String,
@@ -28,15 +38,33 @@ pub struct TailArgs {
     #[arg(long, short = 'S')]
     source: Option<String>,
 
-    /// Initial lookback window.
+    /// Initial lookback window, evaluated against now in the effective
+    /// timezone: `defaults.timezone` if configured, otherwise the system's
+    /// local timezone (see `logchef config show`). Only used by `--poll`; the
+    /// native SSE stream always follows from now.
     #[arg(long, short = 's', default_value = "30s")]
     since: String,
 
-    /// Poll interval in seconds.
+    /// Poll interval in seconds. Only used with `--poll`; the native SSE
+    /// stream is push-based and ignores it.
     #[arg(long, default_value = "2")]
     interval: u64,
 
-    /// Maximum rows to fetch per poll.
+    /// Use the legacy client-side polling loop instead of the server's native
+    /// live-tail SSE stream. SSE is the default; `--poll` is a fallback for
+    /// environments where the streaming endpoint is unavailable.
+    #[arg(long)]
+    poll: bool,
+
+    /// Maximum rows to fetch per poll (only used with `--poll`).
+    ///
+    /// Each poll queries newest-first and keeps only the top --limit rows,
+    /// then advances the cursor past the newest row returned. If a single
+    /// poll has more matching rows than --limit, the OLDEST rows in that
+    /// poll's window are silently dropped (not returned by the server) and
+    /// are never re-fetched, since the cursor has already moved past them.
+    /// A warning is printed the first time this happens; raise --limit or
+    /// lower --interval to reduce the chance of a poll overflowing.
     #[arg(long, default_value = "100")]
     limit: u32,
 
@@ -64,7 +92,9 @@ pub struct TailArgs {
     #[arg(long = "disable-highlight", value_name = "GROUP")]
     disable_highlights: Vec<String>,
 
-    /// Query timeout in seconds per poll.
+    /// Query timeout in seconds. With `--poll` this bounds each poll; with the
+    /// SSE stream it is used as an idle read timeout (reconnect if no data,
+    /// including heartbeats, arrives within this window).
     #[arg(long, default_value = "30")]
     timeout: u32,
 }
@@ -82,6 +112,12 @@ struct JsonlOutput<'a> {
     entry: &'a LogEntry,
 }
 
+/// Rolling lookback margin applied when advancing the poll cursor, mirroring
+/// the server-side fix (#87 item 1): poll from `cursor - margin` rather than
+/// `cursor` so late-arriving rows (ingestion lag/batching) aren't silently
+/// missed. The existing dedup map absorbs the resulting overlap.
+const LOOKBACK_MARGIN: ChronoDuration = ChronoDuration::seconds(5);
+
 pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
     let s = session::authed(&config, &global)?;
@@ -90,12 +126,16 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
     let mut cache = Cache::new(&ctx.server_url);
     let default_team = ctx.defaults.team_with_env();
     let default_source = ctx.defaults.source_with_env();
-    let team_id = resolve_team_id(client, &mut cache, args.team.or(default_team)).await?;
-    let source_id =
-        resolve_source_id(client, &mut cache, team_id, args.source.or(default_source)).await?;
+    let team_id = resolve_team_id(client, &mut cache, args.team.clone().or(default_team)).await?;
+    let source_id = resolve_source_id(
+        client,
+        &mut cache,
+        team_id,
+        args.source.clone().or(default_source),
+    )
+    .await?;
 
-    let is_tty = std::io::stdout().is_terminal();
-    let highlighter = if args.no_highlight || !is_tty {
+    let highlighter = if args.no_highlight || !ui::human(global.quiet) {
         None
     } else {
         let hl_options = HighlightOptions {
@@ -108,6 +148,287 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
         show_timestamp: !args.no_timestamp,
     };
 
+    if args.poll {
+        run_poll(
+            client,
+            ctx,
+            team_id,
+            source_id,
+            &args,
+            highlighter.as_ref(),
+            &fmt_options,
+        )
+        .await
+    } else {
+        run_sse(
+            client,
+            team_id,
+            source_id,
+            &args,
+            highlighter.as_ref(),
+            &fmt_options,
+        )
+        .await
+    }
+}
+
+/// Follows the backend's native live-tail SSE stream (`GET .../logs/tail`).
+/// The server handles ClickHouse polling and VictoriaLogs native streaming
+/// internally, so the client just renders frames and reconnects on drop.
+///
+/// The tail endpoint has no resume cursor — it always follows from now — so a
+/// reconnect resumes from the current instant. Clean session rollovers
+/// (ttl_expired/completed) reconnect immediately; failures back off.
+async fn run_sse(
+    client: &Client,
+    team_id: i64,
+    source_id: i64,
+    args: &TailArgs,
+    highlighter: Option<&Highlighter>,
+    fmt_options: &FormatOptions,
+) -> Result<()> {
+    let mut printed = 0usize;
+    let mut backoff = Duration::from_millis(500);
+    let max_backoff = Duration::from_secs(5);
+    // Idle read timeout: the server heartbeats every 15s, so a longer silence
+    // means a dead connection. Keep it comfortably above the heartbeat.
+    let idle = Duration::from_secs(u64::from(args.timeout).max(20));
+
+    // A single Ctrl-C future, reused across selects so tail exits cleanly (no
+    // task leaks) whether it is blocked connecting, reading, or backing off.
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    loop {
+        // LogchefQL is the tail language (empty query_language → server default);
+        // the server compiles it per source (ClickHouse WHERE-fragment or VL
+        // LogsQL) — see resolveTailQuery in tail_handlers.go.
+        let connect = client.tail_stream(team_id, source_id, &args.query, "");
+        tokio::pin!(connect);
+        let mut resp = tokio::select! {
+            _ = &mut ctrl_c => return Ok(()),
+            r = &mut connect => match r {
+                Ok(resp) => {
+                    backoff = Duration::from_millis(500);
+                    resp
+                }
+                Err(err) => {
+                    eprintln!("tail: connection failed ({err}); reconnecting");
+                    tokio::select! {
+                        _ = &mut ctrl_c => return Ok(()),
+                        _ = sleep(backoff) => {}
+                    }
+                    backoff = (backoff * 2).min(max_backoff);
+                    continue;
+                }
+            },
+        };
+
+        let mut parser = SseParser::new();
+        let mut backoff_needed = false;
+        'read: loop {
+            let chunk = tokio::select! {
+                _ = &mut ctrl_c => return Ok(()),
+                c = tokio::time::timeout(idle, resp.chunk()) => c,
+            };
+            let bytes = match chunk {
+                Err(_elapsed) => {
+                    eprintln!("tail: no data for {}s; reconnecting", idle.as_secs());
+                    backoff_needed = true;
+                    break 'read;
+                }
+                Ok(Ok(Some(bytes))) => bytes,
+                Ok(Ok(None)) => break 'read, // server closed the stream cleanly
+                Ok(Err(err)) => {
+                    eprintln!("tail: stream error ({err}); reconnecting");
+                    backoff_needed = true;
+                    break 'read;
+                }
+            };
+            for event in parser.feed(&bytes) {
+                match event {
+                    SseEvent::Rows(rows) => {
+                        for entry in &rows {
+                            let columns = columns_from_entry(entry);
+                            print_entry(&args.output, entry, &columns, fmt_options, highlighter)?;
+                            printed += 1;
+                            if let Some(max_lines) = args.max_lines
+                                && printed >= max_lines
+                            {
+                                return Ok(());
+                            }
+                        }
+                    }
+                    SseEvent::Notice(message) => {
+                        eprintln!("tail: {message}");
+                    }
+                    SseEvent::End { reason, message } => {
+                        // ttl_expired/completed are normal session rollovers —
+                        // reconnect to keep following. An error end is surfaced
+                        // and backed off before reconnecting.
+                        if reason == "error" {
+                            let detail = message.unwrap_or_else(|| "stream error".to_string());
+                            eprintln!("tail: stream ended ({detail}); reconnecting");
+                            backoff_needed = true;
+                        }
+                        break 'read;
+                    }
+                }
+            }
+        }
+
+        // Backoff on failures; reconnect promptly after a clean end/close (with
+        // a small floor to avoid a hot loop if the server ends immediately).
+        let wait = if backoff_needed {
+            let w = backoff;
+            backoff = (backoff * 2).min(max_backoff);
+            w
+        } else {
+            backoff = Duration::from_millis(500);
+            Duration::from_millis(250)
+        };
+        tokio::select! {
+            _ = &mut ctrl_c => return Ok(()),
+            _ = sleep(wait) => {}
+        }
+    }
+}
+
+/// The SSE frames the tail endpoint emits (see tail_handlers.go). Heartbeat
+/// comment lines (`: hb`) carry no event and are dropped by the parser.
+#[derive(Debug, PartialEq)]
+enum SseEvent {
+    /// `event: rows` — a JSON array of log rows.
+    Rows(Vec<LogEntry>),
+    /// `event: notice` — a server notice (e.g. rate-limited); carries a message.
+    Notice(String),
+    /// `event: end` — the stream ended; carries a reason and optional message.
+    End {
+        reason: String,
+        message: Option<String>,
+    },
+}
+
+/// Incremental parser for the tail SSE wire format. Frames are separated by a
+/// blank line (`\n\n`); each frame is `event: <name>` + `data: <json>`, or a
+/// bare `: comment` heartbeat. `feed` buffers partial frames across chunk
+/// boundaries and returns whatever complete events are available.
+struct SseParser {
+    buf: Vec<u8>,
+}
+
+impl SseParser {
+    fn new() -> Self {
+        Self { buf: Vec::new() }
+    }
+
+    fn feed(&mut self, chunk: &[u8]) -> Vec<SseEvent> {
+        self.buf.extend_from_slice(chunk);
+        let mut events = Vec::new();
+        while let Some(end) = self
+            .buf
+            .windows(2)
+            .position(|w| w == b"\n\n")
+            .map(|i| i + 2)
+        {
+            let block: Vec<u8> = self.buf.drain(..end).collect();
+            if let Some(event) = parse_sse_block(&block) {
+                events.push(event);
+            }
+        }
+        events
+    }
+}
+
+fn parse_sse_block(block: &[u8]) -> Option<SseEvent> {
+    let text = String::from_utf8_lossy(block);
+    let mut event_type: Option<String> = None;
+    let mut data = String::new();
+
+    for raw_line in text.split('\n') {
+        let line = raw_line.trim_end_matches('\r');
+        if line.is_empty() || line.starts_with(':') {
+            // Blank line (frame padding) or comment/heartbeat — ignore.
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("event:") {
+            event_type = Some(rest.trim().to_string());
+        } else if let Some(rest) = line.strip_prefix("data:") {
+            // SSE allows multiple data: lines, joined by newline. The server
+            // emits one per frame, but handle multiples defensively.
+            if !data.is_empty() {
+                data.push('\n');
+            }
+            data.push_str(rest.strip_prefix(' ').unwrap_or(rest));
+        }
+    }
+
+    match event_type?.as_str() {
+        "rows" => serde_json::from_str::<Vec<LogEntry>>(&data)
+            .ok()
+            .map(SseEvent::Rows),
+        "notice" => {
+            let value: serde_json::Value = serde_json::from_str(&data).ok()?;
+            let message = value
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("rate limited")
+                .to_string();
+            Some(SseEvent::Notice(message))
+        }
+        "end" => {
+            let value: serde_json::Value =
+                serde_json::from_str(&data).unwrap_or(serde_json::Value::Null);
+            let reason = value
+                .get("reason")
+                .and_then(|r| r.as_str())
+                .unwrap_or("completed")
+                .to_string();
+            let message = value
+                .get("message")
+                .and_then(|m| m.as_str())
+                .map(|s| s.to_string());
+            Some(SseEvent::End { reason, message })
+        }
+        _ => None,
+    }
+}
+
+/// Synthesizes column metadata from a streamed row's keys (sorted for a stable
+/// field order). The SSE stream sends rows without schema, and the text
+/// formatter needs columns to render non-priority fields.
+fn columns_from_entry(entry: &LogEntry) -> Vec<Column> {
+    let mut names: Vec<&String> = entry.keys().collect();
+    names.sort();
+    names
+        .into_iter()
+        .map(|name| Column {
+            name: name.clone(),
+            column_type: "String".to_string(),
+            description: None,
+        })
+        .collect()
+}
+
+/// The legacy client-side polling loop (used with `--poll`). Repeatedly queries
+/// LogchefQL newest-first, dedups against a rolling window, and advances a
+/// cursor. Preserves VictoriaLogs `_meta_ts_field` awareness for the
+/// dedup/cursor key via `fetch_ts_field`.
+async fn run_poll(
+    client: &Client,
+    ctx: &logchef_core::config::Context,
+    team_id: i64,
+    source_id: i64,
+    args: &TailArgs,
+    highlighter: Option<&Highlighter>,
+    fmt_options: &FormatOptions,
+) -> Result<()> {
+    // Fetch the source's configured timestamp field once, so dedup/cursor logic
+    // uses the right key on sources with a non-default ts field (e.g.
+    // VictoriaLogs uses `_time`). Falls back to `_timestamp`/`timestamp`
+    // probing (see `parse_entry_timestamp`) when the fetch fails or it's unset.
+    let ts_field = fetch_ts_field(client, team_id, source_id).await;
+
     let mut start = Utc::now() - parse_duration(&args.since)?;
     let mut seen: HashMap<DedupKey, ()> = HashMap::new();
     let mut printed = 0usize;
@@ -115,11 +436,15 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
 
     loop {
         let end = Utc::now();
+        let time_range = resolve_time_range(
+            TimeInput::Instant { start, end },
+            ctx.defaults.timezone.as_deref(),
+        );
         let request = QueryRequest {
             query: args.query.clone(),
-            start_time: format_time(start),
-            end_time: format_time(end),
-            timezone: ctx.defaults.timezone.clone(),
+            start_time: time_range.start,
+            end_time: time_range.end,
+            timezone: Some(time_range.timezone),
             limit: Some(args.limit),
             query_timeout: Some(args.timeout),
         };
@@ -131,11 +456,11 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
 
         let returned = response.entries().len();
         let mut entries = response.entries().iter().collect::<Vec<_>>();
-        entries.sort_by_key(|entry| parse_entry_timestamp(entry));
+        entries.sort_by_key(|entry| parse_entry_timestamp(entry, ts_field.as_deref()));
 
         let mut newest = None;
         for entry in entries {
-            let ts = parse_entry_timestamp(entry);
+            let ts = parse_entry_timestamp(entry, ts_field.as_deref());
             let key = dedup_key(entry, ts);
             if seen.insert(key, ()).is_some() {
                 continue;
@@ -145,8 +470,8 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
                 &args.output,
                 entry,
                 &response.columns,
-                &fmt_options,
-                highlighter.as_ref(),
+                fmt_options,
+                highlighter,
             )?;
             printed += 1;
             if let Some(max_lines) = args.max_lines
@@ -157,12 +482,20 @@ pub async fn run(args: TailArgs, global: GlobalArgs) -> Result<()> {
         }
 
         if let Some(ts) = newest {
-            start = ts;
+            // Rolling lookback margin (mirrors the server-side fix, #87 item
+            // 1): re-poll from just before the newest seen row rather than
+            // exactly at it, so late-arriving rows with an earlier timestamp
+            // than `ts` aren't silently missed. The dedup map absorbs the
+            // resulting overlap.
+            start = ts - LOOKBACK_MARGIN;
         }
         // Evict dedup entries older than the current window start; bounded by
         // the BETWEEN range the API filters with, so anything older cannot
-        // reappear in a future poll.
-        seen.retain(|key, _| key.ts.map(|t| t >= start).unwrap_or(true));
+        // reappear in a future poll. Entries with no parseable timestamp
+        // can't be windowed this way — prune them every cycle instead of
+        // keeping them forever, so a source with an unparseable/custom ts
+        // field can't grow the map unbounded.
+        seen.retain(|key, _| key.ts.map(|t| t >= start).unwrap_or(false));
 
         if returned as u32 >= args.limit && !backpressure_warned {
             eprintln!(
@@ -229,17 +562,38 @@ fn print_entry(
     Ok(())
 }
 
-fn parse_entry_timestamp(entry: &LogEntry) -> Option<DateTime<Utc>> {
-    let value = entry.get("_timestamp").or_else(|| entry.get("timestamp"))?;
+/// Fetches the source's configured timestamp field (`_meta_ts_field`) for use
+/// as the dedup/cursor key. Returns `None` (triggering the `_timestamp`/
+/// `timestamp` fallback probing in `parse_entry_timestamp`) if the fetch
+/// fails or the source has no field configured, so a transient API hiccup
+/// degrades tail rather than aborting it.
+async fn fetch_ts_field(client: &Client, team_id: i64, source_id: i64) -> Option<String> {
+    match client.get_source(team_id, source_id).await {
+        Ok(source) => source.meta_ts_field.filter(|f| !f.is_empty()),
+        Err(err) => {
+            eprintln!(
+                "tail: could not fetch source detail ({err}); falling back to _timestamp/timestamp probing"
+            );
+            None
+        }
+    }
+}
+
+/// Extracts a row's timestamp for dedup/cursor purposes. `ts_field`, when
+/// present, is the source's configured `_meta_ts_field` and is tried first;
+/// otherwise (or if the field is absent from the row) falls back to probing
+/// the hardcoded `_timestamp`/`timestamp` keys used by older/ClickHouse-only
+/// behavior.
+fn parse_entry_timestamp(entry: &LogEntry, ts_field: Option<&str>) -> Option<DateTime<Utc>> {
+    let value = ts_field
+        .and_then(|field| entry.get(field))
+        .or_else(|| entry.get("_timestamp"))
+        .or_else(|| entry.get("timestamp"))?;
     let s = value.as_str()?;
     DateTime::parse_from_rfc3339(s)
         .map(|dt| dt.with_timezone(&Utc))
         .or_else(|_| NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").map(|dt| dt.and_utc()))
         .ok()
-}
-
-fn format_time(value: DateTime<Utc>) -> String {
-    value.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
 fn parse_duration(s: &str) -> Result<ChronoDuration> {
@@ -384,7 +738,7 @@ mod tests {
             "_timestamp".to_string(),
             serde_json::Value::String("2026-05-19T09:15:00Z".to_string()),
         );
-        assert!(parse_entry_timestamp(&entry).is_some());
+        assert!(parse_entry_timestamp(&entry, None).is_some());
     }
 
     fn entry_from(pairs: &[(&str, &str)]) -> LogEntry {
@@ -399,7 +753,7 @@ mod tests {
     fn dedup_key_is_stable_across_insertion_order() {
         let a = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "hi")]);
         let b = entry_from(&[("msg", "hi"), ("_timestamp", "2026-05-19T09:15:00Z")]);
-        let ts = parse_entry_timestamp(&a);
+        let ts = parse_entry_timestamp(&a, None);
         assert_eq!(dedup_key(&a, ts), dedup_key(&b, ts));
     }
 
@@ -407,7 +761,7 @@ mod tests {
     fn dedup_key_differs_when_value_differs() {
         let a = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "hi")]);
         let b = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "ho")]);
-        let ts = parse_entry_timestamp(&a);
+        let ts = parse_entry_timestamp(&a, None);
         assert_ne!(dedup_key(&a, ts), dedup_key(&b, ts));
     }
 
@@ -415,9 +769,88 @@ mod tests {
     fn dedup_key_differs_when_timestamp_differs() {
         let a = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z"), ("msg", "hi")]);
         let b = entry_from(&[("_timestamp", "2026-05-19T09:15:01Z"), ("msg", "hi")]);
-        let ts_a = parse_entry_timestamp(&a);
-        let ts_b = parse_entry_timestamp(&b);
+        let ts_a = parse_entry_timestamp(&a, None);
+        let ts_b = parse_entry_timestamp(&b, None);
         assert_ne!(dedup_key(&a, ts_a), dedup_key(&b, ts_b));
+    }
+
+    #[test]
+    fn parse_entry_timestamp_uses_custom_ts_field_when_present() {
+        // A VictoriaLogs-style source with `_time` as its configured field:
+        // the custom field must be tried before the hardcoded fallbacks, and
+        // preferred even when a `timestamp`-named field is also present (as
+        // an ordinary log attribute, not the actual cursor field).
+        let entry = entry_from(&[
+            ("_time", "2026-05-19T09:15:00Z"),
+            ("timestamp", "not-a-real-timestamp-field"),
+        ]);
+        let ts = parse_entry_timestamp(&entry, Some("_time"));
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn parse_entry_timestamp_falls_back_when_custom_field_absent_from_row() {
+        // ts_field configured, but this particular row doesn't have it —
+        // fall back to the hardcoded probing rather than returning None.
+        let entry = entry_from(&[("_timestamp", "2026-05-19T09:15:00Z")]);
+        let ts = parse_entry_timestamp(&entry, Some("_time"));
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn parse_entry_timestamp_falls_back_when_no_ts_field_configured() {
+        let entry = entry_from(&[("timestamp", "2026-05-19T09:15:00Z")]);
+        let ts = parse_entry_timestamp(&entry, None);
+        assert!(ts.is_some());
+    }
+
+    #[test]
+    fn parse_entry_timestamp_returns_none_when_unparseable() {
+        let entry = entry_from(&[("_time", "not-a-timestamp")]);
+        assert!(parse_entry_timestamp(&entry, Some("_time")).is_none());
+    }
+
+    #[test]
+    fn dedup_map_prunes_entries_without_a_parseable_timestamp() {
+        // Regression test for the unbounded-growth bug: rows whose timestamp
+        // can't be parsed (e.g. a custom ts field CLI doesn't yet know about,
+        // or a malformed value) must not accumulate in the dedup map forever.
+        let mut seen: HashMap<DedupKey, ()> = HashMap::new();
+        let start = DateTime::parse_from_rfc3339("2026-05-19T09:15:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+
+        // Simulate one poll's worth of no-ts-field entries landing in the map.
+        for i in 0..50 {
+            seen.insert(
+                DedupKey {
+                    ts: None,
+                    fingerprint: i,
+                },
+                (),
+            );
+        }
+        // And a handful of entries with a real, in-window timestamp.
+        seen.insert(
+            DedupKey {
+                ts: Some(start),
+                fingerprint: 999,
+            },
+            (),
+        );
+
+        // This is the same retention predicate used in the poll loop.
+        seen.retain(|key, _| key.ts.map(|t| t >= start).unwrap_or(false));
+
+        assert_eq!(
+            seen.len(),
+            1,
+            "no-ts entries must be pruned, not retained forever"
+        );
+        assert!(seen.contains_key(&DedupKey {
+            ts: Some(start),
+            fingerprint: 999,
+        }));
     }
 
     #[test]
@@ -425,5 +858,66 @@ mod tests {
         assert_eq!(parse_duration("30").unwrap(), ChronoDuration::seconds(30));
         assert_eq!(parse_duration("30s").unwrap(), ChronoDuration::seconds(30));
         assert_eq!(parse_duration("5m").unwrap(), ChronoDuration::minutes(5));
+    }
+
+    #[test]
+    fn sse_parser_reads_a_rows_frame() {
+        let mut parser = SseParser::new();
+        let events = parser.feed(b"event: rows\ndata: [{\"msg\":\"hello\"}]\n\n");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SseEvent::Rows(rows) => {
+                assert_eq!(rows.len(), 1);
+                assert_eq!(rows[0].get("msg").unwrap().as_str(), Some("hello"));
+            }
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn sse_parser_ignores_comments_and_heartbeats() {
+        let mut parser = SseParser::new();
+        // Initial ": ok" open comment, then a heartbeat, carry no event.
+        assert!(parser.feed(b": ok\n\n").is_empty());
+        assert!(parser.feed(b": hb\n\n").is_empty());
+    }
+
+    #[test]
+    fn sse_parser_reads_notice_and_end_frames() {
+        let mut parser = SseParser::new();
+        let events = parser.feed(
+            b"event: notice\ndata: {\"code\":\"rate_limited\",\"message\":\"dropped 5 rows\"}\n\nevent: end\ndata: {\"reason\":\"ttl_expired\"}\n\n",
+        );
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0], SseEvent::Notice("dropped 5 rows".to_string()));
+        assert_eq!(
+            events[1],
+            SseEvent::End {
+                reason: "ttl_expired".to_string(),
+                message: None,
+            }
+        );
+    }
+
+    #[test]
+    fn sse_parser_buffers_frames_split_across_chunks() {
+        let mut parser = SseParser::new();
+        // First chunk holds only part of the frame — no complete event yet.
+        assert!(parser.feed(b"event: rows\ndata: [{\"a\":").is_empty());
+        // Remainder completes the frame.
+        let events = parser.feed(b"\"b\"}]\n\n");
+        assert_eq!(events.len(), 1);
+        match &events[0] {
+            SseEvent::Rows(rows) => assert_eq!(rows[0].get("a").unwrap().as_str(), Some("b")),
+            other => panic!("expected rows, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn columns_from_entry_covers_all_keys_sorted() {
+        let entry = entry_from(&[("service", "api"), ("_time", "t"), ("msg", "hi")]);
+        let cols = columns_from_entry(&entry);
+        let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["_time", "msg", "service"]);
     }
 }

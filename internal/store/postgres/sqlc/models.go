@@ -13,7 +13,6 @@ type Alert struct {
 	SourceID             int64              `json:"source_id"`
 	Name                 string             `json:"name"`
 	Description          pgtype.Text        `json:"description"`
-	QueryType            string             `json:"query_type"`
 	Query                pgtype.Text        `json:"query"`
 	ConditionJson        pgtype.Text        `json:"condition_json"`
 	LookbackSeconds      int64              `json:"lookback_seconds"`
@@ -33,6 +32,8 @@ type Alert struct {
 	CreatedBy            pgtype.Int8        `json:"created_by"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	QueryLanguage        string             `json:"query_language"`
+	EditorMode           string             `json:"editor_mode"`
 }
 
 type AlertHistory struct {
@@ -86,6 +87,16 @@ type CollectionMember struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type Dashboard struct {
+	ID          int64              `json:"id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	PanelsJson  string             `json:"panels_json"`
+	CreatedBy   pgtype.Int8        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ExportJob struct {
 	ID           string             `json:"id"`
 	SourceID     int64              `json:"source_id"`
@@ -104,6 +115,18 @@ type ExportJob struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type QueryHistory struct {
+	ID            int64              `json:"id"`
+	UserID        int64              `json:"user_id"`
+	TeamID        int64              `json:"team_id"`
+	SourceID      int64              `json:"source_id"`
+	QueryText     string             `json:"query_text"`
+	QueryLanguage string             `json:"query_language"`
+	DurationMs    int64              `json:"duration_ms"`
+	RowCount      int64              `json:"row_count"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
 type QueryShare struct {
 	Token          string             `json:"token"`
 	SourceID       int64              `json:"source_id"`
@@ -115,17 +138,28 @@ type QueryShare struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type QueryStatsDaily struct {
+	BucketDate      pgtype.Date `json:"bucket_date"`
+	UserID          int64       `json:"user_id"`
+	TeamID          int64       `json:"team_id"`
+	SourceID        int64       `json:"source_id"`
+	QueryLanguage   string      `json:"query_language"`
+	QueryCount      int64       `json:"query_count"`
+	TotalDurationMs int64       `json:"total_duration_ms"`
+}
+
 type SavedQuery struct {
 	ID                int64              `json:"id"`
 	SourceID          int64              `json:"source_id"`
 	Name              string             `json:"name"`
 	Description       pgtype.Text        `json:"description"`
-	QueryType         string             `json:"query_type"`
 	QueryContent      string             `json:"query_content"`
 	CreatedBy         pgtype.Int8        `json:"created_by"`
 	CreatedFromTeamID pgtype.Int8        `json:"created_from_team_id"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	QueryLanguage     string             `json:"query_language"`
+	EditorMode        string             `json:"editor_mode"`
 }
 
 type Session struct {
@@ -141,18 +175,15 @@ type Source struct {
 	MetaIsAutoCreated bool               `json:"_meta_is_auto_created"`
 	MetaTsField       string             `json:"_meta_ts_field"`
 	MetaSeverityField pgtype.Text        `json:"_meta_severity_field"`
-	Host              string             `json:"host"`
-	Username          string             `json:"username"`
-	Password          string             `json:"password"`
-	Database          string             `json:"database"`
-	TableName         string             `json:"table_name"`
 	Description       pgtype.Text        `json:"description"`
 	TtlDays           int64              `json:"ttl_days"`
 	Managed           bool               `json:"managed"`
 	SecretRef         pgtype.Text        `json:"secret_ref"`
-	TlsEnable         bool               `json:"tls_enable"`
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	SourceType        string             `json:"source_type"`
+	ConnectionConfig  []byte             `json:"connection_config"`
+	IdentityKey       string             `json:"identity_key"`
 }
 
 type SystemSetting struct {
@@ -200,6 +231,7 @@ type User struct {
 	AccountType  string             `json:"account_type"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	PasswordHash pgtype.Text        `json:"password_hash"`
 }
 
 type UserPreference struct {

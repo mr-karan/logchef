@@ -228,16 +228,17 @@ func (s *Store) ListCollectionItems(ctx context.Context, collectionID int) ([]*m
 	for i := range rows {
 		r := rows[i]
 		query := models.SavedQuery{
-			ID:           int(r.QueryID),
-			SourceID:     models.SourceID(r.SourceID),
-			Name:         r.QueryName,
-			Description:  textStr(r.QueryDescription),
-			QueryType:    models.SavedQueryType(r.QueryType),
-			QueryContent: r.QueryContent,
-			CreatedBy:    userIDPtr(r.QueryCreatedBy),
-			CreatedAt:    r.QueryCreatedAt.Time,
-			UpdatedAt:    r.QueryUpdatedAt.Time,
-			SourceName:   r.SourceName,
+			ID:            int(r.QueryID),
+			SourceID:      models.SourceID(r.SourceID),
+			Name:          r.QueryName,
+			Description:   textStr(r.QueryDescription),
+			QueryLanguage: models.QueryLanguage(r.QueryLanguage),
+			EditorMode:    models.SavedQueryEditorMode(r.EditorMode),
+			QueryContent:  r.QueryContent,
+			CreatedBy:     userIDPtr(r.QueryCreatedBy),
+			CreatedAt:     r.QueryCreatedAt.Time,
+			UpdatedAt:     r.QueryUpdatedAt.Time,
+			SourceName:    r.SourceName,
 		}
 		out = append(out, &models.CollectionItem{
 			CollectionID: int(r.CollectionID),

@@ -1,0 +1,222 @@
+export type QueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type SavedQueryEditorMode = "builder" | "native";
+export type AlertEditorMode = "condition" | "native";
+
+type SourceDescriptor =
+  | {
+      source_type?: string | null;
+      query_languages?: string[] | null;
+      saved_query_editor_modes?: string[] | null;
+      alert_editor_modes?: string[] | null;
+      capabilities?: string[] | null;
+    }
+  | string
+  | null
+  | undefined;
+
+function getSourceType(source: SourceDescriptor): string | null {
+  return typeof source === "string" ? source : source?.source_type ?? null;
+}
+
+function getSupportedQueryLanguages(source: SourceDescriptor): QueryLanguage[] {
+  const explicit = typeof source === "string" ? null : source?.query_languages;
+  if (explicit && explicit.length > 0) {
+    return explicit.filter(
+      (language): language is QueryLanguage =>
+        language === "logchefql" || language === "clickhouse-sql" || language === "logsql"
+    );
+  }
+
+  return getSourceType(source) === "victorialogs"
+    ? ["logchefql", "logsql"]
+    : ["logchefql", "clickhouse-sql"];
+}
+
+function getSupportedSavedQueryEditorModes(source: SourceDescriptor): SavedQueryEditorMode[] {
+  const explicit = typeof source === "string" ? null : source?.saved_query_editor_modes;
+  if (explicit && explicit.length > 0) {
+    return explicit.filter(
+      (mode): mode is SavedQueryEditorMode => mode === "builder" || mode === "native"
+    );
+  }
+
+  return ["builder", "native"];
+}
+
+function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode[] {
+  const explicit = typeof source === "string" ? null : source?.alert_editor_modes;
+  if (explicit && explicit.length > 0) {
+    return explicit.filter(
+      (mode): mode is AlertEditorMode => mode === "condition" || mode === "native"
+    );
+  }
+
+  return ["condition", "native"];
+}
+
+export function supportsQueryLanguage(source: SourceDescriptor, language: QueryLanguage): boolean {
+  return getSupportedQueryLanguages(source).includes(language);
+}
+
+export function supportsSavedQueryEditorMode(source: SourceDescriptor, mode: SavedQueryEditorMode): boolean {
+  return getSupportedSavedQueryEditorModes(source).includes(mode);
+}
+
+export function supportsAlertEditorMode(source: SourceDescriptor, mode: AlertEditorMode): boolean {
+  return getSupportedAlertEditorModes(source).includes(mode);
+}
+
+export function hasSourceCapability(source: SourceDescriptor, capability: string): boolean {
+  const explicit = typeof source === "string" ? null : source?.capabilities;
+  if (explicit && explicit.length > 0) {
+    return explicit.includes(capability);
+  }
+
+  const sourceType = getSourceType(source);
+  if (sourceType === "victorialogs") {
+    return (
+      capability === "histogram" ||
+      capability === "field_values" ||
+      capability === "schema_inspection" ||
+      capability === "source_inspection"
+    );
+  }
+  if (sourceType === "clickhouse" || sourceType == null) {
+    return (
+      capability === "histogram" ||
+      capability === "field_values" ||
+      capability === "schema_inspection" ||
+      capability === "source_inspection" ||
+      capability === "ai_sql_generation" ||
+      capability === "exports"
+    );
+  }
+  return false;
+}
+
+export function isVictoriaLogsSource(source: SourceDescriptor): boolean {
+  return getNativeQueryLanguageForSource(source) === "logsql";
+}
+
+export function getNativeQueryLanguageForSource(source: SourceDescriptor): QueryLanguage {
+  return supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
+}
+
+export function resolveSavedQueryMetadata(input: {
+  query_language?: string | null;
+  editor_mode?: string | null;
+  source_type?: string | null;
+  query_languages?: string[] | null;
+  saved_query_editor_modes?: string[] | null;
+}): { queryLanguage: QueryLanguage; editorMode: SavedQueryEditorMode } {
+  const source = {
+    source_type: input.source_type ?? null,
+    query_languages: input.query_languages ?? null,
+    saved_query_editor_modes: input.saved_query_editor_modes ?? null,
+  };
+  const explicitLanguage = input.query_language;
+  const explicitEditorMode = input.editor_mode;
+
+  let queryLanguage: QueryLanguage;
+  if (explicitLanguage === "logchefql" || explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
+    queryLanguage = explicitLanguage;
+  } else if (explicitEditorMode === "builder") {
+    queryLanguage = "logchefql";
+  } else {
+    queryLanguage = getNativeQueryLanguageForSource(source);
+  }
+
+  if (!supportsQueryLanguage(source, queryLanguage)) {
+    queryLanguage = getNativeQueryLanguageForSource(source);
+  }
+
+  let editorMode: SavedQueryEditorMode;
+  if (explicitEditorMode === "builder" || explicitEditorMode === "native") {
+    editorMode = explicitEditorMode;
+  } else {
+    editorMode = queryLanguage === "logchefql" ? "builder" : "native";
+  }
+
+  return { queryLanguage, editorMode };
+}
+
+export function resolveAlertMetadata(input: {
+  query_language?: string | null;
+  editor_mode?: string | null;
+  source_type?: string | null;
+  query_languages?: string[] | null;
+  alert_editor_modes?: string[] | null;
+}): { queryLanguage: QueryLanguage; editorMode: AlertEditorMode } {
+  const source = {
+    source_type: input.source_type ?? null,
+    query_languages: input.query_languages ?? null,
+    alert_editor_modes: input.alert_editor_modes ?? null,
+  };
+  const explicitLanguage = input.query_language;
+  const explicitEditorMode = input.editor_mode;
+
+  let queryLanguage: QueryLanguage;
+  if (explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {
+    queryLanguage = explicitLanguage;
+  } else if (explicitEditorMode === "condition") {
+    queryLanguage = getNativeQueryLanguageForSource(source);
+  } else {
+    queryLanguage = getNativeQueryLanguageForSource(source);
+  }
+
+  if (!supportsQueryLanguage(source, queryLanguage)) {
+    queryLanguage = getNativeQueryLanguageForSource(source);
+  }
+
+  let editorMode: AlertEditorMode;
+  if (explicitEditorMode === "condition" || explicitEditorMode === "native") {
+    editorMode = explicitEditorMode;
+  } else {
+    editorMode = supportsAlertEditorMode(source, "condition") ? "condition" : "native";
+  }
+
+  if (!supportsAlertEditorMode(source, editorMode)) {
+    editorMode = "native";
+  }
+
+  return { queryLanguage, editorMode };
+}
+
+export function getQueryLanguageLabel(language: string | null | undefined): string {
+  switch (language) {
+    case "logchefql":
+      return "LogchefQL";
+    case "logsql":
+      return "LogsQL";
+    case "clickhouse-sql":
+    default:
+      return "SQL";
+  }
+}
+
+export function getSourceTypeLabel(source: SourceDescriptor): string {
+  switch (getSourceType(source)) {
+    case "victorialogs":
+      return "VictoriaLogs";
+    case "clickhouse":
+    default:
+      return "ClickHouse";
+  }
+}
+
+export type ExploreMode = "logchefql" | "native";
+
+export function getExploreModeForQueryLanguage(language: QueryLanguage): ExploreMode {
+  return language === "logchefql" ? "logchefql" : "native";
+}
+
+/**
+ * Normalizes a persisted/URL/share explore mode value to the canonical set.
+ * The native editor mode was historically stored as "sql" (the ClickHouse-only
+ * era, before multi-datasource); accept that legacy value on read and always
+ * emit "native" going forward. This is the single place that understands the
+ * old "sql" alias.
+ */
+export function normalizeExploreMode(value: string | null | undefined): ExploreMode {
+  return value === "logchefql" ? "logchefql" : "native";
+}

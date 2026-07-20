@@ -51,6 +51,18 @@ const currentGranularity = computed(
 
 const chartHeight = computed(() => Number.parseInt(props.height, 10) || 180);
 
+// Extra vertical room for the legend row rendered below the plot. Without this,
+// the legend is laid out inside a box sized to exactly `chartHeight`, so it gets
+// vertically centered against the plot and clipped by the container's
+// `overflow: hidden` (see LogHistogram legend clipping bug).
+const LEGEND_HEIGHT = 32;
+const hasLegend = computed(
+  () => chartModel.value.isGrouped && chartModel.value.series.length > 1,
+);
+const chartBoxHeight = computed(
+  () => chartHeight.value + (hasLegend.value ? LEGEND_HEIGHT : 0),
+);
+
 // Must match the VisXYContainer margin prop below
 const CHART_MARGIN = { top: 12, right: 12, bottom: 24, left: 8 };
 
@@ -264,7 +276,7 @@ function formatXAxisTick(value: number | Date) {
       v-else
       :config="chartModel.chartConfig"
       class="log-histogram__chart"
-      :style="{ height: props.height }"
+      :style="{ height: `${chartBoxHeight}px` }"
     >
       <!-- Chart wrapper: pointer events go here for both Unovis tooltip AND brush drag -->
       <div

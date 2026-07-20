@@ -39,6 +39,9 @@ type Querier interface {
 	// Collections (cross-team curation lists for saved queries)
 	// Insert a new collection (personal or shared)
 	CreateCollection(ctx context.Context, arg CreateCollectionParams) (CreateCollectionRow, error)
+	// Dashboards -----------------------------------------------------------------
+	// Insert a new dashboard and return its id.
+	CreateDashboard(ctx context.Context, arg CreateDashboardParams) (int64, error)
 	// Export Jobs
 	// Persist an async export job
 	CreateExportJob(ctx context.Context, arg CreateExportJobParams) error
@@ -65,8 +68,12 @@ type Querier interface {
 	DeleteAlert(ctx context.Context, id int64) (int64, error)
 	// Delete a collection. Personal collections cannot be deleted (enforced in app code).
 	DeleteCollection(ctx context.Context, id int64) error
+	// Delete a dashboard; RETURNING lets callers detect not-found.
+	DeleteDashboard(ctx context.Context, id int64) (int64, error)
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt pgtype.Timestamptz) error
+	// Delete all sessions whose expiry is at or before the given time
+	DeleteExpiredSessions(ctx context.Context, expiresAt pgtype.Timestamptz) error
 	// Delete a query share and return its token
 	DeleteQueryShare(ctx context.Context, token string) (string, error)
 	// Delete a saved query
@@ -93,6 +100,8 @@ type Querier interface {
 	GetCollection(ctx context.Context, id int64) (Collection, error)
 	// Look up a single membership row
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
+	// Look up one dashboard by id, with creator identity like ListDashboards.
+	GetDashboard(ctx context.Context, id int64) (GetDashboardRow, error)
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
@@ -106,8 +115,8 @@ type Querier interface {
 	GetSession(ctx context.Context, id string) (Session, error)
 	// Get a single source by ID
 	GetSource(ctx context.Context, id int64) (Source, error)
-	// Get a single source by table name and database
-	GetSourceByName(ctx context.Context, arg GetSourceByNameParams) (Source, error)
+	// Get a single source by provider-computed identity key
+	GetSourceByIdentityKey(ctx context.Context, identityKey string) (Source, error)
 	// Get source by name for provisioning lookup
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (Source, error)
 	// System Settings Queries
@@ -127,8 +136,15 @@ type Querier interface {
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
 	// Get a team ID that the user belongs to and that has access to the source
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
+	// Query stats daily rollup -----------------------------------------------------
+	// Upsert one executed query into the non-pruned daily rollup: add 1 to
+	// query_count and the given duration to total_duration_ms for the composite key.
+	IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
+	// Query history ---------------------------------------------------------------
+	// Record one executed query and return its id.
+	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (bool, error)
 	// Check if a team is managed
@@ -152,6 +168,9 @@ type Querier interface {
 	ListCollectionMembers(ctx context.Context, collectionID int64) ([]ListCollectionMembersRow, error)
 	// List collections the user owns or is a member of, with member count and item count
 	ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error)
+	// List every dashboard, newest-updated first, with the creator's email/name via
+	// a LEFT JOIN (NULL for dashboards whose author was deleted).
+	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtype.Timestamptz) ([]pgtype.Text, error)
 	// Provisioning Queries
@@ -161,6 +180,14 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
+	// Most recent query_history rows across all users, newest first, enriched with
+	// the executing user's email and the source's display name. LEFT JOIN on
+	// sources so history survives a deleted source (source_name is NULL then).
+	// Backs the admin recent-activity view; the table is capped per user, so this
+	// is a recent window, not all-time analytics.
+	ListQueryActivity(ctx context.Context, limit int32) ([]ListQueryActivityRow, error)
+	// List one user's recent history, newest first.
+	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
 	// List every saved query the user can see (any source attached to any of their teams)
 	ListSavedQueriesForUser(ctx context.Context, userID int64) ([]ListSavedQueriesForUserRow, error)
 	// List saved queries for a specific source, scoped to a user that has access to it
@@ -194,6 +221,11 @@ type Querier interface {
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares
 	PruneExpiredQueryShares(ctx context.Context, expiresAt pgtype.Timestamptz) error
+	// Delete a user's history rows beyond the newest `offset` (the per-user cap),
+	// keeping history bounded on every insert.
+	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
+	// Per-day total query count over rollup rows on/after `since`, ascending by day.
+	QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) ([]QueryVolumeByDayRow, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection
@@ -209,9 +241,18 @@ type Querier interface {
 	SetTeamManaged(ctx context.Context, arg SetTeamManagedParams) error
 	// Mark a user as managed/unmanaged
 	SetUserManaged(ctx context.Context, arg SetUserManagedParams) error
+	// Set (or clear) a user's local-auth bcrypt hash
+	SetUserPasswordHash(ctx context.Context, arg SetUserPasswordHashParams) error
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)
+	// Top sources by total query count over rollup rows on/after `since`, with the
+	// source display name (LEFT JOIN so a deleted source yields ''), and integer
+	// average duration (0 when count is 0).
+	TopSourcesByQueries(ctx context.Context, arg TopSourcesByQueriesParams) ([]TopSourcesByQueriesRow, error)
+	// Top users by total query count over rollup rows on/after `since`, joined to
+	// users for the email.
+	TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error)
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token
@@ -220,6 +261,8 @@ type Querier interface {
 	UpdateAlertHistoryPayload(ctx context.Context, arg UpdateAlertHistoryPayloadParams) (int64, error)
 	// Update name/description (owner only - enforced in app code)
 	UpdateCollection(ctx context.Context, arg UpdateCollectionParams) error
+	// Update a dashboard's mutable fields; RETURNING lets callers detect not-found.
+	UpdateDashboard(ctx context.Context, arg UpdateDashboardParams) (int64, error)
 	// Mark an export job as running and return its ID
 	UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error)
 	// Update a saved query's mutable fields

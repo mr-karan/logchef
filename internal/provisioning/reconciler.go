@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -21,7 +21,7 @@ var errDryRun = errors.New("provisioning dry-run rollback")
 // Reconcile applies the provisioning config to the database.
 // It runs in a single write transaction. On dry_run, the transaction is rolled
 // back. adminEmails is used to determine global admin role precedence.
-func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Store, chMgr *clickhouse.Manager, log *slog.Logger, adminEmails []string) error {
+func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Store, ds *datasource.Service, log *slog.Logger, adminEmails []string) error {
 	if !cfg.Enabled() {
 		return nil
 	}
@@ -40,7 +40,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 		adminSet[strings.ToLower(email)] = true
 	}
 
-	// Sources created/updated in this run, for post-commit ClickHouse setup.
+	// Sources created/updated in this run, for post-commit datasource setup.
 	var sourcesToConnect []models.Source
 
 	// All mutations run in a single transaction. On dry_run we return errDryRun
@@ -48,7 +48,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		// Phase 1: Sources
 		if cfg.ManageSources {
-			if err := reconcileSources(ctx, tx, cfg, chMgr, log, &sourcesToConnect); err != nil {
+			if err := reconcileSources(ctx, tx, cfg, ds, log, &sourcesToConnect); err != nil {
 				return fmt.Errorf("source reconciliation failed: %w", err)
 			}
 		}
@@ -75,10 +75,14 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 
 	log.Info("provisioning reconciliation committed successfully")
 
-	// Post-commit: establish ClickHouse connections for new/updated sources.
+	// Post-commit: establish datasource connections for new/updated sources.
 	for i := range sourcesToConnect {
-		if err := chMgr.AddSource(ctx, &sourcesToConnect[i]); err != nil {
-			log.Warn("failed to establish ClickHouse connection for provisioned source",
+		if err := ds.RemoveSource(&sourcesToConnect[i]); err != nil {
+			log.Debug("failed to clear existing datasource connection during provisioning",
+				"source_id", sourcesToConnect[i].ID, "name", sourcesToConnect[i].Name, "error", err)
+		}
+		if err := ds.InitializeSource(ctx, &sourcesToConnect[i]); err != nil {
+			log.Warn("failed to establish datasource connection for provisioned source",
 				"source_id", sourcesToConnect[i].ID, "name", sourcesToConnect[i].Name, "error", err)
 		}
 	}
@@ -86,7 +90,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	return nil
 }
 
-func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, chMgr *clickhouse.Manager, log *slog.Logger, toConnect *[]models.Source) error {
+func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, ds *datasource.Service, log *slog.Logger, toConnect *[]models.Source) error {
 	// Load existing managed sources.
 	existingManaged, err := tx.ListManagedSources(ctx)
 	if err != nil {
@@ -104,61 +108,92 @@ func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.Provis
 		cfgSrc := cfg.Sources[i]
 		desiredNames[cfgSrc.Name] = true
 
-		existing, isManaged := managedByName[cfgSrc.Name]
-		if !isManaged {
-			// Check for an unmanaged source with the same name (adopt). Any
-			// lookup error is treated as "not found" -> create, matching the
-			// prior behavior.
-			if unmanaged, err := tx.GetSourceByNameForProvisioning(ctx, cfgSrc.Name); err == nil {
-				log.Info("adopting existing source as managed", "name", cfgSrc.Name, "id", unmanaged.ID)
-				if err := tx.UpdateSource(ctx, sourceFromConfig(cfgSrc, unmanaged.ID)); err != nil {
-					return fmt.Errorf("failed to adopt source %q: %w", cfgSrc.Name, err)
-				}
-				if err := tx.SetSourceManaged(ctx, unmanaged.ID, true, cfgSrc.SecretRef); err != nil {
-					return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
-				}
-				continue
+		if existing, isManaged := managedByName[cfgSrc.Name]; isManaged {
+			if err := updateManagedSourceIfNeeded(ctx, tx, log, cfgSrc, existing, toConnect); err != nil {
+				return err
 			}
-
-			// Create a new source.
-			log.Info("creating managed source", "name", cfgSrc.Name)
-
-			// Validate ClickHouse connection before creating (best-effort).
-			if err := validateSourceConnection(ctx, chMgr, cfgSrc); err != nil {
-				log.Warn("ClickHouse validation failed for source, creating anyway",
-					"name", cfgSrc.Name, "error", err)
-			}
-
-			src := sourceFromConfig(cfgSrc, 0)
-			if err := tx.CreateSource(ctx, src); err != nil {
-				return fmt.Errorf("failed to create source %q: %w", cfgSrc.Name, err)
-			}
-			if err := tx.SetSourceManaged(ctx, src.ID, true, cfgSrc.SecretRef); err != nil {
-				return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
-			}
-
-			*toConnect = append(*toConnect, models.Source{
-				ID:   src.ID,
-				Name: cfgSrc.Name,
-				Connection: models.ConnectionInfo{
-					Host:      cfgSrc.Host,
-					Username:  cfgSrc.Username,
-					Password:  cfgSrc.Password,
-					Database:  cfgSrc.Database,
-					TableName: cfgSrc.TableName,
-					TLSEnable: cfgSrc.TLSEnable,
-				},
-			})
-		} else if sourceNeedsUpdate(existing, cfgSrc) {
-			// Update existing managed source if fields changed.
-			log.Info("updating managed source", "name", cfgSrc.Name)
-			if err := tx.UpdateSource(ctx, sourceFromConfig(cfgSrc, existing.ID)); err != nil {
-				return fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
+		} else {
+			if err := createOrAdoptSource(ctx, tx, ds, log, cfgSrc, toConnect); err != nil {
+				return err
 			}
 		}
 	}
 
-	// Prune: delete managed sources not in config.
+	return pruneManagedSources(ctx, tx, cfg, log, managedByName, desiredNames)
+}
+
+// createOrAdoptSource handles a config source with no managed counterpart:
+// it adopts a same-named unmanaged source if one exists, otherwise creates a
+// new managed source.
+func createOrAdoptSource(ctx context.Context, tx store.StoreOps, ds *datasource.Service, log *slog.Logger, cfgSrc config.ProvisionSource, toConnect *[]models.Source) error {
+	// Check for an unmanaged source with the same name (adopt). Any lookup
+	// error is treated as "not found" -> create, matching the prior behavior.
+	if unmanaged, err := tx.GetSourceByNameForProvisioning(ctx, cfgSrc.Name); err == nil {
+		log.Info("adopting existing source as managed", "name", cfgSrc.Name, "id", unmanaged.ID)
+		adopted, err := sourceFromConfig(cfgSrc, unmanaged.ID)
+		if err != nil {
+			return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+		}
+		if err := tx.UpdateSource(ctx, adopted); err != nil {
+			return fmt.Errorf("failed to adopt source %q: %w", cfgSrc.Name, err)
+		}
+		if err := tx.SetSourceManaged(ctx, unmanaged.ID, true, cfgSrc.SecretRef); err != nil {
+			return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
+		}
+		*toConnect = append(*toConnect, *adopted)
+		return nil
+	}
+
+	// Create a new source.
+	log.Info("creating managed source", "name", cfgSrc.Name)
+
+	// Validate datasource connectivity before creating (best-effort).
+	if err := validateSourceConnection(ctx, ds, cfgSrc, log); err != nil {
+		log.Warn("datasource validation failed for provisioned source, creating anyway",
+			"name", cfgSrc.Name, "error", err)
+	}
+
+	src, err := sourceFromConfig(cfgSrc, 0)
+	if err != nil {
+		return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+	}
+	if err := tx.CreateSource(ctx, src); err != nil {
+		return fmt.Errorf("failed to create source %q: %w", cfgSrc.Name, err)
+	}
+	if err := tx.SetSourceManaged(ctx, src.ID, true, cfgSrc.SecretRef); err != nil {
+		return fmt.Errorf("failed to set source %q as managed: %w", cfgSrc.Name, err)
+	}
+
+	*toConnect = append(*toConnect, *src)
+	return nil
+}
+
+// updateManagedSourceIfNeeded updates an already-managed source in place when
+// its desired config diverges from the persisted row.
+func updateManagedSourceIfNeeded(ctx context.Context, tx store.StoreOps, log *slog.Logger, cfgSrc config.ProvisionSource, existing *models.Source, toConnect *[]models.Source) error {
+	needsUpdate, err := sourceNeedsUpdate(existing, cfgSrc)
+	if err != nil {
+		return fmt.Errorf("failed to compare managed source %q: %w", cfgSrc.Name, err)
+	}
+	if !needsUpdate {
+		return nil
+	}
+
+	log.Info("updating managed source", "name", cfgSrc.Name)
+	updated, err := sourceFromConfig(cfgSrc, existing.ID)
+	if err != nil {
+		return fmt.Errorf("failed to build provisioned source %q: %w", cfgSrc.Name, err)
+	}
+	if err := tx.UpdateSource(ctx, updated); err != nil {
+		return fmt.Errorf("failed to update source %q: %w", cfgSrc.Name, err)
+	}
+	*toConnect = append(*toConnect, *updated)
+	return nil
+}
+
+// pruneManagedSources deletes (or, with prune=false, just logs) managed
+// sources that are no longer declared in config.
+func pruneManagedSources(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger, managedByName map[string]*models.Source, desiredNames map[string]bool) error {
 	for name, src := range managedByName {
 		if desiredNames[name] {
 			continue
@@ -172,7 +207,6 @@ func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.Provis
 			log.Warn("managed source not in config (prune=false, keeping)", "name", name)
 		}
 	}
-
 	return nil
 }
 
@@ -400,53 +434,34 @@ func reconcileTeamSources(ctx context.Context, tx store.StoreOps, teamID models.
 
 // Helper functions
 
-func validateSourceConnection(ctx context.Context, chMgr *clickhouse.Manager, src config.ProvisionSource) error {
-	tempSource := &models.Source{
-		Name: src.Name,
-		Connection: models.ConnectionInfo{
-			Host:      src.Host,
-			Username:  src.Username,
-			Password:  src.Password,
-			Database:  src.Database,
-			TableName: src.TableName,
-			TLSEnable: src.TLSEnable,
-		},
-	}
-
-	client, err := chMgr.CreateTemporaryClient(ctx, tempSource)
+func validateSourceConnection(ctx context.Context, ds *datasource.Service, src config.ProvisionSource, log *slog.Logger) error {
+	payload, err := src.ConnectionPayload()
 	if err != nil {
-		return fmt.Errorf("connection failed: %w", err)
-	}
-	defer client.Close()
-
-	if err := client.Ping(ctx, src.Database, src.TableName); err != nil {
-		return fmt.Errorf("ping failed: %w", err)
+		return fmt.Errorf("marshal connection config: %w", err)
 	}
 
+	_, err = ds.ValidateConnection(ctx, &models.ValidateConnectionRequest{
+		SourceType:     src.NormalizedSourceType(),
+		Connection:     payload,
+		TimestampField: src.MetaTSField,
+		SeverityField:  src.MetaSeverityField,
+	})
+	if err != nil {
+		log.Debug("provisioning datasource validation failed", "source", src.Name, "error", err)
+		return err
+	}
 	return nil
 }
 
 // sourceFromConfig builds a Source model from provisioning config. id is 0 for
 // a create (CreateSource assigns the real id) or the existing id for an update.
-// managed/secret_ref are set separately via SetSourceManaged.
-func sourceFromConfig(src config.ProvisionSource, id models.SourceID) *models.Source {
-	return &models.Source{
-		ID:                id,
-		Name:              src.Name,
-		MetaIsAutoCreated: false,
-		MetaTSField:       src.MetaTSField,
-		MetaSeverityField: src.MetaSeverityField,
-		Description:       src.Description,
-		TTLDays:           src.TTLDays,
-		Connection: models.ConnectionInfo{
-			Host:      src.Host,
-			Username:  src.Username,
-			Password:  src.Password,
-			Database:  src.Database,
-			TableName: src.TableName,
-			TLSEnable: src.TLSEnable,
-		},
+func sourceFromConfig(src config.ProvisionSource, id models.SourceID) (*models.Source, error) {
+	source, err := buildProvisionedSourceModel(src)
+	if err != nil {
+		return nil, err
 	}
+	source.ID = id
+	return &source, nil
 }
 
 // updateTeamDescription updates a team's name/description, stamping updated_at.
@@ -459,15 +474,50 @@ func updateTeamDescription(ctx context.Context, tx store.StoreOps, teamID models
 	})
 }
 
-func sourceNeedsUpdate(existing *models.Source, desired config.ProvisionSource) bool {
-	return existing.Connection.Host != desired.Host ||
-		existing.Connection.Username != desired.Username ||
-		existing.Connection.Password != desired.Password ||
-		existing.Connection.Database != desired.Database ||
-		existing.Connection.TableName != desired.TableName ||
-		existing.Connection.TLSEnable != desired.TLSEnable ||
+func sourceNeedsUpdate(existing *models.Source, desired config.ProvisionSource) (bool, error) {
+	source, err := buildProvisionedSourceModel(desired)
+	if err != nil {
+		return false, err
+	}
+
+	return existing.SourceType != source.SourceType ||
+		string(existing.ConnectionConfig) != string(source.ConnectionConfig) ||
+		existing.IdentityKey != source.IdentityKey ||
 		existing.Description != desired.Description ||
 		existing.TTLDays != desired.TTLDays ||
 		existing.MetaTSField != desired.MetaTSField ||
-		existing.MetaSeverityField != desired.MetaSeverityField
+		existing.MetaSeverityField != desired.MetaSeverityField ||
+		existing.SecretRef != desired.SecretRef, nil
+}
+
+func buildProvisionedSourceModel(src config.ProvisionSource) (models.Source, error) {
+	connectionPayload, err := src.ConnectionPayload()
+	if err != nil {
+		return models.Source{}, fmt.Errorf("build provisioned source %q: %w", src.Name, err)
+	}
+
+	source := models.Source{
+		Name:              src.Name,
+		SourceType:        src.NormalizedSourceType(),
+		MetaIsAutoCreated: false,
+		MetaTSField:       src.MetaTSField,
+		MetaSeverityField: src.MetaSeverityField,
+		ConnectionConfig:  connectionPayload,
+		Description:       src.Description,
+		TTLDays:           src.TTLDays,
+		Managed:           true,
+		SecretRef:         src.SecretRef,
+	}
+	if source.IsClickHouse() {
+		conn, err := src.ClickHouseConnection()
+		if err != nil {
+			return models.Source{}, err
+		}
+		source.Connection = conn
+	}
+	if err := source.SyncConnectionConfig(); err != nil {
+		return models.Source{}, err
+	}
+
+	return source, nil
 }

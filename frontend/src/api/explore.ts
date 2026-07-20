@@ -1,4 +1,5 @@
 import { apiClient } from "./apiUtils";
+import { createSSEParser } from "@/lib/sse";
 
 // Keep these for the UI filter builder
 export interface FilterCondition {
@@ -45,7 +46,7 @@ export interface TemplateVariable {
 
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
-  raw_sql: string;
+  query_text: string;
   limit?: number;
   window?: string;
   group_by?: string;
@@ -91,24 +92,6 @@ export interface QueryErrorResponse {
 
 export type QueryResponse = QuerySuccessResponse | QueryErrorResponse;
 
-// Log context types
-export interface LogContextRequest {
-  timestamp: number;
-  before_limit: number;
-  after_limit: number;
-  before_offset?: number;     // Offset for before query (for pagination)
-  after_offset?: number;      // Offset for after query (for pagination)
-  exclude_boundary?: boolean; // When true, excludes logs at exact timestamp (for pagination)
-}
-
-export interface LogContextResponse {
-  target_timestamp: number;
-  before_logs: Record<string, any>[];
-  target_logs: Record<string, any>[];
-  after_logs: Record<string, any>[];
-  stats: QueryStats;
-}
-
 // Histogram data types
 export interface HistogramDataPoint {
   bucket: string;
@@ -119,6 +102,25 @@ export interface HistogramDataPoint {
 export interface HistogramResponse {
   granularity: string;
   data: HistogramDataPoint[];
+}
+
+// Log context types (surrounding logs around a target timestamp)
+export interface LogContextRequest {
+  source_id: number;
+  timestamp: number;
+  before_limit?: number;
+  after_limit?: number;
+  before_offset?: number;
+  after_offset?: number;
+  exclude_boundary?: boolean;
+}
+
+export interface LogContextResponse {
+  target_timestamp: number;
+  before_logs: Record<string, any>[];
+  target_logs: Record<string, any>[];
+  after_logs: Record<string, any>[];
+  stats: QueryStats;
 }
 
 export interface ExportLogsRequest extends QueryParams {
@@ -143,7 +145,7 @@ export interface ExportJobResponse {
 
 export interface QuerySharePayload {
   version: number;
-  mode: "logchefql" | "sql";
+  mode: "logchefql" | "native";
   query: string;
   limit: number;
   time_range?: {
@@ -176,6 +178,22 @@ export interface QueryShareResponse {
   expires_at: string;
   created_at: string;
   created_by: number;
+}
+
+// Persistent, server-backed query history (cross-device). Backed by
+// GET /api/v1/me/query-history, which returns the caller's recent queries
+// across all teams/sources, newest-first. See issue #58.
+export type QueryHistoryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+
+export interface QueryHistoryRecord {
+  id: number;
+  team_id: number;
+  source_id: number;
+  query_text: string;
+  query_language: QueryHistoryLanguage;
+  duration_ms: number;
+  row_count: number;
+  created_at: string;
 }
 
 export const exploreApi = {
@@ -306,5 +324,188 @@ export const exploreApi = {
       throw new Error("Share token is required");
     }
     return apiClient.get<QueryShareResponse>(`/query-shares/${encodeURIComponent(token)}`);
+  },
+
+  // Fetch the caller's recent query history (newest-first). limit is clamped
+  // server-side (default 50, max 200).
+  getMyQueryHistory: (limit?: number) => {
+    const search = typeof limit === "number" ? `?limit=${limit}` : "";
+    return apiClient.get<QueryHistoryRecord[]>(`/me/query-history${search}`);
   }
 };
+
+// ---------------------------------------------------------------------------
+// Live tail (SSE)
+//
+// The tail endpoint streams Server-Sent Events over a plain GET (session-cookie
+// auth is automatic). Axios can't consume a streaming body, so live tail uses
+// the fetch + ReadableStream API directly with the dependency-free SSE parser.
+// ---------------------------------------------------------------------------
+
+// query_language values accepted by the tail endpoint. clickhouse-sql is
+// rejected server-side (400) by design, so it is intentionally excluded here.
+export type TailQueryLanguage = "logchefql" | "logsql";
+
+export interface TailNotice {
+  code?: string;
+  message?: string;
+  /**
+   * Cumulative dropped-row count for the whole tail session, as reported by
+   * the server. When present, prefer this over parsing `message`. Older
+   * server builds omit this field and only send the human-readable message.
+   */
+  dropped_total?: number;
+}
+
+export interface TailEnd {
+  reason?: string;
+  message?: string;
+}
+
+export interface TailCallbacks {
+  /** Fired once the stream is open (initial `: ok` received / headers flushed). */
+  onOpen?: () => void;
+  /** A batch of new rows (oldest-first, as the backend emits them). */
+  onRows?: (rows: Record<string, any>[]) => void;
+  /** A `notice` event (e.g. rate-limited drop). */
+  onNotice?: (notice: TailNotice) => void;
+  /** An `end` event (TTL expiry, error, or normal completion). */
+  onEnd?: (end: TailEnd) => void;
+  /** A heartbeat comment (`: hb`), useful for liveness UI. */
+  onHeartbeat?: () => void;
+}
+
+export interface TailErrorLike extends Error {
+  status?: number;
+}
+
+/**
+ * Build the live-tail SSE URL. query may be empty (an unfiltered tail).
+ */
+export function buildTailUrl(
+  teamId: number,
+  sourceId: number,
+  query: string,
+  queryLanguage: TailQueryLanguage
+): string {
+  if (!teamId) throw new Error("Team ID is required for live tail");
+  if (!sourceId) throw new Error("Source ID is required for live tail");
+  const params = new URLSearchParams({
+    query: query ?? "",
+    query_language: queryLanguage,
+  });
+  return `/api/v1/teams/${teamId}/sources/${sourceId}/logs/tail?${params.toString()}`;
+}
+
+function parseJsonSafe<T>(data: string): T | null {
+  try {
+    return JSON.parse(data) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Open an abortable live-tail SSE stream and dispatch parsed frames to the
+ * provided callbacks. Resolves when the stream closes (server `end`, reader
+ * done, or abort). Rejects on connection/HTTP errors (e.g. 429 over cap); the
+ * rejected error carries `.status` when available. Aborting via `signal`
+ * resolves silently rather than rejecting.
+ */
+export async function subscribeToTail(
+  url: string,
+  signal: AbortSignal,
+  callbacks: TailCallbacks
+): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers: { Accept: "text/event-stream" },
+      credentials: "same-origin",
+      cache: "no-store",
+      signal,
+    });
+  } catch (err) {
+    if (signal.aborted) return;
+    throw err;
+  }
+
+  if (!response.ok) {
+    let message = `Live tail request failed (${response.status})`;
+    try {
+      const body = await response.json();
+      if (body?.message) message = body.message;
+    } catch {
+      // non-JSON error body; keep the default message
+    }
+    const error: TailErrorLike = new Error(message);
+    error.status = response.status;
+    throw error;
+  }
+
+  if (!response.body) {
+    throw new Error("Live tail stream did not return a readable body");
+  }
+
+  callbacks.onOpen?.();
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parser = createSSEParser();
+  let endReceived = false;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      const events = parser.push(decoder.decode(value, { stream: true }));
+      for (const event of events) {
+        if (event.type === "comment") {
+          if (event.text === "hb") callbacks.onHeartbeat?.();
+          continue;
+        }
+        switch (event.event) {
+          case "rows": {
+            const rows = parseJsonSafe<Record<string, any>[]>(event.data);
+            if (Array.isArray(rows) && rows.length) callbacks.onRows?.(rows);
+            break;
+          }
+          case "notice": {
+            const notice = parseJsonSafe<TailNotice>(event.data) ?? {};
+            callbacks.onNotice?.(notice);
+            break;
+          }
+          case "end": {
+            const end = parseJsonSafe<TailEnd>(event.data) ?? {};
+            endReceived = true;
+            callbacks.onEnd?.(end);
+            return;
+          }
+          default:
+            // Unknown event types are ignored.
+            break;
+        }
+      }
+    }
+  } catch (err) {
+    if (signal.aborted) return;
+    throw err;
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // reader may already be released on abort
+    }
+  }
+
+  // The reader loop exited via EOF (transport closed) without ever seeing a
+  // terminating `end` frame. Surface this as an abnormal end rather than
+  // resolving silently, which would leave the UI showing "Live" forever.
+  if (!endReceived && !signal.aborted) {
+    callbacks.onEnd?.({
+      reason: "connection_lost",
+      message: "Connection closed unexpectedly before the stream signaled completion.",
+    });
+  }
+}

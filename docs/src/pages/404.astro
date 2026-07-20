@@ -1,0 +1,90 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+---
+
+<BaseLayout
+  title="Page Not Found — Logchef"
+  description="This page doesn't exist. Head back to the Logchef docs, changelog, or GitHub repo."
+  structuredData={false}
+  noindex={true}
+>
+  <style>
+    .not-found {
+      min-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 7rem 1.5rem 4rem;
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .not-found-code {
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+      color: var(--color-accent);
+      letter-spacing: 0.05em;
+      margin-bottom: 1rem;
+    }
+    .not-found h1 {
+      font-size: clamp(1.75rem, 4vw, 2.5rem);
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      margin-bottom: 0.75rem;
+    }
+    .not-found p {
+      color: var(--color-text-secondary);
+      font-size: 1.05rem;
+      margin-bottom: 2rem;
+      line-height: 1.7;
+    }
+    .not-found-links {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+    .not-found-links a {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.9rem;
+      font-weight: 500;
+      padding: 0.75rem 1.5rem;
+      border-radius: 8px;
+      border: 1px solid var(--color-border);
+      color: var(--color-text);
+      background: var(--color-surface);
+      transition: all 0.15s ease;
+      text-decoration: none;
+    }
+    .not-found-links a:hover {
+      border-color: var(--color-text-dim);
+      background: var(--color-border);
+      text-decoration: none;
+    }
+    .not-found-links a.primary {
+      background: var(--color-accent);
+      border-color: var(--color-accent);
+      color: white;
+    }
+    .not-found-links a.primary:hover { background: var(--color-accent-hover); }
+  </style>
+
+  <main class="not-found">
+    <div class="not-found-code">404</div>
+    <h1>This page doesn't exist</h1>
+    <p>
+      The page you're looking for may have moved or never existed. Try the docs, check
+      recent changes, or head back home.
+    </p>
+    <div class="not-found-links">
+      <a href="/" class="primary">Home</a>
+      <a href="/getting-started/quickstart">Docs</a>
+      <a href="/changelog">Changelog</a>
+      <a href="https://demo.logchef.app" target="_blank">Live Demo</a>
+      <a href="https://github.com/mr-karan/logchef" target="_blank">GitHub</a>
+    </div>
+  </main>
+</BaseLayout>

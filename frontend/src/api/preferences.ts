@@ -2,7 +2,7 @@ import { apiClient } from "./apiUtils";
 import type { ThemeMode } from "@/stores/theme";
 
 export type TimezonePreference = "local" | "utc";
-export type DisplayModePreference = "table" | "compact";
+export type DisplayModePreference = "table" | "compact" | "json";
 
 export interface UserPreferences {
   theme: ThemeMode;

@@ -1,0 +1,251 @@
+---
+title: Kubernetes Logs
+description: Collect Kubernetes pod and container logs into ClickHouse with the OpenTelemetry Collector or Vector, then explore them in Logchef.
+---
+
+import { Tabs, TabItem } from "@astrojs/starlight/components";
+
+Kubernetes writes every container's stdout/stderr to a log file on the node (`/var/log/pods/<namespace>_<pod>_<uid>/<container>/*.log`). A DaemonSet-deployed agent tails these files on every node, enriches them with pod metadata, and ships them to ClickHouse. Logchef doesn't collect anything itself — it only queries the resulting table.
+
+Two common agents do this well: the **OpenTelemetry Collector** (if you already run OTel for traces/metrics) or **Vector** (lighter-weight, purpose-built log shipper). Pick one.
+
+## Prerequisites
+
+- ClickHouse server reachable from the cluster
+- A Logchef instance (for querying)
+- Cluster admin access to create a DaemonSet, ServiceAccount, and ClusterRole
+
+<Tabs>
+<TabItem label="OpenTelemetry Collector">
+
+## Option A: OpenTelemetry Collector DaemonSet
+
+The `filelog` receiver tails container log files, and its `container` operator auto-detects the Docker/CRI-O/containerd log format and extracts `k8s.pod.name`, `k8s.namespace.name`, and `k8s.container.name` directly from the file path — no API access required for that part.
+
+### Collector Config
+
+```yaml
+receivers:
+  filelog:
+    include:
+      - /var/log/pods/*/*/*.log
+    exclude:
+      - /var/log/pods/*/otel-collector/*.log
+    start_at: end
+    include_file_path: true
+    operators:
+      - type: container
+        id: container-parser
+
+processors:
+  batch:
+    timeout: 5s
+  k8sattributes:
+    passthrough: false
+    extract:
+      metadata:
+        - k8s.namespace.name
+        - k8s.pod.name
+        - k8s.deployment.name
+        - k8s.node.name
+    pod_association:
+      - sources:
+          - from: resource_attribute
+            name: k8s.pod.name
+
+exporters:
+  clickhouse:
+    endpoint: tcp://clickhouse:9000?dial_timeout=10s
+    database: otel
+    logs_table_name: otel_logs
+    ttl: 168h
+    create_schema: true
+
+service:
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [k8sattributes, batch]
+      exporters: [clickhouse]
+```
+
+The `k8sattributes` processor is optional but useful for metadata the file path doesn't carry — Deployment/Node names, pod labels, annotations. It queries the Kubernetes API, so it needs RBAC (below).
+
+### DaemonSet Manifest
+
+```yaml
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: otel-collector
+  namespace: observability
+spec:
+  selector:
+    matchLabels:
+      app: otel-collector
+  template:
+    metadata:
+      labels:
+        app: otel-collector
+    spec:
+      serviceAccountName: otel-collector
+      containers:
+        - name: otel-collector
+          image: otel/opentelemetry-collector-contrib:latest
+          args: ["--config=/etc/otel/config.yaml"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/otel
+            - name: varlogpods
+              mountPath: /var/log/pods
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: otel-collector-config
+        - name: varlogpods
+          hostPath:
+            path: /var/log/pods
+```
+
+### RBAC (required for `k8sattributes`)
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: otel-collector
+  namespace: observability
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: otel-collector
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "watch", "list"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets", "deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: otel-collector
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: otel-collector
+subjects:
+  - kind: ServiceAccount
+    name: otel-collector
+    namespace: observability
+```
+
+See [OpenTelemetry Collector](/integration/otel-collector) for the full `clickhouseexporter` reference and the `otel_logs` schema this creates.
+
+</TabItem>
+<TabItem label="Vector">
+
+## Option B: Vector DaemonSet
+
+Vector's `kubernetes_logs` source tails pod logs and automatically enriches each event with pod/namespace/container metadata via the Kubernetes API (`/api/v1/pods`, `/api/v1/namespaces`, `/api/v1/nodes`).
+
+### Vector Config
+
+```toml
+[sources.k8s_logs]
+type = "kubernetes_logs"
+
+[transforms.remap_k8s_logs]
+inputs = ["k8s_logs"]
+type = "remap"
+source = '''
+  .service_name = .kubernetes.pod_labels."app.kubernetes.io/name" ?? .kubernetes.container_name
+  .namespace = .kubernetes.pod_namespace
+  .body = .message
+
+  .severity_text = if match(.message, r"(?i)error|exception|fail") {
+    "ERROR"
+  } else if match(.message, r"(?i)warn") {
+    "WARN"
+  } else {
+    "INFO"
+  }
+
+  .severity_number = if .severity_text == "ERROR" {
+    17
+  } else if .severity_text == "WARN" {
+    13
+  } else {
+    9
+  }
+
+  .log_attributes = {
+    "k8s.pod.name": .kubernetes.pod_name,
+    "k8s.container.name": .kubernetes.container_name,
+    "k8s.node.name": get_hostname!(),
+    "k8s.stream": .stream
+  }
+
+  del(.message)
+  del(.kubernetes)
+  del(.source_type)
+  del(.file)
+'''
+
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["remap_k8s_logs"]
+endpoint = "http://clickhouse:8123"
+database = "default"
+table = "logs"
+compression = "gzip"
+skip_unknown_fields = true
+```
+
+This targets the same `logs` table from [Shipping Logs with Vector](/integration/vector) — reuse that table's `CREATE TABLE` statement.
+
+### DaemonSet
+
+The official [Vector Helm chart](https://vector.dev/docs/setup/installation/package-managers/helm/) ships a ready-made `vector-agent` DaemonSet with the RBAC and volume mounts already wired up:
+
+```bash
+helm repo add vector https://helm.vector.dev
+helm install vector vector/vector \
+  --set role=Agent \
+  --set-file customConfig=vector.toml
+```
+
+If you'd rather write the manifest by hand, Vector needs read/list/watch on `pods`, `namespaces`, and `nodes`, plus a hostPath mount for `/var/log/pods` and `/var/log/containers` — the same shape as the RBAC block in the Collector tab above, minus the `apps`/`batch` groups.
+
+</TabItem>
+</Tabs>
+
+## Connect Logchef
+
+Once logs are flowing into ClickHouse:
+
+1. Log in to Logchef
+2. Go to **Sources > Add Source**
+3. Enter the ClickHouse connection details (host, port, database, table)
+4. Create or select a team and assign the source
+
+Start querying:
+
+```
+namespace="payments" and severity_text="ERROR"
+```
+
+```
+log_attributes.k8s.container.name="checkout" and body~"panic"
+```
+
+If you used the OpenTelemetry Collector's default `otel_logs` schema instead, query the `ResourceAttributes`/`LogAttributes` columns as described in [OpenTelemetry Collector](/integration/otel-collector).
+
+## Next steps
+
+- See the full `clickhouseexporter` config and schema in [OpenTelemetry Collector](/integration/otel-collector)
+- Shipping from plain Docker hosts instead of Kubernetes? See [Docker Logs](/integration/docker)
+- Review [Search Syntax](/guide/search-syntax) for the full operator reference

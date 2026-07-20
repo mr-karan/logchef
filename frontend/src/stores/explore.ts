@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed, watch } from "vue";
-import { exploreApi } from "@/api/explore";
+import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
 import { logchefqlApi } from "@/api/logchefql";
 import { isCanceledError } from "@/api/error-handler";
 import type {
@@ -30,8 +30,16 @@ import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
-import { queryHistoryService } from "@/services/QueryHistoryService";
 import { createTimeRangeCondition } from '@/utils/time-utils';
+import { asClickHouseConnection } from '@/api/sources';
+import {
+  getExploreModeForQueryLanguage,
+  getNativeQueryLanguageForSource,
+  hasSourceCapability,
+  normalizeExploreMode,
+  resolveSavedQueryMetadata,
+  supportsQueryLanguage,
+} from "@/lib/queryMetadata";
 
 interface SavedQuerySnapshot {
   queryContent: string;
@@ -43,8 +51,8 @@ interface SavedQuerySnapshot {
 
 interface ExploreDraft {
   version: number;
-  mode: "logchefql" | "sql";
-  rawSql: string;
+  mode: "logchefql" | "native";
+  nativeQuery: string;
   logchefqlCode: string;
   limit: number;
   relativeTime: string | null;
@@ -66,12 +74,12 @@ export interface ExploreState {
   } | null;
   selectedRelativeTime: string | null;
   filterConditions: FilterCondition[];
-  rawSql: string;
+  nativeQuery: string;
   pendingRawSql?: string;
   displaySql?: string;
   logchefQuery?: string;
   logchefqlCode: string;
-  activeMode: "logchefql" | "sql";
+  activeMode: "logchefql" | "native";
   isLoading?: boolean;
   error?: string | null;
   queryId?: string | null;
@@ -84,7 +92,7 @@ export interface ExploreState {
   lastExecutedState?: {
     timeRange: string;
     limit: number;
-    mode: "logchefql" | "sql";
+    mode: "logchefql" | "native";
     logchefqlQuery?: string;
     sqlQuery: string;
     sourceId: number;
@@ -92,12 +100,30 @@ export interface ExploreState {
   lastExecutionTimestamp: number | null;
   hasExecutedQuery: boolean;
   selectedTimezoneIdentifier: string | null;
-  generatedDisplaySql: string | null;
+  generatedDisplayQuery: string | null;
   queryTimeout: number;
   currentQueryAbortController: AbortController | null;
   currentQueryId: string | null;
   isCancellingQuery: boolean;
+
+  // Live tail (SSE). Kept separate from the normal query-result state above so
+  // that stopping live tail restores the last static results untouched.
+  isLive: boolean;
+  liveRows: Record<string, any>[];
+  liveStatus: LiveTailStatus;
+  liveError: string | null;
+  liveEndReason: string | null;
+  liveEndMessage: string | null;
+  liveNotice: string | null;
+  liveDroppedCount: number;
+  liveTailAbortController: AbortController | null;
 }
+
+export type LiveTailStatus = "idle" | "connecting" | "streaming" | "ended" | "error";
+
+// In-memory tail buffer cap (oldest rows dropped) until explore virtualization
+// lands. Matches the ceiling documented in the live-tail spec (#69).
+const MAX_LIVE_ROWS = 500;
 
 const DEFAULT_QUERY_STATS: QueryStats = {
   execution_time_ms: 0,
@@ -177,6 +203,7 @@ function cloneVariables(variables: VariableState[]): VariableState[] {
 
 export const useExploreStore = defineStore("explore", () => {
   const contextStore = useContextStore();
+  const sourcesStore = useSourcesStore();
   const preferencesStore = usePreferencesStore();
   const histogramStore = useExploreHistogramStore();
   const aiStore = useExploreAIStore();
@@ -190,7 +217,7 @@ export const useExploreStore = defineStore("explore", () => {
     timeRange: null,
     selectedRelativeTime: null,
     filterConditions: [],
-    rawSql: "",
+    nativeQuery: "",
     logchefqlCode: "",
     activeMode: "logchefql",
     lastExecutionTimestamp: null,
@@ -201,14 +228,36 @@ export const useExploreStore = defineStore("explore", () => {
     activeSavedQueryName: null,
     savedQuerySnapshot: null,
     selectedTimezoneIdentifier: null,
-    generatedDisplaySql: null,
+    generatedDisplayQuery: null,
     queryTimeout: 30,
     currentQueryAbortController: null,
     currentQueryId: null,
     isCancellingQuery: false,
+    isLive: false,
+    liveRows: [],
+    liveStatus: "idle",
+    liveError: null,
+    liveEndReason: null,
+    liveEndMessage: null,
+    liveNotice: null,
+    liveDroppedCount: 0,
+    liveTailAbortController: null,
   });
 
   let suppressedSourceResetId: number | null = null;
+
+  // Monotonic token stamped on each executeQuery run. A response is only
+  // applied if it's still the latest run AND the source hasn't changed since it
+  // started — otherwise a slow response from a superseded run (or a run against
+  // a source the user has since switched away from) would clobber the current
+  // logs/columns/stats/history. See #101.
+  let executeQueryToken = 0;
+
+  // Suppresses persistDraft() side-effects while initializeFromUrl restores a
+  // saved draft. Without this, the setRelativeTimeRange/setLimit calls during
+  // init persist an empty draft (query text not yet restored) and clobber the
+  // real draft before restoreDraftForCurrentContext() reads it back. See #102.
+  let suppressDraftPersistence = false;
 
   watch(
     () => contextStore.sourceId,
@@ -240,8 +289,35 @@ export const useExploreStore = defineStore("explore", () => {
     isExecutingQuery.value
   );
 
+  const getCurrentSource = () => sourcesStore.currentSourceDetails ?? null;
+  const supportsLogchefQLForSource = (source = getCurrentSource()) => supportsQueryLanguage(source, "logchefql");
+  const supportsClickHouseSQLForSource = (source = getCurrentSource()) =>
+    getNativeQueryLanguageForSource(source) === "clickhouse-sql";
+  const getDefaultModeForSource = (source = getCurrentSource()): "logchefql" | "native" =>
+    supportsLogchefQLForSource(source) ? "logchefql" : "native";
+  const normalizeModeForSource = (
+    mode: "logchefql" | "native",
+    source = getCurrentSource(),
+  ): "logchefql" | "native" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "native" : mode);
+  const isNativeHistogramSource = (source = getCurrentSource()) => getNativeQueryLanguageForSource(source) === "logsql";
+
+  // Live tail: the current source must advertise the capability, and the tail
+  // endpoint only accepts LogchefQL (either backend) or native logsql
+  // (VictoriaLogs). Native clickhouse-sql is rejected 400 server-side, so the
+  // toggle stays disabled there.
+  const supportsLiveTail = computed(() => hasSourceCapability(getCurrentSource(), "live_tail"));
+  const canArmLiveTail = computed(() => {
+    if (!supportsLiveTail.value || !hasValidSource.value) return false;
+    if (state.data.value.activeMode === "logchefql") return true;
+    return getNativeQueryLanguageForSource(getCurrentSource()) === "logsql";
+  });
+
   const isHistogramEligible = computed(() => {
-    return state.data.value.activeMode === 'logchefql';
+    const source = getCurrentSource();
+    return (
+      state.data.value.activeMode === 'logchefql' ||
+      (state.data.value.activeMode === 'native' && isNativeHistogramSource(source))
+    );
   });
   const variableStore = useVariableStore();
   let suppressSharedVariableTracking = false;
@@ -255,12 +331,15 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function persistDraft() {
+    if (suppressDraftPersistence) {
+      return;
+    }
     const key = currentDraftKey();
     if (!key) {
       return;
     }
 
-    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
     let absoluteStart: number | null = null;
     let absoluteEnd: number | null = null;
 
@@ -272,7 +351,7 @@ export const useExploreStore = defineStore("explore", () => {
     const draft: ExploreDraft = {
       version: 1,
       mode: activeMode,
-      rawSql,
+      nativeQuery,
       logchefqlCode,
       limit,
       relativeTime: selectedRelativeTime,
@@ -306,8 +385,8 @@ export const useExploreStore = defineStore("explore", () => {
         return false;
       }
 
-      state.data.value.activeMode = draft.mode === "sql" ? "sql" : "logchefql";
-      state.data.value.rawSql = draft.rawSql || "";
+      state.data.value.activeMode = draft.mode ? normalizeExploreMode(draft.mode) : "logchefql";
+      state.data.value.nativeQuery = draft.nativeQuery || "";
       state.data.value.logchefqlCode = draft.logchefqlCode || "";
       if (draft.limit > 0) {
         state.data.value.limit = draft.limit;
@@ -330,7 +409,7 @@ export const useExploreStore = defineStore("explore", () => {
         variableStore.setAllVariable(draft.variables);
       } else {
         const { ensureVariablesFromSql } = useVariables();
-        ensureVariablesFromSql(state.data.value.activeMode === "sql" ? state.data.value.rawSql : state.data.value.logchefqlCode);
+        ensureVariablesFromSql(state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode);
       }
       return true;
     } catch (error) {
@@ -340,7 +419,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function buildCurrentShareSnapshot(): string {
-    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
     let absoluteStart: number | null = null;
     let absoluteEnd: number | null = null;
 
@@ -352,7 +431,7 @@ export const useExploreStore = defineStore("explore", () => {
     return JSON.stringify({
       sourceId: sourceId.value,
       mode: activeMode,
-      query: activeMode === "sql" ? rawSql : logchefqlCode,
+      query: activeMode === "native" ? nativeQuery : logchefqlCode,
       limit,
       relativeTime: selectedRelativeTime,
       absoluteStart,
@@ -390,15 +469,15 @@ export const useExploreStore = defineStore("explore", () => {
       return null;
     }
 
-    const sourcesStore = useSourcesStore();
     const sourceDetails = sourcesStore.currentSourceDetails;
     if (!sourceDetails) {
       return null;
     }
 
     let tableName = 'default.logs';
-    if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
-      tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+    const chConn = asClickHouseConnection(sourceDetails.connection);
+    if (chConn?.database && chConn?.table_name) {
+      tableName = `${chConn.database}.${chConn.table_name}`;
     } else {
       return null;
     }
@@ -430,9 +509,9 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   const sqlForExecution = computed(() => {
-    const { activeMode, rawSql } = state.data.value;
-    if (activeMode === 'sql') {
-      return rawSql;
+    const { activeMode, nativeQuery } = state.data.value;
+    if (activeMode === 'native') {
+      return nativeQuery;
     }
 
     const translationResult = _logchefQlTranslationResult.value;
@@ -443,11 +522,11 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   const isQueryStateDirty = computed(() => {
-    const { lastExecutedState, limit, activeMode, logchefqlCode, rawSql } = state.data.value;
+    const { lastExecutedState, limit, activeMode, logchefqlCode, nativeQuery } = state.data.value;
 
     if (!lastExecutedState) {
       return (activeMode === 'logchefql' && !!logchefqlCode?.trim()) ||
-             (activeMode === 'sql' && !!rawSql?.trim());
+             (activeMode === 'native' && !!nativeQuery?.trim());
     }
 
     const timeRangeChanged = JSON.stringify(state.data.value.timeRange) !== lastExecutedState.timeRange;
@@ -466,13 +545,13 @@ export const useExploreStore = defineStore("explore", () => {
   });
 
   const hasDivergedFromSavedQuery = computed(() => {
-    const { savedQuerySnapshot, selectedQueryId, activeMode, logchefqlCode, rawSql, limit, selectedRelativeTime, timeRange } = state.data.value;
+    const { savedQuerySnapshot, selectedQueryId, activeMode, logchefqlCode, nativeQuery, limit, selectedRelativeTime, timeRange } = state.data.value;
     
     if (!selectedQueryId || !savedQuerySnapshot) {
       return false;
     }
 
-    const currentContent = activeMode === 'logchefql' ? logchefqlCode : rawSql;
+    const currentContent = activeMode === 'logchefql' ? logchefqlCode : nativeQuery;
     if (currentContent !== savedQuerySnapshot.queryContent) {
       return true;
     }
@@ -563,8 +642,8 @@ export const useExploreStore = defineStore("explore", () => {
 
     params.limit = limit.toString();
 
-    if (activeMode === 'sql') {
-      params.mode = 'sql';
+    if (activeMode === 'native') {
+      params.mode = 'native';
     }
 
     return params;
@@ -582,7 +661,17 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function onSourceChange(_newSourceId: number) {
-    state.data.value.generatedDisplaySql = null;
+    // Abort any query still in flight for the previous source so its response
+    // can't land under the new source. The request-token guard in executeQuery
+    // is the ultimate backstop (a response whose body already arrived before
+    // this abort is dropped there), but aborting also frees the socket early.
+    if (state.data.value.currentQueryAbortController) {
+      state.data.value.currentQueryAbortController.abort();
+      state.data.value.currentQueryAbortController = null;
+    }
+    state.data.value.currentQueryId = null;
+
+    state.data.value.generatedDisplayQuery = null;
     state.data.value.logs = [];
     state.data.value.columns = [];
     state.data.value.queryStats = DEFAULT_QUERY_STATS;
@@ -595,12 +684,8 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.lastExecutionTimestamp = null;
     state.data.value.lastExecutedState = undefined;
     state.data.value.hasExecutedQuery = false;
-
-    if (state.data.value.activeMode === 'sql') {
-      state.data.value.rawSql = '';
-    } else {
-      state.data.value.logchefqlCode = '';
-    }
+    state.data.value.nativeQuery = '';
+    state.data.value.logchefqlCode = '';
   }
 
   function setSource(newSourceId: number) {
@@ -647,24 +732,25 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
-  function setRawSql(sql: string) {
-    state.data.value.rawSql = sql;
+  function setNativeQuery(sql: string) {
+    state.data.value.nativeQuery = sql;
     clearSavedQueryIfDirty();
     clearShareSelectionIfDirty();
     persistDraft();
   }
 
-  function setActiveMode(mode: 'logchefql' | 'sql') {
+  function setActiveMode(mode: 'logchefql' | 'native') {
     const currentMode = state.data.value.activeMode;
-    if (mode === currentMode) return;
-    state.data.value.activeMode = mode;
+    const normalizedMode = normalizeModeForSource(mode);
+    if (normalizedMode === currentMode) return;
+    state.data.value.activeMode = normalizedMode;
     clearShareSelectionIfDirty();
     persistDraft();
   }
 
   function _updateLastExecutedState() {
     const executedSql = state.data.value.activeMode === 'logchefql'
-      ? (state.data.value.generatedDisplaySql || sqlForExecution.value)
+      ? (state.data.value.generatedDisplayQuery || sqlForExecution.value)
       : sqlForExecution.value;
 
     state.data.value.lastExecutedState = {
@@ -679,6 +765,23 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function initializeFromUrl(
+    params: Record<string, string | undefined>,
+    options?: { updateLastExecutedState?: boolean }
+  ): { needsResolve: boolean; queryId?: string; needsShareResolve?: boolean; shareToken?: string; shouldExecute: boolean } {
+    // Suppress persistDraft during init so the setRelativeTimeRange/setLimit
+    // side-effects below don't overwrite the saved draft with empty query text
+    // before restoreDraftForCurrentContext() reads it back (#102). Restoring the
+    // draft never needs to re-persist it, so keeping persistence off for the
+    // whole init is safe.
+    suppressDraftPersistence = true;
+    try {
+      return _initializeFromUrlImpl(params, options);
+    } finally {
+      suppressDraftPersistence = false;
+    }
+  }
+
+  function _initializeFromUrlImpl(
     params: Record<string, string | undefined>,
     options?: { updateLastExecutedState?: boolean }
   ): { needsResolve: boolean; queryId?: string; needsShareResolve?: boolean; shareToken?: string; shouldExecute: boolean } {
@@ -743,21 +846,21 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     if (params.mode) {
-      const mode = params.mode === 'sql' ? 'sql' : 'logchefql';
+      const mode = normalizeModeForSource(normalizeExploreMode(params.mode));
       state.data.value.activeMode = mode;
 
       if (mode === 'logchefql' && params.q) {
         state.data.value.logchefqlCode = params.q;
-      } else if (mode === 'sql' && params.sql) {
-        state.data.value.rawSql = params.sql;
+      } else if (mode === 'native' && params.sql) {
+        state.data.value.nativeQuery = params.sql;
       }
     } else {
       if (params.q) {
-        state.data.value.activeMode = 'logchefql';
+        state.data.value.activeMode = normalizeModeForSource('logchefql');
         state.data.value.logchefqlCode = params.q;
       } else if (params.sql) {
-        state.data.value.activeMode = 'sql';
-        state.data.value.rawSql = params.sql;
+        state.data.value.activeMode = normalizeModeForSource('native');
+        state.data.value.nativeQuery = params.sql;
       }
     }
 
@@ -769,8 +872,8 @@ export const useExploreStore = defineStore("explore", () => {
     // Ensure variables from SQL are initialized in the variable store.
     // This handles page reload where the variable store is empty but SQL has placeholders.
     const { ensureVariablesFromSql } = useVariables();
-    const sqlToCheck = state.data.value.activeMode === 'sql'
-      ? state.data.value.rawSql
+    const sqlToCheck = state.data.value.activeMode === 'native'
+      ? state.data.value.nativeQuery
       : state.data.value.logchefqlCode;
     if (sqlToCheck) {
       ensureVariablesFromSql(sqlToCheck);
@@ -781,7 +884,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const hasRequiredParams = !!(sourceId.value && state.data.value.timeRange);
-    const hasQueryContent = state.data.value.activeMode === 'sql' ? !!state.data.value.rawSql : true;
+    const hasQueryContent = state.data.value.activeMode === 'native' ? !!state.data.value.nativeQuery : true;
 
     return { needsResolve: false, shouldExecute: hasRequiredParams && hasQueryContent };
   }
@@ -789,22 +892,38 @@ export const useExploreStore = defineStore("explore", () => {
   function hydrateFromResolvedQuery(data: {
     id: number;
     name: string;
-    query_type: string;
+    query_language?: string;
+    editor_mode?: string;
     query_content: string;
   }): { shouldExecute: boolean } {
     try {
       const content = JSON.parse(data.query_content);
-      const isLogchefQL = data.query_type === 'logchefql';
+      const metadata = resolveSavedQueryMetadata({
+        query_language: data.query_language,
+        editor_mode: data.editor_mode,
+        source_type: sourcesStore.currentSourceDetails?.source_type ?? "clickhouse",
+        query_languages: sourcesStore.currentSourceDetails?.query_languages ?? [],
+        saved_query_editor_modes: sourcesStore.currentSourceDetails?.saved_query_editor_modes ?? [],
+      });
+      // Route content by the RESOLVED active mode, not the query's own
+      // language. When the source can't honour the saved language,
+      // normalizeModeForSource coerces the mode; routing by the raw language
+      // would drop the content into the hidden editor and run default SQL
+      // instead. Clear the opposite slot so no stale content lingers behind the
+      // hidden editor. See #105.
+      const resolvedMode = normalizeModeForSource(getExploreModeForQueryLanguage(metadata.queryLanguage));
 
-      state.data.value.activeMode = isLogchefQL ? 'logchefql' : 'sql';
+      state.data.value.activeMode = resolvedMode;
       state.data.value.activeSavedQueryName = data.name;
       state.data.value.selectedQueryId = data.id.toString();
 
       const queryContent = content.content || '';
-      if (isLogchefQL) {
+      if (resolvedMode === 'logchefql') {
         state.data.value.logchefqlCode = queryContent;
+        state.data.value.nativeQuery = '';
       } else {
-        state.data.value.rawSql = queryContent;
+        state.data.value.nativeQuery = queryContent;
+        state.data.value.logchefqlCode = '';
       }
 
       const limit = content.limit || 100;
@@ -876,14 +995,14 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.selectedQueryId = null;
       state.data.value.activeSavedQueryName = null;
       state.data.value.savedQuerySnapshot = null;
-      state.data.value.activeMode = payload.mode === "sql" ? "sql" : "logchefql";
+      state.data.value.activeMode = payload.mode ? normalizeExploreMode(payload.mode) : "logchefql";
 
-      if (state.data.value.activeMode === "sql") {
-        state.data.value.rawSql = payload.query || "";
+      if (state.data.value.activeMode === "native") {
+        state.data.value.nativeQuery = payload.query || "";
         state.data.value.logchefqlCode = "";
       } else {
         state.data.value.logchefqlCode = payload.query || "";
-        state.data.value.rawSql = "";
+        state.data.value.nativeQuery = "";
       }
 
       if (payload.limit > 0) {
@@ -934,8 +1053,8 @@ export const useExploreStore = defineStore("explore", () => {
 
   function _clearQueryContent() {
     state.data.value.logchefqlCode = '';
-    state.data.value.rawSql = '';
-    state.data.value.activeMode = 'logchefql';
+    state.data.value.nativeQuery = '';
+    state.data.value.activeMode = getDefaultModeForSource();
     state.data.value.selectedQueryId = null;
     clearActiveShareSelection();
     state.data.value.activeSavedQueryName = null;
@@ -960,25 +1079,26 @@ export const useExploreStore = defineStore("explore", () => {
 
     _clearQueryContent();
 
-    const sourcesStore = useSourcesStore();
     const sourceDetails = sourcesStore.currentSourceDetails;
     
-    let tableName = 'logs.vector_logs';
-    if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
-      tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+    if (supportsClickHouseSQLForSource(sourceDetails)) {
+      let tableName = 'logs.vector_logs';
+      const chConn = asClickHouseConnection(sourceDetails?.connection);
+      if (chConn?.database && chConn?.table_name) {
+        tableName = `${chConn.database}.${chConn.table_name}`;
+      }
+
+      const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
+      const result = SqlManager.generateDefaultSql({
+        tableName,
+        tsField: timestampField,
+        timeRange,
+        limit: state.data.value.limit,
+        timezone: state.data.value.selectedTimezoneIdentifier || undefined
+      });
+
+      state.data.value.nativeQuery = result.success ? result.sql : '';
     }
-    
-    const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
-
-    const result = SqlManager.generateDefaultSql({
-      tableName,
-      tsField: timestampField,
-      timeRange,
-      limit: state.data.value.limit,
-      timezone: state.data.value.selectedTimezoneIdentifier || undefined
-    });
-
-    state.data.value.rawSql = result.success ? result.sql : '';
 
     histogramStore.clearHistogramData();
 
@@ -989,25 +1109,27 @@ export const useExploreStore = defineStore("explore", () => {
     _clearQueryContent();
 
     if (state.data.value.timeRange) {
-      const sourcesStore = useSourcesStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
       
-      let tableName = 'logs.vector_logs';
-      if (sourceDetails?.connection?.database && sourceDetails?.connection?.table_name) {
-        tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
+      if (supportsClickHouseSQLForSource(sourceDetails)) {
+        let tableName = 'logs.vector_logs';
+        const chConn = asClickHouseConnection(sourceDetails?.connection);
+        if (chConn?.database && chConn?.table_name) {
+          tableName = `${chConn.database}.${chConn.table_name}`;
+        }
+
+        const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
+
+        const result = SqlManager.generateDefaultSql({
+          tableName,
+          tsField: timestampField,
+          timeRange: state.data.value.timeRange,
+          limit: state.data.value.limit,
+          timezone: state.data.value.selectedTimezoneIdentifier || undefined
+        });
+
+        state.data.value.nativeQuery = result.success ? result.sql : '';
       }
-      
-      const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
-
-      const result = SqlManager.generateDefaultSql({
-        tableName,
-        tsField: timestampField,
-        timeRange: state.data.value.timeRange,
-        limit: state.data.value.limit,
-        timezone: state.data.value.selectedTimezoneIdentifier || undefined
-      });
-
-      state.data.value.rawSql = result.success ? result.sql : '';
     }
 
     histogramStore.clearHistogramData();
@@ -1027,6 +1149,13 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.currentQueryAbortController.abort();
     }
 
+    // Stamp this run so late responses can be dropped if a newer run started or
+    // the source changed while this one was in flight (#101).
+    const requestToken = ++executeQueryToken;
+    const requestSourceId = sourceId.value;
+    const isStaleResponse = () =>
+      requestToken !== executeQueryToken || sourceId.value !== requestSourceId;
+
     const abortController = new AbortController();
     state.data.value.currentQueryAbortController = abortController;
     state.data.value.isCancellingQuery = false;
@@ -1043,7 +1172,6 @@ export const useExploreStore = defineStore("explore", () => {
         return state.handleError({ status: "error", message: "No team selected", error_type: "ValidationError" }, operationKey);
       }
 
-      const sourcesStore = useSourcesStore();
       const sourceDetails = sourcesStore.currentSourceDetails;
 
       if (!sourceDetails || sourceDetails.id !== sourceId.value) {
@@ -1099,6 +1227,13 @@ export const useExploreStore = defineStore("explore", () => {
             variables: variables.length > 0 ? variables : undefined
           }, { signal: abortController.signal, timeout: queryTimeout });
 
+          // A newer run started, or the source changed, while this request was
+          // in flight — drop the result instead of applying it under the wrong
+          // source/run (#101).
+          if (isStaleResponse()) {
+            return { success: false, data: null, error: { message: 'Superseded by a newer query', error_type: 'StaleResponse' } };
+          }
+
           if (queryResponse.data) {
             const logs = queryResponse.data.logs || [];
             state.data.value.logs = logs;
@@ -1110,25 +1245,16 @@ export const useExploreStore = defineStore("explore", () => {
               state.data.value.currentQueryId = queryResponse.data.query_id;
             }
 
-            if (queryResponse.data.generated_sql) {
-              state.data.value.generatedDisplaySql = queryResponse.data.generated_sql;
+            if (queryResponse.data.generated_query || queryResponse.data.generated_sql) {
+              state.data.value.generatedDisplayQuery =
+                queryResponse.data.generated_query || queryResponse.data.generated_sql || null;
             }
 
             _updateLastExecutedState();
             persistDraft();
 
-            try {
-              if (currentTeamId && sourceId.value) {
-                queryHistoryService.addQueryEntry({
-                  teamId: currentTeamId,
-                  sourceId: sourceId.value,
-                  query: state.data.value.logchefqlCode,
-                  mode: 'logchefql'
-                });
-              }
-            } catch (historyError) {
-              console.warn("Failed to add query to history:", historyError);
-            }
+            // Query history is recorded server-side on execution and surfaced
+            // via GET /me/query-history (see QueryHistoryPanel) — no local write.
 
             if (relativeTime) {
               state.data.value.selectedRelativeTime = relativeTime;
@@ -1136,7 +1262,7 @@ export const useExploreStore = defineStore("explore", () => {
 
             state.data.value.lastExecutionTimestamp = Date.now();
 
-            fetchHistogramData();
+            void fetchHistogramData();
 
             return { success: true, data: queryResponse.data, error: null };
           } else {
@@ -1154,47 +1280,72 @@ export const useExploreStore = defineStore("explore", () => {
           state.error.value = apiError;
           return { success: false, data: null, error: apiError };
         } finally {
-          state.data.value.currentQueryAbortController = null;
-          state.data.value.currentQueryId = null;
-          state.data.value.isCancellingQuery = false;
+          // Only tear down the shared controller/query-id if they still belong
+          // to this run. A superseded run that reaches finally after a newer
+          // run installed its own controller must not clobber it (#101).
+          if (state.data.value.currentQueryAbortController === abortController) {
+            state.data.value.currentQueryAbortController = null;
+            state.data.value.currentQueryId = null;
+            state.data.value.isCancellingQuery = false;
+          }
         }
       }
 
       let sql = sqlForExecution.value;
+      const activeTimeRange = state.data.value.timeRange as TimeRange;
+      const activeTimezone = state.data.value.selectedTimezoneIdentifier || getTimezoneIdentifier();
+
+      const toISOString = (dt: any) => {
+        if (!dt) return '';
+        return new Date(
+          dt.year,
+          dt.month - 1,
+          dt.day,
+          'hour' in dt ? dt.hour : 0,
+          'minute' in dt ? dt.minute : 0,
+          'second' in dt ? dt.second : 0
+        ).toISOString();
+      };
 
       const params: QueryParams = {
-        raw_sql: '',
-        query_timeout: state.data.value.queryTimeout
+        query_text: '',
+        query_timeout: state.data.value.queryTimeout,
+        start_time: activeTimeRange?.start ? toISOString(activeTimeRange.start) : undefined,
+        end_time: activeTimeRange?.end ? toISOString(activeTimeRange.end) : undefined,
+        timezone: activeTimezone,
       };
 
       if (!sql || !sql.trim()) {
-        const tsField = sourceDetails._meta_ts_field || 'timestamp';
-        
-        let tableName = 'default.logs';
-        if (sourceDetails.connection?.database && sourceDetails.connection?.table_name) {
-          tableName = `${sourceDetails.connection.database}.${sourceDetails.connection.table_name}`;
-        }
+        if (supportsClickHouseSQLForSource(sourceDetails)) {
+          const tsField = sourceDetails._meta_ts_field || 'timestamp';
 
-        const result = SqlManager.generateDefaultSql({
-          tableName,
-          tsField,
-          timeRange: state.data.value.timeRange as TimeRange,
-          limit: state.data.value.limit,
-          timezone: state.data.value.selectedTimezoneIdentifier || undefined
-        });
+          let tableName = 'default.logs';
+          const chConn = asClickHouseConnection(sourceDetails.connection);
+          if (chConn?.database && chConn?.table_name) {
+            tableName = `${chConn.database}.${chConn.table_name}`;
+          }
 
-        if (!result.success) {
-          return state.handleError({
-            status: "error",
-            message: "Failed to generate default SQL",
-            error_type: "ValidationError"
-          }, operationKey);
-        }
+          const result = SqlManager.generateDefaultSql({
+            tableName,
+            tsField,
+            timeRange: activeTimeRange,
+            limit: state.data.value.limit,
+            timezone: state.data.value.selectedTimezoneIdentifier || undefined
+          });
 
-        sql = result.sql;
+          if (!result.success) {
+            return state.handleError({
+              status: "error",
+              message: "Failed to generate default SQL",
+              error_type: "ValidationError"
+            }, operationKey);
+          }
 
-        if (state.data.value.activeMode === 'sql') {
-          state.data.value.rawSql = result.sql;
+          sql = result.sql;
+
+          if (state.data.value.activeMode === 'native') {
+            state.data.value.nativeQuery = result.sql;
+          }
         }
       }
 
@@ -1202,7 +1353,7 @@ export const useExploreStore = defineStore("explore", () => {
       const { getVariablesForApi } = useVariables();
       const variables = getVariablesForApi();
 
-      params.raw_sql = sql;
+      params.query_text = sql;
       if (variables.length > 0) {
         params.variables = variables;
       }
@@ -1214,6 +1365,12 @@ export const useExploreStore = defineStore("explore", () => {
           apiCall: async () => exploreApi.getLogs(sourceId.value, params, currentTeamId, abortController.signal),
           showToast: false, // Errors shown inline via QueryError component
           onSuccess: (data: QuerySuccessResponse | null) => {
+            // Drop a superseded/stale response so it can't populate logs,
+            // columns, stats or history under a source the user switched to
+            // mid-flight (#101).
+            if (isStaleResponse()) {
+              return;
+            }
             if (data && (data.data || data.logs)) {
               const logs = data.data || data.logs || [];
               state.data.value.logs = logs;
@@ -1240,28 +1397,15 @@ export const useExploreStore = defineStore("explore", () => {
             _updateLastExecutedState();
             persistDraft();
 
-            try {
-              const teamsStore = useTeamsStore();
-              const currentTeamId = teamsStore.currentTeamId;
-              if (currentTeamId && sourceId.value) {
-                const queryContent = state.data.value.activeMode === 'logchefql'
-                  ? state.data.value.logchefqlCode
-                  : sql;
-
-                queryHistoryService.addQueryEntry({
-                  teamId: currentTeamId,
-                  sourceId: sourceId.value,
-                  mode: state.data.value.activeMode,
-                  query: queryContent,
-                  title: state.data.value.activeSavedQueryName || undefined
-                });
-              }
-            } catch (error) {
-              console.warn('Failed to save query to history:', error);
-            }
+            // Query history is recorded server-side on execution and surfaced
+            // via GET /me/query-history (see QueryHistoryPanel) — no local write.
 
             if (relativeTime) {
               state.data.value.selectedRelativeTime = relativeTime;
+            }
+
+            if (isHistogramEligible.value) {
+              void fetchHistogramData();
             }
           },
           operationKey: operationKey,
@@ -1275,10 +1419,14 @@ export const useExploreStore = defineStore("explore", () => {
           }
         }
       } finally {
-        state.data.value.currentQueryAbortController = null;
-        // Only clear queryId if not mid-cancellation — cancelQuery needs it for backend KILL QUERY
-        if (!state.data.value.isCancellingQuery) {
-          state.data.value.currentQueryId = null;
+        // Only tear down if the shared controller still belongs to this run —
+        // a superseded run must not clobber a newer run's controller (#101).
+        if (state.data.value.currentQueryAbortController === abortController) {
+          state.data.value.currentQueryAbortController = null;
+          // Only clear queryId if not mid-cancellation — cancelQuery needs it for backend KILL QUERY
+          if (!state.data.value.isCancellingQuery) {
+            state.data.value.currentQueryId = null;
+          }
         }
       }
 
@@ -1321,6 +1469,122 @@ export const useExploreStore = defineStore("explore", () => {
     } finally {
       state.data.value.currentQueryId = null;
       state.data.value.isCancellingQuery = false;
+    }
+  }
+
+  // --- Live tail ----------------------------------------------------------
+
+  function appendLiveRows(rows: Record<string, any>[]) {
+    if (!rows?.length) return;
+    // Backend batches are oldest-first; the tail view shows newest-at-top, so
+    // reverse each batch before prepending. Cap the buffer, dropping the oldest.
+    const reversed = [...rows].reverse();
+    const merged = [...reversed, ...state.data.value.liveRows];
+    state.data.value.liveRows =
+      merged.length > MAX_LIVE_ROWS ? merged.slice(0, MAX_LIVE_ROWS) : merged;
+  }
+
+  /**
+   * Abort any in-flight tail stream and leave live mode. Idempotent. Does not
+   * touch the static query results (logs/columns), so the last static view is
+   * restored when the tail view is hidden.
+   */
+  function stopLiveTail() {
+    if (state.data.value.liveTailAbortController) {
+      state.data.value.liveTailAbortController.abort();
+      state.data.value.liveTailAbortController = null;
+    }
+    state.data.value.isLive = false;
+    state.data.value.liveStatus = "idle";
+  }
+
+  function startLiveTail() {
+    const source = getCurrentSource();
+    if (!canArmLiveTail.value || !source) return;
+
+    const currentTeamId = useTeamsStore().currentTeamId;
+    const sid = sourceId.value;
+    if (!currentTeamId || !sid) return;
+
+    let queryLanguage: "logchefql" | "logsql";
+    let queryText: string;
+    if (state.data.value.activeMode === "logchefql") {
+      queryLanguage = "logchefql";
+      queryText = state.data.value.logchefqlCode || "";
+    } else {
+      // canArmLiveTail already guaranteed native === logsql here.
+      queryLanguage = "logsql";
+      queryText = state.data.value.nativeQuery || "";
+    }
+
+    // Abort any prior stream and reset the buffer for a fresh session.
+    stopLiveTail();
+    state.data.value.liveRows = [];
+    state.data.value.liveNotice = null;
+    state.data.value.liveDroppedCount = 0;
+    state.data.value.liveEndReason = null;
+    state.data.value.liveEndMessage = null;
+    state.data.value.liveError = null;
+    state.data.value.isLive = true;
+    state.data.value.liveStatus = "connecting";
+
+    const controller = new AbortController();
+    state.data.value.liveTailAbortController = controller;
+    const url = buildTailUrl(currentTeamId, sid, queryText, queryLanguage);
+
+    const isActive = () => state.data.value.liveTailAbortController === controller;
+
+    subscribeToTail(url, controller.signal, {
+      onOpen: () => {
+        if (isActive()) state.data.value.liveStatus = "streaming";
+      },
+      onRows: (rows) => {
+        if (isActive()) appendLiveRows(rows);
+      },
+      onNotice: (notice) => {
+        if (!isActive()) return;
+        state.data.value.liveNotice = notice.message || "Live tail rate-limited";
+        // Prefer the server's cumulative count when present (newer backends).
+        // Older backends only send the human message, so fall back to
+        // extracting the per-notice count and accumulating client-side.
+        if (typeof notice.dropped_total === "number" && Number.isFinite(notice.dropped_total)) {
+          state.data.value.liveDroppedCount = notice.dropped_total;
+        } else {
+          const match = /(\d+)/.exec(notice.message || "");
+          if (match) state.data.value.liveDroppedCount += parseInt(match[1], 10);
+        }
+      },
+      onEnd: (end) => {
+        if (!isActive()) return;
+        // TTL / completion / abnormal close: keep isLive true so the view can
+        // offer "resume", but the stream itself is finished — release the
+        // controller. `reason` may be a value this build doesn't recognize
+        // (e.g. a new VL connection-lost reason) — it's rendered as opaque
+        // text, so unknown values degrade gracefully rather than crashing.
+        state.data.value.liveStatus = "ended";
+        state.data.value.liveEndReason = end.reason || "ended";
+        state.data.value.liveEndMessage = end.message || null;
+        state.data.value.liveTailAbortController = null;
+      },
+    })
+      .then(() => {
+        if (isActive()) state.data.value.liveTailAbortController = null;
+      })
+      .catch((err) => {
+        // Aborts (toggle off, source/query change, unmount) resolve silently;
+        // guard against stale controllers finishing after a restart.
+        if (controller.signal.aborted || !isActive()) return;
+        state.data.value.liveStatus = "error";
+        state.data.value.liveError = err instanceof Error ? err.message : String(err);
+        state.data.value.liveTailAbortController = null;
+      });
+  }
+
+  function toggleLiveTail() {
+    if (state.data.value.isLive) {
+      stopLiveTail();
+    } else {
+      startLiveTail();
     }
   }
 
@@ -1390,11 +1654,11 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function buildQuerySharePayload(): QuerySharePayload {
-    const { activeMode, rawSql, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
+    const { activeMode, nativeQuery, logchefqlCode, limit, selectedRelativeTime, timeRange, selectedTimezoneIdentifier } = state.data.value;
     const payload: QuerySharePayload = {
       version: 1,
       mode: activeMode,
-      query: activeMode === "sql" ? rawSql : logchefqlCode,
+      query: activeMode === "native" ? nativeQuery : logchefqlCode,
       limit,
       timezone: selectedTimezoneIdentifier || getTimezoneIdentifier(),
       variables: variableStore.allVariables as unknown as QuerySharePayload["variables"],
@@ -1421,7 +1685,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const payload = buildQuerySharePayload();
-    if (payload.mode === "sql" && !payload.query.trim()) {
+    if (payload.mode === "native" && !payload.query.trim()) {
       throw new Error("Query is required to create a share link");
     }
 
@@ -1455,17 +1719,23 @@ export const useExploreStore = defineStore("explore", () => {
   async function fetchHistogramData(granularity?: string) {
     if (!isHistogramEligible.value) {
       histogramStore.clearHistogramData();
-      return { success: false, error: { message: "Histogram is only available for LogchefQL queries" } };
+      return { success: false, error: { message: "Histogram is not available for this query mode" } };
     }
 
-    const sql = state.data.value.generatedDisplaySql;
-    if (!sql) {
+    let queryText = "";
+    if (state.data.value.activeMode === 'logchefql') {
+      queryText = state.data.value.generatedDisplayQuery || "";
+    } else if (isNativeHistogramSource()) {
+      queryText = state.data.value.nativeQuery?.trim() || "*";
+    }
+
+    if (!queryText) {
       histogramStore.clearHistogramData();
-      return { success: false, error: { message: "Run a LogchefQL query first" } };
+      return { success: false, error: { message: "Run a query first to see the histogram" } };
     }
 
     return histogramStore.fetchHistogramData({
-      sql,
+      queryText,
       timeRange: state.data.value.timeRange,
       timezone: state.data.value.selectedTimezoneIdentifier || undefined,
       queryTimeout: state.data.value.queryTimeout,
@@ -1477,8 +1747,8 @@ export const useExploreStore = defineStore("explore", () => {
   async function generateAiSql(naturalLanguageQuery: string, currentQuery?: string) {
     const result = await aiStore.generateAiSql(naturalLanguageQuery, currentQuery);
     
-    if (result.success && result.data && state.data.value.activeMode === 'sql') {
-      state.data.value.rawSql = result.data.sql_query || '';
+    if (result.success && result.data && state.data.value.activeMode === 'native') {
+      state.data.value.nativeQuery = result.data.sql_query || '';
     }
     
     return result;
@@ -1488,7 +1758,6 @@ export const useExploreStore = defineStore("explore", () => {
     aiStore.clearState();
   }
 
-  const sourcesStore = useSourcesStore();
   let lastAutoExecKey: string | null = null;
   
   watch(
@@ -1496,6 +1765,27 @@ export const useExploreStore = defineStore("explore", () => {
     () => {
       lastAutoExecKey = null;
     }
+  );
+
+  watch(
+    () => sourcesStore.currentSourceDetails,
+    (source) => {
+      if (!source) {
+        return;
+      }
+
+      if (!supportsLogchefQLForSource(source) && state.data.value.activeMode === 'logchefql') {
+        if (!state.data.value.nativeQuery && state.data.value.logchefqlCode.trim()) {
+          state.data.value.nativeQuery = state.data.value.logchefqlCode;
+        }
+        state.data.value.logchefqlCode = '';
+        state.data.value.activeMode = 'native';
+        return;
+      }
+
+      state.data.value.activeMode = normalizeModeForSource(state.data.value.activeMode, source);
+    },
+    { immediate: true }
   );
 
   watch(
@@ -1542,6 +1832,27 @@ export const useExploreStore = defineStore("explore", () => {
     }
   );
 
+  // Exit paths that MUST abort an in-flight tail. Toggle-off, route change and
+  // unmount are handled by the caller (they invoke stopLiveTail directly); these
+  // watchers cover source change and any query/mode edit while live.
+  watch(
+    () => sourceId.value,
+    () => {
+      if (state.data.value.isLive) stopLiveTail();
+    }
+  );
+  watch(
+    () =>
+      [
+        state.data.value.activeMode,
+        state.data.value.logchefqlCode,
+        state.data.value.nativeQuery,
+      ] as const,
+    () => {
+      if (state.data.value.isLive) stopLiveTail();
+    }
+  );
+
   return {
     // State
     logs: computed(() => state.data.value.logs),
@@ -1554,7 +1865,7 @@ export const useExploreStore = defineStore("explore", () => {
     timeRange: computed(() => state.data.value.timeRange),
     selectedRelativeTime: computed(() => state.data.value.selectedRelativeTime),
     filterConditions: computed(() => state.data.value.filterConditions),
-    rawSql: computed(() => state.data.value.rawSql),
+    nativeQuery: computed(() => state.data.value.nativeQuery),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
     activeMode: computed(() => state.data.value.activeMode),
     error: state.error,
@@ -1566,7 +1877,7 @@ export const useExploreStore = defineStore("explore", () => {
     activeShareToken: computed(() => state.data.value.activeShareToken),
     activeSavedQueryName: computed(() => state.data.value.activeSavedQueryName),
     selectedTimezoneIdentifier: computed(() => state.data.value.selectedTimezoneIdentifier),
-    generatedDisplaySql: computed(() => state.data.value.generatedDisplaySql),
+    generatedDisplayQuery: computed(() => state.data.value.generatedDisplayQuery),
 
     // AI state (delegated)
     isGeneratingAISQL: computed(() => aiStore.isGeneratingAISQL),
@@ -1597,7 +1908,7 @@ export const useExploreStore = defineStore("explore", () => {
     setLimit,
     setQueryTimeout,
     setFilterConditions,
-    setRawSql,
+    setNativeQuery,
     setActiveMode,
     setLogchefqlCode,
     clearActiveSavedQuerySelection,
@@ -1620,6 +1931,23 @@ export const useExploreStore = defineStore("explore", () => {
     generateAiSql,
     clearAiSqlState,
     fetchHistogramData,
+
+    // Live tail state
+    isLive: computed(() => state.data.value.isLive),
+    liveRows: computed(() => state.data.value.liveRows),
+    liveStatus: computed(() => state.data.value.liveStatus),
+    liveError: computed(() => state.data.value.liveError),
+    liveEndReason: computed(() => state.data.value.liveEndReason),
+    liveEndMessage: computed(() => state.data.value.liveEndMessage),
+    liveNotice: computed(() => state.data.value.liveNotice),
+    liveDroppedCount: computed(() => state.data.value.liveDroppedCount),
+    supportsLiveTail,
+    canArmLiveTail,
+
+    // Live tail actions
+    startLiveTail,
+    stopLiveTail,
+    toggleLiveTail,
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,

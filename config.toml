@@ -84,6 +84,21 @@ admin_emails = ["admin@logchef.internal"]
 # Dev-only value. Replace this in production.
 api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677"
 
+# JIT (just-in-time) user auto-provisioning on first OIDC login (optional).
+# When enabled, a first-time OIDC login from an allowed domain creates a
+# regular member user automatically instead of failing with "user not found".
+# Auto-provisioned users are never admins (admin_emails is unaffected) and are
+# never adopted/managed by [provisioning] — they're plain, user-editable rows.
+[auth.auto_provision]
+enabled = false
+# Email domains eligible for auto-provisioning. Matching is an exact,
+# case-insensitive comparison against the domain part of the OIDC email
+# claim — no subdomain/wildcard matching. Required (non-empty) when enabled.
+allowed_domains = ["example.com"]
+# Team IDs an auto-provisioned user is added to as role "member" (optional).
+# A nonexistent team ID is logged and skipped; it never fails the login.
+# default_team_ids = [1]
+
 # -----------------------------------------------------------------------------
 # Query Settings (optional)
 # -----------------------------------------------------------------------------
@@ -106,6 +121,18 @@ max_concurrent_per_user = 1
 max_concurrent_global = 5
 artifact_ttl = "24h"
 formats = ["csv", "ndjson"]
+
+[tail]
+# Live tail (SSE) streams. ClickHouse polls on poll_interval; VictoriaLogs
+# streams natively. Guardrails are mandatory: admission limits, a hard session
+# TTL, and a per-stream row-rate ceiling (excess rows are dropped, not buffered).
+poll_interval = "2s"
+max_per_user = 2
+max_global = 20
+# Kept under [server] http_server_timeout (15m default) — fasthttp write
+# deadline caps any single response, tails included. Clients re-arm on end.
+session_ttl = "14m"
+max_rows_per_sec = 100
 
 [shares]
 default_ttl = "720h"

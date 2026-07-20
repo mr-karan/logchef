@@ -1,9 +1,7 @@
 ---
 title: Development Setup
-description: Complete guide to setting up your Logchef development environment
+description: Complete guide to setting up a local Logchef development environment for building and contributing to the project.
 ---
-
-# Development Setup
 
 This guide covers multiple ways to set up your Logchef development environment.
 
@@ -231,6 +229,5 @@ lsof -i :8123
 ## Next Steps
 
 - Review the [Architecture Overview](/core/architecture) to understand the codebase
-- Check [CLAUDE.md](https://github.com/mr-karan/logchef/blob/main/CLAUDE.md) for development patterns
 - See [Roadmap](/contributing/roadmap) for upcoming features
 - Read the main [CONTRIBUTING.md](https://github.com/mr-karan/logchef/blob/main/CONTRIBUTING.md) for contribution guidelines

@@ -43,7 +43,6 @@ export const useAuthStore = defineStore("auth", () => {
 
     return await state.withLoading('initialize', async () => {
       try {
-        console.log("Initializing auth store...");
         state.data.value.isInitializing = true;
 
         // Load server meta information first (it's a public endpoint)
@@ -60,17 +59,12 @@ export const useAuthStore = defineStore("auth", () => {
               state.data.value.session = response.session;
               // Mark that we've had a successful session for future reference
               sessionStorage.setItem("hadPreviousSession", "true");
-              console.log("Auth initialized successfully:", {
-                user: user.value,
-                isAuthenticated: isAuthenticated.value,
-              });
             }
           },
           onError: () => {
             // Handle session not found gracefully
             clearState();
             // Log error for diagnostic purposes but don't show to user for initial load
-            console.log("No active session found");
           },
         });
 
@@ -110,6 +104,36 @@ export const useAuthStore = defineStore("auth", () => {
     });
   }
 
+  // Local email+password login. On success the session cookie is set by the
+  // server; load the user and let the router proceed.
+  async function localLogin(email: string, password: string) {
+    return await state.withLoading('localLogin', async () => {
+      const result = await state.callApi({
+        apiCall: () => authApi.localLogin(email, password),
+        showToast: false,
+        operationKey: 'localLogin',
+      });
+      if (result.success) {
+        // Hydrate user/session state off the fresh cookie.
+        const session = await state.callApi({
+          apiCall: () => authApi.getSession(),
+          showToast: false,
+          operationKey: 'localLogin',
+          onSuccess: (response: SessionResponse | null) => {
+            if (response) {
+              state.data.value.user = response.user;
+              state.data.value.session = response.session;
+              state.data.value.isInitialized = true;
+              sessionStorage.setItem("hadPreviousSession", "true");
+            }
+          },
+        });
+        return session;
+      }
+      return result;
+    });
+  }
+
   async function logout() {
     return await state.withLoading('logout', async () => {
       try {
@@ -142,6 +166,7 @@ export const useAuthStore = defineStore("auth", () => {
     error,
     initialize,
     startLogin,
+    localLogin,
     logout,
     clearState,
     // Loading state helpers

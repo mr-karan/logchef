@@ -3,13 +3,13 @@ title: Field Values Sidebar
 description: Explore field values and quickly filter logs with the Kibana-inspired sidebar
 ---
 
-The Field Values Sidebar provides a Kibana-inspired field exploration panel that helps you discover and filter log data quickly. It displays available fields and their top distinct values, making it easy to understand your data and build queries.
+The Field Values Sidebar is a Kibana-inspired field exploration panel for discovering and filtering log data quickly. It shows available fields and their top distinct values, so you can see what's in your data and build queries from it.
 
 ## Overview
 
 The sidebar appears on the left side of the query interface and shows:
 
-- All queryable fields from your log source
+- Queryable fields discovered from your current source
 - Top 10 unique values for each field with occurrence counts
 - Quick-filter buttons to add or exclude values from your query
 
@@ -35,11 +35,13 @@ The sidebar uses a hybrid loading strategy to balance responsiveness with query 
 
 ### Auto-Loaded Fields
 
-**LowCardinality** and **Enum** columns load their values automatically when you open the sidebar. These column types are optimized for distinct value queries and return quickly.
+For ClickHouse, **LowCardinality** and **Enum** columns load their values automatically when you open the sidebar. These column types are optimized for distinct value queries and return quickly.
 
 ### On-Demand Fields
 
-**String** columns require a click to load their values. This prevents slow queries on high-cardinality fields (like request IDs or timestamps) that could have millions of unique values.
+For ClickHouse, **String** columns require a click to load their values. This prevents slow queries on high-cardinality fields (like request IDs or timestamps) that could have millions of unique values.
+
+For VictoriaLogs, fields are discovered dynamically for the selected time range and values are fetched on demand.
 
 ### Auto-Expand Behavior
 
@@ -55,7 +57,7 @@ The sidebar is context-aware and integrates with your current view:
 
 ### Time Range
 
-Values and counts reflect only the selected time range. If you're looking at the last 15 minutes, you'll see values that appeared in that window—not historical data.
+Values and counts reflect only the selected time range. If you're looking at the last 15 minutes, you'll see values that appeared in that window, not historical data.
 
 ### Active Query Filtering
 
@@ -75,7 +77,9 @@ The sidebar handles errors gracefully:
 
 ## Supported Field Types
 
-The sidebar works with these ClickHouse column types:
+The sidebar behavior depends on the datasource:
+
+### ClickHouse
 
 | Column Type | Loading | Notes |
 |-------------|---------|-------|
@@ -85,9 +89,21 @@ The sidebar works with these ClickHouse column types:
 
 Complex types like Map, Array, Tuple, and JSON are excluded since they don't have simple distinct values.
 
+### VictoriaLogs
+
+- Fields are discovered dynamically rather than read from a fixed SQL schema
+- Value lookups are time-range-aware
+- Internal fields such as `_stream` and `_stream_id` may exist, but Logchef hides noisy defaults in the main table view
+
 ## Tips
 
 1. **Use for exploration**: When investigating unfamiliar data, expand fields to discover what values exist
 2. **Build queries visually**: Click through values to construct LogchefQL filters without typing
 3. **Identify patterns**: High occurrence counts reveal common values; low counts may indicate anomalies
 4. **Narrow first**: Apply time range and basic filters before loading String field values to get faster, more relevant results
+
+## Next steps
+
+- Learn the filters the sidebar writes for you in [Search Syntax](/guide/search-syntax)
+- See [Query Examples](/guide/examples) for more LogchefQL patterns
+- Review the [Query Interface](/user-guide/query-interface) for the rest of the explorer

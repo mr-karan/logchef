@@ -1,17 +1,155 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+/* ------------------------------------------------------------------ *
+ * Logchef docs theme
+ * Aligns Starlight's design tokens with the marketing/landing palette
+ * (zinc neutrals + blue accent) so docs, blog, and landing read as one
+ * product. Mirrors Starlight's own light/dark structure: dark lives on
+ * :root, light overrides on :root[data-theme='light'].
+ * ------------------------------------------------------------------ */
+
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Inter:wght@400;500;600;700&display=swap');
 
 :root {
   --sl-font: 'Inter', system-ui, sans-serif;
-}
+  --sl-font-mono: 'DM Mono', 'SF Mono', ui-monospace, monospace;
 
-:root[data-theme="light"] {
-  color-scheme: light;
-}
+  /* Brand blue, matched to the landing accent */
+  --lc-accent: #3b82f6;
+  --lc-accent-soft: #60a5fa;
 
-:root[data-theme="dark"] {
+  /* ---- Dark theme (default) ---- */
+  --sl-color-white: #ffffff;
+  --sl-color-gray-1: #e4e4e7;
+  --sl-color-gray-2: #c4c4cd;
+  --sl-color-gray-3: #9b9ba4;
+  --sl-color-gray-4: #52525b;
+  --sl-color-gray-5: #2a2a2f;
+  --sl-color-gray-6: #131316;
+  --sl-color-gray-7: #0f0f11;
+  --sl-color-black: #0a0a0b;
+
+  --sl-color-accent-low: #172a4d;
+  --sl-color-accent: #3b82f6;
+  --sl-color-accent-high: #bfdbfe;
+
+  --sl-color-text: #c4c4cd;
+  --sl-color-text-accent: var(--lc-accent-soft);
+  --sl-color-text-invert: #0a0a0b;
+
+  --sl-color-bg: #0a0a0b;
+  --sl-color-bg-nav: color-mix(in srgb, #0a0a0b 82%, transparent);
+  --sl-color-bg-sidebar: #0d0d0f;
+  --sl-color-bg-inline-code: #1c1c21;
+  --sl-color-bg-accent: var(--lc-accent);
+
+  --sl-color-hairline: #1f1f23;
+  --sl-color-hairline-light: #27272a;
+  --sl-color-hairline-shade: #161619;
+
   color-scheme: dark;
 }
 
+:root[data-theme='light'] {
+  --sl-color-white: #09090b;
+  --sl-color-gray-1: #18181b;
+  --sl-color-gray-2: #3f3f46;
+  --sl-color-gray-3: #52525b;
+  --sl-color-gray-4: #71717a;
+  --sl-color-gray-5: #e4e4e7;
+  --sl-color-gray-6: #f4f4f5;
+  --sl-color-gray-7: #fafafa;
+  --sl-color-black: #ffffff;
+
+  --sl-color-accent-low: #dbeafe;
+  --sl-color-accent: #2563eb;
+  --sl-color-accent-high: #1e3a8a;
+
+  --sl-color-text: #3f3f46;
+  --sl-color-text-accent: #2563eb;
+  --sl-color-text-invert: #ffffff;
+
+  --sl-color-bg: #ffffff;
+  --sl-color-bg-nav: color-mix(in srgb, #ffffff 82%, transparent);
+  --sl-color-bg-sidebar: #fafafa;
+  --sl-color-bg-inline-code: #f1f1f3;
+  --sl-color-bg-accent: #2563eb;
+
+  --sl-color-hairline: #e8e8ec;
+  --sl-color-hairline-light: #ececef;
+  --sl-color-hairline-shade: #f0f0f2;
+
+  color-scheme: light;
+}
+
+/* ---- Shared refinements to match the landing's typographic voice ---- */
+
+/* Tighter, more editorial headings (landing uses -0.02em tracking) */
+.sl-markdown-content h1,
+.sl-markdown-content h2,
+.sl-markdown-content h3,
+.content-panel h1,
+h1#_top {
+  letter-spacing: -0.02em;
+}
+
+/* Give docs prose a touch more breathing room around section headings */
+.sl-markdown-content :is(h2, h3):not(:where(.not-content *)) {
+  margin-top: 2.25rem;
+}
+
+/* Inline code — subtle bordered chip, consistent with blog/landing */
+.sl-markdown-content code:not(:where(.not-content *)):not(pre code) {
+  border: 1px solid var(--sl-color-hairline);
+  border-radius: 5px;
+  padding: 0.1em 0.38em;
+  font-size: 0.86em;
+  color: var(--sl-color-text-accent);
+}
+
+/* Links: accent, with a refined underline offset on hover */
+.sl-markdown-content a:not(:where(.not-content *)) {
+  text-underline-offset: 0.2em;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, var(--sl-color-text-accent) 45%, transparent);
+}
+.sl-markdown-content a:not(:where(.not-content *)):hover {
+  text-decoration-color: currentColor;
+}
+
+/* Blockquotes: accent bar to match the blog reading surface */
+.sl-markdown-content blockquote:not(:where(.not-content *)) {
+  border-inline-start: 3px solid var(--sl-color-accent);
+  padding-inline-start: 1.1rem;
+  color: var(--sl-color-gray-2);
+  font-style: italic;
+}
+
+/* Header hairline + subtle blur, echoing the landing nav */
+.header {
+  border-bottom: 1px solid var(--sl-color-hairline);
+  backdrop-filter: blur(12px);
+}
+
+/* The docs → site "Blog" link injected via the SocialIcons override */
+.lc-header-link {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--sl-text-sm);
+  font-weight: 500;
+  color: var(--sl-color-gray-2);
+  padding: 0.4rem 0.7rem;
+  border-radius: 6px;
+  text-decoration: none;
+  transition: color 0.15s ease, background-color 0.15s ease;
+}
+.lc-header-link:hover {
+  color: var(--sl-color-white);
+  background: color-mix(in srgb, var(--sl-color-gray-5) 55%, transparent);
+}
+@media (max-width: 30rem) {
+  .lc-header-link { display: none; }
+}
+
+/* Starlight sometimes reserves top padding on its landing/hero splashes */
 .hero {
   padding-block: unset;
 }

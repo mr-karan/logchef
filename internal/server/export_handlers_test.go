@@ -1,12 +1,57 @@
 package server
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+// Regression guard for the P0 where /exports and /logs/export required raw_sql
+// and rejected the web UI's query_text body ("raw_sql is required"). Both fields
+// must be accepted, preferring raw_sql, falling back to query_text.
+func TestExportQueryTextFallback(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		rawSQL    string
+		queryText string
+		want      string
+	}{
+		{name: "raw_sql only", rawSQL: "SELECT 1", queryText: "", want: "SELECT 1"},
+		{name: "query_text only (the regression)", rawSQL: "", queryText: "SELECT 2", want: "SELECT 2"},
+		{name: "both prefer raw_sql", rawSQL: "SELECT 1", queryText: "SELECT 2", want: "SELECT 1"},
+		{name: "raw_sql blank falls through", rawSQL: "   ", queryText: "SELECT 3", want: "SELECT 3"},
+		{name: "neither", rawSQL: "", queryText: "", want: ""},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := exportQueryText(tc.rawSQL, tc.queryText); got != tc.want {
+				t.Fatalf("exportQueryText(%q, %q) = %q, want %q", tc.rawSQL, tc.queryText, got, tc.want)
+			}
+		})
+	}
+}
+
+// A query_text-only export body (as the web UI sends) must bind and resolve to a
+// non-empty query — the exact shape that regressed.
+func TestCreateExportJobRequestAcceptsQueryText(t *testing.T) {
+	t.Parallel()
+
+	var req models.CreateExportJobRequest
+	body := `{"query_text":"SELECT _timestamp FROM smtp.logs LIMIT 1","format":"csv"}`
+	if err := json.Unmarshal([]byte(body), &req); err != nil {
+		t.Fatalf("unmarshal query_text-only body: %v", err)
+	}
+	if got := exportQueryText(req.RawSQL, req.QueryText); strings.TrimSpace(got) == "" {
+		t.Fatalf("query_text-only body resolved to empty query (regression); RawSQL=%q QueryText=%q", req.RawSQL, req.QueryText)
+	}
+}
 
 func TestNormalizeExplicitExportFormat(t *testing.T) {
 	t.Parallel()

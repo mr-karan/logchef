@@ -6,12 +6,16 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
+	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -32,6 +36,7 @@ type ServerOptions struct {
 	Config        *config.Config
 	SQLite        store.Store
 	ClickHouse    *clickhouse.Manager
+	Datasources   *datasource.Service
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
@@ -47,12 +52,17 @@ type Server struct {
 	config        *config.Config
 	sqlite        store.Store
 	clickhouse    *clickhouse.Manager
+	datasources   *datasource.Service
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	fs            http.FileSystem
 	log           *slog.Logger
 	buildInfo     string
 	version       string
+	dashCache     *dashcache.Cache // per-dashboard TTL result cache
+
+	stop chan struct{} // closed by Shutdown to stop background maintenance loops
+	wg   sync.WaitGroup
 }
 
 // @title Logchef API
@@ -84,6 +94,21 @@ func New(opts ServerOptions) *Server {
 		ReadTimeout:           opts.Config.Server.HTTPServerTimeout,
 		WriteTimeout:          opts.Config.Server.HTTPServerTimeout,
 		IdleTimeout:           30 * time.Second, // Free idle keep-alive connection buffers quickly
+		// Request bodies here are queries and small JSON payloads, never bulk
+		// data, so a few MB is generous. This is a coarse transport-level
+		// backstop; the LogchefQL parser additionally enforces its own
+		// (much smaller) query length/nesting limits regardless of this cap.
+		BodyLimit: 4 * 1024 * 1024, // 4MB
+		// Client-IP resolution behind a reverse proxy. The check is always on:
+		// with an empty TrustedProxies list Fiber returns the direct peer IP
+		// (default/current behavior); it reads ProxyHeader only when the direct
+		// peer is a configured trusted proxy, so an untrusted caller can't spoof
+		// it. EnableIPValidation makes c.IP() return the first *valid* header
+		// entry (falling back to the peer) rather than the raw header string.
+		EnableTrustedProxyCheck: true,
+		TrustedProxies:          opts.Config.Server.TrustedProxies,
+		ProxyHeader:             opts.Config.Server.ProxyHeader,
+		EnableIPValidation:      true,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := err.(*fiber.Error); ok {
@@ -99,6 +124,11 @@ func New(opts ServerOptions) *Server {
 	// Add essential middleware.
 	app.Use(recoverMiddleware(log))
 	app.Use(compress.New(compress.Config{
+		// SSE streams (live tail) must not be buffered/compressed: the compressor
+		// holds the whole body, which never completes for an open stream.
+		Next: func(c *fiber.Ctx) bool {
+			return strings.HasSuffix(c.Path(), "/logs/tail")
+		},
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
 	})) // Compress responses
 
@@ -114,12 +144,23 @@ func New(opts ServerOptions) *Server {
 		config:        opts.Config,
 		sqlite:        opts.SQLite,
 		clickhouse:    opts.ClickHouse,
+		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
 		oidcProvider:  opts.OIDCProvider,
 		fs:            opts.FS,
 		log:           opts.Logger,
 		buildInfo:     opts.BuildInfo,
 		version:       opts.Version,
+		dashCache: dashcache.New(dashcache.Config{
+			Enabled:            opts.Config.DashboardCache.Enabled,
+			DefaultTTL:         opts.Config.DashboardCache.DefaultTTL,
+			MaxTTL:             opts.Config.DashboardCache.MaxTTL,
+			MaxBytes:           opts.Config.DashboardCache.MaxBytes,
+			MaxEntryBytes:      opts.Config.DashboardCache.MaxEntryBytes,
+			MaxEntries:         opts.Config.DashboardCache.MaxEntries,
+			MaxConcurrentFills: opts.Config.DashboardCache.MaxConcurrentFills,
+		}),
+		stop: make(chan struct{}),
 	}
 
 	// Register all application routes.
@@ -153,23 +194,51 @@ func (s *Server) setupRoutes() {
 
 	api := s.app.Group("/api/v1")
 
+	// Build rate-limit middleware once so limiter state persists across
+	// requests. When disabled, both helpers below register no middleware.
+	var authLimiter, queryLimiter fiber.Handler
+	if s.config.RateLimit.Enabled {
+		authLimiter = authRateLimitMiddleware(s.config.RateLimit.AuthPerIPPerMinute, s.config.RateLimit.AuthGlobalPerMinute)
+		queryLimiter = queryRateLimitMiddleware(s.config.RateLimit.QueryPerUserPerMinute)
+	}
+	// withAuthLimit / withQueryLimit prepend the relevant limiter to a route's
+	// handler chain when limiting is enabled, and are no-ops otherwise. The
+	// query limiter runs after the group-level requireAuth, so the user context
+	// is populated when it computes its per-user key.
+	withAuthLimit := func(handlers ...fiber.Handler) []fiber.Handler {
+		if authLimiter != nil {
+			return append([]fiber.Handler{authLimiter}, handlers...)
+		}
+		return handlers
+	}
+	withQueryLimit := func(handlers ...fiber.Handler) []fiber.Handler {
+		if queryLimiter != nil {
+			return append([]fiber.Handler{queryLimiter}, handlers...)
+		}
+		return handlers
+	}
+
 	// --- Public Routes ---
 	api.Get("/health", s.handleHealth)
 	api.Get("/meta", s.handleGetMeta)
 
 	// --- Authentication Routes ---
-	api.Get("/auth/login", s.handleLogin)
-	api.Get("/auth/callback", s.handleCallback)
+	// The unauthenticated auth/token endpoints are rate-limited per client IP
+	// (plus an optional global cap) to blunt credential-stuffing / brute force.
+	api.Get("/auth/login", withAuthLimit(s.handleLogin)...)
+	api.Post("/auth/local/login", withAuthLimit(s.handleLocalLogin)...)
+	api.Get("/auth/callback", withAuthLimit(s.handleCallback)...)
 	api.Post("/auth/logout", s.handleLogout)
 
 	// --- CLI Authentication ---
-	api.Post("/cli/token", s.handleCLITokenExchange)
+	api.Post("/cli/token", withAuthLimit(s.handleCLITokenExchange)...)
 
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetCurrentUser)
 	api.Get("/me/teams", s.requireAuth, s.requireTokenScope(models.TokenScopeTeamsRead), s.handleListCurrentUserTeams)
 	api.Get("/me/preferences", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetUserPreferences)
 	api.Put("/me/preferences", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileWrite), s.handleUpdateUserPreferences)
+	api.Get("/me/query-history", s.requireAuth, s.requireTokenScope(models.TokenScopeLogsRead), s.handleListQueryHistory)
 
 	// Share links for ad hoc queries. Share payload access is still scoped by
 	// team membership and source linkage in the handler.
@@ -222,6 +291,12 @@ func (s *Server) setupRoutes() {
 	admin.Put("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleUpdateSource)
 	admin.Delete("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleDeleteSource)
 	admin.Get("/sources/:sourceID/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceStats) // Admin-only source stats
+
+	// Recent query activity (admin recent-activity view over query_history).
+	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)
+
+	// Authoritative all-time usage analytics over the non-pruned query_stats_daily rollup.
+	admin.Get("/query-stats", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryStats)
 
 	// Provisioning Export
 	admin.Get("/provisioning/export", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleExportProvisioning)
@@ -297,15 +372,18 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
 	teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
 
-	// Query and explore logs
-	teamSourceOps.Post("/logs/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
+	// Query and explore logs. The heavy query/exploration endpoints are
+	// rate-limited per authenticated user (queryLimiter runs after the group's
+	// requireAuth, so the user context is available).
+	teamSourceOps.Post("/logs/query", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)...)
+	teamSourceOps.Get("/logs/tail", s.requireTokenScope(models.TokenScopeLogsRead), s.handleTailLogs)
 	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
 	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
 	teamSourceOps.Post("/exports", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCreateExportJob)
 	teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
 	teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
 	teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
-	teamSourceOps.Post("/logs/histogram", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
+	teamSourceOps.Post("/logs/histogram", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)...)
 	teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
 	teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
 	teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
@@ -316,8 +394,8 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 	// Field value exploration for sidebar
-	teamSourceOps.Get("/fields/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
-	teamSourceOps.Get("/fields/:fieldName/values", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
+	teamSourceOps.Get("/fields/values", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)...)         // Get all LowCardinality field values
+	teamSourceOps.Get("/fields/:fieldName/values", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues)...) // Get values for a specific field
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin
@@ -331,6 +409,18 @@ func (s *Server) setupRoutes() {
 	alertRoutes.Delete("/:alertID", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleDeleteAlert)
 	alertRoutes.Get("/:alertID/history", s.requireTokenScope(models.TokenScopeAlertsRead), s.handleListAlertHistory)
 	alertRoutes.Post("/:alertID/resolve", s.requireTokenScope(models.TokenScopeAlertsWrite), s.handleResolveAlert)
+
+	// Dashboards (saved grids of visualization panels). Visibility: any
+	// authenticated user can list/view. Edit/delete: creator + global admin
+	// (dashboards whose author was deleted are global-admin-only). Panel data is
+	// fetched by the frontend through the existing team-scoped log endpoints, so
+	// there is no source-access gate here.
+	dashboardRoutes := api.Group("/dashboards", s.requireAuth)
+	dashboardRoutes.Get("/", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleListDashboards)
+	dashboardRoutes.Post("/", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleCreateDashboard)
+	dashboardRoutes.Get("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleGetDashboard)
+	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard)
+	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard)
 
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
@@ -356,7 +446,14 @@ func (s *Server) Start() error {
 }
 
 // Shutdown gracefully shuts down the Fiber server within the given context timeout.
+// It also stops background maintenance loops (e.g. the expired-session/export-job
+// sweeper) and waits for them to exit before returning.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
+	close(s.stop)
+	if s.dashCache != nil {
+		s.dashCache.Close()
+	}
+	s.wg.Wait()
 	return s.app.ShutdownWithContext(ctx)
 }

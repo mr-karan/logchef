@@ -8,7 +8,7 @@ import {
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
-import { useRouter, useRoute } from "vue-router";
+import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
@@ -27,6 +27,7 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
+import { supportsQueryLanguage, hasSourceCapability } from "@/lib/queryMetadata";
 import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
@@ -47,10 +48,12 @@ import HistogramVisualization from "./components/HistogramVisualization.vue";
 import EmptyResultsState from "./components/EmptyResultsState.vue";
 import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
+import ExploreJsonResults from "./components/ExploreJsonResults.vue";
+import LiveTailPanel from "./components/LiveTailPanel.vue";
 
 // Router and stores
-const router = useRouter();
 const route = useRoute();
+const router = useRouter();
 const exploreStore = useExploreStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
@@ -69,13 +72,11 @@ const {
   sqlQuery,
   activeMode,
   queryError,
-  sqlWarnings: _sqlWarnings,
   isExecutingQuery,
   canExecuteQuery,
   changeMode,
   executeQuery,
   handleTimeRangeUpdate,
-  handleLimitUpdate: _handleLimitUpdate,
 } = useQuery();
 
 const { handleHistogramTimeRangeZoom } = useTimeRange();
@@ -85,13 +86,10 @@ const contextStore = useContextStore();
 // Team/source management - now centralized in sourcesStore
 const availableSources = computed(() => sourcesStore.teamSources);
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
+const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDetails.value, 'logchefql'));
+const supportsExports = computed(() => hasSourceCapability(sourceDetails.value, 'exports'));
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
 const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
-const isLoadingSourceDetails = computed(() => sourcesStore.isLoadingSourceDetails);
-// Convenience aliases for template compatibility
-const teamSources = availableSources;
-const isProcessingTeamChange = isLoadingTeamSources;
-const isProcessingSourceChange = isLoadingSourceDetails;
 
 // Computed properties for the clean approach
 const currentTeamId = computed(() => contextStore.teamId);
@@ -119,53 +117,12 @@ const isChangingContext = computed(() => {
 const isExporting = ref(false);
 let exportAbortController: AbortController | null = null;
 
-const getQueryParamValue = (key: string) => {
-  const value = route.query[key];
-  if (Array.isArray(value)) {
-    return value[0];
-  }
-  return typeof value === "string" ? value : undefined;
-};
-
-const buildExploreNavigationQuery = (
-  overrides: Partial<Record<"team" | "source" | "t" | "start" | "end" | "limit" | "mode", string | undefined>> = {}
-) => {
-  const query: Record<string, string> = {};
-
-  for (const key of ["team", "source", "t", "start", "end", "limit", "mode"] as const) {
-    const value = Object.prototype.hasOwnProperty.call(overrides, key)
-      ? overrides[key]
-      : getQueryParamValue(key);
-    if (value) {
-      query[key] = value;
-    }
-  }
-
-  return query;
-};
-
-// Simple team/source change handlers using router
-function handleTeamChange(teamIdStr: string) {
-  const teamId = parseInt(teamIdStr);
-  if (isNaN(teamId)) return;
-
-  router.replace({
-    query: buildExploreNavigationQuery({
-      team: String(teamId),
-      source: undefined,
-    }),
-  });
+async function handleTeamChange(teamId: number) {
+  await urlState.selectTeam(teamId);
 }
 
-function handleSourceChange(sourceIdStr: string) {
-  const sourceId = parseInt(sourceIdStr);
-  if (isNaN(sourceId)) return;
-
-  router.replace({
-    query: buildExploreNavigationQuery({
-      source: String(sourceId),
-    }),
-  });
+async function handleSourceChange(sourceId: number) {
+  await urlState.selectSource(sourceId);
 }
 
 const {
@@ -173,7 +130,6 @@ const {
   handleSaveQueryClick: openSaveModalFlow,
   handleSaveQuery: processSaveQueryFromComposable,
   loadSavedQuery,
-  updateSavedQuery: _updateSavedQuery,
   loadSourceQueries,
 } = useSavedQueries();
 
@@ -215,13 +171,19 @@ const isHistogramVisible = ref(true);
 const executingQueryId = ref<string | null>(null);
 const lastQueryTime = ref<number>(0);
 
-// Display related refs
-const displayTimezone = computed(() => preferences.value.timezone);
+// CoordinationError retry backoff. The store returns CoordinationError while
+// source details are still catching up with the selected source id; we retry,
+// but cap attempts with exponential backoff so a source that never converges
+// can't livelock the UI re-executing ~10x/sec forever. See #101.
+const MAX_COORDINATION_RETRIES = 8;
+const COORDINATION_RETRY_BASE_MS = 100;
+const COORDINATION_RETRY_MAX_MS = 3000;
+const coordinationRetries = ref(0);
 
 // Display mode for table vs compact view (table is default)
 const displayMode = computed({
   get: () => preferences.value.display_mode,
-  set: (value: 'table' | 'compact') => {
+  set: (value: 'table' | 'compact' | 'json') => {
     preferencesStore.updatePreferences({ display_mode: value });
   },
 });
@@ -283,7 +245,7 @@ const canSaveOrUpdateQuery = computed(() => {
     !!currentTeamId.value &&
     !!currentSourceId.value &&
     hasValidSource.value &&
-    (!!exploreStore.logchefqlCode?.trim() || !!exploreStore.rawSql?.trim())
+    (!!exploreStore.logchefqlCode?.trim() || !!exploreStore.nativeQuery?.trim())
   );
 });
 
@@ -294,7 +256,7 @@ const currentQueryContentJson = computed(() => {
     limit: exploreStore.limit,
     content: exploreStore.activeMode === 'logchefql' 
       ? exploreStore.logchefqlCode 
-      : exploreStore.rawSql,
+      : exploreStore.nativeQuery,
   });
 });
 
@@ -416,6 +378,12 @@ const handleQueryExecution = async (debouncingKey = "") => {
       return;
     }
 
+    // Reset the coordination backoff whenever a fresh (non-retry) execution
+    // starts, so each new user action gets the full retry budget.
+    if (!debouncingKey.includes('-retry')) {
+      coordinationRetries.value = 0;
+    }
+
     // Set executing state
     executingQueryId.value = executionId;
     lastQueryTime.value = now;
@@ -423,18 +391,35 @@ const handleQueryExecution = async (debouncingKey = "") => {
     const result = await executeQuery();
 
     if (result && !result.success && result.error && 'error_type' in result.error && result.error.error_type === 'CoordinationError') {
+      if (coordinationRetries.value >= MAX_COORDINATION_RETRIES) {
+        // Source details never converged — stop retrying to avoid a livelock,
+        // and release the executing lock so a later user action can proceed.
+        console.warn('LogExplorer: source coordination did not converge; giving up retries');
+        coordinationRetries.value = 0;
+        if (executingQueryId.value === executionId) {
+          executingQueryId.value = null;
+        }
+        return result;
+      }
+
+      const attempt = coordinationRetries.value++;
+      const delay = Math.min(COORDINATION_RETRY_BASE_MS * 2 ** attempt, COORDINATION_RETRY_MAX_MS);
       setTimeout(() => {
         if (executingQueryId.value === executionId) {
           handleQueryExecution(`${debouncingKey}-retry`);
         }
-      }, 100);
+      }, delay);
       return result;
     }
+
+    // Any non-coordination outcome means coordination converged (or was never
+    // the issue) — clear the backoff counter.
+    coordinationRetries.value = 0;
 
     if (result && result.success && !isInitializing.value) {
       await urlState.pushHistoryEntry();
 
-      if (activeMode.value === 'sql') {
+      if (activeMode.value === 'native') {
         handleTimeRangeUpdate();
       }
     }
@@ -474,25 +459,6 @@ watch(
     }
   },
   { immediate: false }
-)
-
-// Keep store selection in sync with URL when team/source query params change
-watch(
-  () => [route.query.team, route.query.source],
-  async ([teamParam, sourceParam]) => {
-    if (isInitializing.value) return;
-    const t = teamParam ? parseInt(teamParam as string) : null;
-    const s = sourceParam ? parseInt(sourceParam as string) : null;
-    if (t && t !== currentTeamId.value) {
-      await handleTeamChange(t.toString());
-      // If URL includes a specific source, switch to it after team change
-      if (s) {
-        await handleSourceChange(s.toString());
-      }
-    } else if (s && s !== currentSourceId.value) {
-      await handleSourceChange(s.toString());
-    }
-  }
 )
 
 // Function to handle drill-down from DataTable to add a filter condition
@@ -562,7 +528,7 @@ const updateLogchefqlValue = (newValue: string, _isUserInput = false) => {
 
 const updateSqlValue = (newValue: string, _isUserInput = false) => {
   // Use the store's action to update SQL
-  exploreStore.setRawSql(newValue);
+  exploreStore.setNativeQuery(newValue);
 };
 
 // New handler for the Save/Update button
@@ -620,7 +586,8 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
     const response = await savedQueriesStore.update(queryId, {
       name: formData.name,
       description: formData.description,
-      query_type: formData.query_type,
+      query_language: formData.query_language,
+      editor_mode: formData.editor_mode,
       query_content: formData.query_content,
     });
 
@@ -720,7 +687,7 @@ const handleExport = async () => {
   if (!currentTeamId.value || !currentSourceId.value) return;
 
   const sql = exploreStore.lastExecutedState?.sqlQuery ||
-    (exploreStore.activeMode === "sql" ? exploreStore.sqlForExecution : "");
+    (exploreStore.activeMode === "native" ? exploreStore.sqlForExecution : "");
   if (!sql?.trim()) {
     toast({
       title: "Cannot Download",
@@ -739,7 +706,7 @@ const handleExport = async () => {
     isExporting.value = true;
     const queryTimeout = Math.max(exploreStore.queryTimeout, 120);
     const response = await exploreApi.createExportJob(currentSourceId.value, {
-      raw_sql: sql,
+      query_text: sql,
       format: "csv",
       query_timeout: queryTimeout,
       variables: getVariablesForApi(),
@@ -774,6 +741,14 @@ const handleExport = async () => {
 onBeforeUnmount(() => {
   exportAbortController?.abort();
   exportAbortController = null;
+  // Abort any in-flight live tail stream when the explorer unmounts.
+  exploreStore.stopLiveTail();
+});
+
+// Leaving the explore route must also abort the tail (unmount may lag a
+// keep-alive transition, and this guarantees the fetch is cancelled).
+onBeforeRouteLeave(() => {
+  exploreStore.stopLiveTail();
 });
 
 const calendarDatePartToDate = (value: any) => {
@@ -837,7 +812,7 @@ const handleCopyCliCommand = async () => {
       query:
         exploreStore.activeMode === "logchefql"
           ? exploreStore.logchefqlCode
-          : exploreStore.rawSql,
+          : exploreStore.nativeQuery,
       relativeTime: exploreStore.selectedRelativeTime || undefined,
       absoluteStart: calendarDatePartToDate(timeRange?.start),
       absoluteEnd: calendarDatePartToDate(timeRange?.end),
@@ -980,7 +955,7 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
     let currentQuery = "";
     if (activeMode.value === "logchefql" && logchefQuery.value) {
       currentQuery = logchefQuery.value.trim();
-    } else if (activeMode.value === "sql" && sqlQuery.value) {
+    } else if (activeMode.value === "native" && sqlQuery.value) {
       currentQuery = sqlQuery.value.trim();
     }
 
@@ -994,8 +969,49 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
   }
 };
 
+const formatLogsqlValue = (value: string) => {
+  if (/^-?(?:\d+|\d*\.\d+)$/.test(value) || /^(?:true|false)$/i.test(value)) {
+    return value;
+  }
+  return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+};
+
+const appendLogsqlExpression = (query: string, expression: string) => {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return expression;
+  }
+
+  const pipeIndex = trimmed.indexOf('|');
+  if (pipeIndex === -1) {
+    return `${trimmed} ${expression}`;
+  }
+
+  const base = trimmed.slice(0, pipeIndex).trimEnd();
+  const pipeSection = trimmed.slice(pipeIndex).trimStart();
+  const nextBase = base ? `${base} ${expression}` : expression;
+  return `${nextBase} ${pipeSection}`;
+};
+
 // Handle adding a field filter from the sidebar
 const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!=') => {
+  if (!supportsLogchefQL.value) {
+    const exactFilter = `${field}:=${formatLogsqlValue(value)}`;
+    const filterExpression = operator === '!=' ? `NOT ${exactFilter}` : exactFilter;
+    const currentQuery = exploreStore.nativeQuery?.trim() || '';
+
+    exploreStore.setNativeQuery(appendLogsqlExpression(currentQuery, filterExpression));
+
+    if (activeMode.value !== 'native') {
+      changeMode('native');
+    }
+
+    nextTick(() => {
+      queryEditorRef.value?.focus(true);
+    });
+    return;
+  }
+
   // Build the filter expression
   const needsQuotes = !/^\d+$/.test(value); // Only numbers don't need quotes
   const quotedValue = needsQuotes ? `"${value.replace(/"/g, '\\"')}"` : value;
@@ -1028,6 +1044,20 @@ const handleAddFieldFilter = (field: string, value: string, operator: '=' | '!='
 
 // Handle field name click from sidebar - inserts field name into query
 const handleFieldClick = (fieldName: string) => {
+  if (!supportsLogchefQL.value) {
+    const currentQuery = exploreStore.nativeQuery?.trim() || '';
+    exploreStore.setNativeQuery(appendLogsqlExpression(currentQuery, `${fieldName}:=`));
+
+    if (activeMode.value !== 'native') {
+      changeMode('native');
+    }
+
+    nextTick(() => {
+      queryEditorRef.value?.focus(true);
+    });
+    return;
+  }
+
   // Get current query
   const currentQuery = exploreStore.logchefqlCode?.trim() || '';
   
@@ -1237,11 +1267,13 @@ onMounted(async () => {
         <!-- Header bar for team selection -->
         <div class="border-b py-2 px-4 flex items-center h-12">
           <TeamSourceSelector 
-  :team-sources="teamSources"
-  :is-loading-team-sources="isLoadingTeamSources"
-  :is-processing-team-change="isProcessingTeamChange"
-  :is-processing-source-change="isProcessingSourceChange"
-/>
+            :current-team-id="currentTeamId"
+            :current-source-id="currentSourceId"
+            :available-teams="availableTeams"
+            :available-sources="availableSources"
+            @update:team="handleTeamChange"
+            @update:source="handleSourceChange"
+          />
         </div>
         <!-- Empty state content -->
         <div class="flex flex-col items-center justify-center flex-1 gap-4 text-center">
@@ -1258,11 +1290,13 @@ onMounted(async () => {
         <!-- Filter Bar with Team/Source Selection -->
         <div class="border-b bg-background py-2 px-4 flex items-center h-12 shadow-sm">
           <TeamSourceSelector 
-  :team-sources="teamSources"
-  :is-loading-team-sources="isLoadingTeamSources"
-  :is-processing-team-change="isProcessingTeamChange"
-  :is-processing-source-change="isProcessingSourceChange"
-/>
+            :current-team-id="currentTeamId"
+            :current-source-id="currentSourceId"
+            :available-teams="availableTeams"
+            :available-sources="availableSources"
+            @update:team="handleTeamChange"
+            @update:source="handleSourceChange"
+          />
         </div>
 
         <!-- Source Not Connected Message -->
@@ -1301,7 +1335,16 @@ onMounted(async () => {
       <!-- Main Explorer View -->
       <div v-else class="flex flex-col h-screen overflow-hidden">
         <!-- Streamlined Top Bar -->
-        <ExploreTopBar ref="topBarRef" />
+        <ExploreTopBar
+          ref="topBarRef"
+          :current-team-id="currentTeamId"
+          :current-source-id="currentSourceId"
+          :available-teams="availableTeams"
+          :available-sources="availableSources"
+          :selected-source="sourceDetails"
+          @update:team="handleTeamChange"
+          @update:source="handleSourceChange"
+        />
 
         <!-- Main Content Area -->
         <div class="flex flex-1 min-h-0">
@@ -1310,6 +1353,7 @@ onMounted(async () => {
             :fields="availableFields"
             :team-id="currentTeamId ?? undefined"
             :source-id="currentSourceId ?? undefined"
+            :source="sourceDetails"
             @add-filter="handleAddFieldFilter"
             @field-click="handleFieldClick"
           />
@@ -1349,6 +1393,9 @@ onMounted(async () => {
                   <QueryEditor 
                     ref="queryEditorRef" 
                     :sourceId="currentSourceId" 
+                    :sourceType="sourceDetails?.source_type || 'clickhouse'"
+                    :queryLanguages="sourceDetails?.query_languages || []"
+                    :capabilities="sourceDetails?.capabilities || []"
                     :teamId="currentTeamId ?? 0" 
                     :schema="(sourceDetails?.columns || []).reduce((acc: Record<string, { type: string }>, col) => {
                       if (col.name && col.type) {
@@ -1358,9 +1405,6 @@ onMounted(async () => {
                     }, {})"
                     :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                     :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery"
-                    :placeholder="exploreStore.activeMode === 'logchefql'
-                      ? 'Enter search criteria (e.g., lvl=&quot;ERROR&quot; and namespace~&quot;sys&quot;)'
-                      : 'Enter SQL query...'"
                     :tsField="sourceDetails?._meta_ts_field || 'timestamp'"
                     :tableName="sourcesStore.getCurrentSourceTableName || ''" 
                     :showFieldsPanel="showFieldsPanel"
@@ -1377,7 +1421,7 @@ onMounted(async () => {
                     @cancel-query="handleCancelQuery"
                     @update:query-timeout="exploreStore.setQueryTimeout($event)"
                     @update:activeMode="(mode, isModeSwitchOnly) =>
-                      changeMode(mode === 'logchefql' ? 'logchefql' : 'sql', isModeSwitchOnly)"
+                      changeMode(mode === 'logchefql' ? 'logchefql' : 'native', isModeSwitchOnly)"
                     @toggle-fields="showFieldsPanel = !showFieldsPanel" 
                     @select-saved-query="loadSavedQuery"
                     @save-query="handleSaveOrUpdateClick" 
@@ -1470,6 +1514,7 @@ onMounted(async () => {
                 :logsCount="exploreStore.logs?.length || 0"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
                 :isExporting="isExporting"
+                :canExport="supportsExports"
                 @toggle-histogram="toggleHistogramVisibility"
                 @update:displayMode="displayMode = $event"
                 @export="handleExport"
@@ -1477,8 +1522,8 @@ onMounted(async () => {
                 @copy-cli="handleCopyCliCommand"
               />
 
-              <!-- Histogram visualization -->
-              <div v-if="isHistogramVisible" class="px-4 py-2 border-b">
+              <!-- Histogram visualization - paused during live tail -->
+              <div v-if="isHistogramVisible && !exploreStore.isLive" class="px-4 py-2 border-b">
                 <HistogramVisualization @zoom-time-range="onHistogramTimeRangeZoom" />
               </div>
             </div>
@@ -1492,11 +1537,32 @@ onMounted(async () => {
             ">
               <!-- Results Area -->
               <div class="flex-1 overflow-hidden relative bg-background">
+                <!-- Live Tail Panel - takes over the results area while live -->
+                <LiveTailPanel
+                  v-if="exploreStore.isLive"
+                  :rows="exploreStore.liveRows"
+                  :status="exploreStore.liveStatus"
+                  :notice="exploreStore.liveNotice"
+                  :dropped-count="exploreStore.liveDroppedCount"
+                  :end-reason="exploreStore.liveEndReason"
+                  :end-message="exploreStore.liveEndMessage"
+                  :error="exploreStore.liveError"
+                  :timestamp-field="sourceDetails?._meta_ts_field"
+                  @stop="exploreStore.stopLiveTail()"
+                  @resume="exploreStore.startLiveTail()"
+                />
+
                 <!-- Results Table -->
-                <template v-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
-                  <!-- Render DataTable or CompactLogList based on display mode -->
+                <template v-else-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
+                  <ExploreJsonResults
+                    v-if="displayMode === 'json'"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
+                    :data="exploreStore.logs"
+                    :is-loading="isExecutingQuery || isInitialQueryPending"
+                  />
+
                   <component
-                    v-if="exploreStore.columns?.length > 0"
+                    v-else-if="exploreStore.columns?.length > 0"
                     :is="displayMode === 'table' ? DataTable : CompactLogList"
                     :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId ?? 'noquery'}-${displayMode}`"
                     :columns="exploreStore.columns as any"
@@ -1505,9 +1571,9 @@ onMounted(async () => {
                     :is-loading="isExecutingQuery || isInitialQueryPending"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
+                    :source="sourceDetails"
                     :timestamp-field="sourcesStore.currentSourceDetails?._meta_ts_field"
                     :severity-field="sourcesStore.currentSourceDetails?._meta_severity_field"
-                    :timezone="displayTimezone"
                     :query-fields="queryFields"
                     :regex-highlights="regexHighlights"
                     :active-mode="activeMode"

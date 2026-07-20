@@ -9,51 +9,46 @@ import (
 )
 
 func sourceToModel(r sqlc.Source) *models.Source {
-	return &models.Source{
+	source := &models.Source{
 		ID:                models.SourceID(r.ID),
 		Name:              r.Name,
 		MetaIsAutoCreated: r.MetaIsAutoCreated,
+		SourceType:        models.SourceType(r.SourceType),
 		MetaTSField:       r.MetaTsField,
 		MetaSeverityField: textStr(r.MetaSeverityField),
 		Description:       textStr(r.Description),
 		TTLDays:           int(r.TtlDays),
-		Connection: models.ConnectionInfo{
-			Host:      r.Host,
-			Username:  r.Username,
-			Password:  r.Password,
-			Database:  r.Database,
-			TableName: r.TableName,
-			TLSEnable: r.TlsEnable,
-		},
-		Timestamps: models.Timestamps{CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time},
-		Managed:    r.Managed,
-		SecretRef:  textStr(r.SecretRef),
+		ConnectionConfig:  r.ConnectionConfig,
+		IdentityKey:       r.IdentityKey,
+		Timestamps:        models.Timestamps{CreatedAt: r.CreatedAt.Time, UpdatedAt: r.UpdatedAt.Time},
+		Managed:           r.Managed,
+		SecretRef:         textStr(r.SecretRef),
 	}
-}
-
-func createSourceParams(source *models.Source) sqlc.CreateSourceParams {
-	return sqlc.CreateSourceParams{
-		Name:              source.Name,
-		MetaIsAutoCreated: source.MetaIsAutoCreated,
-		MetaTsField:       source.MetaTSField,
-		MetaSeverityField: text(source.MetaSeverityField),
-		Host:              source.Connection.Host,
-		Username:          source.Connection.Username,
-		Password:          source.Connection.Password,
-		Database:          source.Connection.Database,
-		TableName:         source.Connection.TableName,
-		Description:       text(source.Description),
-		TtlDays:           int64(source.TTLDays),
-		TlsEnable:         source.Connection.TLSEnable,
-	}
+	_ = source.HydrateConnection()
+	return source
 }
 
 // CreateSource inserts a new source and populates ID + timestamps on success.
 func (s *Store) CreateSource(ctx context.Context, source *models.Source) error {
-	id, err := s.q.CreateSource(ctx, createSourceParams(source))
+	if err := source.SyncConnectionConfig(); err != nil {
+		return fmt.Errorf("prepare source connection config: %w", err)
+	}
+	id, err := s.q.CreateSource(ctx, sqlc.CreateSourceParams{
+		Name:              source.Name,
+		MetaIsAutoCreated: source.MetaIsAutoCreated,
+		SourceType:        source.SourceType.String(),
+		MetaTsField:       source.MetaTSField,
+		MetaSeverityField: text(source.MetaSeverityField),
+		ConnectionConfig:  source.ConnectionConfig,
+		IdentityKey:       source.IdentityKey,
+		Description:       text(source.Description),
+		TtlDays:           int64(source.TTLDays),
+		Managed:           source.Managed,
+		SecretRef:         text(source.SecretRef),
+	})
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("%w: source %s.%s already exists", models.ErrConflict, source.Connection.Database, source.Connection.TableName)
+			return fmt.Errorf("%w: source %s already exists", models.ErrConflict, source.IdentityKey)
 		}
 		s.log.Error("failed to create source record in db", "error", err)
 		return fmt.Errorf("error creating source record: %w", err)
@@ -78,15 +73,16 @@ func (s *Store) GetSource(ctx context.Context, id models.SourceID) (*models.Sour
 	return sourceToModel(row), nil
 }
 
-// GetSourceByName retrieves a source by database+table. Returns models.ErrNotFound if absent.
-func (s *Store) GetSourceByName(ctx context.Context, database, tableName string) (*models.Source, error) {
-	row, err := s.q.GetSourceByName(ctx, sqlc.GetSourceByNameParams{Database: database, TableName: tableName})
+// GetSourceByIdentityKey retrieves a source by its provider-computed identity
+// key. Returns models.ErrNotFound if absent.
+func (s *Store) GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error) {
+	row, err := s.q.GetSourceByIdentityKey(ctx, identityKey)
 	if err != nil {
 		if notFound(err) {
 			return nil, models.ErrNotFound
 		}
-		s.log.Error("failed to get source by name from db", "error", err, "database", database, "table", tableName)
-		return nil, fmt.Errorf("error getting source by name: %w", err)
+		s.log.Error("failed to get source by identity key from db", "error", err, "identity_key", identityKey)
+		return nil, fmt.Errorf("error getting source by identity key: %w", err)
 	}
 	return sourceToModel(row), nil
 }
@@ -100,27 +96,28 @@ func (s *Store) ListSources(ctx context.Context) ([]*models.Source, error) {
 	}
 	sources := make([]*models.Source, 0, len(rows))
 	for i := range rows {
-		r := rows[i]
-		sources = append(sources, sourceToModel(r))
+		sources = append(sources, sourceToModel(rows[i]))
 	}
 	return sources, nil
 }
 
 // UpdateSource updates an existing source record.
 func (s *Store) UpdateSource(ctx context.Context, source *models.Source) error {
+	if err := source.SyncConnectionConfig(); err != nil {
+		return fmt.Errorf("prepare source connection config: %w", err)
+	}
 	err := s.q.UpdateSource(ctx, sqlc.UpdateSourceParams{
 		Name:              source.Name,
 		MetaIsAutoCreated: source.MetaIsAutoCreated,
+		SourceType:        source.SourceType.String(),
 		MetaTsField:       source.MetaTSField,
 		MetaSeverityField: text(source.MetaSeverityField),
-		Host:              source.Connection.Host,
-		Username:          source.Connection.Username,
-		Password:          source.Connection.Password,
-		Database:          source.Connection.Database,
-		TableName:         source.Connection.TableName,
+		ConnectionConfig:  source.ConnectionConfig,
+		IdentityKey:       source.IdentityKey,
 		Description:       text(source.Description),
 		TtlDays:           int64(source.TTLDays),
-		TlsEnable:         source.Connection.TLSEnable,
+		Managed:           source.Managed,
+		SecretRef:         text(source.SecretRef),
 		ID:                int64(source.ID),
 	})
 	if err != nil {
