@@ -141,6 +141,37 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
     </article>
 
+    <!-- CLI v0.2.0 -->
+    <article class="version" id="cli-v0.2.0">
+      <div class="version-header">
+        <a class="version-tag" href="#cli-v0.2.0">CLI v0.2.0</a>
+        <span class="version-date">Jul 20, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.2.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        The command-line tool catches up with the v2.0 server. It now queries VictoriaLogs sources the same way it queries ClickHouse, follows logs live in your terminal, and adds a handful of commands for exploring and debugging without leaving the shell.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>VictoriaLogs support</strong>: Query your VictoriaLogs sources from the terminal, just like ClickHouse ones.</li>
+          <li><strong>Live tail in the terminal</strong>: <code>logchef tail</code> now follows matching logs as they arrive, on ClickHouse and VictoriaLogs.</li>
+          <li><strong>Jump to the web explorer</strong>: <code>logchef open</code> opens your current query in the browser, with the query and time range already filled in.</li>
+          <li><strong>See the query first</strong>: <code>logchef explain</code> prints the query Logchef would run, without running it.</li>
+          <li><strong>Counts over time</strong>: <code>logchef histogram</code> shows how often something happens across a time range.</li>
+          <li><strong>Find your fields</strong>: <code>logchef fields</code> lists a source's fields and their common values, so you know what to filter on.</li>
+          <li><strong>Your recent queries</strong>: <code>logchef history</code> reopens queries you ran earlier.</li>
+          <li><strong>Check your setup</strong>: <code>logchef doctor</code> diagnoses server, auth, and source problems when something isn't working.</li>
+          <li><strong>Shell completions</strong>: <code>logchef completions</code> for bash, zsh, and fish.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v1.7.0 -->
     <article class="version" id="v1.7.0">
       <div class="version-header">
