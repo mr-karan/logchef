@@ -13,3 +13,7 @@ be direct about where another tool is the better choice.
   schema-agnostic log UI compares to ClickStack (HyperDX), ClickHouse's
   end-to-end observability stack covering logs, traces, metrics, and session
   replay.
+- [Logchef vs Grafana Loki](/comparisons/logchef-vs-grafana-loki/) — how
+  Logchef's ClickHouse/VictoriaLogs-backed search compares to Loki's
+  label-indexed, object-storage logging, why high-cardinality fields behave
+  differently, and how Logchef + VictoriaLogs is itself a Loki alternative.

@@ -224,6 +224,7 @@ Key areas of the docs:
           items: [
             { label: "Overview", link: "/comparisons" },
             { label: "Logchef vs ClickStack", link: "/comparisons/logchef-vs-clickstack" },
+            { label: "Logchef vs Grafana Loki", link: "/comparisons/logchef-vs-grafana-loki" },
           ],
         },
         {
