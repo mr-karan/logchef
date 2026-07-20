@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0-alpha.1] - 2026-07-20
+
 Logchef v2.0 is a big release, and it starts with one thing: **VictoriaLogs is
 now a first-class datasource.** Point Logchef at a VictoriaLogs instance and
 explore it exactly like ClickHouse — same query box (LogchefQL or raw LogsQL),
