@@ -2,6 +2,11 @@ version: 2
 
 project_name: logchef
 
+# Flag pre-release tags (-alpha/-beta/-rc) as GitHub pre-releases automatically
+# so they don't publish as "Latest".
+release:
+  prerelease: auto
+
 env:
   - GO111MODULE=on
   - CGO_ENABLED=0
