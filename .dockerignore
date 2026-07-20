@@ -4,11 +4,16 @@
 # Node modules
 node_modules
 frontend/node_modules
+.pnpm
+cli/target
 
 # Build artifacts
 bin
 coverage
 frontend/dist
+.cache
+.gocache
+.gomodcache
 
 # Local config / secrets
 *.local
