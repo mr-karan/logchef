@@ -195,6 +195,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getUserTeamForSourceStmt, err = db.PrepareContext(ctx, getUserTeamForSource); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUserTeamForSource: %w", err)
 	}
+	if q.incrementQueryStatsStmt, err = db.PrepareContext(ctx, incrementQueryStats); err != nil {
+		return nil, fmt.Errorf("error preparing query IncrementQueryStats: %w", err)
+	}
 	if q.insertAlertHistoryStmt, err = db.PrepareContext(ctx, insertAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertAlertHistory: %w", err)
 	}
@@ -321,6 +324,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.pruneQueryHistoryForUserStmt, err = db.PrepareContext(ctx, pruneQueryHistoryForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query PruneQueryHistoryForUser: %w", err)
 	}
+	if q.queryVolumeByDayStmt, err = db.PrepareContext(ctx, queryVolumeByDay); err != nil {
+		return nil, fmt.Errorf("error preparing query QueryVolumeByDay: %w", err)
+	}
 	if q.removeCollectionItemStmt, err = db.PrepareContext(ctx, removeCollectionItem); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveCollectionItem: %w", err)
 	}
@@ -350,6 +356,12 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.teamHasSourceStmt, err = db.PrepareContext(ctx, teamHasSource); err != nil {
 		return nil, fmt.Errorf("error preparing query TeamHasSource: %w", err)
+	}
+	if q.topSourcesByQueriesStmt, err = db.PrepareContext(ctx, topSourcesByQueries); err != nil {
+		return nil, fmt.Errorf("error preparing query TopSourcesByQueries: %w", err)
+	}
+	if q.topUsersByQueriesStmt, err = db.PrepareContext(ctx, topUsersByQueries); err != nil {
+		return nil, fmt.Errorf("error preparing query TopUsersByQueries: %w", err)
 	}
 	if q.touchQueryShareStmt, err = db.PrepareContext(ctx, touchQueryShare); err != nil {
 		return nil, fmt.Errorf("error preparing query TouchQueryShare: %w", err)
@@ -686,6 +698,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getUserTeamForSourceStmt: %w", cerr)
 		}
 	}
+	if q.incrementQueryStatsStmt != nil {
+		if cerr := q.incrementQueryStatsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing incrementQueryStatsStmt: %w", cerr)
+		}
+	}
 	if q.insertAlertHistoryStmt != nil {
 		if cerr := q.insertAlertHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing insertAlertHistoryStmt: %w", cerr)
@@ -896,6 +913,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing pruneQueryHistoryForUserStmt: %w", cerr)
 		}
 	}
+	if q.queryVolumeByDayStmt != nil {
+		if cerr := q.queryVolumeByDayStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing queryVolumeByDayStmt: %w", cerr)
+		}
+	}
 	if q.removeCollectionItemStmt != nil {
 		if cerr := q.removeCollectionItemStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeCollectionItemStmt: %w", cerr)
@@ -944,6 +966,16 @@ func (q *Queries) Close() error {
 	if q.teamHasSourceStmt != nil {
 		if cerr := q.teamHasSourceStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing teamHasSourceStmt: %w", cerr)
+		}
+	}
+	if q.topSourcesByQueriesStmt != nil {
+		if cerr := q.topSourcesByQueriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing topSourcesByQueriesStmt: %w", cerr)
+		}
+	}
+	if q.topUsersByQueriesStmt != nil {
+		if cerr := q.topUsersByQueriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing topUsersByQueriesStmt: %w", cerr)
 		}
 	}
 	if q.touchQueryShareStmt != nil {
@@ -1117,6 +1149,7 @@ type Queries struct {
 	getUserByEmailStmt                  *sql.Stmt
 	getUserPreferencesStmt              *sql.Stmt
 	getUserTeamForSourceStmt            *sql.Stmt
+	incrementQueryStatsStmt             *sql.Stmt
 	insertAlertHistoryStmt              *sql.Stmt
 	insertQueryHistoryStmt              *sql.Stmt
 	isSourceManagedStmt                 *sql.Stmt
@@ -1159,6 +1192,7 @@ type Queries struct {
 	pruneAlertHistoryStmt               *sql.Stmt
 	pruneExpiredQuerySharesStmt         *sql.Stmt
 	pruneQueryHistoryForUserStmt        *sql.Stmt
+	queryVolumeByDayStmt                *sql.Stmt
 	removeCollectionItemStmt            *sql.Stmt
 	removeCollectionMemberStmt          *sql.Stmt
 	removeTeamMemberStmt                *sql.Stmt
@@ -1169,6 +1203,8 @@ type Queries struct {
 	setUserManagedStmt                  *sql.Stmt
 	setUserPasswordHashStmt             *sql.Stmt
 	teamHasSourceStmt                   *sql.Stmt
+	topSourcesByQueriesStmt             *sql.Stmt
+	topUsersByQueriesStmt               *sql.Stmt
 	touchQueryShareStmt                 *sql.Stmt
 	updateAPITokenLastUsedStmt          *sql.Stmt
 	updateAlertStmt                     *sql.Stmt
@@ -1247,6 +1283,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getUserByEmailStmt:                  q.getUserByEmailStmt,
 		getUserPreferencesStmt:              q.getUserPreferencesStmt,
 		getUserTeamForSourceStmt:            q.getUserTeamForSourceStmt,
+		incrementQueryStatsStmt:             q.incrementQueryStatsStmt,
 		insertAlertHistoryStmt:              q.insertAlertHistoryStmt,
 		insertQueryHistoryStmt:              q.insertQueryHistoryStmt,
 		isSourceManagedStmt:                 q.isSourceManagedStmt,
@@ -1289,6 +1326,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneAlertHistoryStmt:               q.pruneAlertHistoryStmt,
 		pruneExpiredQuerySharesStmt:         q.pruneExpiredQuerySharesStmt,
 		pruneQueryHistoryForUserStmt:        q.pruneQueryHistoryForUserStmt,
+		queryVolumeByDayStmt:                q.queryVolumeByDayStmt,
 		removeCollectionItemStmt:            q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:          q.removeCollectionMemberStmt,
 		removeTeamMemberStmt:                q.removeTeamMemberStmt,
@@ -1299,6 +1337,8 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		setUserManagedStmt:                  q.setUserManagedStmt,
 		setUserPasswordHashStmt:             q.setUserPasswordHashStmt,
 		teamHasSourceStmt:                   q.teamHasSourceStmt,
+		topSourcesByQueriesStmt:             q.topSourcesByQueriesStmt,
+		topUsersByQueriesStmt:               q.topUsersByQueriesStmt,
 		touchQueryShareStmt:                 q.touchQueryShareStmt,
 		updateAPITokenLastUsedStmt:          q.updateAPITokenLastUsedStmt,
 		updateAlertStmt:                     q.updateAlertStmt,

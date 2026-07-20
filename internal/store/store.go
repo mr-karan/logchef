@@ -153,6 +153,24 @@ type QueryHistoryStore interface {
 	// source name. It backs the admin recent-activity view; because
 	// query_history is capped per user, this is a recent window, not all-time.
 	ListQueryActivity(ctx context.Context, limit int) ([]models.QueryActivityRecord, error)
+
+	// IncrementQueryStats upserts one executed query into the non-pruned
+	// query_stats_daily rollup: it adds 1 to query_count and durationMs to
+	// total_duration_ms for the (bucketDate,userID,teamID,sourceID,language)
+	// key. bucketDate is 'YYYY-MM-DD' (UTC). Called at record time (best-effort)
+	// so all-time usage analytics stay correct despite query_history pruning.
+	IncrementQueryStats(ctx context.Context, bucketDate string, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, language models.QueryLanguage, durationMs int64) error
+	// TopSourcesByQueries returns sources ordered by total query count desc
+	// (capped at limit) over rollup rows with bucket_date >= since. source_name
+	// is "" when the source row is gone (LEFT JOIN); avg_duration_ms is
+	// total_duration_ms/query_count (integer, 0 when count 0).
+	TopSourcesByQueries(ctx context.Context, since string, limit int) ([]models.SourceQueryStat, error)
+	// TopUsersByQueries returns users ordered by total query count desc (capped
+	// at limit) over rollup rows with bucket_date >= since.
+	TopUsersByQueries(ctx context.Context, since string, limit int) ([]models.UserQueryStat, error)
+	// QueryVolumeByDay returns per-day total query counts (ascending by date)
+	// over rollup rows with bucket_date >= since.
+	QueryVolumeByDay(ctx context.Context, since string) ([]models.DailyQueryVolume, error)
 }
 
 // ExportJobStore persists asynchronous CSV/export job records.

@@ -995,3 +995,57 @@ JOIN users u ON u.id = qh.user_id
 LEFT JOIN sources s ON s.id = qh.source_id
 ORDER BY qh.created_at DESC, qh.id DESC
 LIMIT $1;
+
+-- Query stats daily rollup -----------------------------------------------------
+
+-- name: IncrementQueryStats :exec
+-- Upsert one executed query into the non-pruned daily rollup: add 1 to
+-- query_count and the given duration to total_duration_ms for the composite key.
+INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
+VALUES ($1, $2, $3, $4, $5, 1, $6)
+ON CONFLICT (bucket_date, user_id, team_id, source_id, query_language)
+DO UPDATE SET
+    query_count = query_stats_daily.query_count + 1,
+    total_duration_ms = query_stats_daily.total_duration_ms + EXCLUDED.total_duration_ms;
+
+-- name: TopSourcesByQueries :many
+-- Top sources by total query count over rollup rows on/after `since`, with the
+-- source display name (LEFT JOIN so a deleted source yields ''), and integer
+-- average duration (0 when count is 0).
+SELECT
+    qsd.source_id AS source_id,
+    COALESCE(s.name, '') AS source_name,
+    SUM(qsd.query_count)::bigint AS query_count,
+    (CASE WHEN SUM(qsd.query_count) > 0
+        THEN SUM(qsd.total_duration_ms) / SUM(qsd.query_count)
+        ELSE 0 END)::bigint AS avg_duration_ms
+FROM query_stats_daily qsd
+LEFT JOIN sources s ON s.id = qsd.source_id
+WHERE qsd.bucket_date >= $1
+GROUP BY qsd.source_id, s.name
+ORDER BY query_count DESC, qsd.source_id ASC
+LIMIT $2;
+
+-- name: TopUsersByQueries :many
+-- Top users by total query count over rollup rows on/after `since`, joined to
+-- users for the email.
+SELECT
+    qsd.user_id AS user_id,
+    u.email AS user_email,
+    SUM(qsd.query_count)::bigint AS query_count
+FROM query_stats_daily qsd
+JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= $1
+GROUP BY qsd.user_id, u.email
+ORDER BY query_count DESC, qsd.user_id ASC
+LIMIT $2;
+
+-- name: QueryVolumeByDay :many
+-- Per-day total query count over rollup rows on/after `since`, ascending by day.
+SELECT
+    qsd.bucket_date AS bucket_date,
+    SUM(qsd.query_count)::bigint AS query_count
+FROM query_stats_daily qsd
+WHERE qsd.bucket_date >= $1
+GROUP BY qsd.bucket_date
+ORDER BY qsd.bucket_date ASC;

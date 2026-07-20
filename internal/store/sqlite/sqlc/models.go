@@ -139,6 +139,16 @@ type QueryShare struct {
 	TeamID         sql.NullInt64 `json:"team_id"`
 }
 
+type QueryStatsDaily struct {
+	BucketDate      string `json:"bucket_date"`
+	UserID          int64  `json:"user_id"`
+	TeamID          int64  `json:"team_id"`
+	SourceID        int64  `json:"source_id"`
+	QueryLanguage   string `json:"query_language"`
+	QueryCount      int64  `json:"query_count"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
+}
+
 type SavedQuery struct {
 	ID                int64          `json:"id"`
 	SourceID          int64          `json:"source_id"`

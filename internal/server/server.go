@@ -295,6 +295,9 @@ func (s *Server) setupRoutes() {
 	// Recent query activity (admin recent-activity view over query_history).
 	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)
 
+	// Authoritative all-time usage analytics over the non-pruned query_stats_daily rollup.
+	admin.Get("/query-stats", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryStats)
+
 	// Provisioning Export
 	admin.Get("/provisioning/export", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleExportProvisioning)
 

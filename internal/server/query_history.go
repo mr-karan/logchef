@@ -31,5 +31,12 @@ func (s *Server) recordQueryHistory(user *models.User, teamID models.TeamID, sou
 		if err := s.sqlite.RecordQueryHistory(ctx, entry); err != nil {
 			s.log.Warn("failed to record query history", "error", err, "user_id", entry.UserID, "source_id", sourceID)
 		}
+		// Also increment the non-pruned daily rollup so all-time usage analytics
+		// stay correct even after query_history is pruned per user. Best-effort:
+		// log and swallow so recording never blocks or fails the query path.
+		bucketDate := time.Now().UTC().Format("2006-01-02")
+		if err := s.sqlite.IncrementQueryStats(ctx, bucketDate, entry.UserID, teamID, sourceID, entry.QueryLanguage, durationMs); err != nil {
+			s.log.Warn("failed to increment query stats", "error", err, "user_id", entry.UserID, "source_id", sourceID)
+		}
 	}()
 }

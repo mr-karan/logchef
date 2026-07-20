@@ -1426,6 +1426,40 @@ func (q *Queries) GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSo
 	return team_id, err
 }
 
+const incrementQueryStats = `-- name: IncrementQueryStats :exec
+
+INSERT INTO query_stats_daily (bucket_date, user_id, team_id, source_id, query_language, query_count, total_duration_ms)
+VALUES (?, ?, ?, ?, ?, 1, ?)
+ON CONFLICT (bucket_date, user_id, team_id, source_id, query_language)
+DO UPDATE SET
+    query_count = query_count + 1,
+    total_duration_ms = total_duration_ms + excluded.total_duration_ms
+`
+
+type IncrementQueryStatsParams struct {
+	BucketDate      string `json:"bucket_date"`
+	UserID          int64  `json:"user_id"`
+	TeamID          int64  `json:"team_id"`
+	SourceID        int64  `json:"source_id"`
+	QueryLanguage   string `json:"query_language"`
+	TotalDurationMs int64  `json:"total_duration_ms"`
+}
+
+// Query stats daily rollup -----------------------------------------------------
+// Upsert one executed query into the non-pruned daily rollup: add 1 to
+// query_count and the given duration to total_duration_ms for the composite key.
+func (q *Queries) IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error {
+	_, err := q.exec(ctx, q.incrementQueryStatsStmt, incrementQueryStats,
+		arg.BucketDate,
+		arg.UserID,
+		arg.TeamID,
+		arg.SourceID,
+		arg.QueryLanguage,
+		arg.TotalDurationMs,
+	)
+	return err
+}
+
 const insertAlertHistory = `-- name: InsertAlertHistory :one
 
 INSERT INTO alert_history (
@@ -3262,6 +3296,45 @@ func (q *Queries) PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHi
 	return err
 }
 
+const queryVolumeByDay = `-- name: QueryVolumeByDay :many
+SELECT
+    qsd.bucket_date AS bucket_date,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
+FROM query_stats_daily qsd
+WHERE qsd.bucket_date >= ?
+GROUP BY qsd.bucket_date
+ORDER BY qsd.bucket_date ASC
+`
+
+type QueryVolumeByDayRow struct {
+	BucketDate string `json:"bucket_date"`
+	QueryCount int64  `json:"query_count"`
+}
+
+// Per-day total query count over rollup rows on/after `since`, ascending by day.
+func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error) {
+	rows, err := q.query(ctx, q.queryVolumeByDayStmt, queryVolumeByDay, bucketDate)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []QueryVolumeByDayRow{}
+	for rows.Next() {
+		var i QueryVolumeByDayRow
+		if err := rows.Scan(&i.BucketDate, &i.QueryCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
 DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id = ?
 `
@@ -3425,6 +3498,114 @@ func (q *Queries) TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (b
 	var exists bool
 	err := row.Scan(&exists)
 	return exists, err
+}
+
+const topSourcesByQueries = `-- name: TopSourcesByQueries :many
+SELECT
+    qsd.source_id AS source_id,
+    COALESCE(s.name, '') AS source_name,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count,
+    CAST(CASE WHEN SUM(qsd.query_count) > 0
+        THEN SUM(qsd.total_duration_ms) / SUM(qsd.query_count)
+        ELSE 0 END AS INTEGER) AS avg_duration_ms
+FROM query_stats_daily qsd
+LEFT JOIN sources s ON s.id = qsd.source_id
+WHERE qsd.bucket_date >= ?
+GROUP BY qsd.source_id, s.name
+ORDER BY query_count DESC, qsd.source_id ASC
+LIMIT ?
+`
+
+type TopSourcesByQueriesParams struct {
+	BucketDate string `json:"bucket_date"`
+	Limit      int64  `json:"limit"`
+}
+
+type TopSourcesByQueriesRow struct {
+	SourceID      int64  `json:"source_id"`
+	SourceName    string `json:"source_name"`
+	QueryCount    int64  `json:"query_count"`
+	AvgDurationMs int64  `json:"avg_duration_ms"`
+}
+
+// Top sources by total query count over rollup rows on/after `since`, with the
+// source display name (LEFT JOIN so a deleted source yields ”), and integer
+// average duration (0 when count is 0).
+func (q *Queries) TopSourcesByQueries(ctx context.Context, arg TopSourcesByQueriesParams) ([]TopSourcesByQueriesRow, error) {
+	rows, err := q.query(ctx, q.topSourcesByQueriesStmt, topSourcesByQueries, arg.BucketDate, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopSourcesByQueriesRow{}
+	for rows.Next() {
+		var i TopSourcesByQueriesRow
+		if err := rows.Scan(
+			&i.SourceID,
+			&i.SourceName,
+			&i.QueryCount,
+			&i.AvgDurationMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const topUsersByQueries = `-- name: TopUsersByQueries :many
+SELECT
+    qsd.user_id AS user_id,
+    u.email AS user_email,
+    CAST(SUM(qsd.query_count) AS INTEGER) AS query_count
+FROM query_stats_daily qsd
+JOIN users u ON u.id = qsd.user_id
+WHERE qsd.bucket_date >= ?
+GROUP BY qsd.user_id, u.email
+ORDER BY query_count DESC, qsd.user_id ASC
+LIMIT ?
+`
+
+type TopUsersByQueriesParams struct {
+	BucketDate string `json:"bucket_date"`
+	Limit      int64  `json:"limit"`
+}
+
+type TopUsersByQueriesRow struct {
+	UserID     int64  `json:"user_id"`
+	UserEmail  string `json:"user_email"`
+	QueryCount int64  `json:"query_count"`
+}
+
+// Top users by total query count over rollup rows on/after `since`, joined to
+// users for the email.
+func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error) {
+	rows, err := q.query(ctx, q.topUsersByQueriesStmt, topUsersByQueries, arg.BucketDate, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []TopUsersByQueriesRow{}
+	for rows.Next() {
+		var i TopUsersByQueriesRow
+		if err := rows.Scan(&i.UserID, &i.UserEmail, &i.QueryCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchQueryShare = `-- name: TouchQueryShare :exec

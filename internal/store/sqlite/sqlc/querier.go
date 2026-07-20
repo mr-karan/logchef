@@ -136,6 +136,10 @@ type Querier interface {
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
 	// Get a team ID that the user belongs to and that has access to the source
 	GetUserTeamForSource(ctx context.Context, arg GetUserTeamForSourceParams) (int64, error)
+	// Query stats daily rollup -----------------------------------------------------
+	// Upsert one executed query into the non-pruned daily rollup: add 1 to
+	// query_count and the given duration to total_duration_ms for the composite key.
+	IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
 	// Query history ---------------------------------------------------------------
@@ -224,6 +228,8 @@ type Querier interface {
 	// Delete a user's history rows beyond the newest `offset` (the per-user cap),
 	// keeping history bounded on every insert.
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
+	// Per-day total query count over rollup rows on/after `since`, ascending by day.
+	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection
@@ -244,6 +250,13 @@ type Querier interface {
 	// Additional queries for user-source and team-source access
 	// Check if a team has access to a source
 	TeamHasSource(ctx context.Context, arg TeamHasSourceParams) (bool, error)
+	// Top sources by total query count over rollup rows on/after `since`, with the
+	// source display name (LEFT JOIN so a deleted source yields ''), and integer
+	// average duration (0 when count is 0).
+	TopSourcesByQueries(ctx context.Context, arg TopSourcesByQueriesParams) ([]TopSourcesByQueriesRow, error)
+	// Top users by total query count over rollup rows on/after `since`, joined to
+	// users for the email.
+	TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error)
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token
