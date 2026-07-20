@@ -59,6 +59,16 @@ const jsonLd = {
       operatingSystem: "Linux, macOS, Windows",
       description:
         "Open-source, self-hosted log exploration and alerting UI that connects to existing ClickHouse or VictoriaLogs data without owning ingestion or forcing a schema.",
+      featureList: [
+        "Query ClickHouse and VictoriaLogs sources from one UI",
+        "LogchefQL, native ClickHouse SQL, and LogsQL queries",
+        "Live tail (stream logs in real time)",
+        "Dashboards with time-series, stat, and table panels",
+        "Alerting via email and webhooks",
+        "Command-line interface",
+      ],
+      screenshot: new URL("/screenshots/hero-light.png", siteUrl).toString(),
+      downloadUrl: `${githubUrl}/releases`,
       offers: {
         "@type": "Offer",
         price: "0",

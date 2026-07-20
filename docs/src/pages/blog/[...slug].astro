@@ -41,15 +41,29 @@ const initials = post.data.author
 
 const canonicalUrl = new URL(`/blog/${post.id}/`, Astro.site).toString();
 
+const heroImageUrl = post.data.heroImage
+  ? new URL(post.data.heroImage, Astro.site).toString()
+  : new URL('/screenshots/hero-light.png', Astro.site).toString();
+
 const jsonLd = {
   '@context': 'https://schema.org',
   '@type': 'BlogPosting',
   headline: post.data.title,
   description: post.data.description,
+  image: heroImageUrl,
   datePublished: post.data.pubDate.toISOString(),
+  dateModified: post.data.pubDate.toISOString(),
   author: {
     '@type': 'Organization',
     name: post.data.author,
+  },
+  publisher: {
+    '@type': 'Organization',
+    name: 'Logchef',
+    logo: {
+      '@type': 'ImageObject',
+      url: new URL('/logchef-wordmark.svg', Astro.site).toString(),
+    },
   },
   mainEntityOfPage: {
     '@type': 'WebPage',
