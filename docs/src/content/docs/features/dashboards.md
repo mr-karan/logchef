@@ -57,6 +57,20 @@ Panels render correctly for viewers in any timezone: histogram buckets (time ser
 panels) align to your local timezone, while table and stat panels use a UTC-anchored
 query internally so their time window doesn't shift for non-UTC viewers.
 
+## Result caching
+
+Because every panel re-runs on each refresh, a busy dashboard can hammer the
+backend: *N* panels open by *M* viewers is up to *N×M* queries per refresh cycle.
+Each dashboard has a **cache TTL** in its settings (default 10 minutes) that turns
+on a shared, server-side result cache. The first viewer's query fills the cache and
+everyone else within that window is served the stored result, so a panel hits the
+backend at most once per TTL. Set the TTL to `0` to disable caching for that
+dashboard and always query live.
+
+The cache covers dashboard panels only — explorer and other ad-hoc queries are never
+cached. Server-wide limits (total size, per-entry cap, entry count) are set with the
+[`[dashboard_cache]` config](/getting-started/configuration/#dashboard-result-cache).
+
 ## Chart styles
 
 Time series panels can render as **bars** (default), **line**, or **area**. Set the

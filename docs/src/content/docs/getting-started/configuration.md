@@ -286,6 +286,40 @@ query_per_user_per_minute = 120    # /logs/query, /logs/histogram, field values
 
 Rejections return HTTP 429 and increment the `logchef_rate_limit_rejections_total{scope}` metric.
 
+### Dashboard result cache
+
+Dashboards auto-refresh every panel on an interval, so a dashboard with *N*
+panels open by *M* viewers can generate up to *N×M* backend queries per refresh
+cycle. A shared, server-side result cache collapses that into one backend hit
+per panel per TTL window: the first request fills the cache, and every other
+request in that window is served the stored result.
+
+Caching is **per dashboard**: each dashboard's TTL lives in its own settings
+(default 10m; `0` disables caching for that dashboard). Only dashboard panel
+requests are cached — explorer and other ad-hoc queries are never cached. The
+`[dashboard_cache]` section sets the server-wide switch and bounds.
+
+```toml
+[dashboard_cache]
+# Master switch for the per-dashboard result cache.
+enabled = true
+# Default TTL applied when a dashboard does not set its own (client default mirror).
+default_ttl = "10m"
+# Hard clamp on any dashboard's requested TTL.
+max_ttl = "1h"
+# Total encoded bytes held across all cache entries (64 MiB).
+max_bytes = 67108864
+# Per-response cap; responses larger than this bypass the cache instead of being stored (4 MiB).
+max_entry_bytes = 4194304
+# Maximum number of cache entries.
+max_entries = 1024
+# Bounds concurrent distinct datasource fills. Worst-case in-flight buffering is
+# max_concurrent_fills × max_entry_bytes.
+max_concurrent_fills = 8
+```
+
+**Environment variables:** `LOGCHEF_DASHBOARD_CACHE__ENABLED=false`, `LOGCHEF_DASHBOARD_CACHE__MAX_TTL=30m`
+
 :::caution[Behind a reverse proxy]
 The per-IP limiter keys on the client IP. Logchef does not yet read
 `X-Forwarded-For`, so behind a reverse proxy every request appears to come from
