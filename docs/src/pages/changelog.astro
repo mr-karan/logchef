@@ -91,7 +91,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        <strong>VictoriaLogs is now a first-class datasource</strong> alongside ClickHouse. Add a VictoriaLogs source, query it with LogchefQL (compiled to LogsQL) or raw LogsQL, and use it with alerts and live tail — the same explorer, dashboards, and access control you already use for ClickHouse. This release also brings built-in local authentication, capability-driven datasources, live tail, a dashboards upgrade, per-user query history with admin usage analytics, and a broad performance and hardening pass.
+        <strong>VictoriaLogs is now a first-class datasource</strong>, right alongside ClickHouse. Add a VictoriaLogs source and explore it in the same place, with the same queries, dashboards, and access control you already use for your ClickHouse logs. This release also adds email-and-password login, easier dashboard editing, your own query history, and a round of speed and reliability work.
       </p>
 
       <div class="change-section">
@@ -100,16 +100,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>VictoriaLogs datasource</strong>: Add a source with a base URL, auth mode (none / basic / bearer), optional multi-tenant account &amp; project IDs, and an immutable scope query applied to every request. Query in LogchefQL (compiled to LogsQL) or native LogsQL. Alerts support both a condition builder and native <code>stats_query</code>. AI SQL generation, log context, and streamed exports remain ClickHouse-only for now. <a href="/tutorials/victorialogs/">VictoriaLogs guide &rarr;</a></li>
-          <li><strong>Built-in local authentication</strong>: Run Logchef with email+password login, with or without OIDC. Configure via <code>[auth.local]</code> (<code>enabled</code>, <code>admin_email</code>, <code>admin_password</code>). Rate-limited per IP and per email. <a href="/getting-started/configuration/#local-authentication-run-without-oidc">Learn more &rarr;</a></li>
-          <li><strong>SSO auto-provisioning</strong>: A first-time OIDC login from an allowed email domain creates the user automatically instead of failing with "user not found". Configure via <code>[auth.auto_provision]</code> (<code>enabled</code>, <code>allowed_domains</code>, <code>default_team_ids</code>); off by default, exact case-insensitive domain match, new users are always regular members and stay unmanaged by declarative provisioning. <a href="/getting-started/configuration/#sso-auto-provisioning-jit-user-creation">Learn more &rarr;</a></li>
-          <li><strong>Live tail</strong>: A <strong>Live</strong> toggle in the explorer streams matching rows over SSE. ClickHouse is polled (<code>[tail] poll_interval</code>); VictoriaLogs proxies its native tail stream directly. Works in LogchefQL mode on any source, and in native LogsQL mode on VictoriaLogs.</li>
-          <li><strong>Dashboards: grid-canvas editing</strong>: Drag a panel by its header to move it, drag its corner to resize. A full-height panel builder drawer (with a live query preview) replaces the old form sheet.</li>
-          <li><strong>Dashboards: chart styles</strong>: Time series panels render as bars, line, or area, set per panel.</li>
-          <li><strong>Dashboard result caching</strong>: Dashboards cache panel query results server-side, per dashboard (default 10-minute TTL, configurable per dashboard, <code>0</code> = off), so a wall of auto-refreshing panels collapses to one backend hit per window instead of N panels &times; M viewers hammering the datasource. Only dashboard panels are cached; ad-hoc explorer queries never are. Tunable via <code>[dashboard_cache]</code>.</li>
-          <li><strong>Persistent query history &amp; usage analytics</strong>: Executed queries are recorded per user — browse your recent queries in the explorer and via <code>logchef history</code> in the CLI. Admins get a <strong>Query Activity</strong> view: recent activity across all users plus all-time usage analytics (top sources, top users, query volume over time), backed by a non-pruned daily rollup.</li>
-          <li><strong>Per-source ClickHouse query settings</strong>: A source can pin ClickHouse query settings — <code>max_execution_time</code>, result/read row &amp; byte caps, <code>readonly</code>, overflow mode — applied to every query on that source as hard guardrails for shared clusters. Set them in the source form's advanced section.</li>
-          <li><strong>Client-side column filters</strong>: Click a column header's filter icon to narrow currently-loaded rows by a contains match or a numeric comparison (<code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>=</code>). No extra query is sent.</li>
+          <li><strong>VictoriaLogs datasource</strong>: Connect a VictoriaLogs instance and query it with LogchefQL or native LogsQL, then use it across the explorer, dashboards, alerts, and live tail. AI query generation, log context, and streamed exports are still ClickHouse-only for now. <a href="/tutorials/victorialogs/">VictoriaLogs guide &rarr;</a></li>
+          <li><strong>Email &amp; password login</strong>: Run Logchef with local accounts, alongside your SSO provider or without one at all. <a href="/getting-started/configuration/#local-authentication-run-without-oidc">Learn more &rarr;</a></li>
+          <li><strong>Automatic SSO sign-up</strong>: If your administrator turns it on, a first sign-in from an approved email domain creates the account automatically instead of failing. <a href="/getting-started/configuration/#sso-auto-provisioning-jit-user-creation">Learn more &rarr;</a></li>
+          <li><strong>Live tail</strong>: Flip on Live in the explorer to watch matching log lines stream in as they arrive, on either datasource.</li>
+          <li><strong>Easier dashboard editing</strong>: Drag panels to move and resize them right on the dashboard, and edit each panel in a larger builder with a live preview.</li>
+          <li><strong>Dashboard chart styles</strong>: Show time-series panels as bars, lines, or areas, chosen per panel.</li>
+          <li><strong>Faster dashboards</strong>: Dashboards briefly reuse recent panel results, so a page full of panels loads quickly instead of re-running every query for every viewer.</li>
+          <li><strong>Query history</strong>: Reopen your recent queries from the explorer or with <code>logchef history</code> in the CLI. Admins also get a Query Activity view with recent queries and overall usage by source and user.</li>
+          <li><strong>Per-source query limits</strong>: If you run Logchef, you can cap what each ClickHouse source may spend on a single query, so one heavy query can't hog a shared cluster.</li>
+          <li><strong>Quick column filters</strong>: Filter the rows already on screen from any column header, by text match or number comparison, without running another query.</li>
         </ul>
       </div>
 
@@ -119,11 +119,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Source credentials are never echoed back</strong> in API responses. A <code>has_password</code> flag replaces the stored credential; blank on update means "keep existing".</li>
-          <li><strong>Sparse and grouped histograms render as continuous charts</strong>: gaps between the first and last bucket are now zero-filled, in both the explorer and dashboard panels.</li>
-          <li><strong>Dashboard panels are timezone-correct for every viewer</strong>: time-series buckets align to your local timezone; table/stat panels use an internally UTC-pinned query so their window doesn't shift.</li>
-          <li><strong>Opt-in rate limiting</strong>: <code>[rate_limit]</code> adds per-IP and global limits on the unauthenticated auth/token endpoints and a per-user limit on query endpoints. Off by default.</li>
-          <li><strong>Trusted-proxy client-IP resolution</strong>: <code>[server] trusted_proxies</code> / <code>proxy_header</code> make <code>X-Forwarded-For</code> handling safe behind a reverse proxy — the forwarded header is read only when the direct peer is a configured trusted proxy, so it can't be spoofed.</li>
+          <li><strong>Credentials stay private</strong>: Logchef no longer returns a source's saved password in its API, and you can update a source without re-typing it.</li>
+          <li><strong>Cleaner histogram charts</strong>: gaps in sparse or grouped data now show as zero instead of leaving holes, so charts read cleanly in the explorer and on dashboards.</li>
+          <li><strong>Correct times for every viewer</strong>: dashboard panels show timestamps in each viewer's own timezone.</li>
+          <li><strong>Optional request limits</strong>: if you run Logchef, you can rate-limit login and query traffic to protect a busy instance.</li>
+          <li><strong>Safer reverse-proxy setup</strong>: if you run Logchef behind a reverse proxy, it identifies the real client address without trusting forwarding headers that could be spoofed.</li>
         </ul>
       </div>
 
