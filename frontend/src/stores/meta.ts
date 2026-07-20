@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
-import { metaApi, type MetaResponse } from "@/api/meta";
+import { metaApi, type MetaResponse, type DashboardCachePolicy } from "@/api/meta";
 import { useBaseStore } from "./base";
 import type { APIErrorResponse } from "@/api/types";
 
@@ -15,7 +15,28 @@ interface MetaState {
   alertsEnabled: boolean;
   localAuthEnabled: boolean;
   oidcEnabled: boolean;
+  // Server dashboard-cache policy. null = absent (old server) OR malformed →
+  // "cache unavailable / fail closed" (resolveEffectiveCacheTtl returns 0).
+  dashboardCachePolicy: DashboardCachePolicy | null;
   isInitialized: boolean;
+}
+
+// Validate the server's dashboard_cache blob. Anything absent or the wrong
+// shape collapses to null so callers fail closed rather than caching against a
+// guessed policy (which would change query-window semantics + risk stale data).
+function parseDashboardCachePolicy(
+  raw: MetaResponse["dashboard_cache"]
+): DashboardCachePolicy | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.enabled !== "boolean") return null;
+  if (typeof raw.default_ttl_seconds !== "number" || typeof raw.max_ttl_seconds !== "number") {
+    return null;
+  }
+  return {
+    enabled: raw.enabled,
+    default_ttl_seconds: raw.default_ttl_seconds,
+    max_ttl_seconds: raw.max_ttl_seconds,
+  };
 }
 
 export const useMetaStore = defineStore("meta", () => {
@@ -32,6 +53,7 @@ export const useMetaStore = defineStore("meta", () => {
     alertsEnabled: true,
     localAuthEnabled: false,
     oidcEnabled: true,
+    dashboardCachePolicy: null,
     isInitialized: false,
   });
 
@@ -46,6 +68,7 @@ export const useMetaStore = defineStore("meta", () => {
   const alertsEnabled = computed(() => state.data.value.alertsEnabled);
   const localAuthEnabled = computed(() => state.data.value.localAuthEnabled);
   const oidcEnabled = computed(() => state.data.value.oidcEnabled);
+  const dashboardCachePolicy = computed(() => state.data.value.dashboardCachePolicy);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
@@ -73,6 +96,7 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.alertsEnabled = response.alerts_enabled ?? true;
               state.data.value.localAuthEnabled = response.local_auth_enabled ?? false;
               state.data.value.oidcEnabled = response.oidc_enabled ?? true;
+              state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
               state.data.value.isInitialized = true;
             }
           },
@@ -100,6 +124,7 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.alertsEnabled = true;
     state.data.value.localAuthEnabled = false;
     state.data.value.oidcEnabled = true;
+    state.data.value.dashboardCachePolicy = null;
     state.data.value.isInitialized = false;
   }
 
@@ -114,6 +139,7 @@ export const useMetaStore = defineStore("meta", () => {
     alertsEnabled,
     localAuthEnabled,
     oidcEnabled,
+    dashboardCachePolicy,
     isInitialized,
     error,
     loadMeta,

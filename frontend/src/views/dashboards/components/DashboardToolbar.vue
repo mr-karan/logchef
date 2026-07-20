@@ -44,6 +44,24 @@ const selectedQuickRange = computed(() =>
   store.timeRelative ? `Last ${store.timeRelative}` : null
 );
 
+// The window actually queried by the last refresh (may differ from the
+// selection when caching snaps a rolling range to a TTL bucket). Shown so users
+// can see what was executed rather than only what they picked.
+function fmtTime(ms: number): string {
+  return new Date(ms).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+const appliedRangeLabel = computed(() => {
+  const r = store.appliedRange;
+  if (!r) return null;
+  return `${fmtTime(r.start)} → ${fmtTime(r.end)}`;
+});
+
 function handleRangeChange(value: any) {
   const quick = dateTimePickerRef.value?.selectedQuickRange as string | null | undefined;
   if (quick) {
@@ -115,5 +133,13 @@ function manualRefresh() {
     >
       <RefreshCw class="h-3.5 w-3.5" :class="{ 'animate-spin': isRefreshing }" />
     </Button>
+
+    <span
+      v-if="appliedRangeLabel"
+      class="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap"
+      title="Time window actually queried (may be snapped to the cache bucket)"
+    >
+      Queried: {{ appliedRangeLabel }}
+    </span>
   </div>
 </template>

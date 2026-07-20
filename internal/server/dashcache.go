@@ -38,14 +38,19 @@ func (s *Server) dashboardCacheParams(cd *models.CacheDirective) (time.Duration,
 	if cd == nil || cd.Scope != dashboardCacheScope {
 		return 0, false
 	}
-	eff := time.Duration(cd.TTLSeconds) * time.Second
-	if maxTTL := s.config.DashboardCache.MaxTTL; maxTTL > 0 && eff > maxTTL {
-		eff = maxTTL
+	// Clamp the requested seconds BEFORE converting to a Duration: a
+	// maliciously large JSON integer times time.Second (1e9) would overflow
+	// int64 and wrap. Clamping the plain second count first keeps it bounded.
+	secs := cd.TTLSeconds
+	if maxTTL := s.config.DashboardCache.MaxTTL; maxTTL > 0 {
+		if maxSecs := int(maxTTL / time.Second); secs > maxSecs {
+			secs = maxSecs
+		}
 	}
-	if eff <= 0 {
+	if secs <= 0 {
 		return 0, false
 	}
-	return eff, true
+	return time.Duration(secs) * time.Second, true
 }
 
 // canonCacheTime renders a time pointer as its canonical UTC RFC3339Nano form

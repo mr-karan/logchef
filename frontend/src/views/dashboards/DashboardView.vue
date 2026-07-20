@@ -24,6 +24,7 @@ import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
 import { useDashboardsStore, DEFAULT_DASHBOARD_CACHE_TTL_SECONDS } from "@/stores/dashboards";
+import { useMetaStore } from "@/stores/meta";
 import {
   normalizeDashboardLayout,
   cellRect,
@@ -43,6 +44,7 @@ import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/da
 const route = useRoute();
 const router = useRouter();
 const store = useDashboardsStore();
+const metaStore = useMetaStore();
 
 // Grid geometry. 12 columns; each layout row is ROW_HEIGHT px tall.
 const ROW_HEIGHT_PX = 60;
@@ -133,7 +135,11 @@ function removePanel(id: string) {
 
 // --- Cache TTL (edit mode) ---------------------------------------------------
 // Presets for the per-dashboard result-cache TTL, persisted in the panels blob
-// as cache_ttl_seconds. Off (0) disables caching; the default is 10m.
+// as cache_ttl_seconds. Off (0) disables caching. When a dashboard sets no
+// value, the effective TTL is the SERVER's advertised default — so the "Default"
+// shown here is derived from the server policy (falling back to a constant only
+// when the server advertises no policy). We never rewrite a dashboard's saved
+// cache_ttl_seconds just because the current server would clamp it differently.
 const CACHE_TTL_OPTIONS = [
   { label: "Off", seconds: 0 },
   { label: "1m", seconds: 60 },
@@ -143,12 +149,18 @@ const CACHE_TTL_OPTIONS = [
   { label: "1h", seconds: 3600 },
 ];
 
+const defaultCacheTtlSeconds = computed(
+  () => metaStore.dashboardCachePolicy?.default_ttl_seconds ?? DEFAULT_DASHBOARD_CACHE_TTL_SECONDS
+);
 const cacheTtlSeconds = computed(
-  () => store.editDraft?.cache_ttl_seconds ?? DEFAULT_DASHBOARD_CACHE_TTL_SECONDS
+  () => store.editDraft?.cache_ttl_seconds ?? defaultCacheTtlSeconds.value
 );
-const cacheTtlLabel = computed(
-  () => CACHE_TTL_OPTIONS.find((o) => o.seconds === cacheTtlSeconds.value)?.label ?? "Custom"
-);
+const cacheTtlLabel = computed(() => {
+  const match = CACHE_TTL_OPTIONS.find((o) => o.seconds === cacheTtlSeconds.value)?.label ?? "Custom";
+  // When the dashboard hasn't set its own TTL, annotate that this value is the
+  // server default rather than an explicit per-dashboard choice.
+  return store.editDraft?.cache_ttl_seconds == null ? `${match} (default)` : match;
+});
 
 function selectCacheTtl(seconds: number) {
   store.setDraftCacheTtl(seconds);

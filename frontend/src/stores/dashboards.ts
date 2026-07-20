@@ -1,6 +1,8 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
 import { useBaseStore } from "@/stores/base";
+import { useMetaStore } from "@/stores/meta";
+import type { DashboardCachePolicy } from "@/api/meta";
 import {
   dashboardsApi,
   dashboardPanelApi,
@@ -39,8 +41,10 @@ const REFRESH_COALESCE_MS = 80;
 
 const DEFAULT_RELATIVE_TIME = "15m";
 
-// Per-dashboard result-cache TTL used when the blob carries no cache_ttl_seconds.
-// Mirrors the backend's DEFAULT_DASHBOARD_CACHE_TTL_SECONDS (config) — keep equal.
+// UI fallback for the "Default" cache-TTL label shown in the edit toolbar when
+// the server advertises no policy (old server). The authoritative default now
+// comes from the server's dashboard_cache.default_ttl_seconds (see meta store);
+// this constant is only the last-resort display fallback.
 export const DEFAULT_DASHBOARD_CACHE_TTL_SECONDS = 600;
 // Panel queries run in the viewer's browser timezone (falling back to UTC if
 // it can't be resolved). This used to be hardcoded to UTC because the
@@ -91,6 +95,10 @@ interface DashboardsState {
   panelStates: Record<string, PanelState>;
   timeRelative: string | null;
   timeAbsolute: EffectiveRange | null;
+  // The range actually EXECUTED by the most recent refresh (snapped/moving),
+  // for toolbar display. Distinct from `effectiveRange` (the user's SELECTED
+  // range). null until the first refresh runs.
+  appliedRange: EffectiveRange | null;
   refreshIntervalMs: number;
   // Edit mode. `editDraft` is the working copy of the panel blob being mutated;
   // `editSnapshotJson` is the JSON of the blob at the moment Edit was entered,
@@ -157,17 +165,63 @@ function isAbort(err: unknown): boolean {
   );
 }
 
-// Resolve a dashboard's effective cache TTL (seconds) from its panels blob:
-// absent => the default (600); 0 => caching OFF; >0 => that value. A malformed
-// value (negative/non-finite) falls back to the default rather than caching with
-// a nonsense TTL.
-function resolveCacheTtlSeconds(blob: DashboardPanels | null | undefined): number {
-  const raw = blob?.cache_ttl_seconds;
-  if (raw === undefined || raw === null) return DEFAULT_DASHBOARD_CACHE_TTL_SECONDS;
-  if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) {
-    return DEFAULT_DASHBOARD_CACHE_TTL_SECONDS;
+// Resolve a dashboard's EFFECTIVE result-cache TTL (seconds), combining the blob
+// value with the server's advertised policy. Client and server apply the SAME
+// clamp with the SAME max, so the snap bucket, the directive TTL, and the
+// server-side cache TTL all coincide.
+//
+// FAILS CLOSED to 0 (no caching) whenever the policy is missing/disabled/
+// malformed — this is deliberate. Guessing enabled/600 on a stale or old server
+// would change the query-window semantics (snapping) and risk serving stale
+// data against a cache the server may not even keep.
+export function resolveEffectiveCacheTtl(
+  blobTtl: number | null | undefined,
+  policy: DashboardCachePolicy | null | undefined
+): number {
+  // Old/malformed server, or cache disabled → fail closed (no caching).
+  if (!policy || policy.enabled !== true) return 0;
+  if (!Number.isSafeInteger(policy.default_ttl_seconds) || policy.default_ttl_seconds < 1) return 0;
+  if (!Number.isSafeInteger(policy.max_ttl_seconds) || policy.max_ttl_seconds < 1) return 0;
+
+  if (blobTtl === 0) return 0; // explicit per-dashboard "off"
+  const requested =
+    blobTtl === undefined || blobTtl === null
+      ? policy.default_ttl_seconds // dashboard didn't set one → server default
+      : blobTtl;
+  if (!Number.isSafeInteger(requested) || requested < 1) return 0; // fail closed on garbage
+  return Math.min(requested, policy.max_ttl_seconds); // clamp to server max (same clamp the server applies)
+}
+
+// Compute the range actually executed for a refresh, given an injected `nowMs`.
+// Pure + fake-clock testable. `baseStart`/`baseEnd` are the unsnapped range for
+// this now (from the existing time parsing); `durationMs` is only meaningful for
+// "rolling".
+//
+// - absolute → passthrough (never snapped; its key is naturally stable).
+// - calendar (today/yesterday) → passthrough, PRESERVING calendar boundaries —
+//   never subtract a rolling duration (which would move the day off its edge).
+// - rolling + effTtl>0 → snap the end to the current TTL bucket so successive
+//   refreshes within a bucket produce a byte-identical (cacheable) query.
+// - rolling + effTtl===0 → no snap; a fresh moving window anchored on nowMs.
+export function resolveAppliedRange(input: {
+  kind: "rolling" | "calendar" | "absolute";
+  baseStart: number;
+  baseEnd: number;
+  durationMs: number;
+  effTtlSeconds: number;
+  nowMs: number;
+}): { start: number; end: number } {
+  const { kind, baseStart, baseEnd, durationMs, effTtlSeconds, nowMs } = input;
+  if (kind === "absolute" || kind === "calendar") {
+    return { start: baseStart, end: baseEnd };
   }
-  return raw;
+  // rolling
+  if (effTtlSeconds > 0) {
+    const ttlMs = effTtlSeconds * 1000;
+    const bucketEnd = Math.floor(nowMs / ttlMs) * ttlMs;
+    return { start: bucketEnd - durationMs, end: bucketEnd };
+  }
+  return { start: nowMs - durationMs, end: nowMs };
 }
 
 function classifyPanelError(err: unknown): { locked: boolean; message: string } {
@@ -187,12 +241,17 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     panelStates: {},
     timeRelative: DEFAULT_RELATIVE_TIME,
     timeAbsolute: null,
+    appliedRange: null,
     refreshIntervalMs: 0,
     isEditing: false,
     editDraft: null,
     editSnapshotJson: null,
     previewState: null,
   });
+
+  // Server dashboard-cache policy source. Read fresh per refresh so a late
+  // /meta load (or a policy change) is picked up without reloading the store.
+  const metaStore = useMetaStore();
 
   // Non-reactive: the controller aborting the in-flight refresh batch.
   let refreshAbort: AbortController | null = null;
@@ -220,6 +279,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const panelStates = computed(() => state.data.value.panelStates);
   const timeRelative = computed(() => state.data.value.timeRelative);
   const timeAbsolute = computed(() => state.data.value.timeAbsolute);
+  const appliedRange = computed(() => state.data.value.appliedRange);
   const refreshIntervalMs = computed(() => state.data.value.refreshIntervalMs);
 
   const isEditing = computed(() => state.data.value.isEditing);
@@ -255,6 +315,54 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       end: calendarDateTimeToTimestamp(end),
     };
   });
+
+  // Resolve the range to EXECUTE for a refresh, anchored on a caller-supplied
+  // `nowMs` (captured once per refresh — do NOT read the memoized effectiveRange
+  // here, that's what freezes `now`). Classifies the current selection, derives
+  // the unsnapped base range from the existing time parsing, then delegates the
+  // snap/moving-window decision to the pure resolveAppliedRange.
+  function computeAppliedRange(nowMs: number, effTtlSeconds: number): EffectiveRange {
+    const abs = state.data.value.timeAbsolute;
+    if (abs) {
+      return resolveAppliedRange({
+        kind: "absolute",
+        baseStart: abs.start,
+        baseEnd: abs.end,
+        durationMs: 0,
+        effTtlSeconds,
+        nowMs,
+      });
+    }
+    const rel = state.data.value.timeRelative ?? DEFAULT_RELATIVE_TIME;
+    const parse = (s: string) => {
+      const { start, end } = parseRelativeTimeString(s);
+      return { start: calendarDateTimeToTimestamp(start), end: calendarDateTimeToTimestamp(end) };
+    };
+    // today/yesterday are calendar-boundary presets — never snapped.
+    const kind: "calendar" | "rolling" = rel === "today" || rel === "yesterday" ? "calendar" : "rolling";
+    try {
+      const { start, end } = parse(rel);
+      return resolveAppliedRange({
+        kind,
+        baseStart: start,
+        baseEnd: end,
+        durationMs: end - start,
+        effTtlSeconds,
+        nowMs,
+      });
+    } catch {
+      // Unparseable relative → fall back to the default rolling window.
+      const { start, end } = parse(DEFAULT_RELATIVE_TIME);
+      return resolveAppliedRange({
+        kind: "rolling",
+        baseStart: start,
+        baseEnd: end,
+        durationMs: end - start,
+        effTtlSeconds,
+        nowMs,
+      });
+    }
+  }
 
   function getPanelState(panelId: string): PanelState {
     return state.data.value.panelStates[panelId] ?? { status: "idle" };
@@ -555,28 +663,33 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     refreshAbort = controller;
     const signal = controller.signal;
 
-    // Resolve the dashboard's effective cache TTL once for the whole refresh.
-    const effTTL = resolveCacheTtlSeconds(dashboard.panels);
-    const cache: CacheDirective | undefined =
-      effTTL > 0 ? { scope: "dashboard", ttl_seconds: effTTL } : undefined;
+    // Capture the clock ONCE for this refresh. Everything downstream (snap
+    // bucket, moving window) anchors on this — NOT on the memoized
+    // effectiveRange computed, which keys on the selection string and so
+    // freezes `now` between selection changes (the frozen-now auto-refresh bug).
+    const nowMs = Date.now();
 
-    // Compute the panel range ONCE so every panel in this refresh shares an
+    // Resolve the dashboard's effective cache TTL once for the whole refresh,
+    // combining the blob value with the server's advertised policy (fail-closed
+    // to 0 when the server advertises no/disabled/malformed policy).
+    const effTtl = resolveEffectiveCacheTtl(dashboard.panels?.cache_ttl_seconds, metaStore.dashboardCachePolicy);
+    // Send the directive ONLY when caching is actually on.
+    const cache: CacheDirective | undefined =
+      effTtl > 0 ? { scope: "dashboard", ttl_seconds: effTtl } : undefined;
+
+    // Compute the executed range ONCE so every panel in this refresh shares an
     // identical window — a prerequisite for cross-panel/-viewer cache collapse.
-    // When caching is on AND the selected range is RELATIVE, snap the window to
-    // the current TTL bucket so successive refreshes within a bucket produce a
+    // For a rolling relative with caching on, this snaps the window to the
+    // current TTL bucket so successive refreshes within a bucket produce a
     // byte-identical query (and thus the same cache key). This MUST happen here,
     // upstream of resolveNativeQuery/translate, because ClickHouse bakes the
-    // start/end timestamps into the compiled SQL — a snap applied only at request
-    // time (after translation) would never reach the executed query. Absolute
-    // ranges are already stable, so they pass through unchanged.
-    let range = effectiveRange.value;
-    if (effTTL > 0 && state.data.value.timeRelative !== null) {
-      const durationMs = range.end - range.start;
-      const ttlMs = effTTL * 1000;
-      const bucketEnd = Math.floor(Date.now() / ttlMs) * ttlMs;
-      const bucketStart = bucketEnd - durationMs;
-      range = { start: bucketStart, end: bucketEnd };
-    }
+    // start/end timestamps into the compiled SQL — a snap applied only at
+    // request time (after translation) would never reach the executed query.
+    // today/yesterday (calendar) and absolute ranges pass through unsnapped;
+    // when caching is off, rolling windows move with `nowMs`.
+    const range = computeAppliedRange(nowMs, effTtl);
+    // Publish what was actually queried for the toolbar to display.
+    state.data.value.appliedRange = range;
 
     const panels = dashboard.panels?.panels ?? [];
     const tasks = panels.map((panel) => () => executePanel(panel, range, signal, cache));
@@ -894,6 +1007,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     previewAbort = null;
     state.data.value.current = null;
     state.data.value.panelStates = {};
+    state.data.value.appliedRange = null;
     state.data.value.isEditing = false;
     state.data.value.editDraft = null;
     state.data.value.editSnapshotJson = null;
@@ -914,6 +1028,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     panelStates,
     timeRelative,
     timeAbsolute,
+    appliedRange,
     refreshIntervalMs,
     effectiveRange,
 
