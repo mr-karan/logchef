@@ -75,6 +75,23 @@ Full details below.
   form sheet) with a live query preview.
 - **Dashboards: chart styles.** Time series panels render as bars (default),
   line, or area, set per panel in the builder.
+- **Dashboard result caching.** Dashboards cache panel query results
+  server-side, per dashboard (default 10-minute TTL, configurable per dashboard,
+  `0` = off), so a wall of auto-refreshing panels collapses to a single backend
+  hit per TTL window instead of N panels × M viewers hammering
+  ClickHouse/VictoriaLogs. Tunable via `[dashboard_cache]`; only dashboard
+  panels are cached (ad-hoc explorer queries never are), and relative ranges are
+  snapped to the TTL bucket so repeat views actually hit. Metrics under
+  `logchef_dashboard_cache_*`.
+- **Persistent query history & usage analytics.** Executed queries are recorded
+  per user — browse your recent queries in the explorer and via `logchef
+  history` in the CLI. Admins get a **Query Activity** view: recent activity
+  across all users, plus all-time usage analytics (top sources, top users, query
+  volume over time) backed by a non-pruned daily rollup.
+- **Per-source ClickHouse query settings.** A source can pin ClickHouse query
+  settings — `max_execution_time`, result/read row & byte caps, `readonly`,
+  overflow mode — applied to every query on that source, as hard guardrails for
+  shared clusters. Set them in the source form's advanced section.
 - **Client-side column filters** in the results table. Click a column header's
   filter icon to narrow currently-loaded rows by a contains match, or a
   comparison (`>`, `>=`, `<`, `<=`, `=`) on numeric columns. No extra query is
@@ -127,6 +144,15 @@ Full details below.
   after returning 202.
 
 ### Security
+- **Opt-in rate limiting.** `[rate_limit]` adds per-IP and global limits on the
+  unauthenticated auth/token endpoints and a per-user limit on query endpoints.
+  Disabled by default (per-IP limiting needs trusted-proxy config to attribute
+  the real client). Rejections counted under `logchef_rate_limit_rejections_total`.
+- **Trusted-proxy client-IP resolution.** `[server] trusted_proxies` +
+  `proxy_header` make `X-Forwarded-For` handling safe behind a reverse proxy: the
+  forwarded header is read only when the direct peer is a configured trusted
+  proxy (so it can't be spoofed), and invalid or overly-broad entries
+  (`0.0.0.0/0`, `::/0`) are rejected at startup.
 - **Dashboards hardening.** Fixes a stored XSS in the time-series crosshair
   tooltip, where grouped-series labels are attacker-controllable log values —
   they are now escaped. Cross-dashboard save corruption is isolated, and the
@@ -205,7 +231,9 @@ Full details below.
 | SQLite | 000027 | Drops the legacy `query_type` column now that `query_language`/`editor_mode` are authoritative. |
 | SQLite | 000028 | Adds `users.password_hash` (nullable; NULL means OIDC-only) for local authentication. |
 | SQLite | 000029 | Creates `dashboards` (`panels_json` blob; `created_by` nulled, not cascaded, on user deletion). |
-| Postgres | 000002-000004 | Mirrors the datasource, local-auth, and dashboards migrations above for the Postgres backend. |
+| SQLite | 000031 | Adds `query_history` (per-user executed-query log, capped at 200 rows/user). |
+| SQLite | 000032 | Adds `query_stats_daily` (non-pruned daily usage rollup backing admin analytics). |
+| Postgres | 000002-000007 | Mirrors the datasource, local-auth, dashboards, email-normalization, query-history, and usage-rollup migrations for the Postgres backend. |
 
 All migrations apply automatically on upgrade; no manual steps required.
 
