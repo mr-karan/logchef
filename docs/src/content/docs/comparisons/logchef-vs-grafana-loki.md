@@ -1,6 +1,6 @@
 ---
 title: Logchef vs Grafana Loki
-description: How Logchef's query UI over ClickHouse or VictoriaLogs compares to Grafana Loki's label-indexed, object-storage logging — architecture, query languages, high-cardinality, and when each is the right fit.
+description: "How Logchef over ClickHouse or VictoriaLogs compares to Grafana Loki: indexing model, high-cardinality search, query languages, and when each fits."
 ---
 
 Both let you search logs without paying for a hosted SaaS, but they take

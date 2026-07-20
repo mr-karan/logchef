@@ -1,6 +1,6 @@
 ---
 title: "Debugging a 5xx Spike in Nginx Access Logs with ClickHouse and Logchef"
-description: "Query nginx access logs in ClickHouse when 5xx errors spike: live-tail the burst, narrow it with LogchefQL, then pivot to SQL to isolate the bad host and endpoint."
+description: "Query nginx access logs in ClickHouse when 5xx errors spike: live-tail the burst, narrow with LogchefQL, then pivot to SQL to find the bad host and endpoint."
 pubDate: 2026-07-15
 tags: ["clickhouse", "nginx", "observability", "logs", "incident-response"]
 author: "Logchef Team"
