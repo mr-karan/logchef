@@ -43,6 +43,7 @@ import {
   FolderOpen,
   KeyRound,
   LayoutDashboard,
+  Activity,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -189,6 +190,12 @@ const adminNavItems: NavItem[] = [
     title: "System Settings",
     icon: Wrench,
     url: "/admin/settings",
+    adminOnly: true,
+  },
+  {
+    title: "Query Activity",
+    icon: Activity,
+    url: "/admin/query-activity",
     adminOnly: true,
   },
 ];

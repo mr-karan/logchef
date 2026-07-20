@@ -991,3 +991,19 @@ FROM query_history
 WHERE user_id = ?
 ORDER BY created_at DESC, id DESC
 LIMIT ?;
+
+-- name: ListQueryActivity :many
+-- Most recent query_history rows across all users, newest first, enriched with
+-- the executing user's email and the source's display name. LEFT JOIN on
+-- sources so history survives a deleted source (source_name is NULL then).
+-- Backs the admin recent-activity view; the table is capped per user, so this
+-- is a recent window, not all-time analytics.
+SELECT
+    qh.*,
+    u.email AS user_email,
+    s.name AS source_name
+FROM query_history qh
+JOIN users u ON u.id = qh.user_id
+LEFT JOIN sources s ON s.id = qh.source_id
+ORDER BY qh.created_at DESC, qh.id DESC
+LIMIT ?;

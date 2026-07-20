@@ -2247,6 +2247,69 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const listQueryActivity = `-- name: ListQueryActivity :many
+SELECT
+    qh.id, qh.user_id, qh.team_id, qh.source_id, qh.query_text, qh.query_language, qh.duration_ms, qh.row_count, qh.created_at,
+    u.email AS user_email,
+    s.name AS source_name
+FROM query_history qh
+JOIN users u ON u.id = qh.user_id
+LEFT JOIN sources s ON s.id = qh.source_id
+ORDER BY qh.created_at DESC, qh.id DESC
+LIMIT $1
+`
+
+type ListQueryActivityRow struct {
+	ID            int64              `json:"id"`
+	UserID        int64              `json:"user_id"`
+	TeamID        int64              `json:"team_id"`
+	SourceID      int64              `json:"source_id"`
+	QueryText     string             `json:"query_text"`
+	QueryLanguage string             `json:"query_language"`
+	DurationMs    int64              `json:"duration_ms"`
+	RowCount      int64              `json:"row_count"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UserEmail     string             `json:"user_email"`
+	SourceName    pgtype.Text        `json:"source_name"`
+}
+
+// Most recent query_history rows across all users, newest first, enriched with
+// the executing user's email and the source's display name. LEFT JOIN on
+// sources so history survives a deleted source (source_name is NULL then).
+// Backs the admin recent-activity view; the table is capped per user, so this
+// is a recent window, not all-time analytics.
+func (q *Queries) ListQueryActivity(ctx context.Context, limit int32) ([]ListQueryActivityRow, error) {
+	rows, err := q.db.Query(ctx, listQueryActivity, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListQueryActivityRow{}
+	for rows.Next() {
+		var i ListQueryActivityRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.TeamID,
+			&i.SourceID,
+			&i.QueryText,
+			&i.QueryLanguage,
+			&i.DurationMs,
+			&i.RowCount,
+			&i.CreatedAt,
+			&i.UserEmail,
+			&i.SourceName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listQueryHistory = `-- name: ListQueryHistory :many
 SELECT
     id,

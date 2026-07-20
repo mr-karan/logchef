@@ -255,6 +255,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listManagedUsersStmt, err = db.PrepareContext(ctx, listManagedUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedUsers: %w", err)
 	}
+	if q.listQueryActivityStmt, err = db.PrepareContext(ctx, listQueryActivity); err != nil {
+		return nil, fmt.Errorf("error preparing query ListQueryActivity: %w", err)
+	}
 	if q.listQueryHistoryStmt, err = db.PrepareContext(ctx, listQueryHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListQueryHistory: %w", err)
 	}
@@ -783,6 +786,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listManagedUsersStmt: %w", cerr)
 		}
 	}
+	if q.listQueryActivityStmt != nil {
+		if cerr := q.listQueryActivityStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listQueryActivityStmt: %w", cerr)
+		}
+	}
 	if q.listQueryHistoryStmt != nil {
 		if cerr := q.listQueryHistoryStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listQueryHistoryStmt: %w", cerr)
@@ -1129,6 +1137,7 @@ type Queries struct {
 	listManagedSourcesStmt              *sql.Stmt
 	listManagedTeamsStmt                *sql.Stmt
 	listManagedUsersStmt                *sql.Stmt
+	listQueryActivityStmt               *sql.Stmt
 	listQueryHistoryStmt                *sql.Stmt
 	listSavedQueriesForUserStmt         *sql.Stmt
 	listSavedQueriesForUserBySourceStmt *sql.Stmt
@@ -1258,6 +1267,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listManagedSourcesStmt:              q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                q.listManagedTeamsStmt,
 		listManagedUsersStmt:                q.listManagedUsersStmt,
+		listQueryActivityStmt:               q.listQueryActivityStmt,
 		listQueryHistoryStmt:                q.listQueryHistoryStmt,
 		listSavedQueriesForUserStmt:         q.listSavedQueriesForUserStmt,
 		listSavedQueriesForUserBySourceStmt: q.listSavedQueriesForUserBySourceStmt,

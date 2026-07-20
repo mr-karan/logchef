@@ -206,6 +206,12 @@ const routes: RouteRecordRaw[] = [
         component: lazy("AdminSettings", () => import("@/views/admin/AdminSettings.vue")),
         meta: { title: "System Settings", requiresAdmin: true },
       },
+      {
+        path: "query-activity",
+        name: "AdminQueryActivity",
+        component: lazy("AdminQueryActivity", () => import("@/views/admin/QueryActivity.vue")),
+        meta: { title: "Query Activity", requiresAdmin: true },
+      },
     ],
   },
 

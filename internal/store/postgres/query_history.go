@@ -70,3 +70,34 @@ func (s *Store) ListQueryHistory(ctx context.Context, userID models.UserID, limi
 	}
 	return history, nil
 }
+
+// ListQueryActivity returns the most recent query_history rows across all
+// users, newest first, capped at limit, enriched with user email and source
+// name. Because query_history is capped per user, this is a recent window
+// rather than all-time analytics.
+func (s *Store) ListQueryActivity(ctx context.Context, limit int) ([]models.QueryActivityRecord, error) {
+	rows, err := s.q.ListQueryActivity(ctx, int32(limit)) //nolint:gosec // G115: limit is a small bounded window size
+	if err != nil {
+		s.log.Error("failed to list query activity", "error", err)
+		return nil, fmt.Errorf("error listing query activity: %w", err)
+	}
+
+	records := make([]models.QueryActivityRecord, 0, len(rows))
+	for i := range rows {
+		r := rows[i]
+		records = append(records, models.QueryActivityRecord{
+			ID:            r.ID,
+			UserID:        models.UserID(r.UserID),
+			UserEmail:     r.UserEmail,
+			TeamID:        models.TeamID(r.TeamID),
+			SourceID:      models.SourceID(r.SourceID),
+			SourceName:    r.SourceName.String,
+			QueryText:     r.QueryText,
+			QueryLanguage: models.QueryLanguage(r.QueryLanguage),
+			DurationMs:    r.DurationMs,
+			RowCount:      r.RowCount,
+			CreatedAt:     r.CreatedAt.Time,
+		})
+	}
+	return records, nil
+}

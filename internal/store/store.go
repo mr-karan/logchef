@@ -148,6 +148,11 @@ type AlertStore interface {
 type QueryHistoryStore interface {
 	RecordQueryHistory(ctx context.Context, entry *models.QueryHistory) error
 	ListQueryHistory(ctx context.Context, userID models.UserID, limit int) ([]*models.QueryHistory, error)
+	// ListQueryActivity returns the most recent query_history rows across all
+	// users (newest first, capped at limit), enriched with user email and
+	// source name. It backs the admin recent-activity view; because
+	// query_history is capped per user, this is a recent window, not all-time.
+	ListQueryActivity(ctx context.Context, limit int) ([]models.QueryActivityRecord, error)
 }
 
 // ExportJobStore persists asynchronous CSV/export job records.

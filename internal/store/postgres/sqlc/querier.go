@@ -176,6 +176,12 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
+	// Most recent query_history rows across all users, newest first, enriched with
+	// the executing user's email and the source's display name. LEFT JOIN on
+	// sources so history survives a deleted source (source_name is NULL then).
+	// Backs the admin recent-activity view; the table is capped per user, so this
+	// is a recent window, not all-time analytics.
+	ListQueryActivity(ctx context.Context, limit int32) ([]ListQueryActivityRow, error)
 	// List one user's recent history, newest first.
 	ListQueryHistory(ctx context.Context, arg ListQueryHistoryParams) ([]QueryHistory, error)
 	// List every saved query the user can see (any source attached to any of their teams)

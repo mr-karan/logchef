@@ -292,6 +292,9 @@ func (s *Server) setupRoutes() {
 	admin.Delete("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleDeleteSource)
 	admin.Get("/sources/:sourceID/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceStats) // Admin-only source stats
 
+	// Recent query activity (admin recent-activity view over query_history).
+	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)
+
 	// Provisioning Export
 	admin.Get("/provisioning/export", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleExportProvisioning)
 

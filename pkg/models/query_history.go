@@ -29,3 +29,21 @@ type QueryHistory struct {
 	RowCount      int64         `json:"row_count" db:"row_count"`
 	CreatedAt     time.Time     `json:"created_at" db:"created_at"`
 }
+
+// QueryActivityRecord is one query_history row enriched with the executing
+// user's email and the source's display name, used by the admin "recent query
+// activity" view. SourceName is empty when the source row has since been
+// deleted (the join is a LEFT JOIN and source_id carries no FK).
+type QueryActivityRecord struct {
+	ID            int64         `json:"id"`
+	UserID        UserID        `json:"user_id"`
+	UserEmail     string        `json:"user_email"`
+	TeamID        TeamID        `json:"team_id"`
+	SourceID      SourceID      `json:"source_id"`
+	SourceName    string        `json:"source_name"`
+	QueryText     string        `json:"query_text"`
+	QueryLanguage QueryLanguage `json:"query_language"`
+	DurationMs    int64         `json:"duration_ms"`
+	RowCount      int64         `json:"row_count"`
+	CreatedAt     time.Time     `json:"created_at"`
+}
