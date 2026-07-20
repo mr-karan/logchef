@@ -1,5 +1,6 @@
 import type {
   ClickHouseConnectionInfo,
+  ClickHouseQuerySettings,
   Source,
   ValidateConnectionRequestInfo,
   VictoriaLogsConnectionInfo,
@@ -8,6 +9,20 @@ import type {
 export type DatasourceType = "clickhouse" | "victorialogs";
 export type ClickHouseTableMode = "create" | "connect";
 export type VictoriaLogsAuthMode = "none" | "basic" | "bearer";
+
+// UI representation of the optional per-source ClickHouse query settings. Every
+// field is stored as a string so a blank input maps cleanly to "unset": numeric
+// fields hold the raw text, `readonly` is "" | "2", and `resultOverflowMode` is
+// "" | "throw" | "break". A blank field is omitted from the wire JSON entirely.
+export interface ClickHouseSettingsFormState {
+  maxExecutionTime: string;
+  maxResultRows: string;
+  maxResultBytes: string;
+  maxRowsToRead: string;
+  maxBytesToRead: string;
+  readonly: string;
+  resultOverflowMode: string;
+}
 
 export interface ClickHouseSourceFormState {
   host: string;
@@ -22,6 +37,7 @@ export interface ClickHouseSourceFormState {
   metaTSField: string;
   metaSeverityField: string;
   schema: string;
+  settings: ClickHouseSettingsFormState;
 }
 
 export interface VictoriaLogsSourceFormState {
@@ -62,6 +78,18 @@ ORDER BY (namespace, service_name, timestamp)
 TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;`;
 
+export function createDefaultClickHouseSettingsState(): ClickHouseSettingsFormState {
+  return {
+    maxExecutionTime: "",
+    maxResultRows: "",
+    maxResultBytes: "",
+    maxRowsToRead: "",
+    maxBytesToRead: "",
+    readonly: "",
+    resultOverflowMode: "",
+  };
+}
+
 export function createDefaultClickHouseFormState(): ClickHouseSourceFormState {
   return {
     host: "",
@@ -76,6 +104,7 @@ export function createDefaultClickHouseFormState(): ClickHouseSourceFormState {
     metaTSField: "timestamp",
     metaSeverityField: "severity_text",
     schema: "",
+    settings: createDefaultClickHouseSettingsState(),
   };
 }
 
@@ -109,14 +138,78 @@ export function generateClickHouseSchema(state: Pick<ClickHouseSourceFormState, 
     .replace(/{{ttl_day}}/g, ttlDays);
 }
 
+// Parse a numeric settings input. Blank/whitespace-only maps to undefined
+// (unset). Non-numeric or negative values are treated as unset so a malformed
+// entry never sends a bad value to the backend.
+function parseNonNegativeSetting(value: string): number | undefined {
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return undefined;
+  }
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return undefined;
+  }
+  return parsed;
+}
+
+// Build the optional per-source ClickHouse query settings, omitting any blank
+// sub-field. Returns undefined when nothing is set so `settings` is omitted
+// from the connection entirely (matching Go's `omitempty`).
+export function buildClickHouseSettings(
+  state: ClickHouseSettingsFormState
+): ClickHouseQuerySettings | undefined {
+  const settings: ClickHouseQuerySettings = {};
+
+  const maxExecutionTime = parseNonNegativeSetting(state.maxExecutionTime);
+  if (maxExecutionTime !== undefined) {
+    settings.max_execution_time = maxExecutionTime;
+  }
+  const maxResultRows = parseNonNegativeSetting(state.maxResultRows);
+  if (maxResultRows !== undefined) {
+    settings.max_result_rows = maxResultRows;
+  }
+  const maxResultBytes = parseNonNegativeSetting(state.maxResultBytes);
+  if (maxResultBytes !== undefined) {
+    settings.max_result_bytes = maxResultBytes;
+  }
+  const maxRowsToRead = parseNonNegativeSetting(state.maxRowsToRead);
+  if (maxRowsToRead !== undefined) {
+    settings.max_rows_to_read = maxRowsToRead;
+  }
+  const maxBytesToRead = parseNonNegativeSetting(state.maxBytesToRead);
+  if (maxBytesToRead !== undefined) {
+    settings.max_bytes_to_read = maxBytesToRead;
+  }
+
+  const readonly = parseNonNegativeSetting(state.readonly);
+  if (readonly !== undefined) {
+    settings.readonly = readonly;
+  }
+
+  const overflowMode = state.resultOverflowMode.trim();
+  if (overflowMode !== "") {
+    settings.result_overflow_mode = overflowMode;
+  }
+
+  return Object.keys(settings).length > 0 ? settings : undefined;
+}
+
 export function buildClickHouseConnection(state: ClickHouseSourceFormState): ClickHouseConnectionInfo {
-  return {
+  const connection: ClickHouseConnectionInfo = {
     host: state.host.trim(),
     username: state.enableAuth ? state.username.trim() : "",
     password: state.enableAuth ? state.password : "",
     database: state.database.trim(),
     table_name: state.tableName.trim(),
   };
+
+  const settings = buildClickHouseSettings(state.settings);
+  if (settings) {
+    connection.settings = settings;
+  }
+
+  return connection;
 }
 
 export function buildVictoriaLogsConnection(state: VictoriaLogsSourceFormState): VictoriaLogsConnectionInfo {
@@ -174,6 +267,42 @@ export function buildVictoriaLogsValidationRequest(state: VictoriaLogsSourceForm
   };
 }
 
+// Hydrate the UI settings state from a persisted connection. Unset numeric
+// settings become blank strings; readonly and result_overflow_mode fall back to
+// "" (Default) when absent.
+function clickHouseSettingsStateFromConnection(
+  settings: ClickHouseQuerySettings | undefined
+): ClickHouseSettingsFormState {
+  const state = createDefaultClickHouseSettingsState();
+  if (!settings) {
+    return state;
+  }
+
+  if (settings.max_execution_time !== undefined && settings.max_execution_time !== null) {
+    state.maxExecutionTime = String(settings.max_execution_time);
+  }
+  if (settings.max_result_rows !== undefined && settings.max_result_rows !== null) {
+    state.maxResultRows = String(settings.max_result_rows);
+  }
+  if (settings.max_result_bytes !== undefined && settings.max_result_bytes !== null) {
+    state.maxResultBytes = String(settings.max_result_bytes);
+  }
+  if (settings.max_rows_to_read !== undefined && settings.max_rows_to_read !== null) {
+    state.maxRowsToRead = String(settings.max_rows_to_read);
+  }
+  if (settings.max_bytes_to_read !== undefined && settings.max_bytes_to_read !== null) {
+    state.maxBytesToRead = String(settings.max_bytes_to_read);
+  }
+  if (settings.readonly !== undefined && settings.readonly !== null) {
+    state.readonly = String(settings.readonly);
+  }
+  if (settings.result_overflow_mode) {
+    state.resultOverflowMode = settings.result_overflow_mode;
+  }
+
+  return state;
+}
+
 export function clickHouseFormStateFromSource(source: Source): ClickHouseSourceFormState {
   const connection = (source.connection || {}) as Partial<ClickHouseConnectionInfo>;
   const enableAuth = Boolean(connection.username);
@@ -191,6 +320,7 @@ export function clickHouseFormStateFromSource(source: Source): ClickHouseSourceF
     metaTSField: source._meta_ts_field || "timestamp",
     metaSeverityField: source._meta_severity_field || "",
     schema: source.schema || "",
+    settings: clickHouseSettingsStateFromConnection(connection.settings),
   };
 }
 

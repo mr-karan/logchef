@@ -9,6 +9,19 @@ import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Separator } from "@/components/ui/separator";
 import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -17,7 +30,10 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Code, ChevronsUpDown, Database, Plus } from "lucide-vue-next";
-import type { ClickHouseSourceFormState } from "./sourceFormModels";
+import type {
+  ClickHouseSettingsFormState,
+  ClickHouseSourceFormState,
+} from "./sourceFormModels";
 import { generateClickHouseSchema } from "./sourceFormModels";
 
 const props = defineProps<{
@@ -38,6 +54,24 @@ const isEditingSchema = ref(false);
 
 function updateForm(patch: Partial<ClickHouseSourceFormState>) {
   emit("update:modelValue", { ...props.modelValue, ...patch });
+}
+
+function updateSettings(patch: Partial<ClickHouseSettingsFormState>) {
+  updateForm({ settings: { ...props.modelValue.settings, ...patch } });
+}
+
+// Sanitize a number input so blanks stay blank (unset) and negatives are
+// clamped to "" rather than sending a negative value to the backend.
+function sanitizeNonNegative(value: unknown): string {
+  const raw = String(value ?? "").trim();
+  if (raw === "") {
+    return "";
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return "";
+  }
+  return raw;
 }
 
 function updateTableMode(value: unknown) {
@@ -155,6 +189,126 @@ function resetSchema() {
         </div>
       </div>
     </div>
+
+    <Accordion type="single" collapsible class="w-full">
+      <AccordionItem value="advanced-query-settings" class="border rounded-md px-4">
+        <AccordionTrigger class="text-base font-medium">
+          Advanced query settings
+        </AccordionTrigger>
+        <AccordionContent class="space-y-4 pt-2">
+          <p class="text-sm text-muted-foreground">
+            Optional per-source ClickHouse limits. Each value is a hard cap
+            applied to every query run against this source. Leave a field blank
+            to use the ClickHouse defaults.
+          </p>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="grid gap-2">
+              <Label for="ch_max_execution_time">Max execution time (seconds)</Label>
+              <Input
+                id="ch_max_execution_time"
+                :model-value="modelValue.settings.maxExecutionTime"
+                type="number"
+                min="0"
+                placeholder="Unset"
+                @update:model-value="(value) => updateSettings({ maxExecutionTime: sanitizeNonNegative(value) })"
+              />
+            </div>
+
+            <div class="grid gap-2">
+              <Label for="ch_max_result_rows">Max result rows</Label>
+              <Input
+                id="ch_max_result_rows"
+                :model-value="modelValue.settings.maxResultRows"
+                type="number"
+                min="0"
+                placeholder="Unset"
+                @update:model-value="(value) => updateSettings({ maxResultRows: sanitizeNonNegative(value) })"
+              />
+            </div>
+
+            <div class="grid gap-2">
+              <Label for="ch_max_result_bytes">Max result bytes</Label>
+              <Input
+                id="ch_max_result_bytes"
+                :model-value="modelValue.settings.maxResultBytes"
+                type="number"
+                min="0"
+                placeholder="Unset"
+                @update:model-value="(value) => updateSettings({ maxResultBytes: sanitizeNonNegative(value) })"
+              />
+            </div>
+
+            <div class="grid gap-2">
+              <Label for="ch_max_rows_to_read">Max rows to read</Label>
+              <Input
+                id="ch_max_rows_to_read"
+                :model-value="modelValue.settings.maxRowsToRead"
+                type="number"
+                min="0"
+                placeholder="Unset"
+                @update:model-value="(value) => updateSettings({ maxRowsToRead: sanitizeNonNegative(value) })"
+              />
+            </div>
+
+            <div class="grid gap-2">
+              <Label for="ch_max_bytes_to_read">Max bytes to read</Label>
+              <Input
+                id="ch_max_bytes_to_read"
+                :model-value="modelValue.settings.maxBytesToRead"
+                type="number"
+                min="0"
+                placeholder="Unset"
+                @update:model-value="(value) => updateSettings({ maxBytesToRead: sanitizeNonNegative(value) })"
+              />
+            </div>
+          </div>
+
+          <div class="grid gap-4 md:grid-cols-2">
+            <div class="grid gap-2">
+              <Label for="ch_result_overflow_mode">Result overflow mode</Label>
+              <Select
+                :model-value="modelValue.settings.resultOverflowMode || 'default'"
+                @update:model-value="(value) => updateSettings({ resultOverflowMode: value === 'default' ? '' : String(value) })"
+              >
+                <SelectTrigger id="ch_result_overflow_mode">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Default</SelectItem>
+                  <SelectItem value="throw">Throw error (throw)</SelectItem>
+                  <SelectItem value="break">Truncate (break)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-sm text-muted-foreground">
+                What ClickHouse does when a result cap is exceeded.
+              </p>
+            </div>
+
+            <div class="grid gap-2">
+              <Label for="ch_readonly">Read-only mode</Label>
+              <Select
+                :model-value="modelValue.settings.readonly || 'default'"
+                @update:model-value="(value) => updateSettings({ readonly: value === 'default' ? '' : String(value) })"
+              >
+                <SelectTrigger id="ch_readonly">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="default">Default</SelectItem>
+                  <SelectItem value="2">Read-only (2)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p class="text-sm text-muted-foreground">
+                Read-only (2) blocks writes while still allowing LogChef to apply
+                per-query settings. (readonly=1 is intentionally not offered — it
+                forbids per-query settings and breaks LogChef queries.)
+              </p>
+            </div>
+          </div>
+        </AccordionContent>
+      </AccordionItem>
+    </Accordion>
 
     <div v-if="!isEditMode" class="space-y-4">
       <div class="flex items-center justify-between">

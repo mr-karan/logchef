@@ -2,6 +2,20 @@ import { apiClient } from "./apiUtils";
 import type { Team } from "./types";
 import type { QueryLanguage } from "@/lib/queryMetadata";
 
+// Optional per-source ClickHouse query settings applied to every query run
+// against the source. All keys are optional; keys left unset are omitted from
+// the wire JSON (Go side uses pointer + omitempty). Key names must match the
+// Go JSON tags exactly (note: `result_overflow_mode`, not `overflow_mode`).
+export interface ClickHouseQuerySettings {
+  max_execution_time?: number;
+  max_result_rows?: number;
+  max_result_bytes?: number;
+  max_rows_to_read?: number;
+  max_bytes_to_read?: number;
+  readonly?: number;
+  result_overflow_mode?: string;
+}
+
 export interface ClickHouseConnectionInfo {
   host: string;
   username?: string;
@@ -9,6 +23,7 @@ export interface ClickHouseConnectionInfo {
   database: string;
   table_name: string;
   tls_enable?: boolean;
+  settings?: ClickHouseQuerySettings;
 }
 
 export interface VictoriaLogsConnectionInfo {
