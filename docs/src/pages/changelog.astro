@@ -10,11 +10,13 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     .page-header h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 0.5rem; }
     .page-header p { color: var(--color-text-secondary); font-size: 1.125rem; }
 
-    .version { margin-bottom: 3rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--color-border); }
+    .version { margin-bottom: 3rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--color-border); scroll-margin-top: 2rem; }
     .version:last-child { border-bottom: none; }
     .version-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
     .version-tag { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; color: var(--color-text); }
     .version-tag.unreleased { color: var(--color-purple); }
+    a.version-tag { text-decoration: none; }
+    a.version-tag:hover { text-decoration: underline; text-underline-offset: 0.2em; }
     .version-date {
       font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-dim);
       background: var(--color-surface); padding: 0.25rem 0.625rem; border-radius: 4px;
@@ -79,16 +81,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
-    <!-- Unreleased -->
-    <article class="version">
+    <!-- v2.0.0-alpha.1 -->
+    <article class="version" id="v2.0.0-alpha.1">
       <div class="version-header">
-        <span class="version-tag unreleased">Unreleased</span>
-        <span class="version-badge">In development</span>
-        <a href="https://github.com/mr-karan/logchef/blob/main/CHANGELOG.md" class="version-link" target="_blank">Full changelog &rarr;</a>
+        <a class="version-tag" href="#v2.0.0-alpha.1">v2.0.0-alpha.1</a>
+        <span class="version-date">Jul 20, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.0-alpha.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        This release makes <strong>VictoriaLogs a first-class datasource</strong> alongside ClickHouse: add a VictoriaLogs source, query it in LogchefQL (compiled to LogsQL) or raw LogsQL, and build alerts and live tails against it. Sources now advertise an explicit <strong>capability set</strong> (histogram, field values, exports, live tail, &hellip;) instead of hardcoded backend checks. Alongside VictoriaLogs, this release adds <strong>built-in local authentication</strong> (run without an external OIDC provider), <strong>live tail</strong> (stream logs in real time), a <strong>Dashboards</strong> upgrade (direct-manipulation grid editing, a full-height panel builder, line/area/bar chart styles), and <strong>client-side column filters</strong> in the results table.
+        <strong>VictoriaLogs is now a first-class datasource</strong> alongside ClickHouse. Add a VictoriaLogs source, query it with LogchefQL (compiled to LogsQL) or raw LogsQL, and use it with alerts and live tail — the same explorer, dashboards, and access control you already use for ClickHouse. This release also brings built-in local authentication, capability-driven datasources, live tail, a dashboards upgrade, per-user query history with admin usage analytics, and a broad performance and hardening pass.
       </p>
 
       <div class="change-section">
@@ -103,6 +106,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>Live tail</strong>: A <strong>Live</strong> toggle in the explorer streams matching rows over SSE. ClickHouse is polled (<code>[tail] poll_interval</code>); VictoriaLogs proxies its native tail stream directly. Works in LogchefQL mode on any source, and in native LogsQL mode on VictoriaLogs.</li>
           <li><strong>Dashboards: grid-canvas editing</strong>: Drag a panel by its header to move it, drag its corner to resize. A full-height panel builder drawer (with a live query preview) replaces the old form sheet.</li>
           <li><strong>Dashboards: chart styles</strong>: Time series panels render as bars, line, or area, set per panel.</li>
+          <li><strong>Dashboard result caching</strong>: Dashboards cache panel query results server-side, per dashboard (default 10-minute TTL, configurable per dashboard, <code>0</code> = off), so a wall of auto-refreshing panels collapses to one backend hit per window instead of N panels &times; M viewers hammering the datasource. Only dashboard panels are cached; ad-hoc explorer queries never are. Tunable via <code>[dashboard_cache]</code>.</li>
+          <li><strong>Persistent query history &amp; usage analytics</strong>: Executed queries are recorded per user — browse your recent queries in the explorer and via <code>logchef history</code> in the CLI. Admins get a <strong>Query Activity</strong> view: recent activity across all users plus all-time usage analytics (top sources, top users, query volume over time), backed by a non-pruned daily rollup.</li>
+          <li><strong>Per-source ClickHouse query settings</strong>: A source can pin ClickHouse query settings — <code>max_execution_time</code>, result/read row &amp; byte caps, <code>readonly</code>, overflow mode — applied to every query on that source as hard guardrails for shared clusters. Set them in the source form's advanced section.</li>
           <li><strong>Client-side column filters</strong>: Click a column header's filter icon to narrow currently-loaded rows by a contains match or a numeric comparison (<code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code>, <code>=</code>). No extra query is sent.</li>
         </ul>
       </div>
@@ -116,6 +122,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>Source credentials are never echoed back</strong> in API responses. A <code>has_password</code> flag replaces the stored credential; blank on update means "keep existing".</li>
           <li><strong>Sparse and grouped histograms render as continuous charts</strong>: gaps between the first and last bucket are now zero-filled, in both the explorer and dashboard panels.</li>
           <li><strong>Dashboard panels are timezone-correct for every viewer</strong>: time-series buckets align to your local timezone; table/stat panels use an internally UTC-pinned query so their window doesn't shift.</li>
+          <li><strong>Opt-in rate limiting</strong>: <code>[rate_limit]</code> adds per-IP and global limits on the unauthenticated auth/token endpoints and a per-user limit on query endpoints. Off by default.</li>
+          <li><strong>Trusted-proxy client-IP resolution</strong>: <code>[server] trusted_proxies</code> / <code>proxy_header</code> make <code>X-Forwarded-For</code> handling safe behind a reverse proxy — the forwarded header is read only when the direct peer is a configured trusted proxy, so it can't be spoofed.</li>
         </ul>
       </div>
 
@@ -134,11 +142,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.7.0 -->
-    <article class="version">
+    <article class="version" id="v1.7.0">
       <div class="version-header">
-        <span class="version-tag">v1.7.0</span>
+        <a class="version-tag" href="#v1.7.0">v1.7.0</a>
         <span class="version-date">Jul 6, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.7.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
@@ -192,9 +199,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.6.1 -->
-    <article class="version">
+    <article class="version" id="v1.6.1">
       <div class="version-header">
-        <span class="version-tag">v1.6.1</span>
+        <a class="version-tag" href="#v1.6.1">v1.6.1</a>
         <span class="version-date">May 20, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -244,9 +251,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- CLI v0.1.6 -->
-    <article class="version">
+    <article class="version" id="cli-v0.1.6">
       <div class="version-header">
-        <span class="version-tag">CLI v0.1.6</span>
+        <a class="version-tag" href="#cli-v0.1.6">CLI v0.1.6</a>
         <span class="version-date">May 20, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.6" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -288,9 +295,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- CLI v0.1.5 -->
-    <article class="version">
+    <article class="version" id="cli-v0.1.5">
       <div class="version-header">
-        <span class="version-tag">CLI v0.1.5</span>
+        <a class="version-tag" href="#cli-v0.1.5">CLI v0.1.5</a>
         <span class="version-date">May 19, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.5" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -319,9 +326,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
 
     <!-- v1.6.0 -->
-    <article class="version">
+    <article class="version" id="v1.6.0">
       <div class="version-header">
-        <span class="version-tag">v1.6.0</span>
+        <a class="version-tag" href="#v1.6.0">v1.6.0</a>
         <span class="version-date">May 13, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.6.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -395,9 +402,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.5.0 -->
-    <article class="version">
+    <article class="version" id="v1.5.0">
       <div class="version-header">
-        <span class="version-tag">v1.5.0</span>
+        <a class="version-tag" href="#v1.5.0">v1.5.0</a>
         <span class="version-date">Apr 8, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.5.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -443,9 +450,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.4.1 -->
-    <article class="version">
+    <article class="version" id="v1.4.1">
       <div class="version-header">
-        <span class="version-tag">v1.4.1</span>
+        <a class="version-tag" href="#v1.4.1">v1.4.1</a>
         <span class="version-date">Apr 2, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.4.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -486,9 +493,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.4.0 -->
-    <article class="version">
+    <article class="version" id="v1.4.0">
       <div class="version-header">
-        <span class="version-tag">v1.4.0</span>
+        <a class="version-tag" href="#v1.4.0">v1.4.0</a>
         <span class="version-date">Mar 30, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.4.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -521,9 +528,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- CLI v0.1.4 -->
-    <article class="version">
+    <article class="version" id="cli-v0.1.4">
       <div class="version-header">
-        <span class="version-tag">CLI v0.1.4</span>
+        <a class="version-tag" href="#cli-v0.1.4">CLI v0.1.4</a>
         <span class="version-date">Feb 5, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.4" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -552,9 +559,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.3.0 -->
-    <article class="version">
+    <article class="version" id="v1.3.0">
       <div class="version-header">
-        <span class="version-tag">v1.3.0</span>
+        <a class="version-tag" href="#v1.3.0">v1.3.0</a>
         <span class="version-date">Feb 5, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.3.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -597,9 +604,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.2.2 -->
-    <article class="version">
+    <article class="version" id="v1.2.2">
       <div class="version-header">
-        <span class="version-tag">v1.2.2</span>
+        <a class="version-tag" href="#v1.2.2">v1.2.2</a>
         <span class="version-date">Jan 27, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.2.2" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -628,9 +635,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- CLI v0.1.3 -->
-    <article class="version">
+    <article class="version" id="cli-v0.1.3">
       <div class="version-header">
-        <span class="version-tag">CLI v0.1.3</span>
+        <a class="version-tag" href="#cli-v0.1.3">CLI v0.1.3</a>
         <span class="version-date">Jan 27, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.3" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -659,9 +666,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- CLI v0.1.2 -->
-    <article class="version">
+    <article class="version" id="cli-v0.1.2">
       <div class="version-header">
-        <span class="version-tag">CLI v0.1.2</span>
+        <a class="version-tag" href="#cli-v0.1.2">CLI v0.1.2</a>
         <span class="version-date">Jan 21, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.1.2" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -680,9 +687,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.2.1 -->
-    <article class="version">
+    <article class="version" id="v1.2.1">
       <div class="version-header">
-        <span class="version-tag">v1.2.1</span>
+        <a class="version-tag" href="#v1.2.1">v1.2.1</a>
         <span class="version-date">Jan 21, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.2.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
@@ -699,9 +706,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.2.0 -->
-    <article class="version">
+    <article class="version" id="v1.2.0">
       <div class="version-header">
-        <span class="version-tag">v1.2.0</span>
+        <a class="version-tag" href="#v1.2.0">v1.2.0</a>
         <span class="version-date">Jan 21, 2026</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.2.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -741,9 +748,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.1.0 -->
-    <article class="version">
+    <article class="version" id="v1.1.0">
       <div class="version-header">
-        <span class="version-tag">v1.1.0</span>
+        <a class="version-tag" href="#v1.1.0">v1.1.0</a>
         <span class="version-date">Dec 29, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.1.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -787,9 +794,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v1.0.0 -->
-    <article class="version">
+    <article class="version" id="v1.0.0">
       <div class="version-header">
-        <span class="version-tag">v1.0.0</span>
+        <a class="version-tag" href="#v1.0.0">v1.0.0</a>
         <span class="version-date">Dec 22, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v1.0.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -818,9 +825,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v0.6.0 -->
-    <article class="version">
+    <article class="version" id="v0.6.0">
       <div class="version-header">
-        <span class="version-tag">v0.6.0</span>
+        <a class="version-tag" href="#v0.6.0">v0.6.0</a>
         <span class="version-date">Dec 4, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.6.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -839,9 +846,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v0.5.0 -->
-    <article class="version">
+    <article class="version" id="v0.5.0">
       <div class="version-header">
-        <span class="version-tag">v0.5.0</span>
+        <a class="version-tag" href="#v0.5.0">v0.5.0</a>
         <span class="version-date">Oct 3, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.5.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -861,9 +868,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v0.4.0 -->
-    <article class="version">
+    <article class="version" id="v0.4.0">
       <div class="version-header">
-        <span class="version-tag">v0.4.0</span>
+        <a class="version-tag" href="#v0.4.0">v0.4.0</a>
         <span class="version-date">Aug 12, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.4.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -887,9 +894,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v0.3.0 -->
-    <article class="version">
+    <article class="version" id="v0.3.0">
       <div class="version-header">
-        <span class="version-tag">v0.3.0</span>
+        <a class="version-tag" href="#v0.3.0">v0.3.0</a>
         <span class="version-date">Jun 13, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.3.0" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -906,9 +913,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v0.2.2 -->
-    <article class="version">
+    <article class="version" id="v0.2.2">
       <div class="version-header">
-        <span class="version-tag">v0.2.2</span>
+        <a class="version-tag" href="#v0.2.2">v0.2.2</a>
         <span class="version-date">Jun 12, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.2.2" class="version-link" target="_blank">Release notes →</a>
       </div>
@@ -933,9 +940,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </article>
 
     <!-- v0.2.0 -->
-    <article class="version">
+    <article class="version" id="v0.2.0">
       <div class="version-header">
-        <span class="version-tag">v0.2.0</span>
+        <a class="version-tag" href="#v0.2.0">v0.2.0</a>
         <span class="version-date">Apr 27, 2025</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v0.2.0" class="version-link" target="_blank">Release notes →</a>
       </div>
