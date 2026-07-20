@@ -4,11 +4,13 @@ on:
   push:
     paths:
       - "cli/**"
+      - ".agents/skills/logchef/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust-cli.yml"
   pull_request:
     paths:
       - "cli/**"
+      - ".agents/skills/logchef/**"
       - "rust-toolchain.toml"
       - ".github/workflows/rust-cli.yml"
 
@@ -21,6 +23,12 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # The CLI embeds the skill from cli/crates/logchef-cli/skill (must live
+      # inside the Cargo workspace for cross release builds). Guard it against
+      # drift from the canonical copy at .agents/skills/logchef.
+      - name: Skill copy in sync with canonical source
+        run: diff -r .agents/skills/logchef cli/crates/logchef-cli/skill
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable

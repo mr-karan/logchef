@@ -4,9 +4,11 @@ use include_dir::{Dir, include_dir};
 use serde::Serialize;
 
 /// The Logchef skill, embedded at compile time so its content always matches
-/// the installed CLI version. The path is relative to `$CARGO_MANIFEST_DIR`
-/// (`cli/crates/logchef-cli/`), so `../../..` resolves to the repo root.
-static SKILL_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/../../../.agents/skills/logchef");
+/// the installed CLI version. The files live INSIDE the crate (`skill/`) rather
+/// than being pulled from the repo-root `.agents/skills/logchef` — an embed path
+/// that escapes the Cargo workspace breaks `cross` release builds, which mount
+/// only the workspace. `scripts/sync-skill.sh` + CI keep the two copies in sync.
+static SKILL_DIR: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/skill");
 
 /// Name of the single skill exposed by the CLI, mapped to `SKILL_DIR`.
 const CORE_SKILL: &str = "core";
