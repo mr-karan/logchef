@@ -266,11 +266,16 @@ func TestValidateContentMatchesLanguage(t *testing.T) {
 		{"templated clickhouse-sql", `SELECT * FROM x WHERE a = {{val}}`, models.QueryLanguageClickHouseSQL, false},
 		{"templated logchefql", `svc={{service}}`, models.QueryLanguageLogchefQL, false},
 
-		// --- Must REJECT ---
-		// The #119 case: valid LogchefQL mislabeled as clickhouse-sql.
-		{"#119 logchefql under clickhouse-sql", `smtp_id="hedwig-mailer" and status="delivered"`, models.QueryLanguageClickHouseSQL, true},
-		{"broken sql under clickhouse-sql", `SELECT FROM WHERE`, models.QueryLanguageClickHouseSQL, true},
+		// --- Accepted under design (B): clickhouse-sql / logsql are NOT
+		// strict-parsed, to avoid false-rejecting valid-but-exotic SQL. The #119
+		// mislabel (LogchefQL content declared clickhouse-sql) is prevented at its
+		// frontend root cause, not re-litigated with a lossy third-party parser. ---
+		{"logchefql-shaped content under clickhouse-sql is accepted", `smtp_id="hedwig-mailer" and status="delivered"`, models.QueryLanguageClickHouseSQL, false},
+		{"broken sql under clickhouse-sql is accepted (not parsed)", `SELECT FROM WHERE`, models.QueryLanguageClickHouseSQL, false},
+
+		// --- Must REJECT: only the LogchefQL direction is enforced (our parser) ---
 		{"malformed logchefql", `level="error" and and`, models.QueryLanguageLogchefQL, true},
+		{"sql content under logchefql", `SELECT * FROM x WHERE a=1`, models.QueryLanguageLogchefQL, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -301,18 +306,19 @@ func TestCreateSavedQueryRejectsLanguageMismatch(t *testing.T) {
 	user := newTestUser(t, db, "eve@example.com", "Eve")
 	src := newTestSource(t, db, "sql-source")
 
-	// #119 shape: LogchefQL content declared as clickhouse-sql.
-	mismatch := `{"version":1,"limit":100,"content":"smtp_id=\"hedwig-mailer\" and status=\"delivered\""}`
+	// Enforced direction: SQL content declared as logchefql — our own parser
+	// rejects it, so the create path returns the 400 sentinel.
+	mismatch := `{"version":1,"limit":100,"content":"SELECT * FROM x WHERE a=1"}`
 	_, err := CreateSavedQuery(context.Background(), db, nil, log, src.ID, nil, "bad", "",
-		mismatch, models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, user.ID)
+		mismatch, models.QueryLanguageLogchefQL, models.SavedQueryEditorModeBuilder, user.ID)
 	if !errors.Is(err, ErrInvalidQueryContent) {
 		t.Fatalf("CreateSavedQuery(mismatch) err = %v, want ErrInvalidQueryContent (HTTP 400)", err)
 	}
 
-	// Matching pair: valid ClickHouse SQL declared as clickhouse-sql.
-	match := `{"version":1,"limit":100,"content":"SELECT * FROM x WHERE a=1"}`
+	// Matching pair: valid LogchefQL declared as logchefql.
+	match := `{"version":1,"limit":100,"content":"level=\"error\""}`
 	created, err := CreateSavedQuery(context.Background(), db, nil, log, src.ID, nil, "good", "",
-		match, models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, user.ID)
+		match, models.QueryLanguageLogchefQL, models.SavedQueryEditorModeBuilder, user.ID)
 	if err != nil {
 		t.Fatalf("CreateSavedQuery(match) unexpected err: %v", err)
 	}

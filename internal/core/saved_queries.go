@@ -8,8 +8,6 @@ import (
 	"regexp"
 	"strings"
 
-	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
-
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
@@ -122,6 +120,8 @@ func ValidateContentMatchesLanguage(content string, language models.QueryLanguag
 
 	switch models.NormalizeQueryLanguage(language) {
 	case models.QueryLanguageLogchefQL:
+		// LogchefQL is Logchef's own constrained grammar, so validating it here
+		// is reliable and carries no false-reject risk.
 		res := logchefql.Validate(content)
 		if !res.Valid {
 			detail := "invalid syntax"
@@ -130,35 +130,13 @@ func ValidateContentMatchesLanguage(content string, language models.QueryLanguag
 			}
 			return fmt.Errorf("%w: content is not valid logchefql: %s", ErrInvalidQueryContent, detail)
 		}
-	case models.QueryLanguageClickHouseSQL:
-		if err := validateClickHouseSQLSyntax(content); err != nil {
-			return fmt.Errorf("%w: content is not valid clickhouse-sql: %s", ErrInvalidQueryContent, err)
-		}
-	case models.QueryLanguageLogsQL:
-		// There is NO local LogsQL parser in this codebase and we deliberately
-		// do NOT fabricate one. Best-effort validation only: any non-empty,
-		// non-templated content is accepted (empty was handled above). This
-		// mirrors the LogsQL handling in internal/ai/generator.go.
-	}
-	return nil
-}
-
-// validateClickHouseSQLSyntax reports whether content parses as ClickHouse SQL.
-// It mirrors the escaped-single-quote handling in internal/ai/generator.go's
-// validateAndFormatSQL: the parser can misinterpret a doubled single quote (an
-// escaped single quote inside a string literal), so it is swapped for a
-// placeholder before parsing. We use the parser library directly rather than
-// importing internal/ai (layering).
-func validateClickHouseSQLSyntax(content string) error {
-	const placeholder = "___ESCAPED_QUOTE___"
-	processed := strings.ReplaceAll(content, "''", placeholder)
-
-	stmts, err := clickhouseparser.NewParser(processed).ParseStmts()
-	if err != nil {
-		return err
-	}
-	if len(stmts) == 0 {
-		return fmt.Errorf("no SQL statements found")
+	case models.QueryLanguageClickHouseSQL, models.QueryLanguageLogsQL:
+		// Deliberately NOT strict-parsed. ClickHouse SQL and LogsQL are large,
+		// evolving dialects; validating them here with a third-party/absent
+		// parser would reject valid-but-exotic user queries at save time — a
+		// worse regression than the one-off mislabel this guard was added for
+		// (which had a frontend root cause, already fixed). We only enforce the
+		// LogchefQL direction, where our own parser makes it safe.
 	}
 	return nil
 }
