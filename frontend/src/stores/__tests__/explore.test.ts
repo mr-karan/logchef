@@ -181,7 +181,7 @@ describe("explore store", () => {
       expect(store.activeShareToken).toBe("share-token");
     });
 
-    it("auto-migrates logchefql content to native when the source loses logchefql support", async () => {
+    it("clears logchefql content when the source loses logchefql support", async () => {
       mocks.sourcesState.currentSourceDetails = CH_SOURCE;
       const store = useExploreStore();
       store.setLogchefqlCode('level="error"');
@@ -191,10 +191,12 @@ describe("explore store", () => {
 
       expect(store.activeMode).toBe("native");
       expect(store.logchefqlCode).toBe("");
-      expect(store.nativeQuery).toBe('level="error"');
+      // Raw LogchefQL must NOT leak into nativeQuery without translation.
+      // The default SQL generator in executeQuery will produce a valid query.
+      expect(store.nativeQuery).toBe("");
     });
 
-    it("does not clobber an existing native query when auto-migrating", async () => {
+    it("clears both query slots when auto-migrating regardless of prior native content", async () => {
       mocks.sourcesState.currentSourceDetails = CH_SOURCE;
       const store = useExploreStore();
       store.setLogchefqlCode('level="error"');
@@ -203,7 +205,9 @@ describe("explore store", () => {
       mocks.sourcesState.currentSourceDetails = SQL_ONLY_SOURCE;
       await nextTick();
 
-      expect(store.nativeQuery).toBe("SELECT 1");
+      // Both slots are cleared because the source change resets query state.
+      // The previous nativeQuery belonged to a different source.
+      expect(store.nativeQuery).toBe("");
       expect(store.logchefqlCode).toBe("");
     });
 
