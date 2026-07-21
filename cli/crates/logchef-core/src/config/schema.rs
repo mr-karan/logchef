@@ -17,10 +17,24 @@ pub struct Config {
 
     #[serde(default)]
     pub highlights: HighlightsConfig,
+
+    /// Show the ASCII startup banner on bare `logchef` (TTY only). Defaults to
+    /// true; absent in old config files, which load fine via the serde default.
+    #[serde(default = "default_true")]
+    pub show_banner: bool,
+
+    /// Check GitHub for a newer CLI release and print a notice to stderr (TTY
+    /// only). Defaults to true; absent in old config files, which load fine.
+    #[serde(default = "default_true")]
+    pub check_updates: bool,
 }
 
 fn default_version() -> u32 {
     CONFIG_VERSION
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl Default for Config {
@@ -30,6 +44,8 @@ impl Default for Config {
             current_context: None,
             contexts: HashMap::new(),
             highlights: HighlightsConfig::default(),
+            show_banner: true,
+            check_updates: true,
         }
     }
 }
@@ -152,4 +168,29 @@ pub fn context_name_from_url(url: &str) -> String {
         .ok()
         .and_then(|u| u.host_str().map(|h| h.to_string()))
         .unwrap_or_else(|| "default".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn old_config_without_new_fields_defaults_true() {
+        // A config written before show_banner/check_updates existed.
+        let json = r#"{"version":1,"current_context":null,"contexts":{}}"#;
+        let config: Config = serde_json::from_str(json).expect("should load old config");
+        assert!(config.show_banner);
+        assert!(config.check_updates);
+    }
+
+    #[test]
+    fn banner_flag_round_trips() {
+        let mut config = Config::default();
+        assert!(config.show_banner);
+        config.show_banner = false;
+        let json = serde_json::to_string(&config).unwrap();
+        let reloaded: Config = serde_json::from_str(&json).unwrap();
+        assert!(!reloaded.show_banner);
+        assert!(reloaded.check_updates);
+    }
 }

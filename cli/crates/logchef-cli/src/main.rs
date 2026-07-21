@@ -1,7 +1,10 @@
+mod banner;
 mod cli;
 mod commands;
+mod env_flags;
 mod session;
 mod ui;
+mod update;
 
 use clap::Parser;
 

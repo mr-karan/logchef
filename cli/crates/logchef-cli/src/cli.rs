@@ -163,6 +163,10 @@ impl Cli {
             .with_target(false)
             .init();
 
+        let quiet = self.quiet;
+        // The completions command emits a script; keep it free of any notice.
+        let run_update_check = !matches!(self.command, Some(Commands::Completions(_)));
+
         let global = GlobalArgs {
             context: self.context,
             server: self.server,
@@ -170,7 +174,7 @@ impl Cli {
             quiet: self.quiet,
         };
 
-        match self.command {
+        let result = match self.command {
             Some(Commands::Auth(args)) => auth::run(args, global).await,
             Some(Commands::Query(args)) => query::run(args, global).await,
             Some(Commands::Sql(args)) => sql::run(args, global).await,
@@ -192,11 +196,24 @@ impl Cli {
             Some(Commands::Skills(args)) => skills::run(args).await,
             Some(Commands::Completions(args)) => completions::run(args).await,
             None => {
+                let show_banner = logchef_core::Config::load()
+                    .map(|c| c.show_banner)
+                    .unwrap_or(true);
+                crate::banner::print_banner(show_banner);
                 let mut cmd = Cli::command();
                 cmd.print_help()?;
                 println!();
                 Ok(())
             }
+        };
+
+        // Fire the update notifier only after a successful command, and never
+        // for `completions`. It self-gates (config/TTY/quiet/env) and is
+        // time-boxed, so it never delays or breaks the command.
+        if result.is_ok() && run_update_check {
+            crate::update::check_and_notify(quiet).await;
         }
+
+        result
     }
 }

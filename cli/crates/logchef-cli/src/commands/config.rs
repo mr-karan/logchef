@@ -116,6 +116,11 @@ fn delete_context(name: &str) -> Result<()> {
 fn show_config() -> Result<()> {
     let config = Config::load().context("Failed to load config")?;
 
+    println!("CLI preferences:");
+    println!("  banner:        {}", config.show_banner);
+    println!("  check-updates: {}", config.check_updates);
+    println!();
+
     let ctx_name = match config.current_context_name() {
         Some(name) => name,
         None => {
@@ -184,6 +189,24 @@ fn show_path() -> Result<()> {
 fn set_value(key: &str, value: &str) -> Result<()> {
     let mut config = Config::load().context("Failed to load config")?;
 
+    // Global (non-context) CLI preferences. Handled before requiring a context
+    // so they can be toggled even without an authenticated context.
+    match key {
+        "banner" | "show_banner" => {
+            config.show_banner = parse_bool(value)?;
+            config.save().context("Failed to save config")?;
+            println!("Set {} = {}", key, config.show_banner);
+            return Ok(());
+        }
+        "check-updates" | "check_updates" => {
+            config.check_updates = parse_bool(value)?;
+            config.save().context("Failed to save config")?;
+            println!("Set {} = {}", key, config.check_updates);
+            return Ok(());
+        }
+        _ => {}
+    }
+
     let ctx = config
         .current_context_mut()
         .ok_or_else(|| anyhow::anyhow!("No current context. Run 'logchef auth' first."))?;
@@ -208,7 +231,7 @@ fn set_value(key: &str, value: &str) -> Result<()> {
             ctx.defaults.timezone = Some(value.to_string());
         }
         _ => anyhow::bail!(
-            "Unknown key: '{}'. Valid keys: team, source, limit, since, timezone, timeout",
+            "Unknown key: '{}'. Valid keys: team, source, limit, since, timezone, timeout, banner, check-updates",
             key
         ),
     }
@@ -216,4 +239,12 @@ fn set_value(key: &str, value: &str) -> Result<()> {
     config.save().context("Failed to save config")?;
     println!("Set {} = {}", key, value);
     Ok(())
+}
+
+fn parse_bool(value: &str) -> Result<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Ok(true),
+        "false" | "0" | "no" | "off" => Ok(false),
+        _ => anyhow::bail!("Invalid boolean '{}'. Use true or false.", value),
+    }
 }
