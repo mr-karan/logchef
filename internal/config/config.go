@@ -523,9 +523,17 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 		return fmt.Errorf("auth.auto_provision.allowed_domains must be non-empty when auth.auto_provision.enabled is true (either in file or %sAUTH__AUTO_PROVISION__ALLOWED_DOMAINS)", envPrefix)
 	}
 
-	// Validate AI configuration: the bedrock provider needs an AWS region.
-	if cfg.AI.Enabled && cfg.AI.Provider == "bedrock" && cfg.AI.Region == "" {
-		return fmt.Errorf("ai.region is required when ai.provider is \"bedrock\" (either in file or %sAI__REGION)", envPrefix)
+	// Validate AI configuration: the bedrock provider needs an AWS region and an
+	// explicit model id. The default model ("gpt-4o") is only valid for OpenAI;
+	// Bedrock model ids look like "anthropic.claude-3-5-sonnet-20241022-v2:0", so
+	// fail fast rather than sending an invalid id on the first Converse call.
+	if cfg.AI.Enabled && cfg.AI.Provider == "bedrock" {
+		if cfg.AI.Region == "" {
+			return fmt.Errorf("ai.region is required when ai.provider is \"bedrock\" (either in file or %sAI__REGION)", envPrefix)
+		}
+		if cfg.AI.Model == "" {
+			return fmt.Errorf("ai.model is required when ai.provider is \"bedrock\" (a Bedrock model id, e.g. \"anthropic.claude-3-5-sonnet-20241022-v2:0\")")
+		}
 	}
 
 	// Validate OIDC configuration. When local auth is enabled, OIDC becomes
@@ -609,7 +617,10 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	if !k.Exists("ai.base_url") {
 		cfg.AI.BaseURL = defaultAIBaseURL
 	}
-	if !k.Exists("ai.model") {
+	// Default the model to gpt-4o only for the OpenAI provider — "gpt-4o" is not
+	// a valid Bedrock model id, so leaving it empty lets validateConfig fail fast
+	// and require an explicit Bedrock model id.
+	if !k.Exists("ai.model") && cfg.AI.Provider != "bedrock" {
 		cfg.AI.Model = defaultAIModel
 	}
 	if !k.Exists("ai.max_tokens") {

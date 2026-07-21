@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // mockProvider is a scripted Provider: it returns the next response from resps
@@ -34,6 +35,46 @@ func (m *mockProvider) Complete(_ context.Context, _ CompletionRequest) (string,
 
 func newTestGenerator(p Provider) *Generator {
 	return NewGenerator(p, GeneratorConfig{}, testLogger())
+}
+
+// deadlineRecorder records the context deadline seen on each Complete call.
+type deadlineRecorder struct {
+	resps     []string
+	calls     int
+	deadlines []time.Time
+}
+
+func (d *deadlineRecorder) Name() string { return "deadline-recorder" }
+
+func (d *deadlineRecorder) Complete(ctx context.Context, _ CompletionRequest) (string, error) {
+	dl, _ := ctx.Deadline()
+	d.deadlines = append(d.deadlines, dl)
+	idx := d.calls
+	d.calls++
+	if idx < len(d.resps) {
+		return d.resps[idx], nil
+	}
+	return d.resps[len(d.resps)-1], nil
+}
+
+// TestGenerateQueryPerAttemptTimeout guards the fix for the shared-context bug:
+// each attempt (first + repair) must get its OWN timeout window, so a slow first
+// attempt can't starve the repair. With one shared callCtx both calls saw an
+// identical deadline; with a fresh window per call the repair's deadline is
+// strictly later (computed at a later instant).
+func TestGenerateQueryPerAttemptTimeout(t *testing.T) {
+	// First response is invalid ClickHouse SQL (triggers a repair), second valid.
+	p := &deadlineRecorder{resps: []string{"not valid sql ((", "SELECT * FROM default.logs LIMIT 10"}}
+	g := newTestGenerator(p)
+	if _, err := g.GenerateQuery(context.Background(), GenerateQueryInput{Target: TargetClickHouseSQL, NaturalLanguageQuery: "all logs"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(p.deadlines) != 2 {
+		t.Fatalf("expected 2 provider calls, got %d", len(p.deadlines))
+	}
+	if !p.deadlines[1].After(p.deadlines[0]) {
+		t.Fatalf("repair call must get a fresh timeout window (deadline later than the first call); got first=%v repair=%v", p.deadlines[0], p.deadlines[1])
+	}
 }
 
 func TestGenerateQueryRepairLoop(t *testing.T) {

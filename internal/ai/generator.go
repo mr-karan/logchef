@@ -19,7 +19,11 @@ import (
 var ErrInvalidSQLGeneratedByAI = errors.New("AI generated invalid SQL syntax")
 
 // Regular expressions to match markdown code blocks
-var codeBlockRegex = regexp.MustCompile("(?s)```(?:sql)?\\s*(.*?)```")
+// Matches a fenced code block with an optional language tag (```sql, ```logsql,
+// ```logchefql, or a bare ```), capturing the inner content. The [a-zA-Z]* after
+// the fence consumes ANY language tag so it never leaks into the query — the
+// LogsQL target has no parser to catch a leaked tag.
+var codeBlockRegex = regexp.MustCompile("(?s)```[a-zA-Z]*\\s*(.*?)```")
 
 // TargetLanguage is the concrete query language the Generator emits. The server
 // chooses the target deterministically from the source backend and editor mode;
@@ -218,15 +222,13 @@ func (g *Generator) GenerateQuery(ctx context.Context, in GenerateQueryInput) (s
 		"call_timeout", g.callTimeout,
 	)
 
-	callCtx, cancel := context.WithTimeout(ctx, g.callTimeout)
-	defer cancel()
-
 	now := time.Now()
 	systemPrompt := systemPromptFor(in.Target, in.TableName, in.Schema)
 	userPrompt := userPromptFor(in.Target, in.NaturalLanguageQuery, in.CurrentQuery, now)
 
-	// Attempt 1.
-	validated, cleaned, validationErr, err := g.completeAndValidate(callCtx, in.Target, systemPrompt, userPrompt)
+	// Attempt 1. completeAndValidate applies its OWN g.callTimeout window per
+	// call (derived from ctx), so a slow first attempt can't starve the repair.
+	validated, cleaned, validationErr, err := g.completeAndValidate(ctx, in.Target, systemPrompt, userPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -245,7 +247,7 @@ func (g *Generator) GenerateQuery(ctx context.Context, in GenerateQueryInput) (s
 	}
 
 	repairPrompt := repairPromptFor(in.Target, userPrompt, cleaned, validationErr)
-	validated, _, validationErr, err = g.completeAndValidate(callCtx, in.Target, systemPrompt, repairPrompt)
+	validated, _, validationErr, err = g.completeAndValidate(ctx, in.Target, systemPrompt, repairPrompt)
 	if err != nil {
 		return "", err
 	}
@@ -264,7 +266,12 @@ func (g *Generator) GenerateQuery(ctx context.Context, in GenerateQueryInput) (s
 // validation failure (wrapping ErrInvalidSQLGeneratedByAI). cleaned is the
 // markdown-stripped output, used to build a repair prompt.
 func (g *Generator) completeAndValidate(ctx context.Context, target TargetLanguage, system, user string) (validated, cleaned string, validationErr, transportErr error) {
-	raw, err := g.provider.Complete(ctx, CompletionRequest{
+	// Each provider call gets its own timeout window so retries (the repair
+	// attempt) are not starved by a slow first attempt sharing one deadline.
+	callCtx, cancel := context.WithTimeout(ctx, g.callTimeout)
+	defer cancel()
+
+	raw, err := g.provider.Complete(callCtx, CompletionRequest{
 		System:      system,
 		User:        user,
 		Model:       g.model,

@@ -240,3 +240,19 @@ func TestLoad_TrustedProxiesInvalidFailFast(t *testing.T) {
 		}
 	}
 }
+
+func TestLoad_BedrockRequiresRegionAndModel(t *testing.T) {
+	// provider=bedrock with neither region nor model → error (region checked first).
+	if _, err := Load(writeConfig(t, "\n[ai]\nenabled = true\nprovider = \"bedrock\"\n")); err == nil {
+		t.Fatal("expected error: bedrock provider with no region")
+	}
+	// region set but model missing → error (gpt-4o default is invalid for bedrock).
+	if _, err := Load(writeConfig(t, "\n[ai]\nenabled = true\nprovider = \"bedrock\"\nregion = \"us-east-1\"\n")); err == nil {
+		t.Fatal("expected error: bedrock provider with no model")
+	}
+	// region + model set → ok.
+	extra := "\n[ai]\nenabled = true\nprovider = \"bedrock\"\nregion = \"us-east-1\"\nmodel = \"anthropic.claude-3-5-sonnet-20241022-v2:0\"\n"
+	if _, err := Load(writeConfig(t, extra)); err != nil {
+		t.Fatalf("valid bedrock config should load: %v", err)
+	}
+}
