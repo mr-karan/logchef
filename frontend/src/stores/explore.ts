@@ -869,6 +869,13 @@ export const useExploreStore = defineStore("explore", () => {
       restoreDraftForCurrentContext();
     }
 
+    // URL-specified mode wins over draft restoration. When neither q nor sql is
+    // present the active mode should reflect the URL param, not whatever the
+    // last draft wrote.
+    if (params.mode) {
+      state.data.value.activeMode = normalizeModeForSource(normalizeExploreMode(params.mode));
+    }
+
     // Ensure variables from SQL are initialized in the variable store.
     // This handles page reload where the variable store is empty but SQL has placeholders.
     const { ensureVariablesFromSql } = useVariables();
@@ -1778,10 +1785,11 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       if (!supportsLogchefQLForSource(source) && state.data.value.activeMode === 'logchefql') {
-        if (!state.data.value.nativeQuery && state.data.value.logchefqlCode.trim()) {
-          state.data.value.nativeQuery = state.data.value.logchefqlCode;
-        }
+        // The source doesn't support LogchefQL, so raw LogchefQL content cannot be
+        // used as a native query. Drop the LogchefQL content and let the default
+        // SQL generator in executeQuery handle producing an appropriate query.
         state.data.value.logchefqlCode = '';
+        state.data.value.nativeQuery = '';
         state.data.value.activeMode = 'native';
         return;
       }

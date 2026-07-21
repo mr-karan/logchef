@@ -755,6 +755,13 @@ watch(
   (newMode, oldMode) => {
     validationError.value = null;
 
+    // Re-sync editor content from the new mode's value. Without this the
+    // shared editorContent ref can retain stale content from the previous
+    // mode when both mode-specific values happen to be equal (e.g. both
+    // empty after a source change) because the props.value watcher guard
+    // (normalizedValue !== editorContent.value) skips the update.
+    editorContent.value = props.value || "";
+
     if (newMode === "clickhouse-sql") {
       void ensureSqlEditorLoaded();
     } else {

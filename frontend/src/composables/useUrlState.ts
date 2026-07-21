@@ -94,8 +94,8 @@ export function useUrlState(): UrlStateReturn {
     if (limit) normalized.limit = limit;
 
     const mode = getValue('mode');
-    if (mode && normalizeExploreMode(mode) === 'native') {
-      normalized.mode = 'native';
+    if (mode) {
+      normalized.mode = normalizeExploreMode(mode);
     }
 
     const q = getValue('q');
