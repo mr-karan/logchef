@@ -6,9 +6,10 @@
 
 use std::io::IsTerminal;
 
-// Brand purple (~RGB 139,92,246) truecolor + dim, mirroring the raw-ANSI
-// approach already used in `ui.rs` (no color crate dependency).
-const PURPLE: &str = "\x1b[38;2;139;92;246m";
+// Logchef brand blue (#2563EB = RGB 37,99,235, matching LOGCHEF.svg) truecolor
+// + dim, mirroring the raw-ANSI approach already used in `ui.rs` (no color crate
+// dependency).
+const BRAND: &str = "\x1b[38;2;37;99;235m";
 const DIM: &str = "\x1b[2m";
 const RESET: &str = "\x1b[0m";
 
@@ -37,7 +38,7 @@ pub fn print_banner(show_banner: bool) {
     let version = env!("CARGO_PKG_VERSION");
     if crate::env_flags::color_enabled() {
         for line in ART.lines() {
-            println!("{PURPLE}{line}{RESET}");
+            println!("{BRAND}{line}{RESET}");
         }
         println!("{DIM}  {TAGLINE}   v{version}{RESET}");
     } else {
