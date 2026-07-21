@@ -6,8 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strings"
+
+	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -33,48 +37,129 @@ var (
 
 // ValidateSavedQueryContent validates the JSON structure and basic rules of the query content.
 func ValidateSavedQueryContent(contentJSON string) error {
+	_, err := parseAndValidateSavedQueryContent(contentJSON)
+	return err
+}
+
+// parseAndValidateSavedQueryContent parses the envelope ONCE and validates its
+// structural rules, returning the parsed content so callers (create/update) can
+// reuse the inner .Content for the language-match check without re-parsing.
+// Returns (nil, nil) for empty input (a legitimate no-op content).
+func parseAndValidateSavedQueryContent(contentJSON string) (*models.SavedQueryContent, error) {
 	if contentJSON == "" {
-		return nil
+		return nil, nil
 	}
 
 	var queryContent models.SavedQueryContent
 	if err := json.Unmarshal([]byte(contentJSON), &queryContent); err != nil {
-		return fmt.Errorf("%w: failed to parse JSON: %v", ErrInvalidQueryContent, err)
+		return nil, fmt.Errorf("%w: failed to parse JSON: %v", ErrInvalidQueryContent, err)
 	}
 
 	if queryContent.Version <= 0 {
-		return fmt.Errorf("%w: version must be positive", ErrInvalidQueryContent)
+		return nil, fmt.Errorf("%w: version must be positive", ErrInvalidQueryContent)
 	}
 	if queryContent.Content == "" {
-		return fmt.Errorf("%w: query content cannot be empty", ErrInvalidQueryContent)
+		return nil, fmt.Errorf("%w: query content cannot be empty", ErrInvalidQueryContent)
 	}
 	if queryContent.Limit <= 0 {
-		return fmt.Errorf("%w: limit must be positive", ErrInvalidQueryContent)
+		return nil, fmt.Errorf("%w: limit must be positive", ErrInvalidQueryContent)
 	}
 
 	hasRelativeTime := queryContent.TimeRange.Relative != ""
 	hasAbsoluteTime := queryContent.TimeRange.Absolute.Start != 0 || queryContent.TimeRange.Absolute.End != 0
 
 	if hasRelativeTime && hasAbsoluteTime {
-		return fmt.Errorf("%w: cannot specify both relative and absolute time range", ErrInvalidQueryContent)
+		return nil, fmt.Errorf("%w: cannot specify both relative and absolute time range", ErrInvalidQueryContent)
 	}
 
 	if hasRelativeTime && !isValidRelativeTimeFormat(queryContent.TimeRange.Relative) {
-		return fmt.Errorf("%w: invalid relative time format (expected e.g. '15m', '1h', '7d')", ErrInvalidQueryContent)
+		return nil, fmt.Errorf("%w: invalid relative time format (expected e.g. '15m', '1h', '7d')", ErrInvalidQueryContent)
 	}
 
 	if hasAbsoluteTime {
 		if queryContent.TimeRange.Absolute.Start <= 0 {
-			return fmt.Errorf("%w: absolute start time must be positive", ErrInvalidQueryContent)
+			return nil, fmt.Errorf("%w: absolute start time must be positive", ErrInvalidQueryContent)
 		}
 		if queryContent.TimeRange.Absolute.End <= 0 {
-			return fmt.Errorf("%w: absolute end time must be positive", ErrInvalidQueryContent)
+			return nil, fmt.Errorf("%w: absolute end time must be positive", ErrInvalidQueryContent)
 		}
 		if queryContent.TimeRange.Absolute.End < queryContent.TimeRange.Absolute.Start {
-			return fmt.Errorf("%w: absolute end time must be after start time", ErrInvalidQueryContent)
+			return nil, fmt.Errorf("%w: absolute end time must be after start time", ErrInvalidQueryContent)
 		}
 	}
 
+	return &queryContent, nil
+}
+
+// ValidateContentMatchesLanguage returns an error when the query content does
+// not parse in the declared language, so a mismatched (language, content) pair
+// can never be persisted (the root cause of prod query #119: LogchefQL content
+// stored as clickhouse-sql, which then ran as SQL and failed with
+// "unexpected token"). The error wraps ErrInvalidQueryContent so both the
+// create and update handlers surface it as HTTP 400. We deliberately fail loud
+// rather than auto-correcting the language, so a buggy client surfaces the
+// error instead of silently corrupting data.
+//
+// Two accept paths guard against false-rejects (a worse regression than the
+// original bug):
+//   - Empty / whitespace-only content is valid for EVERY language (a no-filter
+//     saved query is legitimate).
+//   - Content containing the "{{" template marker (Logchef's template-variable
+//     syntax, e.g. WHERE x = {{val}}) is accepted WITHOUT strict parsing:
+//     templated SQL legitimately does not parse as raw SQL. The #119 corruption
+//     case has no "{{" marker, so it is still caught.
+func ValidateContentMatchesLanguage(content string, language models.QueryLanguage) error {
+	// Accept path 1: empty / whitespace-only content is a valid no-filter query.
+	if strings.TrimSpace(content) == "" {
+		return nil
+	}
+	// Accept path 2: templated content. "{{" is Logchef's template-variable
+	// marker (see internal/template/variables.go). Raw parsing of a template
+	// would spuriously fail, so accept it as-is.
+	if strings.Contains(content, "{{") {
+		return nil
+	}
+
+	switch models.NormalizeQueryLanguage(language) {
+	case models.QueryLanguageLogchefQL:
+		res := logchefql.Validate(content)
+		if !res.Valid {
+			detail := "invalid syntax"
+			if res.Error != nil {
+				detail = res.Error.Error()
+			}
+			return fmt.Errorf("%w: content is not valid logchefql: %s", ErrInvalidQueryContent, detail)
+		}
+	case models.QueryLanguageClickHouseSQL:
+		if err := validateClickHouseSQLSyntax(content); err != nil {
+			return fmt.Errorf("%w: content is not valid clickhouse-sql: %s", ErrInvalidQueryContent, err)
+		}
+	case models.QueryLanguageLogsQL:
+		// There is NO local LogsQL parser in this codebase and we deliberately
+		// do NOT fabricate one. Best-effort validation only: any non-empty,
+		// non-templated content is accepted (empty was handled above). This
+		// mirrors the LogsQL handling in internal/ai/generator.go.
+	}
+	return nil
+}
+
+// validateClickHouseSQLSyntax reports whether content parses as ClickHouse SQL.
+// It mirrors the escaped-single-quote handling in internal/ai/generator.go's
+// validateAndFormatSQL: the parser can misinterpret a doubled single quote (an
+// escaped single quote inside a string literal), so it is swapped for a
+// placeholder before parsing. We use the parser library directly rather than
+// importing internal/ai (layering).
+func validateClickHouseSQLSyntax(content string) error {
+	const placeholder = "___ESCAPED_QUOTE___"
+	processed := strings.ReplaceAll(content, "''", placeholder)
+
+	stmts, err := clickhouseparser.NewParser(processed).ParseStmts()
+	if err != nil {
+		return err
+	}
+	if len(stmts) == 0 {
+		return fmt.Errorf("no SQL statements found")
+	}
 	return nil
 }
 
@@ -93,14 +178,22 @@ func resolveSavedQueryMetadata(ctx context.Context, ds *datasource.Service, sour
 	return normalizedLanguage, normalizedMode, nil
 }
 
-// validateSavedQueryFields runs the shared content checks used by create and update.
-func validateSavedQueryFields(queryContentJSON string) error {
-	if queryContentJSON != "" {
-		if err := ValidateSavedQueryContent(queryContentJSON); err != nil {
-			return err
-		}
+// validateSavedQueryFields runs the shared content checks used by create and
+// update. It parses the envelope ONCE and then verifies the inner content
+// matches the resolved query language, so a mismatched pair can never be
+// persisted from either the API or the UI, on either create or update.
+func validateSavedQueryFields(queryContentJSON string, language models.QueryLanguage) error {
+	if queryContentJSON == "" {
+		return nil
 	}
-	return nil
+	parsed, err := parseAndValidateSavedQueryContent(queryContentJSON)
+	if err != nil {
+		return err
+	}
+	if parsed == nil {
+		return nil
+	}
+	return ValidateContentMatchesLanguage(parsed.Content, language)
 }
 
 // CreateSavedQuery persists a new saved query owned by the supplied creator.
@@ -109,7 +202,7 @@ func CreateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Ser
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSavedQueryFields(queryContentJSON); err != nil {
+	if err := validateSavedQueryFields(queryContentJSON, queryLanguage); err != nil {
 		log.Warn("invalid saved query create payload", "error", err, "source_id", sourceID, "name", name)
 		return nil, err
 	}
@@ -165,7 +258,7 @@ func UpdateSavedQuery(ctx context.Context, db store.StoreOps, ds *datasource.Ser
 	if err != nil {
 		return nil, err
 	}
-	if err := validateSavedQueryFields(queryContentJSON); err != nil {
+	if err := validateSavedQueryFields(queryContentJSON, queryLanguage); err != nil {
 		log.Warn("invalid saved query update payload", "error", err, "query_id", queryID)
 		return nil, err
 	}

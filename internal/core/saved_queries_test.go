@@ -237,6 +237,90 @@ func TestValidateSavedQueryContent(t *testing.T) {
 	}
 }
 
+// TestValidateContentMatchesLanguage pins the durable defense against
+// persisting a (language, content) mismatch (root cause of prod query #119).
+// The must-PASS (no-false-reject) cases matter as much as the must-REJECT ones:
+// a false reject would break legitimate no-filter and templated saved queries.
+func TestValidateContentMatchesLanguage(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		content  string
+		language models.QueryLanguage
+		wantErr  bool
+	}{
+		// --- Must PASS: empty content is valid for every language ---
+		{"empty logchefql", "", models.QueryLanguageLogchefQL, false},
+		{"empty clickhouse-sql", "", models.QueryLanguageClickHouseSQL, false},
+		{"empty logsql", "", models.QueryLanguageLogsQL, false},
+		{"whitespace-only clickhouse-sql", "   \t\n ", models.QueryLanguageClickHouseSQL, false},
+
+		// --- Must PASS: valid content in its declared language ---
+		{"valid logchefql", `level="error" and svc="api"`, models.QueryLanguageLogchefQL, false},
+		{"valid clickhouse-sql", `SELECT * FROM x WHERE a=1`, models.QueryLanguageClickHouseSQL, false},
+		{"escaped-quote clickhouse-sql", `SELECT * FROM x WHERE s = 'it''s'`, models.QueryLanguageClickHouseSQL, false},
+		{"non-empty logsql", `service:="payments" AND level:="error"`, models.QueryLanguageLogsQL, false},
+
+		// --- Must PASS: templated content accepted via the "{{" marker path ---
+		{"templated clickhouse-sql", `SELECT * FROM x WHERE a = {{val}}`, models.QueryLanguageClickHouseSQL, false},
+		{"templated logchefql", `svc={{service}}`, models.QueryLanguageLogchefQL, false},
+
+		// --- Must REJECT ---
+		// The #119 case: valid LogchefQL mislabeled as clickhouse-sql.
+		{"#119 logchefql under clickhouse-sql", `smtp_id="hedwig-mailer" and status="delivered"`, models.QueryLanguageClickHouseSQL, true},
+		{"broken sql under clickhouse-sql", `SELECT FROM WHERE`, models.QueryLanguageClickHouseSQL, true},
+		{"malformed logchefql", `level="error" and and`, models.QueryLanguageLogchefQL, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateContentMatchesLanguage(tc.content, tc.language)
+			if tc.wantErr {
+				if !errors.Is(err, ErrInvalidQueryContent) {
+					t.Errorf("ValidateContentMatchesLanguage(%q, %s) err = %v, want ErrInvalidQueryContent", tc.content, tc.language, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("ValidateContentMatchesLanguage(%q, %s) unexpected err: %v", tc.content, tc.language, err)
+			}
+		})
+	}
+}
+
+// TestCreateSavedQueryRejectsLanguageMismatch exercises the full create path:
+// a mismatched (language, content) pair is rejected with ErrInvalidQueryContent
+// (which both saved-query handlers map to HTTP 400), while a matching pair is
+// persisted. ds is nil, which skips the source-support check but keeps the rest
+// of the shared create/update path — the same path UpdateSavedQuery uses.
+func TestCreateSavedQueryRejectsLanguageMismatch(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	user := newTestUser(t, db, "eve@example.com", "Eve")
+	src := newTestSource(t, db, "sql-source")
+
+	// #119 shape: LogchefQL content declared as clickhouse-sql.
+	mismatch := `{"version":1,"limit":100,"content":"smtp_id=\"hedwig-mailer\" and status=\"delivered\""}`
+	_, err := CreateSavedQuery(context.Background(), db, nil, log, src.ID, nil, "bad", "",
+		mismatch, models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, user.ID)
+	if !errors.Is(err, ErrInvalidQueryContent) {
+		t.Fatalf("CreateSavedQuery(mismatch) err = %v, want ErrInvalidQueryContent (HTTP 400)", err)
+	}
+
+	// Matching pair: valid ClickHouse SQL declared as clickhouse-sql.
+	match := `{"version":1,"limit":100,"content":"SELECT * FROM x WHERE a=1"}`
+	created, err := CreateSavedQuery(context.Background(), db, nil, log, src.ID, nil, "good", "",
+		match, models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, user.ID)
+	if err != nil {
+		t.Fatalf("CreateSavedQuery(match) unexpected err: %v", err)
+	}
+	if created == nil {
+		t.Fatal("CreateSavedQuery(match) returned nil query")
+	}
+}
+
 type savedQueryGetterFunc func(context.Context, int) (*models.SavedQuery, error)
 
 func (f savedQueryGetterFunc) GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQuery, error) {
