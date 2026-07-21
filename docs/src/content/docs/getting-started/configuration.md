@@ -341,25 +341,42 @@ Configure AI-powered SQL generation through the Admin Settings UI:
 
 **Settings available:**
 - **Enabled**: Enable/disable AI features
-- **API Key**: OpenAI API key (marked as sensitive, hidden in UI)
-- **Base URL**: OpenAI-compatible API endpoint (default: https://api.openai.com/v1)
-- **Model**: Model name (e.g., "gpt-4o", "gpt-4o-mini")
+- **Provider**: AI transport to use — `openai` (default) or `bedrock`
+- **Region**: AWS region for the `bedrock` provider (e.g. `us-east-1`); required when `provider = "bedrock"`
+- **API Key**: OpenAI API key (marked as sensitive, hidden in UI); used by the `openai` provider
+- **Base URL**: OpenAI-compatible API endpoint (default: https://api.openai.com/v1); used by the `openai` provider
+- **Model**: Model name (e.g., "gpt-4o", "gpt-4o-mini" for OpenAI; a Bedrock model id / inference-profile ARN such as "anthropic.claude-3-5-sonnet-20241022-v2:0" for Bedrock)
 - **Max Tokens**: Maximum tokens to generate (default: 1024)
 - **Temperature**: Generation temperature 0.0-1.0 (default: 0.1)
 
 **Supported Providers:**
-- **OpenAI**: Use default base URL (https://api.openai.com/v1)
-- **OpenRouter**: Set base URL to "https://openrouter.ai/api/v1"
-- **Azure OpenAI**: Configure your Azure endpoint
-- **Local Models**: Point to your local OpenAI-compatible server
+- **OpenAI** (`provider = "openai"`): Use default base URL (https://api.openai.com/v1)
+- **OpenRouter**: OpenAI provider with base URL set to "https://openrouter.ai/api/v1"
+- **Azure OpenAI**: OpenAI provider pointed at your Azure endpoint
+- **Local Models**: OpenAI provider pointed at your local OpenAI-compatible server
+- **AWS Bedrock** (`provider = "bedrock"`): Native Bedrock via the unified Converse API. Works across Claude/Llama/Titan/Nova/Mistral. Authenticates through the standard AWS credential chain (environment, shared config, or an IAM role) — no API key is stored in Logchef.
 
 **Optional `config.toml` seeding (first boot only):**
+
+OpenAI (or OpenAI-compatible):
 ```toml
 [ai]
 enabled = false
+provider = "openai"  # default when omitted
 base_url = "https://api.openai.com/v1"
 api_key = ""  # Set via Admin UI after first boot
 model = "gpt-4o"
+max_tokens = 1024
+temperature = 0.1
+```
+
+AWS Bedrock (credentials via the AWS chain / IAM role, no api_key):
+```toml
+[ai]
+enabled = true
+provider = "bedrock"
+region = "us-east-1"
+model = "anthropic.claude-3-5-sonnet-20241022-v2:0"
 max_tokens = 1024
 temperature = 0.1
 ```

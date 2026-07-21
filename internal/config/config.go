@@ -278,9 +278,14 @@ type LoggingConfig struct {
 	Level string `koanf:"level"`
 }
 
-// AIConfig contains AI service (OpenAI) settings
+// AIConfig contains AI service settings.
 type AIConfig struct {
-	// OpenAI API key
+	// Provider selects the AI transport: "openai" (default when empty) or "bedrock".
+	Provider string `koanf:"provider"`
+	// Region is the AWS region for the bedrock provider (e.g. "us-east-1").
+	// Required only when provider = "bedrock".
+	Region string `koanf:"region"`
+	// OpenAI API key (used by the openai provider).
 	APIKey string `koanf:"api_key"`
 	// Model to use for AI SQL generation (default: gpt-4o)
 	Model string `koanf:"model"`
@@ -477,7 +482,7 @@ func validateTrustedProxies(proxies []string) error {
 	return nil
 }
 
-func validateConfig(cfg *Config) error {
+func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation is a flat sequence of independent required-field checks
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
 	case "sqlite":
@@ -516,6 +521,11 @@ func validateConfig(cfg *Config) error {
 	// required when enabled, otherwise every OIDC domain would be eligible.
 	if cfg.Auth.AutoProvision.Enabled && len(cfg.Auth.AutoProvision.AllowedDomains) == 0 {
 		return fmt.Errorf("auth.auto_provision.allowed_domains must be non-empty when auth.auto_provision.enabled is true (either in file or %sAUTH__AUTO_PROVISION__ALLOWED_DOMAINS)", envPrefix)
+	}
+
+	// Validate AI configuration: the bedrock provider needs an AWS region.
+	if cfg.AI.Enabled && cfg.AI.Provider == "bedrock" && cfg.AI.Region == "" {
+		return fmt.Errorf("ai.region is required when ai.provider is \"bedrock\" (either in file or %sAI__REGION)", envPrefix)
 	}
 
 	// Validate OIDC configuration. When local auth is enabled, OIDC becomes

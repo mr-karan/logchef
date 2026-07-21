@@ -29,8 +29,8 @@ import (
 
 // Added constant
 const (
-	// OpenAIRequestTimeout is the maximum time to wait for OpenAI to respond
-	OpenAIRequestTimeout = 15 * time.Second
+	// AIRequestTimeout is the maximum time to wait for the AI provider to respond
+	AIRequestTimeout = 15 * time.Second
 	// FieldValuesTimeout is the maximum time to wait for field values queries
 	// This propagates to ClickHouse as max_execution_time via the context deadline
 	FieldValuesTimeout = 15 * time.Second

@@ -69,7 +69,9 @@ func (s *Server) validateAIConfig() func(*fiber.Ctx) error {
 			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not enabled", models.GeneralErrorType)
 		}
 	}
-	if s.config.AI.APIKey == "" {
+	// The openai provider (default) requires an API key; the bedrock provider
+	// authenticates via the AWS credential chain instead.
+	if (s.config.AI.Provider == "" || s.config.AI.Provider == ai.ProviderOpenAI) && s.config.AI.APIKey == "" {
 		return func(c *fiber.Ctx) error {
 			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not configured (missing API key)", models.GeneralErrorType)
 		}
@@ -132,22 +134,27 @@ func formatSchemaForAI(source *models.Source) string {
 }
 
 func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, schemaJSON, tableName string) (string, error) {
-	aiCtx, cancel := context.WithTimeout(ctx, OpenAIRequestTimeout)
+	aiCtx, cancel := context.WithTimeout(ctx, AIRequestTimeout)
 	defer cancel()
 
-	aiClient, err := ai.NewClient(ai.ClientOptions{
-		APIKey:      s.config.AI.APIKey,
+	provider, err := ai.NewProvider(aiCtx, ai.ProviderConfig{
+		Provider: s.config.AI.Provider,
+		APIKey:   s.config.AI.APIKey,
+		BaseURL:  s.config.AI.BaseURL,
+		Region:   s.config.AI.Region,
+	}, s.log)
+	if err != nil {
+		return "", fmt.Errorf("failed to initialize AI provider: %w", err)
+	}
+
+	gen := ai.NewGenerator(provider, ai.GeneratorConfig{
 		Model:       s.config.AI.Model,
 		MaxTokens:   s.config.AI.MaxTokens,
 		Temperature: s.config.AI.Temperature,
-		Timeout:     OpenAIRequestTimeout,
-		BaseURL:     s.config.AI.BaseURL,
+		Timeout:     AIRequestTimeout,
 	}, s.log)
-	if err != nil {
-		return "", fmt.Errorf("failed to initialize AI client: %w", err)
-	}
 
-	generatedSQL, err := aiClient.GenerateSQL(aiCtx, req.NaturalLanguageQuery, schemaJSON, tableName, req.CurrentQuery)
+	generatedSQL, err := gen.GenerateSQL(aiCtx, req.NaturalLanguageQuery, schemaJSON, tableName, req.CurrentQuery)
 	if err != nil {
 		if errors.Is(err, ai.ErrInvalidSQLGeneratedByAI) {
 			return "", fmt.Errorf("AI could not generate valid SQL: %w", err)
