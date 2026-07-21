@@ -17,8 +17,7 @@ use serde::{Deserialize, Serialize};
 const CACHE_FILE: &str = "update-check.json";
 const CACHE_TTL_SECS: u64 = 24 * 60 * 60; // 24h, mirroring cache.rs' TTL pattern.
 const HTTP_TIMEOUT: Duration = Duration::from_millis(1500);
-const RELEASES_API: &str =
-    "https://api.github.com/repos/mr-karan/logchef/releases?per_page=30";
+const RELEASES_API: &str = "https://api.github.com/repos/mr-karan/logchef/releases?per_page=30";
 const RELEASES_URL: &str = "https://github.com/mr-karan/logchef/releases";
 const TAG_PREFIX: &str = "cli-v";
 const USER_AGENT_VALUE: &str = concat!("logchef-cli/", env!("CARGO_PKG_VERSION"));
@@ -54,10 +53,7 @@ pub async fn check_and_notify(quiet: bool) {
 /// All the non-network gating: config flag, stderr TTY, not quiet, no env
 /// kill-switch. Config-load failures fall back to enabled (default true).
 fn gate(quiet: bool) -> bool {
-    if quiet
-        || crate::env_flags::env_off("LOGCHEF_NO_UPDATE_CHECK")
-        || crate::env_flags::ci()
-    {
+    if quiet || crate::env_flags::env_off("LOGCHEF_NO_UPDATE_CHECK") || crate::env_flags::ci() {
         return false;
     }
     if !std::io::stderr().is_terminal() {
@@ -100,7 +96,10 @@ async fn fetch_latest_stable() -> Option<Version> {
         latest_stable_from_tags(releases.iter().map(|r| r.tag_name.as_str()))
     };
 
-    tokio::time::timeout(HTTP_TIMEOUT, fetch).await.ok().flatten()
+    tokio::time::timeout(HTTP_TIMEOUT, fetch)
+        .await
+        .ok()
+        .flatten()
 }
 
 #[derive(Debug, Deserialize)]
@@ -132,9 +131,7 @@ fn save_cache(path: &PathBuf, latest: &str) {
         latest: latest.to_string(),
         checked_at: now(),
     };
-    if let (Some(parent), Ok(content)) =
-        (path.parent(), serde_json::to_string_pretty(&cache))
-    {
+    if let (Some(parent), Ok(content)) = (path.parent(), serde_json::to_string_pretty(&cache)) {
         std::fs::create_dir_all(parent).ok();
         std::fs::write(path, content).ok();
     }
@@ -303,11 +300,11 @@ mod tests {
     #[test]
     fn filters_non_cli_and_unparseable_tags() {
         let tags = [
-            "v1.0.0",          // wrong prefix (server release) -> skip
-            "cli-v0.3.0",      // stable cli release
-            "cli-vgarbage",    // unparseable -> skip
-            "cli-v0.2.0",      // older stable
-            "some-other-tag",  // skip
+            "v1.0.0",         // wrong prefix (server release) -> skip
+            "cli-v0.3.0",     // stable cli release
+            "cli-vgarbage",   // unparseable -> skip
+            "cli-v0.2.0",     // older stable
+            "some-other-tag", // skip
         ];
         let latest = latest_stable_from_tags(tags.iter().copied()).unwrap();
         assert_eq!(latest.to_string(), "0.3.0");
