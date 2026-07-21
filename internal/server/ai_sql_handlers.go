@@ -53,14 +53,39 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 	if err != nil {
 		return err
 	}
-	_ = source
 
-	generatedSQL, err := s.callAIToGenerateSQL(c.Context(), req, schemaJSON, tableName)
+	// The target language is chosen deterministically from the source backend
+	// and the editor mode. The model never chooses the backend.
+	target := deriveAITarget(source.SourceType, req.Mode)
+
+	generatedQuery, err := s.callAIToGenerateSQL(c.Context(), req, target, schemaJSON, tableName)
 	if err != nil {
 		return err
 	}
 
-	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{SQLQuery: generatedSQL})
+	return SendSuccess(c, http.StatusOK, models.GenerateSQLResponse{
+		SQLQuery: generatedQuery,
+		Language: string(target),
+	})
+}
+
+// deriveAITarget maps the source backend and editor mode to the concrete AI
+// target language, deterministically and server-side. An empty/absent or
+// unrecognized mode is treated as "native" for backward compatibility, so an
+// existing ClickHouse caller still gets ClickHouse SQL.
+//
+//	(ClickHouse,   native) -> ClickHouse SQL
+//	(ClickHouse,   logchefql) -> LogchefQL
+//	(VictoriaLogs, native) -> LogsQL
+//	(VictoriaLogs, logchefql) -> LogchefQL
+func deriveAITarget(sourceType models.SourceType, mode string) ai.TargetLanguage {
+	if mode == string(models.QueryLanguageLogchefQL) {
+		return ai.TargetLogchefQL
+	}
+	if sourceType == models.SourceTypeVictoriaLogs {
+		return ai.TargetLogsQL
+	}
+	return ai.TargetClickHouseSQL
 }
 
 func (s *Server) validateAIConfig() func(*fiber.Ctx) error {
@@ -103,13 +128,16 @@ func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (s
 		return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
 	if !source.HasCapability(string(datasource.CapabilityAISQLGeneration)) {
-		return nil, "", "", SendErrorWithType(c, http.StatusBadRequest, "AI SQL generation is only supported for ClickHouse sources", models.ValidationErrorType)
+		return nil, "", "", SendErrorWithType(c, http.StatusBadRequest, "AI query generation is not supported for this source", models.ValidationErrorType)
 	}
 
 	if !source.IsConnected {
 		return nil, "", "", SendErrorWithType(c, http.StatusServiceUnavailable, "Source is not currently connected", models.ExternalServiceErrorType)
 	}
-	if len(source.Columns) == 0 {
+	// ClickHouse SQL generation needs a concrete schema. VictoriaLogs discovers
+	// fields dynamically and may legitimately have a sparse/empty column set, so
+	// we proceed for VL and let the prompt work from whatever schema is available.
+	if source.SourceType != models.SourceTypeVictoriaLogs && len(source.Columns) == 0 {
 		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
 	}
 
@@ -133,7 +161,7 @@ func formatSchemaForAI(source *models.Source) string {
 	return string(schemaJSON)
 }
 
-func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, schemaJSON, tableName string) (string, error) {
+func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, target ai.TargetLanguage, schemaJSON, tableName string) (string, error) {
 	aiCtx, cancel := context.WithTimeout(ctx, AIRequestTimeout)
 	defer cancel()
 
@@ -154,12 +182,18 @@ func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQL
 		Timeout:     AIRequestTimeout,
 	}, s.log)
 
-	generatedSQL, err := gen.GenerateSQL(aiCtx, req.NaturalLanguageQuery, schemaJSON, tableName, req.CurrentQuery)
+	generatedQuery, err := gen.GenerateQuery(aiCtx, ai.GenerateQueryInput{
+		Target:               target,
+		NaturalLanguageQuery: req.NaturalLanguageQuery,
+		Schema:               schemaJSON,
+		TableName:            tableName,
+		CurrentQuery:         req.CurrentQuery,
+	})
 	if err != nil {
 		if errors.Is(err, ai.ErrInvalidSQLGeneratedByAI) {
-			return "", fmt.Errorf("AI could not generate valid SQL: %w", err)
+			return "", fmt.Errorf("AI could not generate a valid query: %w", err)
 		}
-		return "", fmt.Errorf("failed to generate SQL: %w", err)
+		return "", fmt.Errorf("failed to generate query: %w", err)
 	}
-	return generatedSQL, nil
+	return generatedQuery, nil
 }

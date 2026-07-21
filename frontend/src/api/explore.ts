@@ -25,10 +25,16 @@ export interface FilterCondition {
 export interface AIGenerateSQLRequest {
   natural_language_query: string;
   current_query?: string; // Optional current query for context
+  // Editor mode; the server combines it with the source backend to pick the
+  // concrete target language. Empty/absent is treated as "native".
+  mode?: "logchefql" | "native";
 }
 
 export interface AIGenerateSQLResponse {
   sql_query: string;
+  // Concrete target language the server generated ("clickhouse-sql" |
+  // "logchefql" | "logsql"). Optional.
+  language?: string;
 }
 
 

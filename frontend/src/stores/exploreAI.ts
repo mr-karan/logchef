@@ -31,7 +31,11 @@ export const useExploreAIStore = defineStore("exploreAI", () => {
     state.value.generatedSql = null;
   }
 
-  async function generateAiSql(naturalLanguageQuery: string, currentQuery?: string): Promise<{
+  async function generateAiSql(
+    naturalLanguageQuery: string,
+    currentQuery?: string,
+    mode?: "logchefql" | "native"
+  ): Promise<{
     success: boolean;
     data?: AIGenerateSQLResponse;
     error?: { message: string; status?: string; error_type?: string };
@@ -60,7 +64,8 @@ export const useExploreAIStore = defineStore("exploreAI", () => {
 
       const request: AIGenerateSQLRequest = {
         natural_language_query: naturalLanguageQuery,
-        current_query: currentQuery
+        current_query: currentQuery,
+        mode
       };
 
       const response = await exploreApi.generateAISQL(sourceId, request, currentTeamId);

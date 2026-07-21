@@ -1745,12 +1745,15 @@ export const useExploreStore = defineStore("explore", () => {
 
   // AI delegation
   async function generateAiSql(naturalLanguageQuery: string, currentQuery?: string) {
-    const result = await aiStore.generateAiSql(naturalLanguageQuery, currentQuery);
-    
+    // The concrete target language is derived server-side from the source
+    // backend + this editor mode; forward the explorer's current mode.
+    const mode = state.data.value.activeMode === 'logchefql' ? 'logchefql' : 'native';
+    const result = await aiStore.generateAiSql(naturalLanguageQuery, currentQuery, mode);
+
     if (result.success && result.data && state.data.value.activeMode === 'native') {
       state.data.value.nativeQuery = result.data.sql_query || '';
     }
-    
+
     return result;
   }
 

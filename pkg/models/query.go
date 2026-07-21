@@ -358,11 +358,20 @@ type UpdateSavedQueryRequest struct {
 type GenerateSQLRequest struct {
 	NaturalLanguageQuery string `json:"natural_language_query" validate:"required"`
 	CurrentQuery         string `json:"current_query,omitempty"` // Optional current query for context
+	// Mode is the explorer's current editor mode: "logchefql" | "native".
+	// Empty is treated as "native" for backward compatibility. The server
+	// combines this with the source backend to pick the concrete target
+	// language deterministically; the model never chooses the backend.
+	Mode string `json:"mode,omitempty"`
 }
 
 // GenerateSQLResponse defines the successful response for SQL generation.
 type GenerateSQLResponse struct {
 	SQLQuery string `json:"sql_query"`
+	// Language echoes the concrete target language the server generated
+	// ("clickhouse-sql" | "logchefql" | "logsql"), so the frontend can confirm
+	// what it received. Optional and non-breaking.
+	Language string `json:"language,omitempty"`
 }
 
 // QueryShare stores an ad hoc query payload behind a short token.

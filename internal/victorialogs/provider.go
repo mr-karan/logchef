@@ -134,6 +134,7 @@ func (p *Provider) Capabilities() []datasource.Capability {
 		datasource.CapabilityFieldValues,
 		datasource.CapabilitySourceInspection,
 		datasource.CapabilityLiveTail,
+		datasource.CapabilityAISQLGeneration,
 	}
 }
 

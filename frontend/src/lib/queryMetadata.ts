@@ -78,7 +78,8 @@ export function hasSourceCapability(source: SourceDescriptor, capability: string
       capability === "histogram" ||
       capability === "field_values" ||
       capability === "schema_inspection" ||
-      capability === "source_inspection"
+      capability === "source_inspection" ||
+      capability === "ai_sql_generation"
     );
   }
   if (sourceType === "clickhouse" || sourceType == null) {
