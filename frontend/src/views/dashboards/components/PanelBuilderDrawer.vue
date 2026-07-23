@@ -56,6 +56,7 @@ const monacoTheme = computed(() => (isDark.value ? "logchef-dark" : "logchef-lig
 const PANEL_TYPES: { value: DashboardPanelType; label: string }[] = [
   { value: "timeseries", label: "Time series" },
   { value: "stat", label: "Stat" },
+  { value: "breakdown", label: "Breakdown" },
   { value: "table", label: "Table" },
 ];
 

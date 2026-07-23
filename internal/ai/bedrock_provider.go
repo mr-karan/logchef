@@ -78,8 +78,7 @@ func (p *bedrockProvider) Complete(ctx context.Context, req CompletionRequest) (
 			},
 		},
 		InferenceConfig: &types.InferenceConfiguration{
-			MaxTokens:   aws.Int32(int32(maxTokens)),
-			Temperature: aws.Float32(req.Temperature),
+			MaxTokens: aws.Int32(int32(maxTokens)),
 		},
 	})
 	if err != nil {

@@ -559,3 +559,16 @@ describe("B11: degenerate grid geometry", () => {
     expect(index).toBe(0);
   });
 });
+
+describe("breakdown panel validation", () => {
+  const breakdownBlob = (panels: DashboardPanel[]): DashboardPanels => ({
+    version: 1, panels, layout: panels.map((p, index) => ({ id: p.id, x: index * 6, y: 0, w: 6, h: 2 })),
+  });
+  it("requires a non-empty group-by and validates its view", () => {
+    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: {} })]))).toMatch(/group-by/i);
+    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "  " } })]))).toMatch(/group-by/i);
+    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "service", breakdown_view: "donut" } })]))).toBeNull();
+    expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "service", breakdown_view: "pie" as never } })]))).toMatch(/view/i);
+    expect(validatePanelsBlob(breakdownBlob([panel("b", { options: { breakdown_view: "donut" } })]))).toMatch(/breakdown view/i);
+  });
+});

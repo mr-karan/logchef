@@ -35,6 +35,11 @@ type HistogramBucket struct {
 	Bucket     time.Time `json:"bucket"`
 	LogCount   int       `json:"log_count"`
 	GroupValue string    `json:"group_value,omitempty"`
+	// IsOther is true when this row represents the synthetic remainder bucket
+	// (groups beyond the top-N series limit folded together).
+	IsOther bool `json:"is_other,omitempty"`
+	// IsNull distinguishes a SQL NULL group from an ordinary string value.
+	IsNull bool `json:"is_null,omitempty"`
 }
 
 type HistogramResult struct {

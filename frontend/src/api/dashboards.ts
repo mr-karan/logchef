@@ -6,7 +6,7 @@ import type { QueryResponse as LogchefqlQueryResponse, TranslateResponse } from 
 export type PanelQueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
 
 // The three chart kinds a panel can render (mirrors pkg/models/dashboards.go).
-export type DashboardPanelType = "timeseries" | "stat" | "table";
+export type DashboardPanelType = "timeseries" | "stat" | "table" | "breakdown";
 
 export interface DashboardPanelOptions {
   /** Field to group a timeseries by (produces stacked series). */
@@ -22,6 +22,14 @@ export interface DashboardPanelOptions {
    * Explicit values are always honored.
    */
   chart?: "bars" | "line" | "area";
+  /**
+   * Bar render mode, only meaningful when chart is "bars".
+   * - "stacked" (default when absent): bars drawn cumulatively.
+   * - "grouped": bars drawn side-by-side per series.
+   */
+  bar_mode?: "stacked" | "grouped";
+  /** Breakdown rendering style. Absent defaults to horizontal bars. */
+  breakdown_view?: "horizontal-bars" | "donut";
 }
 
 export interface DashboardPanel {

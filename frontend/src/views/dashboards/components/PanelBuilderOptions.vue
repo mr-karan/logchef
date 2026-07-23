@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { X } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +24,20 @@ const CHART_STYLES: { value: NonNullable<DashboardPanelOptions["chart"]>; label:
   { value: "area", label: "Area" },
   { value: "bars", label: "Bars" },
 ];
+
+const BAR_MODES: { value: NonNullable<DashboardPanelOptions["bar_mode"]>; label: string }[] = [
+  { value: "stacked", label: "Stacked" },
+  { value: "grouped", label: "Grouped" },
+];
+const BREAKDOWN_VIEWS: { value: NonNullable<DashboardPanelOptions["breakdown_view"]>; label: string }[] = [
+  { value: "horizontal-bars", label: "Horizontal bars" },
+  { value: "donut", label: "Donut" },
+];
+
+// The effective chart style, matching what PanelTimeseries renders.
+const effectiveChart = computed<NonNullable<DashboardPanelOptions["chart"]>>(
+  () => props.options.chart ?? "line"
+);
 
 const columnInput = ref("");
 
@@ -80,11 +94,54 @@ function removeColumn(name: string) {
           :key="style.value"
           type="button"
           size="sm"
-          :variant="(options.chart ?? 'line') === style.value ? 'default' : 'outline'"
+          :variant="effectiveChart === style.value ? 'default' : 'outline'"
           class="h-8 text-xs"
           @click="emit('update:options', { chart: style.value })"
         >
           {{ style.label }}
+        </Button>
+      </div>
+    </div>
+    <div v-if="effectiveChart === 'bars'" class="space-y-1.5">
+      <Label>Bar mode</Label>
+      <div class="grid grid-cols-2 gap-1.5">
+        <Button
+          v-for="mode in BAR_MODES"
+          :key="mode.value"
+          type="button"
+          size="sm"
+          :variant="(options.bar_mode ?? 'stacked') === mode.value ? 'default' : 'outline'"
+          class="h-8 text-xs"
+          @click="emit('update:options', { bar_mode: mode.value })"
+        >
+          {{ mode.label }}
+        </Button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Breakdown: a required grouping field and a view-only selector. -->
+  <div v-else-if="type === 'breakdown'" class="space-y-4">
+    <div class="space-y-1.5">
+      <Label for="panel-breakdown-groupby">Group by <span class="text-destructive">(required)</span></Label>
+      <Input
+        id="panel-breakdown-groupby"
+        :model-value="options.group_by ?? ''"
+        list="panel-field-suggestions"
+        placeholder="e.g. service"
+        @update:model-value="(v) => emit('update:options', { group_by: String(v ?? '') })"
+      />
+      <datalist id="panel-field-suggestions">
+        <option v-for="name in fieldSuggestions" :key="name" :value="name" />
+      </datalist>
+    </div>
+    <div class="space-y-1.5">
+      <Label>View</Label>
+      <div class="grid grid-cols-2 gap-1.5">
+        <Button v-for="view in BREAKDOWN_VIEWS" :key="view.value" type="button" size="sm"
+          :variant="(options.breakdown_view ?? 'horizontal-bars') === view.value ? 'default' : 'outline'"
+          class="h-8 text-xs" @click="emit('update:options', { breakdown_view: view.value })">
+          {{ view.label }}
         </Button>
       </div>
     </div>

@@ -290,7 +290,8 @@ func (s *Server) setupRoutes() {
 	admin.Post("/sources/validate", s.requireTokenScope(models.TokenScopeSourcesWrite), s.handleValidateSourceConnection)
 	admin.Put("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleUpdateSource)
 	admin.Delete("/sources/:sourceID", s.requireTokenScope(models.TokenScopeSourcesWrite), s.requireSourceNotManaged, s.handleDeleteSource)
-	admin.Get("/sources/:sourceID/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceStats) // Admin-only source stats
+	admin.Get("/sources/:sourceID/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceStats)
+	admin.Get("/sources/:sourceID/activity", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceActivity) // Admin-only recent activity
 
 	// Recent query activity (admin recent-activity view over query_history).
 	admin.Get("/query-activity", s.requireTokenScope(models.TokenScopeLogsRead), s.handleAdminQueryActivity)
@@ -371,6 +372,7 @@ func (s *Server) setupRoutes() {
 	// Get detailed source info including connection status and schema
 	teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
 	teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
+	teamSourceOps.Get("/activity", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
 
 	// Query and explore logs. The heavy query/exploration endpoints are
 	// rate-limited per authenticated user (queryLimiter runs after the group's

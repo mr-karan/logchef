@@ -40,6 +40,10 @@ const isLoadingInspection = computed(() =>
   sourcesStore.isLoadingOperation(`getSourceInspection-${selectedSourceId.value}`)
 )
 
+const activity = computed(() => selectedSourceId.value ? sourcesStore.getSourceActivityById(Number(selectedSourceId.value)) : null)
+const activityError = computed(() => selectedSourceId.value ? sourcesStore.getSourceActivityErrorById(Number(selectedSourceId.value)) : null)
+const isLoadingActivity = computed(() => sourcesStore.isLoadingOperation(`getSourceActivity-${selectedSourceId.value}`))
+
 const inspectionError = computed(() => {
   const hasInspection = !!inspection.value
   if (!isLoadingInspection.value && storeError.value && selectedSourceId.value && !hasInspection) {
@@ -47,6 +51,18 @@ const inspectionError = computed(() => {
   }
   return null
 })
+
+async function fetchSourceData(refresh = false) {
+  if (!selectedSourceId.value) return
+  await Promise.allSettled([
+    sourcesStore.getSourceInspection(Number(selectedSourceId.value)),
+    sourcesStore.getSourceActivity(Number(selectedSourceId.value), refresh),
+  ])
+}
+
+async function fetchSourceActivity() {
+  if (selectedSourceId.value) await sourcesStore.getSourceActivity(Number(selectedSourceId.value), true)
+}
 
 async function fetchSourceInspection() {
   if (!selectedSourceId.value) {
@@ -58,7 +74,7 @@ async function fetchSourceInspection() {
     return
   }
 
-  await sourcesStore.getSourceInspection(Number(selectedSourceId.value))
+  await sourcesStore.getSourceInspection(Number(selectedSourceId.value), true)
 }
 
 function syncRouteSelection(sourceId: string) {
@@ -105,7 +121,7 @@ watch(
     if (route.query.sourceId !== newSourceId) {
       syncRouteSelection(newSourceId)
     }
-    await fetchSourceInspection()
+    await fetchSourceData()
   },
 )
 </script>
@@ -116,7 +132,7 @@ watch(
       <CardHeader>
         <CardTitle>Source Inspection</CardTitle>
         <CardDescription>
-          Inspect datasource metadata, storage characteristics, activity, and schema across backends.
+          Inspect datasource metadata, storage characteristics, and schema across backends.
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
@@ -144,7 +160,7 @@ watch(
             </Badge>
             <Button @click="fetchSourceInspection" :disabled="isLoadingInspection">
               <span v-if="isLoadingInspection">Refreshing...</span>
-              <span v-else>Refresh Inspection</span>
+              <span v-else>Refresh metadata</span>
             </Button>
           </div>
         </div>
@@ -168,12 +184,12 @@ watch(
             :details="inspection.details"
             :storage="inspection.storage"
           />
-          <SourceInspectionActivity :activity="inspection.activity" />
           <SourceInspectionSchema
             :source="selectedSource"
             :schema="inspection.schema"
           />
         </template>
+        <SourceInspectionActivity v-if="selectedSourceId" :activity="activity" :loading="isLoadingActivity" :error="activityError" @retry="fetchSourceActivity" />
       </CardContent>
     </Card>
   </div>

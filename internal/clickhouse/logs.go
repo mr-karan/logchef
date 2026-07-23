@@ -84,17 +84,33 @@ type HistogramParams struct {
 	QueryTimeout *int
 }
 
+// defaultHistogramSeriesLimit caps the number of distinct group-by series
+// returned for a grouped histogram query. Groups beyond this limit are folded
+// into a single synthetic remainder row per bucket with IsOther=true.
+const defaultHistogramSeriesLimit = 10
+
 // HistogramData represents a single time bucket and its log count in a histogram.
 type HistogramData struct {
 	Bucket     time.Time `json:"bucket"`      // Start time of the bucket.
 	LogCount   int       `json:"log_count"`   // Number of logs in the bucket.
 	GroupValue string    `json:"group_value"` // Value of the group for grouped histograms.
+	// IsOther is true when this row represents the synthetic remainder bucket
+	// (groups beyond the top-N series limit folded together). It is the
+	// structural identity field — GroupValue may also be "Other" for a real
+	// group value, but only rows with IsOther=true are the synthetic remainder.
+	IsOther bool `json:"is_other,omitempty"`
+	// IsNull distinguishes a SQL NULL group from an ordinary string value after
+	// ClickHouse converts the grouped value to its display representation.
+	IsNull bool `json:"is_null,omitempty"`
 }
 
 // HistogramResult holds the complete histogram data and its granularity.
 type HistogramResult struct {
 	Granularity string          `json:"granularity"` // The time window used (e.g., "5m").
 	Data        []HistogramData `json:"data"`
+	// Notice carries a non-fatal message (e.g. group-by series were capped to a
+	// top-N set). Empty when there is nothing to surface.
+	Notice string `json:"notice,omitempty"`
 }
 
 // GetHistogramData generates histogram data by grouping log counts into time buckets.
@@ -145,9 +161,20 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 
 	results := c.parseHistogramResults(result, params.GroupBy != "")
 
+	notice := ""
+	if params.GroupBy != "" {
+		for _, row := range results {
+			if row.IsOther {
+				notice = fmt.Sprintf("Showing top %d series by %q; the rest are aggregated into an \"Other\" bucket.", defaultHistogramSeriesLimit, params.GroupBy)
+				break
+			}
+		}
+	}
+
 	return &HistogramResult{
 		Granularity: string(params.Window),
 		Data:        results,
+		Notice:      notice,
 	}, nil
 }
 
@@ -183,26 +210,56 @@ func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, gr
 		return "", fmt.Errorf("failed to modify query for histogram: %w", err)
 	}
 
-	if groupBy != "" && strings.TrimSpace(groupBy) != "" {
-		quotedGroupBy := quoteIdentifier(groupBy)
+	if groupBy == "" || strings.TrimSpace(groupBy) == "" {
 		return fmt.Sprintf(`
-			WITH top_groups AS (
-				SELECT %s AS group_value, count(*) AS total_logs
-				FROM (%s) AS raw_logs
-				GROUP BY group_value ORDER BY total_logs DESC LIMIT 10
-			)
-			SELECT %s AS bucket, %s AS group_value, count(*) AS log_count
+			SELECT %s AS bucket, count(*) AS log_count
 			FROM (%s) AS raw_logs
-			WHERE %s GLOBAL IN (SELECT group_value FROM top_groups)
-			GROUP BY bucket, group_value ORDER BY bucket ASC, log_count DESC
-		`, quotedGroupBy, modifiedQuery, intervalFunc, quotedGroupBy, modifiedQuery, quotedGroupBy), nil
+			GROUP BY bucket ORDER BY bucket ASC
+		`, intervalFunc, modifiedQuery), nil
 	}
 
+	// One atomic grouped query with top-N ranking and a synthetic remainder.
+	// Keep the original group value through the aggregate/rank/join chain so
+	// nullable values retain their identity. Convert only the displayed top-N
+	// value, after the null-safe join has assigned its rank.
+	quotedGroupBy := quoteIdentifier(groupBy)
 	return fmt.Sprintf(`
-		SELECT %s AS bucket, count(*) AS log_count
-		FROM (%s) AS raw_logs
-		GROUP BY bucket ORDER BY bucket ASC
-	`, intervalFunc, modifiedQuery), nil
+		WITH aggregated AS (
+			SELECT
+				%s AS bucket,
+				%s AS group_value,
+				count(*) AS log_count
+			FROM (%s) AS raw_logs
+			GROUP BY bucket, group_value
+		),
+		group_totals AS (
+			SELECT
+				group_value,
+				sum(log_count) AS total_logs
+			FROM aggregated
+			GROUP BY group_value
+		),
+		ranked AS (
+			SELECT
+				group_value,
+				row_number() OVER (ORDER BY total_logs DESC, group_value ASC) AS rn
+			FROM group_totals
+		)
+		SELECT
+			a.bucket,
+			if(r.rn IS NOT NULL AND r.rn <= %d,
+				ifNull(toString(a.group_value), ''),
+				'Other'
+			) AS group_value,
+			sum(a.log_count) AS log_count,
+			if(r.rn IS NOT NULL AND r.rn <= %d, 0, 1) AS is_other,
+			if(r.rn IS NOT NULL AND r.rn <= %d AND isNull(a.group_value), 1, 0) AS is_null
+		FROM aggregated AS a
+		LEFT JOIN ranked AS r
+			ON (a.group_value = r.group_value) OR (isNull(a.group_value) AND isNull(r.group_value))
+		GROUP BY a.bucket, group_value, is_other, is_null
+		ORDER BY a.bucket ASC, log_count DESC
+	`, intervalFunc, quotedGroupBy, modifiedQuery, defaultHistogramSeriesLimit, defaultHistogramSeriesLimit, defaultHistogramSeriesLimit), nil
 }
 
 func (c *Client) parseHistogramResults(result *models.QueryResult, hasGroupBy bool) []HistogramData {
@@ -230,14 +287,18 @@ func (c *Client) parseHistogramRow(row map[string]any, hasGroupBy bool) (Histogr
 	}
 
 	groupValue := ""
+	isOther := false
+	isNull := false
 	if hasGroupBy {
 		groupValue, ok = extractGroupValue(row)
 		if !ok {
 			return HistogramData{}, false
 		}
+		isOther = parseHistogramFlag(row, "is_other")
+		isNull = parseHistogramFlag(row, "is_null")
 	}
 
-	return HistogramData{Bucket: bucket, LogCount: count, GroupValue: groupValue}, true
+	return HistogramData{Bucket: bucket, LogCount: count, GroupValue: groupValue, IsOther: isOther, IsNull: isNull}, true
 }
 
 func toInt(v any) (int, bool) {
@@ -253,6 +314,34 @@ func toInt(v any) (int, bool) {
 		return int(val), true
 	default:
 		return 0, false
+	}
+}
+
+// parseHistogramFlag extracts a bool-ish ClickHouse result value by key. It
+// accepts uint8 0/1, int64 0/1, float64 0/1, and string "0"/"1". Absent keys
+// and any other value default to false.
+func parseHistogramFlag(row map[string]any, key string) bool {
+	val, ok := row[key]
+	if !ok {
+		return false
+	}
+	switch v := val.(type) {
+	case bool:
+		return v
+	case uint8:
+		return v != 0
+	case int64:
+		return v != 0
+	case uint64:
+		return v != 0
+	case int:
+		return v != 0
+	case float64:
+		return v != 0
+	case string:
+		return v == "1" || strings.EqualFold(v, "true")
+	default:
+		return false
 	}
 }
 

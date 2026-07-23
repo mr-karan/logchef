@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -168,7 +169,12 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	inspection, err := core.InspectSource(c.Context(), s.datasources, sourceID)
+	var inspection *core.SourceInspection
+	if c.Query("refresh") == "true" {
+		inspection, err = core.RefreshSourceInspection(c.Context(), s.datasources, sourceID)
+	} else {
+		inspection, err = core.InspectSource(c.Context(), s.datasources, sourceID)
+	}
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found when getting inspection")
@@ -203,3 +209,27 @@ func (s *Server) handleGetTeamSourceStats(c *fiber.Ctx) error {
 	// Get inspection using the current implementation
 	return s.handleGetSourceStats(c)
 }
+
+func (s *Server) handleGetSourceActivity(c *fiber.Ctx) error {
+	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+	}
+	activity, err := core.InspectSourceActivity(c.Context(), s.datasources, sourceID, c.Query("refresh") == "true")
+	if err == nil {
+		return SendSuccess(c, fiber.StatusOK, activity)
+	}
+	if errors.Is(err, core.ErrSourceNotFound) {
+		return SendError(c, fiber.StatusNotFound, "Source not found")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return SendError(c, fiber.StatusGatewayTimeout, "Recent activity timed out")
+	}
+	if errors.Is(err, datasource.ErrSourceActivityUnavailable) || errors.Is(err, datasource.ErrOperationNotSupported) {
+		return SendError(c, fiber.StatusServiceUnavailable, "Recent activity unavailable")
+	}
+	s.log.Error("failed to get source activity", "error", err, "source_id", sourceID)
+	return SendError(c, fiber.StatusInternalServerError, "Error getting recent activity")
+}
+
+func (s *Server) handleGetTeamSourceActivity(c *fiber.Ctx) error { return s.handleGetSourceActivity(c) }

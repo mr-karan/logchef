@@ -22,6 +22,8 @@ export interface HistogramChartModel {
   bucketWidthMs: number;
 }
 
+const OTHER_SERIES_COLOR = "#6E7074";
+
 const severityColorMapping: Record<string, string> = {
   error: "#EE6666",
   err: "#EE6666",
@@ -239,6 +241,7 @@ function inferBucketWidthMs(sortedTimestamps: number[], fallback = 60_000): numb
 export function buildHistogramChartModel(
   buckets: HistogramData[],
   granularity?: string | null,
+  forceGrouped = false,
 ): HistogramChartModel {
   if (!buckets.length) {
     const chartConfig = {
@@ -261,7 +264,12 @@ export function buildHistogramChartModel(
     (left, right) => new Date(left.bucket).getTime() - new Date(right.bucket).getTime(),
   );
 
-  const isGrouped = sortedBuckets.some((bucket) => bucket.group_value && bucket.group_value !== "");
+  // `group_value` is omitted from JSON for a genuine empty group, so callers
+  // that know a group-by was requested must force grouped rendering. Synthetic
+  // remainder rows also identify a grouped response structurally.
+  const isGrouped = forceGrouped || sortedBuckets.some(
+    (bucket) => bucket.group_value !== undefined || bucket.is_other === true || bucket.is_null === true,
+  );
 
   if (!isGrouped) {
     const bucketWidthMs =
@@ -310,24 +318,40 @@ export function buildHistogramChartModel(
   }
 
   const bucketRows = new Map<number, HistogramChartRow>();
-  const labelToSeriesKey = new Map<string, string>();
+  const identityToSeriesKey = new Map<string, string>();
   const series: HistogramChartSeries[] = [];
 
   sortedBuckets.forEach((bucket) => {
     const ts = new Date(bucket.bucket).getTime();
-    const groupLabel = bucket.group_value || "Other";
+    const isOther = bucket.is_other === true;
+    const isNull = !isOther && bucket.is_null === true;
+    // Synthetic Other and SQL NULL have structural identities independent of
+    // their display markers. Real groups retain their raw value as identity,
+    // so an empty value cannot overwrite a literal "(empty)" value.
+    const groupLabel = isOther
+      ? "Other"
+      : isNull
+        ? "(null)"
+        : bucket.group_value === "" || bucket.group_value === undefined
+          ? "(empty)"
+          : bucket.group_value;
+    const seriesIdentity = isOther
+      ? "synthetic-other"
+      : isNull
+        ? "structural-null"
+        : `group:${bucket.group_value ?? ""}`;
 
-    if (!labelToSeriesKey.has(groupLabel)) {
+    if (!identityToSeriesKey.has(seriesIdentity)) {
       const seriesKey = `series_${series.length}`;
-      labelToSeriesKey.set(groupLabel, seriesKey);
+      identityToSeriesKey.set(seriesIdentity, seriesKey);
       series.push({
         key: seriesKey,
         label: groupLabel,
-        color: getColorForGroupValue(groupLabel),
+        color: isOther ? OTHER_SERIES_COLOR : getColorForGroupValue(groupLabel),
       });
     }
 
-    const seriesKey = labelToSeriesKey.get(groupLabel)!;
+    const seriesKey = identityToSeriesKey.get(seriesIdentity)!;
     const existingRow =
       bucketRows.get(ts) ??
       ({

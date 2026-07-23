@@ -8,16 +8,25 @@ import type {
   CreateSourcePayload,
   UpdateSourcePayload,
   SourceInspection,
+  SourceActivity,
   ValidateConnectionRequestInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
+
+type SourceActivityRequestResult = {
+  success: boolean;
+  data?: SourceActivity | null;
+  error?: APIErrorResponse;
+};
 
 interface SourcesState {
   sources: Source[];
   teamSources: Source[];
   sourceQueries: Record<string, any>;
   sourceInspections: Record<string, SourceInspection>;
+  sourceActivities: Record<string, SourceActivity>;
+  sourceActivityErrors: Record<string, string>;
   currentSourceDetails: Source | null;
   // Loading states
   isLoadingTeamSources: boolean;
@@ -36,6 +45,8 @@ export const useSourcesStore = defineStore("sources", () => {
     teamSources: [],
     sourceQueries: {},
     sourceInspections: {},
+    sourceActivities: {},
+    sourceActivityErrors: {},
     currentSourceDetails: null,
     isLoadingTeamSources: false,
     isLoadingSourceDetails: false,
@@ -47,6 +58,8 @@ export const useSourcesStore = defineStore("sources", () => {
   const sources = computed(() => state.data.value.sources);
   const teamSources = computed(() => state.data.value.teamSources);
   const sourceInspections = computed(() => state.data.value.sourceInspections);
+  const sourceActivities = computed(() => state.data.value.sourceActivities);
+  const sourceActivityErrors = computed(() => state.data.value.sourceActivityErrors);
   const currentSourceDetails = computed(() => state.data.value.currentSourceDetails);
   
   // Loading state computed properties
@@ -73,12 +86,13 @@ export const useSourcesStore = defineStore("sources", () => {
   );
 
   // Source stats getter
-  const getSourceInspectionById = computed(() => (id: number) =>
-    sourceInspections.value[id.toString()]
-  );
+  const getSourceInspectionById = computed(() => (id: number) => sourceInspections.value[id.toString()]);
+  const getSourceActivityById = computed(() => (id: number) => sourceActivities.value[id.toString()]);
+  const getSourceActivityErrorById = computed(() => (id: number) => sourceActivityErrors.value[id.toString()] ?? null);
 
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
+  const sourceActivityRequests = new Map<number, Promise<SourceActivityRequestResult>>();
 
   // Hydration state
   const isHydrated = ref(false);
@@ -323,10 +337,10 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   // Get stats for a source (admin-only version)
-  async function getSourceInspection(sourceId: number) {
+  async function getSourceInspection(sourceId: number, refresh = false) {
     return await state.withLoading(`getSourceInspection-${sourceId}`, async () => {
       return await state.callApi({
-        apiCall: () => sourcesApi.getAdminSourceInspection(sourceId),
+        apiCall: () => sourcesApi.getAdminSourceInspection(sourceId, refresh),
         operationKey: `getSourceInspection-${sourceId}`,
         onSuccess: (data: any) => {
           state.data.value.sourceInspections = {
@@ -337,6 +351,48 @@ export const useSourcesStore = defineStore("sources", () => {
         showToast: false,
       });
     });
+  }
+
+
+  async function getSourceActivity(sourceId: number, refresh = false) {
+    const existingRequest = sourceActivityRequests.get(sourceId);
+    if (existingRequest) {
+      return await existingRequest;
+    }
+
+    const key = sourceId.toString();
+    const { [key]: _removed, ...remaining } = state.data.value.sourceActivityErrors;
+    state.data.value.sourceActivityErrors = remaining;
+
+    const request = state.withLoading(`getSourceActivity-${sourceId}`, async () =>
+      state.callApi<SourceActivity>({
+        apiCall: () => sourcesApi.getAdminSourceActivity(sourceId, refresh),
+        operationKey: `getSourceActivity-${sourceId}`,
+        showToast: false,
+        onSuccess: (data) => {
+          if (data) {
+            state.data.value.sourceActivities = { ...state.data.value.sourceActivities, [key]: data };
+          }
+          const { [key]: _removed, ...remaining } = state.data.value.sourceActivityErrors;
+          state.data.value.sourceActivityErrors = remaining;
+        },
+        onError: (error) => {
+          state.data.value.sourceActivityErrors = {
+            ...state.data.value.sourceActivityErrors,
+            [key]: error.message ?? "Recent activity unavailable",
+          };
+        },
+      })
+    );
+    sourceActivityRequests.set(sourceId, request);
+
+    try {
+      return await request;
+    } finally {
+      if (sourceActivityRequests.get(sourceId) === request) {
+        sourceActivityRequests.delete(sourceId);
+      }
+    }
   }
 
   // Get team-scoped inspection data for a source
@@ -481,6 +537,8 @@ export const useSourcesStore = defineStore("sources", () => {
 
     // Also clear any stats for this source
     delete state.data.value.sourceInspections[sourceId.toString()];
+    delete state.data.value.sourceActivities[sourceId.toString()];
+    delete state.data.value.sourceActivityErrors[sourceId.toString()];
 
     // Clear current source details if it matches this source
     if (state.data.value.currentSourceDetails?.id === sourceId) {
@@ -585,6 +643,8 @@ export const useSourcesStore = defineStore("sources", () => {
     error: state.error,
     teamSourcesMap,
     sourceInspections,
+    sourceActivities,
+    sourceActivityErrors,
     loadingStates: state.loadingStates,
     validatedConnections,
     currentSourceDetails,
@@ -614,6 +674,8 @@ export const useSourcesStore = defineStore("sources", () => {
     getSourceById,
     getTeamSourceById,
     getSourceInspectionById: (id: number) => getSourceInspectionById.value(id),
+    getSourceActivityById: (id: number) => getSourceActivityById.value(id),
+    getSourceActivityErrorById: (id: number) => getSourceActivityErrorById.value(id),
     isConnectionValidated,
 
     // Actions
@@ -624,6 +686,7 @@ export const useSourcesStore = defineStore("sources", () => {
     deleteSource,
     getSourcesNotInTeam,
     getSourceInspection,
+    getSourceActivity,
     getTeamSourceInspection,
     getSource,
     validateSourceConnection,

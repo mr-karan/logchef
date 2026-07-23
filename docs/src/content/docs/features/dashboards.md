@@ -25,11 +25,14 @@ explorer, they can see in a panel.
 
 ## Panel types
 
-- **Time series**: a stacked bar chart over time, the same histogram the explorer
-  draws. Optionally group by a field to break the series out (for example, 5xx
+- **Time series**: a chart over time, using the same histogram data the explorer
+  draws. You can render it as a line, area, or bars (stacked or grouped), and
+  optionally group by a field to break the series out (for example, 5xx
   responses split by service).
 - **Stat**: a single number: the total match count for the query over the current
   time range. Good for "how many errors in the last 15 minutes".
+- **Breakdown**: log counts by a required field over the selected range. Use
+  horizontal bars (default) or a donut for a compact top-category view.
 - **Table**: the matching rows, like the explorer results grid. Set a row limit and
   an optional column subset.
 
@@ -73,8 +76,9 @@ cached. Server-wide limits (total size, per-entry cap, entry count) are set with
 
 ## Chart styles
 
-Time series panels can render as **bars** (default), **line**, or **area**. Set the
-style per panel in the panel builder. The histogram data is shared with the
+Time series panels can render as **line** (default), **area**, or **bars**. Set the
+style per panel in the panel builder. When the style is bars, you can choose
+**stacked** (default) or **grouped** bar mode. The histogram data is shared with the
 explorer, including zero-filled gaps, so a sparse or grouped series (e.g. 5xx errors
 by host) renders as a continuous chart instead of isolated bars floating over dead
 space.
@@ -89,7 +93,7 @@ Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
   the **panel builder**, a full-height drawer where you pick the team and source,
   write the query in the Monaco editor (LogchefQL or the source's native language)
   with a live preview, choose the panel type, and set type-specific options: group-by
-  and chart style for time series, a row limit and optional column subset for tables.
+  and chart style for time series, a required group-by and horizontal-bar or donut view for breakdowns, and a row limit and optional column subset for tables.
 - **Edit or remove** an existing panel via the pencil / trash icons on its header,
   which reopens the same panel builder drawer.
 

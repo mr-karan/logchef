@@ -335,6 +335,18 @@ func TestHistogramCatchAllSeriesLabeledOther(t *testing.T) {
 	if result.Notice == "" {
 		t.Fatalf("expected a truncation notice when the catch-all series is present")
 	}
+	for _, bucket := range result.Data {
+		switch bucket.GroupValue {
+		case "x":
+			if bucket.IsOther {
+				t.Fatal("real group must not be marked as Other")
+			}
+		case histogramOtherSeriesLabel:
+			if !bucket.IsOther {
+				t.Fatal("catch-all group must be marked as Other")
+			}
+		}
+	}
 }
 
 // TestHistogramEmptyValueGroupNotTruncated verifies a genuine empty-value group
@@ -346,7 +358,9 @@ func TestHistogramEmptyValueGroupNotTruncated(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"hits":[` +
 			`{"fields":{"service":"x"},"timestamps":["2026-04-08T10:01:00Z"],"values":[5]},` +
-			`{"fields":{"service":""},"timestamps":["2026-04-08T10:01:00Z"],"values":[3]}` +
+			`{"fields":{"service":""},"timestamps":["2026-04-08T10:01:00Z"],"values":[3]},` +
+			`{"fields":{"service":"Other"},"timestamps":["2026-04-08T10:01:00Z"],"values":[2]},` +
+			`{"fields":{"service":"__other__"},"timestamps":["2026-04-08T10:01:00Z"],"values":[1]}` +
 			`]}`))
 	}))
 	defer server.Close()
@@ -367,8 +381,8 @@ func TestHistogramEmptyValueGroupNotTruncated(t *testing.T) {
 	}
 	sawEmpty := false
 	for _, b := range result.Data {
-		if b.GroupValue == histogramOtherSeriesLabel {
-			t.Fatalf("genuine empty-value group must not be labeled as the aggregate bucket")
+		if b.IsOther {
+			t.Fatalf("genuine group %q must not be marked as Other", b.GroupValue)
 		}
 		if b.GroupValue == "" {
 			sawEmpty = true

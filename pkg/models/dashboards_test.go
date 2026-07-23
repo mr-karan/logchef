@@ -50,6 +50,24 @@ func TestValidateDashboardPanels_Valid(t *testing.T) {
 	if err := ValidateDashboardPanels(withOptions); err != nil {
 		t.Fatalf("valid options blob rejected: %v", err)
 	}
+
+	// Valid bar_mode "grouped" with chart "bars".
+	groupedBars := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"timeseries","team_id":1,"source_id":1,"query":"x","query_language":"logchefql","options":{"chart":"bars","bar_mode":"grouped"}}]}`)
+	if err := ValidateDashboardPanels(groupedBars); err != nil {
+		t.Fatalf("valid grouped bar_mode rejected: %v", err)
+	}
+
+	// Valid bar_mode "stacked" with chart "bars".
+	stackedBars := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"timeseries","team_id":1,"source_id":1,"query":"x","query_language":"logchefql","options":{"chart":"bars","bar_mode":"stacked"}}]}`)
+	if err := ValidateDashboardPanels(stackedBars); err != nil {
+		t.Fatalf("valid stacked bar_mode rejected: %v", err)
+	}
+
+	// Absent bar_mode is valid (defaults to stacked).
+	noBarMode := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"timeseries","team_id":1,"source_id":1,"query":"x","query_language":"logchefql","options":{"chart":"bars"}}]}`)
+	if err := ValidateDashboardPanels(noBarMode); err != nil {
+		t.Fatalf("absent bar_mode rejected: %v", err)
+	}
 }
 
 func TestValidateDashboardPanels_Violations(t *testing.T) {
@@ -100,6 +118,8 @@ func TestValidateDashboardPanels_Violations(t *testing.T) {
 		{"limit too large", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"limit":9999999}}]}`), "max"},
 		{"columns as string", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"columns":"service"}}]}`), "invalid options"},
 		{"group_by as number", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"group_by":5}}]}`), "invalid options"},
+		// bar_mode validation.
+		{"invalid bar_mode", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"timeseries","team_id":1,"source_id":1,"query_language":"logchefql","options":{"chart":"bars","bar_mode":"invalid"}}]}`), "invalid options.bar_mode"},
 	}
 
 	for _, tc := range tests {
@@ -110,6 +130,35 @@ func TestValidateDashboardPanels_Violations(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.wantSub) {
 				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantSub)
+			}
+		})
+	}
+}
+
+func TestValidateDashboardPanels_Breakdown(t *testing.T) {
+	valid := func(options string) json.RawMessage {
+		return json.RawMessage(`{"version":1,"layout":[{"id":"b","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"b","type":"breakdown","team_id":1,"source_id":1,"query_language":"logchefql","options":` + options + `}]}`)
+	}
+	for _, tc := range []struct {
+		name string
+		blob json.RawMessage
+		want string
+	}{
+		{"default view", valid(`{"group_by":"service"}`), ""},
+		{"donut view", valid(`{"group_by":"service","breakdown_view":"donut"}`), ""},
+		{"missing options", json.RawMessage(`{"version":1,"layout":[{"id":"b","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"b","type":"breakdown","team_id":1,"source_id":1,"query_language":"logchefql"}]}`), "group_by"},
+		{"missing group by", valid(`{}`), "group_by"},
+		{"blank group by", valid(`{"group_by":"  "}`), "group_by"},
+		{"bad view", valid(`{"group_by":"service","breakdown_view":"pie"}`), "breakdown_view"},
+		{"view on stat", json.RawMessage(`{"version":1,"layout":[{"id":"s","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"s","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql","options":{"breakdown_view":"donut"}}]}`), "breakdown_view"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := ValidateDashboardPanels(tc.blob)
+			if tc.want == "" && err != nil {
+				t.Fatalf("valid breakdown rejected: %v", err)
+			}
+			if tc.want != "" && (err == nil || !strings.Contains(err.Error(), tc.want)) {
+				t.Fatalf("error = %v, want %q", err, tc.want)
 			}
 		})
 	}

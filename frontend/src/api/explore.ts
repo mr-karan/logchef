@@ -103,11 +103,15 @@ export interface HistogramDataPoint {
   bucket: string;
   log_count: number;
   group_value?: string; // Optional field for grouped data
+  is_other?: boolean; // true when this row represents the synthetic remainder
+  is_null?: boolean; // true when this row represents a structural SQL NULL group
 }
 
 export interface HistogramResponse {
   granularity: string;
   data: HistogramDataPoint[];
+  /** Non-fatal notice (e.g., series were capped to a top-N set). */
+  notice?: string;
 }
 
 // Log context types (surrounding logs around a target timestamp)

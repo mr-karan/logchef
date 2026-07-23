@@ -9,17 +9,19 @@ import (
 )
 
 type fakeConverse struct {
+	in  *bedrockruntime.ConverseInput
 	out *bedrockruntime.ConverseOutput
 	err error
 }
 
-func (f *fakeConverse) Converse(_ context.Context, _ *bedrockruntime.ConverseInput, _ ...func(*bedrockruntime.Options)) (*bedrockruntime.ConverseOutput, error) {
+func (f *fakeConverse) Converse(_ context.Context, in *bedrockruntime.ConverseInput, _ ...func(*bedrockruntime.Options)) (*bedrockruntime.ConverseOutput, error) {
+	f.in = in
 	return f.out, f.err
 }
 
 func TestBedrockProviderComplete(t *testing.T) {
 	p := &bedrockProvider{logger: testLogger()}
-	p.client = &fakeConverse{
+	client := &fakeConverse{
 		out: &bedrockruntime.ConverseOutput{
 			Output: &types.ConverseOutputMemberMessage{
 				Value: types.Message{
@@ -32,6 +34,7 @@ func TestBedrockProviderComplete(t *testing.T) {
 			},
 		},
 	}
+	p.client = client
 
 	got, err := p.Complete(context.Background(), CompletionRequest{User: "q", System: "s", Model: "m", MaxTokens: 10, Temperature: 0.1})
 	if err != nil {
@@ -39,6 +42,9 @@ func TestBedrockProviderComplete(t *testing.T) {
 	}
 	if got != "SELECT 1 FROM t" {
 		t.Fatalf("unexpected text: %q", got)
+	}
+	if client.in.InferenceConfig.Temperature != nil {
+		t.Fatal("temperature must be omitted for Bedrock model compatibility")
 	}
 }
 

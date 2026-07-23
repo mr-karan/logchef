@@ -452,12 +452,15 @@ func (p *ClickHouseProvider) Histogram(ctx context.Context, source *models.Sourc
 			Bucket:     row.Bucket,
 			LogCount:   row.LogCount,
 			GroupValue: row.GroupValue,
+			IsOther:    row.IsOther,
+			IsNull:     row.IsNull,
 		})
 	}
 
 	return &HistogramResult{
 		Granularity: result.Granularity,
 		Data:        data,
+		Notice:      result.Notice,
 	}, nil
 }
 
@@ -566,20 +569,51 @@ func (p *ClickHouseProvider) InspectSource(ctx context.Context, source *models.S
 		return nil, fmt.Errorf("failed to get client for source %d: %w", source.ID, err)
 	}
 
-	tableInfo, _ := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+	tableInfo, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		return nil, fmt.Errorf("inspect table metadata: %w", err)
+	}
 	ttlExpr := extractTTLFromTableInfo(ctx, client, tableInfo)
 	statsDB, statsTable := getStatsTableLocation(source, tableInfo)
-
-	tableStats, _ := client.TableStats(ctx, statsDB, statsTable)
-	columnStats, _ := client.ColumnStats(ctx, statsDB, statsTable)
-	ingestionStats, _ := client.IngestionStats(ctx, statsDB, statsTable, source.MetaTSField)
-
+	tableStats, statsErr := client.TableStats(ctx, statsDB, statsTable)
+	if statsErr != nil {
+		p.log.Warn("failed to inspect table storage", "source_id", source.ID, "error", statsErr)
+	}
 	return &SourceInspection{
-		Details:  buildClickHouseInspectionDetails(source, tableInfo),
-		Storage:  buildClickHouseStorageMetrics(tableStats),
-		Activity: mapActivityStats(ingestionStats),
-		Schema:   mapClickHouseSchemaInspection(tableInfo, source, ttlExpr, columnStats),
+		Details: buildClickHouseInspectionDetails(source, tableInfo),
+		Storage: buildClickHouseStorageMetrics(tableStats),
+		Schema:  mapClickHouseSchemaInspection(tableInfo, source, ttlExpr),
 	}, nil
+}
+
+func (p *ClickHouseProvider) InspectSourceActivity(ctx context.Context, source *models.Source) (*SourceActivity, error) {
+	if source == nil {
+		return nil, fmt.Errorf("source is required")
+	}
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("get client for source %d: %w", source.ID, err)
+	}
+	info, err := client.GetTableInfo(ctx, source.Connection.Database, source.Connection.TableName)
+	if err != nil {
+		return nil, fmt.Errorf("inspect activity table metadata: %w", err)
+	}
+	if !hasLeadingTimestampSortKey(info, source.MetaTSField) {
+		return nil, ErrSourceActivityUnavailable
+	}
+	database, table := getStatsTableLocation(source, info)
+	stats, err := client.IngestionStats(ctx, database, table, source.MetaTSField)
+	if err != nil {
+		return nil, err
+	}
+	return mapActivityStats(stats), nil
+}
+
+func hasLeadingTimestampSortKey(info *clickhouse.TableInfo, timestamp string) bool {
+	if info == nil || len(info.SortKeys) == 0 || strings.TrimSpace(timestamp) == "" {
+		return false
+	}
+	return strings.Trim(strings.TrimSpace(info.SortKeys[0]), "`") == strings.Trim(strings.TrimSpace(timestamp), "`")
 }
 
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
@@ -795,21 +829,11 @@ func mapActivityStats(stats *clickhouse.IngestionStats) *SourceActivity {
 		})
 	}
 
-	daily := make([]IngestionBucket, 0, len(stats.DailyBuckets))
-	for _, bucket := range stats.DailyBuckets {
-		daily = append(daily, IngestionBucket{
-			Bucket: bucket.Bucket,
-			Rows:   bucket.Rows,
-		})
-	}
-
 	return &SourceActivity{
 		Rows1h:        stats.Rows1h,
 		Rows24h:       stats.Rows24h,
-		Rows7d:        stats.Rows7d,
 		LatestTS:      stats.LatestTS,
 		HourlyBuckets: hourly,
-		DailyBuckets:  daily,
 	}
 }
 
@@ -832,6 +856,9 @@ func buildClickHouseInspectionDetails(source *models.Source, tableInfo *clickhou
 			Key: "engine", Label: "Engine", Value: tableInfo.Engine,
 		})
 	}
+	if tableInfo != nil && tableInfo.Engine == "Distributed" {
+		details = append(details, InspectionDetail{Key: "storage_scope", Label: "Storage totals", Value: "Connected local replica only, not cluster-wide"})
+	}
 	return details
 }
 
@@ -852,7 +879,6 @@ func mapClickHouseSchemaInspection(
 	tableInfo *clickhouse.TableInfo,
 	source *models.Source,
 	ttlExpr string,
-	columnStats []clickhouse.TableColumnStat,
 ) *SourceSchemaInspection {
 	if tableInfo == nil && source == nil {
 		return nil
@@ -861,18 +887,12 @@ func mapClickHouseSchemaInspection(
 	schema := &SourceSchemaInspection{
 		TTL: ttlExpr,
 	}
-	columnStatMap := make(map[string]clickhouse.TableColumnStat, len(columnStats))
-	for _, stat := range columnStats {
-		columnStatMap[stat.Column] = stat
-	}
-
 	if tableInfo != nil {
 		schema.SortKeys = append(schema.SortKeys, tableInfo.SortKeys...)
 		schema.CreateQuery = tableInfo.CreateQuery
 		if len(tableInfo.ExtColumns) > 0 {
 			schema.Fields = make([]SourceSchemaField, 0, len(tableInfo.ExtColumns))
 			for _, col := range tableInfo.ExtColumns {
-				stat := columnStatMap[col.Name]
 				schema.Fields = append(schema.Fields, SourceSchemaField{
 					Name:              col.Name,
 					Type:              col.Type,
@@ -880,11 +900,6 @@ func mapClickHouseSchemaInspection(
 					IsPrimaryKey:      col.IsPrimaryKey,
 					DefaultExpression: col.DefaultExpression,
 					Comment:           col.Comment,
-					Compressed:        stat.Compressed,
-					Uncompressed:      stat.Uncompressed,
-					CompressionRatio:  stat.ComprRatio,
-					AvgRowSize:        stat.AvgRowSize,
-					RowCount:          stat.RowsCount,
 				})
 			}
 			return schema
@@ -892,15 +907,9 @@ func mapClickHouseSchemaInspection(
 
 		schema.Fields = make([]SourceSchemaField, 0, len(tableInfo.Columns))
 		for _, col := range tableInfo.Columns {
-			stat := columnStatMap[col.Name]
 			schema.Fields = append(schema.Fields, SourceSchemaField{
-				Name:             col.Name,
-				Type:             col.Type,
-				Compressed:       stat.Compressed,
-				Uncompressed:     stat.Uncompressed,
-				CompressionRatio: stat.ComprRatio,
-				AvgRowSize:       stat.AvgRowSize,
-				RowCount:         stat.RowsCount,
+				Name: col.Name,
+				Type: col.Type,
 			})
 		}
 		return schema
@@ -909,15 +918,9 @@ func mapClickHouseSchemaInspection(
 	if source != nil && len(source.Columns) > 0 {
 		schema.Fields = make([]SourceSchemaField, 0, len(source.Columns))
 		for _, col := range source.Columns {
-			stat := columnStatMap[col.Name]
 			schema.Fields = append(schema.Fields, SourceSchemaField{
-				Name:             col.Name,
-				Type:             col.Type,
-				Compressed:       stat.Compressed,
-				Uncompressed:     stat.Uncompressed,
-				CompressionRatio: stat.ComprRatio,
-				AvgRowSize:       stat.AvgRowSize,
-				RowCount:         stat.RowsCount,
+				Name: col.Name,
+				Type: col.Type,
 			})
 		}
 	}

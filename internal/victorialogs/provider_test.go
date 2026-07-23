@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -423,32 +424,32 @@ func TestHistogramAndEvaluateAlert(t *testing.T) {
 	}
 }
 
-func TestInspectSourceIncludesSchemaAndActivity(t *testing.T) {
+func TestInspectSourceSeparatesSchemaAndActivity(t *testing.T) {
 	t.Parallel()
 
 	now := time.Now().UTC().Truncate(time.Hour)
-	latest := now.Add(-5 * time.Minute).Format(time.RFC3339)
+	var requestMu sync.Mutex
+	pathCounts := make(map[string]int)
+	dailyHits := 0
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Fatalf("parse form: %v", err)
 		}
+		requestMu.Lock()
+		pathCounts[r.URL.Path]++
+		if r.URL.Path == "/select/logsql/hits" && r.Form.Get("step") == "1d" {
+			dailyHits++
+		}
+		requestMu.Unlock()
 		switch r.URL.Path {
 		case "/select/logsql/field_names":
 			_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":10},{"value":"_msg","hits":12},{"value":"_stream","hits":12},{"value":"_stream_id","hits":12}]}`))
 		case "/select/logsql/hits":
-			switch r.Form.Get("step") {
-			case "1h":
-				_, _ = fmt.Fprintf(w, `{"hits":[{"fields":{},"timestamps":["%s"],"values":[8],"total":8}]}`, now.Format(time.RFC3339))
-			case "1d":
-				dayOne := now.Add(-24 * time.Hour).Format(time.RFC3339)
-				dayTwo := now.Format(time.RFC3339)
-				_, _ = fmt.Fprintf(w, `{"hits":[{"fields":{},"timestamps":["%s","%s"],"values":[12,20],"total":32}]}`, dayOne, dayTwo)
-			default:
-				t.Fatalf("unexpected step: %q", r.Form.Get("step"))
+			if got := r.Form.Get("step"); got != "1h" {
+				t.Fatalf("unexpected step: %q", got)
 			}
-		case "/select/logsql/query":
-			_, _ = fmt.Fprintf(w, `{"_time":"%s","_msg":"latest row","service":"api"}`, latest)
+			_, _ = fmt.Fprintf(w, `{"hits":[{"fields":{},"timestamps":["%s"],"values":[8],"total":8}]}`, now.Format(time.RFC3339))
 		default:
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
@@ -467,20 +468,32 @@ func TestInspectSourceIncludesSchemaAndActivity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InspectSource returned error: %v", err)
 	}
-	if inspection.Activity == nil {
+	requestMu.Lock()
+	inspectionPaths := maps.Clone(pathCounts)
+	requestMu.Unlock()
+	if inspectionPaths["/select/logsql/field_names"] != 1 || inspectionPaths["/select/logsql/hits"] != 0 || inspectionPaths["/select/logsql/query"] != 0 {
+		t.Fatalf("unexpected inspection request paths: %#v", inspectionPaths)
+	}
+
+	activity, err := provider.InspectSourceActivity(context.Background(), source)
+	if err != nil {
+		t.Fatalf("InspectSourceActivity returned error: %v", err)
+	}
+	if activity == nil {
 		t.Fatalf("expected activity inspection, got nil")
 	}
-	if inspection.Activity.Rows1h != 8 {
-		t.Fatalf("unexpected rows_1h: %d", inspection.Activity.Rows1h)
+	if activity.Rows1h != 8 {
+		t.Fatalf("unexpected rows_1h: %d", activity.Rows1h)
 	}
-	if inspection.Activity.Rows24h != 8 {
-		t.Fatalf("unexpected rows_24h: %d", inspection.Activity.Rows24h)
+	if activity.Rows24h != 8 {
+		t.Fatalf("unexpected rows_24h: %d", activity.Rows24h)
 	}
-	if inspection.Activity.Rows7d != 32 {
-		t.Fatalf("unexpected rows_7d: %d", inspection.Activity.Rows7d)
-	}
-	if inspection.Activity.LatestTS == nil || inspection.Activity.LatestTS.Format(time.RFC3339) != latest {
-		t.Fatalf("unexpected latest_ts: %#v", inspection.Activity.LatestTS)
+	requestMu.Lock()
+	activityPaths := maps.Clone(pathCounts)
+	activityDailyHits := dailyHits
+	requestMu.Unlock()
+	if activityPaths["/select/logsql/hits"] != 1 || activityPaths["/select/logsql/query"] != 0 || activityDailyHits != 0 {
+		t.Fatalf("unexpected activity requests: paths=%#v daily_hits=%d", activityPaths, activityDailyHits)
 	}
 	if inspection.Schema == nil || len(inspection.Schema.Fields) == 0 {
 		t.Fatalf("expected schema fields, got %#v", inspection.Schema)

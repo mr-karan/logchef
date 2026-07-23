@@ -5,7 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
+
+	"golang.org/x/sync/singleflight"
 
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
@@ -36,9 +39,15 @@ type Provider interface {
 }
 
 type Service struct {
-	db        store.Store
-	log       *slog.Logger
-	providers map[models.SourceType]Provider
+	db             store.Store
+	log            *slog.Logger
+	providers      map[models.SourceType]Provider
+	inspectionMu   sync.Mutex
+	inspections    map[models.SourceID]inspectionCacheEntry
+	activities     map[models.SourceID]activityCacheEntry
+	inspectionFill singleflight.Group
+	activityFill   singleflight.Group
+	activitySlots  chan struct{}
 }
 
 type Capability string
@@ -56,9 +65,12 @@ const (
 
 func NewService(db store.Store, log *slog.Logger) *Service {
 	return &Service{
-		db:        db,
-		log:       log.With("component", "datasource_service"),
-		providers: make(map[models.SourceType]Provider),
+		db:            db,
+		log:           log.With("component", "datasource_service"),
+		providers:     make(map[models.SourceType]Provider),
+		inspections:   make(map[models.SourceID]inspectionCacheEntry),
+		activities:    make(map[models.SourceID]activityCacheEntry),
+		activitySlots: make(chan struct{}, 2),
 	}
 }
 
@@ -391,11 +403,35 @@ func (s *Service) GetAllFieldValues(ctx context.Context, sourceID models.SourceI
 }
 
 func (s *Service) InspectSource(ctx context.Context, sourceID models.SourceID) (*SourceInspection, error) {
+	return s.inspectSource(ctx, sourceID, false)
+}
+
+func (s *Service) RefreshSourceInspection(ctx context.Context, sourceID models.SourceID) (*SourceInspection, error) {
+	return s.inspectSource(ctx, sourceID, true)
+}
+
+func (s *Service) inspectSource(ctx context.Context, sourceID models.SourceID, refresh bool) (*SourceInspection, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
 		return nil, err
 	}
-	return provider.InspectSource(ctx, source)
+	return s.inspectionForSource(ctx, source, provider, refresh)
+}
+
+func (s *Service) InspectSourceActivity(ctx context.Context, sourceID models.SourceID) (*SourceActivity, error) {
+	return s.inspectSourceActivity(ctx, sourceID, false)
+}
+
+func (s *Service) RefreshSourceActivity(ctx context.Context, sourceID models.SourceID) (*SourceActivity, error) {
+	return s.inspectSourceActivity(ctx, sourceID, true)
+}
+
+func (s *Service) inspectSourceActivity(ctx context.Context, sourceID models.SourceID, refresh bool) (*SourceActivity, error) {
+	source, provider, err := s.sourceAndProvider(ctx, sourceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.activityForSource(ctx, source, provider, refresh)
 }
 
 func (s *Service) RemoveSource(source *models.Source) error {

@@ -1899,6 +1899,7 @@ export const useExploreStore = defineStore("explore", () => {
     histogramData: computed(() => histogramStore.histogramData),
     isLoadingHistogram: computed(() => histogramStore.isLoadingHistogram),
     histogramError: computed(() => histogramStore.histogramError),
+    histogramNotice: computed(() => histogramStore.histogramNotice),
     histogramGranularity: computed(() => histogramStore.histogramGranularity),
     groupByField: computed(() => histogramStore.groupByField),
 

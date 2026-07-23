@@ -109,3 +109,25 @@ func InspectSource(ctx context.Context, ds *datasource.Service, sourceID models.
 	}
 	return result, nil
 }
+
+func RefreshSourceInspection(ctx context.Context, ds *datasource.Service, sourceID models.SourceID) (*SourceInspection, error) {
+	result, err := ds.RefreshSourceInspection(ctx, sourceID)
+	if errors.Is(err, models.ErrNotFound) {
+		return nil, ErrSourceNotFound
+	}
+	return result, err
+}
+
+func InspectSourceActivity(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, refresh bool) (*datasource.SourceActivity, error) {
+	var result *datasource.SourceActivity
+	var err error
+	if refresh {
+		result, err = ds.RefreshSourceActivity(ctx, sourceID)
+	} else {
+		result, err = ds.InspectSourceActivity(ctx, sourceID)
+	}
+	if errors.Is(err, models.ErrNotFound) {
+		return nil, ErrSourceNotFound
+	}
+	return result, err
+}

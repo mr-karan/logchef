@@ -37,11 +37,39 @@ export function sanitizeChartColor(value: unknown): string {
   const str = typeof value === "string" ? value.trim() : "";
   return str && SAFE_COLOR_PATTERN.test(str) ? str : DEFAULT_SAFE_COLOR;
 }
+
+/**
+ * Resolve the effective bar mode from chart style and explicit bar_mode.
+ * - When chart is "bars": barMode (defaulting to "stacked") wins.
+ * - Otherwise returns "stacked" (irrelevant but well-defined).
+ */
+export function resolveBarMode(
+  chart: string | undefined,
+  barMode: string | undefined
+): "stacked" | "grouped" {
+  if (chart === "bars") {
+    return barMode === "grouped" ? "grouped" : "stacked";
+  }
+  return "stacked";
+}
+
+/**
+ * Whether the crosshair should use yStacked accessors (cumulative height).
+ * Line charts and grouped bars use regular y; stacked bars and area use yStacked.
+ */
+export function shouldUseCrosshairYStacked(
+  chart: string | undefined,
+  barMode: string | undefined
+): boolean {
+  if (chart === "line") return false;
+  if (chart === "bars" && barMode === "grouped") return false;
+  return true;
+}
 </script>
 
 <script setup lang="ts">
 import { computed } from "vue";
-import { VisArea, VisAxis, VisLine, VisStackedBar, VisXYContainer } from "@unovis/vue";
+import { VisArea, VisAxis, VisGroupedBar, VisLine, VisStackedBar, VisXYContainer } from "@unovis/vue";
 import { ChartContainer, ChartCrosshair, ChartLegendContent, ChartTooltip } from "@/components/ui/chart";
 import {
   buildHistogramChartModel,
@@ -59,9 +87,13 @@ interface Props {
   buckets: HistogramData[];
   granularity?: string | null;
   groupBy?: string | null;
+  /** Non-fatal backend notice, such as a grouped-series cap. */
+  notice?: string | null;
   height?: number;
   /** Render style. Absent/undefined defaults to 'line' (Grafana-like). */
   chart?: "bars" | "line" | "area";
+  /** Bar render mode. Only meaningful when chart is 'bars'. Absent defaults to 'stacked'. */
+  barMode?: "stacked" | "grouped";
   /**
    * The panel's requested query time range (epoch ms), when the caller has
    * it available. When provided, the chart's x-domain and axis/tooltip time
@@ -81,6 +113,7 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   granularity: null,
   groupBy: null,
+  notice: null,
   height: 160,
   range: null,
 });
@@ -97,10 +130,14 @@ function isValidRange(range: Props["range"]): range is { start: number; end: num
 // 'line' is the default render style when the panel hasn't set one explicitly.
 const effectiveChart = computed<"bars" | "line" | "area">(() => props.chart ?? "line");
 
+const effectiveBarMode = computed<"stacked" | "grouped">(() =>
+  resolveBarMode(props.chart, props.barMode)
+);
+
 const CHART_MARGIN = { top: 8, right: 12, bottom: 22, left: 8 };
 
 const chartModel = computed(() =>
-  buildHistogramChartModel(props.buckets, props.granularity ?? undefined)
+  buildHistogramChartModel(props.buckets, props.granularity ?? undefined, Boolean(props.groupBy))
 );
 
 const seriesAccessors = computed(() =>
@@ -110,12 +147,12 @@ const seriesAccessors = computed(() =>
 );
 const seriesColors = computed(() => chartModel.value.series.map((series) => series.color));
 
-// Bars and area are drawn stacked (crosshair circles must land on the cumulative
-// height), while line series are drawn independently at their own value.
+// Stacked bars and area are drawn cumulatively (crosshair circles land on the
+// cumulative height). Line and grouped bars are drawn at their own value.
 const crosshairYProps = computed(() =>
-  effectiveChart.value === "line"
-    ? { y: seriesAccessors.value }
-    : { yStacked: seriesAccessors.value }
+  shouldUseCrosshairYStacked(effectiveChart.value, effectiveBarMode.value)
+    ? { yStacked: seriesAccessors.value }
+    : { y: seriesAccessors.value }
 );
 
 const chartRange = computed(() => {
@@ -223,7 +260,7 @@ function formatXAxisTick(value: number | Date) {
         :num-ticks="4"
       />
       <VisStackedBar
-        v-if="effectiveChart === 'bars'"
+        v-if="effectiveChart === 'bars' && effectiveBarMode !== 'grouped'"
         :x="(row: HistogramChartRow) => row?.ts"
         :y="seriesAccessors"
         :color="seriesColors"
@@ -231,6 +268,15 @@ function formatXAxisTick(value: number | Date) {
         :bar-padding="0.15"
         :bar-max-width="36"
         :bar-min-height1-px="true"
+      />
+      <VisGroupedBar
+        v-else-if="effectiveChart === 'bars' && effectiveBarMode === 'grouped'"
+        :x="(row: HistogramChartRow) => row?.ts"
+        :y="seriesAccessors"
+        :color="seriesColors"
+        :rounded-corners="3"
+        :bar-padding="0.15"
+        :bar-min-height="1"
       />
       <VisArea
         v-else-if="effectiveChart === 'area'"
@@ -259,6 +305,7 @@ function formatXAxisTick(value: number | Date) {
         :hide-when-far-from-pointer="false"
       />
     </VisXYContainer>
+    <p v-if="props.notice" class="panel-timeseries__notice" role="status">{{ props.notice }}</p>
     <ChartLegendContent
       v-if="chartModel.isGrouped && chartModel.series.length > 1"
       class="panel-timeseries__legend"
@@ -292,6 +339,12 @@ function formatXAxisTick(value: number | Date) {
 .panel-timeseries :deep(.vis-axis-tick-label) {
   font-size: 10px;
   fill: hsl(var(--muted-foreground));
+}
+.panel-timeseries__notice {
+  flex-shrink: 0;
+  margin: 0.25rem 0 0;
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
 }
 .panel-timeseries__legend {
   flex-shrink: 0;

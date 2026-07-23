@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { Lock, AlertCircle, BarChart3, Hash, Table2 } from "lucide-vue-next";
+import { Lock, AlertCircle, BarChart3, Hash, Table2, ListFilter } from "lucide-vue-next";
 import { Skeleton } from "@/components/ui/skeleton";
 import PanelTimeseries from "./PanelTimeseries.vue";
 import PanelStat from "./PanelStat.vue";
+import PanelBreakdown from "./PanelBreakdown.vue";
 import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
@@ -52,6 +53,8 @@ const typeIcon = computed(() => {
       return BarChart3;
     case "stat":
       return Hash;
+    case "breakdown":
+      return ListFilter;
     default:
       return Table2;
   }
@@ -105,13 +108,23 @@ const typeIcon = computed(() => {
           :buckets="panelState.timeseries.buckets"
           :granularity="panelState.timeseries.granularity"
           :group-by="panelState.timeseries.groupBy"
+          :notice="panelState.timeseries.notice"
           :range="panelState.timeseries.range"
           :height="chartHeight"
           :chart="panel.options?.chart"
+          :bar-mode="panel.options?.bar_mode"
         />
         <PanelStat
           v-else-if="panel.type === 'stat' && panelState.stat"
           :value="panelState.stat.value"
+        />
+        <PanelBreakdown
+          v-else-if="panel.type === 'breakdown' && panelState.breakdown"
+          :buckets="panelState.breakdown.buckets"
+          :group-by="panelState.breakdown.groupBy"
+          :notice="panelState.breakdown.notice"
+          :height="chartHeight"
+          :view="panel.options?.breakdown_view"
         />
         <PanelTable
           v-else-if="panel.type === 'table' && panelState.table"

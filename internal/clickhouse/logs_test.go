@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"testing"
+	"time"
 )
 
 // TestEnsureTimestampInQuery tests the ensureTimestampInQuery function
@@ -438,6 +439,92 @@ func TestHistogramParams(t *testing.T) {
 			isValid := tt.params.Query != ""
 			if isValid != tt.valid {
 				t.Errorf("expected valid=%v, got valid=%v", tt.valid, isValid)
+			}
+		})
+	}
+}
+
+func TestBuildGroupedHistogramQueryUsesNullSafeRankedRemainder(t *testing.T) {
+	client := &Client{}
+	query, err := client.buildHistogramQuery(
+		"SELECT * FROM logs",
+		"timestamp",
+		"toStartOfMinute(timestamp, 'UTC')",
+		"service",
+	)
+	if err != nil {
+		t.Fatalf("buildHistogramQuery returned error: %v", err)
+	}
+
+	for _, want := range []string{
+		"row_number() OVER",
+		"ifNull(toString(a.group_value), '')",
+		"(a.group_value = r.group_value) OR (isNull(a.group_value) AND isNull(r.group_value))",
+		"GROUP BY a.bucket, group_value, is_other, is_null",
+		"AS is_other",
+		"AS is_null",
+	} {
+		if !containsIgnoreCase(query, want) {
+			t.Errorf("grouped query missing %q:\n%s", want, query)
+		}
+	}
+	if containsIgnoreCase(query, "NOT IN") {
+		t.Errorf("grouped query must not use NOT IN:\n%s", query)
+	}
+}
+
+func TestParseHistogramRowStructuralFlagsUseBoolishValues(t *testing.T) {
+	bucket := time.Date(2026, time.April, 8, 10, 1, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		value    any
+		expected bool
+	}{
+		{name: "bool true", value: true, expected: true},
+		{name: "uint8 one", value: uint8(1), expected: true},
+		{name: "int64 zero", value: int64(0), expected: false},
+		{name: "float64 one", value: float64(1), expected: true},
+		{name: "string true", value: "TRUE", expected: true},
+		{name: "string zero", value: "0", expected: false},
+		{name: "invalid defaults false", value: "yes", expected: false},
+	}
+
+	for _, flag := range []string{"is_other", "is_null"} {
+		for _, tt := range tests {
+			t.Run(flag+"/"+tt.name, func(t *testing.T) {
+				row := map[string]any{
+					"bucket":      bucket,
+					"log_count":   int64(2),
+					"group_value": "service-a",
+					flag:          tt.value,
+				}
+				got, ok := (&Client{}).parseHistogramRow(row, true)
+				if !ok {
+					t.Fatal("parseHistogramRow rejected a valid row")
+				}
+				if got.IsOther != (flag == "is_other" && tt.expected) {
+					t.Errorf("IsOther = %v, want %v", got.IsOther, flag == "is_other" && tt.expected)
+				}
+				if got.IsNull != (flag == "is_null" && tt.expected) {
+					t.Errorf("IsNull = %v, want %v", got.IsNull, flag == "is_null" && tt.expected)
+				}
+			})
+		}
+	}
+
+	for _, flag := range []string{"is_other", "is_null"} {
+		t.Run(flag+"/absent defaults false", func(t *testing.T) {
+			row := map[string]any{
+				"bucket":      bucket,
+				"log_count":   int64(2),
+				"group_value": "service-a",
+			}
+			got, ok := (&Client{}).parseHistogramRow(row, true)
+			if !ok {
+				t.Fatal("parseHistogramRow rejected a valid row")
+			}
+			if got.IsOther || got.IsNull {
+				t.Errorf("structural flags = IsOther:%v IsNull:%v, want both false", got.IsOther, got.IsNull)
 			}
 		})
 	}

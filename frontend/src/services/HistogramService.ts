@@ -2,6 +2,8 @@ export interface HistogramData {
   bucket: string;
   log_count: number;
   group_value?: string; // Field needed for grouped histogram data
+  is_other?: boolean;
+  is_null?: boolean;
 }
 
 export class HistogramService {

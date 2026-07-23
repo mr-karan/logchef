@@ -90,6 +90,7 @@ func (s *Service) UpdateSource(ctx context.Context, sourceID models.SourceID, re
 		}
 	}
 
+	s.invalidateInspectionCache(sourceID)
 	return s.GetSource(ctx, sourceID)
 }
 
@@ -109,6 +110,7 @@ func (s *Service) DeleteSource(ctx context.Context, sourceID models.SourceID) er
 		return fmt.Errorf("delete source from database: %w", err)
 	}
 
+	s.invalidateInspectionCache(sourceID)
 	return nil
 }
 

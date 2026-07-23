@@ -11,6 +11,7 @@ import {
   BarChart3,
   Hash,
   Table2,
+  ListFilter,
   User,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
@@ -65,7 +66,7 @@ function panelCount(d: Dashboard): number {
 
 // Distinct panel types on a dashboard, for the small type-icon row on each
 // card — a cheap stand-in for a real thumbnail that still hints at content.
-const TYPE_ICONS = { timeseries: BarChart3, stat: Hash, table: Table2 } as const;
+const TYPE_ICONS = { timeseries: BarChart3, stat: Hash, breakdown: ListFilter, table: Table2 } as const;
 function panelTypeIcons(d: Dashboard) {
   const types = new Set((d.panels?.panels ?? []).map((p) => p.type));
   return Array.from(types)

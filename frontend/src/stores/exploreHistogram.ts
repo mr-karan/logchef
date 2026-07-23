@@ -10,6 +10,7 @@ interface HistogramState {
   data: HistogramData[];
   isLoading: boolean;
   error: string | null;
+  notice: string | null;
   granularity: string | null;
   groupByField: string | null;
 }
@@ -21,6 +22,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     data: [],
     isLoading: false,
     error: null,
+    notice: null,
     granularity: null,
     groupByField: null,
   });
@@ -32,6 +34,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
   const histogramData = computed(() => state.value.data);
   const isLoadingHistogram = computed(() => state.value.isLoading);
   const histogramError = computed(() => state.value.error);
+  const histogramNotice = computed(() => state.value.notice);
   const histogramGranularity = computed(() => state.value.granularity);
   const groupByField = computed(() => state.value.groupByField);
 
@@ -44,6 +47,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     }
     state.value.data = [];
     state.value.error = null;
+    state.value.notice = null;
     state.value.granularity = null;
     state.value.isLoading = false;
   }
@@ -78,6 +82,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
 
     state.value.isLoading = true;
     state.value.error = null;
+    state.value.notice = null;
 
     try {
       const currentTeamId = useTeamsStore().currentTeamId;
@@ -155,11 +160,13 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       if (response.data) {
         state.value.data = response.data.data || [];
         state.value.granularity = response.data.granularity || null;
+        state.value.notice = response.data.notice || null;
         state.value.error = null;
         return { success: true, data: response.data };
       } else {
         state.value.data = [];
         state.value.granularity = null;
+        state.value.notice = null;
         state.value.error = "Failed to fetch histogram data";
         return { success: false, error: { message: "Failed to fetch histogram data" } };
       }
@@ -187,6 +194,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     histogramData,
     isLoadingHistogram,
     histogramError,
+    histogramNotice,
     histogramGranularity,
     groupByField,
 

@@ -117,6 +117,66 @@ describe("buildHistogramChartModel zero-fill", () => {
   });
 });
 
+describe("buildHistogramChartModel grouped series identity", () => {
+  it("uses is_other for synthetic Other without collapsing real marker values", () => {
+    const model = buildHistogramChartModel([
+      { bucket: iso(0), log_count: 4, group_value: "__other__", is_other: true },
+      { bucket: iso(0), log_count: 3, group_value: "Other" },
+      { bucket: iso(0), log_count: 2, group_value: "__other__" },
+      { bucket: iso(0), log_count: 1, group_value: "" },
+    ], "1m");
+
+    expect(model.isGrouped).toBe(true);
+    expect(model.series.map((series) => series.label)).toEqual([
+      "Other",
+      "Other",
+      "__other__",
+      "(empty)",
+    ]);
+    expect(model.series.filter((series) => series.label === "Other")).toHaveLength(2);
+    expect(model.series[0].color).toBe("#6E7074");
+    expect(model.series[1].color).not.toBe("#6E7074");
+    expect(model.rows[0].total).toBe(10);
+    for (const series of model.series) {
+      expect(model.rows[0][series.key]).toBeGreaterThan(0);
+    }
+  });
+
+  it("renders an all-empty group as grouped when the caller knows group-by was requested", () => {
+    const model = buildHistogramChartModel([
+      { bucket: iso(0), log_count: 5 },
+    ], "1m", true);
+
+    expect(model.isGrouped).toBe(true);
+    expect(model.series).toHaveLength(1);
+    expect(model.series[0].label).toBe("(empty)");
+    expect(model.rows[0][model.series[0].key]).toBe(5);
+  });
+
+  it("keeps an empty group separate from a literal (empty) value at one timestamp", () => {
+    const model = buildHistogramChartModel([
+      { bucket: iso(0), log_count: 2, group_value: "" },
+      { bucket: iso(0), log_count: 3, group_value: "(empty)" },
+    ], "1m");
+
+    expect(model.series.map((series) => series.label)).toEqual(["(empty)", "(empty)"]);
+    expect(model.series.map((series) => model.rows[0][series.key])).toEqual([2, 3]);
+    expect(model.rows[0].total).toBe(5);
+  });
+
+  it("keeps a structural null separate from literal null display values at one timestamp", () => {
+    const model = buildHistogramChartModel([
+      { bucket: iso(0), log_count: 2, group_value: "", is_null: true },
+      { bucket: iso(0), log_count: 3, group_value: "(null)" },
+      { bucket: iso(0), log_count: 4, group_value: "null" },
+    ], "1m");
+
+    expect(model.series.map((series) => series.label)).toEqual(["(null)", "(null)", "null"]);
+    expect(model.series.map((series) => model.rows[0][series.key])).toEqual([2, 3, 4]);
+    expect(model.rows[0].total).toBe(9);
+  });
+});
+
 describe("parseGranularityToMilliseconds", () => {
   it("parses well-formed granularities", () => {
     expect(parseGranularityToMilliseconds("5m")).toBe(5 * MIN);

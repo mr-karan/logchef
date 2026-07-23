@@ -167,10 +167,10 @@ export interface SourceSchemaInspection {
 export interface SourceActivity {
   rows_1h: number;
   rows_24h: number;
-  rows_7d: number;
+  rows_7d?: number;
   latest_ts?: string | null;
   hourly_buckets: { bucket: string; rows: number }[];
-  daily_buckets: { bucket: string; rows: number }[];
+  daily_buckets?: { bucket: string; rows: number }[];
 }
 
 export interface SourceInspection {
@@ -212,10 +212,14 @@ export const sourcesApi = {
     apiClient.delete<{ message: string }>(`/admin/sources/${id}`),
 
   // Source inspection and schema (admin and team-scoped versions)
-  getAdminSourceInspection: (sourceId: number) =>
-    apiClient.get<SourceInspection>(`/admin/sources/${sourceId}/stats`),
-  getTeamSourceInspection: (teamId: number, sourceId: number) =>
-    apiClient.get<SourceInspection>(`/teams/${teamId}/sources/${sourceId}/stats`),
+  getAdminSourceInspection: (sourceId: number, refresh = false) =>
+    apiClient.get<SourceInspection>(`/admin/sources/${sourceId}/stats${refresh ? '?refresh=true' : ''}`, { timeout: 7 }),
+  getTeamSourceInspection: (teamId: number, sourceId: number, refresh = false) =>
+    apiClient.get<SourceInspection>(`/teams/${teamId}/sources/${sourceId}/stats${refresh ? '?refresh=true' : ''}`, { timeout: 7 }),
+  getAdminSourceActivity: (sourceId: number, refresh = false) =>
+    apiClient.get<SourceActivity>(`/admin/sources/${sourceId}/activity${refresh ? '?refresh=true' : ''}`, { timeout: 5, suppressErrorToast: true }),
+  getTeamSourceActivity: (teamId: number, sourceId: number, refresh = false) =>
+    apiClient.get<SourceActivity>(`/teams/${teamId}/sources/${sourceId}/activity${refresh ? '?refresh=true' : ''}`, { timeout: 5, suppressErrorToast: true }),
   getTeamSourceSchema: (teamId: number, sourceId: number) =>
     apiClient.get<string>(`/teams/${teamId}/sources/${sourceId}/schema`),
 

@@ -42,6 +42,7 @@ const exploreStore = useExploreStore();
 
 const histogramData = computed(() => exploreStore.histogramData);
 const histogramError = computed(() => exploreStore.histogramError);
+const histogramNotice = computed(() => exploreStore.histogramNotice);
 const isChartLoading = computed(
   () => props.isLoading || exploreStore.isLoadingHistogram,
 );
@@ -67,7 +68,11 @@ const chartBoxHeight = computed(
 const CHART_MARGIN = { top: 12, right: 12, bottom: 24, left: 8 };
 
 const chartModel = computed(() =>
-  buildHistogramChartModel(histogramData.value, currentGranularity.value),
+  buildHistogramChartModel(
+    histogramData.value,
+    currentGranularity.value,
+    Boolean(exploreStore.groupByField && exploreStore.groupByField !== "__none__"),
+  ),
 );
 
 const seriesAccessors = computed(() =>
@@ -239,8 +244,9 @@ function formatXAxisTick(value: number | Date) {
 
 <template>
   <div class="log-histogram" :style="{ minHeight: props.height }">
-    <div class="log-histogram__header" v-if="chartSubtitle">
-      <p class="log-histogram__subtitle">{{ chartSubtitle }}</p>
+    <div class="log-histogram__header" v-if="chartSubtitle || histogramNotice">
+      <p v-if="chartSubtitle" class="log-histogram__subtitle">{{ chartSubtitle }}</p>
+      <p v-if="histogramNotice" class="log-histogram__notice" role="status">{{ histogramNotice }}</p>
     </div>
 
     <div v-if="isChartLoading" class="histogram-loading-overlay">
@@ -375,6 +381,11 @@ function formatXAxisTick(value: number | Date) {
 }
 
 .log-histogram__subtitle {
+  color: var(--muted-foreground);
+  font-size: 0.75rem;
+}
+
+.log-histogram__notice {
   color: var(--muted-foreground);
   font-size: 0.75rem;
 }

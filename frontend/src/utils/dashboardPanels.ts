@@ -22,7 +22,7 @@ export const DASHBOARD_PANELS_VERSION = 1;
 // request time); mirrors the validation in internal/core/dashboards.go.
 export const MAX_DASHBOARD_CACHE_TTL_SECONDS = 86400;
 
-const VALID_PANEL_TYPES: readonly DashboardPanelType[] = ["timeseries", "stat", "table"];
+const VALID_PANEL_TYPES: readonly DashboardPanelType[] = ["timeseries", "stat", "table", "breakdown"];
 // Mirrors pkg/models.QueryLanguage's Valid() set (server: query.go).
 const VALID_QUERY_LANGUAGES: readonly PanelQueryLanguage[] = ["logchefql", "clickhouse-sql", "logsql"];
 
@@ -251,6 +251,17 @@ export function validatePanelsBlob(blob: DashboardPanels): string | null {
     }
     if (!VALID_QUERY_LANGUAGES.includes(p.query_language)) {
       return `Panel "${p.title || p.id}" has an unsupported query language.`;
+    }
+    if (p.type === "breakdown" && !p.options?.group_by?.trim()) {
+      return `Breakdown panel "${p.title || p.id}" requires a group-by field.`;
+    }
+    const breakdownView = p.options?.breakdown_view as string | undefined;
+    if (breakdownView !== undefined) {
+      if (p.type !== "breakdown") {
+        if (breakdownView !== "") return `Panel "${p.title || p.id}" cannot use a breakdown view.`;
+      } else if (breakdownView !== "horizontal-bars" && breakdownView !== "donut") {
+        return `Breakdown panel "${p.title || p.id}" has an unsupported breakdown view.`;
+      }
     }
   }
   const seenLayoutIds = new Set<string>();

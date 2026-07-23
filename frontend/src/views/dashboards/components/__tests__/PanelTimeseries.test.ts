@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { escapeHtml, sanitizeChartColor } from "@/views/dashboards/components/PanelTimeseries.vue";
+import {
+  escapeHtml,
+  sanitizeChartColor,
+  resolveBarMode,
+  shouldUseCrosshairYStacked,
+} from "@/views/dashboards/components/PanelTimeseries.vue";
 
 // A5 (P1 stored XSS): PanelTimeseries' tooltip renders a raw HTML string via
 // unovis' crosshair (innerHTML), interpolating a grouped log-field value
@@ -53,5 +58,55 @@ describe("sanitizeChartColor", () => {
     expect(sanitizeChartColor("")).toBe("var(--chart-1)");
     expect(sanitizeChartColor(null)).toBe("var(--chart-1)");
     expect(sanitizeChartColor(undefined)).toBe("var(--chart-1)");
+  });
+});
+
+describe("resolveBarMode", () => {
+  it("returns grouped when chart is bars and barMode is grouped", () => {
+    expect(resolveBarMode("bars", "grouped")).toBe("grouped");
+  });
+
+  it("returns stacked when chart is bars and barMode is stacked", () => {
+    expect(resolveBarMode("bars", "stacked")).toBe("stacked");
+  });
+
+  it("defaults to stacked when barMode is absent", () => {
+    expect(resolveBarMode("bars", undefined)).toBe("stacked");
+  });
+
+  it("returns stacked for non-bar chart styles (line/area)", () => {
+    expect(resolveBarMode("line", undefined)).toBe("stacked");
+    expect(resolveBarMode("line", "grouped")).toBe("stacked");
+    expect(resolveBarMode("area", undefined)).toBe("stacked");
+  });
+
+  it("returns stacked when chart is undefined", () => {
+    expect(resolveBarMode(undefined, undefined)).toBe("stacked");
+    expect(resolveBarMode(undefined, "grouped")).toBe("stacked");
+  });
+});
+
+describe("shouldUseCrosshairYStacked", () => {
+  it("returns false for line charts (uses regular y accessors)", () => {
+    expect(shouldUseCrosshairYStacked("line", undefined)).toBe(false);
+    expect(shouldUseCrosshairYStacked("line", "stacked")).toBe(false);
+  });
+
+  it("returns false for grouped bars (uses regular y accessors)", () => {
+    expect(shouldUseCrosshairYStacked("bars", "grouped")).toBe(false);
+  });
+
+  it("returns true for stacked bars (uses yStacked accessors)", () => {
+    expect(shouldUseCrosshairYStacked("bars", "stacked")).toBe(true);
+    expect(shouldUseCrosshairYStacked("bars", undefined)).toBe(true);
+  });
+
+  it("returns true for area charts (uses yStacked accessors)", () => {
+    expect(shouldUseCrosshairYStacked("area", undefined)).toBe(true);
+    expect(shouldUseCrosshairYStacked("area", "grouped")).toBe(true);
+  });
+
+  it("returns true when chart is undefined (defaults to yStacked)", () => {
+    expect(shouldUseCrosshairYStacked(undefined, undefined)).toBe(true);
   });
 });

@@ -20,7 +20,6 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
 import { useTableSearchSort } from '@/composables/useTableSearchSort'
-import SourceSparkline from '@/components/visualizations/SourceSparkline.vue'
 import { getSourceTypeLabel } from '@/lib/queryMetadata'
 import { formatDate, getSourceConnectionDetails } from '@/utils/format'
 
@@ -90,12 +89,6 @@ const retryLoading = async () => {
     await loadSources()
 }
 
-const fetchSourceIngestionStats = async () => {
-    await Promise.all(
-        sourcesStore.sources.map((source) => sourcesStore.getSourceInspection(source.id))
-    )
-}
-
 // Load sources for admin view
 const loadSources = async () => {
     // Reset any previous error
@@ -120,7 +113,6 @@ const confirmDelete = async () => {
 onMounted(async () => {
     // Load admin sources
     await loadSources()
-    await fetchSourceIngestionStats()
 })
 </script>
 
@@ -169,7 +161,6 @@ onMounted(async () => {
                                     </button>
                                 </TableHead>
                                 <TableHead class="w-[120px]">Type</TableHead>
-                                <TableHead class="w-[200px]">Activity (24h)</TableHead>
                                 <TableHead class="w-[150px]">Auto Created</TableHead>
                                 <TableHead class="w-[150px]">Timestamp Field</TableHead>
                                 <TableHead class="w-[300px]">Connection</TableHead>
@@ -206,19 +197,6 @@ onMounted(async () => {
                                 </TableCell>
                                 <TableCell>
                                     <Badge variant="outline">{{ getSourceTypeLabel(source) }}</Badge>
-                                </TableCell>
-                                <TableCell>
-                                    <div class="space-y-1 min-w-[180px]">
-                                        <div class="text-xs text-muted-foreground">
-                                            {{ sourcesStore.getSourceInspectionById(source.id)?.activity?.rows_24h?.toLocaleString() || '0' }} rows
-                                        </div>
-                                        <SourceSparkline
-                                            v-if="sourcesStore.getSourceInspectionById(source.id)?.activity"
-                                            :data="sourcesStore.getSourceInspectionById(source.id)?.activity?.hourly_buckets || []"
-                                            :height="36"
-                                            bucket-mode="hourly"
-                                        />
-                                    </div>
                                 </TableCell>
                                 <TableCell>
                                     <Badge :variant="source._meta_is_auto_created ? 'default' : 'secondary'"

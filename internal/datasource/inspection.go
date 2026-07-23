@@ -18,17 +18,12 @@ type InspectionMetric struct {
 }
 
 type SourceSchemaField struct {
-	Name              string  `json:"name"`
-	Type              string  `json:"type"`
-	IsNullable        bool    `json:"is_nullable,omitempty"`
-	IsPrimaryKey      bool    `json:"is_primary_key,omitempty"`
-	DefaultExpression string  `json:"default_expression,omitempty"`
-	Comment           string  `json:"comment,omitempty"`
-	Compressed        string  `json:"compressed,omitempty"`
-	Uncompressed      string  `json:"uncompressed,omitempty"`
-	CompressionRatio  float64 `json:"compression_ratio,omitempty"`
-	AvgRowSize        float64 `json:"avg_row_size,omitempty"`
-	RowCount          uint64  `json:"row_count,omitempty"`
+	Name              string `json:"name"`
+	Type              string `json:"type"`
+	IsNullable        bool   `json:"is_nullable,omitempty"`
+	IsPrimaryKey      bool   `json:"is_primary_key,omitempty"`
+	DefaultExpression string `json:"default_expression,omitempty"`
+	Comment           string `json:"comment,omitempty"`
 }
 
 type SourceSchemaInspection struct {
@@ -46,10 +41,10 @@ type IngestionBucket struct {
 type SourceActivity struct {
 	Rows1h        uint64            `json:"rows_1h"`
 	Rows24h       uint64            `json:"rows_24h"`
-	Rows7d        uint64            `json:"rows_7d"`
+	Rows7d        uint64            `json:"rows_7d,omitempty"`
 	LatestTS      *time.Time        `json:"latest_ts,omitempty"`
 	HourlyBuckets []IngestionBucket `json:"hourly_buckets"`
-	DailyBuckets  []IngestionBucket `json:"daily_buckets"`
+	DailyBuckets  []IngestionBucket `json:"daily_buckets,omitempty"`
 }
 
 type SourceInspection struct {

@@ -73,10 +73,16 @@ export interface PanelState {
     buckets: HistogramData[];
     granularity: string | null;
     groupBy: string | null;
+    notice: string | null;
     range: { start: number; end: number };
   };
   stat?: {
     value: number;
+  };
+  breakdown?: {
+    buckets: HistogramData[];
+    groupBy: string;
+    notice: string | null;
   };
   table?: {
     columns: PanelColumn[];
@@ -535,10 +541,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const startIso = msToRfc3339(range.start);
     const endIso = msToRfc3339(range.end);
 
-    if (panel.type === "timeseries" || panel.type === "stat") {
+    if (panel.type === "timeseries" || panel.type === "stat" || panel.type === "breakdown") {
+      const groupBy = panel.type === "timeseries" || panel.type === "breakdown" ? panel.options?.group_by?.trim() || undefined : undefined;
+      if (panel.type === "breakdown" && !groupBy) {
+        return { status: "error", error: "Breakdown panels require a group-by field." };
+      }
       const { query: queryText, language: nativeLanguage } = await resolveNativeQuery(panel, range, signal);
       const window = HistogramService.calculateOptimalGranularity(startIso, endIso);
-      const groupBy = panel.type === "timeseries" ? panel.options?.group_by || undefined : undefined;
 
       // query_language is advisory today (the native endpoints interpret
       // query_text by source type) but is sent so a VictoriaLogs source runs
@@ -560,12 +569,19 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       if (panel.type === "stat") {
         return { status: "success", stat: { value: sumHistogramCounts(buckets) } };
       }
+      if (panel.type === "breakdown") {
+        return {
+          status: buckets.length ? "success" : "empty",
+          breakdown: { buckets, groupBy: groupBy!, notice: data?.notice ?? null },
+        };
+      }
       return {
         status: buckets.length ? "success" : "empty",
         timeseries: {
           buckets,
           granularity: data?.granularity ?? null,
           groupBy: groupBy ?? null,
+          notice: data?.notice ?? null,
           range: { start: range.start, end: range.end },
         },
       };

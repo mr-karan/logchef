@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -93,6 +94,19 @@ var validDashboardPanelCharts = map[DashboardPanelChart]struct{}{
 	DashboardPanelChartArea: {},
 }
 
+// DashboardPanelBarMode specifies the bar render mode when options.chart is "bars".
+type DashboardPanelBarMode string
+
+const (
+	DashboardPanelBarModeStacked DashboardPanelBarMode = "stacked"
+	DashboardPanelBarModeGrouped DashboardPanelBarMode = "grouped"
+)
+
+var validDashboardPanelBarModes = map[DashboardPanelBarMode]struct{}{
+	DashboardPanelBarModeStacked: {},
+	DashboardPanelBarModeGrouped: {},
+}
+
 // DashboardPanelType enumerates the chart kinds a panel may render.
 type DashboardPanelType string
 
@@ -100,12 +114,14 @@ const (
 	DashboardPanelTimeseries DashboardPanelType = "timeseries"
 	DashboardPanelStat       DashboardPanelType = "stat"
 	DashboardPanelTable      DashboardPanelType = "table"
+	DashboardPanelBreakdown  DashboardPanelType = "breakdown"
 )
 
 var validDashboardPanelTypes = map[DashboardPanelType]struct{}{
 	DashboardPanelTimeseries: {},
 	DashboardPanelStat:       {},
 	DashboardPanelTable:      {},
+	DashboardPanelBreakdown:  {},
 }
 
 // validDashboardPanelWidths is the set of allowed grid column spans (12-col grid).
@@ -165,10 +181,12 @@ type dashboardPanels struct {
 // present with the wrong JSON shape (e.g. columns as a string) fails to
 // unmarshal and is rejected.
 type dashboardPanelOptions struct {
-	Chart   *string  `json:"chart"`
-	Limit   *int     `json:"limit"`
-	Columns []string `json:"columns"`
-	GroupBy *string  `json:"group_by"`
+	Chart         *string  `json:"chart"`
+	Limit         *int     `json:"limit"`
+	Columns       []string `json:"columns"`
+	GroupBy       *string  `json:"group_by"`
+	BarMode       *string  `json:"bar_mode"`
+	BreakdownView *string  `json:"breakdown_view"`
 }
 
 // DashboardPanelRef identifies the team and source a single panel targets. It
@@ -300,7 +318,7 @@ func validateDashboardPanelEntries(panels []dashboardPanel) (map[string]struct{}
 		if !NormalizeQueryLanguage(p.QueryLanguage).Valid() {
 			return nil, fmt.Errorf("panel %q has invalid query_language %q", p.ID, p.QueryLanguage)
 		}
-		if err := validateDashboardPanelOptions(p.ID, p.Options); err != nil {
+		if err := validateDashboardPanelOptions(p.ID, DashboardPanelType(p.Type), p.Options); err != nil {
 			return nil, err
 		}
 	}
@@ -373,8 +391,11 @@ func layoutRectsOverlap(a, b dashboardPanelLayout) bool {
 // validateDashboardPanelOptions enforces the panel `options` contract
 // (finding B8). It is lenient about unknown keys for forward-compat but
 // rejects clearly-wrong shapes and values.
-func validateDashboardPanelOptions(panelID string, raw json.RawMessage) error {
+func validateDashboardPanelOptions(panelID string, panelType DashboardPanelType, raw json.RawMessage) error {
 	if len(raw) == 0 {
+		if panelType == DashboardPanelBreakdown {
+			return fmt.Errorf("panel %q requires a non-empty options.group_by for breakdown", panelID)
+		}
 		return nil
 	}
 	var opts dashboardPanelOptions
@@ -394,7 +415,31 @@ func validateDashboardPanelOptions(panelID string, raw json.RawMessage) error {
 			return fmt.Errorf("panel %q has invalid options.limit %d (max %d)", panelID, *opts.Limit, MaxDashboardPanelOptionLimit)
 		}
 	}
+	if opts.BarMode != nil && *opts.BarMode != "" {
+		if _, ok := validDashboardPanelBarModes[DashboardPanelBarMode(*opts.BarMode)]; !ok {
+			return fmt.Errorf("panel %q has invalid options.bar_mode %q (allowed: stacked, grouped)", panelID, *opts.BarMode)
+		}
+	}
+	if err := validateDashboardBreakdownOptions(panelID, panelType, opts); err != nil {
+		return err
+	}
 	// Columns and GroupBy shapes are enforced by the unmarshal above (a string
 	// where an array is expected, or vice versa, fails to decode).
+	return nil
+}
+
+func validateDashboardBreakdownOptions(panelID string, panelType DashboardPanelType, opts dashboardPanelOptions) error {
+	if panelType == DashboardPanelBreakdown {
+		if opts.GroupBy == nil || strings.TrimSpace(*opts.GroupBy) == "" {
+			return fmt.Errorf("panel %q requires a non-empty options.group_by for breakdown", panelID)
+		}
+		if opts.BreakdownView != nil && *opts.BreakdownView != "horizontal-bars" && *opts.BreakdownView != "donut" {
+			return fmt.Errorf("panel %q has invalid options.breakdown_view %q (allowed: horizontal-bars, donut)", panelID, *opts.BreakdownView)
+		}
+		return nil
+	}
+	if opts.BreakdownView != nil && *opts.BreakdownView != "" {
+		return fmt.Errorf("panel %q has options.breakdown_view but is not a breakdown panel", panelID)
+	}
 	return nil
 }

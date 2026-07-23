@@ -28,10 +28,9 @@ const (
 	// one series per distinct value — a server-side memory spike and a
 	// multi-MB payload for the browser.
 	defaultHistogramSeriesLimit = 10
-	// histogramOtherSeriesLabel is the GroupValue assigned to VL's catch-all
-	// aggregate series (the "{}" series it returns once the group count exceeds
-	// fields_limit). It is intentionally distinct so it is never confused with a
-	// genuine empty-value group.
+	// histogramOtherSeriesLabel remains the GroupValue assigned to VL's
+	// catch-all aggregate series for backward compatibility. IsOther is the
+	// structural identity used by new clients.
 	histogramOtherSeriesLabel = "__other__"
 )
 
@@ -377,15 +376,17 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	truncated := false
 	for _, series := range result.Hits {
 		groupValue := ""
+		isOther := false
 		if groupBy != "" {
 			value, hasGroupField := series.Fields[groupBy]
 			if !hasGroupField {
 				// VL's top-hits cap folds every series beyond fields_limit into a
 				// single catch-all series keyed "{}", serialized with an empty
 				// `fields` object. It lacks the group-by field, so it must not be
-				// rendered as a genuine empty-value group; label it as the
-				// aggregate "other" bucket and note that truncation occurred.
+				// rendered as a genuine empty-value group; retain the legacy
+				// marker while identifying it structurally as synthetic Other.
 				groupValue = histogramOtherSeriesLabel
+				isOther = true
 				truncated = true
 			} else {
 				groupValue = value
@@ -403,6 +404,7 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 				Bucket:     bucket,
 				LogCount:   int(series.Values[i]),
 				GroupValue: groupValue,
+				IsOther:    isOther,
 			})
 		}
 	}
@@ -541,44 +543,28 @@ func (p *Provider) InspectSource(ctx context.Context, source *models.Source) (*d
 	}
 
 	return &datasource.SourceInspection{
-		Details:  buildVictoriaLogsInspectionDetails(source),
-		Activity: p.inspectSourceActivity(ctx, source),
+		Details: buildVictoriaLogsInspectionDetails(source),
 		Schema: &datasource.SourceSchemaInspection{
 			Fields: mapVictoriaLogsSchemaFields(columns),
 		},
 	}, nil
 }
 
-func (p *Provider) inspectSourceActivity(ctx context.Context, source *models.Source) *datasource.SourceActivity {
+func (p *Provider) InspectSourceActivity(ctx context.Context, source *models.Source) (*datasource.SourceActivity, error) {
 	conn, err := p.connectionForSource(source)
 	if err != nil {
-		return nil
+		return nil, err
 	}
-
 	now := time.Now().UTC()
 	hourlyBuckets, err := p.fetchActivityBuckets(ctx, conn, now.Add(-24*time.Hour), now, "1h")
 	if err != nil {
-		return nil
+		return nil, err
 	}
-
-	dailyBuckets, err := p.fetchActivityBuckets(ctx, conn, now.Add(-(7 * 24 * time.Hour)), now, "1d")
-	if err != nil {
-		dailyBuckets = nil
-	}
-
-	latestTS, err := p.fetchLatestTimestamp(ctx, conn, source.MetaTSField)
-	if err != nil {
-		latestTS = nil
-	}
-
 	return &datasource.SourceActivity{
 		Rows1h:        sumBucketsSince(hourlyBuckets, now.Add(-time.Hour)),
 		Rows24h:       sumBuckets(hourlyBuckets),
-		Rows7d:        sumBuckets(dailyBuckets),
-		LatestTS:      latestTS,
 		HourlyBuckets: hourlyBuckets,
-		DailyBuckets:  dailyBuckets,
-	}
+	}, nil
 }
 
 func (p *Provider) fetchActivityBuckets(
@@ -627,61 +613,6 @@ func (p *Provider) fetchActivityBuckets(
 	})
 
 	return buckets, nil
-}
-
-func (p *Provider) fetchLatestTimestamp(
-	ctx context.Context,
-	conn models.VictoriaLogsConnectionInfo,
-	timestampField string,
-) (*time.Time, error) {
-	fieldName := strings.TrimSpace(timestampField)
-	if fieldName == "" {
-		fieldName = "_time"
-	}
-
-	form := url.Values{}
-	// Sort newest-first so limit=1 returns the actual latest row, not an
-	// arbitrary one.
-	form.Set("query", "* | sort by (_time desc)")
-	form.Set("limit", "1")
-	applyScopeFilters(form, conn)
-
-	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/query", form)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	decoder := json.NewDecoder(resp.Body)
-	decoder.UseNumber()
-
-	var row map[string]any
-	if err := decoder.Decode(&row); err != nil {
-		if err == io.EOF {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("decode victorialogs latest timestamp response: %w", err)
-	}
-
-	rawValue, ok := row[fieldName]
-	if !ok {
-		rawValue = row["_time"]
-	}
-	if rawValue == nil {
-		return nil, nil
-	}
-
-	value, ok := rawValue.(string)
-	if !ok || strings.TrimSpace(value) == "" {
-		return nil, nil
-	}
-
-	parsed, err := time.Parse(time.RFC3339, value)
-	if err != nil {
-		return nil, nil
-	}
-
-	return &parsed, nil
 }
 
 func sumBuckets(buckets []datasource.IngestionBucket) uint64 {
