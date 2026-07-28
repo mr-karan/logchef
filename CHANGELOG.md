@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0-alpha.1] - 2026-07-20
+## [2.0.0] - 2026-07-28
 
 Logchef v2.0 is a big release, and it starts with one thing: **VictoriaLogs is
 now a first-class datasource.** Point Logchef at a VictoriaLogs instance and
@@ -24,9 +24,10 @@ There's a lot more in the box:
 - **Better dashboards.** Build multi-panel views by dragging and resizing panels
   right on the grid, with time-series, stat, and table panels and line/area/bar
   chart styles.
-- **A much stronger CLI (v0.2.0).** New `explain`, `histogram`, `fields`,
+- **A much stronger CLI (v0.2.1).** New `explain`, `histogram`, `fields`,
   `doctor`, and `open` commands, live-tail streaming in your terminal, and full
-  VictoriaLogs support — see the CLI v0.2.0 notes below.
+  VictoriaLogs support. It also adds a startup banner and update notifications.
+  See the CLI v0.2.1 notes below.
 - **Faster on big results, and hardened throughout.** Large query results now
   stream instead of buffering in memory, and a broad security and reliability
   pass tightened dashboards, the VictoriaLogs connector, and query handling.
@@ -40,14 +41,14 @@ Full details below.
   LogchefQL (compiled to LogsQL) or write native LogsQL directly. Alerts support
   both a LogchefQL condition builder (with a field-and-aggregate picker) and
   native LogsQL via `stats_query`. See the
-  [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/). Known gaps:
-  AI SQL generation, log context ("surrounding logs"), and streamed
-  exports/downloads remain ClickHouse-only for now.
+  [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/). Log context
+  ("surrounding logs") and streamed exports/downloads remain ClickHouse-only
+  for now.
 - **Datasource capability model.** Each source now advertises a capability set
   (`schema_inspection`, `histogram`, `field_values`, `source_inspection`,
   `ai_sql_generation`, `log_context`, `exports`, `live_tail`) that both the API
   and UI gate on, instead of hardcoded source-type checks. ClickHouse supports
-  all eight; VictoriaLogs currently supports the first four plus `live_tail`.
+  all eight; VictoriaLogs supports all except `log_context` and `exports`.
 - **Built-in local authentication.** Set `[auth.local]` (`enabled`,
   `admin_email`, `admin_password`, or the matching `LOGCHEF_AUTH__LOCAL__*` env
   vars) to run Logchef with email+password auth, with or without OIDC. The
@@ -75,8 +76,16 @@ Full details below.
   drag a panel by its header to move it, drag its corner to resize. Adding or
   editing a panel opens a full-height panel builder drawer (replacing the old
   form sheet) with a live query preview.
-- **Dashboards: chart styles.** Time series panels render as bars (default),
-  line, or area, set per panel in the builder.
+- **Dashboards: chart styles.** Time series panels render as bars, line, or
+  area, set per panel in the builder. Bar charts can be stacked or grouped.
+- **Dashboards: category breakdowns.** Add a breakdown panel grouped by a field
+  and render its categories as horizontal bars or a donut chart.
+- **AI query generation for every supported query mode.** The assistant selects
+  LogchefQL, ClickHouse SQL, or LogsQL from the source and editor mode, validates
+  the generated query, and makes one repair attempt when it can identify a
+  syntax error.
+- **Native AWS Bedrock AI provider.** Use Bedrock through the AWS credential
+  chain alongside OpenAI-compatible providers.
 - **Dashboard result caching.** Dashboards cache panel query results
   server-side, per dashboard (default 10-minute TTL, configurable per dashboard,
   `0` = off), so a wall of auto-refreshing panels collapses to a single backend
@@ -121,6 +130,9 @@ Full details below.
   sources now stream row-by-row instead of buffering the full JSON result in
   memory, removing a memory-spike path on large result sets. The response shape
   is unchanged. VictoriaLogs keeps the buffered path. (Closes #51)
+- **Source Stats scales more predictably.** Metadata inspection and recent
+  activity load separately. Activity is bounded to recent data, cached, and
+  refreshed independently so it does not hold up the rest of the page.
 
 ### Fixed
 - **Deleting a user now deletes their sessions too**: previously a removed
@@ -141,6 +153,18 @@ Full details below.
 - **Query-timeout detection for metrics is accurate**: ClickHouse timeout
   classification no longer relies on brittle string matching. (Closes #54)
 - **The grouped-histogram legend no longer clips** in the explorer. (Closes #38)
+- **Grouped histograms preserve their identity and totals.** Empty, null, and
+  literal group values remain distinct, and capped series are folded into an
+  exact `Other` remainder.
+- **Saved-query language validation is reliable.** Invalid LogchefQL content is
+  rejected before save, while valid native ClickHouse SQL and LogsQL are not
+  rejected by overly strict local parsing.
+- **Explore URLs no longer leak LogchefQL into native mode.** URL mode now wins
+  over a saved draft, and switching modes resynchronizes the editor content.
+- **AI query requests are more robust.** Each generation and repair attempt has
+  its own timeout, Bedrock validates its model configuration before requests,
+  code-fence tags are removed, and Bedrock requests are compatible with Sonnet
+  5 temperature requirements.
 - **Exports return a clean 400** (and the Download button hides) on sources
   that don't support them, instead of a 500 or a job that fails asynchronously
   after returning 202.
@@ -366,7 +390,24 @@ read the [Database Backends & HA guide](https://logchef.app/operations/database-
 first. Note the current caveat that alert evaluation must run on **exactly one**
 replica until leader election lands.
 
-## [CLI v0.2.0] - Unreleased
+## [CLI v0.2.1] - 2026-07-21
+
+Patch release for the Logchef CLI.
+
+### Added
+- **Startup banner.** Running `logchef` in an interactive terminal shows the
+  current version and a branded banner. It can be disabled in config, with an
+  environment variable, in CI, or with `--quiet`.
+- **Update notification.** Interactive commands check for a newer stable CLI
+  release and show an unobtrusive update notice. The check is cached and can be
+  disabled in config, with an environment variable, in CI, or with `--quiet`.
+
+### Fixed
+- **Brand color.** The startup banner uses the Logchef blue.
+- **Release builds package the bundled skill correctly** across supported target
+  platforms.
+
+## [CLI v0.2.0] - 2026-07-20
 
 Logchef CLI 0.2.0 is the VictoriaLogs release: `query`, `sql`, `find`, and
 `tail` all work against VictoriaLogs sources, and `tail` follows both backends
@@ -1148,6 +1189,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[2.0.0]: https://github.com/mr-karan/logchef/compare/v1.7.0...v2.0.0
 [1.7.0]: https://github.com/mr-karan/logchef/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/mr-karan/logchef/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/mr-karan/logchef/compare/v1.5.0...v1.6.0
