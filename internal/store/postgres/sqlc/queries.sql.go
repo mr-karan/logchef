@@ -3370,7 +3370,7 @@ SELECT
     COALESCE(s.name, '') AS source_name,
     SUM(qsd.query_count)::bigint AS query_count,
     (CASE WHEN SUM(qsd.query_count) > 0
-        THEN SUM(qsd.total_duration_ms) / SUM(qsd.query_count)
+        THEN TRUNC(SUM(qsd.total_duration_ms)::numeric / SUM(qsd.query_count))
         ELSE 0 END)::bigint AS avg_duration_ms
 FROM query_stats_daily qsd
 LEFT JOIN sources s ON s.id = qsd.source_id
