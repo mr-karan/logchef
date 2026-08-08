@@ -8,8 +8,6 @@ FROM oven/bun:1-debian AS frontend-builder
 
 WORKDIR /app
 
-# Optional public credentials for purpose-built demo images. Official builds
-# leave these unset, so the normal login page never displays or prefills them.
 # Install dependencies first for better layer caching
 COPY frontend/package.json frontend/bun.lock ./frontend/
 RUN --mount=type=cache,target=/root/.bun/install/cache \
