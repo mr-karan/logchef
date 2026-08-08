@@ -4,95 +4,169 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
 <BaseLayout title="Changelog — Logchef" description="Logchef release notes and version history: VictoriaLogs, dashboards, live tail, the CLI, and every change, version by version." activeNav="changelog">
   <style>
-    main { max-width: 900px; margin: 0 auto; padding: 6rem 1.5rem 4rem; }
+    .cl-wrap { position: relative; overflow: clip; }
+    .cl-wrap .bg-glow {
+      width: min(900px, 120vw); height: min(900px, 120vw);
+      top: -44%; left: 50%; transform: translateX(-50%);
+    }
+    main { position: relative; z-index: 1; max-width: 900px; margin: 0 auto; padding: 8rem 1.5rem 4rem; }
 
     .page-header { margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 1px solid var(--color-border); }
-    .page-header h1 { font-size: 2.5rem; font-weight: 700; letter-spacing: -0.03em; margin-bottom: 0.5rem; }
-    .page-header p { color: var(--color-text-secondary); font-size: 1.125rem; }
+    .page-header .kicker { display: block; margin-bottom: 1rem; }
+    .page-header h1 { font-size: clamp(2rem, 4.4vw, 2.75rem); font-weight: 700; letter-spacing: -0.033em; margin-bottom: 0.5rem; }
+    .page-header p { color: var(--color-text-secondary); font-size: 1.0625rem; }
 
-    .version { margin-bottom: 3rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--color-border); scroll-margin-top: 2rem; }
+    .version { margin-bottom: 3rem; padding-bottom: 2.5rem; border-bottom: 1px solid var(--color-border); scroll-margin-top: 6rem; }
     .version:last-child { border-bottom: none; }
+    /* The milestone release gets a blue-bordered frame, not a gradient wash —
+       blue is the workspace colour and it should carry the emphasis alone. */
+    .version.milestone {
+      margin-inline: -1.25rem; padding: 1.75rem 1.25rem 2.5rem;
+      border: 1px solid color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
+      border-radius: 12px;
+      background: var(--color-surface);
+    }
     .version-header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
-    .version-tag { font-family: var(--font-mono); font-size: 1.25rem; font-weight: 600; color: var(--color-text); }
+    .version-tag { font-family: var(--font-mono); font-size: 1.1875rem; font-weight: 500; color: var(--color-text); }
     .version-tag.unreleased { color: var(--color-purple); }
     a.version-tag { text-decoration: none; }
     a.version-tag:hover { text-decoration: underline; text-underline-offset: 0.2em; }
     .version-date {
-      font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-dim);
-      background: var(--color-surface); padding: 0.25rem 0.625rem; border-radius: 4px;
+      font-family: var(--font-mono); font-size: 0.8125rem; color: var(--color-text-muted);
+      background: var(--color-bg); border: 1px solid var(--color-border);
+      padding: 0.25rem 0.625rem; border-radius: 5px;
     }
     .version-badge {
       font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500;
-      text-transform: uppercase; letter-spacing: 0.05em;
-      padding: 0.25rem 0.5rem; border-radius: 4px;
-      background: color-mix(in srgb, var(--color-success) 10%, transparent); color: var(--color-success);
+      text-transform: uppercase; letter-spacing: 0.14em;
+      padding: 0.25rem 0.55rem; border-radius: 5px;
+      border: 1px solid color-mix(in srgb, var(--color-success) 40%, transparent);
+      color: var(--color-success);
     }
-    .version-link { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim); margin-left: auto; }
+    .version-link { font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-muted); margin-left: auto; }
     .version-link:hover { color: var(--color-accent); text-decoration: none; }
 
     .change-section { margin-bottom: 1.5rem; }
     .change-section:last-child { margin-bottom: 0; }
+    /* Change types read as outlined mono chips — same family as the film's
+       source chips, so severity stays legible without coloured blocks. */
     .change-type {
-      display: inline-flex; align-items: center; gap: 0.375rem;
+      display: inline-flex; align-items: center; gap: 0.4rem;
       font-family: var(--font-mono); font-size: 0.6875rem; font-weight: 500;
-      text-transform: uppercase; letter-spacing: 0.05em;
-      padding: 0.25rem 0.5rem; border-radius: 4px; margin-bottom: 0.75rem;
+      text-transform: uppercase; letter-spacing: 0.14em;
+      padding: 0.28rem 0.6rem; border-radius: 5px; margin-bottom: 0.9rem;
+      border: 1px solid currentColor;
     }
-    .change-type.added { background: color-mix(in srgb, var(--color-success) 10%, transparent); color: var(--color-success); }
-    .change-type.changed { background: color-mix(in srgb, var(--color-warning) 10%, transparent); color: var(--color-warning); }
-    .change-type.fixed { background: color-mix(in srgb, var(--color-accent) 10%, transparent); color: var(--color-accent); }
-    .change-type.removed { background: color-mix(in srgb, var(--color-error) 10%, transparent); color: var(--color-error); }
+    .change-type.added { color: var(--color-success); }
+    .change-type.changed { color: var(--color-warning); }
+    .change-type.fixed { color: var(--color-accent-soft); }
+    .change-type.removed { color: var(--color-error); }
+    .change-type.security { color: var(--color-purple); }
+    .change-type.breaking { color: var(--color-warning); }
     .change-type svg { width: 12px; height: 12px; }
 
-    .change-list { list-style: none; display: flex; flex-direction: column; gap: 0.625rem; padding-left: 0.25rem; }
-    .change-list li {
-      position: relative; padding-left: 1.25rem;
-      font-size: 0.9375rem; color: var(--color-text-secondary); line-height: 1.6;
+    .release-kicker {
+      margin-bottom: 0.85rem; color: var(--color-accent-soft); font-family: var(--font-mono);
+      font-size: 0.6875rem; font-weight: 500; letter-spacing: 0.2em; text-transform: uppercase;
     }
+    .release-intro { margin-bottom: 1.5rem; color: var(--color-text-secondary); font-size: 1.0625rem; line-height: 1.7; }
+    .release-intro strong { color: var(--color-text); }
+    .release-highlights {
+      display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem;
+      margin: 0 0 2rem; padding: 0; list-style: none;
+    }
+    .release-highlights li {
+      padding: 1rem; border: 1px solid var(--color-border); border-radius: 8px;
+      background: var(--color-bg);
+      color: var(--color-text-secondary); font-size: 0.875rem; line-height: 1.6;
+    }
+    .release-highlights strong { display: block; margin-bottom: 0.3rem; color: var(--color-text); font-size: 0.9375rem; }
+    .upgrade-note {
+      margin: 0 0 1.75rem; padding: 1rem 1.125rem;
+      border: 1px solid color-mix(in srgb, var(--color-warning) 32%, var(--color-border));
+      border-left-width: 2px; border-left-color: var(--color-warning);
+      border-radius: 0 8px 8px 0;
+      background: var(--color-bg);
+      color: var(--color-text-secondary); font-size: 0.9rem; line-height: 1.65;
+    }
+    .upgrade-note strong { color: var(--color-text); }
+    .upgrade-note code {
+      font-family: var(--font-mono); font-size: 0.8125rem;
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      padding: 0.1em 0.35em; border-radius: 4px; color: var(--color-text);
+    }
+
+    .change-list { list-style: none; display: flex; flex-direction: column; gap: 0.7rem; padding-left: 0.25rem; }
+    .change-list li {
+      position: relative; padding-left: 1.35rem;
+      font-size: 0.9375rem; color: var(--color-text-secondary); line-height: 1.65;
+    }
+    /* A short log line rather than a bullet — the mark's motif at list scale. */
     .change-list li::before {
-      content: ''; position: absolute; left: 0; top: 0.625rem;
-      width: 4px; height: 4px; border-radius: 50%; background: var(--color-text-dim);
+      content: ''; position: absolute; left: 0; top: 0.7rem;
+      width: 9px; height: 2px; border-radius: 1px;
+      background: var(--color-accent); opacity: 0.65;
     }
     .change-list li strong { color: var(--color-text); font-weight: 500; }
     .change-list li code {
       font-family: var(--font-mono); font-size: 0.8125rem;
-      background: var(--color-surface); padding: 0.125rem 0.375rem;
-      border-radius: 4px; color: var(--color-accent);
+      background: var(--color-surface); border: 1px solid var(--color-border);
+      padding: 0.1em 0.35em;
+      border-radius: 4px; color: var(--color-accent-soft);
     }
     .change-list .breaking { color: var(--color-warning); font-weight: 600; }
 
     .contributors {
-      margin-top: 1rem; padding-top: 1rem;
-      border-top: 1px dashed var(--color-border);
-      font-size: 0.875rem; color: var(--color-text-dim);
+      margin-top: 1.25rem; padding-top: 1rem;
+      border-top: 1px solid var(--color-border);
+      font-size: 0.875rem; color: var(--color-text-muted);
     }
     .contributors a { color: var(--color-text-secondary); }
 
     @media (max-width: 768px) {
-      .page-header h1 { font-size: 2rem; }
+      main { padding-top: 6.5rem; }
       .version-header { flex-direction: column; align-items: flex-start; gap: 0.5rem; }
       .version-link { margin-left: 0; }
+      .version.milestone { margin-inline: -0.75rem; padding-inline: 0.9rem; }
+      .release-highlights { grid-template-columns: 1fr; }
     }
   </style>
 
+  <div class="cl-wrap">
+  <div class="bg-glow" aria-hidden="true"></div>
   <main>
     <header class="page-header">
+      <span class="kicker">Release history</span>
       <h1>Changelog</h1>
       <p>What's new in Logchef.</p>
     </header>
 
-    <!-- v2.0.0-alpha.1 -->
-    <article class="version" id="v2.0.0-alpha.1">
+    <!-- v2.0.0 -->
+    <article class="version milestone" id="v2.0.0">
       <div class="version-header">
-        <a class="version-tag" href="#v2.0.0-alpha.1">v2.0.0-alpha.1</a>
-        <span class="version-date">Jul 20, 2026</span>
+        <a class="version-tag" href="#v2.0.0">v2.0.0</a>
+        <span class="version-date">Aug 8, 2026</span>
         <span class="version-badge">Latest</span>
-        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.0-alpha.1" class="version-link" target="_blank">Release notes &rarr;</a>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
-      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
-        <strong>VictoriaLogs is now a first-class datasource</strong>, right alongside ClickHouse. Add a VictoriaLogs source and explore it in the same place, with the same queries, dashboards, and access control you already use for your ClickHouse logs. This release also adds email-and-password login, easier dashboard editing, your own query history, and a round of speed and reliability work.
+      <p class="release-kicker">A new chapter for Logchef</p>
+      <p class="release-intro">
+        <strong>Logchef 2.0 is the largest release in the project's history.</strong> It grows Logchef from a ClickHouse log explorer into a multi-datasource log exploration platform. VictoriaLogs now sits beside ClickHouse as a first-class datasource, while dashboards, live tail, local authentication, query history, usage analytics, and a substantially more capable CLI turn Logchef into a complete place to investigate and understand logs.
       </p>
+
+      <ul class="release-highlights">
+        <li><strong>VictoriaLogs, end to end</strong>Explore with LogchefQL or LogsQL, inspect fields, build dashboards and alerts, generate queries with AI, and tail logs live.</li>
+        <li><strong>Dashboards, brand new</strong>Build operational views from log queries. Drag, resize, and preview panels on the grid. Mix time series, stats, tables, horizontal bars, and donut breakdowns.</li>
+        <li><strong>Live logs everywhere</strong>Follow matching rows from either backend in the web explorer or terminal, with server-side stream guardrails.</li>
+        <li><strong>Deploy your way</strong>Use built-in email and password login with no OIDC dependency, or automatically provision approved users through SSO.</li>
+        <li><strong>Investigation memory</strong>Return to your own query history; administrators can see recent activity and all-time usage trends by user and source.</li>
+        <li><strong>CLI v0.2.1</strong>Query both backends, tail, explain, graph histograms, inspect fields, diagnose setup, and jump from the shell into the web explorer.</li>
+      </ul>
+
+      <aside class="upgrade-note">
+        <strong>Before upgrading:</strong> if you provision sources with <code>provisioning.toml</code>, move each source's connection fields under <code>[sources.connection]</code> and add its <code>source_type</code>. Logchef exits with a migration hint if it finds the old flat format. Database migrations remain automatic. <a href="#v2-breaking">See the exact change &darr;</a>
+      </aside>
 
       <div class="change-section">
         <div class="change-type added">
@@ -100,16 +174,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>VictoriaLogs datasource</strong>: Connect a VictoriaLogs instance and query it with LogchefQL or native LogsQL, then use it across the explorer, dashboards, alerts, and live tail. AI query generation, log context, and streamed exports are still ClickHouse-only for now. <a href="/tutorials/victorialogs/">VictoriaLogs guide &rarr;</a></li>
-          <li><strong>Email &amp; password login</strong>: Run Logchef with local accounts, alongside your SSO provider or without one at all. <a href="/getting-started/configuration/#local-authentication-run-without-oidc">Learn more &rarr;</a></li>
-          <li><strong>Automatic SSO sign-up</strong>: If your administrator turns it on, a first sign-in from an approved email domain creates the account automatically instead of failing. <a href="/getting-started/configuration/#sso-auto-provisioning-jit-user-creation">Learn more &rarr;</a></li>
-          <li><strong>Live tail</strong>: Flip on Live in the explorer to watch matching log lines stream in as they arrive, on either datasource.</li>
-          <li><strong>Easier dashboard editing</strong>: Drag panels to move and resize them right on the dashboard, and edit each panel in a larger builder with a live preview.</li>
-          <li><strong>Dashboard chart styles</strong>: Show time-series panels as bars, lines, or areas, chosen per panel.</li>
-          <li><strong>Faster dashboards</strong>: Dashboards briefly reuse recent panel results, so a page full of panels loads quickly instead of re-running every query for every viewer.</li>
-          <li><strong>Query history</strong>: Reopen your recent queries from the explorer or with <code>logchef history</code> in the CLI. Admins also get a Query Activity view with recent queries and overall usage by source and user.</li>
-          <li><strong>Per-source query limits</strong>: If you run Logchef, you can cap what each ClickHouse source may spend on a single query, so one heavy query can't hog a shared cluster.</li>
-          <li><strong>Quick column filters</strong>: Filter the rows already on screen from any column header, by text match or number comparison, without running another query.</li>
+          <li><strong>VictoriaLogs datasource</strong>: Connect with no auth, basic auth, or a bearer token; optionally set multi-tenant account/project IDs and an immutable server-side scope. Query it with LogchefQL or native LogsQL across the explorer, dashboards, alerts, field inspection, AI generation, and live tail. Log context and exports remain ClickHouse-only. <a href="/tutorials/victorialogs/">VictoriaLogs guide &rarr;</a></li>
+          <li><strong>Built-in local authentication</strong>: Run Logchef with email and password accounts, alongside OIDC or without an external identity provider. The configured bootstrap admin can be rotated on restart, and local login attempts are limited by IP and email. <a href="/getting-started/configuration/#local-authentication-run-without-oidc">Local authentication &rarr;</a></li>
+          <li><strong>Automatic SSO provisioning</strong>: Allow first-time OIDC users from approved email domains to create a regular account and join configured default teams. <a href="/getting-started/configuration/#sso-auto-provisioning-jit-user-creation">SSO auto-provisioning &rarr;</a></li>
+          <li><strong>Live tail</strong>: Flip on Live to stream matching rows as they arrive. ClickHouse uses efficient polling; VictoriaLogs proxies its native stream. Session, concurrency, and rows-per-second limits keep a shared instance bounded.</li>
+          <li><strong>Dashboards</strong>: A brand-new module for operational views, mixing ClickHouse and VictoriaLogs panels on one grid. Move and resize panels directly on the canvas, then edit them in a full-height drawer with a live query preview.</li>
+          <li><strong>More ways to visualize logs</strong>: Time-series panels support line, area, grouped bar, or stacked bar charts. Category breakdowns render as horizontal bars or donut charts alongside stat and table panels.</li>
+          <li><strong>Dashboard result cache</strong>: Per-dashboard TTL caching reuses panel results across viewers and refreshes, reducing repeated backend work without caching ad-hoc explorer queries.</li>
+          <li><strong>Query history and usage analytics</strong>: Reopen your recent queries in the explorer or with <code>logchef history</code>. Administrators get recent Query Activity plus durable all-time trends by source and user.</li>
+          <li><strong>AI for every supported query mode</strong>: Generate and validate LogchefQL, ClickHouse SQL, or LogsQL, with one automatic repair attempt for recognized syntax errors. AWS Bedrock joins OpenAI-compatible providers.</li>
+          <li><strong>Per-source ClickHouse guardrails</strong>: Cap execution time, result/read rows and bytes, set read-only mode, and choose overflow behavior for each shared ClickHouse source.</li>
+          <li><strong>Client-side column filters</strong>: Narrow loaded rows from a column header with text matching or numeric comparisons, without issuing another query.</li>
         </ul>
       </div>
 
@@ -119,26 +194,87 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Credentials stay private</strong>: Logchef no longer returns a source's saved password in its API, and you can update a source without re-typing it.</li>
-          <li><strong>Cleaner histogram charts</strong>: gaps in sparse or grouped data now show as zero instead of leaving holes, so charts read cleanly in the explorer and on dashboards.</li>
-          <li><strong>Correct times for every viewer</strong>: dashboard panels show timestamps in each viewer's own timezone.</li>
-          <li><strong>Optional request limits</strong>: if you run Logchef, you can rate-limit login and query traffic to protect a busy instance.</li>
-          <li><strong>Safer reverse-proxy setup</strong>: if you run Logchef behind a reverse proxy, it identifies the real client address without trusting forwarding headers that could be spoofed.</li>
+          <li><strong>Datasource-neutral architecture</strong>: Source configuration, query compilation, execution, inspection, and UI feature gates now flow through provider capabilities instead of ClickHouse-specific assumptions.</li>
+          <li><strong>Large ClickHouse results stream progressively</strong>: Preview responses no longer buffer the complete result in server memory before returning it.</li>
+          <li><strong>Credentials stay private</strong>: APIs return whether a credential exists, never the stored secret; leaving it blank while editing preserves the current value.</li>
+          <li><strong>Cleaner, timezone-correct charts</strong>: Sparse histograms fill missing buckets with zero, grouped series keep exact totals, and dashboard time ranges align to the viewer's timezone.</li>
+          <li><strong>Source Stats loads predictably</strong>: Metadata and bounded recent activity load and refresh independently, so slow activity queries do not block the whole page.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type security">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 3l7 4v5c0 4.5-2.9 7.6-7 9-4.1-1.4-7-4.5-7-9V7l7-4z"/></svg>
+          Security &amp; reliability
+        </div>
+        <ul class="change-list">
+          <li><strong>Safe dashboard sharing and editing</strong>: Stored tooltip XSS is closed, concurrent saves detect conflicts, corrupt panels are isolated, and viewers only receive panels backed by sources they can access.</li>
+          <li><strong>Hardened VictoriaLogs connections</strong>: Auth and tenant headers cannot be overridden, stale credentials are cleared when auth changes, health checks exercise the real query path, and slow request paths have read deadlines.</li>
+          <li><strong>Request and proxy controls</strong>: Opt-in login/query rate limits and trusted-proxy client-IP resolution protect public or shared deployments without trusting spoofable forwarding headers.</li>
+          <li><strong>Session lifecycle fixes</strong>: Deleting a user revokes their sessions immediately, and expired sessions are swept in the background.</li>
         </ul>
       </div>
 
       <div class="change-section">
         <div class="change-type fixed">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
-          Fixed
+          Notable fixes
         </div>
         <ul class="change-list">
-          <li><strong>Deleting a user deletes their sessions too</strong>: a removed user's session no longer keeps working until natural expiry.</li>
-          <li><strong>Condition-mode alerts aggregate over a real field</strong>: <code>sum</code>/<code>avg</code>/<code>min</code>/<code>max</code> now use a field you pick, instead of a hardcoded column that didn't exist on most datasets.</li>
-          <li><strong>ClickHouse query results no longer lose their columns</strong> on the alert-evaluation path, fixing alerts whose query returned rows failing to evaluate.</li>
-          <li><strong>Exports return a clean 400</strong> (and the Download button hides) on sources that don't support them, instead of a 500 or a silently-failing background job.</li>
+          <li><strong>Condition alerts aggregate the selected field</strong> for <code>sum</code>, <code>avg</code>, <code>min</code>, and <code>max</code>, on both backends.</li>
+          <li><strong>Alert evaluation keeps ClickHouse column metadata</strong>, fixing successful queries that previously failed only on the alert path.</li>
+          <li><strong>Saved-query and URL modes stay consistent</strong>: LogchefQL, ClickHouse SQL, and LogsQL are validated appropriately, and drafts no longer leak LogchefQL into native mode.</li>
+          <li><strong>Unsupported exports fail clearly</strong>: Sources without export capability hide Download and return a clean <code>400</code>, rather than starting a doomed job.</li>
         </ul>
       </div>
+
+      <div class="change-section" id="v2-breaking">
+        <div class="change-type breaking">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 4.2L2.7 17.4A2 2 0 004.4 20h15.2a2 2 0 001.7-2.6L13.7 4.2a2 2 0 00-3.4 0z"/></svg>
+          Breaking change
+        </div>
+        <ul class="change-list">
+          <li><strong>Provisioned source shape</strong>: Every <code>[[sources]]</code> entry now needs <code>source_type = "clickhouse"</code> or <code>"victorialogs"</code>, with provider-specific fields nested under <code>[sources.connection]</code>. Teams, members, descriptions, retention, and metadata-field settings are unchanged. <a href="/getting-started/provisioning/">Migration example &rarr;</a></li>
+          <li><strong>Metadata migrations</strong>: SQLite migrations 000025–000032 and Postgres migrations 000002–000007 add datasource-neutral sources, local-auth credentials, dashboards, case-insensitive emails, query history, and durable daily usage stats. They apply automatically; case-only duplicate emails must be resolved manually if detected.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- CLI v0.2.1 -->
+    <article class="version" id="cli-v0.2.1">
+      <div class="version-header">
+        <a class="version-tag" href="#cli-v0.2.1">CLI v0.2.1</a>
+        <span class="version-date">Jul 21, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/cli-v0.2.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        A polished companion to the v2 server and the feature-packed CLI v0.2.0 release: interactive sessions now show the installed version in a Logchef banner and unobtrusively report when a newer stable CLI is available. Both can be disabled for scripts, CI, or quieter terminals.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Startup banner</strong>: Interactive runs identify the current CLI version; disable it in config, with an environment variable, in CI, or with <code>--quiet</code>.</li>
+          <li><strong>Update notification</strong>: A cached version check announces newer stable releases without slowing every invocation, with the same opt-out controls.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v2.0.0-alpha.1 -->
+    <article class="version" id="v2.0.0-alpha.1">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.0.0-alpha.1">v2.0.0-alpha.1</a>
+        <span class="version-date">Jul 20, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.0-alpha.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p style="margin-bottom: 1.5rem; color: var(--color-text-secondary); line-height: 1.6;">
+        First public preview of the v2 architecture: VictoriaLogs as a datasource, live tail, local authentication, dashboards, query history, usage analytics, and the datasource-neutral provider layer. The stable v2.0.0 release above includes the completed feature set and hardening work.
+      </p>
     </article>
 
     <!-- CLI v0.2.0 -->
@@ -984,7 +1120,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Initial Release
         </div>
         <ul class="change-list">
-          <li><strong>Log Explorer</strong>: Search and filter your logs in real-time with an intuitive interface.</li>
+          <li><strong>Log Explorer</strong>: Search and filter your logs in real time.</li>
           <li><strong>LogchefQL</strong>: Simple query language for filtering logs: <code>level="error" service="api"</code></li>
           <li><strong>Full SQL mode</strong>: Write raw ClickHouse SQL for advanced queries, aggregations, and joins.</li>
           <li><strong>Saved queries</strong>: Save your frequently used queries and share them with your team.</li>
@@ -995,4 +1131,5 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       </div>
     </article>
   </main>
+  </div>
 </BaseLayout>

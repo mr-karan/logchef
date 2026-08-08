@@ -83,3 +83,33 @@ func TestHandleGetMetaAlertsEnabled(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleGetMetaAdvertisesDemoReadOnly(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{
+		version: "test",
+		config: &config.Config{
+			Server: config.ServerConfig{HTTPServerTimeout: 30 * time.Second},
+			Demo:   config.DemoConfig{ReadOnly: true},
+		},
+	}
+	app := fiber.New()
+	app.Get("/api/v1/meta", s.handleGetMeta)
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/meta", http.NoBody))
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var envelope struct {
+		Data MetaResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if !envelope.Data.DemoReadOnly {
+		t.Fatal("demo_read_only = false, want true")
+	}
+}

@@ -61,6 +61,36 @@ Security Team        → Access to audit logs, security events
 DevOps Team         → Access to deployment logs, monitoring
 ```
 
+## Role Model
+
+Logchef evaluates access at multiple layers instead of relying on one coarse
+administrator flag. The complete model is included in the open-source release.
+
+| Layer | Roles | What it controls |
+|-------|-------|------------------|
+| **Instance** | `admin`, `member` | Global administration of users, teams, sources, and system settings |
+| **Team** | `admin`, `editor`, `member` | Access to sources assigned to that team and delegated team-level management |
+| **Collection** | `owner`, `editor`, `member` | Who can run, edit, curate, or administer a shared collection of saved queries |
+
+Roles are intentionally separate. A user can administer one team, edit shared
+workflows in another, and remain a regular member elsewhere. Collection roles
+delegate ownership of shared queries without granting access to the underlying
+log source.
+
+For automation, [service accounts and scoped tokens](/features/service-tokens)
+add two independent checks. The token must allow the requested action, and the
+service account must belong to a team that can access the source. The strictest
+layer wins.
+
+This produces a few important guarantees:
+
+- Joining a collection never grants access to its logs.
+- Team membership only exposes sources explicitly assigned to that team.
+- Team admins can manage members and source assignments without becoming global admins.
+- Scoped service tokens can be limited by both action and source access.
+- Teams, memberships, and source assignments can be reconciled from
+  [version-controlled provisioning](/getting-started/provisioning).
+
 ## Access Control Flow
 
 1. When a user logs in, Logchef identifies their Team memberships

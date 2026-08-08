@@ -1,9 +1,15 @@
 package server
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gofiber/fiber/v2"
+
+	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -82,5 +88,32 @@ func TestSlowestActivity(t *testing.T) {
 	// n larger than the window returns the whole window sorted, no panic.
 	if all := slowestActivity(activityWindow(), 100); len(all) != 5 {
 		t.Fatalf("expected 5 rows, got %d", len(all))
+	}
+}
+
+func TestDemoQueryActivityDoesNotExposeDetailedHistory(t *testing.T) {
+	t.Parallel()
+
+	s := &Server{config: &config.Config{Demo: config.DemoConfig{ReadOnly: true}}}
+	app := fiber.New()
+	app.Get("/api/v1/admin/query-activity", s.handleAdminQueryActivity)
+
+	resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/admin/query-activity?limit=100", http.NoBody))
+	if err != nil {
+		t.Fatalf("app.Test: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusOK)
+	}
+
+	var envelope struct {
+		Data queryActivityResponse `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if envelope.Data.Total != 0 || len(envelope.Data.Recent) != 0 || len(envelope.Data.Slowest) != 0 {
+		t.Fatalf("demo activity exposed detailed history: %+v", envelope.Data)
 	}
 }

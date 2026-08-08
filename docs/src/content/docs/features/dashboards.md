@@ -1,9 +1,9 @@
 ---
 title: Dashboards
-description: Build multi-panel Logchef dashboards that group saved log and metric visualizations into a shared grid with one time range and auto-refresh.
+description: Build multi-panel Logchef dashboards that group log-query visualizations into a shared grid with one time range and auto-refresh.
 ---
 
-A dashboard is a grid of panels, each one a query rendered as a chart, sharing one
+A dashboard is a grid of panels, each one a query rendered as a visualization, sharing one
 time range and refreshing together. Use them for the views you keep coming back to:
 an error overview, a service's request rate, the count of 5xx responses right now.
 There's no configuration or external tooling to set up; dashboards live entirely
@@ -16,7 +16,8 @@ its panels.
 
 A dashboard holds a set of **panels** laid out on a 12-column grid. Each panel is a
 self-contained visualization: it points at a team and source, carries its own query
-(LogchefQL or a source-native query), and renders as one of the panel types below.
+(LogchefQL, or native LogsQL for a VictoriaLogs source), and renders as one of
+the panel types below.
 Panels do not share a query, only the dashboard's time range and refresh interval.
 
 Panels run through the same team-scoped query endpoints the explorer uses, so a
@@ -36,16 +37,47 @@ explorer, they can see in a panel.
 - **Table**: the matching rows, like the explorer results grid. Set a row limit and
   an optional column subset.
 
+Time series, stat, and breakdown panels all use the source's histogram endpoint.
+For native VictoriaLogs panels, write the filter portion of LogsQL: VictoriaLogs'
+hits API ignores pipes while building histogram data. Table panels execute the
+full LogsQL query and can use pipes such as `fields` and `unpack_json`.
+
+Grouped histograms return the top 10 series and combine any remaining series
+into an **other** bucket. Prefer fields such as service, environment, host, or
+severity over high-cardinality request and trace IDs.
+
 ### Multiple data sources
 
 Each panel picks its own team and source, so a single dashboard can mix panels from
 different backends: a ClickHouse time series next to a VictoriaLogs stat. LogchefQL
 compiles to whatever the panel's source speaks, so the same filter works across
-backends. Native-query panels (SQL or LogsQL) target the specific source you chose.
+backends. The panel builder also offers a native LogsQL toggle when a VictoriaLogs
+source is selected. Native ClickHouse SQL is not exposed in the dashboard panel
+builder in this release; use LogchefQL for ClickHouse panels.
 
 If a viewer lacks access to a panel's source, that panel renders a locked state
 while the rest of the dashboard loads normally, the same pattern used for shared
 collection items.
+
+## Build a VictoriaLogs overview
+
+After connecting a VictoriaLogs source, a compact service-health dashboard is a
+good way to see the four panel types together:
+
+1. Open **Dashboards**, choose **New dashboard**, name it, and open it.
+2. Choose **Edit**, then **Add panel**.
+3. Add a **Stat** panel for `level="error"` to show the current error count.
+4. Add a **Time series** panel for `env="prod"`, grouped by `service`, to show
+   which service is driving volume.
+5. Add a **Breakdown** panel for `env="prod"`, grouped by `level`, and choose
+   horizontal bars or a donut.
+6. Add a **Table** panel for `level="error"`, keep its row limit small, and pick
+   the columns responders need first.
+7. Resize and arrange the panels, then choose **Save**.
+
+All four panels follow the dashboard time picker. You can switch an individual
+VictoriaLogs panel to native LogsQL without changing the other panels or the
+dashboard's backend mix.
 
 ## Time range and refresh
 
@@ -91,7 +123,7 @@ Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
 - **Resize a panel**: drag the handle on its bottom-right corner.
 - **Add a panel**: click an empty grid slot, or the "+ Add panel" tile. This opens
   the **panel builder**, a full-height drawer where you pick the team and source,
-  write the query in the Monaco editor (LogchefQL or the source's native language)
+  write the query in the Monaco editor (LogchefQL, or LogsQL for VictoriaLogs)
   with a live preview, choose the panel type, and set type-specific options: group-by
   and chart style for time series, a required group-by and horizontal-bar or donut view for breakdowns, and a row limit and optional column subset for tables.
 - **Edit or remove** an existing panel via the pencil / trash icons on its header,
@@ -99,6 +131,8 @@ Open a dashboard and choose **Edit** to enter a direct-manipulation canvas:
 
 Changes stay local until you **Save**; **Cancel** discards them. Leaving with unsaved
 edits prompts first.
+
+A dashboard can contain up to 24 panels.
 
 ## Who can edit
 

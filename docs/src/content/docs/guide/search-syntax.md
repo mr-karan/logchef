@@ -1,9 +1,9 @@
 ---
 title: Search Syntax
-description: Learn LogchefQL, Logchef's simple yet powerful search syntax for filtering and querying logs without writing SQL.
+description: Learn LogchefQL, Logchef's search syntax for filtering and querying logs without writing SQL.
 ---
 
-Logchef provides a simple yet powerful search syntax called **LogchefQL** that makes it easy to find exactly what you're looking for in your logs.
+**LogchefQL** is Logchef's search syntax. You use it to filter logs without writing SQL.
 
 LogchefQL is the quick-filter language shared across supported datasources:
 
@@ -27,7 +27,7 @@ service="payment-api"
 
 ## Operators
 
-LogchefQL supports a comprehensive set of operators for different use cases:
+LogchefQL supports these operators:
 
 ### Equality Operators
 
@@ -107,7 +107,7 @@ log_attributes."nested.key".subfield="value"
 
 ## Pipe Operator (Custom SELECT)
 
-The pipe operator (`|`) allows you to select specific columns instead of the default `SELECT *`. This is useful for:
+The pipe operator (`|`) selects specific columns instead of the default `SELECT *`. Use it for:
 
 - Reducing data transfer
 - Focusing on relevant fields

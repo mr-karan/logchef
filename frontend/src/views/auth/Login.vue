@@ -4,7 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { AlertCircle, Loader2 } from 'lucide-vue-next'
+import { AlertCircle, KeyRound, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
 import { useRoute, useRouter } from 'vue-router'
@@ -16,8 +16,12 @@ const authStore = useAuthStore()
 const metaStore = useMetaStore()
 const isLoggingIn = ref(false)
 
-const email = ref('')
-const password = ref('')
+const demoEmail = import.meta.env.VITE_DEMO_LOGIN_EMAIL?.trim() || ''
+const demoPassword = import.meta.env.VITE_DEMO_LOGIN_PASSWORD || ''
+const showDemoCredentials = Boolean(demoEmail && demoPassword)
+
+const email = ref(demoEmail)
+const password = ref(demoPassword)
 const localError = ref<string | null>(null)
 
 // Cold visits land here before the auth flow loads meta; fetch it so the
@@ -110,6 +114,20 @@ async function handleLocalLogin() {
             </AlertDescription>
           </div>
         </Alert>
+
+        <div v-if="localAuthEnabled && showDemoCredentials"
+          class="rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
+          <div class="mb-2 flex items-center gap-2 font-medium">
+            <KeyRound class="h-4 w-4 text-muted-foreground" />
+            Demo credentials
+          </div>
+          <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
+            <dt class="text-muted-foreground">Email</dt>
+            <dd class="select-all font-mono">{{ demoEmail }}</dd>
+            <dt class="text-muted-foreground">Password</dt>
+            <dd class="select-all font-mono">{{ demoPassword }}</dd>
+          </dl>
+        </div>
 
         <form v-if="localAuthEnabled" class="space-y-3" @submit.prevent="handleLocalLogin">
           <div class="space-y-1.5">

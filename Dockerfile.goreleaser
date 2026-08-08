@@ -21,7 +21,7 @@ USER logchef
 WORKDIR /data
 
 # Expose ports
-EXPOSE 8080
+EXPOSE 8125
 
 # Set entry point
 ENTRYPOINT ["/usr/local/bin/logchef"]

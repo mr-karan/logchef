@@ -8,7 +8,7 @@ This guide will help you get Logchef up and running quickly. We'll cover install
 ## Prerequisites
 
 - Docker (for the recommended setup) or a Linux/macOS system for binary installation
-- A ClickHouse instance (included in Docker setup)
+- A ClickHouse or VictoriaLogs instance (ClickHouse is included in the Docker setup)
 - SSO Provider (Dex is included in the Docker setup)
 
 ## Installation Options
@@ -34,6 +34,11 @@ This will start:
 
 After starting, you can access the Logchef UI at `http://localhost:8125`.
 
+The compose file demonstrates the ClickHouse path. The
+[VictoriaLogs tutorial](/tutorials/victorialogs) includes a one-command local
+VictoriaLogs server and a JSON-line ingestion example if you want to try the new
+datasource alongside it.
+
 ### Using Pre-built Binaries
 
 For production deployments or running without Docker, you can download pre-built binaries:
@@ -54,8 +59,15 @@ chmod +x logchef
 # Create a basic configuration file
 curl -L -O https://github.com/mr-karan/logchef/raw/main/config.toml
 
-# Edit the config file to match your environment
-# You'll need to update the OIDC settings and database path
+# Edit the config file to match your environment. The quickest path is
+# built-in email + password login: enable [auth.local] and set a bootstrap
+# admin. No external identity provider needed. OIDC/SSO is optional.
+#
+#   [auth.local]
+#   enabled = true
+#   admin_email = "admin@example.com"
+#   # supply the password via env instead of the file:
+#   # export LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD="a-strong-password"
 
 # Run Logchef with your config
 ./logchef -config config.toml
@@ -80,7 +92,8 @@ just run
 ## First Login
 
 1. After starting Logchef, visit `http://localhost:8125` in your browser
-2. You'll be redirected to the SSO login page
+2. Sign in with email and password (local auth), or use the SSO button if
+   you configured OIDC
 3. For the Docker setup, use the default credentials:
    - Email: `admin@logchef.internal`
    - Password: `password`
@@ -105,20 +118,48 @@ Before you can start querying logs, you need to set up a team, create a data sou
 
 ### 3. Configure a Data Source
 
+Choose either backend. Logchef does not copy data between them; a source points
+at logs that already exist in ClickHouse or VictoriaLogs.
+
+#### ClickHouse from the Docker setup
+
 1. Navigate to Sources > Manage Sources
 2. Click "Add Source"
 3. Enter your ClickHouse connection details:
    ```
-   Name: Demo Syslogs
-   Host: localhost (or clickhouse if using Docker)
-   Port: 9000
+   Name: Demo Logs
+   Host: clickhouse:9000 (Docker) or localhost:9000 (host process)
    Database: default
-   Table: syslogs
+   Table: logs
+   Timestamp Field: timestamp
+   Severity Field: severity_text
    ```
 
 ![Add Source form for connecting a ClickHouse data source](/screenshots/logchef_source.png)
 
 4. Test the connection and save
+
+#### VictoriaLogs
+
+For a local VictoriaLogs instance, first ingest the sample from the
+[end-to-end VictoriaLogs example](/tutorials/victorialogs#end-to-end-local-example).
+Then choose **VictoriaLogs** in the Add Source form and use:
+
+```text
+Name: VictoriaLogs Demo
+Base URL: http://victorialogs:9428
+Authentication: No Auth
+Timestamp Field: _time
+Severity Field: level
+```
+
+If Logchef runs in Docker and VictoriaLogs is another container, both containers
+must share a network and the base URL must use the VictoriaLogs service or
+container name, for example `http://victorialogs:9428`. From inside a container,
+`localhost` refers to that same container.
+
+Choose **Validate Connection**, then save the source. Validation checks health,
+field discovery, and real query access.
 
 ### 4. Assign the Source to Your Team
 
@@ -138,19 +179,47 @@ Now you're ready to explore your logs:
 Basic search:
 
 ```
-namespace="syslogs"
+namespace="syslog"
 ```
 
+Search for specific text in the log body with `~`, the case-insensitive
+substring operator:
 
-Search for specific text in the log body:
+```text
+namespace="syslog" and body~"error"
+```
 
+For the VictoriaLogs sample, the same LogchefQL workflow looks like:
+
+```text
+env="demo" and level="error"
 ```
-namespace="syslogs" and body="error"
+
+Switch the editor to **LogsQL** when you need the native language:
+
+```text
+env:="demo" AND level:="error" | fields _time, service, level, _msg
 ```
+
+## Build Your First Dashboard
+
+1. Open **Dashboards** and choose **New dashboard**
+2. Open the dashboard, choose **Edit**, then **Add panel**
+3. Pick a team and source, enter a LogchefQL filter, and choose a time series,
+   stat, breakdown, or table panel
+4. Use **group by** on a time series or breakdown to split counts by a field
+   such as service or severity
+5. Add panels from either ClickHouse or VictoriaLogs, arrange the grid, and save
+
+Every panel follows one dashboard time range and refresh interval. See
+[Dashboards](/features/dashboards) for a VictoriaLogs example, native LogsQL
+behavior, permissions, and result caching.
 
 ## Next Steps
 
 - Learn more about the [search syntax](/guide/search-syntax)
 - Explore [advanced querying examples](/guide/examples)
 - Set up [Vector integration](/integration/vector) for your own logs
+- Connect [VictoriaLogs end to end](/tutorials/victorialogs)
+- Build a mixed-source [dashboard](/features/dashboards)
 - Learn about [user management](/core/user-management)

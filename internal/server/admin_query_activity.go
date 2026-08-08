@@ -68,6 +68,18 @@ func (s *Server) handleAdminQueryActivity(c *fiber.Ctx) error {
 		limit = queryActivityMaxLimit
 	}
 
+	// The public demo uses a shared identity. Detailed history would disclose
+	// one visitor's query text to another, so only the separate aggregate stats
+	// endpoint is populated in demo mode.
+	if s.config != nil && s.config.Demo.ReadOnly {
+		return SendSuccess(c, fiber.StatusOK, queryActivityResponse{
+			Recent:     []models.QueryActivityRecord{},
+			ByLanguage: []queryActivityLanguageCount{},
+			BySource:   []queryActivitySourceCount{},
+			Slowest:    []models.QueryActivityRecord{},
+		})
+	}
+
 	window, err := s.sqlite.ListQueryActivity(c.Context(), queryActivityWindow)
 	if err != nil {
 		s.log.Error("failed to list query activity", "error", err)

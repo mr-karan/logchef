@@ -235,6 +235,9 @@ func (s *Server) handleListQueryHistory(c *fiber.Ctx) error {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
+	if s.config != nil && s.config.Demo.ReadOnly {
+		return SendSuccess(c, fiber.StatusOK, []*models.QueryHistory{})
+	}
 
 	limit := models.QueryHistoryDefaultLimit
 	if raw := c.Query("limit"); raw != "" {

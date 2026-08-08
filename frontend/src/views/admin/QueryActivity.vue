@@ -1,8 +1,19 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import type { AcceptableValue } from "reka-ui";
+import {
+  Activity,
+  Clock3,
+  Database,
+  RefreshCw,
+  Search,
+  ShieldCheck,
+  Users,
+} from "lucide-vue-next";
 import { PageHeader, LoadingState, EmptyState } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -25,25 +36,43 @@ import {
 } from "@/api/admin";
 import { isSuccessResponse } from "@/api/types";
 import { formatHistoryTimeAgo, formatHistoryDuration } from "@/lib/queryHistory";
+import { useMetaStore } from "@/stores/meta";
 
-// Recent-feed length requested from the server (clamped 1..500 server-side).
 const RECENT_LIMIT = 100;
+const RECENT_PAGE_SIZE = 20;
+const DAYS_OPTIONS = ["7", "30", "90"] as const;
+
+const metaStore = useMetaStore();
+const isDemo = computed(() => metaStore.demoReadOnly);
 
 const isLoading = ref(true);
 const error = ref<string | null>(null);
 const activity = ref<QueryActivityResponse | null>(null);
 const nowMs = ref(Date.now());
+const recentSearch = ref("");
+const visibleRecentCount = ref(RECENT_PAGE_SIZE);
 
-// --- All-time usage (#127): authoritative rollup, independent from recent ---
-const DAYS_OPTIONS = ["7", "30", "90"] as const;
 const statsDays = ref<string>("30");
 const statsLoading = ref(true);
 const statsError = ref<string | null>(null);
 const stats = ref<QueryStatsResponse | null>(null);
 
 async function loadActivity() {
-  isLoading.value = true;
   error.value = null;
+
+  if (isDemo.value) {
+    activity.value = {
+      total: 0,
+      recent: [],
+      by_language: [],
+      by_source: [],
+      slowest: [],
+    };
+    isLoading.value = false;
+    return;
+  }
+
+  isLoading.value = true;
   try {
     const response = await adminApi.getQueryActivity(RECENT_LIMIT);
     if (isSuccessResponse(response)) {
@@ -76,45 +105,86 @@ async function loadStats() {
   }
 }
 
+async function refreshAll() {
+  await Promise.all([loadStats(), loadActivity()]);
+}
+
 function onDaysChange(value: AcceptableValue) {
   if (typeof value !== "string") return;
   statsDays.value = value;
   loadStats();
 }
 
+const isRefreshing = computed(() => statsLoading.value || isLoading.value);
 const topSources = computed(() => stats.value?.top_sources ?? []);
 const topUsers = computed(() => stats.value?.top_users ?? []);
 const volumeByDay = computed(() => stats.value?.volume_by_day ?? []);
-
-// Largest daily volume drives the relative height of the volume bars.
-const maxDailyVolume = computed(() =>
-  volumeByDay.value.reduce((max, d) => Math.max(max, d.query_count), 0)
-);
-
-function volumeBarHeight(count: number): string {
-  if (maxDailyVolume.value <= 0) return "0%";
-  // Floor at a sliver so non-zero days stay visible.
-  return `${Math.max(2, Math.round((count / maxDailyVolume.value) * 100))}%`;
-}
-
 const total = computed(() => activity.value?.total ?? 0);
 const byLanguage = computed(() => activity.value?.by_language ?? []);
-const bySource = computed(() => activity.value?.by_source ?? []);
-const slowest = computed(() => activity.value?.slowest ?? []);
+const slowest = computed(() => activity.value?.slowest.slice(0, 5) ?? []);
 const recent = computed(() => activity.value?.recent ?? []);
 
-// Largest source count drives the relative width of the inline bars.
-const maxSourceCount = computed(() =>
-  bySource.value.reduce((max, s) => Math.max(max, s.count), 0)
+const statsTotal = computed(() =>
+  volumeByDay.value.reduce((sum, day) => sum + day.query_count, 0)
 );
 
-function sourceBarWidth(count: number): string {
-  if (maxSourceCount.value <= 0) return "0%";
-  return `${Math.round((count / maxSourceCount.value) * 100)}%`;
+const averageDuration = computed(() => {
+  const count = topSources.value.reduce((sum, source) => sum + source.query_count, 0);
+  if (!count) return 0;
+  const totalDuration = topSources.value.reduce(
+    (sum, source) => sum + source.query_count * source.avg_duration_ms,
+    0
+  );
+  return Math.round(totalDuration / count);
+});
+
+const busiestDay = computed(() =>
+  volumeByDay.value.reduce<(typeof volumeByDay.value)[number] | null>(
+    (busiest, day) => (!busiest || day.query_count > busiest.query_count ? day : busiest),
+    null
+  )
+);
+
+const dailySeries = computed(() => {
+  if (!stats.value) return [];
+  const byDate = new Map(volumeByDay.value.map((day) => [day.date, day.query_count]));
+  const start = new Date(`${stats.value.since}T00:00:00Z`);
+  return Array.from({ length: stats.value.days }, (_, index) => {
+    const date = new Date(start);
+    date.setUTCDate(start.getUTCDate() + index);
+    const key = date.toISOString().slice(0, 10);
+    return { date: key, query_count: byDate.get(key) ?? 0 };
+  });
+});
+
+const maxDailyVolume = computed(() =>
+  dailySeries.value.reduce((max, day) => Math.max(max, day.query_count), 0)
+);
+
+const maxTopSourceCount = computed(() =>
+  topSources.value.reduce((max, source) => Math.max(max, source.query_count), 0)
+);
+
+function dailyBarHeight(count: number): string {
+  if (!count || !maxDailyVolume.value) return "2px";
+  return `${Math.max(8, Math.round((count / maxDailyVolume.value) * 100))}%`;
+}
+
+function topSourceWidth(count: number): string {
+  if (!maxTopSourceCount.value) return "0%";
+  return `${Math.max(4, Math.round((count / maxTopSourceCount.value) * 100))}%`;
 }
 
 function sourceLabel(name: string, sourceId: number): string {
   return name || `Source #${sourceId}`;
+}
+
+function formatDay(date: string): string {
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(`${date}T00:00:00Z`));
 }
 
 function timeAgo(createdAt: string): string {
@@ -125,291 +195,331 @@ function duration(ms: number): string {
   return formatHistoryDuration(ms);
 }
 
-onMounted(() => {
-  loadActivity();
-  loadStats();
+function languageLabel(language: string): string {
+  if (language === "logchefql") return "LogChefQL";
+  if (language === "clickhouse-sql") return "ClickHouse SQL";
+  if (language === "logsql") return "LogsQL";
+  return language;
+}
+
+function queryLabel(queryText: string, language: string): string {
+  const trimmed = queryText?.trim();
+  return trimmed || `${languageLabel(language)} query · text unavailable`;
+}
+
+const filteredRecent = computed(() => {
+  const search = recentSearch.value.trim().toLowerCase();
+  if (!search) return recent.value;
+  return recent.value.filter((query) =>
+    [query.query_text, query.source_name, query.user_email, query.query_language]
+      .some((value) => String(value ?? "").toLowerCase().includes(search))
+  );
 });
+
+const visibleRecent = computed(() =>
+  filteredRecent.value.slice(0, visibleRecentCount.value)
+);
+
+watch(recentSearch, () => {
+  visibleRecentCount.value = RECENT_PAGE_SIZE;
+});
+
+onMounted(refreshAll);
 </script>
 
 <template>
   <div class="space-y-6">
     <PageHeader
       title="Query Activity"
-      description="Recent query activity across all users. This reflects the most recent query history and is not an all-time total."
-    />
+      description="Understand query volume, latency, sources, and users without leaving LogChef."
+    >
+      <template #actions>
+        <Button variant="outline" size="sm" :disabled="isRefreshing" @click="refreshAll">
+          <RefreshCw :class="['mr-2 h-3.5 w-3.5', isRefreshing && 'animate-spin']" />
+          Refresh
+        </Button>
+      </template>
+    </PageHeader>
 
-    <!-- ===================================================================
-         All-time usage (#127) — AUTHORITATIVE analytics from the non-pruned
-         daily rollup. Distinct from the "Recent activity" section further
-         down, which is only the capped 200-rows/user window.
-         =================================================================== -->
-    <section class="space-y-4 rounded-md border border-primary/30 bg-primary/[0.03] p-4">
-      <div class="flex flex-wrap items-start justify-between gap-3">
-        <div class="space-y-1">
-          <div class="flex items-center gap-2">
-            <h2 class="text-base font-semibold">All-time usage</h2>
-            <Badge variant="default" class="font-normal">Authoritative</Badge>
+    <section class="overflow-hidden rounded-lg border bg-card shadow-sm">
+      <div class="flex flex-wrap items-start justify-between gap-4 border-b px-5 py-4">
+        <div class="flex items-start gap-3">
+          <div class="mt-0.5 rounded-md bg-sky-500/10 p-2 text-sky-600 dark:bg-sky-400/10 dark:text-sky-300">
+            <Activity class="h-4 w-4" />
           </div>
-          <p class="text-sm text-muted-foreground">
-            Complete totals from the daily rollup — not capped like the recent
-            feed below.
-            <span v-if="stats" class="tabular-nums">Since {{ stats.since }}.</span>
-          </p>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 class="font-semibold">Usage rollup</h2>
+              <Badge variant="secondary" class="font-normal">Durable totals</Badge>
+            </div>
+            <p class="mt-1 text-sm text-muted-foreground">
+              Aggregate query telemetry for capacity planning and adoption.
+              <span v-if="stats" class="tabular-nums">Window starts {{ formatDay(stats.since) }}.</span>
+            </p>
+          </div>
         </div>
         <div class="flex items-center gap-2">
-          <label for="stats-days" class="text-sm text-muted-foreground">Window</label>
+          <label for="stats-days" class="text-xs font-medium text-muted-foreground">Window</label>
           <Select :model-value="statsDays" @update:model-value="onDaysChange">
-            <SelectTrigger id="stats-days" class="w-[130px]">
+            <SelectTrigger id="stats-days" class="h-8 w-[126px] text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem v-for="d in DAYS_OPTIONS" :key="d" :value="d">
-                Last {{ d }} days
+              <SelectItem v-for="days in DAYS_OPTIONS" :key="days" :value="days">
+                Last {{ days }} days
               </SelectItem>
             </SelectContent>
           </Select>
         </div>
       </div>
 
-      <LoadingState v-if="statsLoading" label="Loading usage stats…" />
+      <LoadingState v-if="statsLoading" class="py-16" label="Loading usage stats…" />
 
       <div
         v-else-if="statsError"
-        class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+        class="m-5 rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
       >
         {{ statsError }}
       </div>
 
       <template v-else-if="stats">
-        <div class="grid gap-4 lg:grid-cols-2">
-          <!-- Top sources -->
-          <div class="space-y-2">
-            <h3 class="text-sm font-medium">Top sources</h3>
-            <div class="rounded-md border bg-background">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Source</TableHead>
-                    <TableHead class="text-right">Queries</TableHead>
-                    <TableHead class="text-right">Avg duration</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-if="!topSources.length">
-                    <TableCell colspan="3" class="text-center text-sm text-muted-foreground">
-                      No usage recorded in this window.
-                    </TableCell>
-                  </TableRow>
-                  <TableRow v-for="src in topSources" :key="src.source_id">
-                    <TableCell class="font-medium">{{ sourceLabel(src.source_name, src.source_id) }}</TableCell>
-                    <TableCell class="text-right tabular-nums">{{ src.query_count }}</TableCell>
-                    <TableCell class="text-right text-sm text-muted-foreground tabular-nums">{{ duration(src.avg_duration_ms) }}</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+        <div class="grid border-b sm:grid-cols-2 xl:grid-cols-4">
+          <div class="border-b p-5 sm:border-r xl:border-b-0">
+            <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Activity class="h-3.5 w-3.5" /> Total queries
             </div>
+            <p class="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{{ statsTotal.toLocaleString() }}</p>
+            <p class="mt-1 text-xs text-muted-foreground">in the selected window</p>
           </div>
-
-          <!-- Top users -->
-          <div class="space-y-2">
-            <h3 class="text-sm font-medium">Top users</h3>
-            <div class="rounded-md border bg-background">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>User</TableHead>
-                    <TableHead class="text-right">Queries</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  <TableRow v-if="!topUsers.length">
-                    <TableCell colspan="2" class="text-center text-sm text-muted-foreground">
-                      No usage recorded in this window.
-                    </TableCell>
-                  </TableRow>
-                  <TableRow v-for="u in topUsers" :key="u.user_id">
-                    <TableCell class="font-medium">{{ u.user_email || `User #${u.user_id}` }}</TableCell>
-                    <TableCell class="text-right tabular-nums">{{ u.query_count }}</TableCell>
-                  </TableRow>
-                </TableBody>
-              </Table>
+          <div class="border-b p-5 xl:border-b-0 xl:border-r">
+            <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Database class="h-3.5 w-3.5" /> Active sources
             </div>
+            <p class="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{{ topSources.length }}</p>
+            <p class="mt-1 text-xs text-muted-foreground">sources receiving queries</p>
+          </div>
+          <div class="border-b p-5 sm:border-r sm:border-b-0">
+            <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Clock3 class="h-3.5 w-3.5" /> Average latency
+            </div>
+            <p class="mt-2 text-3xl font-semibold tracking-tight tabular-nums">{{ duration(averageDuration) }}</p>
+            <p class="mt-1 text-xs text-muted-foreground">weighted across top sources</p>
+          </div>
+          <div class="p-5">
+            <div class="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+              <Users class="h-3.5 w-3.5" /> Top user
+            </div>
+            <p class="mt-2 truncate text-sm font-semibold" :title="topUsers[0]?.user_email">
+              {{ topUsers[0]?.user_email || "No activity yet" }}
+            </p>
+            <p class="mt-1 text-xs text-muted-foreground tabular-nums">
+              {{ topUsers[0] ? `${topUsers[0].query_count.toLocaleString()} queries` : "—" }}
+            </p>
           </div>
         </div>
 
-        <!-- Volume by day -->
-        <div class="space-y-2">
-          <h3 class="text-sm font-medium">Volume by day</h3>
-          <div class="rounded-md border bg-background p-4">
-            <div v-if="!volumeByDay.length" class="py-6 text-center text-sm text-muted-foreground">
-              No usage recorded in this window.
+        <div class="grid gap-0 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
+          <div class="border-b p-5 xl:border-r xl:border-b-0">
+            <div class="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h3 class="text-sm font-semibold">Daily volume</h3>
+                <p class="mt-1 text-xs text-muted-foreground">Queries completed successfully, grouped by UTC day.</p>
+              </div>
+              <div v-if="busiestDay" class="text-right text-xs text-muted-foreground">
+                Peak <span class="font-medium text-foreground tabular-nums">{{ busiestDay.query_count.toLocaleString() }}</span>
+                <span class="ml-1">on {{ formatDay(busiestDay.date) }}</span>
+              </div>
             </div>
-            <div v-else class="flex h-40 items-end gap-1">
+            <div class="overflow-x-auto pb-1">
               <div
-                v-for="d in volumeByDay"
-                :key="d.date"
-                class="flex flex-1 flex-col items-center justify-end gap-1"
-                :title="`${d.date}: ${d.query_count} queries`"
+                class="flex h-36 items-end gap-1 border-b border-border/70"
+                :class="dailySeries.length > 30 && 'min-w-[720px]'"
               >
-                <div class="flex w-full flex-1 items-end">
+                <div
+                  v-for="day in dailySeries"
+                  :key="day.date"
+                  class="group relative flex h-full min-w-[5px] flex-1 items-end"
+                  :title="`${formatDay(day.date)}: ${day.query_count.toLocaleString()} queries`"
+                >
                   <div
-                    class="w-full rounded-t bg-primary"
-                    :style="{ height: volumeBarHeight(d.query_count) }"
+                    class="w-full rounded-t-sm bg-sky-500/75 transition-colors group-hover:bg-sky-400 dark:bg-sky-400/70 dark:group-hover:bg-sky-300"
+                    :class="!day.query_count && 'bg-muted dark:bg-muted'"
+                    :style="{ height: dailyBarHeight(day.query_count) }"
                   />
                 </div>
               </div>
             </div>
+            <div v-if="dailySeries.length" class="mt-2 flex justify-between text-[10px] text-muted-foreground tabular-nums">
+              <span>{{ formatDay(dailySeries[0].date) }}</span>
+              <span>{{ formatDay(dailySeries[dailySeries.length - 1].date) }}</span>
+            </div>
+          </div>
+
+          <div class="p-5">
+            <h3 class="text-sm font-semibold">Top sources</h3>
+            <p class="mt-1 text-xs text-muted-foreground">Ranked by completed queries.</p>
+            <div v-if="topSources.length" class="mt-4 space-y-4">
+              <div v-for="source in topSources.slice(0, 6)" :key="source.source_id" class="space-y-1.5">
+                <div class="flex items-center justify-between gap-3 text-xs">
+                  <span class="truncate font-medium">{{ sourceLabel(source.source_name, source.source_id) }}</span>
+                  <span class="shrink-0 text-muted-foreground tabular-nums">{{ source.query_count.toLocaleString() }}</span>
+                </div>
+                <div class="h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div class="h-full rounded-full bg-sky-500/75 dark:bg-sky-400/70" :style="{ width: topSourceWidth(source.query_count) }" />
+                </div>
+                <p class="text-[10px] text-muted-foreground">{{ duration(source.avg_duration_ms) }} average</p>
+              </div>
+            </div>
+            <p v-else class="mt-8 text-center text-sm text-muted-foreground">No usage in this window.</p>
           </div>
         </div>
       </template>
     </section>
 
-    <h2 class="border-t pt-6 text-base font-semibold">Recent activity</h2>
-    <p class="-mt-4 text-sm text-muted-foreground">
-      The most recent queries only — capped at 200 rows per user, so these
-      figures are not all-time totals.
-    </p>
-
-    <LoadingState v-if="isLoading" label="Loading query activity…" />
-
-    <div
-      v-else-if="error"
-      class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+    <section
+      v-if="isDemo"
+      class="flex items-start gap-3 rounded-lg border border-sky-500/25 bg-sky-500/[0.05] p-4"
     >
-      {{ error }}
-    </div>
-
-    <template v-else-if="activity">
-      <!-- Summary: total + compact by_language breakdown -->
-      <div class="rounded-md border p-4 space-y-3">
-        <div class="flex items-baseline gap-2">
-          <span class="text-2xl font-semibold tabular-nums">{{ total }}</span>
-          <span class="text-sm text-muted-foreground">queries in the recent window</span>
-        </div>
-        <div v-if="byLanguage.length" class="flex flex-wrap items-center gap-2">
-          <Badge
-            v-for="lang in byLanguage"
-            :key="lang.language"
-            variant="secondary"
-            class="font-normal"
-          >
-            <span class="font-mono">{{ lang.language }}</span>
-            <span class="ml-1.5 tabular-nums text-muted-foreground">{{ lang.count }}</span>
-          </Badge>
-        </div>
+      <div class="rounded-md bg-sky-500/10 p-2 text-sky-600 dark:text-sky-300">
+        <ShieldCheck class="h-4 w-4" />
       </div>
-
-      <!-- By source -->
-      <div class="space-y-2">
-        <h2 class="text-sm font-medium">By source</h2>
-        <div class="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Source</TableHead>
-                <TableHead class="w-1/2">Queries</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-if="!bySource.length">
-                <TableCell colspan="2" class="text-center text-sm text-muted-foreground">
-                  No source activity in the recent window.
-                </TableCell>
-              </TableRow>
-              <TableRow v-for="src in bySource" :key="src.source_id">
-                <TableCell class="font-medium">{{ sourceLabel(src.source_name, src.source_id) }}</TableCell>
-                <TableCell>
-                  <div class="flex items-center gap-2">
-                    <div class="h-2 flex-1 rounded-full bg-muted">
-                      <div
-                        class="h-2 rounded-full bg-primary"
-                        :style="{ width: sourceBarWidth(src.count) }"
-                      />
-                    </div>
-                    <span class="w-10 shrink-0 text-right text-sm tabular-nums">{{ src.count }}</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
+      <div>
+        <h2 class="text-sm font-semibold">Aggregate-only on the public demo</h2>
+        <p class="mt-1 max-w-3xl text-sm leading-relaxed text-muted-foreground">
+          Volume and latency counters update normally, but individual query text is never retained.
+          This keeps the shared demo useful without exposing one visitor's searches to another.
+        </p>
       </div>
+    </section>
 
-      <!-- Slowest queries -->
-      <div class="space-y-2">
-        <h2 class="text-sm font-medium">Slowest queries</h2>
-        <div class="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Query</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead class="text-right">Duration</TableHead>
-                <TableHead class="text-right">Time</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-if="!slowest.length">
-                <TableCell colspan="5" class="text-center text-sm text-muted-foreground">
-                  No queries in the recent window.
-                </TableCell>
-              </TableRow>
-              <TableRow v-for="q in slowest" :key="q.id">
-                <TableCell class="max-w-md">
-                  <span class="block truncate font-mono text-xs" :title="q.query_text">{{ q.query_text }}</span>
-                </TableCell>
-                <TableCell class="text-sm">{{ sourceLabel(q.source_name, q.source_id) }}</TableCell>
-                <TableCell class="text-sm text-muted-foreground">{{ q.user_email }}</TableCell>
-                <TableCell class="text-right text-sm tabular-nums">{{ duration(q.duration_ms) }}</TableCell>
-                <TableCell class="text-right text-sm text-muted-foreground">{{ timeAgo(q.created_at) }}</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+    <template v-else>
+      <section class="space-y-4">
+        <div>
+          <h2 class="text-base font-semibold">Recent query sample</h2>
+          <p class="mt-1 text-sm text-muted-foreground">
+            A bounded operational feed for debugging recent usage. Durable totals remain in the rollup above.
+          </p>
         </div>
-      </div>
 
-      <!-- Recent queries feed -->
-      <div class="space-y-2">
-        <h2 class="text-sm font-medium">Recent queries</h2>
-        <div class="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Time</TableHead>
-                <TableHead>User</TableHead>
-                <TableHead>Source</TableHead>
-                <TableHead>Language</TableHead>
-                <TableHead class="text-right">Duration</TableHead>
-                <TableHead class="text-right">Rows</TableHead>
-                <TableHead>Query</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-if="!recent.length">
-                <TableCell colspan="7" class="text-center text-sm text-muted-foreground">
-                  No recent queries.
-                </TableCell>
-              </TableRow>
-              <TableRow v-for="q in recent" :key="q.id">
-                <TableCell class="whitespace-nowrap text-sm text-muted-foreground">{{ timeAgo(q.created_at) }}</TableCell>
-                <TableCell class="whitespace-nowrap text-sm">{{ q.user_email }}</TableCell>
-                <TableCell class="whitespace-nowrap text-sm">{{ sourceLabel(q.source_name, q.source_id) }}</TableCell>
-                <TableCell>
-                  <code class="rounded bg-muted px-1 py-0.5 text-xs">{{ q.query_language }}</code>
-                </TableCell>
-                <TableCell class="text-right text-sm tabular-nums">{{ duration(q.duration_ms) }}</TableCell>
-                <TableCell class="text-right text-sm tabular-nums">{{ q.row_count }}</TableCell>
-                <TableCell class="max-w-xs">
-                  <span class="block truncate font-mono text-xs" :title="q.query_text">{{ q.query_text }}</span>
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
+        <LoadingState v-if="isLoading" label="Loading recent query activity…" />
+
+        <div
+          v-else-if="error"
+          class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive"
+        >
+          {{ error }}
         </div>
-      </div>
+
+        <template v-else-if="activity">
+          <div class="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-5 py-4 shadow-sm">
+            <div>
+              <span class="text-2xl font-semibold tabular-nums">{{ total.toLocaleString() }}</span>
+              <span class="ml-2 text-sm text-muted-foreground">retained records in the recent window</span>
+            </div>
+            <div class="ml-auto flex flex-wrap gap-2">
+              <Badge v-for="language in byLanguage" :key="language.language" variant="secondary" class="font-normal">
+                {{ languageLabel(language.language) }}
+                <span class="ml-1 tabular-nums text-muted-foreground">{{ language.count }}</span>
+              </Badge>
+            </div>
+          </div>
+
+          <div class="overflow-hidden rounded-lg border bg-card shadow-sm">
+            <div class="border-b px-5 py-4">
+              <h3 class="text-sm font-semibold">Slowest recent queries</h3>
+              <p class="mt-1 text-xs text-muted-foreground">Highest execution time within the retained sample.</p>
+            </div>
+            <div class="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Query</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>User</TableHead>
+                    <TableHead class="text-right">Duration</TableHead>
+                    <TableHead class="text-right">Time</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-if="!slowest.length">
+                    <TableCell colspan="5" class="py-10 text-center text-sm text-muted-foreground">No recent queries.</TableCell>
+                  </TableRow>
+                  <TableRow v-for="query in slowest" :key="query.id">
+                    <TableCell class="max-w-lg">
+                      <code class="block truncate text-xs" :class="!query.query_text?.trim() && 'text-muted-foreground italic'" :title="queryLabel(query.query_text, query.query_language)">
+                        {{ queryLabel(query.query_text, query.query_language) }}
+                      </code>
+                    </TableCell>
+                    <TableCell class="text-sm">{{ sourceLabel(query.source_name, query.source_id) }}</TableCell>
+                    <TableCell class="text-sm text-muted-foreground">{{ query.user_email }}</TableCell>
+                    <TableCell class="text-right text-sm font-medium tabular-nums">{{ duration(query.duration_ms) }}</TableCell>
+                    <TableCell class="text-right text-sm text-muted-foreground">{{ timeAgo(query.created_at) }}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+
+          <div class="overflow-hidden rounded-lg border bg-card shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4">
+              <div>
+                <h3 class="text-sm font-semibold">Recent queries</h3>
+                <p class="mt-1 text-xs text-muted-foreground">
+                  Showing {{ Math.min(visibleRecentCount, filteredRecent.length) }} of {{ filteredRecent.length }} loaded records.
+                </p>
+              </div>
+              <div class="relative w-full sm:w-72">
+                <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input v-model="recentSearch" class="h-8 pl-8 text-xs" placeholder="Filter query, source, user…" />
+              </div>
+            </div>
+            <div class="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Source</TableHead>
+                    <TableHead>Language</TableHead>
+                    <TableHead class="text-right">Duration</TableHead>
+                    <TableHead class="text-right">Rows</TableHead>
+                    <TableHead>Query</TableHead>
+                    <TableHead>User</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow v-if="!visibleRecent.length">
+                    <TableCell colspan="7" class="py-10 text-center text-sm text-muted-foreground">
+                      {{ recentSearch ? "No queries match this filter." : "No recent queries." }}
+                    </TableCell>
+                  </TableRow>
+                  <TableRow v-for="query in visibleRecent" :key="query.id">
+                    <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ timeAgo(query.created_at) }}</TableCell>
+                    <TableCell class="whitespace-nowrap text-sm font-medium">{{ sourceLabel(query.source_name, query.source_id) }}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" class="font-normal">{{ languageLabel(query.query_language) }}</Badge>
+                    </TableCell>
+                    <TableCell class="text-right text-sm tabular-nums">{{ duration(query.duration_ms) }}</TableCell>
+                    <TableCell class="text-right text-sm tabular-nums">{{ query.row_count.toLocaleString() }}</TableCell>
+                    <TableCell class="max-w-md">
+                      <code class="block truncate text-xs" :class="!query.query_text?.trim() && 'text-muted-foreground italic'" :title="queryLabel(query.query_text, query.query_language)">
+                        {{ queryLabel(query.query_text, query.query_language) }}
+                      </code>
+                    </TableCell>
+                    <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ query.user_email }}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+            <div v-if="visibleRecentCount < filteredRecent.length" class="border-t p-3 text-center">
+              <Button variant="ghost" size="sm" @click="visibleRecentCount += RECENT_PAGE_SIZE">
+                Show {{ Math.min(RECENT_PAGE_SIZE, filteredRecent.length - visibleRecentCount) }} more
+              </Button>
+            </div>
+          </div>
+        </template>
+
+        <EmptyState v-else title="No recent activity" description="No retained query activity is available yet." />
+      </section>
     </template>
-
-    <EmptyState v-else title="No activity" description="No query activity is available yet." />
   </div>
 </template>

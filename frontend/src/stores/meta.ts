@@ -15,6 +15,7 @@ interface MetaState {
   alertsEnabled: boolean;
   localAuthEnabled: boolean;
   oidcEnabled: boolean;
+  demoReadOnly: boolean;
   // Server dashboard-cache policy. null = absent (old server) OR malformed →
   // "cache unavailable / fail closed" (resolveEffectiveCacheTtl returns 0).
   dashboardCachePolicy: DashboardCachePolicy | null;
@@ -53,6 +54,7 @@ export const useMetaStore = defineStore("meta", () => {
     alertsEnabled: true,
     localAuthEnabled: false,
     oidcEnabled: true,
+    demoReadOnly: false,
     dashboardCachePolicy: null,
     isInitialized: false,
   });
@@ -68,6 +70,7 @@ export const useMetaStore = defineStore("meta", () => {
   const alertsEnabled = computed(() => state.data.value.alertsEnabled);
   const localAuthEnabled = computed(() => state.data.value.localAuthEnabled);
   const oidcEnabled = computed(() => state.data.value.oidcEnabled);
+  const demoReadOnly = computed(() => state.data.value.demoReadOnly);
   const dashboardCachePolicy = computed(() => state.data.value.dashboardCachePolicy);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
@@ -96,6 +99,7 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.alertsEnabled = response.alerts_enabled ?? true;
               state.data.value.localAuthEnabled = response.local_auth_enabled ?? false;
               state.data.value.oidcEnabled = response.oidc_enabled ?? true;
+              state.data.value.demoReadOnly = response.demo_read_only ?? false;
               state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
               state.data.value.isInitialized = true;
             }
@@ -124,6 +128,7 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.alertsEnabled = true;
     state.data.value.localAuthEnabled = false;
     state.data.value.oidcEnabled = true;
+    state.data.value.demoReadOnly = false;
     state.data.value.dashboardCachePolicy = null;
     state.data.value.isInitialized = false;
   }
@@ -139,6 +144,7 @@ export const useMetaStore = defineStore("meta", () => {
     alertsEnabled,
     localAuthEnabled,
     oidcEnabled,
+    demoReadOnly,
     dashboardCachePolicy,
     isInitialized,
     error,

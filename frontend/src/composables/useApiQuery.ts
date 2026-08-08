@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import type { APIResponse, APIErrorResponse } from "@/api/types";
-import { showErrorToast, isCanceledError } from "@/api/error-handler";
+import { showErrorToast, isCanceledError, hasShownErrorToast } from "@/api/error-handler";
 
 export function useApiQuery<T>() {
   const isLoading = ref(false);
@@ -55,7 +55,7 @@ export function useApiQuery<T>() {
 
       // Handle unexpected errors
       error.value = err as APIErrorResponse;
-      if (options?.showToast !== false) {
+      if (options?.showToast !== false && !hasShownErrorToast(err)) {
         showErrorToast(err, options?.errorMessage);
       }
       options?.onError?.(error.value);

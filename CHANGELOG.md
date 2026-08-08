@@ -7,23 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [2.0.0] - 2026-07-28
+## [2.0.0] - 2026-08-08
 
-Logchef v2.0 is a big release, and it starts with one thing: **VictoriaLogs is
-now a first-class datasource.** Point Logchef at a VictoriaLogs instance and
-explore it exactly like ClickHouse — same query box (LogchefQL or raw LogsQL),
-the same live tail, the same alerts — with no separate tooling to learn.
+Logchef 2.0 is the largest release in the project's history. It grows Logchef
+from a ClickHouse log explorer into a multi-datasource log exploration platform,
+with **VictoriaLogs now a first-class datasource** beside ClickHouse. Point
+Logchef at either backend and use the same explorer, LogchefQL workflow, access
+control, dashboards, alerts, and live tail — without splitting your team across
+separate tools.
 
-There's a lot more in the box:
+This is much more than a connector release:
 
 - **Run Logchef without an external login provider.** Built-in email + password
   auth means you can stand it up with zero OIDC setup — and if you do use SSO, it
   can now create users automatically on their first login.
 - **Watch logs live.** Turn on live tail and matching rows stream in as they
   arrive, on either backend.
-- **Better dashboards.** Build multi-panel views by dragging and resizing panels
-  right on the grid, with time-series, stat, and table panels and line/area/bar
-  chart styles.
+- **Dashboards, brand new in 2.0.** Assemble multi-panel operational views by
+  dragging and resizing panels directly on the grid. Mix time-series, stat,
+  table, and category-breakdown panels; choose line, area, bar, horizontal
+  bar, or donut visualizations; preview queries while you build; and combine
+  ClickHouse and VictoriaLogs panels on the same dashboard.
 - **A much stronger CLI (v0.2.1).** New `explain`, `histogram`, `fields`,
   `doctor`, and `open` commands, live-tail streaming in your terminal, and full
   VictoriaLogs support. It also adds a startup banner and update notifications.
@@ -31,6 +35,11 @@ There's a lot more in the box:
 - **Faster on big results, and hardened throughout.** Large query results now
   stream instead of buffering in memory, and a broad security and reliability
   pass tightened dashboards, the VictoriaLogs connector, and query handling.
+
+**Before upgrading:** deployments that provision sources from `provisioning.toml`
+must migrate the source definitions to the new datasource-neutral format. The
+exact before/after example is in [Breaking changes](#breaking-changes). Database
+migrations still run automatically.
 
 Full details below.
 
@@ -40,7 +49,7 @@ Full details below.
   optional immutable scope query applied server-side to every query). Query it in
   LogchefQL (compiled to LogsQL) or write native LogsQL directly. Alerts support
   both a LogchefQL condition builder (with a field-and-aggregate picker) and
-  native LogsQL via `stats_query`. See the
+  native LogsQL aggregation queries. See the
   [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/). Log context
   ("surrounding logs") and streamed exports/downloads remain ClickHouse-only
   for now.
@@ -72,14 +81,13 @@ Full details below.
   Available in LogchefQL mode on any source, and in native mode on VictoriaLogs
   (LogsQL), but not available for raw ClickHouse SQL. Guardrails:
   `max_per_user`, `max_global`, `session_ttl`, `max_rows_per_sec` under `[tail]`.
-- **Dashboards: grid-canvas editing.** Edit mode is now direct manipulation:
-  drag a panel by its header to move it, drag its corner to resize. Adding or
-  editing a panel opens a full-height panel builder drawer (replacing the old
-  form sheet) with a live query preview.
-- **Dashboards: chart styles.** Time series panels render as bars, line, or
-  area, set per panel in the builder. Bar charts can be stacked or grouped.
-- **Dashboards: category breakdowns.** Add a breakdown panel grouped by a field
-  and render its categories as horizontal bars or a donut chart.
+- **Dashboards.** A new module for building operational views from log queries,
+  across ClickHouse and VictoriaLogs sources on the same grid. Editing is
+  direct manipulation: drag a panel by its header to move it, drag its corner
+  to resize, and build or edit panels in a full-height drawer with a live query
+  preview. Panel types cover time series (line, area, or bars — stacked or
+  grouped), stats, tables, and category breakdowns rendered as horizontal bars
+  or a donut chart.
 - **AI query generation for every supported query mode.** The assistant selects
   LogchefQL, ClickHouse SQL, or LogsQL from the source and editor mode, validates
   the generated query, and makes one repair attempt when it can identify a
@@ -257,6 +265,7 @@ Full details below.
 | SQLite | 000027 | Drops the legacy `query_type` column now that `query_language`/`editor_mode` are authoritative. |
 | SQLite | 000028 | Adds `users.password_hash` (nullable; NULL means OIDC-only) for local authentication. |
 | SQLite | 000029 | Creates `dashboards` (`panels_json` blob; `created_by` nulled, not cascaded, on user deletion). |
+| SQLite | 000030 | Normalizes user emails to lowercase and enforces case-insensitive uniqueness; the migration stops for manual resolution if case-only duplicate accounts already exist. |
 | SQLite | 000031 | Adds `query_history` (per-user executed-query log, capped at 200 rows/user). |
 | SQLite | 000032 | Adds `query_stats_daily` (non-pruned daily usage rollup backing admin analytics). |
 | Postgres | 000002-000007 | Mirrors the datasource, local-auth, dashboards, email-normalization, query-history, and usage-rollup migrations for the Postgres backend. |

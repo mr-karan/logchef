@@ -10,81 +10,101 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 >
   <style>
     .not-found {
-      min-height: 80vh;
+      position: relative;
+      min-height: 78vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       text-align: center;
-      padding: 7rem 1.5rem 4rem;
-      max-width: 640px;
-      margin: 0 auto;
+      padding: 8rem 1.5rem 5rem;
+      overflow: hidden;
     }
-    .not-found-code {
+    .not-found .bg-glow {
+      width: min(760px, 120vw); height: min(760px, 120vw);
+      top: -30%; left: 50%; transform: translateX(-50%);
+    }
+    .nf-inner { position: relative; z-index: 1; max-width: 620px; }
+
+    /* A query that returned nothing — the page's own idiom. */
+    .nf-query {
+      display: inline-block;
       font-family: var(--font-mono);
-      font-size: 0.875rem;
-      color: var(--color-accent);
-      letter-spacing: 0.05em;
-      margin-bottom: 1rem;
+      font-size: 0.8125rem;
+      border: 1px solid var(--color-border);
+      background: var(--code-bg);
+      border-radius: 8px;
+      padding: 0.7rem 1rem;
+      margin-bottom: 1.75rem;
+      color: var(--color-text-secondary);
     }
+    .nf-query .q-field { color: var(--q-field); }
+    .nf-query .q-op { color: var(--q-op); }
+    .nf-query .q-str { color: var(--q-str); }
+
+    .not-found .kicker { display: block; margin-bottom: 1rem; }
     .not-found h1 {
-      font-size: clamp(1.75rem, 4vw, 2.5rem);
-      font-weight: 600;
-      letter-spacing: -0.02em;
-      margin-bottom: 0.75rem;
+      font-size: clamp(1.85rem, 4.2vw, 2.6rem);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-bottom: 0.85rem;
     }
     .not-found p {
       color: var(--color-text-secondary);
       font-size: 1.05rem;
-      margin-bottom: 2rem;
+      margin-bottom: 2.25rem;
       line-height: 1.7;
     }
-    .not-found-links {
+    .nf-links {
       display: flex;
       flex-wrap: wrap;
       justify-content: center;
-      gap: 0.75rem;
+      gap: 0.6rem;
     }
-    .not-found-links a {
+    .nf-links a {
       display: inline-flex;
       align-items: center;
-      gap: 0.5rem;
-      font-size: 0.9rem;
+      font-size: 0.875rem;
       font-weight: 500;
-      padding: 0.75rem 1.5rem;
+      padding: 0.6rem 1.1rem;
       border-radius: 8px;
       border: 1px solid var(--color-border);
       color: var(--color-text);
       background: var(--color-surface);
-      transition: all 0.15s ease;
       text-decoration: none;
+      transition: border-color 0.15s ease, color 0.15s ease;
     }
-    .not-found-links a:hover {
+    .nf-links a:hover {
       border-color: var(--color-text-dim);
-      background: var(--color-border);
       text-decoration: none;
     }
-    .not-found-links a.primary {
-      background: var(--color-accent);
-      border-color: var(--color-accent);
-      color: white;
+    .nf-links a.primary {
+      background: var(--color-accent-solid);
+      border-color: var(--color-accent-solid);
+      color: #fff;
     }
-    .not-found-links a.primary:hover { background: var(--color-accent-hover); }
+    .nf-links a.primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
   </style>
 
   <main class="not-found">
-    <div class="not-found-code">404</div>
-    <h1>This page doesn't exist</h1>
-    <p>
-      The page you're looking for may have moved or never existed. Try the docs, check
-      recent changes, or head back home.
-    </p>
-    <div class="not-found-links">
-      <a href="/" class="primary">Home</a>
-      <a href="/getting-started/quickstart">Docs</a>
-      <a href="/changelog">Changelog</a>
-      <a href="https://demo.logchef.app" target="_blank">Live Demo</a>
-      <a href="https://github.com/mr-karan/logchef" target="_blank">GitHub</a>
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="nf-inner">
+      <span class="kicker">Error 404</span>
+
+      <div class="nf-query"><span class="q-field">path</span><span class="q-op">=</span><span class="q-str">"this one"</span> <span class="q-op">→</span> 0 results</div>
+
+      <h1>Nothing matched that query</h1>
+      <p>
+        This page isn't here. Try the docs, check the changelog, or start again from home.
+      </p>
+      <div class="nf-links">
+        <a href="/" class="primary">Home</a>
+        <a href="/getting-started/quickstart">Docs</a>
+        <a href="/changelog">Changelog</a>
+        <a href="https://demo.logchef.app" target="_blank" rel="noopener">Live Demo</a>
+        <a href="https://github.com/mr-karan/logchef" target="_blank" rel="noopener">GitHub</a>
+      </div>
     </div>
   </main>
 </BaseLayout>

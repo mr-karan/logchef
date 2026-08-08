@@ -72,4 +72,22 @@ describe('useMetaStore alertsEnabled capability', () => {
 
     expect(store.alertsEnabled).toBe(true)
   })
+
+  it('defaults demoReadOnly to false for older servers', async () => {
+    ;(metaApi.getMeta as any).mockResolvedValueOnce(okResponse())
+
+    const store = useMetaStore()
+    await store.loadMeta()
+
+    expect(store.demoReadOnly).toBe(false)
+  })
+
+  it('reflects demo_read_only=true when the server advertises it', async () => {
+    ;(metaApi.getMeta as any).mockResolvedValueOnce(okResponse({ demo_read_only: true }))
+
+    const store = useMetaStore()
+    await store.loadMeta()
+
+    expect(store.demoReadOnly).toBe(true)
+  })
 })

@@ -286,6 +286,39 @@ query_per_user_per_minute = 120    # /logs/query, /logs/histogram, field values
 
 Rejections return HTTP 429 and increment the `logchef_rate_limit_rejections_total{scope}` metric.
 
+### Public demo read-only mode
+
+For an internet-facing showcase, Logchef can make its metadata control plane
+read-only while keeping authentication, source reads, LogchefQL/native queries,
+histograms, AI query generation, and live exploration available:
+
+```toml
+[demo]
+read_only = true
+```
+
+Or set `LOGCHEF_DEMO__READ_ONLY=true`. The server advertises this mode through
+`/api/v1/meta`, so the web UI displays a persistent explanation and removes
+dashboard mutation controls. Blocked metadata writes return HTTP 403 with
+`error_type: DEMO_INSTANCE`.
+
+Browser-only preferences such as theme, timezone, view mode, and the fields
+panel remain usable. They are saved to local storage instead of the shared demo
+account, so one visitor cannot change another visitor's interface.
+
+Successful queries still increment privacy-safe daily usage and latency
+aggregates. Raw query text and per-visitor history are neither retained nor
+returned, including from the admin activity view.
+
+If an internal bootstrap job needs to refresh seeded demo resources after an
+upgrade, set `LOGCHEF_DEMO__PROVISIONING_TOKEN` and send the same secret in the
+`X-Logchef-Demo-Provisioning-Token` header. Keep this header private to the
+internal job; do not add it in a public reverse proxy.
+
+This mode is intended for a shared public demo, not as a substitute for normal
+role-based access control. Keep datasource credentials read-only and retain
+reverse-proxy rate limits for public traffic.
+
 ### Dashboard result cache
 
 Dashboards auto-refresh every panel on an interval, so a dashboard with *N*
@@ -321,12 +354,12 @@ max_concurrent_fills = 8
 **Environment variables:** `LOGCHEF_DASHBOARD_CACHE__ENABLED=false`, `LOGCHEF_DASHBOARD_CACHE__MAX_TTL=30m`
 
 :::caution[Behind a reverse proxy]
-The per-IP limiter keys on the client IP. Logchef does not yet read
-`X-Forwarded-For`, so behind a reverse proxy every request appears to come from
-the proxy — per-IP limiting then collapses to a single shared bucket and would
-throttle *all* auth traffic together. That's why this is off by default. Until
-trusted-proxy support lands, rely on the global cap (`auth_global_per_minute`)
-and the per-user query limit (which key on the authenticated user, not the IP).
+The per-IP limiter keys on the resolved client IP. Behind a reverse proxy, set
+`server.trusted_proxies` to the proxy's exact IP or CIDR and ensure the proxy
+overwrites `server.proxy_header` (default `X-Forwarded-For`). Logchef ignores
+the forwarding header from untrusted peers, preventing callers from spoofing
+their address. Leave per-IP limiting off until trusted-proxy resolution is
+configured; the global auth cap and per-user query limit remain usable.
 :::
 
 ## Runtime Configuration (Admin Settings UI)

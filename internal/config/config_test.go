@@ -107,6 +107,24 @@ func TestLoad_AutoProvisionDisabledByDefault(t *testing.T) {
 	}
 }
 
+func TestLoad_DemoReadOnlyIsOptIn(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Demo.ReadOnly {
+		t.Fatal("demo.read_only should default to false")
+	}
+
+	cfg, err = Load(writeConfig(t, "\n[demo]\nread_only = true\n"))
+	if err != nil {
+		t.Fatalf("Load with demo mode: %v", err)
+	}
+	if !cfg.Demo.ReadOnly {
+		t.Fatal("demo.read_only = false, want true")
+	}
+}
+
 func TestLoad_RateLimitDefaults(t *testing.T) {
 	cfg, err := Load(writeConfig(t, ""))
 	if err != nil {

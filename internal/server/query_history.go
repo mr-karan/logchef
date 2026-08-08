@@ -16,6 +16,10 @@ func (s *Server) recordQueryHistory(user *models.User, teamID models.TeamID, sou
 	if user == nil {
 		return
 	}
+	// A public demo intentionally shares one login across visitors. Never retain
+	// raw query text there, but keep the privacy-safe daily counters useful for
+	// the aggregate admin activity view.
+	recordDetailedHistory := s.config == nil || !s.config.Demo.ReadOnly
 	entry := &models.QueryHistory{
 		UserID:        user.ID,
 		TeamID:        teamID,
@@ -28,8 +32,10 @@ func (s *Server) recordQueryHistory(user *models.User, teamID models.TeamID, sou
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		if err := s.sqlite.RecordQueryHistory(ctx, entry); err != nil {
-			s.log.Warn("failed to record query history", "error", err, "user_id", entry.UserID, "source_id", sourceID)
+		if recordDetailedHistory {
+			if err := s.sqlite.RecordQueryHistory(ctx, entry); err != nil {
+				s.log.Warn("failed to record query history", "error", err, "user_id", entry.UserID, "source_id", sourceID)
+			}
 		}
 		// Also increment the non-pruned daily rollup so all-time usage analytics
 		// stay correct even after query_history is pruned per user. Best-effort:

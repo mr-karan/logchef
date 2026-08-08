@@ -54,11 +54,11 @@ Download the latest CLI release for your platform from [GitHub Releases](https:/
 | macOS Intel | `logchef-cli_<version>_macos-x86_64.tar.gz` |
 | Windows x86_64 | `logchef-cli_<version>_windows-x86_64.zip` |
 
-Grab the latest version tag from the [CLI releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true) (e.g. `0.2.0`), set it once, then download:
+Grab the latest version tag from the [CLI releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true) (e.g. `0.2.1`), set it once, then download:
 
 ```bash
 # Set to the latest version from the releases page above
-CLI_VERSION="0.2.0"
+CLI_VERSION="0.2.1"
 
 # Linux x86_64
 curl -LO "https://github.com/mr-karan/logchef/releases/download/cli-v${CLI_VERSION}/logchef-cli_${CLI_VERSION}_linux-x86_64-musl.tar.gz"
@@ -188,7 +188,7 @@ Generate API tokens from the Logchef web UI under your profile settings, or see
 
 ### Query Logs
 
-The `query` command allows you to execute LogchefQL queries directly from your terminal.
+The `query` command runs LogchefQL queries from your terminal.
 
 LogchefQL compiles to the selected source's native query language:
 
@@ -978,7 +978,7 @@ The configuration is stored at `~/.config/logchef/logchef.json`:
 
 ## Syntax Highlighting
 
-Logchef CLI provides automatic syntax highlighting for common log patterns, powered by [tailspin](https://github.com/bensadeh/tailspin).
+The CLI highlights common log patterns automatically, using [tailspin](https://github.com/bensadeh/tailspin).
 
 ### Built-in Highlighting
 

@@ -34,6 +34,7 @@ type MetaResponse struct {
 	AlertsEnabled       bool               `json:"alerts_enabled"`
 	LocalAuthEnabled    bool               `json:"local_auth_enabled"`
 	OIDCEnabled         bool               `json:"oidc_enabled"`
+	DemoReadOnly        bool               `json:"demo_read_only"`
 	DashboardCache      DashboardCacheMeta `json:"dashboard_cache"`
 }
 
@@ -59,6 +60,7 @@ func (s *Server) handleGetMeta(c *fiber.Ctx) error {
 		AlertsEnabled:       s.config.Alerts.Enabled,
 		LocalAuthEnabled:    s.config.Auth.Local.Enabled,
 		OIDCEnabled:         s.oidcProvider != nil,
+		DemoReadOnly:        s.config.Demo.ReadOnly,
 		DashboardCache: DashboardCacheMeta{
 			Enabled:           s.config.DashboardCache.Enabled,
 			DefaultTTLSeconds: int(s.config.DashboardCache.DefaultTTL / time.Second),

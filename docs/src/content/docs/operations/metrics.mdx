@@ -1,9 +1,9 @@
 ---
 title: Prometheus Metrics
-description: Comprehensive guide to Logchef's Prometheus metrics for monitoring usage and performance
+description: Logchef's Prometheus metrics for monitoring usage and performance
 ---
 
-Logchef exposes comprehensive Prometheus metrics to monitor instance usage, performance, and health. These metrics provide visibility into query patterns, user activity, authentication events, and system resource utilization.
+Logchef exposes Prometheus metrics covering instance usage, performance, and health: query patterns, user activity, authentication events, and resource use.
 
 ## Metrics Endpoint
 
@@ -243,7 +243,7 @@ rate(logchef_clickhouse_connection_validation_total{result="failure"}[5m])
 
 ## Dashboard Recommendations
 
-For comprehensive monitoring, create dashboards tracking:
+Dashboards worth building:
 
 1. **Overview Dashboard**: Key metrics, active users, query volume, error rates
 2. **Performance Dashboard**: Query latency, HTTP response times, histogram generation

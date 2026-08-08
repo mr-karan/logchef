@@ -23,6 +23,18 @@ secure_cookie = false
 # For first boot with a separate frontend origin, set LOGCHEF_SERVER__FRONTEND_URL.
 
 # -----------------------------------------------------------------------------
+# Public demo safety (optional)
+# -----------------------------------------------------------------------------
+[demo]
+# Reject metadata mutations while keeping login, reads, queries, histograms,
+# AI query generation, and live exploration available. The UI shows an
+# explicit read-only banner when enabled.
+read_only = false
+# Optional secret used only by a trusted internal job that converges demo seed
+# data. Prefer LOGCHEF_DEMO__PROVISIONING_TOKEN instead of storing it here.
+provisioning_token = ""
+
+# -----------------------------------------------------------------------------
 # Metadata backend (optional) — selects where application metadata is stored
 # -----------------------------------------------------------------------------
 [database]
@@ -49,8 +61,11 @@ path = "local.db"
 # conn_max_lifetime = "30m"
 
 # -----------------------------------------------------------------------------
-# OpenID Connect (OIDC) (required)
+# OpenID Connect (OIDC) (optional when [auth.local] is enabled)
 # -----------------------------------------------------------------------------
+# Logchef ships with built-in email + password login ([auth.local] below), so
+# an external identity provider is not required to run it. Configure OIDC to
+# offer SSO alongside — or instead of — local login.
 [oidc]
 # OIDC provider discovery URL.
 provider_url = "http://localhost:5556/dex"
@@ -83,6 +98,18 @@ admin_emails = ["admin@logchef.internal"]
 # Secret key for API token hashing (required; generate with: openssl rand -hex 32).
 # Dev-only value. Replace this in production.
 api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677"
+
+# Built-in email + password authentication (optional).
+# The fastest way to run Logchef without an external identity provider: enable
+# local auth and set a bootstrap admin. The admin user is created (or updated)
+# idempotently at startup. Prefer supplying the password via the
+# LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD environment variable over checking it
+# into a config file. Minimum password length: 10 characters.
+# When local auth is enabled, the [oidc] section becomes optional.
+# [auth.local]
+# enabled = true
+# admin_email = "admin@example.com"
+# admin_password = ""  # or set LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD
 
 # JIT (just-in-time) user auto-provisioning on first OIDC login (optional).
 # When enabled, a first-time OIDC login from an allowed domain creates a

@@ -13,6 +13,7 @@ import {
   Table2,
   ListFilter,
   User,
+  LockKeyhole,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,13 +36,16 @@ import {
 } from "@/components/ui/dropdown-menu";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useDashboardsStore } from "@/stores/dashboards";
+import { useMetaStore } from "@/stores/meta";
 import type { Dashboard } from "@/api/dashboards";
 
 const router = useRouter();
 const store = useDashboardsStore();
+const metaStore = useMetaStore();
 
 const isLoading = computed(() => store.isLoadingOperation("fetchDashboards"));
 const dashboards = computed(() => store.dashboards);
+const demoReadOnly = computed(() => metaStore.demoReadOnly);
 
 const search = ref("");
 const filteredDashboards = computed(() => {
@@ -139,9 +143,13 @@ async function doDelete() {
           <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input v-model="search" placeholder="Search dashboards…" class="h-9 w-56 pl-8" />
         </div>
-        <Button size="sm" class="gap-1.5" @click="openCreate">
+        <Button v-if="!demoReadOnly" size="sm" class="gap-1.5" @click="openCreate">
           <Plus class="h-4 w-4" />
           New dashboard
+        </Button>
+        <Button v-else size="sm" variant="outline" class="gap-1.5" disabled>
+          <LockKeyhole class="h-4 w-4" />
+          Read-only demo
         </Button>
       </div>
     </div>
@@ -175,7 +183,7 @@ async function doDelete() {
           trends, or anything you check often.
         </p>
       </div>
-      <Button size="sm" class="mt-1 gap-1.5" @click="openCreate">
+      <Button v-if="!demoReadOnly" size="sm" class="mt-1 gap-1.5" @click="openCreate">
         <Plus class="h-4 w-4" />
         Create your first dashboard
       </Button>
@@ -200,7 +208,7 @@ async function doDelete() {
       >
         <div class="flex items-start justify-between gap-2">
           <h2 class="font-medium leading-tight truncate">{{ d.name }}</h2>
-          <DropdownMenu v-if="d.can_edit">
+          <DropdownMenu v-if="d.can_edit && !demoReadOnly">
             <DropdownMenuTrigger as-child @click.stop>
               <Button
                 variant="ghost"

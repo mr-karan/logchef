@@ -1,18 +1,24 @@
 ---
-title: AI SQL Generation
-description: Generate ClickHouse SQL queries from natural language questions using schema-aware AI, no SQL expertise required.
+title: AI Query Generation
+description: Generate LogchefQL, ClickHouse SQL, or LogsQL from natural language with schema-aware AI.
 ---
 
-Logchef can translate natural language questions into ClickHouse SQL queries using OpenAI-compatible LLMs. The AI is schema-aware: it knows your table's columns and types.
+Logchef turns natural-language questions into queries for whichever datasource
+and editor mode you are using. It generates LogchefQL in the shared builder,
+ClickHouse SQL in ClickHouse native mode, and LogsQL in VictoriaLogs native
+mode. The assistant is schema-aware: it sees the selected source's columns or
+discovered fields and types.
 
 ## Usage
 
 1. Open any log source
 2. Click the AI assistant button (wand icon) in the query editor
 3. Describe what you want in plain English
-4. Review the generated SQL, then insert it into the editor
+4. Review the generated query, then insert it into the editor
 
-If you already have a query in the editor, the AI uses it as context for refinements.
+If you already have a query in the editor, the AI uses it as context for
+refinements. Logchef validates the generated query for the active target and
+makes one repair attempt when it can identify a syntax error.
 
 ## Example Queries
 
@@ -31,15 +37,17 @@ Configure via **Administration → System Settings → AI**:
 | Setting | Description | Default |
 |---------|-------------|---------|
 | Enabled | Toggle AI features | `true` |
+| Provider | `openai` or native `bedrock` transport | `openai` |
 | API Key | Your OpenAI API key | — |
 | Base URL | API endpoint | `https://api.openai.com/v1` |
+| Region | AWS region when using Bedrock | — |
 | Model | Model name | `gpt-4o` |
 | Max Tokens | Max tokens to generate | `1024` |
 | Temperature | Randomness (0.0–1.0) | `0.1` |
 
 ### Supported Providers
 
-Any OpenAI-compatible API works:
+Use an OpenAI-compatible API or AWS Bedrock:
 
 | Provider | Base URL |
 |----------|----------|
@@ -47,6 +55,7 @@ Any OpenAI-compatible API works:
 | OpenRouter | `https://openrouter.ai/api/v1` |
 | Azure OpenAI | Your Azure endpoint |
 | Local models | Your local server URL |
+| AWS Bedrock | Native Converse API using the standard AWS credential chain |
 
 ### Environment Variables
 
@@ -54,9 +63,14 @@ For containerized deployments, seed the initial config via env vars:
 
 ```bash
 export LOGCHEF_AI__ENABLED=true
+export LOGCHEF_AI__PROVIDER=openai
 export LOGCHEF_AI__API_KEY="sk-your-key"
 export LOGCHEF_AI__MODEL="gpt-4o"
 ```
+
+For Bedrock, set `LOGCHEF_AI__PROVIDER=bedrock`,
+`LOGCHEF_AI__REGION`, and a Bedrock model ID or inference-profile ARN. Logchef
+uses the normal AWS credential chain, so no API key is stored.
 
 After first boot, the Admin UI takes precedence over env vars.
 
@@ -66,4 +80,6 @@ For AI assistant integration outside the web UI (e.g., Claude Desktop), see [MCP
 
 ## Limitations
 
-Always review AI-generated SQL before running it. The model can get complex aggregations or unfamiliar schemas wrong, so start with simple questions and iterate from there.
+Always review AI-generated queries before running them. The model can get
+complex aggregations or unfamiliar schemas wrong, so start with simple
+questions and iterate from there.

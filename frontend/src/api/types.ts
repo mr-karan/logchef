@@ -26,6 +26,7 @@ export interface APIErrorResponse {
   message: string;
   error_type: string;
   data?: any;
+  _toastShown?: boolean;
 }
 
 export type APIResponse<T = any> = APISuccessResponse<T> | APIErrorResponse;

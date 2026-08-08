@@ -58,7 +58,7 @@ const dashboard = computed(() => store.current);
 const notFound = ref(false);
 
 const isEditing = computed(() => store.isEditing);
-const canEdit = computed(() => store.canEdit);
+const canEdit = computed(() => store.canEdit && !metaStore.demoReadOnly);
 
 // In edit mode the grid renders from the working draft; otherwise from the live
 // dashboard. Both go through the same normalizer for stable placements.

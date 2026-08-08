@@ -1,4 +1,49 @@
+# https://logchef.app/robots.txt
+
 User-agent: *
+Allow: /
+
+# The documentation is also published as plain Markdown, which is usually a
+# better source for an LLM or agent than scraping the rendered HTML:
+#   https://logchef.app/llms.txt         index + reading guide
+#   https://logchef.app/llms-full.txt    the full docs corpus
+#   https://logchef.app/llms-small.txt   condensed corpus
+
+# Named AI crawlers, listed explicitly. Each group below is equivalent to the
+# wildcard rule above — a crawler that matches a named group ignores `*`, so
+# these exist to state intent, not to change behaviour. Logchef is AGPL and
+# wants to be found, read, and cited.
+User-agent: GPTBot
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-User
+Allow: /
+
+User-agent: Claude-SearchBot
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+User-agent: meta-externalagent
+Allow: /
+
+User-agent: Bytespider
 Allow: /
 
 Sitemap: https://logchef.app/sitemap-index.xml

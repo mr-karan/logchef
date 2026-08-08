@@ -23,6 +23,9 @@ export interface MetaResponse {
   alerts_enabled?: boolean;
   local_auth_enabled?: boolean;
   oidc_enabled?: boolean;
+  // Public demo instances advertise their write policy so the UI can explain
+  // it before a visitor reaches a mutation.
+  demo_read_only?: boolean;
   // Dashboard result-cache policy; ABSENT on an old server (→ null in the store,
   // which means "cache unavailable / fail closed").
   dashboard_cache?: DashboardCachePolicy;

@@ -1,0 +1,682 @@
+---
+/**
+ * HeroLogAnimation — the hero's "data at rest" scene.
+ *
+ * A single Canvas 2D scene with a real (tiny) 3D projection. Structured
+ * log rows lie shelved in a dark field — they never move, because with
+ * Logchef the logs stay where they already live. What moves is the
+ * query: a translucent blue plane that sweeps through the field from
+ * back to front like a live query re-running. Rows it touches blink as
+ * they are inspected, matching rows stay lit blue, and the histogram in
+ * front accumulates the results of the pass. The pointer acts as a
+ * torchlight that illuminates the floor grid and reveals the fields of
+ * nearby rows.
+ *
+ * Canvas 2D (no dependency) was chosen over CSS 3D because the scene
+ * needs per-row occlusion, depth sorting, and colour changes at the
+ * plane intersection — cheap on one canvas, awkward across dozens of
+ * DOM nodes. Everything runs off one rAF loop that pauses when the
+ * hero is offscreen or the tab is hidden. Reduced motion gets a
+ * pre-simulated static frame instead of a running loop.
+ */
+---
+
+<div class="hero-scene" data-hero-scene aria-hidden="true">
+  <canvas></canvas>
+</div>
+
+<style>
+  .hero-scene {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    min-height: inherit;
+    pointer-events: auto;
+  }
+  .hero-scene canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    /* Blend into the hero's grid instead of living in a hard container. */
+    mask-image: radial-gradient(115% 105% at 50% 46%, #000 58%, transparent 96%);
+    -webkit-mask-image: radial-gradient(115% 105% at 50% 46%, #000 58%, transparent 96%);
+  }
+</style>
+
+<script>
+  const host = document.querySelector<HTMLElement>('[data-hero-scene]');
+
+  if (host && !host.dataset.ready) {
+    host.dataset.ready = '1';
+    const canvas = host.querySelector('canvas')!;
+    const ctx = canvas.getContext('2d')!;
+
+    /* ---------------- palette (kept in sync with the site tokens) ------- */
+
+    const cssVar = (name: string, fallback: string) =>
+      getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+
+    const readPalette = () => ({
+      light: document.documentElement.getAttribute('data-theme') === 'light',
+      accent: cssVar('--color-accent', '#3b82f6'),
+      accentSoft: cssVar('--color-accent-soft', '#60a5fa'),
+      text: cssVar('--color-text', '#e4e4e7'),
+      textSecondary: cssVar('--color-text-secondary', '#a1a1aa'),
+      textMuted: cssVar('--color-text-muted', '#82828c'),
+      textDim: cssVar('--color-text-dim', '#52525b'),
+      error: cssVar('--color-error', '#ef4444'),
+      qNum: cssVar('--q-num', '#d0a56b'),
+      qStr: cssVar('--q-str', '#7fb5f0'),
+    });
+    let pal = readPalette();
+
+    /* rgba() from a token that may be #rgb, #rrggbb or rgb(...) */
+    const rgbCache = new Map<string, [number, number, number]>();
+    const toRgb = (c: string): [number, number, number] => {
+      let v = rgbCache.get(c);
+      if (v) return v;
+      if (c[0] === '#') {
+        const h = c.length === 4 ? c.replace(/[^#]/g, (m) => m + m) : c;
+        v = [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
+      } else {
+        const m = c.match(/[\d.]+/g);
+        v = m ? [+m[0], +m[1], +m[2]] : [128, 128, 128];
+      }
+      rgbCache.set(c, v);
+      return v;
+    };
+    const rgba = (c: string, a: number) => {
+      const [r, g, b] = toRgb(c);
+      return `rgba(${r},${g},${b},${a})`;
+    };
+
+    /* ---------------- world & camera ------------------------------------ */
+
+    // World: x right, y up, z away from camera. Camera at z=0, f below.
+    const F = 620;
+    const CENTER_Z = 330;
+
+    // The beam's travel ends nearer than the nearest lane so every row in
+    // the field gets swept once per pass.
+    const FIELD = { hw: 105, zNear: 274, zFar: 428, shelves: [4, 21, 38, 55] };
+    const BEAM = { hw: 112, y0: -2, y1: 68, zStart: 438, zEnd: 266, sweep: 7, gap: 1 };
+    const HIST = { n: 16, hw: 64, baseY: -58, maxH: 28 };
+    const Z_HIST_REF = 236;
+    const FLOOR_Y = -68;
+    const LABELS = ['level=error', 'service=payments', 'duration_ms=812'];
+
+    let cw = 0, ch = 0, dpr = 1, worldScale = 1;
+    let yaw = 0, pitch = 0, yawV = 0, pitchV = 0;
+    const BASE_YAW = -0.045, BASE_PITCH = 0.028;
+
+    let cosY = 1, sinY = 0, cosP = 1, sinP = 0;
+    const setRotation = () => {
+      cosY = Math.cos(yaw); sinY = Math.sin(yaw);
+      cosP = Math.cos(pitch); sinP = Math.sin(pitch);
+    };
+
+    // Project a world point. Returns screen x/y, scale and camera-space z.
+    const P = { x: 0, y: 0, s: 1, z: 1 };
+    const project = (x: number, y: number, z: number, out = P) => {
+      const dz = z - CENTER_Z;
+      const x1 = x * cosY + dz * sinY;
+      const z1 = -x * sinY + dz * cosY;
+      const y1 = y * cosP - z1 * sinP;
+      const z2 = y * sinP + z1 * cosP + CENTER_Z;
+      const s = (F / z2) * worldScale;
+      out.x = cw * 0.5 + x1 * s;
+      out.y = ch * 0.49 - y1 * s;
+      out.s = s;
+      out.z = z2;
+      return out;
+    };
+
+    /* ---------------- scene state --------------------------------------- */
+
+    interface Row {
+      x: number; y: number; z: number;
+      len: number; segs: number[];
+      match: boolean; label: string; labeled: boolean;
+      lit: number;   // matched + scanned: decaying blue energy
+      pulse: number; // inspected but not matched: brief blink
+      phase: number; // idle shimmer
+      sx: number; sy: number; // last projected pos (for the torch)
+    }
+
+    // The field is a jittered lattice: shelves (y) x lanes (z) x slots (x).
+    // Structured rows at rest, not a particle cloud.
+    const rows: Row[] = [];
+    {
+      const shelves = FIELD.shelves.length, lanes = 4, slots = 5;
+      const cells: number[] = Array.from({ length: shelves * lanes * slots }, (_, i) => i);
+      for (let i = cells.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [cells[i], cells[j]] = [cells[j], cells[i]];
+      }
+      let labelCursor = 0;
+      let labeledCount = 0;
+      for (let n = 0; n < 58; n++) {
+        const cell = cells[n];
+        const sh = cell % shelves;
+        const lane = Math.floor(cell / shelves) % lanes;
+        const slot = Math.floor(cell / (shelves * lanes));
+        const x = -FIELD.hw + ((slot + 0.15 + Math.random() * 0.7) * (FIELD.hw * 2)) / slots;
+        const z = FIELD.zNear + ((lane + 0.15 + Math.random() * 0.7) * (FIELD.zFar - FIELD.zNear)) / lanes;
+        const y = FIELD.shelves[sh] + (Math.random() * 5 - 2.5);
+        const len = 16 + Math.random() * 12;
+        const cut1 = 0.34 + Math.random() * 0.18;
+        const cut2 = cut1 + 0.12 + Math.random() * 0.14;
+        const match = Math.random() < 0.42;
+        // At most three carried labels, one of each field, away from the
+        // top shelf so text never crowds the beam label above the field.
+        const labeled = labeledCount < 3 && z < 375 && sh < 3 && Math.random() < 0.22;
+        rows.push({
+          x, y, z, len,
+          segs: Math.random() < 0.4 ? [cut1, cut2] : [cut1],
+          match,
+          label: LABELS[(labeled ? labeledCount++ : labelCursor++) % LABELS.length],
+          labeled,
+          lit: 0, pulse: 0,
+          phase: Math.random() * Math.PI * 2,
+          sx: -999, sy: -999,
+        });
+      }
+    }
+
+    const ripples: { x: number; y: number; z: number; t: number }[] = [];
+    const barH = new Array(HIST.n).fill(0);
+    const barV = new Array(HIST.n).fill(0);
+    const barBase = Array.from({ length: HIST.n }, (_, i) =>
+      4 + 13 * Math.exp(-(((i - 8.2) / 4) ** 2)) + Math.random() * 2.5
+    );
+    const bucketX = (i: number) => -HIST.hw + ((i + 0.5) * (HIST.hw * 2)) / HIST.n;
+    const bucketOf = (x: number) =>
+      Math.max(0, Math.min(HIST.n - 1, Math.floor(((x + FIELD.hw) / (FIELD.hw * 2)) * HIST.n)));
+
+    // Start mid-sweep so the first visible frame is already alive.
+    let time = 3;
+    let clock = 14 * 3600 + 3 * 60 + 17; // "14:03:17"
+    let clockAcc = 0;
+    const clockStr = () => {
+      const h = Math.floor(clock / 3600) % 24;
+      const m = Math.floor(clock / 60) % 60;
+      const s = clock % 60;
+      const p = (n: number) => String(n).padStart(2, '0');
+      return `${p(h)}:${p(m)}:${p(s)}`;
+    };
+
+    const pointer = { active: false, x: 0, y: 0 };
+    let torch = 0; // smoothed 0..1 pointer-light intensity
+    let hostRect: DOMRect | null = null;
+
+    // Narrow screens get a calmer, simpler field. Used by update and draw
+    // alike so hidden rows never feed the histogram.
+    const visibleRows = () => (cw > 620 ? rows.length : cw > 420 ? 44 : 34);
+
+    // The query pass: z position + visibility for the current cycle.
+    let beamZ = BEAM.zStart;
+    let beamA = 0;
+    const beamState = () => {
+      const cycle = BEAM.sweep + BEAM.gap;
+      const t = time % cycle;
+      if (t >= BEAM.sweep) return { z: BEAM.zEnd, a: 0 };
+      const k = t / BEAM.sweep;
+      const z = BEAM.zStart - k * (BEAM.zStart - BEAM.zEnd);
+      const aIn = Math.min(1, t / 0.5);
+      const aOut = Math.min(1, (BEAM.sweep - t) / 0.5);
+      return { z, a: Math.min(aIn, aOut) };
+    };
+
+    /* ---------------- update -------------------------------------------- */
+
+    const update = (dt: number, interactive: boolean) => {
+      time += dt;
+      clockAcc += dt;
+      while (clockAcc >= 1) { clockAcc -= 1; clock += 1; }
+
+      // Camera: pointer target when hovered, gentle drift otherwise.
+      let tYaw = BASE_YAW + Math.sin(time * 0.13) * 0.02;
+      let tPitch = BASE_PITCH + Math.sin(time * 0.09 + 1.7) * 0.014;
+      if (interactive && pointer.active && cw > 0) {
+        const nx = Math.max(-1, Math.min(1, (pointer.x - cw / 2) / (cw / 2)));
+        const ny = Math.max(-1, Math.min(1, (pointer.y - ch / 2) / (ch / 2)));
+        tYaw = BASE_YAW + nx * 0.072;   // worst case ≈ 6.7° with the base tilt
+        tPitch = BASE_PITCH - ny * 0.05;
+      }
+      yawV += (52 * (tYaw - yaw) - 11.5 * yawV) * dt;
+      pitchV += (52 * (tPitch - pitch) - 11.5 * pitchV) * dt;
+      yaw += yawV * dt;
+      pitch += pitchV * dt;
+
+      torch += ((interactive && pointer.active ? 1 : 0) - torch) * Math.min(1, dt * 7);
+
+      // The query plane sweeps back-to-front; rows it crosses get inspected.
+      const prevZ = beamZ;
+      const b = beamState();
+      beamZ = b.z;
+      beamA = b.a;
+      const swept = prevZ > beamZ; // false on cycle wrap (z jumps back)
+      const n = visibleRows();
+      for (let i = 0; i < n; i++) {
+        const r = rows[i];
+        if (swept && r.z <= prevZ && r.z > beamZ) {
+          if (r.match) {
+            r.lit = 1;
+            barV[bucketOf(r.x)] += 40;
+            ripples.push({ x: r.x, y: r.y, z: r.z, t: 0 });
+          } else {
+            r.pulse = 1;
+          }
+        }
+        r.lit = Math.max(0, r.lit - dt * 0.22);
+        r.pulse = Math.max(0, r.pulse - dt * 3);
+      }
+
+      // Histogram bars: spring toward their baseline profile, bump on hits.
+      for (let i = 0; i < HIST.n; i++) {
+        barV[i] += (14 * (barBase[i] - barH[i]) - 6.5 * barV[i]) * dt;
+        barH[i] = Math.max(0, Math.min(HIST.maxH, barH[i] + barV[i] * dt));
+      }
+
+      for (let i = ripples.length - 1; i >= 0; i--) {
+        ripples[i].t += dt;
+        if (ripples[i].t > 0.55) ripples.splice(i, 1);
+      }
+    };
+
+    /* ---------------- draw ----------------------------------------------- */
+
+    const mono = (px: number, w = 500) => `${w} ${px}px "DM Mono", ui-monospace, monospace`;
+
+    const roundRect = (x: number, y: number, w: number, h: number, r: number) => {
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.arcTo(x + w, y, x + w, y + h, r);
+      ctx.arcTo(x + w, y + h, x, y + h, r);
+      ctx.arcTo(x, y + h, x, y, r);
+      ctx.arcTo(x, y, x + w, y, r);
+      ctx.closePath();
+    };
+
+    // Floor grid. `boost` multiplies line alpha — the torch pass redraws the
+    // grid clipped to the pointer's light circle at full brightness.
+    const drawFloor = (boost = 1) => {
+      const a = Math.min(1, (pal.light ? 0.16 : 0.28) * boost);
+      ctx.lineWidth = 1;
+      for (let z = 248; z <= 445; z += 36) {
+        const l = project(-162, FLOOR_Y, z);
+        const lx = l.x, ly = l.y;
+        const r = project(162, FLOOR_Y, z);
+        ctx.globalAlpha = 1 - ((z - 248) / 280) * 0.8;
+        ctx.strokeStyle = rgba(pal.textDim, a);
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(r.x, r.y);
+        ctx.stroke();
+      }
+      for (let x = -162; x <= 162; x += 40.5) {
+        const n = project(x, FLOOR_Y, 248);
+        const nx = n.x, ny = n.y;
+        const f = project(x, FLOOR_Y, 445);
+        const g = ctx.createLinearGradient(nx, ny, f.x, f.y);
+        g.addColorStop(0, rgba(pal.textDim, a));
+        g.addColorStop(1, rgba(pal.textDim, 0));
+        ctx.globalAlpha = 1;
+        ctx.strokeStyle = g;
+        ctx.beginPath();
+        ctx.moveTo(nx, ny);
+        ctx.lineTo(f.x, f.y);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    };
+
+    const drawBeam = () => {
+      if (beamA <= 0.01) return;
+      const tl = project(-BEAM.hw, BEAM.y1, beamZ);
+      const tlx = tl.x, tly = tl.y, tls = tl.s;
+      const tr = project(BEAM.hw, BEAM.y1, beamZ);
+      const trx = tr.x, try_ = tr.y;
+      const br = project(BEAM.hw, BEAM.y0, beamZ);
+      const brx = br.x, bry = br.y;
+      const bl = project(-BEAM.hw, BEAM.y0, beamZ);
+
+      ctx.beginPath();
+      ctx.moveTo(tlx, tly);
+      ctx.lineTo(trx, try_);
+      ctx.lineTo(brx, bry);
+      ctx.lineTo(bl.x, bl.y);
+      ctx.closePath();
+      const g = ctx.createLinearGradient(0, tly, 0, bry);
+      g.addColorStop(0, rgba(pal.accent, 0.05 * beamA));
+      g.addColorStop(1, rgba(pal.accent, (pal.light ? 0.1 : 0.11) * beamA));
+      ctx.fillStyle = g;
+      ctx.fill();
+      ctx.strokeStyle = rgba(pal.accent, (pal.light ? 0.34 : 0.32) * beamA);
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Fine ruled lines keep the plane reading as a structured filter
+      // surface instead of an empty pane of glass.
+      ctx.strokeStyle = rgba(pal.accent, (pal.light ? 0.07 : 0.08) * beamA);
+      for (let y = BEAM.y0 + 8; y < BEAM.y1 - 4; y += 9) {
+        const a = project(-BEAM.hw + 4, y, beamZ);
+        const ax = a.x, ay = a.y;
+        const c = project(BEAM.hw - 4, y, beamZ);
+        ctx.beginPath();
+        ctx.moveTo(ax, ay);
+        ctx.lineTo(c.x, c.y);
+        ctx.stroke();
+      }
+
+      // The filter, written along the plane's top edge. It grows as the
+      // query travels toward the viewer.
+      const px = Math.max(8, Math.min(10.5, 5 * tls));
+      ctx.font = mono(px);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      // The label fades in as the query approaches, so it never fights the
+      // row labels while the plane is still deep in the field.
+      const nearK = Math.max(0.3, Math.min(1, (tls / worldScale - 1.42) / 0.35));
+      ctx.fillStyle = rgba(pal.accentSoft, 0.92 * beamA * nearK);
+      // Narrow canvases shorten the filter so it stays inside the frame.
+      const filter = cw < 520 ? 'level=error' : 'level=error service=payments';
+      const tw = ctx.measureText(filter).width;
+      const mid = Math.max(tw / 2 + 6, Math.min(cw - tw / 2 - 6, (tlx + trx) / 2));
+      ctx.fillText(filter, mid, Math.min(tly, try_) - 6);
+    };
+
+    const drawRipples = () => {
+      for (const r of ripples) {
+        const q = project(r.x, r.y, r.z);
+        const k = r.t / 0.55;
+        ctx.strokeStyle = rgba(pal.accentSoft, 0.5 * (1 - k));
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(q.x, q.y, (2 + 16 * k) * (q.s / 2), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+    };
+
+    const drawRow = (r: Row) => {
+      const q = project(r.x, r.y, r.z);
+      r.sx = q.x; r.sy = q.y;
+
+      // Torchlight: nearby rows brighten and reveal their fields.
+      let boost = 0;
+      if (torch > 0.02) {
+        const dx = q.x - pointer.x, dy = q.y - pointer.y;
+        const d = Math.sqrt(dx * dx + dy * dy);
+        if (d < 120) boost = (1 - d / 120) * torch;
+      }
+
+      const depthA = Math.min(1, (q.s / worldScale - 1.2) * 0.9 + 0.45);
+      const shimmer = 0.1 * Math.sin(time * 0.7 + r.phase);
+      const a = Math.min(1, depthA * (0.62 + shimmer + r.pulse * 0.3 + boost * 0.55));
+
+      const lit = r.lit > 0.02;
+      const litK = Math.min(1, r.lit * 1.6);
+      const color = lit ? pal.accent : pal.textSecondary;
+      const baseA = lit ? 0.55 + 0.45 * litK : pal.light ? 0.62 : 0.6;
+
+      const L = r.len * q.s * (1 + boost * 0.14);
+      const H = Math.max(1.8, 1.5 * q.s) * (1 + boost * 0.1);
+      const x0 = q.x - L / 2;
+
+      ctx.fillStyle = rgba(color, a * baseA);
+      let prev = 0;
+      const cuts = [...r.segs, 1];
+      for (let i = 0; i < cuts.length; i++) {
+        const gap = i === 0 ? 0 : 0.045;
+        const w = (cuts[i] - prev - gap) * L;
+        roundRect(x0 + (prev + gap) * L, q.y - H / 2, w, H, H / 2);
+        ctx.fill();
+        prev = cuts[i];
+      }
+      // Fresh matches flash brighter right after the query passes them.
+      const flash = Math.max(0, r.lit - 0.75) * 4;
+      if (flash > 0) {
+        ctx.fillStyle = rgba(pal.accentSoft, a * flash * 0.8);
+        roundRect(x0 - 1, q.y - H / 2 - 1, L + 2, H + 2, H / 2 + 1);
+        ctx.fill();
+      }
+
+      // Field label: a few rows carry one; the torch reveals the rest.
+      if ((r.labeled || boost > 0.45) && q.s > 1.5 * worldScale) {
+        const px = Math.max(8, Math.min(10.5, 4.6 * q.s));
+        ctx.font = mono(px);
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'bottom';
+        const [field, value] = r.label.split('=');
+        const fieldStr = field + '=';
+        const labelA = a * (r.labeled ? 0.42 + 0.45 * litK + boost * 0.35 : boost);
+        ctx.fillStyle = rgba(pal.textMuted, labelA);
+        ctx.fillText(fieldStr, x0, q.y - H - 2);
+        const vColor = value === 'error' ? pal.error : /^\d/.test(value) ? pal.qNum : pal.qStr;
+        ctx.fillStyle = rgba(vColor, labelA);
+        ctx.fillText(value, x0 + ctx.measureText(fieldStr).width, q.y - H - 2);
+      }
+    };
+
+    const drawHistogram = () => {
+      const bw = ((HIST.hw * 2) / HIST.n) * 0.72;
+      for (let i = 0; i < HIST.n; i++) {
+        const x = bucketX(i);
+        const b = project(x, HIST.baseY, Z_HIST_REF);
+        const bx = b.x, by = b.y, bs = b.s;
+        const t = project(x, HIST.baseY + barH[i], Z_HIST_REF);
+        const w = bw * bs;
+        const hpx = by - t.y;
+        if (hpx < 1) continue;
+        const g = ctx.createLinearGradient(0, t.y, 0, by);
+        g.addColorStop(0, rgba(pal.accent, pal.light ? 0.85 : 0.9));
+        g.addColorStop(1, rgba(pal.accent, pal.light ? 0.3 : 0.18));
+        ctx.fillStyle = g;
+        ctx.fillRect(bx - w / 2, t.y, w, hpx);
+        ctx.fillStyle = rgba(pal.accentSoft, 0.95);
+        ctx.fillRect(bx - w / 2, t.y, w, 1.2);
+      }
+      // Baseline
+      const l = project(-HIST.hw - 6, HIST.baseY, Z_HIST_REF);
+      const lx = l.x, ly = l.y, ls = l.s;
+      const r = project(HIST.hw + 6, HIST.baseY, Z_HIST_REF);
+      ctx.strokeStyle = rgba(pal.textDim, pal.light ? 0.8 : 0.9);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(lx, ly);
+      ctx.lineTo(r.x, r.y);
+      ctx.stroke();
+
+      // Live chip (left) and the ticking clock (right).
+      const px = Math.max(8, Math.min(10.5, 3.6 * ls));
+      ctx.font = mono(px);
+      ctx.textBaseline = 'top';
+      const pulse = 0.55 + 0.45 * Math.sin(time * 2.6);
+      ctx.fillStyle = rgba(pal.accent, 0.35 + 0.6 * pulse);
+      ctx.beginPath();
+      ctx.arc(lx + 3, ly + px * 0.85, px * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = rgba(pal.textSecondary, 0.95);
+      ctx.textAlign = 'left';
+      ctx.fillText('Live', lx + 3 + px * 0.75, ly + px * 0.38);
+      ctx.fillStyle = rgba(pal.textMuted, 0.95);
+      ctx.textAlign = 'right';
+      ctx.fillText(clockStr(), r.x, ly + px * 0.38);
+    };
+
+    const draw = () => {
+      setRotation();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, cw, ch);
+
+      drawFloor();
+
+      // Torchlight: re-draw the floor grid at full brightness inside the
+      // pointer's light circle, so the cursor genuinely illuminates it.
+      if (torch > 0.02) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(pointer.x, pointer.y, 150, 0, Math.PI * 2);
+        ctx.clip();
+        drawFloor(1 + 2.2 * torch);
+        ctx.restore();
+      }
+
+      // Painter's algorithm over the depth-ordered pieces of the scene.
+      const visible = visibleRows();
+      type Item = { z: number; d: () => void };
+      const items: Item[] = [];
+      items.push({ z: project(0, (BEAM.y0 + BEAM.y1) / 2, beamZ).z, d: drawBeam });
+      items.push({ z: project(0, HIST.baseY, Z_HIST_REF).z, d: drawHistogram });
+      for (let i = 0; i < visible; i++) {
+        const r = rows[i];
+        items.push({ z: project(r.x, r.y, r.z).z, d: () => drawRow(r) });
+      }
+      items.sort((a, b) => b.z - a.z);
+      for (const it of items) it.d();
+      drawRipples();
+
+      // The torch wash itself: a restrained blue light under the pointer.
+      if (torch > 0.02) {
+        const g = ctx.createRadialGradient(pointer.x, pointer.y, 0, pointer.x, pointer.y, 150);
+        g.addColorStop(0, rgba(pal.accent, (pal.light ? 0.1 : 0.17) * torch));
+        g.addColorStop(0.35, rgba(pal.accent, (pal.light ? 0.06 : 0.1) * torch));
+        g.addColorStop(1, rgba(pal.accent, 0));
+        ctx.fillStyle = g;
+        ctx.fillRect(pointer.x - 150, pointer.y - 150, 300, 300);
+      }
+    };
+
+    /* ---------------- lifecycle ------------------------------------------ */
+
+    const reducedMq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    let reduced = reducedMq.matches;
+    let inView = true;
+    let raf = 0;
+    let last = 0;
+
+    const shouldRun = () => inView && !document.hidden && !reduced && cw > 0;
+
+    const frame = (ts: number) => {
+      raf = 0;
+      if (!shouldRun()) return;
+      const dt = Math.min((ts - last) / 1000, 0.05);
+      last = ts;
+      update(dt, true);
+      draw();
+      raf = requestAnimationFrame(frame);
+    };
+    const kick = () => {
+      if (!raf && shouldRun()) {
+        last = performance.now();
+        raf = requestAnimationFrame(frame);
+      }
+    };
+    const halt = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = 0;
+    };
+
+    // Reduced motion: simulate a few seconds once, render a single frame
+    // with the query mid-sweep and part of the field lit behind it.
+    const composeStill = () => {
+      ripples.length = 0;
+      pointer.active = false;
+      torch = 0;
+      time = 3;
+      beamZ = BEAM.zStart;
+      for (const r of rows) { r.lit = 0; r.pulse = 0; }
+      barH.fill(0); barV.fill(0);
+      yaw = BASE_YAW; pitch = BASE_PITCH; yawV = 0; pitchV = 0;
+      for (let i = 0; i < 612; i++) update(1 / 60, false);
+      yaw = BASE_YAW; pitch = BASE_PITCH;
+      draw();
+    };
+
+    const resize = (w: number, h: number) => {
+      cw = w; ch = h;
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = Math.max(1, Math.round(w * dpr));
+      canvas.height = Math.max(1, Math.round(h * dpr));
+      // Wide-short canvases (the stacked tablet/mobile band) get a slightly
+      // tighter height basis so the scene still fills the space.
+      worldScale = Math.min(w / 455, h / (w / h > 1.6 ? 345 : 385));
+      hostRect = null;
+      if (reduced) composeStill();
+      else if (!raf) draw();
+    };
+
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0].contentRect;
+      if (r.width > 0) resize(r.width, r.height);
+      kick();
+    });
+    ro.observe(host);
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        inView = entries[0].isIntersecting;
+        inView ? kick() : halt();
+      },
+      { threshold: 0.02 }
+    );
+    io.observe(host);
+
+    const onVis = () => (document.hidden ? halt() : kick());
+    document.addEventListener('visibilitychange', onVis);
+
+    const onReduced = () => {
+      reduced = reducedMq.matches;
+      if (reduced) { halt(); composeStill(); }
+      else kick();
+    };
+    reducedMq.addEventListener('change', onReduced);
+
+    // Theme flips re-read the tokens; a paused scene needs one repaint.
+    const mo = new MutationObserver(() => {
+      pal = readPalette();
+      if (!raf) reduced ? composeStill() : draw();
+    });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+    host.addEventListener(
+      'pointerenter',
+      (e) => {
+        if (e.pointerType !== 'mouse') return;
+        hostRect = canvas.getBoundingClientRect();
+        pointer.active = true;
+      },
+      { passive: true }
+    );
+    host.addEventListener(
+      'pointermove',
+      (e) => {
+        if (!pointer.active || !hostRect) return;
+        pointer.x = e.clientX - hostRect.left;
+        pointer.y = e.clientY - hostRect.top;
+      },
+      { passive: true }
+    );
+    host.addEventListener('pointerleave', () => (pointer.active = false), { passive: true });
+
+    // Crisp mono labels once the self-hosted font is in.
+    if (document.fonts?.ready) {
+      document.fonts.ready.then(() => { if (!raf) reduced ? composeStill() : draw(); });
+    }
+
+    window.addEventListener(
+      'pagehide',
+      () => {
+        halt();
+        ro.disconnect();
+        io.disconnect();
+        mo.disconnect();
+        document.removeEventListener('visibilitychange', onVis);
+        reducedMq.removeEventListener('change', onReduced);
+      },
+      { once: true }
+    );
+  }
+</script>

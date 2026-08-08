@@ -436,7 +436,7 @@ onUnmounted(() => {
                         <Badge
                           v-else-if="!expandedFields.has(field.name) && fieldValues[field.name]?.total_distinct"
                           variant="secondary"
-                          class="text-[9px] h-4 px-1.5 font-normal flex-shrink-0 bg-primary/10 text-primary"
+                          class="text-[9px] h-4 px-1.5 font-normal tabular-nums flex-shrink-0"
                           :title="`${fieldValues[field.name].total_distinct} unique values`"
                         >
                           {{ fieldValues[field.name].total_distinct }}

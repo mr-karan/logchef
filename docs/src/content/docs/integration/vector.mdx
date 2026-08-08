@@ -1,23 +1,30 @@
 ---
 title: Shipping Logs with Vector
-description: Collect and ship logs to ClickHouse using Vector for querying with Logchef
+description: Collect, shape, and ship logs with Vector to ClickHouse or VictoriaLogs for querying with Logchef.
 ---
 
-[Vector](https://vector.dev) is a lightweight, high-performance observability pipeline that can collect, transform, and route logs to ClickHouse. Since Logchef reads directly from ClickHouse, Vector is the recommended way to ingest logs.
+[Vector](https://vector.dev) is a lightweight, high-performance observability
+pipeline that can collect, transform, and route logs to ClickHouse or
+VictoriaLogs. Logchef queries either backend in place; Vector is the component
+that gets logs there.
 
 ## Quick Start
 
-If you're using the [Docker quick start](/getting-started/quickstart), Vector is already included and configured: demo syslog data flows into ClickHouse automatically. Skip to [Adapting for Real Sources](#adapting-for-real-sources) when you're ready to ship your own logs.
+If you're using the [Docker quick start](/getting-started/quickstart), Vector is
+already included and configured: demo syslog data flows into ClickHouse
+automatically. Skip to [Adapting for Real Sources](#adapting-for-real-sources)
+when you're ready to ship your own logs, or add the
+[VictoriaLogs sink](#send-the-same-events-to-victorialogs) below.
 
 For a standalone setup, you need three things:
 
-1. A ClickHouse table with the right schema
+1. A ClickHouse table with the right schema, or a reachable VictoriaLogs server
 2. A Vector config that transforms and ships logs
-3. Logchef pointed at the table
+3. Logchef pointed at the ClickHouse table or VictoriaLogs API
 
 ## Prerequisites
 
-- ClickHouse server running and accessible
+- ClickHouse or VictoriaLogs running and accessible
 - [Vector installed](https://vector.dev/docs/setup/installation/) (v0.30+)
 - A Logchef instance (for querying)
 
@@ -133,6 +140,57 @@ Run Vector:
 vector --config vector.toml
 ```
 
+## Send the Same Events to VictoriaLogs
+
+VictoriaLogs does not need a table schema. Point a second sink at the same
+`remap_logs` transform to dual-write the normalized event, or replace the
+ClickHouse sink if VictoriaLogs is your only store:
+
+```toml
+[sinks.victorialogs]
+type = "elasticsearch"
+inputs = ["remap_logs"]
+endpoints = ["http://localhost:9428/insert/elasticsearch/"]
+api_version = "v8"
+mode = "bulk"
+compression = "gzip"
+
+[sinks.victorialogs.healthcheck]
+enabled = false
+
+[sinks.victorialogs.request.headers]
+VL-Stream-Fields = "namespace,service_name"
+VL-Time-Field = "timestamp"
+VL-Msg-Field = "body"
+```
+
+The three VictoriaLogs headers tell the ingestion API how to map your event:
+
+- `VL-Time-Field` becomes VictoriaLogs' `_time`
+- `VL-Msg-Field` becomes `_msg`
+- `VL-Stream-Fields` defines stable stream identity
+
+Keep stream fields low-cardinality. Service, environment, namespace, and host
+are good candidates; request IDs and trace IDs are not. All remaining event
+fields stay available for LogsQL and LogchefQL filters.
+
+When Vector runs in a container, replace `localhost` with the VictoriaLogs
+service name on the shared Docker network. If your VictoriaLogs deployment is
+multi-tenant, add `AccountID` and `ProjectID` headers to this ingestion sink as
+well as to the Logchef source; writing to one tenant and querying another will
+look like successful ingestion followed by empty results.
+
+Verify the pipeline at the storage API before configuring Logchef:
+
+```bash
+curl --fail --data-urlencode 'query=namespace:="syslog"' \
+  http://localhost:9428/select/logsql/query
+```
+
+Then add a VictoriaLogs source in Logchef with timestamp field `_time` and
+severity field `severity_text`. See [Using VictoriaLogs with Logchef](/tutorials/victorialogs)
+for source authentication, tenancy, immutable scope, and query modes.
+
 ## Adapting for Real Sources
 
 Replace the `[sources]` and `[transforms]` sections for your log source. The sink stays the same.
@@ -215,7 +273,7 @@ source = '''
 
   .log_attributes = {
     "container.name": .container_name,
-    "container.image": .container_image,
+    "container.image": .image,
     "container.id": .container_id
   }
 
@@ -297,13 +355,17 @@ inputs = ["enrich_logs"]
 # ... rest stays the same
 ```
 
+If you also configured the VictoriaLogs sink, update its `inputs` to
+`["enrich_logs"]` too so both backends receive the same enriched event.
+
 ## Connect Logchef
 
-Once logs are flowing into ClickHouse:
+Once logs are flowing into your chosen backend:
 
 1. Log in to Logchef
 2. Go to **Sources > Add Source**
-3. Enter the ClickHouse connection details (host, port, database, table)
+3. Select **ClickHouse** and enter host/database/table details, or select
+   **VictoriaLogs** and enter its base URL and optional auth/tenant scope
 4. Create or select a team and assign the source
 
 Start querying:

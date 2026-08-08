@@ -44,6 +44,8 @@ import {
   KeyRound,
   LayoutDashboard,
   Activity,
+  ExternalLink,
+  LockKeyhole,
 } from "lucide-vue-next";
 
 import { useAuthStore } from "@/stores/auth";
@@ -373,6 +375,26 @@ const navItems = [
       </Sidebar>
 
       <SidebarInset class="flex flex-col flex-1 min-w-0 overflow-hidden h-screen">
+        <div
+          v-if="metaStore.demoReadOnly"
+          role="status"
+          class="flex shrink-0 items-center justify-center gap-2 border-b border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-foreground"
+        >
+          <LockKeyhole class="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span>
+            <strong class="font-semibold">Public demo:</strong>
+            explore dashboards and logs freely. Changes are disabled.
+          </span>
+          <a
+            href="https://logchef.app/getting-started/quickstart/"
+            target="_blank"
+            rel="noreferrer"
+            class="inline-flex shrink-0 items-center gap-1 font-medium underline decoration-amber-500/50 underline-offset-2 hover:decoration-current"
+          >
+            Self-host LogChef
+            <ExternalLink class="h-3 w-3" />
+          </a>
+        </div>
         <main class="flex-1 min-w-0 h-full flex flex-col">
           <div class="flex-1 px-3 py-3 min-w-0 overflow-y-auto">
             <router-view />

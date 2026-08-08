@@ -4,6 +4,7 @@ import { useBaseStore } from "./base";
 import { preferencesApi, type UserPreferences, type UserPreferencesResponse } from "@/api/preferences";
 import { useThemeStore, type ThemeMode } from "./theme";
 import { useAuthStore } from "./auth";
+import { useMetaStore } from "./meta";
 
 interface PreferencesState {
   preferences: UserPreferences;
@@ -106,6 +107,7 @@ function preferencesEqual(a: UserPreferences, b: UserPreferences) {
 export const usePreferencesStore = defineStore("preferences", () => {
   const themeStore = useThemeStore();
   const authStore = useAuthStore();
+  const metaStore = useMetaStore();
 
   const initialPreferences = readStoredPreferences(themeStore.preference);
 
@@ -133,7 +135,10 @@ export const usePreferencesStore = defineStore("preferences", () => {
   applyPreferences(state.data.value.preferences, { syncTheme: false });
 
   async function loadPreferences(forceReload = false) {
-    if (!authStore.isAuthenticated) {
+    // A public demo uses one shared account, so server preferences would make
+    // visitors overwrite each other's theme and explorer defaults. Keep the
+    // already-persisted browser copy authoritative in demo mode.
+    if (!authStore.isAuthenticated || metaStore.demoReadOnly) {
       state.data.value.isLoaded = true;
       return { success: true, data: preferences.value };
     }
@@ -184,7 +189,7 @@ export const usePreferencesStore = defineStore("preferences", () => {
   }
 
   async function syncPreferencesToServer(next: UserPreferences) {
-    if (!authStore.isAuthenticated) {
+    if (!authStore.isAuthenticated || metaStore.demoReadOnly) {
       return { success: true, data: next };
     }
 
@@ -203,7 +208,7 @@ export const usePreferencesStore = defineStore("preferences", () => {
 
     applyPreferences(next, { syncTheme: options?.syncTheme });
 
-    if (!authStore.isAuthenticated) {
+    if (!authStore.isAuthenticated || metaStore.demoReadOnly) {
       return { success: true, data: next };
     }
 

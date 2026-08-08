@@ -33,6 +33,16 @@ type Config struct {
 	RateLimit      RateLimitConfig      `koanf:"rate_limit"`
 	DashboardCache DashboardCacheConfig `koanf:"dashboard_cache"`
 	Provisioning   ProvisioningConfig   `koanf:"provisioning"`
+	Demo           DemoConfig           `koanf:"demo"`
+}
+
+// DemoConfig controls the public-demo safety mode. When ReadOnly is enabled,
+// Logchef continues to serve authentication, exploration, and query requests,
+// but rejects metadata mutations before they reach a handler. It is disabled
+// by default and should only be enabled deliberately by public demo operators.
+type DemoConfig struct {
+	ReadOnly          bool   `koanf:"read_only"`
+	ProvisioningToken string `koanf:"provisioning_token"`
 }
 
 // DashboardCacheConfig controls the per-dashboard server-side result cache, a

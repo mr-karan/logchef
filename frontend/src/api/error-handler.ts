@@ -7,6 +7,7 @@ export interface APIErrorResponse {
   message: string;
   error_type: string;
   data?: any;
+  _toastShown?: boolean;
 }
 
 // Error type mapping
@@ -16,7 +17,7 @@ const ERROR_TITLES: Record<string, string> = {
   AuthorizationError: "Authorization Error",
   NotFoundError: "Not Found",
   RateLimitError: "Rate Limit Exceeded",
-  DemoModeError: "Demo Mode Restriction",
+  DemoModeError: "Read-only demo",
   GeneralError: "Error",
   GeneralException: "System Error",
 };
@@ -121,6 +122,11 @@ export function isCanceledError(error: unknown): boolean {
   return false;
 }
 
+/** Returns true when an interceptor already surfaced this error to the user. */
+export function hasShownErrorToast(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "_toastShown" in error && (error as APIErrorResponse)._toastShown);
+}
+
 /**
  * Shows a toast notification for an error
  */
@@ -141,4 +147,3 @@ export function showErrorToast(error: unknown, customMessage?: string): void {
     duration: TOAST_DURATION.ERROR
   });
 }
-

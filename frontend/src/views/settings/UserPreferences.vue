@@ -9,10 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { usePreferencesStore } from "@/stores/preferences";
 import { useThemeStore, type ThemeMode } from "@/stores/theme";
+import { useMetaStore } from "@/stores/meta";
 import type { DisplayModePreference, TimezonePreference } from "@/api/preferences";
 
 const preferencesStore = usePreferencesStore();
 const themeStore = useThemeStore();
+const metaStore = useMetaStore();
 const { preferences } = storeToRefs(preferencesStore);
 
 onMounted(() => {
@@ -24,6 +26,11 @@ const isSaving = computed(
     preferencesStore.isLoadingOperation("updatePreferences") ||
     preferencesStore.isLoadingOperation("syncPreferences")
 );
+
+const saveStatus = computed(() => {
+  if (metaStore.demoReadOnly) return "Saved in this browser.";
+  return isSaving.value ? "Saving changes…" : "Changes save automatically.";
+});
 
 const themePreference = computed({
   get: () => themeStore.preference,
@@ -63,7 +70,7 @@ const fieldsPanelOpen = computed({
     >
       <template #actions>
         <p class="text-xs text-muted-foreground">
-          {{ isSaving ? "Saving changes…" : "Changes save automatically." }}
+          {{ saveStatus }}
         </p>
       </template>
     </PageHeader>

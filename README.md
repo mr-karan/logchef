@@ -2,31 +2,44 @@
 
 <p align="center"><img src="LOGCHEF.svg" alt="Logchef Logo" /></p>
 
-<p align="center">Self-hosted log analytics and log explorer for ClickHouse and VictoriaLogs — single binary, multi-datasource, open source</p>
+<p align="center"><strong>The open-source log workspace for ClickHouse and VictoriaLogs.</strong><br />Search, live tail, dashboards, alerts, and access control in one self-hosted binary.</p>
 
 <p align="center">
   <a href="https://demo.logchef.app"><strong>Try Demo</strong></a> ·
   <a href="https://logchef.app"><strong>Read Documentation</strong></a> ·
-  <a href="https://mrkaran.dev/posts/announcing-logchef/"><strong>Announcement Blog Post</strong></a>
+  <a href="https://logchef.app/changelog/#v2.0.0"><strong>What's new in v2.0</strong></a>
 </p>
 
 <p align="center">
   <img alt="Logchef Log Explorer" src="docs/public/screenshots/hero-light.png">
 </p>
 
-Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of existing log backends. It runs as a single binary and currently supports both ClickHouse and VictoriaLogs as datasource backends, providing a unified log explorer for exploration, saved queries, alerting, and access control — without reshaping how you store logs.
+Logchef is a lightweight, self-hosted log analytics and observability platform for teams that want a strong query and control plane on top of the log backends they already run. Connect ClickHouse, VictoriaLogs, or both. Logchef gives them one workflow for exploration, dashboards, saved queries, alerting, and access control — without moving or reshaping your data.
 
 If you are evaluating VictoriaLogs specifically, start with the [VictoriaLogs guide](https://logchef.app/tutorials/victorialogs/).
+
+## Logchef 2.0
+
+Version 2.0 is a major expansion of what Logchef can sit in front of and what teams can do once it is there:
+
+- **VictoriaLogs is a first-class datasource.** Use the same LogchefQL search workflow across backends, drop into native LogsQL when you need it, and carry source-level auth, tenant headers, and immutable scope through every query.
+- **Build real operational dashboards.** Mix ClickHouse and VictoriaLogs panels on one grid, drag and resize them in place, and choose time series, stat, breakdown, or table views.
+- **Follow incidents as they unfold.** Live tail streams matching rows into the explorer and CLI on both backends, including native VictoriaLogs tailing.
+- **Run without an identity provider.** Built-in email and password authentication works on its own or alongside OIDC; OIDC deployments can also auto-provision new users safely.
+- **Investigate from the terminal.** The CLI understands both backends and includes query, native SQL/LogsQL, explain, histogram, fields, history, tail, doctor, and browser hand-off workflows.
+- **Ship it with more confidence.** v2 adds dashboard caching, ClickHouse query guardrails, opt-in rate limiting, streaming for large ClickHouse results, and a broad security and reliability pass.
+
+Read the [v2.0 release notes](https://logchef.app/changelog/#v2.0.0) or [try the live demo](https://demo.logchef.app).
 
 ## Features
 
 - **Query-first log exploration**: Fast filtering with LogchefQL plus native SQL or LogsQL depending on the source.
 - **Live tail**: Stream matching logs in real time from the explorer.
-- **Dashboards**: Multi-panel views (time series, stat, table) on a shared time range, with a direct-manipulation grid editor.
-- **AI Query Assistant**: Turn natural language into ClickHouse SQL instantly.
-- **Real-time alerting**: Schedule rules and send email or webhook notifications.
+- **Dashboards**: Multi-panel views (time series, stat, breakdown, table) on a shared time range, with a direct-manipulation grid editor.
+- **AI Query Assistant**: Turn natural language into LogchefQL, ClickHouse SQL, or LogsQL.
+- **Scheduled alerting**: Evaluate source-aware rules and send email or webhook notifications.
 - **OIDC or local auth + RBAC**: SSO out of the box, or run without an external identity provider using built-in email+password authentication.
-- **Datasource-first**: Connect ClickHouse tables or VictoriaLogs instances without reshaping your storage layer.
+- **Datasource-first**: Connect ClickHouse tables, VictoriaLogs instances, or both without reshaping your storage layer.
 - **Single binary**: One executable, no runtime dependencies.
 - **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
@@ -49,31 +62,31 @@ Access the Logchef interface at `http://localhost:8125`.
 
 ## CLI
 
-Logchef includes a powerful CLI for querying logs directly from your terminal.
+Logchef includes a cross-platform CLI for querying and investigating logs directly from your terminal.
 
 ### Install
 
 Find the latest CLI version on the [releases page](https://github.com/mr-karan/logchef/releases?q=cli&expanded=true), then set `CLI_VERSION` and download the build for your platform:
 
 ```bash
-# Set to the latest cli-v* tag from the releases page (e.g. cli-v0.2.0)
-CLI_VERSION=cli-vX.Y.Z
-BASE=https://github.com/mr-karan/logchef/releases/download/$CLI_VERSION
+# Set to the latest cli-v* version from the releases page
+CLI_VERSION="0.2.1"
+BASE=https://github.com/mr-karan/logchef/releases/download/cli-v${CLI_VERSION}
 
 # macOS (Apple Silicon)
-curl -LO $BASE/logchef-darwin-arm64.tar.gz
+curl -LO $BASE/logchef-cli_${CLI_VERSION}_macos-aarch64.tar.gz
 
 # macOS (Intel)
-curl -LO $BASE/logchef-darwin-amd64.tar.gz
+curl -LO $BASE/logchef-cli_${CLI_VERSION}_macos-x86_64.tar.gz
 
 # Linux (x86_64)
-curl -LO $BASE/logchef-linux-amd64.tar.gz
+curl -LO $BASE/logchef-cli_${CLI_VERSION}_linux-x86_64-musl.tar.gz
 
 # Linux (ARM64)
-curl -LO $BASE/logchef-linux-arm64.tar.gz
+curl -LO $BASE/logchef-cli_${CLI_VERSION}_linux-aarch64-musl.tar.gz
 
 # Extract and install
-tar -xzf logchef-*.tar.gz
+tar -xzf logchef-cli_*.tar.gz
 sudo mv logchef /usr/local/bin/
 ```
 

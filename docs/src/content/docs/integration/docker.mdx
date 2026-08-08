@@ -1,17 +1,23 @@
 ---
 title: Docker Logs
-description: Collect logs from Docker containers into ClickHouse with Vector's docker_logs source, then explore them in Logchef.
+description: Collect Docker container logs with Vector, store them in ClickHouse or VictoriaLogs, and explore them in Logchef.
 ---
 
-[Vector](https://vector.dev)'s `docker_logs` source connects to the Docker daemon socket and streams stdout/stderr from every running container, no log driver configuration needed. This is the simplest path from plain Docker (or Docker Compose) hosts into ClickHouse for querying with Logchef.
+[Vector](https://vector.dev)'s `docker_logs` source connects to the Docker daemon
+socket and streams stdout/stderr from every running container, no log driver
+configuration needed. This is the simplest path from plain Docker (or Docker
+Compose) hosts into ClickHouse or VictoriaLogs for querying with Logchef.
 
 ## Prerequisites
 
-- ClickHouse server running and accessible
+- ClickHouse or VictoriaLogs running and accessible
 - Docker Engine with the daemon socket available (`/var/run/docker.sock`)
 - A Logchef instance (for querying)
 
-## Create the ClickHouse Table
+## Create the ClickHouse Table (ClickHouse only)
+
+Skip this section when VictoriaLogs is your storage backend; it discovers fields
+from ingested events and does not need a table definition.
 
 ```sql
 CREATE TABLE IF NOT EXISTS default.logs
@@ -101,11 +107,40 @@ healthcheck.enabled = false
 skip_unknown_fields = true
 ```
 
+### VictoriaLogs sink
+
+To store the same normalized container events in VictoriaLogs, add this sink and
+either keep the ClickHouse sink for dual-write or remove it:
+
+```toml
+[sinks.victorialogs]
+type = "elasticsearch"
+inputs = ["remap_docker_logs"]
+endpoints = ["http://victorialogs:9428/insert/elasticsearch/"]
+api_version = "v8"
+mode = "bulk"
+compression = "gzip"
+
+[sinks.victorialogs.healthcheck]
+enabled = false
+
+[sinks.victorialogs.request.headers]
+VL-Stream-Fields = "namespace,service_name"
+VL-Time-Field = "timestamp"
+VL-Msg-Field = "body"
+```
+
+This maps `timestamp` to VictoriaLogs' `_time` and `body` to `_msg`, while
+keeping the other event fields queryable. Keep the stream-field list stable and
+low-cardinality; do not add container IDs, request IDs, or trace IDs.
+
 Vector's `docker_logs` source emits `container_id`, `container_name`, `image`, `stream` (`stdout`/`stderr`), `label` (container labels as an object), and a `timestamp` already parsed from the Docker log entry. Use `include_containers` / `exclude_containers` (prefix match) or `include_images` / `include_labels` to scope collection to specific services instead of `["*"]`.
 
 ## Run with Docker Compose
 
-Mount the Docker socket read-only so Vector can talk to the daemon, and give it access to `/var/lib/docker/containers` for the log file bind-mounts:
+Mount the Docker socket read-only so Vector can talk to the daemon. This example
+starts both storage backends; keep the one your Vector config targets, or use
+both sinks to compare them in one Logchef dashboard:
 
 ```yaml
 services:
@@ -114,7 +149,6 @@ services:
     volumes:
       - ./vector.toml:/etc/vector/vector.toml:ro
       - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
     command: ["--config", "/etc/vector/vector.toml"]
     restart: unless-stopped
 
@@ -126,8 +160,19 @@ services:
     volumes:
       - clickhouse-data:/var/lib/clickhouse
 
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    command:
+      - -storageDataPath=/victoria-logs-data
+      - -retentionPeriod=30d
+    ports:
+      - "9428:9428"
+    volumes:
+      - victorialogs-data:/victoria-logs-data
+
 volumes:
   clickhouse-data:
+  victorialogs-data:
 ```
 
 Or run Vector standalone against an existing Docker host:
@@ -159,12 +204,16 @@ source = '''
 
 ## Connect Logchef
 
-Once logs are flowing into ClickHouse:
+Once logs are flowing:
 
 1. Log in to Logchef
 2. Go to **Sources > Add Source**
-3. Enter the ClickHouse connection details (host, port, database, table)
+3. Add the ClickHouse table, the VictoriaLogs base URL, or one source for each
 4. Create or select a team and assign the source
+
+For VictoriaLogs, use timestamp field `_time` and severity field
+`severity_text`. If Logchef runs in the same compose project, use
+`http://victorialogs:9428` as the base URL rather than `localhost`.
 
 Start querying:
 
@@ -178,6 +227,13 @@ service_name="checkout-api" and log_attributes.docker.stream="stderr"
 
 ```
 log_attributes."compose.service"="api" and body~"connection refused"
+```
+
+The same LogchefQL filters work on the VictoriaLogs source. You can also switch
+that source to native LogsQL:
+
+```text
+namespace:="docker" AND severity_text:="ERROR" | fields _time, service_name, _msg
 ```
 
 ## Next steps

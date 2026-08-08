@@ -90,10 +90,7 @@ const jsonLd = {
       width: min(1100px, 120vw);
       height: 460px;
       transform: translateX(-50%);
-      background:
-        radial-gradient(circle at 30% 0%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 60%),
-        radial-gradient(circle at 75% 10%, color-mix(in srgb, var(--color-purple) 12%, transparent), transparent 55%);
-      opacity: 0.7;
+      background: radial-gradient(circle at 50% 0%, var(--glow-blue) 0%, var(--glow-blue-mid) 42%, transparent 70%);
       pointer-events: none;
       z-index: 0;
     }
@@ -103,14 +100,14 @@ const jsonLd = {
       z-index: 1;
       max-width: 720px;
       margin: 0 auto;
-      padding: 6.5rem 1.5rem 5rem;
+      padding: 7.5rem 1.5rem 5rem;
     }
 
     /* ---- Breadcrumb / back ---- */
     .crumb {
       display: inline-flex; align-items: center; gap: 0.4rem;
       font-family: var(--font-mono); font-size: 0.78rem;
-      letter-spacing: 0.02em; color: var(--color-text-dim);
+      letter-spacing: 0.02em; color: var(--color-text-muted);
       margin-bottom: 2rem; transition: color 0.15s ease;
     }
     .crumb svg { width: 14px; height: 14px; }
@@ -159,7 +156,7 @@ const jsonLd = {
     .byline-author { font-size: 0.9rem; font-weight: 600; color: var(--color-text); }
     .byline-sub {
       font-family: var(--font-mono); font-size: 0.76rem;
-      color: var(--color-text-dim); display: flex; align-items: center; gap: 0.5rem;
+      color: var(--color-text-muted); display: flex; align-items: center; gap: 0.5rem;
     }
     .byline-sub .dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; }
 
@@ -295,20 +292,19 @@ const jsonLd = {
     .post-nav { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 2.5rem; }
     .nav-card {
       display: flex; flex-direction: column; gap: 0.4rem;
-      padding: 1.1rem 1.25rem; border-radius: 12px;
+      padding: 1.1rem 1.25rem; border-radius: 10px;
       border: 1px solid var(--color-border); background: var(--color-surface);
-      transition: border-color 0.15s ease, transform 0.15s ease, background 0.15s ease;
+      transition: border-color 0.15s ease;
       color: inherit;
     }
     .nav-card:hover {
-      text-decoration: none; transform: translateY(-2px);
+      text-decoration: none;
       border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-border));
-      background: color-mix(in srgb, var(--color-accent) 4%, var(--color-surface));
     }
     .nav-card.is-next { text-align: right; align-items: flex-end; }
     .nav-card .label {
       font-family: var(--font-mono); font-size: 0.7rem; text-transform: uppercase;
-      letter-spacing: 0.08em; color: var(--color-text-dim);
+      letter-spacing: 0.16em; color: var(--color-text-muted);
       display: flex; align-items: center; gap: 0.4rem;
     }
     .nav-card .label svg { width: 13px; height: 13px; }
@@ -320,12 +316,9 @@ const jsonLd = {
     /* CTA */
     .post-cta {
       position: relative; overflow: hidden;
-      border-radius: 16px; padding: 2rem;
-      border: 1px solid var(--color-border);
-      background:
-        radial-gradient(circle at 15% 0%, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 55%),
-        radial-gradient(circle at 90% 120%, color-mix(in srgb, var(--color-purple) 12%, transparent), transparent 50%),
-        var(--color-surface);
+      border-radius: 12px; padding: 2rem;
+      border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+      background: var(--color-surface);
     }
     .post-cta h3 { font-size: 1.25rem; font-weight: 650; letter-spacing: -0.02em; margin-bottom: 0.5rem; }
     .post-cta p { color: var(--color-text-secondary); font-size: 0.95rem; margin-bottom: 1.25rem; max-width: 46ch; }
@@ -337,7 +330,7 @@ const jsonLd = {
       border: 1px solid transparent; transition: all 0.15s ease;
     }
     .cta-btn svg { width: 16px; height: 16px; }
-    .cta-btn.primary { background: var(--color-accent); color: #fff; }
+    .cta-btn.primary { background: var(--color-accent-solid); color: #fff; }
     .cta-btn.primary:hover { background: var(--color-accent-hover); text-decoration: none; }
     .cta-btn.ghost { background: transparent; color: var(--color-text); border-color: var(--color-border); }
     .cta-btn.ghost:hover { border-color: var(--color-text-dim); background: color-mix(in srgb, var(--color-bg) 40%, transparent); text-decoration: none; }

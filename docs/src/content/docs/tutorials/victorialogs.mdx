@@ -10,7 +10,8 @@ Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared 
 - Add a VictoriaLogs datasource with optional tenant headers and immutable source scope
 - Query in **LogchefQL** for common filtering workflows
 - Drop into **LogsQL** for native VictoriaLogs features
-- Explore histograms, field values, and saved queries
+- Explore histograms, field values, saved queries, dashboards, and live tail
+- Generate LogchefQL or LogsQL from natural language when the AI assistant is enabled
 - Create alerts in either:
   - **Condition mode** using LogchefQL
   - **Native mode** using LogsQL
@@ -19,22 +20,72 @@ Logchef supports VictoriaLogs as a first-class datasource. The goal is a shared 
 
 Logchef does not ingest into VictoriaLogs directly. You send logs to VictoriaLogs using your normal shipper, then point Logchef at the VictoriaLogs API.
 
+### End-to-end local example
+
+Start a single-node VictoriaLogs server:
+
+```bash
+docker run -d --name victorialogs \
+  -p 9428:9428 \
+  -v victorialogs-data:/victoria-logs-data \
+  victoriametrics/victoria-logs:latest \
+  -storageDataPath=/victoria-logs-data \
+  -retentionPeriod=7d
+
+until curl --fail --silent http://localhost:9428/health >/dev/null; do
+  sleep 1
+done
+```
+
+That command is enough when Logchef runs on the host. If you started Logchef
+with the Docker quick start, attach VictoriaLogs to its network before adding
+the source:
+
+```bash
+docker network connect logchef_net victorialogs
+```
+
+Send a few JSON lines through the native ingestion endpoint. The special timestamp
+value `0` tells VictoriaLogs to use its current time, which keeps this example visible
+in Logchef's default **Last 15 minutes** range:
+
+```bash
+printf '%s\n' \
+  '{"timestamp":"0","service":"checkout-api","env":"demo","level":"info","message":"checkout completed","status_code":200}' \
+  '{"timestamp":"0","service":"checkout-api","env":"demo","level":"error","message":"payment gateway timeout","status_code":504}' \
+  '{"timestamp":"0","service":"catalog-api","env":"demo","level":"warn","message":"inventory running low","status_code":200}' \
+  | curl --fail --data-binary @- \
+      -H 'Content-Type: application/stream+json' \
+      'http://localhost:9428/insert/jsonline?_stream_fields=service,env&_time_field=timestamp&_msg_field=message'
+```
+
+Verify ingestion before involving Logchef:
+
+```bash
+curl --fail --data-urlencode 'query=env:="demo"' \
+  http://localhost:9428/select/logsql/query
+```
+
 The local development setup in this repo uses Vector with the VictoriaLogs Elasticsearch-compatible ingestion endpoint:
 
 ```toml
 [sinks.victorialogs]
 type = "elasticsearch"
-inputs = ["remap_logs"]
+inputs = ["remap_victorialogs"]
 endpoints = ["http://localhost:9428/insert/elasticsearch/"]
 mode = "bulk"
 api_version = "v8"
 compression = "gzip"
 
 [sinks.victorialogs.request.headers]
-VL-Stream-Fields = "service,host,env"
-VL-Time-Field = "datetime"
-VL-Msg-Field = "message"
+VL-Stream-Fields = "service,env,pipeline"
+VL-Time-Field = "timestamp"
+VL-Msg-Field = "message,msg,_msg"
 ```
+
+Choose low-cardinality identity fields such as service, environment, host, or
+namespace for `VL-Stream-Fields`. Do not use request IDs, trace IDs, or other
+per-event values as stream fields.
 
 See the official VictoriaLogs docs for more ingestion patterns:
 
@@ -44,7 +95,8 @@ See the official VictoriaLogs docs for more ingestion patterns:
 
 ## Add The Datasource
 
-When adding a VictoriaLogs source in Logchef:
+As a global admin, open **Sources**, choose **Add Source**, select
+**VictoriaLogs**, and configure:
 
 - Set the **Base URL** to the VictoriaLogs API endpoint
 - Choose auth mode:
@@ -52,8 +104,15 @@ When adding a VictoriaLogs source in Logchef:
   - **basic auth** — username + password, sent as an `Authorization: Basic ...` header
   - **bearer token** — sent as `Authorization: Bearer <token>`
 - Set **Account ID** and **Project ID** together if you use multi-tenant VictoriaLogs — both are required together, and both must be numeric (VictoriaLogs tenants are `uint32` account/project IDs). Logchef sends them as `AccountID` / `ProjectID` request headers on every call.
-- Optionally add **custom headers**, e.g. an API key for a fronting proxy
 - Optionally define an **Immutable Scope Query**
+- Leave **Timestamp Field** as `_time` for a normal VictoriaLogs setup and set
+  **Severity Field** to the field your pipeline emits, such as `level`
+
+The base URL must be reachable from the Logchef process. For example, use
+`http://localhost:9428` when both run directly on the host, or the VictoriaLogs
+service name (such as `http://victorialogs:9428`) when they share a Docker
+network. Do not use `localhost` from inside the Logchef container to refer to a
+different container.
 
 Examples of immutable scope:
 
@@ -67,7 +126,17 @@ kubernetes.namespace:="prod"
 
 Logchef applies that scope server-side to every query, histogram, field-values lookup, live tail, and alert evaluation for that datasource — it can't be overridden from the query editor.
 
-When you save the source, Logchef validates the connection by checking `/health` and then running a small `field_names` query with your configured auth, tenant headers, and scope applied. This catches a wrong base URL, bad credentials, or an invalid scope filter at setup time rather than on the first real query. Editing a source later and leaving a credential field blank keeps the previously-stored value — you only need to re-enter a username/password/token when you're changing it (or switching auth mode to "none", which clears any stored credentials for that source).
+When you save the source, Logchef checks `/health`, field discovery, and a
+one-row query with your configured auth, tenant headers, and scope applied. This
+catches a wrong base URL, proxy ACL that allows metadata but blocks queries, bad
+credentials, or an invalid scope filter before the first real query. Editing a
+source later and leaving a credential field blank keeps the previously-stored
+value — you only need to re-enter a username/password/token when you're changing
+it. Switching auth mode to **No Auth** clears stored credentials for that source.
+
+Finally, open **Access > Teams**, select the team that should query this data,
+and add the new source. Creating a source does not automatically grant every
+team access to it.
 
 ## Query Modes
 
@@ -108,6 +177,27 @@ Use native LogsQL when you need:
 - `unpack_json`
 - other VictoriaLogs-native pipe flows
 
+The explorer applies its selected time range separately through VictoriaLogs'
+`start` and `end` parameters. You normally should not add a `_time:` filter to
+an interactive LogsQL query unless you intentionally want a second, narrower
+time constraint.
+
+## Dashboards
+
+VictoriaLogs works with all four dashboard panel types: time series, stat,
+breakdown, and table. A useful first dashboard for the sample data above is:
+
+- a **Stat** panel with `level="error"`
+- a **Time series** panel with `env="demo"`, grouped by `service`
+- a **Breakdown** panel with `env="demo"`, grouped by `level`
+- a **Table** panel with `env="demo"`
+
+Dashboard time series, stat, and breakdown panels derive counts from histogram
+data. Use a filter in those panels; VictoriaLogs pipes are ignored by the hits
+API used to build them. A table panel executes the full native LogsQL query, so
+it can use pipes such as `fields` or `unpack_json`. See [Dashboards](/features/dashboards)
+for the complete panel and caching behavior.
+
 ## Live Tail
 
 VictoriaLogs sources support **Live Tail** from the explorer's Live toggle. Unlike
@@ -128,17 +218,25 @@ Your source's immutable scope filter and tenant headers apply to live tail the
 same way they apply to regular queries — a tail can only ever stream the data the
 source is scoped to.
 
+## AI-assisted queries
+
+When [AI query generation](/features/ai-sql-generation) is enabled, the assistant
+uses the selected source and editor mode to choose the output language. It
+generates LogchefQL in LogchefQL mode and VictoriaLogs LogsQL in native mode.
+The generated query should still be reviewed before running it over a wide time
+range.
+
 ## Known limitations
 
 A few Logchef features are ClickHouse-only for now and are not available on
 VictoriaLogs sources:
 
-- **AI SQL generation**: the AI assistant only writes ClickHouse SQL.
 - **Log context** ("surrounding logs"): jumping from a row to the logs around it.
 - **Exports / downloads**: streaming a full result set to CSV or NDJSON.
 
 Everything else in this guide (explore, histograms, field values, saved queries,
-live tail, and alerting) works the same as on ClickHouse.
+dashboards, live tail, AI-assisted queries, and alerting) is available for
+VictoriaLogs sources.
 
 ## Result Views
 
@@ -210,7 +308,8 @@ For VictoriaLogs sources, good defaults are:
 
 - Timestamp field: `_time`
 - Severity field: `level` or your dataset’s severity field
-- Message field in your dataset: `_msg` if you use `VL-Msg-Field`
+- Message field: `_msg` (VictoriaLogs maps the first non-empty field named by
+  `VL-Msg-Field` into this canonical field)
 
 For cleaner exploration, prefer stream fields that represent stable source identity, such as:
 

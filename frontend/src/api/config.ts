@@ -115,8 +115,9 @@ api.interceptors.response.use(
       if (error.response?.data?.error_type === "DEMO_INSTANCE") {
         const demoError = {
           status: "error",
-          message: error.response.data.message || "This operation is not permitted in demo mode",
+          message: error.response.data.message || "This public demo is read-only. Explore dashboards and logs freely; self-host LogChef to create or change resources.",
           error_type: "DemoModeError",
+          _toastShown: true,
         };
         showErrorToast(demoError);
         return Promise.reject(demoError);

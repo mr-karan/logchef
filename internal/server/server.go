@@ -221,6 +221,7 @@ func (s *Server) setupRoutes() {
 	// --- Public Routes ---
 	api.Get("/health", s.handleHealth)
 	api.Get("/meta", s.handleGetMeta)
+	api.Use(s.enforceDemoReadOnly)
 
 	// --- Authentication Routes ---
 	// The unauthenticated auth/token endpoints are rate-limited per client IP

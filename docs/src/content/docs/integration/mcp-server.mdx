@@ -5,7 +5,7 @@ description: Connect AI coding assistants to Logchef for natural language log an
 
 import { Card, CardGrid, Tabs, TabItem, LinkCard } from "@astrojs/starlight/components";
 
-The [Logchef MCP server](https://github.com/mr-karan/logchef-mcp) lets AI assistants query logs, explore schemas, manage alerts, and administer your Logchef deployment through the [Model Context Protocol](https://modelcontextprotocol.io/). It exposes 37 tools across 10 categories, plus resources and guided investigation prompts.
+The [Logchef MCP server](https://github.com/mr-karan/logchef-mcp) lets AI assistants query logs, explore schemas, manage alerts, and administer your Logchef deployment through the [Model Context Protocol](https://modelcontextprotocol.io/). It also provides read-only resources and guided investigation prompts.
 
 ## Prerequisites
 
@@ -220,7 +220,7 @@ go build -o logchef-mcp ./cmd/logchef-mcp
 
 ## Available Tools
 
-37 tools organized into 10 categories. Each tool includes MCP annotations indicating whether it is read-only, non-destructive, or destructive.
+Tools are organized by capability. Each one includes MCP annotations indicating whether it is read-only, non-destructive, or destructive.
 
 ### Profile and Metadata
 
@@ -277,7 +277,7 @@ go build -o logchef-mcp ./cmd/logchef-mcp
 
 | Tool | Description |
 |------|-------------|
-| `generate_query` | Generate a ClickHouse SQL query from natural language (requires AI enabled on Logchef) |
+| `generate_query` | Generate source-native ClickHouse SQL or LogsQL from natural language (requires AI enabled on Logchef) |
 | `get_all_field_dimensions` | Get top values for all LowCardinality fields in one call |
 
 ### Telemetry

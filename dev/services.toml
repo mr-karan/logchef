@@ -1,0 +1,93 @@
+# Realistic service logs for demos and screenshots: believable services,
+# messages, and severity mix, written into default.syslogs alongside the
+# stock syslog stream. Run with: vector -c services.toml (from dev/).
+data_dir = "/tmp/logchef-vector-services"
+
+[sources.tick]
+type = "demo_logs"
+format = "json"
+interval = 0.2
+
+[transforms.service_logs]
+inputs = ["tick"]
+type = "remap"
+source = '''
+  services = ["payments", "checkout", "auth", "edge-gateway", "search", "notifications"]
+  regions = ["ap-south", "us-east", "eu-central"]
+
+  svc = get!(services, [random_int(0, 6)])
+  region = get!(regions, [random_int(0, 3)])
+  dur = random_int(3, 240)
+  roll = random_int(0, 100)
+
+  lvl = "INFO"
+  body = ""
+  if roll < 58 {
+    msgs = [
+      "request completed in " + to_string(dur) + "ms",
+      "card authorization approved in " + to_string(dur) + "ms",
+      "session refreshed for device",
+      "cache hit: product catalog v42",
+      "webhook delivered to partner endpoint in " + to_string(dur) + "ms",
+      "background job finished: reconcile-ledger",
+      "config reloaded from control plane"
+    ]
+    body = get!(msgs, [random_int(0, 7)])
+  } else if roll < 72 {
+    lvl = "DEBUG"
+    msgs = [
+      "grpc call ListOrders took " + to_string(dur) + "ms",
+      "token cache miss, fetching from issuer",
+      "retry budget remaining: 87%",
+      "connection pool checkout in " + to_string(dur) + "ms"
+    ]
+    body = get!(msgs, [random_int(0, 4)])
+  } else if roll < 88 {
+    lvl = "WARN"
+    slow = random_int(300, 1400)
+    msgs = [
+      "slow query took " + to_string(slow) + "ms: orders_by_customer",
+      "retrying upstream call: attempt 2/3",
+      "rate limit near threshold for client acme-mobile",
+      "connection pool 90% utilized",
+      "tls certificate expires in 13 days"
+    ]
+    body = get!(msgs, [random_int(0, 5)])
+  } else {
+    lvl = "ERROR"
+    slow = random_int(500, 3000)
+    msgs = [
+      "upstream timeout on /v1/charge after " + to_string(slow) + "ms",
+      "card authorization declined: insufficient_funds",
+      "failed to publish event to kafka: broker unavailable",
+      "db connection reset by peer, retrying",
+      "circuit breaker open for provider stripe-eu"
+    ]
+    body = get!(msgs, [random_int(0, 5)])
+  }
+
+  .timestamp = format_timestamp!(now(), format: "%Y-%m-%d %H:%M:%S.%f")
+  .lvl = lvl
+  .service_name = svc
+  .namespace = "prod"
+  .body = body
+  .log_attributes = {
+    "region": region,
+    "duration_ms": to_string(dur)
+  }
+
+  del(.message)
+  del(.source_type)
+  del(.host)
+  del(."user-identifier")
+'''
+
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["service_logs"]
+endpoint = "http://localhost:8123"
+database = "default"
+table = "syslogs"
+compression = "gzip"
+healthcheck.enabled = false
+skip_unknown_fields = true

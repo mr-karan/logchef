@@ -1,424 +1,802 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
+import HeroLogAnimation from '../components/home/HeroLogAnimation.astro';
 ---
 
 <BaseLayout
-  title="Logchef — Multi-Datasource Log Explorer"
-  description="Logchef is an open-source, self-hosted log exploration and alerting UI for ClickHouse and VictoriaLogs. Single binary, no per-seat pricing, no vendor lock-in."
+  title="Logchef 2.0: Open-Source Log Analytics for ClickHouse and VictoriaLogs"
+  description="Search, live tail, dashboards, and alerts for logs stored in ClickHouse or VictoriaLogs. One open-source, self-hosted binary with no new log storage layer."
   activeNav="home"
 >
   <style>
-    main { max-width: 1200px; margin: 0 auto; overflow: clip; }
+    /* ------------------------------------------------------------------ *
+     * Homepage visual language carried over from the Logchef 2.0 film.
+     * Blue is the only brand colour. Thin borders, fine grid, restrained
+     * glow. Mono is structural chrome, not body copy.
+     * ------------------------------------------------------------------ */
 
+    .wrap { max-width: 1180px; margin: 0 auto; padding-inline: 1.5rem; }
+
+    /* ---------------- Hero ---------------- */
     .hero {
       position: relative;
-      min-height: 85vh;
-      display: flex;
-      align-items: center;
-      padding: 7rem 1.5rem 5rem;
+      padding: 9rem 0 0;
       overflow: hidden;
+      border-bottom: 1px solid var(--color-border);
     }
-    .hero::before {
+    .hero .bg-glow {
+      width: min(1100px, 130vw); height: min(1100px, 130vw);
+      top: -55%; left: 50%; transform: translateX(-50%);
+    }
+
+    /* Pointer torchlight across the whole hero: a brighter, accent-tinted
+       copy of the grid revealed through a small radial mask that follows
+       the pointer. The parent .bg-grid's own mask still applies, so the
+       reveal fades out toward the bottom of the hero like the base grid. */
+    .hero .bg-grid::after {
       content: "";
-      position: absolute;
-      inset: -20% -10% auto;
-      height: 70%;
-      background:
-        radial-gradient(circle at 20% 20%, color-mix(in srgb, var(--color-accent) 15%, transparent), transparent 60%),
-        radial-gradient(circle at 80% 10%, color-mix(in srgb, var(--color-purple) 18%, transparent), transparent 55%);
-      opacity: 0.7;
-      pointer-events: none;
+      position: absolute; inset: 0;
+      background-image:
+        linear-gradient(color-mix(in srgb, var(--color-accent) 24%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--color-accent) 24%, transparent) 1px, transparent 1px);
+      background-size: 72px 72px;
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      mask-image: radial-gradient(circle 250px at var(--torch-x, 50%) var(--torch-y, 40%), #000 0%, transparent 72%);
+      -webkit-mask-image: radial-gradient(circle 250px at var(--torch-x, 50%) var(--torch-y, 40%), #000 0%, transparent 72%);
     }
-    .hero-inner {
-      max-width: 1280px;
-      margin: 0 auto;
+    .hero.torch-on .bg-grid::after { opacity: 1; }
+    .hero-inner { position: relative; z-index: 1; }
+
+    /* Two columns at desktop: copy left, the log observatory right. The
+       scene is decorative canvas, so the copy column keeps priority and
+       the visual collapses under it on smaller screens. */
+    .hero-grid {
       display: grid;
-      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
-      gap: clamp(2rem, 6vw, 5rem);
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
+      gap: clamp(1.5rem, 3vw, 3rem);
       align-items: center;
-      position: relative;
-      z-index: 1;
+      margin-bottom: 3.25rem;
     }
-    .hero-copy { text-align: left; }
-    .hero-title {
-      font-size: clamp(1.9rem, 3.2vw, 2.6rem);
-      line-height: 1.15;
-      letter-spacing: -0.02em;
-      max-width: 24ch;
-      text-wrap: balance;
-      font-weight: 600;
-      margin-bottom: 1.25rem;
-    }
-    .badge {
-      display: inline-flex; align-items: center; gap: 0.5rem;
-      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-accent);
-      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-      border: 1px solid color-mix(in srgb, var(--color-accent) 20%, transparent);
-      padding: 0.375rem 0.75rem; border-radius: 100px;
-      margin-bottom: 1.5rem;
-    }
-    .hero-logo {
-      margin-bottom: 1.25rem;
-    }
-    .hero-logo img {
-      width: clamp(220px, 40vw, 340px);
-      height: auto;
-    }
-    .hero-desc {
-      font-size: 1.1rem; color: var(--color-text-secondary);
-      max-width: 520px; margin-bottom: 2rem; line-height: 1.7;
-    }
-    .hero-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 0.75rem; }
-    .hero-highlights {
-      margin-top: 1.5rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      color: var(--color-text-dim);
-      font-size: 0.78rem;
-      text-transform: uppercase;
-      letter-spacing: 0.06em;
-    }
-    .hero-highlights span {
-      border: 1px solid var(--color-border);
-      padding: 0.25rem 0.6rem;
-      border-radius: 999px;
-      background: color-mix(in srgb, var(--color-bg) 70%, transparent);
-    }
+    .hero-copy { min-width: 0; }
     .hero-visual {
       position: relative;
-      justify-self: start;
-      width: min(1320px, 80vw);
-    }
-    .hero-glow {
-      position: absolute;
-      inset: -20%;
-      background: radial-gradient(circle at 40% 50%, color-mix(in srgb, var(--color-accent) 18%, transparent), transparent 65%);
-      filter: blur(40px);
-      opacity: 0.7;
-      pointer-events: none;
-      z-index: 0;
-    }
-    .hero-screenshot {
-      position: relative;
-      aspect-ratio: 16 / 9;
-      border-radius: 0;
-      overflow: visible;
-      border: none;
-      background: none;
-      box-shadow: none;
-      transition: transform 0.35s ease;
-    }
-    .hero-screenshot:hover {
-      transform: translateY(-8px);
+      min-height: 460px;
+      /* Bleed slightly past the container edge; the canvas mask fades the
+         scene into the hero grid, so there is no hard box to respect. */
+      margin-right: clamp(-2.5rem, -2vw, -1rem);
     }
 
-    .btn {
-      display: inline-flex; align-items: center; gap: 0.5rem;
-      font-family: var(--font-sans); font-size: 0.9rem; font-weight: 500;
-      padding: 0.75rem 1.5rem; border-radius: 8px;
-      border: 1px solid transparent; transition: all 0.15s ease; cursor: pointer;
-      text-decoration: none;
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 0.6rem;
+      border: 1px solid var(--color-border);
+      background: var(--color-surface);
+      padding: 0.4rem 0.8rem; border-radius: 6px;
+      margin-bottom: 2rem;
     }
-    .btn:hover { text-decoration: none; }
-    .btn-primary { background: var(--color-accent); color: white; }
-    .btn-primary:hover { background: var(--color-accent-hover); }
-    .btn-secondary { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); }
-    .btn-secondary:hover { background: var(--color-border); border-color: var(--color-text-dim); }
-    .btn svg { width: 18px; height: 18px; }
+    .eyebrow .kicker { color: var(--color-accent-soft); }
+    .eyebrow .sep { width: 1px; height: 11px; background: var(--color-border-strong); }
+    .eyebrow .what { font-family: var(--font-mono); font-size: 0.6875rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--color-text-secondary); }
 
-    .gh-stars { display: flex; align-items: center; }
+    .hero-title {
+      font-size: clamp(2.1rem, 4.7vw, 3.5rem);
+      font-weight: 700;
+      line-height: 1.06;
+      letter-spacing: -0.033em;
+      margin-bottom: 1.5rem;
+    }
+    /* In the two-column hero the title shares the row with the scene, so it
+       steps down just enough to keep each deliberate line unwrapped. */
+    @media (min-width: 1024px) {
+      .hero-title { font-size: clamp(2rem, 2.6vw, 2.8rem); }
+    }
+    /* Two deliberate lines rather than a <br> keep the datasource pair on
+       its own line at every width without losing the inter-word space. */
+    .hero-title > span { display: block; }
+
+    .hero-desc {
+      font-size: 1.0625rem;
+      color: var(--color-text-secondary);
+      max-width: 60ch;
+      line-height: 1.7;
+      margin-bottom: 2.25rem;
+    }
+    .hero-desc strong { color: var(--color-text); font-weight: 500; }
+
+    .hero-actions {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem;
+    }
+    .gh-stars { display: inline-flex; align-items: center; margin-left: 0.25rem; }
     .gh-stars img { height: 20px; }
 
-    .features { padding: 5rem 1.5rem; max-width: 1000px; margin: 0 auto; border-top: 1px solid var(--color-border); }
-    .section-header { text-align: center; margin-bottom: 3rem; }
-    .section-label {
-      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim);
-      text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.75rem;
+    /* Product proof bar. Each claim gets a category and a concrete value so
+       this reads as product architecture rather than a row of keywords. */
+    .proof-rail {
+      display: grid;
+      grid-template-columns: 0.9fr 1.1fr 1.3fr 1fr 0.9fr;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--color-surface) 76%, transparent);
+      overflow: hidden;
+      box-shadow: 0 14px 40px color-mix(in srgb, var(--color-bg) 70%, transparent);
     }
-    .section-title { font-size: 1.75rem; font-weight: 600; letter-spacing: -0.02em; }
-    .section-desc {
-      margin-top: 0.75rem;
-      color: var(--color-text-secondary);
-      max-width: 640px;
-      margin-left: auto;
-      margin-right: auto;
-      font-size: 1rem;
+    .proof-item {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 0.7rem;
+      padding: 0.9rem 1rem;
     }
-    .features-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
-    .feature {
-      background: var(--color-surface); border: 1px solid var(--color-border);
-      border-radius: 12px; padding: 1.75rem;
+    .proof-item + .proof-item { border-left: 1px solid var(--color-border); }
+    .proof-icon {
+      width: 30px; height: 30px;
+      flex: none;
+      display: grid; place-items: center;
+      border: 1px solid color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
+      border-radius: 7px;
+      color: var(--color-accent);
+      background: color-mix(in srgb, var(--color-accent) 8%, transparent);
     }
-    .feature-icon {
-      width: 40px; height: 40px; display: flex; align-items: center; justify-content: center;
-      background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-      border-radius: 10px; margin-bottom: 1rem; color: var(--color-accent);
+    .proof-icon svg { width: 15px; height: 15px; }
+    .proof-copy { min-width: 0; display: flex; flex-direction: column; gap: 0.2rem; }
+    .proof-label {
+      font-family: var(--font-mono);
+      font-size: 0.5625rem;
+      line-height: 1.2;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
+      white-space: nowrap;
     }
-    .feature-icon svg { width: 22px; height: 22px; }
-    .feature h3 { font-size: 1.1rem; font-weight: 600; margin-bottom: 0.5rem; letter-spacing: -0.01em; }
-    .feature p { color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.6; }
+    .proof-value {
+      font-size: 0.7813rem;
+      line-height: 1.35;
+      font-weight: 600;
+      color: var(--color-text);
+      text-wrap: balance;
+    }
 
-    .quickstart { padding: 5rem 1.5rem; max-width: 800px; margin: 0 auto; }
-    .quickstart .section-header { text-align: center; }
-    .code-block {
-      background: var(--color-surface); border: 1px solid var(--color-border);
-      border-radius: 12px; overflow: hidden; margin-top: 2rem;
+    /* Hero product shot */
+    .hero-shot {
+      position: relative; z-index: 1;
+      max-width: 1400px; margin: 3.5rem auto 0;
+      padding-inline: 1.5rem;
     }
-    .code-header {
-      display: flex; justify-content: space-between; align-items: center;
-      padding: 0.625rem 1rem; border-bottom: 1px solid var(--color-border);
+    .frame {
+      position: relative;
+      border: 1px solid var(--color-border);
+      border-top-left-radius: 12px; border-top-right-radius: 12px;
+      background: var(--color-surface);
+      box-shadow: var(--shadow-frame);
+      overflow: hidden;
     }
-    .code-tabs { display: flex; gap: 0; }
+    .frame-bar {
+      display: flex; align-items: center; gap: 0.6rem;
+      height: 34px; padding: 0 0.9rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-elevated);
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.14em; text-transform: uppercase;
+      color: var(--color-text-muted);
+    }
+    .frame-bar .right { margin-left: auto; color: var(--color-text-muted); }
+    .frame-shot { position: relative; overflow: hidden; aspect-ratio: 1800 / 1124; }
+    /* The hero shot bleeds off the bottom of the viewport, film-style. */
+    .hero-shot .frame-shot {
+      aspect-ratio: 1800 / 900;
+      mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+      -webkit-mask-image: linear-gradient(180deg, #000 72%, transparent 100%);
+    }
+
+    .theme-img {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%;
+      object-fit: cover; object-position: top center;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    /* The ai-* assets have a black bezel baked in; scale past it. */
+    .theme-img[src^="/screenshots/ai-"] { transform: scale(1.075); }
+    .theme-img-light { opacity: 1; }
+    :root[data-theme='dark'] .theme-img-light { opacity: 0; }
+    :root[data-theme='dark'] .theme-img-dark { opacity: 1; }
+
+    /* ---------------- Section scaffolding ---------------- */
+    .section { padding: 6rem 0; border-bottom: 1px solid var(--color-border); }
+    .section-head { margin-bottom: 3.5rem; max-width: 66ch; }
+    .section-head .kicker { display: block; margin-bottom: 0.9rem; }
+    .section-title {
+      font-size: clamp(1.6rem, 3vw, 2.15rem);
+      font-weight: 700; letter-spacing: -0.025em; line-height: 1.15;
+      text-wrap: balance;
+    }
+    .section-desc {
+      margin-top: 0.9rem; color: var(--color-text-secondary);
+      font-size: 1rem; line-height: 1.7;
+    }
+
+    /* ---------------- One query, two backends ---------------- */
+    .translate { position: relative; overflow: hidden; }
+    .translate .bg-glow {
+      width: min(900px, 120vw); height: min(900px, 120vw);
+      top: -30%; left: 50%; transform: translateX(-50%);
+      opacity: 0.7;
+    }
+    .translate-inner { position: relative; z-index: 1; }
+
+    .qhead { text-align: center; margin-bottom: 3.25rem; }
+    .qhead .kicker { display: block; color: var(--color-accent-soft); margin-bottom: 1rem; }
+    .qhead .section-title { margin-bottom: 1.25rem; }
+    .qsource {
+      font-family: var(--font-mono);
+      font-size: clamp(1rem, 2.6vw, 1.75rem);
+      letter-spacing: -0.01em;
+      line-height: 1.5;
+      word-break: break-word;
+      margin-bottom: 1rem;
+    }
+    .qhead p { color: var(--color-text-secondary); font-size: 1rem; }
+
+    /* Query token colours, matched to the film's editor */
+    .q-field { color: var(--q-field); }
+    .q-op { color: var(--q-op); }
+    .q-str { color: var(--q-str); }
+    .q-num { color: var(--q-num); }
+    .q-kw { color: var(--q-kw); }
+
+    .panels { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+    .panel {
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      background: var(--color-surface);
+      padding: 1.75rem;
+      display: flex; flex-direction: column; gap: 1.25rem;
+    }
+    .panel-name {
+      font-family: var(--font-mono); font-size: 0.75rem;
+      letter-spacing: 0.24em; text-transform: uppercase; font-weight: 500;
+      color: var(--color-text);
+    }
+    .panel h3 { font-size: 1.25rem; font-weight: 600; letter-spacing: -0.015em; margin-top: -0.5rem; }
+    .panel-chip {
+      align-self: flex-start;
+      font-family: var(--font-mono); font-size: 0.75rem;
+      color: var(--color-text-secondary);
+      border: 1px solid var(--color-border-strong);
+      border-radius: 6px; padding: 0.3rem 0.6rem;
+      margin-top: -0.5rem;
+    }
+    .panel-label {
+      font-family: var(--font-mono); font-size: 0.625rem;
+      letter-spacing: 0.16em; text-transform: uppercase;
+      color: var(--color-text-muted);
+      margin-bottom: 0.55rem;
+    }
+    .panel-code {
+      background: var(--code-bg);
+      border: 1px solid var(--color-border);
+      border-radius: 8px;
+      padding: 1rem 1.1rem;
+      font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.75;
+      overflow-x: auto;
+    }
+    .panel-code pre { margin: 0; }
+    .panel-event {
+      border: 1px solid var(--color-border);
+      border-left: 2px solid var(--color-accent);
+      border-radius: 6px;
+      background: var(--code-bg);
+      padding: 0.65rem 0.85rem;
+      font-family: var(--font-mono); font-size: 0.75rem;
+      color: var(--color-text-secondary);
+      overflow-x: auto; white-space: nowrap;
+      /* The row is longer than the panel by design. Fade the tail so the
+         overflow reads as "there is more", not as a broken clip. */
+      mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+      -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+      scrollbar-width: none;
+    }
+    .panel-event::-webkit-scrollbar { display: none; }
+    .panel-event .ts { color: var(--color-text-muted); }
+    .panel-event .lvl { color: var(--color-error); font-weight: 500; }
+    .panel-event .msg { color: var(--color-text); }
+    .panel-grow { margin-top: auto; }
+
+    /* Product-truth footnote under the two panels */
+    .truth {
+      margin-top: 2rem;
+      display: flex; align-items: flex-start; gap: 0.85rem;
+      border: 1px solid var(--color-border);
+      border-radius: 10px;
+      background: var(--color-surface);
+      padding: 1.1rem 1.3rem;
+    }
+    .truth .logbars { margin-top: 0.35rem; }
+    .truth p { color: var(--color-text-secondary); font-size: 0.9375rem; line-height: 1.65; }
+    .truth strong { color: var(--color-text); font-weight: 600; }
+
+    /* ---------------- Showcase ---------------- */
+    .showcase-list {
+      display: flex; flex-direction: column;
+      gap: clamp(3rem, 6vw, 4.5rem);
+    }
+    .showcase-item {
+      display: grid;
+      grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.7fr);
+      gap: clamp(1.75rem, 4vw, 3.25rem);
+      align-items: center;
+    }
+    /* Alternate sides by swapping the track sizes, not by reordering. The
+       media must stay in the wide track whichever side it sits on. */
+    .showcase-item .showcase-media { grid-area: 1 / 1; }
+    .showcase-item .showcase-text { grid-area: 1 / 2; }
+    .showcase-item.is-reversed { grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); }
+    .showcase-item.is-reversed .showcase-media { grid-area: 1 / 2; }
+    .showcase-item.is-reversed .showcase-text { grid-area: 1 / 1; }
+    .showcase-text { max-width: 44ch; }
+    .showcase-text .kicker { display: block; margin-bottom: 0.75rem; }
+    .showcase-text h3 {
+      font-size: 1.3rem; font-weight: 600;
+      letter-spacing: -0.02em; margin-bottom: 0.6rem;
+    }
+    .showcase-text p { color: var(--color-text-secondary); font-size: 0.9688rem; line-height: 1.7; }
+    .showcase-media .frame { border-radius: 12px; }
+    /* Uniform frames keep the rhythm. The screenshots have wildly different
+       native aspect ratios, so crop from the top where the signal is. */
+    .showcase-media .frame-shot { aspect-ratio: 16 / 10; }
+
+    /* ---------------- v2 product proof ---------------- */
+    .v2-proof { background: color-mix(in srgb, var(--color-surface) 34%, var(--color-bg)); }
+    .v2-proof .frame-shot { aspect-ratio: 1280 / 577; }
+    .proof-img {
+      position: absolute; inset: 0;
+      width: 100%; height: 100%; object-fit: cover; object-position: top center;
+    }
+
+    /* ---------------- Feature grid ---------------- */
+    .features-grid {
+      display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1px;
+      background: var(--color-border);
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    .feature {
+      background: var(--color-bg);
+      padding: 1.85rem 1.65rem;
+      display: flex; flex-direction: column; gap: 0.7rem;
+    }
+    .feature-top { display: flex; align-items: center; gap: 0.7rem; }
+    .feature-top svg { width: 18px; height: 18px; color: var(--color-accent); flex: none; }
+    .feature h3 { font-size: 1rem; font-weight: 600; letter-spacing: -0.01em; }
+    .feature p { color: var(--color-text-secondary); font-size: 0.9063rem; line-height: 1.65; }
+
+    /* ---------------- Agent-native workflows ---------------- */
+    .agent-native {
+      background: color-mix(in srgb, var(--color-surface) 34%, var(--color-bg));
+    }
+    /* A real CLI investigation, rendered from a live session. The terminal
+       stays dark in both themes; the frame chrome adapts. */
+    .agent-cli { margin-bottom: 2.5rem; }
+    .agent-cli .frame-shot {
+      aspect-ratio: 2482 / 771;
+      background: #0d0d10;
+    }
+    .agent-cli img { display: block; width: 100%; height: 100%; }
+    /* Small screens: keep the session readable by letting it scroll sideways
+       inside its own frame instead of shrinking into an illegible strip. */
+    @media (max-width: 700px) {
+      .agent-cli .frame-bar .right { display: none; }
+      .agent-cli .frame-shot {
+        aspect-ratio: auto;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+      }
+      .agent-cli img { width: 720px; height: auto; }
+    }
+    .agent-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .agent-feature {
+      color: inherit;
+      text-decoration: none;
+      transition: background-color 0.15s ease;
+    }
+    .agent-feature:hover { background: var(--color-surface); text-decoration: none; }
+    .agent-proof {
+      align-self: flex-start;
+      margin-top: auto;
+      border: 1px solid var(--color-border-strong);
+      border-radius: 6px;
+      padding: 0.35rem 0.55rem;
+      color: var(--color-text-secondary);
+      background: var(--code-bg);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      line-height: 1.4;
+    }
+
+    /* ---------------- Quickstart terminal ---------------- */
+    .quickstart-inner { max-width: 860px; margin: 0 auto; }
+    .quickstart-inner .section-head { margin-inline: auto; text-align: center; }
+    .term {
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      background: var(--code-bg);
+      overflow: hidden;
+      box-shadow: var(--shadow-frame);
+    }
+    .term-head {
+      display: flex; align-items: center; gap: 0.25rem;
+      height: 42px; padding: 0 0.75rem;
+      border-bottom: 1px solid var(--color-border);
+      background: var(--color-elevated);
+    }
     .code-tab {
-      font-family: var(--font-mono); font-size: 0.75rem; color: var(--color-text-dim);
-      background: none; border: none; padding: 0.5rem 0.875rem;
-      cursor: pointer; transition: color 0.15s ease; border-radius: 6px;
+      font-family: var(--font-mono); font-size: 0.75rem;
+      color: var(--color-text-muted);
+      background: none; border: none; padding: 0.4rem 0.8rem;
+      cursor: pointer; border-radius: 6px;
+      transition: color 0.15s ease, background-color 0.15s ease;
     }
     .code-tab.active { color: var(--color-text); background: var(--color-bg); }
     .code-tab:hover:not(.active) { color: var(--color-text-secondary); }
     .copy-btn {
-      font-family: var(--font-mono); font-size: 0.6875rem; color: var(--color-text-dim);
+      margin-left: auto;
+      font-family: var(--font-mono); font-size: 0.6875rem;
+      color: var(--color-text-secondary);
       background: var(--color-bg); border: 1px solid var(--color-border);
-      padding: 0.375rem 0.625rem; border-radius: 6px; cursor: pointer; transition: all 0.15s ease;
+      padding: 0.35rem 0.6rem; border-radius: 6px; cursor: pointer;
+      transition: color 0.15s ease, border-color 0.15s ease;
     }
     .copy-btn:hover { color: var(--color-text); border-color: var(--color-text-dim); }
-    .code-content {
-      padding: 1.25rem; font-family: var(--font-mono);
-      font-size: 0.8125rem; line-height: 1.7; overflow-x: auto;
+    .term-body {
+      padding: 1.35rem 1.5rem;
+      font-family: var(--font-mono); font-size: 0.8125rem; line-height: 1.85;
+      overflow-x: auto;
     }
-    .code-content pre { margin: 0; }
-    .code-comment { color: var(--color-text-dim); }
+    .term-body pre { margin: 0; }
+    .code-comment { color: var(--color-text-secondary); }
     .code-string { color: var(--color-success); }
-    .code-keyword { color: var(--color-accent); }
 
-    .integrations { padding: 3rem 1.5rem 5rem; max-width: 1000px; margin: 0 auto; border-top: 1px solid var(--color-border); }
-    .integrations-inner { display: flex; justify-content: center; align-items: center; gap: 3rem; flex-wrap: wrap; }
-    .integrations-label { font-size: 0.875rem; color: var(--color-text-dim); }
-    .integrations-logos { display: flex; align-items: center; gap: 2rem; flex-wrap: wrap; }
-    .integrations-logos a {
-      display: flex; align-items: center; gap: 0.5rem;
-      color: var(--color-text-secondary); font-size: 0.9375rem; font-weight: 500; transition: color 0.15s ease;
-    }
-    .integrations-logos a:hover { color: var(--color-text); text-decoration: none; }
-    .integrations-logos svg { width: 24px; height: 24px; }
-
-    @media (max-width: 960px) {
-      .hero { min-height: auto; }
-      .hero-inner { grid-template-columns: 1fr; text-align: center; }
-      .hero-copy { text-align: center; }
-      .hero-actions { justify-content: center; }
-      .hero-highlights { justify-content: center; }
-      .hero-visual { width: 100%; margin-right: 0; justify-self: center; }
-    }
-
-    @media (max-width: 768px) {
-      .features-grid { grid-template-columns: 1fr; }
-      .integrations-inner { flex-direction: column; gap: 1.5rem; }
-    }
-
-    .reveal { opacity: 0; transform: translateY(16px); transition: all 0.5s cubic-bezier(0.16, 1, 0.3, 1); }
-    .reveal.visible { opacity: 1; transform: translateY(0); }
-
-    /* Screenshot Showcase */
-    .showcase {
+    /* ---------------- Existing-stack architecture ---------------- */
+    .stack-map {
       position: relative;
-      padding: 5rem 1.5rem 6rem;
-      max-width: 1200px;
-      margin: 0 auto;
+      overflow: hidden;
+      background: color-mix(in srgb, var(--color-surface) 34%, var(--color-bg));
     }
-    .showcase::before {
+    .stack-map::before {
       content: "";
-      position: absolute;
-      top: 10%;
-      left: -10%;
-      right: -10%;
-      height: 55%;
-      background: radial-gradient(circle at 70% 20%, color-mix(in srgb, var(--color-accent) 12%, transparent), transparent 60%);
-      opacity: 0.6;
+      position: absolute; inset: 0;
       pointer-events: none;
-      z-index: 0;
+      opacity: 0.35;
+      background-image:
+        linear-gradient(var(--color-grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--color-grid) 1px, transparent 1px);
+      background-size: 72px 72px;
+      mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 78%, transparent);
     }
-    .showcase .section-header {
-      position: relative;
-      z-index: 1;
-      text-align: left;
-      max-width: 680px;
-      margin-left: 0;
-      margin-right: 0;
+    .stack-map-inner { position: relative; z-index: 1; }
+    .stack-map .section-head { margin-inline: auto; text-align: center; }
+    .stack-flow {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 112px minmax(0, 1.08fr) 112px minmax(0, 1fr);
+      align-items: stretch;
     }
-    .showcase .section-desc {
-      margin-left: 0;
-      margin-right: 0;
-    }
-
-    .theme-img {
-      opacity: 0;
-      transition: opacity 0.35s ease, transform 0.35s ease;
-      position: absolute;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: top center;
-      border-radius: inherit;
-      pointer-events: none;
-    }
-    .theme-img-light { opacity: 1; pointer-events: auto; }
-    :root[data-theme='dark'] .theme-img-light { opacity: 0; }
-    :root[data-theme='dark'] .theme-img-dark { opacity: 1; pointer-events: auto; }
-
-    .showcase-list {
-      position: relative;
-      z-index: 1;
+    .stack-node {
+      min-width: 0;
+      min-height: 218px;
       display: flex;
       flex-direction: column;
-      gap: clamp(2.75rem, 6vw, 4.5rem);
-      margin-top: 3rem;
+      border: 1px solid var(--color-border);
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--color-surface) 92%, transparent);
+      padding: 1.5rem;
+      box-shadow: 0 18px 50px color-mix(in srgb, var(--color-bg) 52%, transparent);
     }
-
-    .showcase-item {
-      display: grid;
-      grid-template-columns: minmax(0, 1.25fr) minmax(0, 0.75fr);
-      gap: clamp(1.5rem, 4vw, 3rem);
+    .stack-node.is-logchef {
+      border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
+      background:
+        radial-gradient(circle at 50% 0%, color-mix(in srgb, var(--color-accent) 13%, transparent), transparent 58%),
+        var(--color-surface);
+    }
+    .stack-node-label {
+      display: flex;
       align-items: center;
+      gap: 0.55rem;
+      margin-bottom: 1.15rem;
+      font-family: var(--font-mono);
+      font-size: 0.5938rem;
+      line-height: 1.2;
+      letter-spacing: 0.17em;
+      text-transform: uppercase;
+      color: var(--color-text-muted);
     }
-
-    .showcase-item.is-reversed .showcase-media {
-      order: 2;
-    }
-
-    .showcase-item.is-reversed .showcase-text {
-      order: 1;
-    }
-
-    .showcase-media {
-      position: relative;
-      border-radius: 22px;
-      overflow: hidden;
-      border: 1px solid color-mix(in srgb, var(--color-border) 80%, transparent);
-      background: linear-gradient(180deg, color-mix(in srgb, var(--color-bg) 70%, transparent), var(--color-surface));
-      box-shadow: 0 30px 80px -60px rgba(0, 0, 0, 0.6);
-      transition: transform 0.35s ease, box-shadow 0.35s ease, border-color 0.35s ease;
-    }
-
-    .showcase-media:hover {
-      transform: translateY(-6px);
-      border-color: color-mix(in srgb, var(--color-accent) 30%, var(--color-border));
-      box-shadow: 0 40px 90px -60px rgba(0, 0, 0, 0.7);
-    }
-
-    .showcase-media .theme-img {
-      object-fit: contain;
-      object-position: center;
-    }
-
-    .showcase-text {
-      max-width: 480px;
-    }
-
-    .showcase-text h3 {
-      font-size: 1.4rem;
+    .stack-node-label .logbars { transform: scale(0.9); transform-origin: left center; }
+    .stack-node h3 {
+      margin-bottom: 0.55rem;
+      font-size: 1.125rem;
       font-weight: 600;
-      margin-bottom: 0.5rem;
-      letter-spacing: -0.01em;
-      color: var(--color-text);
+      letter-spacing: -0.015em;
     }
-
-    .showcase-text p {
-      font-size: 1rem;
+    .stack-node p {
       color: var(--color-text-secondary);
-      line-height: 1.7;
+      font-size: 0.875rem;
+      line-height: 1.6;
+    }
+    .stack-products {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: auto;
+      padding-top: 1.25rem;
+    }
+    .stack-product {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      min-height: 34px;
+      border: 1px solid var(--color-border-strong);
+      border-radius: 7px;
+      padding: 0.4rem 0.6rem;
+      background: var(--color-bg);
+      color: var(--color-text-secondary);
+      font-size: 0.75rem;
+      font-weight: 500;
+      transition: color 0.15s ease, border-color 0.15s ease, background-color 0.15s ease;
+    }
+    .stack-product:hover {
+      color: var(--color-text);
+      border-color: color-mix(in srgb, var(--color-accent) 42%, var(--color-border));
+      background: var(--color-elevated);
+      text-decoration: none;
+    }
+    .stack-product svg { width: 15px; height: 15px; flex: none; }
+    .stack-product.is-static { pointer-events: none; }
+    .flow-connector {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      gap: 0.55rem;
+      color: var(--color-text-muted);
+    }
+    .flow-connector span {
+      font-family: var(--font-mono);
+      font-size: 0.5625rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .flow-connector svg { width: 80px; height: 18px; overflow: visible; }
+    .flow-connector path { vector-effect: non-scaling-stroke; }
+    .flow-connector.is-query { color: var(--color-accent); }
+    .stack-truth {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 0.65rem;
+      margin: 1.5rem auto 0;
+      color: var(--color-text-secondary);
+      font-family: var(--font-mono);
+      font-size: 0.6875rem;
+      letter-spacing: 0.04em;
+      text-align: center;
+    }
+    .stack-truth svg { width: 15px; height: 15px; color: var(--color-accent); flex: none; }
+
+    /* ---------------- Closing CTA ---------------- */
+    .closing { padding: 1rem 0 7rem; }
+    .closing-card {
+      position: relative; overflow: hidden;
+      border: 1px solid var(--color-border);
+      border-radius: 16px;
+      background: var(--color-surface);
+      padding: clamp(2rem, 6vw, 4rem);
+      text-align: center;
+    }
+    .closing-card::before {
+      content: ""; position: absolute; width: 560px; height: 560px;
+      left: 50%; top: -410px; transform: translateX(-50%);
+      border-radius: 50%; pointer-events: none;
+      background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 68%);
+    }
+    .closing-card > * { position: relative; z-index: 1; }
+    .closing-card .kicker { display: block; margin-bottom: 1rem; }
+    .closing-card h2 {
+      max-width: 760px; margin: 0 auto;
+      font-size: clamp(1.8rem, 4vw, 2.75rem); line-height: 1.1;
+      letter-spacing: -0.035em; text-wrap: balance;
+    }
+    .closing-card p {
+      max-width: 620px; margin: 1rem auto 1.75rem;
+      color: var(--color-text-secondary); font-size: 1rem; line-height: 1.7;
+    }
+    .closing-actions { display: flex; justify-content: center; flex-wrap: wrap; gap: 0.75rem; }
+
+    /* ---------------- Reveal (cheap, CSS-only) ---------------- */
+    :global(html.js) .reveal { opacity: 0; transform: translateY(14px); transition: opacity 0.6s cubic-bezier(0.22, 1, 0.36, 1), transform 0.6s cubic-bezier(0.22, 1, 0.36, 1); }
+    :global(html.js) .reveal.visible { opacity: 1; transform: none; }
+
+    /* ---------------- Responsive ---------------- */
+    @media (max-width: 1023px) {
+      /* Single column: the scene becomes a shorter band under the copy
+         instead of squeezing in beside the headline. */
+      .hero-grid { grid-template-columns: 1fr; gap: 2.25rem; }
+      .hero-visual {
+        min-height: 300px;
+        margin-right: 0;
+        width: 100%;
+        max-width: 640px;
+        margin-inline: auto;
+      }
     }
 
-    @media (max-width: 768px) {
-      .showcase-item {
-        grid-template-columns: 1fr;
-        gap: 1.5rem;
-      }
-
+    @media (max-width: 900px) {
+      .panels { grid-template-columns: 1fr; }
+      .features-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .proof-rail { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .proof-item:nth-child(4) { border-left: 0; border-top: 1px solid var(--color-border); }
+      .proof-item:nth-child(5) { border-top: 1px solid var(--color-border); }
+      .stack-flow { grid-template-columns: 1fr; }
+      .stack-node { min-height: 0; }
+      .flow-connector { height: 70px; }
+      .flow-connector svg { width: 54px; transform: rotate(90deg); }
+      .showcase-item,
+      .showcase-item.is-reversed { grid-template-columns: 1fr; gap: 1.5rem; }
       .showcase-item .showcase-media,
-      .showcase-item .showcase-text {
-        order: initial;
-      }
-
-      .showcase-media { border-radius: 16px; }
+      .showcase-item.is-reversed .showcase-media { grid-area: 1 / 1; }
+      .showcase-item .showcase-text,
+      .showcase-item.is-reversed .showcase-text { grid-area: 2 / 1; }
       .showcase-text { max-width: 100%; }
-      .showcase-text h3 { font-size: 1.2rem; }
-      .showcase-text p { font-size: 0.95rem; }
+    }
+
+    @media (max-width: 640px) {
+      .hero { padding-top: 7rem; }
+      .hero-grid { gap: 2rem; margin-bottom: 2.5rem; }
+      .hero-visual { min-height: 235px; }
+      .hero-actions .btn { flex-basis: 100%; }
+      .hero-actions .gh-stars { width: 100%; margin-left: 0; }
+      .proof-rail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .proof-item { padding: 0.8rem; }
+      .proof-item:nth-child(3),
+      .proof-item:nth-child(5) { border-left: 0; }
+      .proof-item:nth-child(3) { border-top: 1px solid var(--color-border); }
+      .proof-item:nth-child(4) { border-left: 1px solid var(--color-border); }
+      .proof-item:nth-child(5) { grid-column: 1 / -1; }
+      .hero-shot { margin-top: 2.5rem; padding-inline: 1rem; }
+      .section { padding: 4rem 0; }
+      .section-head { margin-bottom: 2.5rem; }
+      .stack-node { padding: 1.25rem; }
+      .stack-truth { align-items: flex-start; text-align: left; }
+      .features-grid { grid-template-columns: 1fr; }
+      .panel { padding: 1.35rem; }
+      .qsource { font-size: 0.9375rem; }
+      .btn { flex: 1 1 auto; justify-content: center; }
     }
 
     @media (prefers-reduced-motion: reduce) {
-      .reveal,
-      .showcase-media,
-      .theme-img {
-        transition: none;
-        animation: none;
-      }
+      :global(html.js) .reveal,
+      .reveal { opacity: 1; transform: none; transition: none; }
     }
   </style>
 
+  <!-- ============================ HERO ============================ -->
   <section class="hero">
-    <div class="hero-inner">
-      <div class="hero-copy">
-        <div class="badge">
-          <span>Open Source</span>
-          <span>·</span>
-          <span>Single Binary</span>
-        </div>
-        
-        <div class="hero-logo">
-          <img src="/logchef-wordmark.svg" alt="Logchef" />
-        </div>
-        
-        <h1 class="hero-title">Fast, self-hosted log exploration for ClickHouse &amp; VictoriaLogs</h1>
-        
-        <p class="hero-desc">
-          Logchef is an open-source, self-hosted log exploration and alerting UI that connects to the ClickHouse or VictoriaLogs data you already run —
-          no proprietary ingestion pipeline, no forced schema. Ship it as a single binary and give your team fast search, saved queries, scheduled alerting, and role-based access in minutes.
-        </p>
+    <div class="bg-grid" aria-hidden="true"></div>
+    <div class="bg-glow" aria-hidden="true"></div>
 
-        <div class="hero-actions">
-          <a href="/getting-started/quickstart" class="btn btn-primary">
-            Get Started
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M5 12h14M12 5l7 7-7 7"/>
-            </svg>
-          </a>
-          <a href="https://github.com/mr-karan/logchef" class="btn btn-secondary" target="_blank">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
-              <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
-            </svg>
-            GitHub
-          </a>
-          <div class="gh-stars">
-            <a href="https://github.com/mr-karan/logchef" target="_blank">
-              <img src="https://img.shields.io/github/stars/mr-karan/logchef?style=social" alt="GitHub stars">
+    <div class="wrap hero-inner">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="kicker">Logchef 2.0</span>
+            <span class="sep" aria-hidden="true"></span>
+            <span class="what">VictoriaLogs is here</span>
+          </div>
+
+          <h1 class="hero-title">
+            <span>Open-source log analytics</span>
+            <span>for ClickHouse &amp; VictoriaLogs</span>
+          </h1>
+
+          <p class="hero-desc">
+            Search, tail, visualize, and alert on logs without adding another log storage layer.
+            Logchef runs as a single self-hosted binary and queries the data already in your infrastructure.
+          </p>
+
+          <div class="hero-actions">
+            <a href="https://demo.logchef.app" class="btn btn-primary">
+              Explore the demo
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
             </a>
+            <a href="/getting-started/quickstart" class="btn btn-secondary">
+              Self-host Logchef
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path d="M12 3v12M7 10l5 5 5-5M5 21h14"/>
+              </svg>
+            </a>
+            <span class="gh-stars">
+              <a href="https://github.com/mr-karan/logchef" target="_blank" rel="noopener">
+                <img src="https://img.shields.io/github/stars/mr-karan/logchef?style=social" alt="Logchef GitHub stars" width="110" height="20" />
+              </a>
+            </span>
           </div>
         </div>
 
-        <div class="hero-highlights">
-          <span>ClickHouse + VictoriaLogs</span>
-          <span>LogchefQL + Native Queries</span>
-          <span>Alerting + AI Query</span>
+        <div class="hero-visual" aria-hidden="true">
+          <HeroLogAnimation />
         </div>
       </div>
 
-      <div class="hero-visual">
-        <div class="hero-glow"></div>
-        <div class="hero-screenshot">
+      <div class="proof-rail" aria-label="Logchef product architecture">
+        <div class="proof-item">
+          <span class="proof-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7l8 4 8-4-8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></svg>
+          </span>
+          <span class="proof-copy">
+            <span class="proof-label">Deploy</span>
+            <span class="proof-value">Single binary</span>
+          </span>
+        </div>
+        <div class="proof-item">
+          <span class="proof-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>
+          </span>
+          <span class="proof-copy">
+            <span class="proof-label">Data model</span>
+            <span class="proof-value">No new storage layer</span>
+          </span>
+        </div>
+        <div class="proof-item">
+          <span class="proof-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="7" height="16" rx="2"/><rect x="14" y="4" width="7" height="16" rx="2"/><path d="M6.5 8h0M6.5 12h0M17.5 8h0M17.5 12h0"/></svg>
+          </span>
+          <span class="proof-copy">
+            <span class="proof-label">Backends</span>
+            <span class="proof-value">ClickHouse + VictoriaLogs</span>
+          </span>
+        </div>
+        <div class="proof-item">
+          <span class="proof-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></svg>
+          </span>
+          <span class="proof-copy">
+            <span class="proof-label">Interfaces</span>
+            <span class="proof-value">Web · CLI · MCP</span>
+          </span>
+        </div>
+        <div class="proof-item">
+          <span class="proof-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/></svg>
+          </span>
+          <span class="proof-copy">
+            <span class="proof-label">Access</span>
+            <span class="proof-value">RBAC included</span>
+          </span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-shot">
+      <div class="frame">
+        <div class="frame-bar">
+          <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span>Log Explorer</span>
+          <span class="right">demo.logchef.app</span>
+        </div>
+        <div class="frame-shot">
           <picture>
             <source srcset="/screenshots/hero-light.avif" type="image/avif" />
             <source srcset="/screenshots/hero-light.webp" type="image/webp" />
             <img
               src="/screenshots/hero-light.png"
-              alt="Logchef Log Explorer"
+              alt="The Logchef log explorer showing a query, a histogram of matching events, and a table of structured log rows"
               class="theme-img theme-img-light"
-              width="1800"
-              height="1124"
-              loading="lazy"
-              decoding="async"
+              width="1920" height="1200" loading="eager" decoding="async"
             />
           </picture>
           <picture>
@@ -426,13 +804,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
             <source srcset="/screenshots/hero-dark.webp" type="image/webp" />
             <img
               src="/screenshots/hero-dark.png"
-              alt="Logchef Log Explorer"
+              alt=""
               class="theme-img theme-img-dark"
-              width="1800"
-              height="1121"
-              fetchpriority="high"
-              loading="eager"
-              decoding="async"
+              width="1920" height="1200" fetchpriority="high" loading="eager" decoding="async"
             />
           </picture>
         </div>
@@ -440,259 +814,570 @@ import BaseLayout from '../layouts/BaseLayout.astro';
     </div>
   </section>
 
-  <section class="showcase reveal">
-      <div class="section-header">
-      <div class="section-label">Features</div>
-      <h2 class="section-title">How teams use Logchef</h2>
-      <p class="section-desc">Query logs fast. Everything else follows.</p>
-    </div>
+  <!-- ======================= V2 PRODUCT PROOF ======================= -->
+  <section class="section v2-proof reveal">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">New in Logchef 2.0</span>
+        <h2 class="section-title">One operational view across every log backend</h2>
+        <p class="section-desc">
+          VictoriaLogs is now a first-class datasource, and dashboards can combine it with
+          ClickHouse on the same grid. The backend changes; the investigation workflow does not.
+        </p>
+      </div>
 
-    <div class="showcase-list">
-      <article class="showcase-item">
-        <div class="showcase-media" style="aspect-ratio: 2400 / 1040;">
-          <picture>
-            <source srcset="/screenshots/teams-light.avif" type="image/avif" />
-            <source srcset="/screenshots/teams-light.webp" type="image/webp" />
-            <img src="/screenshots/teams-light.png" class="theme-img theme-img-light" alt="Teams" width="1800" height="782" loading="lazy" decoding="async" />
-          </picture>
-          <picture>
-            <source srcset="/screenshots/teams-dark.avif" type="image/avif" />
-            <source srcset="/screenshots/teams-dark.webp" type="image/webp" />
-            <img src="/screenshots/teams-dark.png" class="theme-img theme-img-dark" alt="Teams" width="1800" height="776" loading="lazy" decoding="async" />
-          </picture>
-        </div>
-        <div class="showcase-text">
-          <h3>Teams & Access Control</h3>
-          <p>Roles, teams, and saved views keep access tidy.</p>
-        </div>
-      </article>
+      <div class="showcase-list">
+        <article class="showcase-item">
+          <div class="showcase-media">
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>Dashboards</span>
+                <span class="right">ClickHouse + VictoriaLogs</span>
+              </div>
+              <div class="frame-shot">
+                <picture>
+                  <source srcset="/screenshots/v2-mission-control.avif" type="image/avif" />
+                  <source srcset="/screenshots/v2-mission-control.webp" type="image/webp" />
+                  <img src="/screenshots/v2-mission-control.png" class="proof-img" alt="A Logchef operational dashboard combining ClickHouse and VictoriaLogs panels" width="1920" height="865" loading="lazy" decoding="async" />
+                </picture>
+              </div>
+            </div>
+          </div>
+          <div class="showcase-text">
+            <span class="kicker">Cross-source dashboards</span>
+            <h3>See the whole system, not another silo</h3>
+            <p>
+              Mix ClickHouse and VictoriaLogs panels on one grid. Stats, time series,
+              breakdowns, and tables share the same time range and refresh together.
+            </p>
+          </div>
+        </article>
 
-      <article class="showcase-item is-reversed">
-        <div class="showcase-media" style="aspect-ratio: 2400 / 2440;">
-          <picture>
-            <source srcset="/screenshots/alerts-light.avif" type="image/avif" />
-            <source srcset="/screenshots/alerts-light.webp" type="image/webp" />
-            <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="Alerts" width="1800" height="1823" loading="lazy" decoding="async" />
-          </picture>
-          <picture>
-            <source srcset="/screenshots/alerts-dark.avif" type="image/avif" />
-            <source srcset="/screenshots/alerts-dark.webp" type="image/webp" />
-            <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="Alerts" width="1800" height="1832" loading="lazy" decoding="async" />
-          </picture>
-        </div>
-        <div class="showcase-text">
-          <h3>Scheduled Alerting</h3>
-          <p>Schedule native queries and deliver alerts via email or webhooks.</p>
-        </div>
-      </article>
-
-      <article class="showcase-item">
-        <div class="showcase-media" style="aspect-ratio: 1456 / 1144;">
-          <picture>
-            <source srcset="/screenshots/ai-light.avif" type="image/avif" />
-            <source srcset="/screenshots/ai-light.webp" type="image/webp" />
-            <img src="/screenshots/ai-light.png" class="theme-img theme-img-light" alt="AI Query Assistant" width="1456" height="1144" loading="lazy" decoding="async" />
-          </picture>
-          <picture>
-            <source srcset="/screenshots/ai-dark.avif" type="image/avif" />
-            <source srcset="/screenshots/ai-dark.webp" type="image/webp" />
-            <img src="/screenshots/ai-dark.png" class="theme-img theme-img-dark" alt="AI Query Assistant" width="1454" height="1130" loading="lazy" decoding="async" />
-          </picture>
-        </div>
-        <div class="showcase-text">
-          <h3>AI Query Assistant</h3>
-          <p>Ask in plain English and generate queries faster for supported sources.</p>
-        </div>
-      </article>
-
-      <article class="showcase-item is-reversed">
-        <div class="showcase-media" style="aspect-ratio: 16 / 10;">
-          <picture>
-            <source srcset="/screenshots/compact-light.avif" type="image/avif" />
-            <source srcset="/screenshots/compact-light.webp" type="image/webp" />
-            <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Compact View" width="1800" height="1125" loading="lazy" decoding="async" />
-          </picture>
-          <picture>
-            <source srcset="/screenshots/compact-dark.avif" type="image/avif" />
-            <source srcset="/screenshots/compact-dark.webp" type="image/webp" />
-            <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="Compact View" width="1800" height="1124" loading="lazy" decoding="async" />
-          </picture>
-        </div>
-        <div class="showcase-text">
-          <h3>Compact View</h3>
-          <p>Switch between table and condensed rows to scan faster.</p>
-        </div>
-      </article>
-
-      <article class="showcase-item">
-        <div class="showcase-media" style="aspect-ratio: 1798 / 1726;">
-          <picture>
-            <source srcset="/screenshots/sidebar-light.avif" type="image/avif" />
-            <source srcset="/screenshots/sidebar-light.webp" type="image/webp" />
-            <img src="/screenshots/sidebar-light.png" class="theme-img theme-img-light" alt="Field Sidebar" width="1782" height="1728" loading="lazy" decoding="async" />
-          </picture>
-          <picture>
-            <source srcset="/screenshots/sidebar-dark.avif" type="image/avif" />
-            <source srcset="/screenshots/sidebar-dark.webp" type="image/webp" />
-            <img src="/screenshots/sidebar-dark.png" class="theme-img theme-img-dark" alt="Field Sidebar" width="1798" height="1726" loading="lazy" decoding="async" />
-          </picture>
-        </div>
-        <div class="showcase-text">
-          <h3>Field Exploration</h3>
-          <p>Top values, counts, and one-click filters.</p>
-        </div>
-      </article>
-    </div>
-  </section>
-
-  <section class="integrations reveal">
-    <div class="integrations-inner">
-      <span class="integrations-label">Works with</span>
-      <div class="integrations-logos">
-        <a href="https://clickhouse.com" target="_blank">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M21.333 10H24v4h-2.667zM16 1.335h2.667v21.33H16zm-5.333 0h2.666v21.33h-2.666zM0 22.665V1.335h2.667v21.33zm5.333-21.33H8v21.33H5.333z"/>
-          </svg>
-          ClickHouse
-        </a>
-        <a href="https://victoriametrics.com/products/victorialogs/" target="_blank">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.8 3.4L12 11 5.2 7.6 12 4.2zm-7 5.1 6 3v7l-6-3V9.3zm8 10v-7l6-3v7l-6 3z"/>
-          </svg>
-          VictoriaLogs
-        </a>
-        <a href="https://vector.dev" target="_blank">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12.69.77L2.5 6.71v10.58l10.19 5.94 10.19-5.94V6.71zm0 2.32l7.53 4.39-7.53 4.4-7.53-4.4z"/>
-          </svg>
-          Vector
-        </a>
-        <a href="https://opentelemetry.io" target="_blank">
-          <svg viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm0 3a9 9 0 110 18 9 9 0 010-18zm0 2a7 7 0 100 14 7 7 0 000-14z"/>
-          </svg>
-          OpenTelemetry
-        </a>
-
+        <article class="showcase-item is-reversed">
+          <div class="showcase-media">
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>Log Explorer</span>
+                <span class="right">Native LogsQL</span>
+              </div>
+              <div class="frame-shot">
+                <picture>
+                  <source srcset="/screenshots/v2-native-logsql.avif" type="image/avif" />
+                  <source srcset="/screenshots/v2-native-logsql.webp" type="image/webp" />
+                  <img src="/screenshots/v2-native-logsql.png" class="proof-img" alt="Logchef running a native LogsQL query against VictoriaLogs" width="1920" height="865" loading="lazy" decoding="async" />
+                </picture>
+              </div>
+            </div>
+          </div>
+          <div class="showcase-text">
+            <span class="kicker">VictoriaLogs, first-class</span>
+            <h3>Use LogchefQL, or go native</h3>
+            <p>
+              Explore VictoriaLogs with the same field-first workflow as ClickHouse, then
+              switch to native LogsQL whenever an investigation needs backend-specific power.
+            </p>
+          </div>
+        </article>
       </div>
     </div>
   </section>
 
-  <section class="features reveal">
-    <div class="section-header">
-      <div class="section-label">Why Logchef</div>
-      <h2 class="section-title">Enterprise-ready, no paywall</h2>
-    </div>
-
-    <div class="features-grid">
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-            <line x1="12" y1="22.08" x2="12" y2="12"/>
-          </svg>
-        </div>
-        <h3>Single Binary</h3>
-        <p>One executable, zero dependencies, deploy anywhere fast.</p>
+  <!-- ================= ONE QUERY, TWO BACKENDS ================= -->
+  <section class="section translate">
+    <div class="bg-glow" aria-hidden="true"></div>
+    <div class="wrap translate-inner">
+      <div class="qhead">
+        <span class="kicker">LogchefQL</span>
+        <h2 class="section-title">One workflow. Native when you need it.</h2>
+        <div class="qsource"><span class="q-field">lvl</span><span class="q-op">=</span><span class="q-str">"ERROR"</span> <span class="q-kw">and</span> <span class="q-field">duration_ms</span><span class="q-op">&gt;</span><span class="q-num">500</span></div>
+        <p>Use LogchefQL across every source, or switch to native SQL and LogsQL without leaving the investigation.</p>
       </div>
 
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <ellipse cx="12" cy="5" rx="9" ry="3"/>
-            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
-            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
-          </svg>
-        </div>
-        <h3>Schema Agnostic</h3>
-        <p>Point Logchef at existing ClickHouse tables or VictoriaLogs datasets without reshaping storage first.</p>
+      <div class="panels">
+        <article class="panel">
+          <span class="panel-name">ClickHouse</span>
+          <h3>Native SQL when you need it.</h3>
+          <span class="panel-chip">TABLE default.app_logs · MergeTree</span>
+          <div>
+            <div class="panel-label">Compiled from LogchefQL</div>
+            <div class="panel-code"><pre><span class="q-kw">SELECT</span> * <span class="q-kw">FROM</span> default.app_logs
+<span class="q-kw">WHERE</span> (<span class="q-field">lvl</span> = <span class="q-str">'ERROR'</span>)
+  <span class="q-kw">AND</span> (<span class="q-field">duration_ms</span> &gt; <span class="q-num">500</span>)</pre></div>
+          </div>
+          <div class="panel-grow">
+            <div class="panel-label">Matching event</div>
+            <div class="panel-event"><span class="ts">14:03:17.512</span> <span class="lvl">ERROR</span> edge-gateway ap-south 812ms <span class="msg">upstream timeout on /v1/checkout</span></div>
+          </div>
+        </article>
+
+        <article class="panel">
+          <span class="panel-name">VictoriaLogs</span>
+          <h3>Native LogsQL when you need it.</h3>
+          <span class="panel-chip">SOURCE waf-security · HTTP API</span>
+          <div>
+            <div class="panel-label">Compiled from LogchefQL</div>
+            <div class="panel-code"><pre>(<span class="q-field">lvl</span>:=<span class="q-str">"ERROR"</span>) <span class="q-kw">AND</span> (<span class="q-field">duration_ms</span>:&gt;<span class="q-num">500</span>)</pre></div>
+          </div>
+          <div class="panel-grow">
+            <div class="panel-label">Matching event</div>
+            <div class="panel-event"><span class="ts">_time=14:03:17.512</span> <span class="lvl">lvl=ERROR</span> service_name=edge-gateway region=ap-south <span class="msg">duration_ms=812</span></div>
+          </div>
+        </article>
       </div>
 
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2M7.5 13a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3m9 0a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3"/>
-          </svg>
-        </div>
-        <h3>AI Query Assistant</h3>
-        <p>Describe the question and generate LogchefQL or backend-native queries faster.</p>
-      </div>
-
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-            <circle cx="9" cy="7" r="4"/>
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-        </div>
-        <h3>Teams & Permissions</h3>
-        <p>Granular roles and team boundaries built in.</p>
-      </div>
-
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-            <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
-          </svg>
-        </div>
-        <h3>Alerting Pipeline</h3>
-        <p>Schedule source-aware alert queries and route notifications via email or webhooks.</p>
-      </div>
-
-      <div class="feature">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-            <rect x="3" y="11" width="18" height="11" rx="2"/>
-            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-          </svg>
-        </div>
-        <h3>SSO + RBAC Included</h3>
-        <p>OIDC SSO and role-based access are built in — no SSO tax.</p>
+      <div class="truth">
+        <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+        <p>
+          <strong>Your backend stays the source of truth.</strong>&#32;
+          Logchef queries ClickHouse and VictoriaLogs directly. There is no re-ingestion,
+          duplicate storage, or schema migration.
+        </p>
       </div>
     </div>
   </section>
 
-  <section class="quickstart reveal">
-    <div class="section-header">
-      <div class="section-label">Get Started</div>
-      <h2 class="section-title">Running in 2 minutes</h2>
-    </div>
+  <!-- ======================= SHOWCASE ======================= -->
+  <section class="section reveal">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">The daily workflow</span>
+        <h2 class="section-title">Everything between storage and answers</h2>
+        <p class="section-desc">
+          Your backend already stores the logs. Logchef gives your team one place to explore
+          them, understand their structure, reuse useful queries, and act when something breaks.
+        </p>
+      </div>
 
-    <div class="code-block">
-      <div class="code-header">
-        <div class="code-tabs">
+      <div class="showcase-list">
+        <article class="showcase-item">
+          <div class="showcase-media">
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>Log Explorer</span>
+                <span class="right">Compact view</span>
+              </div>
+              <div class="frame-shot">
+                <picture>
+                  <source srcset="/screenshots/compact-light.avif" type="image/avif" />
+                  <source srcset="/screenshots/compact-light.webp" type="image/webp" />
+                  <img src="/screenshots/compact-light.png" class="theme-img theme-img-light" alt="Logchef showing a condensed log view with a histogram above the result rows" width="1920" height="1200" loading="lazy" decoding="async" />
+                </picture>
+                <picture>
+                  <source srcset="/screenshots/compact-dark.avif" type="image/avif" />
+                  <source srcset="/screenshots/compact-dark.webp" type="image/webp" />
+                  <img src="/screenshots/compact-dark.png" class="theme-img theme-img-dark" alt="" width="1920" height="1200" loading="lazy" decoding="async" />
+                </picture>
+              </div>
+            </div>
+          </div>
+          <div class="showcase-text">
+            <span class="kicker">Explore</span>
+            <h3>Scan fast, then narrow</h3>
+            <p>
+              Compact rows put more events on screen. The histogram above them shows when the
+              spike happened, so you can watch your query close in on it.
+            </p>
+          </div>
+        </article>
+
+        <article class="showcase-item is-reversed">
+          <div class="showcase-media">
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>Fields</span>
+                <span class="right">Top values</span>
+              </div>
+              <div class="frame-shot">
+                <picture>
+                  <source srcset="/screenshots/sidebar-light.avif" type="image/avif" />
+                  <source srcset="/screenshots/sidebar-light.webp" type="image/webp" />
+                  <img src="/screenshots/sidebar-light.png" class="theme-img theme-img-light" alt="The Logchef field sidebar listing fields with their top values and counts" width="1920" height="1200" loading="lazy" decoding="async" />
+                </picture>
+                <picture>
+                  <source srcset="/screenshots/sidebar-dark.avif" type="image/avif" />
+                  <source srcset="/screenshots/sidebar-dark.webp" type="image/webp" />
+                  <img src="/screenshots/sidebar-dark.png" class="theme-img theme-img-dark" alt="" width="1920" height="1200" loading="lazy" decoding="async" />
+                </picture>
+              </div>
+            </div>
+          </div>
+          <div class="showcase-text">
+            <span class="kicker">Fields</span>
+            <h3>Discover the shape of your data</h3>
+            <p>
+              Inspect available fields, top values, and counts without leaving the results.
+              Click any value to add a filter instead of memorizing column names.
+            </p>
+          </div>
+        </article>
+
+        <article class="showcase-item">
+          <div class="showcase-media">
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>Alerts</span>
+                <span class="right">Email · Webhook</span>
+              </div>
+              <div class="frame-shot">
+                <picture>
+                  <source srcset="/screenshots/alerts-light.avif" type="image/avif" />
+                  <source srcset="/screenshots/alerts-light.webp" type="image/webp" />
+                  <img src="/screenshots/alerts-light.png" class="theme-img theme-img-light" alt="The Logchef alert rule editor with a query, schedule, and notification targets" width="1920" height="1200" loading="lazy" decoding="async" />
+                </picture>
+                <picture>
+                  <source srcset="/screenshots/alerts-dark.avif" type="image/avif" />
+                  <source srcset="/screenshots/alerts-dark.webp" type="image/webp" />
+                  <img src="/screenshots/alerts-dark.png" class="theme-img theme-img-dark" alt="" width="1920" height="1200" loading="lazy" decoding="async" />
+                </picture>
+              </div>
+            </div>
+          </div>
+          <div class="showcase-text">
+            <span class="kicker">Alerts</span>
+            <h3>Turn a useful query into an alert</h3>
+            <p>
+              Save a query as a rule and pick how often it runs. When it matches, Logchef sends
+              email or hits a webhook. The query that found the problem is the one that warns
+              you next time.
+            </p>
+          </div>
+        </article>
+
+        <article class="showcase-item is-reversed">
+          <div class="showcase-media">
+            <div class="frame">
+              <div class="frame-bar">
+                <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+                <span>AI Assistant</span>
+                <span class="right">Generate · Validate</span>
+              </div>
+              <div class="frame-shot">
+                <picture>
+                  <source srcset="/screenshots/ai-light.avif" type="image/avif" />
+                  <source srcset="/screenshots/ai-light.webp" type="image/webp" />
+                  <img src="/screenshots/ai-light.png" class="theme-img theme-img-light" alt="The Logchef AI assistant turning a plain-English request into a generated query" width="1456" height="1144" loading="lazy" decoding="async" />
+                </picture>
+                <picture>
+                  <source srcset="/screenshots/ai-dark.avif" type="image/avif" />
+                  <source srcset="/screenshots/ai-dark.webp" type="image/webp" />
+                  <img src="/screenshots/ai-dark.png" class="theme-img theme-img-dark" alt="" width="1454" height="1130" loading="lazy" decoding="async" />
+                </picture>
+              </div>
+            </div>
+          </div>
+          <div class="showcase-text">
+            <span class="kicker">AI Assistant</span>
+            <h3>Describe the question. Keep control of the query.</h3>
+            <p>
+              Describe what you're after. You get LogchefQL, ClickHouse SQL, or LogsQL back in
+              the query bar, where you can read it and change it before it runs.
+            </p>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= AGENT-NATIVE ======================= -->
+  <section id="agent-native" class="section agent-native reveal">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">Agent-native by design</span>
+        <h2 class="section-title">Give your coding agent a real log interface</h2>
+        <p class="section-desc">
+          The browser is only one way into Logchef. Use a schema-aware AI assistant, an
+          agent-ready CLI, or an MCP server built for log investigations. Scoped tokens control
+          access to the same ClickHouse and VictoriaLogs sources your team investigates.
+        </p>
+      </div>
+
+      <div class="frame agent-cli">
+        <div class="frame-bar">
+          <span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>
+          <span>logchef CLI</span>
+          <span class="right">Spot the spike, then pull the evidence</span>
+        </div>
+        <div class="frame-shot">
+          <picture>
+            <source srcset="/screenshots/cli-investigation.avif" type="image/avif" />
+            <source srcset="/screenshots/cli-investigation.webp" type="image/webp" />
+            <img
+              src="/screenshots/cli-investigation.png"
+              alt="A terminal session where the logchef CLI draws an error histogram with a visible incident spike, then fetches the matching payment error logs"
+              width="2482" height="771" loading="lazy" decoding="async"
+            />
+          </picture>
+        </div>
+      </div>
+
+      <div class="features-grid agent-grid">
+        <a class="feature agent-feature" href="/integration/mcp-server">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M8 9h8M8 15h8"/>
+              <rect x="3" y="4" width="18" height="16" rx="3"/>
+              <path d="M9 4V2M15 4V2"/>
+            </svg>
+            <h3>MCP for log investigations</h3>
+          </div>
+          <p>Connect Claude, Codex, Cursor, Copilot, or any MCP client. Agents can discover schemas, query logs, compare time windows, inspect alerts, and follow guided investigation prompts.</p>
+          <span class="agent-proof">Annotated tools · scoped service tokens</span>
+        </a>
+
+        <a class="feature agent-feature" href="/integration/cli">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+              <path d="m7 9 3 3-3 3M13 15h4"/>
+            </svg>
+            <h3>Agent-ready CLI</h3>
+          </div>
+          <p>Compose fields, explain, histogram, find, and live-tail commands in an investigation. Stable JSON and JSONL output keeps piped workflows clean and machine-readable.</p>
+          <code class="agent-proof">--output jsonl --quiet</code>
+        </a>
+
+        <a class="feature agent-feature" href="/integration/cli#skills">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+              <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+            </svg>
+            <h3>Version-matched agent skill</h3>
+          </div>
+          <p>The CLI ships its query grammar, investigation loops, output contracts, and safety guidance. Your agent gets instructions guaranteed to match the binary you installed.</p>
+          <code class="agent-proof">logchef skills get core --full</code>
+        </a>
+
+        <a class="feature agent-feature" href="/features/ai-sql-generation">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="m12 3-1.5 4.5L6 9l4.5 1.5L12 15l1.5-4.5L18 9l-4.5-1.5L12 3z"/>
+              <path d="m5 15-.75 2.25L2 18l2.25.75L5 21l.75-2.25L8 18l-2.25-.75L5 15z"/>
+            </svg>
+            <h3>Schema-aware AI assistant</h3>
+          </div>
+          <p>Ask in plain English and get LogchefQL, ClickHouse SQL, or LogsQL for the active source. Logchef validates the result and leaves it in the editor for review before it runs.</p>
+          <span class="agent-proof">LogchefQL · SQL · LogsQL</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= NEW IN 2.0 ======================= -->
+  <section class="section reveal">
+    <div class="wrap">
+      <div class="section-head">
+        <span class="kicker">New in v2.0</span>
+        <h2 class="section-title">The largest Logchef release yet</h2>
+        <p class="section-desc">
+          VictoriaLogs, cross-source dashboards, live tail, local authentication, a more capable
+          CLI, and production guardrails turn Logchef into a complete operational workspace.
+        </p>
+      </div>
+
+      <div class="features-grid">
+        <div class="feature">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+              <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+              <line x1="12" y1="22.08" x2="12" y2="12"/>
+            </svg>
+            <h3>VictoriaLogs, first-class</h3>
+          </div>
+          <p>Search it with LogchefQL, or drop into LogsQL when you need to. Tenant headers and source scopes carry through every query. Alerts and live tail work the same as they do on ClickHouse.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1"/>
+              <rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/>
+              <rect x="14" y="14" width="7" height="7" rx="1"/>
+            </svg>
+            <h3>Cross-source dashboards</h3>
+          </div>
+          <p>Put ClickHouse and VictoriaLogs panels on the same grid. Drag and resize them in place. Time series, stats, breakdowns, and tables all share one time range.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M3 12h4l2.5-7 5 14 2.5-7h4"/>
+            </svg>
+            <h3>Live investigation</h3>
+          </div>
+          <p>Keep the filter that found the issue running and watch matching events arrive in the browser or your terminal.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <rect x="3" y="11" width="18" height="10" rx="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+              <circle cx="12" cy="16" r="1"/>
+            </svg>
+            <h3>RBAC included in open source</h3>
+          </div>
+          <p>Use local login or OIDC, then control access with global, team, and collection roles. Source assignments isolate log data, scoped service tokens secure automation, and provisioning keeps access reproducible.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="16" rx="2"/>
+              <path d="m7 9 3 3-3 3M13 15h4"/>
+            </svg>
+            <h3>Investigate from the terminal</h3>
+          </div>
+          <p>Query either backend from your terminal. Read the generated query before it runs, draw histograms, tail live, dig through fields and history, and hand any result off to the browser.</p>
+        </div>
+
+        <div class="feature">
+          <div class="feature-top">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <h3>Guardrails for production</h3>
+          </div>
+          <p>Cache dashboard results, set per-source ClickHouse query limits, stream large ClickHouse previews, and enable rate limits for shared deployments.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ======================= QUICKSTART ======================= -->
+  <section class="section reveal">
+    <div class="wrap quickstart-inner">
+      <div class="section-head">
+        <span class="kicker">Deployment</span>
+        <h2 class="section-title">One binary. Up in minutes.</h2>
+        <p class="section-desc">Logchef itself has no runtime dependencies. Start with the bundled local demo stack, or download the binary and configure it for the ClickHouse or VictoriaLogs backend you already run.</p>
+      </div>
+
+      <div class="term">
+        <div class="term-head">
           <button class="code-tab active" data-tab="docker">Docker</button>
           <button class="code-tab" data-tab="binary">Binary</button>
+          <button class="copy-btn">Copy</button>
         </div>
-        <button class="copy-btn">Copy</button>
-      </div>
-      <div class="code-content" id="code-docker">
-        <pre><span class="code-comment"># Start Logchef and connect your log backend</span>
+        <div class="term-body" id="code-docker">
+          <pre><span class="code-comment"># Start the bundled Logchef + ClickHouse demo stack</span>
 curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/deployment/docker/docker-compose.yml
 
 docker compose up -d
 
 <span class="code-comment"># Open http://localhost:8125</span></pre>
+        </div>
+        <div class="term-body" id="code-binary" style="display: none;">
+          <pre><span class="code-comment"># Set the latest release from GitHub, then download for your platform</span>
+VERSION=<span class="code-string">"2.0.0"</span>
+curl -LO https://github.com/mr-karan/logchef/releases/download/v$&#123;VERSION&#125;/logchef_$&#123;VERSION&#125;_linux_amd64.tar.gz
+tar xzf logchef_$&#123;VERSION&#125;_linux_amd64.tar.gz
+
+<span class="code-comment"># Download the documented configuration, then set auth and your datasource</span>
+curl -LO https://raw.githubusercontent.com/mr-karan/logchef/main/config.toml
+<span class="code-comment"># Configuration guide: https://logchef.app/getting-started/configuration</span>
+./logchef -config config.toml</pre>
+        </div>
       </div>
-      <div class="code-content" id="code-binary" style="display: none;">
-        <pre><span class="code-comment"># Download the binary</span>
-curl -LO https://github.com/mr-karan/logchef/releases/latest/download/logchef_linux_amd64
+    </div>
+  </section>
 
-<span class="code-comment"># Create config</span>
-cat > config.toml &lt;&lt; <span class="code-string">EOF</span>
-<span class="code-keyword">[server]</span>
-address = <span class="code-string">"0.0.0.0:8125"</span>
+  <!-- ======================= EXISTING STACK ======================= -->
+  <section class="section stack-map reveal">
+    <div class="wrap stack-map-inner">
+      <div class="section-head">
+        <span class="kicker">Fits your existing stack</span>
+        <h2 class="section-title">Keep your pipeline. Add the workspace.</h2>
+        <p class="section-desc">Vector and OpenTelemetry keep shipping logs to the backends you already operate. Logchef connects to ClickHouse and VictoriaLogs as the query and control plane.</p>
+      </div>
 
-<span class="code-keyword">[clickhouse]</span>
-dsn = <span class="code-string">"clickhouse://localhost:9000"</span>
-<span class="code-string">EOF</span>
+      <div class="stack-flow">
+        <article class="stack-node">
+          <div class="stack-node-label">Ingestion</div>
+          <h3>Your existing pipeline</h3>
+          <p>Collect and route logs with the tools you already run.</p>
+          <div class="stack-products">
+            <a class="stack-product" href="https://vector.dev" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12.69.77L2.5 6.71v10.58l10.19 5.94 10.19-5.94V6.71zm0 2.32l7.53 4.39-7.53 4.4-7.53-4.4z"/></svg>
+              Vector
+            </a>
+            <a class="stack-product" href="https://opentelemetry.io" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373S18.627 0 12 0zm0 3a9 9 0 110 18 9 9 0 010-18zm0 2a7 7 0 100 14 7 7 0 000-14z"/></svg>
+              OpenTelemetry
+            </a>
+          </div>
+        </article>
 
-<span class="code-comment"># Run</span>
-./logchef_linux_amd64 --config config.toml</pre>
+        <div class="flow-connector" aria-hidden="true">
+          <span>Ships logs</span>
+          <svg viewBox="0 0 64 18" fill="none"><path d="M2 9h58" stroke="currentColor" stroke-width="1" stroke-dasharray="3 4"/><path d="m54 3 6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+
+        <article class="stack-node">
+          <div class="stack-node-label">Source of truth</div>
+          <h3>Your log backends</h3>
+          <p>Keep retention, schemas, and operations where they are.</p>
+          <div class="stack-products">
+            <a class="stack-product" href="https://clickhouse.com" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M21.333 10H24v4h-2.667zM16 1.335h2.667v21.33H16zm-5.333 0h2.666v21.33h-2.666zM0 22.665V1.335h2.667v21.33zm5.333-21.33H8v21.33H5.333z"/></svg>
+              ClickHouse
+            </a>
+            <a class="stack-product" href="https://victoriametrics.com/products/victorialogs/" target="_blank" rel="noopener">
+              <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 3 6.5v11L12 22l9-4.5v-11L12 2zm0 2.2 6.8 3.4L12 11 5.2 7.6 12 4.2zm-7 5.1 6 3v7l-6-3V9.3zm8 10v-7l6-3v7l-6 3z"/></svg>
+              VictoriaLogs
+            </a>
+          </div>
+        </article>
+
+        <div class="flow-connector is-query" aria-hidden="true">
+          <span>Queries in place</span>
+          <svg viewBox="0 0 64 18" fill="none"><path d="M4 9h56" stroke="currentColor" stroke-width="1"/><path d="m10 3-6 6 6 6M54 3l6 6-6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </div>
+
+        <article class="stack-node is-logchef">
+          <div class="stack-node-label"><span class="logbars" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Query + control plane</div>
+          <h3>Logchef</h3>
+          <p>Search, tail, visualize, alert, and automate across both backends.</p>
+          <div class="stack-products">
+            <span class="stack-product is-static">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 4 7l8 4 8-4-8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></svg>
+              Single binary
+            </span>
+          </div>
+        </article>
+      </div>
+
+      <p class="stack-truth">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>
+        No forwarding changes. No duplicate storage. No schema migration.
+      </p>
+    </div>
+  </section>
+
+  <section class="closing reveal">
+    <div class="wrap">
+      <div class="closing-card">
+        <span class="kicker">Open source · Self-hosted</span>
+        <h2>Your logs are already there. Put Logchef in front of them.</h2>
+        <p>Start with the live demo, or deploy the single binary and connect your first ClickHouse or VictoriaLogs source.</p>
+        <div class="closing-actions">
+          <a href="https://demo.logchef.app" class="btn btn-primary">
+            Explore the demo
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+          </a>
+          <a href="/getting-started/quickstart" class="btn btn-secondary">
+            Self-host Logchef
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+          </a>
+        </div>
       </div>
     </div>
   </section>
@@ -702,23 +1387,50 @@ dsn = <span class="code-string">"clickhouse://localhost:9000"</span>
       tab.addEventListener('click', () => {
         document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
         tab.classList.add('active');
-        const id = tab.dataset.tab;
-        document.getElementById('code-docker').style.display = id === 'docker' ? 'block' : 'none';
-        document.getElementById('code-binary').style.display = id === 'binary' ? 'block' : 'none';
+        const id = (tab as HTMLElement).dataset.tab;
+        (document.getElementById('code-docker') as HTMLElement).style.display = id === 'docker' ? 'block' : 'none';
+        (document.getElementById('code-binary') as HTMLElement).style.display = id === 'binary' ? 'block' : 'none';
       });
     });
 
-    document.querySelector('.copy-btn').addEventListener('click', function() {
-      const active = document.querySelector('.code-tab.active').dataset.tab;
-      const code = document.getElementById(`code-${active}`).textContent;
+    document.querySelector('.copy-btn')?.addEventListener('click', function (this: HTMLElement) {
+      const active = (document.querySelector('.code-tab.active') as HTMLElement).dataset.tab;
+      const code = document.getElementById(`code-${active}`)?.textContent ?? '';
       navigator.clipboard.writeText(code);
       this.textContent = 'Copied!';
-      setTimeout(() => this.textContent = 'Copy', 2000);
+      setTimeout(() => { this.textContent = 'Copy'; }, 2000);
     });
 
+    // Hero torchlight: move the grid-reveal mask with the pointer. Writes
+    // two CSS vars per move (no layout reads; the rect is cached on entry).
+    const hero = document.querySelector<HTMLElement>('.hero');
+    const heroGrid = hero?.querySelector<HTMLElement>('.bg-grid');
+    if (hero && heroGrid) {
+      let rect: DOMRect | null = null;
+      hero.addEventListener('pointerenter', (e) => {
+        if (e.pointerType !== 'mouse') return;
+        rect = hero.getBoundingClientRect();
+        hero.classList.add('torch-on');
+      }, { passive: true });
+      hero.addEventListener('pointermove', (e) => {
+        if (!rect) return;
+        heroGrid.style.setProperty('--torch-x', `${e.clientX - rect.left}px`);
+        heroGrid.style.setProperty('--torch-y', `${e.clientY - rect.top}px`);
+      }, { passive: true });
+      hero.addEventListener('pointerleave', () => {
+        hero.classList.remove('torch-on');
+        rect = null;
+      }, { passive: true });
+    }
+
     const observer = new IntersectionObserver((entries) => {
-      entries.forEach(entry => { if (entry.isIntersecting) entry.target.classList.add('visible'); });
-    }, { threshold: 0.1 });
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
+        }
+      });
+    }, { rootMargin: '0px 0px -8% 0px', threshold: 0.05 });
     document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
   </script>
 </BaseLayout>
