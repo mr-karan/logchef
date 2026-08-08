@@ -308,25 +308,18 @@ export function useQuery() {
           error: undefined
         };
       } else {
-        // For LogchefQL mode, use QueryService
-        const params = {
-          mode: 'logchefql' as const,
-          query,
-          tableName: sourcesStore.getCurrentSourceTableName || '',
-          tsField: sourceDetails._meta_ts_field || 'timestamp',
-          timeRange: exploreStore.timeRange as TimeRange,
-          limit: exploreStore.limit,
-          timezone: exploreStore.selectedTimezoneIdentifier || undefined
+        // LogchefQL execution is source-aware and happens in the explore store.
+        // Validation above is the only client-side preflight needed here; trying
+        // to generate ClickHouse SQL would reject VictoriaLogs sources because
+        // they intentionally have no database/table coordinates.
+        sqlWarnings.value = [];
+        queryError.value = '';
+        return {
+          success: true,
+          sql: '',
+          warnings: [],
+          error: undefined
         };
-
-        // Delegate to QueryService
-        const result = QueryService.prepareQueryForExecution(params);
-
-        // Track warnings and errors
-        sqlWarnings.value = result.warnings || [];
-        queryError.value = result.error || '';
-
-        return result;
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';

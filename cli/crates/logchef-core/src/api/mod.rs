@@ -19,6 +19,18 @@ pub struct Client {
 }
 
 impl Client {
+    fn complete_query_response(response: ApiResponse<QueryResponse>) -> Result<QueryResponse> {
+        let query = response.data;
+        if let Some(message) = query.error.as_deref() {
+            return Err(Error::api_with_type(
+                Some(200),
+                message.to_owned(),
+                Some("DatabaseError".to_owned()),
+            ));
+        }
+        Ok(query)
+    }
+
     pub fn new(server_url: &str, timeout_secs: u64) -> Result<Self> {
         let base_url = server_url.trim_end_matches('/').to_string();
         let timeout = Duration::from_secs(timeout_secs);
@@ -116,6 +128,22 @@ impl Client {
         }
 
         let body = response.text().await?;
+
+        // Streaming endpoints may have already committed a successful HTTP
+        // status before the backend query fails. In that case the server keeps
+        // the body valid by returning its standard top-level error envelope.
+        // Surface that error directly instead of trying to deserialize it as a
+        // success response and masking the useful message as "missing data".
+        if let Ok(api_error) = serde_json::from_str::<ApiErrorResponse>(&body)
+            && api_error.status == "error"
+        {
+            return Err(Error::api_with_type(
+                Some(status_code),
+                api_error.message,
+                api_error.error_type,
+            ));
+        }
+
         serde_json::from_str(&body)
             .map_err(|e| Error::other(format!("Failed to parse response: {} (body: {})", e, body)))
     }
@@ -179,7 +207,7 @@ impl Client {
                 request,
             )
             .await?;
-        Ok(response.data)
+        Self::complete_query_response(response)
     }
 
     pub async fn translate_logchefql(
@@ -270,7 +298,7 @@ impl Client {
                 request,
             )
             .await?;
-        Ok(response.data)
+        Self::complete_query_response(response)
     }
 
     pub async fn export_sql(
@@ -500,5 +528,107 @@ impl Client {
             .get(&format!("/api/v1/me/query-history?limit={}", limit))
             .await?;
         Ok(response.data)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
+
+    fn serve_once(body: &'static str) -> (String, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("read test server address");
+
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test request");
+            let mut request = [0_u8; 4096];
+            let _ = stream.read(&mut request).expect("read test request");
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write test response");
+        });
+
+        (format!("http://{}", address), server)
+    }
+
+    #[tokio::test]
+    async fn handle_response_surfaces_error_envelope_with_success_http_status() {
+        let (server_url, server) = serve_once(
+            r#"{"status":"error","message":"backend query failed","error_type":"DatabaseError"}"#,
+        );
+        let client = Client::new(&server_url, 5).expect("create client");
+
+        let result = client.get::<ApiResponse<serde_json::Value>>("/test").await;
+
+        match result {
+            Err(Error::Api {
+                status,
+                message,
+                error_type,
+            }) => {
+                assert_eq!(status, Some(200));
+                assert_eq!(message, "backend query failed");
+                assert_eq!(error_type.as_deref(), Some("DatabaseError"));
+            }
+            other => panic!("expected API error, got {other:?}"),
+        }
+
+        server.join().expect("join test server");
+    }
+
+    #[tokio::test]
+    async fn handle_response_still_parses_success_envelope() {
+        let (server_url, server) = serve_once(r#"{"status":"success","data":{"value":42}}"#);
+        let client = Client::new(&server_url, 5).expect("create client");
+
+        let response: ApiResponse<serde_json::Value> =
+            client.get("/test").await.expect("parse success response");
+
+        assert_eq!(response.status, "success");
+        assert_eq!(response.data["value"], 42);
+
+        server.join().expect("join test server");
+    }
+
+    #[tokio::test]
+    async fn query_surfaces_error_attached_after_partial_stream() {
+        let (server_url, server) = serve_once(
+            r#"{"status":"success","data":{"logs":[{"message":"partial row"}],"columns":[],"stats":{},"error":"stream interrupted"}}"#,
+        );
+        let client = Client::new(&server_url, 5).expect("create client");
+        let request = QueryRequest {
+            query: "".to_owned(),
+            start_time: "2026-08-08 10:00:00".to_owned(),
+            end_time: "2026-08-08 10:15:00".to_owned(),
+            timezone: Some("UTC".to_owned()),
+            limit: Some(100),
+            query_timeout: Some(30),
+        };
+
+        let result = client.query_logchefql(1, 2, &request).await;
+
+        match result {
+            Err(Error::Api {
+                status,
+                message,
+                error_type,
+            }) => {
+                assert_eq!(status, Some(200));
+                assert_eq!(message, "stream interrupted");
+                assert_eq!(error_type.as_deref(), Some("DatabaseError"));
+            }
+            other => panic!("expected API error, got {other:?}"),
+        }
+
+        server.join().expect("join test server");
     }
 }

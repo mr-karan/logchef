@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-08-08
+
+### Fixed
+- **VictoriaLogs queries from Explore.** Running a valid LogchefQL filter no
+  longer passes through the legacy ClickHouse-only SQL preflight, which rejected
+  VictoriaLogs sources with `Missing required parameters` before the real query
+  request could be sent.
+- **CLI errors from streamed queries.** The CLI now recognizes standard error
+  envelopes returned after a streaming response has committed HTTP 200 and
+  surfaces the server's database error instead of a misleading response parsing
+  failure.
+
 ## [2.0.1] - 2026-08-08
 
 ### Added
@@ -1208,6 +1220,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[2.0.2]: https://github.com/mr-karan/logchef/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/mr-karan/logchef/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/mr-karan/logchef/compare/v1.7.0...v2.0.0
 [1.7.0]: https://github.com/mr-karan/logchef/compare/v1.6.1...v1.7.0

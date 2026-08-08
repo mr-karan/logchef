@@ -123,7 +123,11 @@ function makeSource(overrides: Partial<Source> = {}): Source {
 // A ClickHouse source: supports both logchefql and clickhouse-sql (default).
 const CH_SOURCE = makeSource({ id: 1, source_type: "clickhouse" });
 // A VictoriaLogs source: supports logchefql and logsql.
-const VL_SOURCE = makeSource({ id: 2, source_type: "victorialogs" });
+const VL_SOURCE = makeSource({
+  id: 2,
+  source_type: "victorialogs",
+  connection: { base_url: "http://victorialogs:9428" },
+});
 // A source explicitly restricted to SQL only (no LogchefQL support).
 const SQL_ONLY_SOURCE = makeSource({ id: 3, query_languages: ["clickhouse-sql"] });
 
@@ -310,6 +314,49 @@ describe("explore store", () => {
       await store.executeQuery();
       expect(store.timeRange).toEqual(before);
       expect(store.selectedRelativeTime).toBeNull();
+    });
+  });
+
+  describe("LogchefQL execution", () => {
+    it("sends a VictoriaLogs query through the source-aware LogchefQL endpoint", async () => {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(VL_SOURCE.id);
+
+      const store = useExploreStore();
+      store.setRelativeTimeRange("15m");
+      store.setLogchefqlCode('lvl="WARN"');
+      mocks.logchefqlQuery.mockResolvedValue({
+        data: {
+          logs: [],
+          columns: [],
+          stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 },
+        },
+      });
+
+      const result = await store.executeQuery();
+
+      expect(result.success).toBe(true);
+      expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
+        1,
+        VL_SOURCE.id,
+        expect.objectContaining({
+          query: 'lvl="WARN"',
+          start_time: expect.any(String),
+          end_time: expect.any(String),
+          timezone: expect.any(String),
+          limit: 100,
+          query_timeout: expect.any(Number),
+        }),
+        expect.objectContaining({
+          signal: expect.any(AbortSignal),
+          timeout: expect.any(Number),
+        }),
+      );
     });
   });
 

@@ -378,6 +378,8 @@ pub struct QueryResponse {
     pub generated_query: Option<String>,
     #[serde(default)]
     pub generated_query_language: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
 }
 
 impl QueryResponse {
