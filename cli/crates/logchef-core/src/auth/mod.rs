@@ -58,8 +58,8 @@ impl AuthFlow {
             urlencoding::encode(&self.client_id),
             urlencoding::encode(&redirect_url),
             urlencoding::encode("openid email profile"),
-            &state,
-            &pkce_challenge,
+            state,
+            pkce_challenge,
         );
 
         info!("Opening browser for authentication...");
