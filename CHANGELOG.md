@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.1] - 2026-08-08
+
+### Added
+- **Runtime demo login credential disclosure.** Deployments can now opt in
+  with `[demo] show_login_credentials = true` (or
+  `LOGCHEF_DEMO__SHOW_LOGIN_CREDENTIALS=true`) to expose the configured local
+  authentication credentials through runtime metadata and display/prefill them
+  on the login page. The option is disabled by default because enabling it
+  intentionally makes those credentials public.
+
 ## [2.0.0] - 2026-08-08
 
 Logchef 2.0 is the largest release in the project's history. It grows Logchef
@@ -1198,6 +1208,7 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[2.0.1]: https://github.com/mr-karan/logchef/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/mr-karan/logchef/compare/v1.7.0...v2.0.0
 [1.7.0]: https://github.com/mr-karan/logchef/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/mr-karan/logchef/compare/v1.6.0...v1.6.1

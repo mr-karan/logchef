@@ -7,8 +7,9 @@ import { Label } from '@/components/ui/label'
 import { AlertCircle, KeyRound, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
+import { prefillEmptyLoginFields } from '@/utils/demoCredentials'
 import { useRoute, useRouter } from 'vue-router'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -16,13 +17,25 @@ const authStore = useAuthStore()
 const metaStore = useMetaStore()
 const isLoggingIn = ref(false)
 
-const demoEmail = import.meta.env.VITE_DEMO_LOGIN_EMAIL?.trim() || ''
-const demoPassword = import.meta.env.VITE_DEMO_LOGIN_PASSWORD || ''
-const showDemoCredentials = Boolean(demoEmail && demoPassword)
+// Demo credentials are advertised explicitly by the running server. Keeping
+// this runtime-only means disabling the server option immediately removes them
+// from the login page, regardless of how the frontend image was built.
+const demoCredentials = computed(() => metaStore.demoLoginCredentials)
+const showDemoCredentials = computed(() => demoCredentials.value !== null)
 
-const email = ref(demoEmail)
-const password = ref(demoPassword)
+const email = ref('')
+const password = ref('')
 const localError = ref<string | null>(null)
+
+watch(demoCredentials, (credentials) => {
+  if (!credentials) return
+  const prefilled = prefillEmptyLoginFields(
+    { email: email.value, password: password.value },
+    credentials,
+  )
+  email.value = prefilled.email
+  password.value = prefilled.password
+}, { immediate: true })
 
 // Cold visits land here before the auth flow loads meta; fetch it so the
 // local-auth form can render.
@@ -123,9 +136,9 @@ async function handleLocalLogin() {
           </div>
           <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
             <dt class="text-muted-foreground">Email</dt>
-            <dd class="select-all font-mono">{{ demoEmail }}</dd>
+            <dd class="select-all font-mono">{{ demoCredentials?.email }}</dd>
             <dt class="text-muted-foreground">Password</dt>
-            <dd class="select-all font-mono">{{ demoPassword }}</dd>
+            <dd class="select-all font-mono">{{ demoCredentials?.password }}</dd>
           </dl>
         </div>
 

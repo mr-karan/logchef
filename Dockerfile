@@ -10,11 +10,6 @@ WORKDIR /app
 
 # Optional public credentials for purpose-built demo images. Official builds
 # leave these unset, so the normal login page never displays or prefills them.
-ARG VITE_DEMO_LOGIN_EMAIL
-ARG VITE_DEMO_LOGIN_PASSWORD
-ENV VITE_DEMO_LOGIN_EMAIL=${VITE_DEMO_LOGIN_EMAIL}
-ENV VITE_DEMO_LOGIN_PASSWORD=${VITE_DEMO_LOGIN_PASSWORD}
-
 # Install dependencies first for better layer caching
 COPY frontend/package.json frontend/bun.lock ./frontend/
 RUN --mount=type=cache,target=/root/.bun/install/cache \

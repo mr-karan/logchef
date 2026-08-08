@@ -1,6 +1,11 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
-import { metaApi, type MetaResponse, type DashboardCachePolicy } from "@/api/meta";
+import {
+  metaApi,
+  type MetaResponse,
+  type DashboardCachePolicy,
+  type DemoLoginCredentials,
+} from "@/api/meta";
 import { useBaseStore } from "./base";
 import type { APIErrorResponse } from "@/api/types";
 
@@ -16,6 +21,7 @@ interface MetaState {
   localAuthEnabled: boolean;
   oidcEnabled: boolean;
   demoReadOnly: boolean;
+  demoLoginCredentials: DemoLoginCredentials | null;
   // Server dashboard-cache policy. null = absent (old server) OR malformed →
   // "cache unavailable / fail closed" (resolveEffectiveCacheTtl returns 0).
   dashboardCachePolicy: DashboardCachePolicy | null;
@@ -40,6 +46,15 @@ function parseDashboardCachePolicy(
   };
 }
 
+function parseDemoLoginCredentials(
+  raw: MetaResponse["demo_login_credentials"]
+): DemoLoginCredentials | null {
+  if (!raw || typeof raw !== "object") return null;
+  if (typeof raw.email !== "string" || !raw.email) return null;
+  if (typeof raw.password !== "string" || !raw.password) return null;
+  return { email: raw.email, password: raw.password };
+}
+
 export const useMetaStore = defineStore("meta", () => {
   const state = useBaseStore<MetaState>({
     version: null,
@@ -55,6 +70,7 @@ export const useMetaStore = defineStore("meta", () => {
     localAuthEnabled: false,
     oidcEnabled: true,
     demoReadOnly: false,
+    demoLoginCredentials: null,
     dashboardCachePolicy: null,
     isInitialized: false,
   });
@@ -71,6 +87,7 @@ export const useMetaStore = defineStore("meta", () => {
   const localAuthEnabled = computed(() => state.data.value.localAuthEnabled);
   const oidcEnabled = computed(() => state.data.value.oidcEnabled);
   const demoReadOnly = computed(() => state.data.value.demoReadOnly);
+  const demoLoginCredentials = computed(() => state.data.value.demoLoginCredentials);
   const dashboardCachePolicy = computed(() => state.data.value.dashboardCachePolicy);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
@@ -100,6 +117,7 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.localAuthEnabled = response.local_auth_enabled ?? false;
               state.data.value.oidcEnabled = response.oidc_enabled ?? true;
               state.data.value.demoReadOnly = response.demo_read_only ?? false;
+              state.data.value.demoLoginCredentials = parseDemoLoginCredentials(response.demo_login_credentials);
               state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
               state.data.value.isInitialized = true;
             }
@@ -129,6 +147,7 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.localAuthEnabled = false;
     state.data.value.oidcEnabled = true;
     state.data.value.demoReadOnly = false;
+    state.data.value.demoLoginCredentials = null;
     state.data.value.dashboardCachePolicy = null;
     state.data.value.isInitialized = false;
   }
@@ -145,6 +164,7 @@ export const useMetaStore = defineStore("meta", () => {
     localAuthEnabled,
     oidcEnabled,
     demoReadOnly,
+    demoLoginCredentials,
     dashboardCachePolicy,
     isInitialized,
     error,

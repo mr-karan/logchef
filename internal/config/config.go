@@ -41,8 +41,9 @@ type Config struct {
 // but rejects metadata mutations before they reach a handler. It is disabled
 // by default and should only be enabled deliberately by public demo operators.
 type DemoConfig struct {
-	ReadOnly          bool   `koanf:"read_only"`
-	ProvisioningToken string `koanf:"provisioning_token"`
+	ReadOnly             bool   `koanf:"read_only"`
+	ShowLoginCredentials bool   `koanf:"show_login_credentials"`
+	ProvisioningToken    string `koanf:"provisioning_token"`
 }
 
 // DashboardCacheConfig controls the per-dashboard server-side result cache, a
@@ -520,6 +521,16 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 	}
 	if len(cfg.Auth.APITokenSecret) < 32 {
 		return fmt.Errorf("api_token_secret must be at least 32 characters long for security")
+	}
+
+	if cfg.Demo.ShowLoginCredentials && !cfg.Demo.ReadOnly {
+		return fmt.Errorf("demo.show_login_credentials requires demo.read_only=true")
+	}
+	if cfg.Demo.ShowLoginCredentials && !cfg.Auth.Local.Enabled {
+		return fmt.Errorf("demo.show_login_credentials requires auth.local.enabled=true")
+	}
+	if cfg.Demo.ShowLoginCredentials && (cfg.Auth.Local.AdminEmail == "" || cfg.Auth.Local.AdminPassword == "") {
+		return fmt.Errorf("demo.show_login_credentials requires non-empty auth.local.admin_email and auth.local.admin_password")
 	}
 
 	// Validate local auth configuration

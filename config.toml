@@ -30,6 +30,10 @@ secure_cookie = false
 # AI query generation, and live exploration available. The UI shows an
 # explicit read-only banner when enabled.
 read_only = false
+# WARNING: Enabling this publicly exposes the configured auth.local
+# admin_email and admin_password through unauthenticated runtime metadata so
+# the login page can display and prefill them. Use only for intentional demos.
+show_login_credentials = false
 # Optional secret used only by a trusted internal job that converges demo seed
 # data. Prefer LOGCHEF_DEMO__PROVISIONING_TOKEN instead of storing it here.
 provisioning_token = ""

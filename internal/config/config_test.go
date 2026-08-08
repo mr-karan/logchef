@@ -125,6 +125,72 @@ func TestLoad_DemoReadOnlyIsOptIn(t *testing.T) {
 	}
 }
 
+func TestLoad_DemoLoginCredentialsRequireReadOnlyLocalAuth(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+	}{
+		{
+			name: "read-only disabled",
+			extra: `
+[auth.local]
+enabled = true
+admin_email = "demo@example.com"
+admin_password = "demo-password"
+
+[demo]
+show_login_credentials = true
+`,
+		},
+		{
+			name: "local auth disabled",
+			extra: `
+[demo]
+read_only = true
+show_login_credentials = true
+`,
+		},
+		{
+			name: "local credentials missing",
+			extra: `
+[auth.local]
+enabled = true
+
+[demo]
+read_only = true
+show_login_credentials = true
+`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := Load(writeConfig(t, tt.extra)); err == nil {
+				t.Fatal("expected invalid demo credential exposure config to be rejected")
+			}
+		})
+	}
+}
+
+func TestLoad_DemoLoginCredentialsCanBeEnabledForReadOnlyLocalAuth(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[auth.local]
+enabled = true
+admin_email = "demo@example.com"
+admin_password = "demo-password"
+
+[demo]
+read_only = true
+show_login_credentials = true
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Demo.ShowLoginCredentials {
+		t.Fatal("demo.show_login_credentials = false, want true")
+	}
+}
+
 func TestLoad_RateLimitDefaults(t *testing.T) {
 	cfg, err := Load(writeConfig(t, ""))
 	if err != nil {

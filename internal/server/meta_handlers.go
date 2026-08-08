@@ -20,22 +20,30 @@ type DashboardCacheMeta struct {
 	MaxTTLSeconds     int  `json:"max_ttl_seconds"`
 }
 
+// DemoLoginCredentials contains local credentials that a deliberately
+// configured public demo may advertise on its login page.
+type DemoLoginCredentials struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
 // MetaResponse represents the server metadata response
 type MetaResponse struct {
-	Version             string             `json:"version"`
-	HTTPServerTimeout   string             `json:"http_server_timeout"`
-	OIDCIssuer          string             `json:"oidc_issuer,omitempty"`
-	CLIClientID         string             `json:"cli_client_id,omitempty"`
-	MaxQueryLimit       int                `json:"max_query_limit"`
-	MaxQueryTimeoutSecs int                `json:"max_query_timeout_seconds"`
-	DefaultPreviewLimit int                `json:"default_preview_limit"`
-	MaxPreviewLimit     int                `json:"max_preview_limit"`
-	MaxExportRows       int                `json:"max_export_rows"`
-	AlertsEnabled       bool               `json:"alerts_enabled"`
-	LocalAuthEnabled    bool               `json:"local_auth_enabled"`
-	OIDCEnabled         bool               `json:"oidc_enabled"`
-	DemoReadOnly        bool               `json:"demo_read_only"`
-	DashboardCache      DashboardCacheMeta `json:"dashboard_cache"`
+	Version              string                `json:"version"`
+	HTTPServerTimeout    string                `json:"http_server_timeout"`
+	OIDCIssuer           string                `json:"oidc_issuer,omitempty"`
+	CLIClientID          string                `json:"cli_client_id,omitempty"`
+	MaxQueryLimit        int                   `json:"max_query_limit"`
+	MaxQueryTimeoutSecs  int                   `json:"max_query_timeout_seconds"`
+	DefaultPreviewLimit  int                   `json:"default_preview_limit"`
+	MaxPreviewLimit      int                   `json:"max_preview_limit"`
+	MaxExportRows        int                   `json:"max_export_rows"`
+	AlertsEnabled        bool                  `json:"alerts_enabled"`
+	LocalAuthEnabled     bool                  `json:"local_auth_enabled"`
+	OIDCEnabled          bool                  `json:"oidc_enabled"`
+	DemoReadOnly         bool                  `json:"demo_read_only"`
+	DemoLoginCredentials *DemoLoginCredentials `json:"demo_login_credentials,omitempty"`
+	DashboardCache       DashboardCacheMeta    `json:"dashboard_cache"`
 }
 
 // handleGetMeta returns server metadata including version and configuration
@@ -49,6 +57,10 @@ type MetaResponse struct {
 // @Success 200 {object} MetaResponse "Server metadata"
 // @Router /meta [get]
 func (s *Server) handleGetMeta(c *fiber.Ctx) error {
+	// Runtime metadata can intentionally include public demo credentials. Never
+	// let a browser or intermediary retain them after opt-out or rotation.
+	c.Set(fiber.HeaderCacheControl, "no-store, private")
+
 	meta := MetaResponse{
 		Version:             s.version,
 		HTTPServerTimeout:   s.config.Server.HTTPServerTimeout.String(),
@@ -71,6 +83,15 @@ func (s *Server) handleGetMeta(c *fiber.Ctx) error {
 	if s.oidcProvider != nil {
 		meta.OIDCIssuer = s.oidcProvider.GetIssuer()
 		meta.CLIClientID = s.config.OIDC.CLIClientID
+	}
+
+	localAuth := s.config.Auth.Local
+	if s.config.Demo.ReadOnly && s.config.Demo.ShowLoginCredentials && localAuth.Enabled &&
+		localAuth.AdminEmail != "" && localAuth.AdminPassword != "" {
+		meta.DemoLoginCredentials = &DemoLoginCredentials{
+			Email:    localAuth.AdminEmail,
+			Password: localAuth.AdminPassword,
+		}
 	}
 
 	return SendSuccess(c, fiber.StatusOK, meta)

@@ -10,6 +10,11 @@ export interface DashboardCachePolicy {
   max_ttl_seconds: number;
 }
 
+export interface DemoLoginCredentials {
+  email: string;
+  password: string;
+}
+
 export interface MetaResponse {
   version: string;
   http_server_timeout: string;
@@ -26,6 +31,9 @@ export interface MetaResponse {
   // Public demo instances advertise their write policy so the UI can explain
   // it before a visitor reaches a mutation.
   demo_read_only?: boolean;
+  // Present only when a read-only demo explicitly opts in to advertising its
+  // configured local admin credentials.
+  demo_login_credentials?: DemoLoginCredentials;
   // Dashboard result-cache policy; ABSENT on an old server (→ null in the store,
   // which means "cache unavailable / fail closed").
   dashboard_cache?: DashboardCachePolicy;

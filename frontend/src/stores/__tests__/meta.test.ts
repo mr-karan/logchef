@@ -90,4 +90,35 @@ describe('useMetaStore alertsEnabled capability', () => {
 
     expect(store.demoReadOnly).toBe(true)
   })
+
+  it('parses and clears advertised demo login credentials', async () => {
+    ;(metaApi.getMeta as any).mockResolvedValueOnce(okResponse({
+      demo_login_credentials: {
+        email: 'demo@example.com',
+        password: 'demo-password',
+      },
+    }))
+
+    const store = useMetaStore()
+    await store.loadMeta()
+
+    expect(store.demoLoginCredentials).toEqual({
+      email: 'demo@example.com',
+      password: 'demo-password',
+    })
+
+    store.clearState()
+    expect(store.demoLoginCredentials).toBeNull()
+  })
+
+  it('defaults malformed or absent demo login credentials to null', async () => {
+    ;(metaApi.getMeta as any).mockResolvedValueOnce(okResponse({
+      demo_login_credentials: { email: 'demo@example.com' },
+    }))
+
+    const store = useMetaStore()
+    await store.loadMeta()
+
+    expect(store.demoLoginCredentials).toBeNull()
+  })
 })

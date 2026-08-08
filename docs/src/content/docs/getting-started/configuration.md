@@ -302,6 +302,20 @@ Or set `LOGCHEF_DEMO__READ_ONLY=true`. The server advertises this mode through
 dashboard mutation controls. Blocked metadata writes return HTTP 403 with
 `error_type: DEMO_INSTANCE`.
 
+For an intentional public demo, `show_login_credentials = true` lets Logchef
+expose the configured `[auth.local]` email and password through
+`/api/v1/meta` so the login page can display and prefill them at runtime. You
+can also set `LOGCHEF_DEMO__SHOW_LOGIN_CREDENTIALS=true`. This option is off by
+default. **Enabling it publicly exposes the configured local authentication
+credentials to every visitor**, so never enable it for a normal deployment or
+with credentials that must remain secret.
+
+```toml
+[demo]
+read_only = true
+show_login_credentials = true
+```
+
 Browser-only preferences such as theme, timezone, view mode, and the fields
 panel remain usable. They are saved to local storage instead of the shared demo
 account, so one visitor cannot change another visitor's interface.

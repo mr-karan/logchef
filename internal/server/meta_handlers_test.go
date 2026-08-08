@@ -113,3 +113,90 @@ func TestHandleGetMetaAdvertisesDemoReadOnly(t *testing.T) {
 		t.Fatal("demo_read_only = false, want true")
 	}
 }
+
+func TestHandleGetMetaDemoLoginCredentials(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name        string
+		demo        config.DemoConfig
+		local       config.LocalAuthConfig
+		wantExposed bool
+	}{
+		{
+			name:        "explicit read-only local demo",
+			demo:        config.DemoConfig{ReadOnly: true, ShowLoginCredentials: true},
+			local:       config.LocalAuthConfig{Enabled: true, AdminEmail: "demo@example.com", AdminPassword: "demo-password"},
+			wantExposed: true,
+		},
+		{
+			name:  "opt-in disabled",
+			demo:  config.DemoConfig{ReadOnly: true},
+			local: config.LocalAuthConfig{Enabled: true, AdminEmail: "demo@example.com", AdminPassword: "demo-password"},
+		},
+		{
+			name:  "read-only disabled",
+			demo:  config.DemoConfig{ShowLoginCredentials: true},
+			local: config.LocalAuthConfig{Enabled: true, AdminEmail: "demo@example.com", AdminPassword: "demo-password"},
+		},
+		{
+			name:  "local auth disabled",
+			demo:  config.DemoConfig{ReadOnly: true, ShowLoginCredentials: true},
+			local: config.LocalAuthConfig{AdminEmail: "demo@example.com", AdminPassword: "demo-password"},
+		},
+		{
+			name:  "credentials incomplete",
+			demo:  config.DemoConfig{ReadOnly: true, ShowLoginCredentials: true},
+			local: config.LocalAuthConfig{Enabled: true, AdminEmail: "demo@example.com"},
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			s := &Server{
+				version: "test",
+				config: &config.Config{
+					Server: config.ServerConfig{HTTPServerTimeout: 30 * time.Second},
+					Demo:   tt.demo,
+					Auth:   config.AuthConfig{Local: tt.local},
+				},
+			}
+			app := fiber.New()
+			app.Get("/api/v1/meta", s.handleGetMeta)
+
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, "/api/v1/meta", http.NoBody))
+			if err != nil {
+				t.Fatalf("app.Test: %v", err)
+			}
+			defer resp.Body.Close()
+			if got := resp.Header.Get(fiber.HeaderCacheControl); got != "no-store, private" {
+				t.Fatalf("Cache-Control = %q, want %q", got, "no-store, private")
+			}
+
+			var envelope struct {
+				Data map[string]json.RawMessage `json:"data"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			raw, exposed := envelope.Data["demo_login_credentials"]
+			if exposed != tt.wantExposed {
+				t.Fatalf("demo_login_credentials exposed = %v, want %v", exposed, tt.wantExposed)
+			}
+			if !tt.wantExposed {
+				return
+			}
+
+			var got DemoLoginCredentials
+			if err := json.Unmarshal(raw, &got); err != nil {
+				t.Fatalf("decode demo_login_credentials: %v", err)
+			}
+			if got.Email != tt.local.AdminEmail || got.Password != tt.local.AdminPassword {
+				t.Fatalf("demo_login_credentials = %#v, want configured local credentials", got)
+			}
+		})
+	}
+}
