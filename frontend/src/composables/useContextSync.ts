@@ -117,6 +117,7 @@ export function useContextSync(options: UseContextSyncOptions = {}): UseContextS
     () => [route.query.team, route.query.source] as const,
     async ([nextRouteTeam, nextRouteSource], previousRouteSelection) => {
       if (state.value !== 'ready') return;
+      if (!routeSync.isCurrentRoute()) return;
       const [previousRouteTeam, previousRouteSource] = previousRouteSelection ?? [undefined, undefined];
       if (nextRouteTeam === previousRouteTeam && nextRouteSource === previousRouteSource) {
         return;

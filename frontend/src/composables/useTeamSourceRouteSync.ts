@@ -21,11 +21,22 @@ export function useTeamSourceRouteSync(basePath?: string) {
   const router = useRouter()
   const contextStore = useContextStore()
   const teamSourceContext = useTeamSourceContext()
+  const syncPath = basePath ?? route.path
+
+  function isCurrentRoute(): boolean {
+    return route.path === syncPath
+  }
 
   async function syncUrlToContext(
     teamId: number | null = contextStore.teamId,
     sourceId: number | null = contextStore.sourceId
   ): Promise<void> {
+    // LogsLayout caches child views. A cached view's watchers may still run
+    // after navigation, but it must never rewrite a different route.
+    if (!isCurrentRoute()) {
+      return
+    }
+
     const query: Record<string, string> = {}
 
     if (teamId) {
@@ -49,7 +60,7 @@ export function useTeamSourceRouteSync(basePath?: string) {
       return
     }
 
-    await router.replace({ path: basePath ?? route.path, query })
+    await router.replace({ path: syncPath, query })
   }
 
   async function clearSourceSelection(options: { syncUrl?: boolean } = {}): Promise<void> {
@@ -123,6 +134,7 @@ export function useTeamSourceRouteSync(basePath?: string) {
     applyContextSelection,
     applyRouteContext,
     clearSourceSelection,
+    isCurrentRoute,
     selectTeam,
     selectSource,
     syncUrlToContext,
