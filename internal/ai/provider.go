@@ -21,6 +21,11 @@ type CompletionRequest struct {
 	Model       string
 	MaxTokens   int
 	Temperature float32
+	// ReasoningEffort selects how much the model reasons before answering
+	// ("none", "low", "medium", "high", "xhigh", "max"). Empty means "leave it
+	// to the model default". Only the bedrock provider honors it today, and only
+	// reasoning-capable models (e.g. openai.gpt-5.6-*) accept it.
+	ReasoningEffort string
 }
 
 // ProviderConfig carries the fields needed to build any Provider. Which fields

@@ -428,6 +428,22 @@ max_tokens = 1024
 temperature = 0.1
 ```
 
+Reasoning-capable Bedrock models (e.g. `openai.gpt-5.6-*`) accept an optional
+`reasoning_effort`: `none`, `low`, `medium`, `high`, `xhigh` or `max`. Leave it
+empty (or omit it) for the model default; other models reject the parameter, so
+only set it for models that support reasoning. Reasoning tokens count against
+`max_tokens`, so raise `max_tokens` when using a higher effort — otherwise the
+model can spend its whole budget thinking and return no query.
+```toml
+[ai]
+enabled = true
+provider = "bedrock"
+region = "ap-south-1"
+model = "in.openai.gpt-5.6-luna"
+reasoning_effort = "high"
+max_tokens = 4096
+```
+
 **Note:** After first boot, changes to `[ai]` section in `config.toml` are ignored. Manage settings via the UI.
 
 ### Alerting

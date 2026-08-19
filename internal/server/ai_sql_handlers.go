@@ -176,10 +176,11 @@ func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQL
 	}
 
 	gen := ai.NewGenerator(provider, ai.GeneratorConfig{
-		Model:       s.config.AI.Model,
-		MaxTokens:   s.config.AI.MaxTokens,
-		Temperature: s.config.AI.Temperature,
-		Timeout:     AIRequestTimeout,
+		Model:           s.config.AI.Model,
+		MaxTokens:       s.config.AI.MaxTokens,
+		Temperature:     s.config.AI.Temperature,
+		ReasoningEffort: s.config.AI.ReasoningEffort,
+		Timeout:         AIRequestTimeout,
 	}, s.log)
 
 	generatedQuery, err := gen.GenerateQuery(aiCtx, ai.GenerateQueryInput{

@@ -61,3 +61,46 @@ func TestBedrockProviderCompleteEmpty(t *testing.T) {
 		t.Fatal("expected error for empty content")
 	}
 }
+
+func TestBedrockProviderReasoningEffort(t *testing.T) {
+	newClient := func() *fakeConverse {
+		return &fakeConverse{
+			out: &bedrockruntime.ConverseOutput{
+				Output: &types.ConverseOutputMemberMessage{
+					Value: types.Message{
+						Role:    types.ConversationRoleAssistant,
+						Content: []types.ContentBlock{&types.ContentBlockMemberText{Value: "SELECT 1"}},
+					},
+				},
+			},
+		}
+	}
+
+	// Unset effort must not add the model-specific field: models that do not
+	// support reasoning reject an unknown parameter outright.
+	p := &bedrockProvider{logger: testLogger()}
+	client := newClient()
+	p.client = client
+	if _, err := p.Complete(context.Background(), CompletionRequest{User: "q", Model: "m", MaxTokens: 10}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client.in.AdditionalModelRequestFields != nil {
+		t.Fatal("AdditionalModelRequestFields must be nil when reasoning effort is unset")
+	}
+
+	client = newClient()
+	p.client = client
+	if _, err := p.Complete(context.Background(), CompletionRequest{User: "q", Model: "m", MaxTokens: 10, ReasoningEffort: "high"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client.in.AdditionalModelRequestFields == nil {
+		t.Fatal("expected AdditionalModelRequestFields to carry the reasoning effort")
+	}
+	raw, err := client.in.AdditionalModelRequestFields.MarshalSmithyDocument()
+	if err != nil {
+		t.Fatalf("marshal additional fields: %v", err)
+	}
+	if want := `{"reasoning":{"effort":"high"}}`; string(raw) != want {
+		t.Fatalf("unexpected additional fields: got %s, want %s", raw, want)
+	}
+}

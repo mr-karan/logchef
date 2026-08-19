@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -241,6 +243,19 @@ var specificSettingValidators = map[string]func(string) error{
 	"alerts.smtp_from":             validateEmailAddress,
 	"alerts.smtp_reply_to":         validateEmailAddress,
 	"ai.temperature":               validateTemperature,
+	"ai.reasoning_effort":          validateReasoningEffort,
+}
+
+// validateReasoningEffort accepts the Bedrock reasoning effort levels, or an
+// empty value meaning "leave it to the model default".
+func validateReasoningEffort(value string) error {
+	if value == "" {
+		return nil
+	}
+	if !slices.Contains(config.ValidReasoningEfforts, value) {
+		return fmt.Errorf("must be one of %v (or empty for the model default)", config.ValidReasoningEfforts)
+	}
+	return nil
 }
 
 func validateOptionalURL(value string) error {

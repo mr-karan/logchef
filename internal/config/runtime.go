@@ -43,6 +43,7 @@ func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, store Settings
 	cfg.AI.Model = store.GetSettingWithDefault(ctx, "ai.model", cfg.AI.Model)
 	cfg.AI.MaxTokens = store.GetIntSetting(ctx, "ai.max_tokens", cfg.AI.MaxTokens)
 	cfg.AI.Temperature = float32(store.GetFloat64Setting(ctx, "ai.temperature", float64(cfg.AI.Temperature)))
+	cfg.AI.ReasoningEffort = store.GetSettingWithDefault(ctx, "ai.reasoning_effort", cfg.AI.ReasoningEffort)
 
 	// Auth session management
 	cfg.Auth.SessionDuration = store.GetDurationSetting(ctx, "auth.session_duration", cfg.Auth.SessionDuration)

@@ -39,7 +39,7 @@ const (
 const (
 	DefaultMaxTokens               = 1024
 	DefaultTemperature             = float32(0.1)
-	DefaultTimeout                 = 15 * time.Second // Used for both HTTP client and individual call fallback
+	DefaultTimeout                 = 90 * time.Second // Used for both HTTP client and individual call fallback
 	DefaultSystemPromptTableFormat = `You are an expert ClickHouse SQL query assistant for log analytics. Given a table schema and a natural language query, generate an optimized and correct ClickHouse SQL query. Important guidelines:
 
 1. Only use columns present in the provided schema.
@@ -122,7 +122,10 @@ type GeneratorConfig struct {
 	Model       string
 	MaxTokens   int
 	Temperature float32
-	Timeout     time.Duration // Timeout applied to an individual GenerateSQL call.
+	// ReasoningEffort is passed through to the provider for reasoning-capable
+	// models; empty leaves the model default. See CompletionRequest.
+	ReasoningEffort string
+	Timeout         time.Duration // Timeout applied to an individual GenerateSQL call.
 }
 
 // Generator turns natural language into validated ClickHouse SQL. It is
@@ -130,12 +133,13 @@ type GeneratorConfig struct {
 // ClickHouse-parser validation, and delegates the raw text completion to a
 // Provider transport.
 type Generator struct {
-	provider    Provider
-	logger      *slog.Logger
-	model       string
-	maxTokens   int
-	temperature float32
-	callTimeout time.Duration // Timeout for individual GenerateSQL calls
+	provider        Provider
+	logger          *slog.Logger
+	model           string
+	maxTokens       int
+	temperature     float32
+	reasoningEffort string
+	callTimeout     time.Duration // Timeout for individual GenerateSQL calls
 }
 
 // NewGenerator creates a Generator wrapping the given Provider. Defaults mirror
@@ -159,12 +163,13 @@ func NewGenerator(provider Provider, cfg GeneratorConfig, logger *slog.Logger) *
 	}
 
 	return &Generator{
-		provider:    provider,
-		logger:      logger.With("component", "ai_generator"),
-		model:       model,
-		maxTokens:   maxTokens,
-		temperature: temperature,
-		callTimeout: callTimeout,
+		provider:        provider,
+		logger:          logger.With("component", "ai_generator"),
+		model:           model,
+		maxTokens:       maxTokens,
+		temperature:     temperature,
+		reasoningEffort: cfg.ReasoningEffort,
+		callTimeout:     callTimeout,
 	}
 }
 
@@ -272,11 +277,12 @@ func (g *Generator) completeAndValidate(ctx context.Context, target TargetLangua
 	defer cancel()
 
 	raw, err := g.provider.Complete(callCtx, CompletionRequest{
-		System:      system,
-		User:        user,
-		Model:       g.model,
-		MaxTokens:   g.maxTokens,
-		Temperature: g.temperature,
+		System:          system,
+		User:            user,
+		Model:           g.model,
+		MaxTokens:       g.maxTokens,
+		Temperature:     g.temperature,
+		ReasoningEffort: g.reasoningEffort,
 	})
 	if err != nil {
 		g.logger.Error("error calling AI provider", "provider", g.provider.Name(), "error", err)

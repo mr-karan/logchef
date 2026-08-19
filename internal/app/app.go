@@ -449,6 +449,12 @@ func (a *App) seedSystemSettings(ctx context.Context) error {
 			description: "Temperature for generation (0.0-1.0, lower is more deterministic)",
 			isSensitive: false,
 		},
+		"ai.reasoning_effort": {
+			value:       a.Config.AI.ReasoningEffort,
+			valueType:   "string",
+			description: "Reasoning effort for reasoning-capable Bedrock models: none, low, medium, high, xhigh, max (empty for model default)",
+			isSensitive: false,
+		},
 	}
 
 	for key, setting := range aiSettings {

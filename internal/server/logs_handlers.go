@@ -29,8 +29,10 @@ import (
 
 // Added constant
 const (
-	// AIRequestTimeout is the maximum time to wait for the AI provider to respond
-	AIRequestTimeout = 15 * time.Second
+	// AIRequestTimeout is the maximum time to wait for the AI provider to respond.
+	// Reasoning models spend several seconds thinking before emitting any text, and
+	// the generator may follow up with a repair attempt, so this is generous.
+	AIRequestTimeout = 90 * time.Second
 	// FieldValuesTimeout is the maximum time to wait for field values queries
 	// This propagates to ClickHouse as max_execution_time via the context deadline
 	FieldValuesTimeout = 15 * time.Second

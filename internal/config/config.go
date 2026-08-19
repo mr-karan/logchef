@@ -5,6 +5,7 @@ import (
 	"log"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -304,6 +305,11 @@ type AIConfig struct {
 	MaxTokens int `koanf:"max_tokens"`
 	// Temperature controls randomness in generation (0.0-1.0, default: 0.1)
 	Temperature float32 `koanf:"temperature"`
+	// ReasoningEffort tunes how much a reasoning-capable model thinks before
+	// answering: "none", "low", "medium", "high", "xhigh" or "max". Empty leaves
+	// the model default. Only honored by the bedrock provider, and only by models
+	// that support it (e.g. openai.gpt-5.6-*); other models reject the parameter.
+	ReasoningEffort string `koanf:"reasoning_effort"`
 	// Enabled indicates whether AI features are enabled
 	Enabled bool `koanf:"enabled"`
 	// BaseURL for OpenAI API (default: "", which uses the standard OpenAI API endpoint)
@@ -397,6 +403,10 @@ const (
 var defaultExportFormats = []string{"csv", "ndjson"}
 
 var defaultOIDCScopes = []string{"openid", "email", "profile"}
+
+// ValidReasoningEfforts are the effort levels Bedrock accepts for
+// reasoning-capable models.
+var ValidReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
 
 // Load loads the configuration from a file and environment variables.
 // Environment variables with the prefix LOGCHEF_ can override file values.
@@ -555,6 +565,12 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 		if cfg.AI.Model == "" {
 			return fmt.Errorf("ai.model is required when ai.provider is \"bedrock\" (a Bedrock model id, e.g. \"anthropic.claude-3-5-sonnet-20241022-v2:0\")")
 		}
+	}
+
+	// A misspelled reasoning effort is only rejected by Bedrock at request time,
+	// which would surface as a broken AI assistant long after startup.
+	if cfg.AI.Enabled && cfg.AI.ReasoningEffort != "" && !slices.Contains(ValidReasoningEfforts, cfg.AI.ReasoningEffort) {
+		return fmt.Errorf("ai.reasoning_effort must be one of %v, got %q", ValidReasoningEfforts, cfg.AI.ReasoningEffort)
 	}
 
 	// Validate OIDC configuration. When local auth is enabled, OIDC becomes

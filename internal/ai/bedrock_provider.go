@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
+	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
 )
 
@@ -64,6 +65,16 @@ func (p *bedrockProvider) Complete(ctx context.Context, req CompletionRequest) (
 		maxTokens = math.MaxInt32
 	}
 
+	// Reasoning effort is not part of the unified Converse inference config; it
+	// rides along as a model-specific field. Only send it when configured so
+	// models that reject the parameter keep working.
+	var additionalFields document.Interface
+	if req.ReasoningEffort != "" {
+		additionalFields = document.NewLazyDocument(map[string]any{
+			"reasoning": map[string]any{"effort": req.ReasoningEffort},
+		})
+	}
+
 	out, err := p.client.Converse(ctx, &bedrockruntime.ConverseInput{
 		ModelId: &model,
 		System: []types.SystemContentBlock{
@@ -80,6 +91,7 @@ func (p *bedrockProvider) Complete(ctx context.Context, req CompletionRequest) (
 		InferenceConfig: &types.InferenceConfiguration{
 			MaxTokens: aws.Int32(int32(maxTokens)),
 		},
+		AdditionalModelRequestFields: additionalFields,
 	})
 	if err != nil {
 		return "", fmt.Errorf("bedrock Converse API error: %w", err)

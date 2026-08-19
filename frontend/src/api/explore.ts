@@ -1,6 +1,10 @@
 import { apiClient } from "./apiUtils";
 import { createSSEParser } from "@/lib/sse";
 
+// Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
+// tens of seconds, and the shared axios client otherwise aborts after 10s.
+const AI_GENERATE_TIMEOUT_SECONDS = 95;
+
 // Keep these for the UI filter builder
 export interface FilterCondition {
   field: string;
@@ -265,9 +269,12 @@ export const exploreApi = {
     if (!sourceId) {
       throw new Error("Source ID is required for AI SQL generation");
     }
+    // Reasoning models can think for a while, and the server allows up to 90s
+    // (AIRequestTimeout); the shared client default of 10s would abort first.
     return apiClient.post<AIGenerateSQLResponse>(
       `/teams/${teamId}/sources/${sourceId}/generate-sql`,
-      params
+      params,
+      { timeout: AI_GENERATE_TIMEOUT_SECONDS }
     );
   },
 
