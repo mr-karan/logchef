@@ -671,24 +671,6 @@ func (p *ClickHouseProvider) connectionFromConfig(raw json.RawMessage) (models.C
 }
 
 func (p *ClickHouseProvider) validateColumnTypes(ctx context.Context, client *clickhouse.Client, database, tableName, tsField, severityField string) error {
-	// Validate all identifiers before they are interpolated into SQL.
-	// This is defense-in-depth: callers also validate, but the function guards itself.
-	for _, id := range []struct {
-		field string
-		value string
-	}{
-		{"database", database},
-		{"table", tableName},
-		{"ts_field", tsField},
-	} {
-		if !IsValidIdentifier(id.value) {
-			return &ValidationError{Field: id.field, Message: fmt.Sprintf("invalid identifier %q", id.value)}
-		}
-	}
-	if severityField != "" && !IsValidIdentifier(severityField) {
-		return &ValidationError{Field: "severity_field", Message: fmt.Sprintf("invalid identifier %q", severityField)}
-	}
-
 	tsQuery := fmt.Sprintf(
 		`SELECT type FROM system.columns WHERE database = '%s' AND table = '%s' AND name = '%s'`,
 		database, tableName, tsField,
