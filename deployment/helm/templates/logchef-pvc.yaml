@@ -1,0 +1,22 @@
+{{- if and .Values.logchef.enabled .Values.logchef.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "logchef.logchefServiceName" . }}-data
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: logchef
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.logchef.persistence.accessModes | nindent 4 }}
+  resources:
+    requests:
+      storage: {{ .Values.logchef.persistence.size | quote }}
+  {{- with .Values.logchef.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

@@ -1,0 +1,111 @@
+{{- if .Values.clickhouse.enabled }}
+{{- $schemaName := printf "%s-clickhouse-schema" (include "logchef.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $jobRev := .Values.clickhouse.schemaJobRevision | default "1" | toString }}
+{{- $sqlHash := .Values.clickhouse.initSql | sha256sum | trunc 8 }}
+{{- $jobName := printf "%s-ch-schema-%s-%s" (include "logchef.fullname" .) $jobRev $sqlHash | trunc 63 | trimSuffix "-" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $schemaName }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+data:
+  01-logchef.sql: |
+{{ .Values.clickhouse.initSql | nindent 4 }}
+---
+# Regular Job (not a Helm hook). Bump clickhouse.schemaJobRevision to re-run after a failure.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ $jobName }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ttlSecondsAfterFinished: 86400
+  backoffLimit: 20
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        {{- include "logchef.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: clickhouse-schema
+    spec:
+      restartPolicy: OnFailure
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: schema
+          image: {{ .Values.clickhouse.image | quote }}
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: CH_HOST
+              value: {{ include "logchef.clickhouseServiceName" . | quote }}
+          command:
+            - /bin/bash
+            - -ec
+            - |
+              set -euo pipefail
+              echo "Waiting for ClickHouse at http://${CH_HOST}:8123/ping ..."
+              for i in $(seq 1 120); do
+                if wget -q -O- "http://${CH_HOST}:8123/ping" 2>/dev/null | grep -q Ok; then
+                  echo "ClickHouse is up (attempt ${i})"
+                  break
+                fi
+                if [ "$i" -eq 120 ]; then
+                  echo "Timed out waiting for ClickHouse" >&2
+                  exit 1
+                fi
+                sleep 5
+              done
+
+              echo "=== Applying schema ==="
+              cat /sql/01-logchef.sql
+              echo "======================="
+
+              # clickhouse-client is in the server image; --multiquery runs the full file.
+              clickhouse-client \
+                --host "${CH_HOST}" \
+                --port 9000 \
+                --user default \
+                --multiquery \
+                --queries-file /sql/01-logchef.sql
+
+              EXISTS="$(wget -q -O- "http://${CH_HOST}:8123/?query=EXISTS%20TABLE%20default.logs")"
+              echo "EXISTS TABLE default.logs => ${EXISTS}"
+              if [ "${EXISTS}" != "1" ]; then
+                echo "Schema apply failed: default.logs still missing" >&2
+                exit 1
+              fi
+              echo "Schema OK"
+          volumeMounts:
+            - name: sql
+              mountPath: /sql
+              readOnly: true
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: sql
+          configMap:
+            name: {{ $schemaName }}
+{{- end }}

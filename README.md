@@ -60,6 +60,16 @@ docker compose up -d
 
 Access the Logchef interface at `http://localhost:8125`.
 
+### Helm
+
+A chart for Kubernetes (Logchef, Dex, and ClickHouse via the Altinity operator) lives in [`deployment/helm`](deployment/helm):
+
+```shell
+helm install logchef ./deployment/helm --namespace logchef --create-namespace
+```
+
+See [`deployment/helm/values.yaml`](deployment/helm/values.yaml) for options and requirements.
+
 ## CLI
 
 Logchef includes a cross-platform CLI for querying and investigating logs directly from your terminal.

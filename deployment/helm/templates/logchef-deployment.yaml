@@ -1,0 +1,150 @@
+{{- if .Values.logchef.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "logchef.logchefServiceName" . }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: logchef
+  annotations:
+    reloader.stakater.com/auto: "true"
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.logchef.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "logchef.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: logchef
+  template:
+    metadata:
+      labels:
+        {{- include "logchef.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: logchef
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/logchef-config-secret.yaml") . | sha256sum }}
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "logchef.serviceAccountName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # SQLite needs a writable /data; PVC is often root-owned without fsGroup.
+      securityContext:
+        fsGroup: {{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }}
+        fsGroupChangePolicy: OnRootMismatch
+      initContainers:
+        - name: fix-data-perms
+          # Dedicated root image: logchef image may lack a usable root shell/chown.
+          image: "{{ .Values.logchef.dataPermsInit.image.repository }}:{{ .Values.logchef.dataPermsInit.image.tag }}"
+          imagePullPolicy: {{ .Values.logchef.dataPermsInit.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              mkdir -p /data
+              chown -R {{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }}:{{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }} /data
+              chmod 775 /data
+              ls -la /data
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          securityContext:
+            runAsUser: 0
+            runAsGroup: 0
+            allowPrivilegeEscalation: false
+      containers:
+        - name: logchef
+          image: "{{ .Values.logchef.image.repository }}:{{ .Values.logchef.image.tag }}"
+          imagePullPolicy: {{ .Values.logchef.image.pullPolicy }}
+          {{- $aiCfg := .Values.logchef.config.ai | default dict }}
+          {{- $aiSecret := .Values.logchef.ai.existingSecret | default "" }}
+          env:
+            - name: LOGCHEF_AUTH__API_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "logchef.apiTokenSecretName" . | quote }}
+                  key: {{ include "logchef.apiTokenSecretKey" . | quote }}
+            {{- if $aiCfg.enabled | default false }}
+            - name: LOGCHEF_AI__ENABLED
+              value: "true"
+            {{- with $aiCfg.provider }}
+            - name: LOGCHEF_AI__PROVIDER
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $aiCfg.model }}
+            - name: LOGCHEF_AI__MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $aiCfg.base_url }}
+            - name: LOGCHEF_AI__BASE_URL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- with $aiCfg.region }}
+            - name: LOGCHEF_AI__REGION
+              value: {{ . | quote }}
+            {{- end }}
+            {{- end }}
+            {{- if $aiSecret }}
+            - name: LOGCHEF_AI__API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $aiSecret | quote }}
+                  key: {{ .Values.logchef.ai.apiKeyKey | default "api-key" | quote }}
+            {{- end }}
+            {{- with .Values.logchef.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.logchef.service.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/logchef/config.toml
+              subPath: config.toml
+              readOnly: true
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.logchef.probes.liveness.path }}
+              port: {{ .Values.logchef.probes.liveness.port }}
+            initialDelaySeconds: {{ .Values.logchef.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.logchef.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.logchef.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.logchef.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.logchef.probes.readiness.path }}
+              port: {{ .Values.logchef.probes.readiness.port }}
+            initialDelaySeconds: {{ .Values.logchef.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.logchef.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.logchef.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.logchef.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.logchef.resources | nindent 12 }}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "logchef.logchefServiceName" . }}-config
+        - name: data
+          {{- if .Values.logchef.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "logchef.logchefServiceName" . }}-data
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+{{- end }}
