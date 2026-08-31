@@ -157,8 +157,8 @@ function resetSchema() {
             </p>
           </div>
           <Switch
-            :checked="modelValue.enableAuth"
-            @update:checked="(checked: boolean) => updateForm({ enableAuth: checked })"
+            :model-value="modelValue.enableAuth"
+            @update:model-value="(checked: boolean) => updateForm({ enableAuth: checked })"
           />
         </div>
 
