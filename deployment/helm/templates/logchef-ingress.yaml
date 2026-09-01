@@ -1,0 +1,37 @@
+{{- if and .Values.logchef.enabled .Values.logchef.ingress.enabled }}
+{{- $annotations := mergeOverwrite (dict) .Values.commonAnnotations .Values.logchef.ingress.annotations }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "logchef.logchefServiceName" . }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: logchef
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.logchef.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.logchef.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.logchef.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path | quote }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "logchef.logchefServiceName" $ }}
+                port:
+                  number: {{ $.Values.logchef.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

@@ -45,6 +45,7 @@ spec:
       securityContext:
         fsGroup: {{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }}
         fsGroupChangePolicy: OnRootMismatch
+      {{- if dig "enabled" true (.Values.logchef.dataPermsInit | default dict) }}
       initContainers:
         - name: fix-data-perms
           # Dedicated root image: logchef image may lack a usable root shell/chown.
@@ -65,6 +66,7 @@ spec:
             runAsUser: 0
             runAsGroup: 0
             allowPrivilegeEscalation: false
+      {{- end }}
       containers:
         - name: logchef
           image: "{{ .Values.logchef.image.repository }}:{{ .Values.logchef.image.tag }}"
@@ -139,7 +141,7 @@ spec:
       volumes:
         - name: config
           secret:
-            secretName: {{ include "logchef.logchefServiceName" . }}-config
+            secretName: {{ .Values.logchef.existingSecret | default (printf "%s-config" (include "logchef.logchefServiceName" .)) | quote }}
         - name: data
           {{- if .Values.logchef.persistence.enabled }}
           persistentVolumeClaim:

@@ -57,10 +57,21 @@ logchef:
   podSecurityContext:
     fsGroup: 1000
   dataPermsInit:
+    enabled: true
     image:
       repository: busybox
       tag: "1.36"
       pullPolicy: IfNotPresent
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: logchef.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
   # Overridable config.toml fragments. OIDC URLs are templated from publicDomain
   # and in-cluster Dex service DNS when left empty.
   config:
@@ -158,6 +169,16 @@ dex:
   httproute:
     create: false
     path: /
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: dex.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
   # Local password DB (demo). Set false when using external IdP connectors.
   enablePasswordDB: true
   # Optional: inject OIDC client id/secret from a Secret into Dex env
@@ -240,7 +261,7 @@ clickhouse:
     - "::/0"
   # Bump to force a new schema Job (Job names are immutable once created).
   schemaJobRevision: "4"
-  # Init SQL for default.logs — applied by Job + CHI startup_scripts + initdb mount.
+  # Init SQL for default.logs — applied by the schema Job and initdb mount.
   # Not via docker-entrypoint alone: Altinity may start clickhouse-server directly;
   # PVC already having data also skips initdb unless CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS=1.
   initSql: |
