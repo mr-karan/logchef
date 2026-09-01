@@ -63,6 +63,12 @@ func buildLogchefQLConditionsSQL(query string) string {
 // GetFieldDistinctValues retrieves the top N distinct values for a field within a time range.
 func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table string, params FieldValuesParams) (*FieldValuesResult, error) {
 	// Validate inputs that will be interpolated into SQL
+	if err := ValidateIdentifier(database); err != nil {
+		return nil, fmt.Errorf("invalid database name: %w", err)
+	}
+	if err := ValidateIdentifier(table); err != nil {
+		return nil, fmt.Errorf("invalid table name: %w", err)
+	}
 	if err := ValidateIdentifier(params.FieldName); err != nil {
 		return nil, fmt.Errorf("invalid field name: %w", err)
 	}
@@ -86,6 +92,8 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 	additionalConditions := buildLogchefQLConditionsSQL(params.LogchefQL)
 
 	quotedField := quoteIdentifier(params.FieldName)
+	quotedTS := quoteIdentifier(params.TimestampField)
+	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
 
 	// For string-like fields, exclude empty strings. For numeric fields, no such filter.
 	emptyFilter := fmt.Sprintf("%s != ''", quotedField)
@@ -95,12 +103,12 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 
 	query := fmt.Sprintf(`
 		SELECT %s AS value, count() AS cnt
-		FROM %s.%s
+		FROM %s
 		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
 		WHERE %s%s
 		GROUP BY value ORDER BY cnt DESC LIMIT %d
-	`, quotedField, database, table,
-		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
+	`, quotedField, qualifiedTable,
+		quotedTS, startTimeStr, timezone, endTimeStr, timezone,
 		emptyFilter, additionalConditions, limit)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
@@ -212,6 +220,8 @@ func extractInt64FromRow(row map[string]any, key string) (int64, bool) {
 
 func (c *Client) queryTotalDistinct(ctx context.Context, database, table string, params FieldValuesParams, startTimeStr, endTimeStr, timezone, additionalConditions string, timeoutSeconds *int) int64 {
 	quotedField := quoteIdentifier(params.FieldName)
+	quotedTS := quoteIdentifier(params.TimestampField)
+	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
 	emptyFilter := fmt.Sprintf("%s != ''", quotedField)
 	if isNumericColumnType(params.FieldType) {
 		emptyFilter = "1"
@@ -219,11 +229,11 @@ func (c *Client) queryTotalDistinct(ctx context.Context, database, table string,
 
 	query := fmt.Sprintf(`
 		SELECT uniq(%s) AS total
-		FROM %s.%s
+		FROM %s
 		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
 		WHERE %s%s
-	`, quotedField, database, table,
-		params.TimestampField, startTimeStr, timezone, endTimeStr, timezone,
+	`, quotedField, qualifiedTable,
+		quotedTS, startTimeStr, timezone, endTimeStr, timezone,
 		emptyFilter, additionalConditions)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
