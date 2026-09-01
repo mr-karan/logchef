@@ -1,0 +1,37 @@
+{{- if and .Values.dex.enabled .Values.dex.ingress.enabled }}
+{{- $annotations := mergeOverwrite (dict) .Values.commonAnnotations .Values.dex.ingress.annotations }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "logchef.dexServiceName" . }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+  {{- with $annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.dex.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.dex.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.dex.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path | quote }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "logchef.dexServiceName" $ }}
+                port:
+                  number: {{ $.Values.dex.service.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}

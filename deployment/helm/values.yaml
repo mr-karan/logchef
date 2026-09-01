@@ -1,0 +1,289 @@
+# logchef — docker-compose → Helm (ClickHouse via Altinity CHI)
+
+nameOverride: ""
+fullnameOverride: ""
+
+# Public hostname suffix used for OIDC redirect / Dex issuer (e.g. example.com).
+# When set, public URLs become https://<service>.<publicDomain>/…
+publicDomain: ""
+
+# Optional Gateway API HTTPRoutes (requires a Gateway in the cluster).
+gateway:
+  name: ""
+  namespace: ""
+  httpSectionName: http
+  httpsSectionName: https
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+commonAnnotations: {}
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# Logchef
+# ---------------------------------------------------------------------------
+logchef:
+  enabled: true
+  image:
+    repository: ghcr.io/mr-karan/logchef
+    tag: latest
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 8125
+  httproute:
+    create: false
+    path: /
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: true
+    size: 5Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  podSecurityContext:
+    fsGroup: 1000
+  dataPermsInit:
+    enabled: true
+    image:
+      repository: busybox
+      tag: "1.36"
+      pullPolicy: IfNotPresent
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: logchef.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  # Overridable config.toml fragments. OIDC URLs are templated from publicDomain
+  # and in-cluster Dex service DNS when left empty.
+  config:
+    server:
+      host: "0.0.0.0"
+      port: 8125
+    sqlite:
+      path: /data/local.db
+    oidc:
+      # Empty → https://<release>-dex.<publicDomain>/dex (must match Dex issuer)
+      provider_url: ""
+      # Empty → https://<release>-dex.<publicDomain>/dex/auth
+      auth_url: ""
+      # Empty → http://<release>-dex:5556/dex/token (in-cluster token exchange)
+      token_url: ""
+      client_id: logchef
+      # Prefer existingSecret; plaintext used only for bootstrap.
+      client_secret: logchef-secret
+      # Empty → https://<release>.<publicDomain>/api/v1/auth/callback
+      redirect_url: ""
+      scopes:
+        - openid
+        - email
+        - profile
+      # Set true when the IdP does not send email_verified=true.
+      skip_email_verified_check: false
+    auth:
+      admin_emails:
+        - admin@logchef.internal
+      session_duration: 24h
+      max_concurrent_sessions: 1
+      default_token_expiry: 2160h
+      # JIT create users on first successful OIDC login (domain allow-list).
+      auto_provision:
+        enabled: false
+        allowed_domains: []
+    ai:
+      enabled: false
+      provider: openai
+      model: gpt-4o
+      # base_url: ""       # optional override
+      # region: ""         # required for bedrock
+      # Do not set api_key here — use logchef.ai.existingSecret + LOGCHEF_AI__API_KEY.
+    logging:
+      level: info
+  # HMAC pepper for user API tokens (injected as LOGCHEF_AUTH__API_TOKEN_SECRET).
+  # Leave existingSecret empty: the chart creates <release>-api-token once
+  # (openssl rand -hex 32) and reuses it on upgrade via lookup.
+  auth:
+    existingSecret: ""
+    apiTokenSecretKey: api-token-secret
+  # OpenAI API key from a manually created Secret (e.g. logchef-ai).
+  ai:
+    existingSecret: ""
+    apiKeyKey: api-key
+  extraEnv: []
+  existingSecret: ""
+  probes:
+    liveness:
+      path: /api/v1/health
+      port: http
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /api/v1/health
+      port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# ---------------------------------------------------------------------------
+# Dex (OIDC)
+# ---------------------------------------------------------------------------
+dex:
+  enabled: true
+  image:
+    repository: dexidp/dex
+    tag: v2.35.3
+    pullPolicy: IfNotPresent
+  replicaCount: 1
+  service:
+    type: ClusterIP
+    port: 5556
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+  # Browser-facing Dex hostname (HTTPRoute created when publicDomain and gateway.name are set).
+  httproute:
+    create: false
+    path: /
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: dex.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+  # Local password DB (demo). Set false when using external IdP connectors.
+  enablePasswordDB: true
+  # Optional: inject OIDC client id/secret from a Secret into Dex env
+  # (referenced from connectors as $OIDC_CLIENT_ID / $OIDC_CLIENT_SECRET).
+  oidcSecret:
+    existingSecret: ""
+    clientIdKey: client-id
+    clientSecretKey: client-secret
+    clientIdEnv: OIDC_CLIENT_ID
+    clientSecretEnv: OIDC_CLIENT_SECRET
+  # Dex IdP connectors (OIDC/SAML/etc). See https://dexidp.io/docs/connectors/
+  connectors: []
+  # bcrypt of "password" (same as upstream docker-compose demo)
+  staticPasswords:
+    - email: admin@logchef.internal
+      hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+      username: admin
+      userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+    - email: demo@logchef.internal
+      hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+      username: demo-user
+      userID: "08a8684b-db88-4b73-90a9-3cd1661f5467"
+  probes:
+    liveness:
+      path: /dex/.well-known/openid-configuration
+      port: http
+      initialDelaySeconds: 10
+      periodSeconds: 10
+      timeoutSeconds: 3
+      failureThreshold: 3
+    readiness:
+      path: /dex/.well-known/openid-configuration
+      port: http
+      initialDelaySeconds: 5
+      periodSeconds: 5
+      timeoutSeconds: 3
+      failureThreshold: 3
+
+# ---------------------------------------------------------------------------
+# ClickHouse (Altinity ClickHouseInstallation)
+# Requires altinity-clickhouse-operator CRDs in the cluster.
+# ---------------------------------------------------------------------------
+clickhouse:
+  enabled: true
+  name: logchef
+  image: clickhouse/clickhouse-server:24.8.4
+  cluster:
+    name: logchef
+    shards: 1
+    replicas: 1
+  # Empty → clickhouse-{chi} (Altinity default), e.g. clickhouse-logchef for chi name logchef.
+  serviceName: ""
+  resources:
+    requests:
+      memory: 2Gi
+      cpu: 500m
+    limits:
+      memory: 4Gi
+      cpu: "2"
+  # Align with pod memory limits — default profile was 10Gi/query and OOM'd merges.
+  profiles:
+    default:
+      max_memory_usage: "2000000000"
+      use_uncompressed_cache: "0"
+      load_balancing: in_order
+      log_queries: "1"
+  settings:
+    display_name: logchef
+    # ~85% of cgroup RAM for server total; merge cap avoids background OOM on small pods.
+    max_server_memory_usage_to_ram_ratio: "0.85"
+    merge_max_memory_usage: "1500000000"
+    background_merges_mutations_concurrency: "2"
+  storage:
+    size: 50Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  # default user networks — open within cluster
+  allowFrom:
+    - "::/0"
+  # Bump to force a new schema Job (Job names are immutable once created).
+  schemaJobRevision: "4"
+  # Init SQL for default.logs — applied by the schema Job and initdb mount.
+  # Not via docker-entrypoint alone: Altinity may start clickhouse-server directly;
+  # PVC already having data also skips initdb unless CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS=1.
+  initSql: |
+    CREATE DATABASE IF NOT EXISTS default;
+
+    CREATE TABLE IF NOT EXISTS default.logs
+    (
+        timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
+        severity_text LowCardinality(String) CODEC(ZSTD(1)),
+        severity_number Int32 CODEC(ZSTD(1)),
+        service_name LowCardinality(String) CODEC(ZSTD(1)),
+        namespace LowCardinality(String) CODEC(ZSTD(1)),
+        body String CODEC(ZSTD(1)),
+        log_attributes Map(LowCardinality(String), String) CODEC(ZSTD(1)),
+
+        INDEX idx_severity_text severity_text TYPE set(100) GRANULARITY 4,
+        INDEX idx_log_attributes_keys mapKeys(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+        INDEX idx_log_attributes_values mapValues(log_attributes) TYPE bloom_filter(0.01) GRANULARITY 1,
+        INDEX idx_body body TYPE tokenbf_v1(32768, 3, 0) GRANULARITY 1
+    )
+    ENGINE = MergeTree()
+    PARTITION BY toDate(timestamp)
+    ORDER BY (namespace, service_name, timestamp)
+    TTL toDateTime(timestamp) + INTERVAL 30 DAY
+    SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;

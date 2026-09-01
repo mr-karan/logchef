@@ -1,0 +1,100 @@
+{{- if .Values.dex.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "logchef.dexServiceName" . }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+  annotations:
+    reloader.stakater.com/auto: "true"
+    {{- with .Values.commonAnnotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  replicas: {{ .Values.dex.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "logchef.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dex
+  template:
+    metadata:
+      labels:
+        {{- include "logchef.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dex
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/dex-config-secret.yaml") . | sha256sum }}
+        {{- with .Values.commonAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "logchef.serviceAccountName" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: dex
+          image: "{{ .Values.dex.image.repository }}:{{ .Values.dex.image.tag }}"
+          imagePullPolicy: {{ .Values.dex.image.pullPolicy }}
+          args:
+            - dex
+            - serve
+            - /etc/dex/config.yaml
+          {{- if .Values.dex.oidcSecret.existingSecret }}
+          env:
+            - name: {{ .Values.dex.oidcSecret.clientIdEnv | default "OIDC_CLIENT_ID" | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dex.oidcSecret.existingSecret | quote }}
+                  key: {{ .Values.dex.oidcSecret.clientIdKey | default "client-id" | quote }}
+            - name: {{ .Values.dex.oidcSecret.clientSecretEnv | default "OIDC_CLIENT_SECRET" | quote }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.dex.oidcSecret.existingSecret | quote }}
+                  key: {{ .Values.dex.oidcSecret.clientSecretKey | default "client-secret" | quote }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.dex.service.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/dex/config.yaml
+              subPath: config.yaml
+              readOnly: true
+            - name: data
+              mountPath: /var/dex
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.dex.probes.liveness.path }}
+              port: {{ .Values.dex.probes.liveness.port }}
+            initialDelaySeconds: {{ .Values.dex.probes.liveness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.dex.probes.liveness.periodSeconds }}
+            timeoutSeconds: {{ .Values.dex.probes.liveness.timeoutSeconds }}
+            failureThreshold: {{ .Values.dex.probes.liveness.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.dex.probes.readiness.path }}
+              port: {{ .Values.dex.probes.readiness.port }}
+            initialDelaySeconds: {{ .Values.dex.probes.readiness.initialDelaySeconds }}
+            periodSeconds: {{ .Values.dex.probes.readiness.periodSeconds }}
+            timeoutSeconds: {{ .Values.dex.probes.readiness.timeoutSeconds }}
+            failureThreshold: {{ .Values.dex.probes.readiness.failureThreshold }}
+          resources:
+            {{- toYaml .Values.dex.resources | nindent 12 }}
+      volumes:
+        - name: config
+          secret:
+            secretName: {{ include "logchef.dexServiceName" . }}-config
+        - name: data
+          emptyDir: {}
+{{- end }}

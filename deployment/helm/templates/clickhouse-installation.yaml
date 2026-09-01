@@ -1,0 +1,121 @@
+{{- if .Values.clickhouse.enabled }}
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: {{ .Values.clickhouse.name | quote }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: clickhouse
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  defaults:
+    templates:
+      dataVolumeClaimTemplate: data-volume
+      serviceTemplate: svc-template
+      podTemplate: pod-template
+  configuration:
+    users:
+      default/access_management: "1"
+      default/networks/ip: {{ index .Values.clickhouse.allowFrom 0 | default "::/0" | quote }}
+      default/profile: default
+      default/quota: default
+      default/named_collection_control: "1"
+      default/show_named_collections: "1"
+      default/show_named_collections_secrets: "1"
+    profiles:
+      {{- range $profile, $settings := .Values.clickhouse.profiles }}
+      {{- range $key, $val := $settings }}
+      {{ printf "%s/%s" $profile $key }}: {{ $val | quote }}
+      {{- end }}
+      {{- end }}
+    settings:
+      {{- range $key, $val := .Values.clickhouse.settings }}
+      {{ $key }}: {{ $val | quote }}
+      {{- end }}
+    files:
+      config.d/logchef-logger.xml: |
+        <clickhouse>
+            <logger>
+                <level>information</level>
+                <log>/var/log/clickhouse-server/clickhouse-server.log</log>
+                <errorlog>/var/log/clickhouse-server/clickhouse-server.err.log</errorlog>
+                <size>1000M</size>
+                <count>3</count>
+            </logger>
+            <listen_host>0.0.0.0</listen_host>
+        </clickhouse>
+    clusters:
+      - name: {{ .Values.clickhouse.cluster.name | quote }}
+        layout:
+          shardsCount: {{ .Values.clickhouse.cluster.shards }}
+          replicasCount: {{ .Values.clickhouse.cluster.replicas }}
+  templates:
+    serviceTemplates:
+      - name: svc-template
+        generateName: clickhouse-{chi}
+        spec:
+          ports:
+            - name: http
+              port: 8123
+            - name: tcp
+              port: 9000
+          type: ClusterIP
+    podTemplates:
+      - name: pod-template
+        spec:
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          containers:
+            - name: clickhouse
+              image: {{ .Values.clickhouse.image | quote }}
+              env:
+                # If the image entrypoint runs, re-apply initdb scripts even when PVC already has data.
+                - name: CLICKHOUSE_ALWAYS_RUN_INITDB_SCRIPTS
+                  value: "1"
+              resources:
+                {{- toYaml .Values.clickhouse.resources | nindent 16 }}
+              ports:
+                - name: http
+                  containerPort: 8123
+                - name: tcp
+                  containerPort: 9000
+                - name: interserver
+                  containerPort: 9009
+              volumeMounts:
+                # Keep data PVC mount explicit when adding custom mounts (Altinity merge varies by version).
+                - name: data-volume
+                  mountPath: /var/lib/clickhouse
+                - name: logchef-initdb
+                  mountPath: /docker-entrypoint-initdb.d
+              securityContext:
+                capabilities:
+                  add:
+                    - SYS_NICE
+                    - IPC_LOCK
+          volumes:
+            - name: logchef-initdb
+              configMap:
+                name: {{ printf "%s-clickhouse-schema" (include "logchef.fullname" .) | trunc 63 | trimSuffix "-" }}
+                defaultMode: 0555
+    volumeClaimTemplates:
+      - name: data-volume
+        reclaimPolicy: Retain
+        spec:
+          accessModes:
+            {{- toYaml .Values.clickhouse.storage.accessModes | nindent 12 }}
+          {{- with .Values.clickhouse.storage.storageClass }}
+          storageClassName: {{ . | quote }}
+          {{- end }}
+          resources:
+            requests:
+              storage: {{ .Values.clickhouse.storage.size | quote }}
+{{- end }}

@@ -1,0 +1,70 @@
+{{- if and .Values.dex.enabled .Values.dex.httproute.create .Values.gateway.name (include "logchef.publicDomain" .) }}
+{{- $gateway := .Values.gateway.name }}
+{{- $gatewayNamespace := .Values.gateway.namespace }}
+{{- $domain := include "logchef.publicDomain" . }}
+{{- $host := printf "%s.%s" (include "logchef.dexServiceName" .) $domain }}
+{{- $svc := include "logchef.dexServiceName" . }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $svc }}-redirect
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  hostnames:
+    - {{ $host | quote }}
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $gateway }}
+      {{- if $gatewayNamespace }}
+      namespace: {{ $gatewayNamespace }}
+      {{- end }}
+      sectionName: {{ .Values.gateway.httpSectionName | default "http" }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            port: 443
+            statusCode: 301
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ $svc }}
+  labels:
+    {{- include "logchef.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+  {{- with .Values.commonAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  hostnames:
+    - {{ $host | quote }}
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: {{ $gateway }}
+      {{- if $gatewayNamespace }}
+      namespace: {{ $gatewayNamespace }}
+      {{- end }}
+      sectionName: {{ .Values.gateway.httpsSectionName | default "https" }}
+  rules:
+    - backendRefs:
+        - group: ""
+          kind: Service
+          name: {{ $svc }}
+          port: {{ .Values.dex.service.port }}
+          weight: 1
+      matches:
+        - path:
+            type: PathPrefix
+            value: {{ .Values.dex.httproute.path | default "/" | quote }}
+{{- end }}
