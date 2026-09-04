@@ -48,6 +48,18 @@ Read the [v2.0 release notes](https://logchef.app/changelog/#v2.0.0) or [try the
 
 ## Quick Start
 
+### One-click Deploy
+
+Deploy a full Logchef stack (Logchef + ClickHouse + a demo log generator) to your
+own account on a managed platform. Log in with the admin credentials generated at
+deploy time and connect the ClickHouse source — [deployment instructions](deployment/oneclick/README.md).
+
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/mr-karan/logchef)
+
+<!-- Uncomment once the Railway template is published (see deployment/railway/README.md):
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/<template-slug>)
+-->
+
 ### Docker
 
 ```shell

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -466,6 +467,18 @@ func loadProvisioningFile(cfg *Config, mainConfigPath string) error {
 		provPath = filepath.Join(filepath.Dir(mainConfigPath), provPath)
 	}
 	pk := koanf.New(".")
+	if _, err := os.Stat(provPath); err != nil {
+		if os.IsNotExist(err) {
+			// A declared-but-missing provisioning file only disables
+			// provisioning; the default shipped config points at a dev-only
+			// path that does not exist in packaged images. Log and continue —
+			// a present-but-malformed file still fails loudly below.
+			log.Printf("provisioning file %q not found; provisioning disabled", provPath)
+			cfg.Provisioning.File = ""
+			return nil
+		}
+		return fmt.Errorf("error stat-ing provisioning file %q: %w", provPath, err)
+	}
 	if err := pk.Load(file.Provider(provPath), toml.Parser()); err != nil {
 		return fmt.Errorf("error loading provisioning file %q: %w", provPath, err)
 	}

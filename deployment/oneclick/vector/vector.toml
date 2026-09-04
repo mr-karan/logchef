@@ -1,0 +1,82 @@
+# Demo log generator for one-click deploys.
+#
+# Generates synthetic syslog lines and ships them to ClickHouse in OpenTelemetry
+# shape. Connection details come from the CLICKHOUSE_* environment variables,
+# which the Render blueprint / Railway template wires to the ClickHouse service.
+
+[api]
+enabled = true
+
+[sources.generate_syslog]
+type = "demo_logs"
+format = "syslog"
+interval = 0.5
+
+[transforms.remap_syslog]
+inputs = ["generate_syslog"]
+type = "remap"
+source = '''
+structured = parse_syslog!(.message)
+
+# OpenTelemetry required fields
+.timestamp = format_timestamp!(structured.timestamp, format: "%Y-%m-%d %H:%M:%S.%f")
+
+# Map message to body
+.body = structured.message
+
+# Service information
+.service_name = structured.appname
+.namespace = "syslog"
+
+# Map severity
+.severity_text = if includes(["emerg", "err", "crit", "alert"], structured.severity) {
+  "ERROR"
+} else if structured.severity == "warning" {
+  "WARN"
+} else if structured.severity == "debug" {
+  "DEBUG"
+} else if includes(["info", "notice"], structured.severity) {
+  "INFO"
+} else {
+  structured.severity
+}
+
+# Convert severity to number according to OpenTelemetry spec
+# https://opentelemetry.io/docs/specs/otel/logs/data-model/#severity-fields
+.severity_number = if .severity_text == "ERROR" {
+  17  # ERROR
+} else if .severity_text == "WARN" {
+  13  # WARN
+} else if .severity_text == "DEBUG" {
+  5   # DEBUG
+} else {
+  9   # INFO
+}
+
+# Store syslog-specific fields in log_attributes
+.log_attributes = {
+  "syslog.procid": structured.procid,
+  "syslog.facility": structured.facility,
+  "syslog.version": structured.version,
+  "syslog.hostname": structured.hostname
+}
+
+# Cleanup
+del(.message)
+del(.source_type)
+'''
+
+[sinks.clickhouse]
+type = "clickhouse"
+inputs = ["remap_syslog"]
+endpoint = "http://${CLICKHOUSE_HOST}:${CLICKHOUSE_PORT}"
+database = "default"
+table = "logs"
+compression = "gzip"
+healthcheck.enabled = false
+skip_unknown_fields = true
+
+[sinks.clickhouse.auth]
+strategy = "basic"
+user = "${CLICKHOUSE_USER}"
+password = "${CLICKHOUSE_PASSWORD}"

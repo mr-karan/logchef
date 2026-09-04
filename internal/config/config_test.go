@@ -73,6 +73,40 @@ func TestLoad_RejectsUnknownDriver(t *testing.T) {
 	}
 }
 
+func TestLoad_MissingProvisioningFileDisablesProvisioning(t *testing.T) {
+	// The shipped config.toml points [provisioning] file at a dev-only path
+	// that does not exist in packaged images. A missing file should disable
+	// provisioning instead of failing startup.
+	cfg, err := Load(writeConfig(t, "\n[provisioning]\nfile = \"dev/provisioning.toml\"\n"))
+	if err != nil {
+		t.Fatalf("Load with missing provisioning file: %v", err)
+	}
+	if cfg.Provisioning.File != "" {
+		t.Errorf("provisioning.file = %q, want empty (disabled)", cfg.Provisioning.File)
+	}
+}
+
+func TestLoad_ProvisioningFileIsLoaded(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	cfgText := baseConfig + "\n[provisioning]\nfile = \"provisioning.toml\"\n"
+	if err := os.WriteFile(configPath, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+	provPath := filepath.Join(dir, "provisioning.toml")
+	prov := "manage_sources = true\n\n[[sources]]\nname = \"test\"\n"
+	if err := os.WriteFile(provPath, []byte(prov), 0o600); err != nil {
+		t.Fatalf("write provisioning: %v", err)
+	}
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Provisioning.ManageSources {
+		t.Error("manage_sources = false, want true")
+	}
+}
+
 func TestLoad_AutoProvisionEnabledRequiresAllowedDomains(t *testing.T) {
 	_, err := Load(writeConfig(t, "\n[auth.auto_provision]\nenabled = true\n"))
 	if err == nil {

@@ -1,0 +1,5 @@
+<clickhouse>
+    <!-- Listen on all interfaces so private-network peers (Logchef, Vector)
+         can reach the HTTP (8123) and native (9000) interfaces. -->
+    <listen_host replace="true">0.0.0.0</listen_host>
+</clickhouse>

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **One-click deploys.** Deploy a full Logchef stack (Logchef + ClickHouse +
+  demo log generator) in one click:
+  - Render blueprint (`render.yaml`) wired to the "Deploy to Render" button in
+    the README.
+  - Railway template runbook (`deployment/railway/README.md`).
+  - Shared deploy images under `deployment/oneclick/` (ClickHouse with the
+    `logs` table schema baked in, Vector demo log generator).
+
+### Fixed
+- **Bare Docker image failed to boot.** The shipped `config.toml` points
+  `[provisioning] file` at a dev-only path that does not exist in packaged
+  images, so starting the published image without a mounted config crashed
+  with `error loading provisioning file`. A declared-but-missing provisioning
+  file now disables provisioning with a warning instead of failing startup
+  (a present-but-malformed file still fails loudly).
+
 ## [2.0.2] - 2026-08-08
 
 ### Fixed

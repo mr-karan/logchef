@@ -1,0 +1,108 @@
+# Render Blueprint for a one-click Logchef stack:
+#   logchef (web) + ClickHouse (private service) + Vector demo log generator.
+#
+# Deploy via the "Deploy to Render" button in the README, or with:
+#   render blueprints launch
+#
+# After the first deploy, log in and connect the ClickHouse source (see
+# deployment/oneclick/README.md for the exact values).
+services:
+  # Logchef UI + API. Prebuilt image from GHCR — no build step.
+  - type: web
+    name: logchef
+    runtime: image
+    image:
+      url: ghcr.io/mr-karan/logchef:latest
+    plan: 1c-2g
+    region: oregon
+    healthCheckPath: /api/v1/health
+    envVars:
+      # Render routes public traffic to the port the service binds (10000).
+      - key: LOGCHEF_SERVER__PORT
+        value: 10000
+      # Termination happens at Render's edge; the instance itself is plain HTTP.
+      - key: LOGCHEF_SERVER__SECURE_COOKIE
+        value: "true"
+      # SQLite metadata store on a persistent disk.
+      - key: LOGCHEF_SQLITE__PATH
+        value: /data/logchef.db
+      # Built-in email + password auth (no OIDC provider needed for one-click).
+      - key: LOGCHEF_AUTH__LOCAL__ENABLED
+        value: "true"
+      - key: LOGCHEF_AUTH__LOCAL__ADMIN_EMAIL
+        sync: false # prompted at deploy time
+      - key: LOGCHEF_AUTH__LOCAL__ADMIN_PASSWORD
+        generateValue: true # shown in the service's env vars in the dashboard
+      - key: LOGCHEF_AUTH__API_TOKEN_SECRET
+        generateValue: true
+      # The image ships dev-only OIDC defaults pointing at a local Dex. Blank
+      # them so the login page only offers local email + password auth.
+      - key: LOGCHEF_OIDC__PROVIDER_URL
+        value: ""
+      - key: LOGCHEF_OIDC__AUTH_URL
+        value: ""
+      - key: LOGCHEF_OIDC__TOKEN_URL
+        value: ""
+      - key: LOGCHEF_LOGGING__LEVEL
+        value: info
+    disk:
+      name: logchef-data
+      mountPath: /data
+      sizeGB: 1
+
+  # ClickHouse log backend. Private service: not reachable from the public
+  # internet, only from the other services in this blueprint.
+  - type: pserv
+    name: clickhouse
+    runtime: docker
+    dockerfilePath: ./deployment/oneclick/clickhouse/Dockerfile
+    dockerContext: ./deployment/oneclick/clickhouse
+    plan: 1c-2g
+    region: oregon
+    envVars:
+      # Private-network port. HTTP interface listens on 8123; the native
+      # interface (used by Logchef sources) listens on 9000.
+      - key: PORT
+        value: "8123"
+      - key: CLICKHOUSE_USER
+        value: logchef
+      - key: CLICKHOUSE_PASSWORD
+        generateValue: true
+      - key: CLICKHOUSE_DB
+        value: default
+    disk:
+      name: clickhouse-data
+      mountPath: /data/db
+      sizeGB: 10
+
+  # Demo log generator: ships synthetic syslog into ClickHouse so the stack
+  # has data to explore immediately. Remove this service when connecting a
+  # real ingestion pipeline.
+  - type: worker
+    name: vector
+    runtime: docker
+    dockerfilePath: ./deployment/oneclick/vector/Dockerfile
+    dockerContext: ./deployment/oneclick/vector
+    plan: 0.5c-512mb
+    region: oregon
+    envVars:
+      - key: CLICKHOUSE_HOST
+        fromService:
+          name: clickhouse
+          type: pserv
+          property: host
+      - key: CLICKHOUSE_PORT
+        fromService:
+          name: clickhouse
+          type: pserv
+          property: port
+      - key: CLICKHOUSE_USER
+        fromService:
+          name: clickhouse
+          type: pserv
+          envVarKey: CLICKHOUSE_USER
+      - key: CLICKHOUSE_PASSWORD
+        fromService:
+          name: clickhouse
+          type: pserv
+          envVarKey: CLICKHOUSE_PASSWORD
