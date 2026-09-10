@@ -519,6 +519,7 @@ const table = useTable({
             : updaterOrValue;
         columnOrder.value = enforceTimestampFirst(nextValue);
     },
+    getRowCanExpand: () => true,
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
     // Let table derive column sizing info from the state ref
