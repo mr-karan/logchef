@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, watch } from "vue";
+import { computed, markRaw, watch } from "vue";
 import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
 import { logchefqlApi } from "@/api/logchefql";
 import { isCanceledError } from "@/api/error-handler";
@@ -1243,7 +1243,7 @@ export const useExploreStore = defineStore("explore", () => {
 
           if (queryResponse.data) {
             const logs = queryResponse.data.logs || [];
-            state.data.value.logs = logs;
+            state.data.value.logs = markRaw(logs);
             state.data.value.columns = normalizeQueryColumns(queryResponse.data.columns, logs);
             state.data.value.queryStats = queryResponse.data.stats || DEFAULT_QUERY_STATS;
             state.data.value.queryWarnings = queryResponse.data.warnings || [];
@@ -1380,7 +1380,7 @@ export const useExploreStore = defineStore("explore", () => {
             }
             if (data && (data.data || data.logs)) {
               const logs = data.data || data.logs || [];
-              state.data.value.logs = logs;
+              state.data.value.logs = markRaw(logs);
               state.data.value.columns = normalizeQueryColumns(data.columns, logs);
               state.data.value.queryStats = data.stats || DEFAULT_QUERY_STATS;
               state.data.value.queryWarnings = data.warnings || [];

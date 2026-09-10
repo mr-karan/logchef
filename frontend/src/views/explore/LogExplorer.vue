@@ -86,6 +86,15 @@ const contextStore = useContextStore();
 // Team/source management - now centralized in sourcesStore
 const availableSources = computed(() => sourcesStore.teamSources);
 const sourceDetails = computed(() => sourcesStore.currentSourceDetails);
+const editorSchema = computed(() => {
+  const schema: Record<string, { type: string }> = {};
+  for (const column of sourceDetails.value?.columns || []) {
+    if (column.name && column.type) {
+      schema[column.name] = { type: column.type };
+    }
+  }
+  return schema;
+});
 const supportsLogchefQL = computed(() => supportsQueryLanguage(sourceDetails.value, 'logchefql'));
 const supportsExports = computed(() => hasSourceCapability(sourceDetails.value, 'exports'));
 const hasValidSource = computed(() => sourcesStore.hasValidCurrentSource);
@@ -1397,12 +1406,7 @@ onMounted(async () => {
                     :queryLanguages="sourceDetails?.query_languages || []"
                     :capabilities="sourceDetails?.capabilities || []"
                     :teamId="currentTeamId ?? 0" 
-                    :schema="(sourceDetails?.columns || []).reduce((acc: Record<string, { type: string }>, col) => {
-                      if (col.name && col.type) {
-                        acc[col.name] = { type: col.type };
-                      }
-                      return acc;
-                    }, {})"
+                    :schema="editorSchema"
                     :activeMode="exploreStore.activeMode === 'logchefql' ? 'logchefql' : 'clickhouse-sql'"
                     :value="exploreStore.activeMode === 'logchefql' ? logchefQuery : sqlQuery"
                     :tsField="sourceDetails?._meta_ts_field || 'timestamp'"
