@@ -44,7 +44,7 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 		},
 		{
 			name:           "timestamp only in WHERE clause - adds to SELECT",
-			query:          "SELECT * FROM logs WHERE parsed_timestamp BETWEEN now() - 1h AND now()",
+			query:          "SELECT * FROM logs WHERE parsed_timestamp BETWEEN now() - INTERVAL 1 HOUR AND now()",
 			timestampField: "parsed_timestamp",
 			wantContains:   "SELECT *, `parsed_timestamp`",
 		},
@@ -76,7 +76,31 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 			name:           "SELECT with DISTINCT",
 			query:          "SELECT DISTINCT host FROM logs",
 			timestampField: "ts",
-			wantContains:   "`ts`",
+			wantErr:        true,
+		},
+		{
+			name:           "similar column name is not the timestamp",
+			query:          "SELECT timestamp_text FROM logs",
+			timestampField: "timestamp",
+			wantContains:   "SELECT `timestamp`, timestamp_text",
+		},
+		{
+			name:           "quoted projection can be extended",
+			query:          "SELECT `ts`, msg FROM logs",
+			timestampField: "category",
+			wantContains:   "SELECT `category`, `ts`, msg",
+		},
+		{
+			name:           "literal is not a selected timestamp",
+			query:          "SELECT 'ts' AS msg FROM logs",
+			timestampField: "ts",
+			wantContains:   "SELECT `ts`, 'ts' AS msg",
+		},
+		{
+			name:           "alias exposes timestamp",
+			query:          "SELECT event_time AS ts FROM logs",
+			timestampField: "ts",
+			wantUnchanged:  true,
 		},
 	}
 
@@ -199,7 +223,7 @@ func TestHistogramQueryConstruction(t *testing.T) {
 	}{
 		{
 			name:           "basic histogram without grouping",
-			baseQuery:      "SELECT * FROM logs WHERE timestamp BETWEEN now() - 1h AND now()",
+			baseQuery:      "SELECT * FROM logs WHERE timestamp BETWEEN now() - INTERVAL 1 HOUR AND now()",
 			timestampField: "timestamp",
 			window:         "5m",
 			wantContains: []string{
@@ -459,7 +483,7 @@ func TestBuildGroupedHistogramQueryUsesNullSafeRankedRemainder(t *testing.T) {
 	for _, want := range []string{
 		"row_number() OVER",
 		"ifNull(toString(a.group_value), '')",
-		"(a.group_value = r.group_value) OR (isNull(a.group_value) AND isNull(r.group_value))",
+		"tuple(a.group_value) = tuple(r.group_value)",
 		"GROUP BY a.bucket, group_value, is_other, is_null",
 		"AS is_other",
 		"AS is_null",

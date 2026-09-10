@@ -61,8 +61,8 @@ func (p *openaiProvider) Complete(ctx context.Context, req CompletionRequest) (s
 					Content: req.User,
 				},
 			},
-			MaxTokens:   req.MaxTokens,
-			Temperature: req.Temperature,
+			MaxCompletionTokens: req.MaxTokens,
+			Temperature:         req.Temperature,
 		},
 	)
 	if err != nil {

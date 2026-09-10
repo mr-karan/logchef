@@ -179,6 +179,7 @@ const warningText = computed(() => {
             <TooltipTrigger asChild>
               <button
                 class="h-6 w-6 rounded flex items-center justify-center transition-colors"
+                aria-label="Compact view"
                 :class="displayMode === 'compact' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
                 @click="emit('update:displayMode', 'compact')"
               >
@@ -196,6 +197,7 @@ const warningText = computed(() => {
             <TooltipTrigger asChild>
               <button
                 class="h-6 w-6 rounded flex items-center justify-center transition-colors"
+                aria-label="JSON view"
                 :class="displayMode === 'json' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
                 @click="emit('update:displayMode', 'json')"
               >
@@ -213,6 +215,7 @@ const warningText = computed(() => {
             <TooltipTrigger asChild>
               <button
                 class="h-6 w-6 rounded flex items-center justify-center transition-colors"
+                aria-label="Table view"
                 :class="displayMode === 'table' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
                 @click="emit('update:displayMode', 'table')"
               >

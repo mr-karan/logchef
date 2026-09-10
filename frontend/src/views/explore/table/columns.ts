@@ -1,6 +1,6 @@
 import { h } from "vue";
 import { ArrowDown, ArrowUp } from "lucide-vue-next";
-import type { Column, ColumnDef, Row } from "@tanstack/vue-table";
+import type { Column, ColumnDef, Row } from "./tableFeatures";
 import { formatTimestamp, formatLogContent } from "@/lib/utils";
 import { getSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';

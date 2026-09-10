@@ -1,12 +1,10 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import {
-  useVueTable,
-  getCoreRowModel,
-  getPaginationRowModel,
-  type ColumnDef,
+  useTable,
   type PaginationState,
 } from "@tanstack/vue-table";
+import { logTableFeatures, type ColumnDef } from '../table/tableFeatures';
 import JsonViewer from "@/components/json-viewer/JsonViewer.vue";
 import DataTablePagination from "@/views/explore/table/data-table-pagination.vue";
 import { valueUpdater } from "@/lib/utils";
@@ -33,7 +31,8 @@ const pagination = ref<PaginationState>({
 
 const columns: ColumnDef<Record<string, any>>[] = [];
 
-const table = useVueTable({
+const table = useTable({
+  features: logTableFeatures,
   get data() {
     return props.data;
   },
@@ -44,8 +43,6 @@ const table = useVueTable({
     },
   },
   onPaginationChange: (updaterOrValue) => valueUpdater(updaterOrValue, pagination),
-  getCoreRowModel: getCoreRowModel(),
-  getPaginationRowModel: getPaginationRowModel(),
 });
 
 // A new query result replaces `data` with a fresh array reference - jump

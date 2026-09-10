@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Table } from '@tanstack/vue-table'
+import type { Table } from './tableFeatures'
 import { Button } from '@/components/ui/button'
 import {
   Select,
@@ -36,10 +36,10 @@ const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
     <TooltipProvider>
       <Tooltip :delayDuration="200">
         <TooltipTrigger>
-          <Select :model-value="`${table.getState().pagination.pageSize}`"
+          <Select :model-value="`${table.atoms.pagination.get().pageSize}`"
             @update:model-value="(value) => table.setPageSize(Number(value))">
             <SelectTrigger class="h-7 w-[70px] text-xs">
-              <SelectValue :placeholder="`${table.getState().pagination.pageSize}`" />
+              <SelectValue :placeholder="`${table.atoms.pagination.get().pageSize}`" />
             </SelectTrigger>
             <SelectContent side="top">
               <SelectItem v-for="size in pageSizes" :key="size" :value="`${size}`" class="text-xs">
@@ -71,7 +71,7 @@ const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
       </Button>
 
       <span class="text-xs mx-1">
-        {{ table.getState().pagination.pageIndex + 1 }}/{{ table.getPageCount() }}
+        {{ table.atoms.pagination.get().pageIndex + 1 }}/{{ table.getPageCount() }}
       </span>
 
       <!-- Next Page -->

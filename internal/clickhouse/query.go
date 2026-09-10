@@ -5,19 +5,24 @@ package clickhouse
 
 import (
 	"context"
+	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
+	"math"
+	"math/big"
 	"net"
 	"reflect"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
 )
 
@@ -40,8 +45,7 @@ type RowStreamWriter interface {
 
 // Query executes a SELECT query, processes the results, and applies query hooks.
 // It automatically handles DDL statements by calling execDDL.
-// The params argument is now unused but kept for potential future structured query building.
-func (c *Client) Query(ctx context.Context, query string /* params LogQueryParams - Removed */) (*models.QueryResult, error) {
+func (c *Client) Query(ctx context.Context, query string) (*models.QueryResult, error) {
 	return c.QueryWithTimeout(ctx, query, nil)
 }
 
@@ -102,7 +106,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 
 		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
 
-		rows, queryErr = c.conn.Query(hookCtx, query)
+		rows, queryErr = c.queryResultRows(hookCtx, query, opts)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -110,12 +114,15 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 		// Close rows when we're done processing them
 		defer func() {
 			if rows != nil {
+				cancel()
 				rows.Close()
 			}
 		}()
 
 		var scanDest []any
 		var scanPtrs []reflect.Value
+		// JSON's scan type is known only after decoding the first data block.
+		hasRow := rows.Next()
 		// Assign (not :=) so the outer columnsInfo makes it into the result —
 		// a := here would shadow it and the response would carry no columns.
 		columnsInfo, scanDest, scanPtrs = prepareRowScan(rows)
@@ -123,12 +130,13 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 		// Preallocate to the applied row bound (capped) to avoid repeated slice
 		// regrowth on large result sets, without over-committing on huge limits.
 		resultData = make([]map[string]any, 0, boundedRowCap(opts))
-		for rows.Next() {
+		for ; hasRow; hasRow = rows.Next() {
 			if opts.MaxRows > 0 && len(resultData) >= opts.MaxRows {
 				truncatedReason = "row_limit"
 				break
 			}
 
+			resetNullableScanTargets(scanPtrs)
 			if err := rows.Scan(scanDest...); err != nil {
 				return fmt.Errorf("scanning row: %w", err)
 			}
@@ -213,24 +221,29 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
 
-		rows, err := c.conn.Query(hookCtx, query)
+		rows, err := c.queryResultRows(hookCtx, query, opts)
 		if err != nil {
 			return err
 		}
-		defer rows.Close()
+		defer func() {
+			cancel()
+			rows.Close()
+		}()
 
+		hasRow := rows.Next()
 		columnsInfo, scanDest, scanPtrs := prepareRowScan(rows)
 		if err := writer.Begin(columnsInfo); err != nil {
 			return err
 		}
 
-		for rows.Next() {
+		for ; hasRow; hasRow = rows.Next() {
 			if opts.MaxRows > 0 && rowsReturned >= opts.MaxRows {
 				stats.Truncated = true
 				stats.TruncatedReason = "row_limit"
 				break
 			}
 
+			resetNullableScanTargets(scanPtrs)
 			if err := rows.Scan(scanDest...); err != nil {
 				return fmt.Errorf("scanning row: %w", err)
 			}
@@ -261,6 +274,40 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 func (c *Client) contextWithQuerySettings(ctx context.Context, opts QueryOptions) context.Context {
 	settings := buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
 	return clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+}
+
+// Detect support once per client; older servers must never receive this setting.
+func (c *Client) contextWithNativeJSON(ctx context.Context, opts QueryOptions) context.Context {
+	c.capabilitiesMu.Lock()
+	flattenedJSON := c.flattenedJSON
+	c.capabilitiesMu.Unlock()
+	if flattenedJSON == nil {
+		var supported uint64
+		probeCtx := clickhouse.Context(ctx, clickhouse.WithSettings(clickhouse.Settings{"max_execution_time": 2}))
+		err := c.conn.QueryRow(probeCtx, "SELECT count() FROM system.settings WHERE name = 'output_format_native_use_flattened_dynamic_and_json_serialization'").Scan(&supported)
+		if err != nil {
+			return ctx
+		}
+		enabled := supported > 0
+		flattenedJSON = &enabled
+		c.capabilitiesMu.Lock()
+		c.flattenedJSON = flattenedJSON
+		c.capabilitiesMu.Unlock()
+	}
+	if *flattenedJSON {
+		settings := buildQuerySettings(*opts.TimeoutSeconds, opts.Settings, c.querySettings)
+		settings["output_format_native_use_flattened_dynamic_and_json_serialization"] = 1
+		ctx = clickhouse.Context(ctx, clickhouse.WithSettings(settings))
+	}
+	return ctx
+}
+
+func resetNullableScanTargets(ptrs []reflect.Value) {
+	for _, ptr := range ptrs {
+		if ptr.Elem().Kind() == reflect.Pointer {
+			ptr.Elem().SetZero()
+		}
+	}
 }
 
 // buildQuerySettings merges, in increasing precedence: the request timeout,
@@ -355,20 +402,112 @@ func prepareRowScan(rows driver.Rows) (columns []models.ColumnInfo, dests []any,
 			Type: ct.DatabaseTypeName(),
 		}
 		p := reflect.New(ct.ScanType()) // *T, never nil
+		if strings.HasPrefix(ct.DatabaseTypeName(), "Nullable(JSON") {
+			p = reflect.ValueOf(&jsonScanValue{})
+		}
 		ptrValues[i] = p
 		scanDest[i] = p.Interface()
 	}
 	return columnsInfo, scanDest, ptrValues
 }
 
+type jsonScanValue struct{ value any }
+
+func (v *jsonScanValue) DeserializeClickHouseJSON(object *chcol.JSON) error {
+	v.value = object.NestedMap()
+	return nil
+}
+
+func (v *jsonScanValue) Scan(value any) error {
+	switch value := value.(type) {
+	case nil:
+		v.value = nil
+	case string:
+		v.value = json.RawMessage(value)
+	case []byte:
+		v.value = json.RawMessage(append([]byte(nil), value...))
+	default:
+		return fmt.Errorf("unsupported JSON scan value %T", value)
+	}
+	return nil
+}
+
 func scanRowMap(ptrs []reflect.Value, columnsInfo []models.ColumnInfo) map[string]any {
 	rowMap := make(map[string]any, len(columnsInfo))
 	for i, col := range columnsInfo {
-		// ptrs[i] is the *T from reflect.New (always non-nil), so Elem() is valid;
-		// Interface() yields the scanned value exactly as before.
-		rowMap[col.Name] = ptrs[i].Elem().Interface()
+		value := ptrs[i].Elem().Interface()
+		if text, ok := value.(string); ok && (col.Type == "JSON" || strings.HasPrefix(col.Type, "JSON(")) {
+			value = json.RawMessage(text)
+		}
+		rowMap[col.Name] = normalizeResultValue(value)
 	}
 	return rowMap
+}
+
+// Normalize native driver values to JSON-compatible values before retaining rows.
+func normalizeResultValue(value any) any {
+	switch v := value.(type) {
+	case jsonScanValue:
+		return normalizeResultValue(v.value)
+	case nil, string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+		return value
+	case chcol.JSON:
+		return normalizeResultValue(v.NestedMap())
+	case *chcol.JSON:
+		if v == nil {
+			return nil
+		}
+		return normalizeResultValue(v.NestedMap())
+	case chcol.Variant:
+		return normalizeResultValue(v.Any())
+	case big.Int:
+		return &v
+	case float64:
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil
+		}
+		return v
+	case float32:
+		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+			return nil
+		}
+		return v
+	case json.Marshaler, encoding.TextMarshaler:
+		return value
+	}
+	return normalizeReflectedValue(value)
+}
+
+func normalizeReflectedValue(value any) any {
+	v := reflect.ValueOf(value)
+	switch v.Kind() {
+	case reflect.Pointer, reflect.Interface:
+		if v.IsNil() {
+			return nil
+		}
+		return normalizeResultValue(v.Elem().Interface())
+	case reflect.Slice, reflect.Array:
+		if v.Kind() == reflect.Slice && v.IsNil() {
+			return nil
+		}
+		items := make([]any, v.Len())
+		for i := range items {
+			items[i] = normalizeResultValue(v.Index(i).Interface())
+		}
+		return items
+	case reflect.Map:
+		if v.IsNil() {
+			return nil
+		}
+		object := make(map[string]any, v.Len())
+		iter := v.MapRange()
+		for iter.Next() {
+			object[fmt.Sprint(iter.Key().Interface())] = normalizeResultValue(iter.Value().Interface())
+		}
+		return object
+	default:
+		return value
+	}
 }
 
 // approxJSONSize returns a fast approximation of a scanned row's JSON-encoded
@@ -378,7 +517,7 @@ func scanRowMap(ptrs []reflect.Value, columnsInfo []models.ColumnInfo) map[strin
 func approxJSONSize(row map[string]any) int {
 	size := 2 // {}
 	for k, v := range row {
-		size += len(k) + 4 // "k": plus separators
+		size += jsonStringSize(k) + 2 // colon and separator
 		size += approxValueSize(v)
 	}
 	return size
@@ -396,6 +535,14 @@ func jsonStringSize(s string) int {
 			n += 2 // short escape, e.g. \n
 		case c < 0x20, c == '<', c == '>', c == '&':
 			n += 6 // \u00XX (control) or HTML-escaped form
+		case c >= utf8.RuneSelf:
+			r, size := utf8.DecodeRuneInString(s[i:])
+			if r == '\u2028' || r == '\u2029' || r == utf8.RuneError && size == 1 {
+				n += 6
+			} else {
+				n += size
+			}
+			i += size - 1
 		default:
 			n++
 		}
@@ -418,7 +565,7 @@ func approxValueSize(v any) int {
 	case float32, float64:
 		return 24
 	case time.Time:
-		return 32
+		return 37
 	default:
 		if b, err := json.Marshal(v); err == nil {
 			return len(b)
@@ -439,13 +586,10 @@ func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSe
 	}
 
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		// Always apply timeout setting
-		hookCtx = clickhouse.Context(hookCtx, clickhouse.WithSettings(clickhouse.Settings{
-			"max_execution_time": *timeoutSeconds,
-		}))
+		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: timeoutSeconds})
 		c.logger.Debug("applying DDL query timeout", "timeout_seconds", *timeoutSeconds)
 
-		return c.conn.Exec(hookCtx, query)
+		return c.execQuery(hookCtx, query)
 	})
 
 	if err != nil {

@@ -6,7 +6,7 @@
 // comparison (e.g. ">= 500", "!= 3", "42") and the cell's value is itself
 // numeric, a numeric comparison is used instead.
 
-import type { Row } from "@tanstack/vue-table";
+import type { Row } from "./tableFeatures";
 
 export type ColumnFilterOperator = ">" | ">=" | "<" | "<=" | "=" | "!=";
 

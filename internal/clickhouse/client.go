@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -45,14 +46,17 @@ type Client struct {
 	conn       driver.Conn // Underlying ClickHouse native connection.
 	logger     *slog.Logger
 	queryHooks []QueryHook         // Hooks to execute before/after queries.
-	mu         sync.Mutex          // Protects shared resources within the client if any
+	mu         sync.RWMutex        // Protects connection publication.
 	opts       *clickhouse.Options // Stores connection options for reconnection
 	sourceID   string              // Source ID for metrics tracking
 	source     *models.Source      // Source model for metrics with meaningful labels
 	metrics    *metrics.ClickHouseMetrics
 	// querySettings holds per-source ClickHouse settings applied to every query
 	// context (e.g. max_result_rows, readonly). Nil when the source configures none.
-	querySettings clickhouse.Settings
+	querySettings  clickhouse.Settings
+	capabilitiesMu sync.Mutex
+	flattenedJSON  *bool
+	closed         bool
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -146,7 +150,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		source:     opts.Source,
 	}
 	if len(opts.QuerySettings) > 0 {
-		client.querySettings = clickhouse.Settings(opts.QuerySettings)
+		client.querySettings = maps.Clone(clickhouse.Settings(opts.QuerySettings))
 	}
 
 	// Apply a default hook for basic query logging.
@@ -207,8 +211,12 @@ func (c *Client) Close() error {
 	done := make(chan error, 1)
 
 	// Close the connection in a goroutine
+	c.mu.Lock()
+	c.closed = true
+	conn := c.conn
+	c.mu.Unlock()
 	go func() {
-		done <- c.conn.Close()
+		done <- conn.Close()
 	}()
 
 	// Wait for close to complete or timeout
@@ -223,11 +231,48 @@ func (c *Client) Close() error {
 	}
 }
 
+func (c *Client) connection() driver.Conn {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.conn
+}
+
+func (c *Client) queryRows(ctx context.Context, query string, args ...any) (driver.Rows, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return nil, net.ErrClosed
+	}
+	return c.conn.Query(ctx, query, args...)
+}
+
+func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions) (driver.Rows, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return nil, net.ErrClosed
+	}
+	ctx = c.contextWithNativeJSON(ctx, opts)
+	return c.conn.Query(ctx, query)
+}
+
+func (c *Client) execQuery(ctx context.Context, query string) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return net.ErrClosed
+	}
+	return c.conn.Exec(ctx, query)
+}
+
 // Reconnect attempts to re-establish the connection to the ClickHouse server.
 // This is useful for recovering from connection failures during health checks.
 func (c *Client) Reconnect(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if c.closed {
+		return net.ErrClosed
+	}
 
 	success := false
 	defer func() {
@@ -236,29 +281,6 @@ func (c *Client) Reconnect(ctx context.Context) error {
 			c.metrics.UpdateConnectionStatus(success)
 		}
 	}()
-
-	// Only attempt reconnect if connection exists but is failing
-	if c.conn != nil {
-		// Try to close the existing connection first with a timeout
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 2*time.Second)
-		defer closeCancel()
-
-		closeComplete := make(chan struct{})
-		go func() {
-			_ = c.conn.Close() // Ignore close errors
-			close(closeComplete)
-		}()
-
-		// Wait for close to complete or timeout
-		select {
-		case <-closeComplete:
-			// Successfully closed
-			c.logger.Debug("successfully closed old connection for reconnect")
-		case <-closeCtx.Done():
-			// Timeout occurred
-			c.logger.Warn("timeout closing old connection for reconnect, proceeding anyway")
-		}
-	}
 
 	// Use stored connection options
 	if c.opts == nil {
@@ -276,23 +298,17 @@ func (c *Client) Reconnect(ctx context.Context) error {
 	defer pingCancel()
 
 	if err := newConn.Ping(pingCtx); err != nil {
-		// Clean up failed connection with timeout
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 1*time.Second)
-		defer closeCancel()
-
-		go func() {
-			_ = newConn.Close() // Clean up failed connection
-			close(make(chan struct{}))
-		}()
-
-		// Just wait for timeout - we don't care about the result
-		<-closeCtx.Done()
-
+		_ = newConn.Close()
 		return fmt.Errorf("ping after reconnect failed: %w", err)
 	}
 
 	// Replace the connection
+	oldConn := c.conn
 	c.conn = newConn
+	c.flattenedJSON = nil
+	if oldConn != nil {
+		_ = oldConn.Close()
+	}
 	success = true
 	c.logger.Debug("reconnected to clickhouse")
 	return nil

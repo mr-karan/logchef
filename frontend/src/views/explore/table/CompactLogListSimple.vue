@@ -6,14 +6,11 @@ import TableControls from './TableControls.vue'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { Clock } from 'lucide-vue-next'
 import { 
-  useVueTable, 
-  getCoreRowModel, 
-  getPaginationRowModel,
-  getFilteredRowModel,
+  useTable,
   type PaginationState,
-  type VisibilityState,
-  type ColumnDef
+  type ColumnVisibilityState as VisibilityState,
 } from '@tanstack/vue-table'
+import { logTableFeatures, type ColumnDef } from './tableFeatures'
 import { valueUpdater } from '@/lib/utils'
 import type { QueryStats } from '@/api/explore'
 import type { Source } from '@/api/sources'
@@ -124,7 +121,8 @@ watch(tableColumns, (newColumns) => {
 }, { immediate: true })
 
 // Create table
-const table = useVueTable({
+const table = useTable({
+  features: logTableFeatures,
   get data() {
     return logs.value
   },
@@ -149,9 +147,6 @@ const table = useVueTable({
   onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
   onColumnVisibilityChange: updaterOrValue => valueUpdater(updaterOrValue, columnVisibility),
   onColumnOrderChange: updaterOrValue => valueUpdater(updaterOrValue, columnOrder),
-  getCoreRowModel: getCoreRowModel(),
-  getPaginationRowModel: getPaginationRowModel(),
-  getFilteredRowModel: getFilteredRowModel(),
 })
 
 // Format timestamp for compact view
@@ -483,8 +478,8 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       
       <!-- Empty state -->
       <div v-else class="p-4 text-center text-muted-foreground">
-        <template v-if="table.getState().globalFilter">
-          No logs matching "{{ table.getState().globalFilter }}"
+        <template v-if="globalFilter">
+          No logs matching "{{ globalFilter }}"
         </template>
         <template v-else>
           No logs to display

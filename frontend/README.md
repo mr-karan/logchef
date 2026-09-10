@@ -1,22 +1,26 @@
 # Logchef Frontend
 
-Vue 3 + TypeScript frontend built with modern, high-performance tooling.
+Vue 3 + TypeScript frontend.
 
 ## Tech Stack
 
 - **Framework**: Vue 3 with `<script setup>` SFCs
-- **Build**: [rolldown-vite](https://github.com/vitejs/rolldown-vite) (10-30x faster than Rollup)
-- **Package Manager**: [Bun](https://bun.sh) (15-30x faster installs)
-- **Type Checking**: vue-tsc
+- **Build**: [Vite 8](https://vite.dev/) with Rolldown
+- **Package Manager**: [Bun](https://bun.sh)
+- **Type Checking**: vue-tsc with the TypeScript 7 native bridge
 - **Testing**: Vitest
 
-## Performance
+## TypeScript compiler
 
-| Metric | Time |
-|--------|------|
-| Install | ~8s |
-| Dev server start | ~1s |
-| Production build | ~2.3s |
+The `typescript` dependency aliases `typescript-native-bridge`, pinned to
+`6.0.3-bridge.16.tsgo.7.0.2`. This runs the TypeScript 7.0.2 checker while
+preserving the JavaScript compiler API used by `vue-tsc` for Vue templates.
+Stock TypeScript 7.0 does not provide that API.
+
+The bridge requires a supported native binary. Linux builds use glibc, so the
+frontend Docker build uses Debian. Alpine/musl cannot run the bridge.
+Recheck Vue tooling compatibility before replacing the alias with stock
+TypeScript. See the [Vue support issue](https://github.com/vuejs/language-tools/issues/5381).
 
 ## Getting Started
 
@@ -24,7 +28,7 @@ Vue 3 + TypeScript frontend built with modern, high-performance tooling.
 # Install dependencies
 bun install
 
-# Start dev server (rolldown-vite)
+# Start dev server
 bun run dev
 
 # Type check

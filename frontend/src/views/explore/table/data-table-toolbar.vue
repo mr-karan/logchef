@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { Table } from '@tanstack/vue-table'
+import type { Table } from './tableFeatures'
 import type { QueryStats } from '@/api/explore'
 
 interface Props {

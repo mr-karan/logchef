@@ -1,7 +1,7 @@
 use tailspin::Highlighter as TailspinHighlighter;
 use tailspin::config::{
     DateTimeConfig, IpV4Config, IpV6Config, JsonConfig, KeyValueConfig, KeywordConfig,
-    NumberConfig, PointerConfig, QuotesConfig, RegexConfig, UnixPathConfig, UnixProcessConfig,
+    NumberConfig, PointerConfig, QuoteConfig, RegexConfig, UnixPathConfig, UnixProcessConfig,
     UrlConfig, UuidConfig,
 };
 use tailspin::style::{Color, Style};
@@ -56,50 +56,50 @@ impl Highlighter {
         }
 
         if !keywords.is_empty() {
-            builder.with_keyword_highlighter(keywords);
+            builder = builder.with_keyword_highlighters(keywords);
         }
 
         for regex_cfg in &config.custom_regexes {
             let style = parse_color_style(&regex_cfg.color)
                 .bold_if(regex_cfg.bold)
                 .italic_if(regex_cfg.italic);
-            builder.with_regex_highlighter(RegexConfig {
+            builder = builder.with_regex_highlighter(RegexConfig {
                 regex: regex_cfg.pattern.clone(),
                 style,
             });
         }
 
         if !disabled.contains(&"dates") {
-            builder.with_date_time_highlighters(DateTimeConfig::default());
+            builder = builder.with_date_time_highlighter(DateTimeConfig::default());
         }
         if !disabled.contains(&"numbers") {
-            builder.with_number_highlighter(NumberConfig::default());
+            builder = builder.with_number_highlighter(NumberConfig::default());
         }
         if !disabled.contains(&"uuids") {
-            builder.with_uuid_highlighter(UuidConfig::default());
+            builder = builder.with_uuid_highlighter(UuidConfig::default());
         }
         if !disabled.contains(&"ips") {
-            builder.with_ip_v4_highlighter(IpV4Config::default());
-            builder.with_ip_v6_highlighter(IpV6Config::default());
+            builder = builder.with_ip_v4_highlighter(IpV4Config::default());
+            builder = builder.with_ip_v6_highlighter(IpV6Config::default());
         }
         if !disabled.contains(&"urls") {
-            builder.with_url_highlighter(UrlConfig::default());
+            builder = builder.with_url_highlighter(UrlConfig::default());
         }
         if !disabled.contains(&"paths") {
-            builder.with_unix_path_highlighter(UnixPathConfig::default());
-            builder.with_unix_process_highlighter(UnixProcessConfig::default());
+            builder = builder.with_unix_path_highlighter(UnixPathConfig::default());
+            builder = builder.with_unix_process_highlighter(UnixProcessConfig::default());
         }
         if !disabled.contains(&"pointers") {
-            builder.with_pointer_highlighter(PointerConfig::default());
+            builder = builder.with_pointer_highlighter(PointerConfig::default());
         }
         if !disabled.contains(&"keyvalue") {
-            builder.with_key_value_highlighter(KeyValueConfig::default());
+            builder = builder.with_key_value_highlighter(KeyValueConfig::default());
         }
         if !disabled.contains(&"quotes") {
-            builder.with_quote_highlighter(QuotesConfig::default());
+            builder = builder.with_quote_highlighter(QuoteConfig::default());
         }
         if !disabled.contains(&"json") {
-            builder.with_json_highlighter(JsonConfig::default());
+            builder = builder.with_json_highlighter(JsonConfig::default());
         }
 
         let inner = builder

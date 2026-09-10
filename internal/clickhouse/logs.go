@@ -4,9 +4,10 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"regexp"
 	"strings"
 	"time"
+
+	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -179,6 +180,7 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 }
 
 func windowToIntervalFunc(window TimeWindow, timestampField, timezone string) (string, error) {
+	timestampField = quoteIdentifier(timestampField)
 	switch window {
 	case TimeWindow1s:
 		// toStartOfSecond only supports DateTime64 in some ClickHouse builds.
@@ -196,7 +198,9 @@ func windowToIntervalFunc(window TimeWindow, timestampField, timezone string) (s
 		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s MINUTE, '%s')", timestampField, minutes, timezone), nil
 	case TimeWindow1h:
 		return fmt.Sprintf("toStartOfHour(%s, '%s')", timestampField, timezone), nil
-	case TimeWindow2h, TimeWindow3h, TimeWindow6h, TimeWindow12h, TimeWindow24h:
+	case TimeWindow24h:
+		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL 1 DAY, '%s')", timestampField, timezone), nil
+	case TimeWindow2h, TimeWindow3h, TimeWindow6h, TimeWindow12h:
 		hours := strings.TrimSuffix(string(window), "h")
 		return fmt.Sprintf("toStartOfInterval(%s, INTERVAL %s HOUR, '%s')", timestampField, hours, timezone), nil
 	default:
@@ -223,6 +227,10 @@ func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, gr
 	// nullable values retain their identity. Convert only the displayed top-N
 	// value, after the null-safe join has assigned its rank.
 	quotedGroupBy := quoteIdentifier(groupBy)
+	modifiedQuery, err = c.ensureTimestampInQuery(modifiedQuery, groupBy)
+	if err != nil {
+		return "", fmt.Errorf("adding histogram group column: %w", err)
+	}
 	return fmt.Sprintf(`
 		WITH aggregated AS (
 			SELECT
@@ -256,7 +264,7 @@ func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, gr
 			if(r.rn IS NOT NULL AND r.rn <= %d AND isNull(a.group_value), 1, 0) AS is_null
 		FROM aggregated AS a
 		LEFT JOIN ranked AS r
-			ON (a.group_value = r.group_value) OR (isNull(a.group_value) AND isNull(r.group_value))
+			ON tuple(a.group_value) = tuple(r.group_value)
 		GROUP BY a.bucket, group_value, is_other, is_null
 		ORDER BY a.bucket ASC, log_count DESC
 	`, intervalFunc, quotedGroupBy, modifiedQuery, defaultHistogramSeriesLimit, defaultHistogramSeriesLimit, defaultHistogramSeriesLimit), nil
@@ -372,64 +380,62 @@ func extractGroupValue(row map[string]any) (string, bool) {
 	}
 }
 
-// Compiled once: histogram query rewriting matches "SELECT *" and a leading
-// "SELECT" to inject the (possibly MATERIALIZED) timestamp field.
-var (
-	selectStarRe = regexp.MustCompile(`(?i)SELECT\s+\*`)
-	selectLeadRe = regexp.MustCompile(`(?i)^SELECT\s+`)
-)
-
 // ensureTimestampInQuery ensures the timestamp field is available for histogram bucketing.
 // IMPORTANT: In ClickHouse, MATERIALIZED columns are NOT included in SELECT *.
 // When we wrap a query in a subquery for histogram, we must explicitly select the timestamp field.
 func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, error) {
-	if strings.TrimSpace(query) == "" {
-		return "", fmt.Errorf("query cannot be empty")
+	statements, err := clickhouseparser.NewParser(query).ParseStmts()
+	if err != nil || len(statements) != 1 {
+		return "", fmt.Errorf("histogram requires one parseable SELECT query")
 	}
-
-	upperQuery := strings.ToUpper(strings.TrimSpace(query))
-	escapedTsField := fmt.Sprintf("`%s`", timestampField)
-
-	// Check if timestamp field is already explicitly mentioned in the SELECT clause only.
-	// We look only before the first FROM keyword to avoid false positives from WHERE/ORDER BY.
-	selectClause := upperQuery
-	if fromIdx := strings.Index(upperQuery, "FROM"); fromIdx > 0 {
-		selectClause = upperQuery[:fromIdx]
+	selection, ok := statements[0].(*clickhouseparser.SelectQuery)
+	if !ok || len(selection.SelectItems) == 0 {
+		return "", fmt.Errorf("histogram requires a SELECT query")
 	}
-	if strings.Contains(selectClause, strings.ToUpper(timestampField)) {
-		// Timestamp field is already in SELECT clause, return as-is
+	if selectsColumn(selection, timestampField) {
 		return query, nil
 	}
+	if selection.HasDistinct || selection.DistinctOn != nil || selection.GroupBy != nil || selection.UnionAll != nil || selection.UnionDistinct != nil || selection.Except != nil || selection.Intersect != nil {
+		return "", fmt.Errorf("histogram column %q must be selected explicitly in grouped, DISTINCT, or set queries", timestampField)
+	}
+	first := selection.SelectItems[0]
+	if isUnmodifiedWildcard(first) {
+		pos := first.Pos() + 1
+		return query[:pos] + ", " + quoteIdentifier(timestampField) + query[pos:], nil
+	}
+	pos := first.Pos()
+	// The parser reports quoted identifier positions inside the opening quote.
+	if pos > 0 && (query[pos-1] == '`' || query[pos-1] == '"' || query[pos-1] == '\'') {
+		pos--
+	}
+	return query[:pos] + quoteIdentifier(timestampField) + ", " + query[pos:], nil
+}
 
-	// For SELECT * queries, we need to explicitly add the timestamp field
-	// because MATERIALIZED columns are NOT included in SELECT *
-	// Replace "SELECT *" with "SELECT *, `timestamp_field`"
-	if selectStarRe.MatchString(query) {
-		modifiedQuery := selectStarRe.ReplaceAllString(query, fmt.Sprintf("SELECT *, %s", escapedTsField))
-		if c.logger != nil {
-			c.logger.Debug("Added timestamp field to SELECT * for histogram",
-				"timestamp_field", timestampField,
-				"reason", "MATERIALIZED columns not included in SELECT *")
+func isUnmodifiedWildcard(item *clickhouseparser.SelectItem) bool {
+	ident, ok := item.Expr.(*clickhouseparser.Ident)
+	return ok && ident.Name == "*" && ident.QuoteType == 0 && len(item.Modifiers) == 0
+}
+
+func selectsColumn(selection *clickhouseparser.SelectQuery, name string) bool {
+	for _, item := range selection.SelectItems {
+		if item.Alias != nil {
+			if item.Alias.Name == name {
+				return true
+			}
+			continue
 		}
-		return modifiedQuery, nil
-	}
-
-	// For any other case, try to add the timestamp field after SELECT
-	// This handles cases like "SELECT col1, col2 FROM ..."
-	if selectLeadRe.MatchString(query) {
-		modifiedQuery := selectLeadRe.ReplaceAllString(query, fmt.Sprintf("SELECT %s, ", escapedTsField))
-		if c.logger != nil {
-			c.logger.Debug("Prepended timestamp field to SELECT for histogram",
-				"timestamp_field", timestampField)
+		switch expr := item.Expr.(type) {
+		case *clickhouseparser.Ident:
+			if expr.Name == name {
+				return true
+			}
+		case *clickhouseparser.NestedIdentifier:
+			if expr.DotIdent != nil && expr.DotIdent.Name == name || expr.DotIdent == nil && expr.Ident.Name == name {
+				return true
+			}
 		}
-		return modifiedQuery, nil
 	}
-
-	if c.logger != nil {
-		c.logger.Warn("Could not modify query to include timestamp field",
-			"query_preview", query[:min(100, len(query))])
-	}
-	return query, nil
+	return false
 }
 
 // GetSurroundingLogs retrieves logs around a specific timestamp, similar to grep -C.

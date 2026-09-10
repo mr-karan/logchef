@@ -1,7 +1,7 @@
 import { fileURLToPath, URL } from "node:url";
 import vue from "@vitejs/plugin-vue";
 import tailwindcss from "@tailwindcss/vite";
-import { defineConfig, loadEnv, type Plugin, type UserConfig } from "rolldown-vite";
+import { defineConfig, loadEnv, type Plugin, type UserConfig } from "vite";
 import { resolve } from "path";
 
 // https://vite.dev/config/

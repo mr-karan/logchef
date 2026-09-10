@@ -271,7 +271,7 @@ fn generate_pkce() -> Result<(String, String)> {
     use sha2::{Digest, Sha256};
 
     let mut verifier_bytes = [0u8; 32];
-    getrandom::getrandom(&mut verifier_bytes)
+    getrandom::fill(&mut verifier_bytes)
         .map_err(|e| Error::auth(format!("Failed to generate random bytes: {}", e)))?;
     let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
 
@@ -286,7 +286,7 @@ fn generate_state() -> Result<String> {
     use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
 
     let mut state_bytes = [0u8; 16];
-    getrandom::getrandom(&mut state_bytes)
+    getrandom::fill(&mut state_bytes)
         .map_err(|e| Error::auth(format!("Failed to generate random bytes: {}", e)))?;
     Ok(URL_SAFE_NO_PAD.encode(state_bytes))
 }

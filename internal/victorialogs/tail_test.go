@@ -3,12 +3,13 @@ package victorialogs
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -96,58 +97,61 @@ func TestTailLogsCleanStopOnCallerCancel(t *testing.T) {
 func TestTailLogsFlushesBufferedRowsOnCancel(t *testing.T) {
 	t.Parallel()
 
-	const rowCount = 3
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		for i := 0; i < rowCount; i++ {
-			_, _ = w.Write([]byte(`{"_time":"2026-04-08T10:00:00Z","_msg":"a"}` + "\n"))
-		}
-		if flusher, ok := w.(http.Flusher); ok {
-			flusher.Flush()
-		}
-		// Hold the connection open past the cancellation below, rather than
-		// closing it ourselves, so the only thing that stops the tail is the
-		// client's own ctx cancellation.
-		<-r.Context().Done()
-	}))
-	defer server.Close()
+	synctest.Test(t, func(t *testing.T) {
+		reader, writer := io.Pipe()
+		defer reader.Close()
+		defer writer.Close()
 
-	provider := newTestProvider(server)
-	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	var mu sync.Mutex
-	var got []map[string]any
-	done := make(chan error, 1)
-	go func() {
-		done <- provider.TailLogs(ctx, source, datasource.TailRequest{}, func(rows []map[string]any) error {
-			mu.Lock()
-			got = append(got, rows...)
-			mu.Unlock()
-			return nil
+		provider := newTestProvider(nil)
+		provider.client.Transport = tailRoundTripper(func(req *http.Request) (*http.Response, error) {
+			defer req.Body.Close()
+			return &http.Response{StatusCode: http.StatusOK, Body: reader, Header: make(http.Header)}, nil
 		})
-	}()
+		source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: "http://victorialogs.test"})
 
-	// Give the decode goroutine time to land all rowCount rows in the batch —
-	// comfortably under tailFlushInterval (200ms), so the periodic ticker
-	// cannot have flushed them on its own before the cancel below, which is
-	// what this test needs to exercise.
-	time.Sleep(50 * time.Millisecond)
-	cancel()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		var got []map[string]any
+		done := make(chan error, 1)
+		go func() {
+			done <- provider.TailLogs(ctx, source, datasource.TailRequest{}, func(rows []map[string]any) error {
+				got = append(got, rows...)
+				return nil
+			})
+		}()
 
-	select {
-	case err := <-done:
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Fatalf("expected nil or context.Canceled, got %v", err)
+		const rowCount = 3
+		rows := strings.Repeat(`{"_time":"2026-04-08T10:00:00Z","_msg":"a"}`+"\n", rowCount)
+		if _, err := io.WriteString(writer, rows); err != nil {
+			t.Fatalf("write tail rows: %v", err)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("TailLogs did not return after ctx cancellation")
-	}
+		// Wait for the decoder to hand every row to the batch and block on
+		// the open pipe again, without advancing the periodic flush timer.
+		synctest.Wait()
+		if len(got) != 0 {
+			t.Fatalf("expected no rows emitted before cancellation, got %d: %v", len(got), got)
+		}
+		cancel()
+		synctest.Wait()
 
-	mu.Lock()
-	defer mu.Unlock()
-	if len(got) != rowCount {
-		t.Fatalf("expected the %d buffered rows to be flushed on cancel, got %d: %v", rowCount, len(got), got)
-	}
+		select {
+		case err := <-done:
+			if err != nil && !errors.Is(err, context.Canceled) {
+				t.Fatalf("expected nil or context.Canceled, got %v", err)
+			}
+		default:
+			t.Fatal("TailLogs did not return after ctx cancellation")
+		}
+		if len(got) != rowCount {
+			t.Fatalf("expected the %d buffered rows to be flushed on cancel, got %d: %v", rowCount, len(got), got)
+		}
+	})
+}
+
+type tailRoundTripper func(*http.Request) (*http.Response, error)
+
+func (f tailRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 // TestTailLogsDecodeGoroutineDoesNotLeakOnEmitError proves the #21 fix: when

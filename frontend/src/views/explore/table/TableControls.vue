@@ -6,12 +6,12 @@ import { Button } from '@/components/ui/button'
 import { RefreshCw, Search, FilterX } from 'lucide-vue-next'
 import DataTablePagination from './data-table-pagination.vue'
 import DataTableColumnSelector from './data-table-column-selector.vue'
-import type { Table } from '@tanstack/vue-table'
+import type { Table } from './tableFeatures'
 import type { QueryStats } from '@/api/explore'
 import { usePreferencesStore } from '@/stores/preferences'
 
 interface Props {
-  table: Table<any>
+  table: Table<Record<string, unknown>>
   stats?: QueryStats
   isLoading?: boolean
   showColumnSelector?: boolean
@@ -52,7 +52,7 @@ const displayTimezone = computed({
 })
 
 const globalFilter = computed({
-  get: () => props.table.getState().globalFilter ?? '',
+  get: () => props.table.atoms.globalFilter.get() ?? '',
   set: (value) => {
     props.table.setGlobalFilter(value)
     emit('update:globalFilter', value)
@@ -74,7 +74,7 @@ const hasRows = computed(() => props.table && props.table.getRowModel().rows?.le
 
 // Column filters are client-side (see data-table.vue / columnFilter.ts) and only
 // ever filter the currently loaded result page - surface that plainly here.
-const hasColumnFilters = computed(() => (props.table?.getState().columnFilters?.length ?? 0) > 0)
+const hasColumnFilters = computed(() => (props.table?.atoms.columnFilters.get()?.length ?? 0) > 0)
 const filteredRowCount = computed(() => props.table?.getFilteredRowModel().rows.length ?? 0)
 const totalRowCount = computed(() => props.table?.getCoreRowModel().rows.length ?? 0)
 

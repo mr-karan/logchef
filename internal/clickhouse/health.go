@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"time"
 )
@@ -13,7 +14,13 @@ import (
 // Ping checks the connectivity to the ClickHouse server and optionally verifies a table exists.
 // It uses short timeouts internally. Returns nil on success, or an error indicating the failure reason.
 func (c *Client) Ping(ctx context.Context, database, table string) error {
-	if c.conn == nil {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if c.closed {
+		return net.ErrClosed
+	}
+	conn := c.conn
+	if conn == nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
 		}
@@ -24,7 +31,7 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	pingCtx, pingCancel := context.WithTimeout(ctx, 1*time.Second)
 	defer pingCancel()
 
-	if err := c.conn.Ping(pingCtx); err != nil {
+	if err := conn.Ping(pingCtx); err != nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
 			c.metrics.UpdateConnectionStatus(false)
@@ -57,7 +64,7 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	var exists uint8
 
 	// No need for executeQueryWithHooks here, it's a simple metadata check.
-	err := c.conn.QueryRow(tableCtx, query, database, table).Scan(&exists)
+	err := conn.QueryRow(tableCtx, query, database, table).Scan(&exists)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)

@@ -1,4 +1,4 @@
-import type { ColumnDef } from '@tanstack/vue-table'
+import type { ColumnDef } from './tableFeatures'
 import type { Source } from '@/api/sources'
 import {
   MESSAGE_FIELD_ALIASES,

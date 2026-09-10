@@ -5,9 +5,10 @@ package clickhouse
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
+
+	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -41,6 +42,15 @@ type TableInfo struct {
 // GetTableInfo retrieves detailed metadata about a table, including handling
 // for Distributed tables by inspecting the underlying local table.
 func (c *Client) GetTableInfo(ctx context.Context, database, table string) (*TableInfo, error) {
+	return c.getTableInfo(ctx, database, table, make(map[[2]string]bool))
+}
+
+func (c *Client) getTableInfo(ctx context.Context, database, table string, visited map[[2]string]bool) (*TableInfo, error) {
+	key := [2]string{database, table}
+	if visited[key] {
+		return nil, fmt.Errorf("cyclic Distributed table reference: %s.%s", database, table)
+	}
+	visited[key] = true
 	start := time.Now()
 	defer func() {
 		c.logger.Debug("table info query completed",
@@ -58,7 +68,7 @@ func (c *Client) GetTableInfo(ctx context.Context, database, table string) (*Tab
 
 	// If it's a Distributed engine table, fetch metadata from the underlying local table.
 	if baseInfo.Engine == "Distributed" && len(baseInfo.EngineParams) >= 3 {
-		return c.handleDistributedTable(ctx, baseInfo), nil
+		return c.handleDistributedTable(ctx, baseInfo, visited), nil
 	}
 
 	// If it's a MergeTree family table, attempt to get sorting keys.
@@ -82,14 +92,10 @@ func (c *Client) getBaseTableInfo(ctx context.Context, database, table string) (
 		return nil, err // Error getting engine details is fatal here.
 	}
 
-	columns, err := c.getColumns(ctx, database, table)
-	if err != nil {
-		return nil, err // Error getting basic columns is fatal here.
-	}
-
 	// Extended column info is optional; log errors but don't fail.
 	// Try to get extended columns, but handle version compatibility gracefully.
 	extColumns, err := c.getExtendedColumns(ctx, database, table)
+	var columns []models.ColumnInfo
 	if err != nil {
 		c.logger.Warn("failed to get extended column info",
 			"error", err,
@@ -98,6 +104,15 @@ func (c *Client) getBaseTableInfo(ctx context.Context, database, table string) (
 		)
 		// Set to nil to indicate extended columns are not available
 		extColumns = nil
+		columns, err = c.getColumns(ctx, database, table)
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		columns = make([]models.ColumnInfo, len(extColumns))
+		for i, col := range extColumns {
+			columns[i] = models.ColumnInfo{Name: col.Name, Type: col.Type}
+		}
 	}
 	columns = withColumnDescriptions(columns, extColumns)
 
@@ -133,7 +148,9 @@ func (c *Client) getExtendedColumns(ctx context.Context, database, table string)
 
 	// Use hook wrapper for consistency, though less critical for metadata queries.
 	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		rows, err = c.conn.Query(hookCtx, query, database, table)
+		timeout := DefaultQueryTimeout
+		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
+		rows, err = c.queryRows(hookCtx, query, database, table)
 		return err
 	})
 
@@ -155,7 +172,7 @@ func (c *Client) getExtendedColumns(ctx context.Context, database, table string)
 			return nil, fmt.Errorf("failed to scan extended column: %w", err)
 		}
 		// Determine nullability from the type string since is_nullable column may not be available
-		col.IsNullable = strings.HasPrefix(col.Type, "Nullable(")
+		col.IsNullable = strings.HasPrefix(strings.TrimPrefix(col.Type, "LowCardinality("), "Nullable(")
 		columns = append(columns, col)
 	}
 	return columns, rows.Err() // Return any error encountered during iteration.
@@ -171,7 +188,9 @@ func (c *Client) getTableEngine(ctx context.Context, database, table string) (en
 	var rows driver.Rows
 
 	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		rows, err = c.conn.Query(hookCtx, query, database, table)
+		timeout := DefaultQueryTimeout
+		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
+		rows, err = c.queryRows(hookCtx, query, database, table)
 		return err
 	})
 
@@ -210,7 +229,9 @@ func (c *Client) getColumns(ctx context.Context, database, table string) ([]mode
 	var err error
 
 	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		rows, err = c.conn.Query(hookCtx, query, database, table)
+		timeout := DefaultQueryTimeout
+		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
+		rows, err = c.queryRows(hookCtx, query, database, table)
 		return err
 	})
 
@@ -242,7 +263,9 @@ func (c *Client) getSortKeys(ctx context.Context, database, table string) ([]str
 	var err error
 
 	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		rows, err = c.conn.Query(hookCtx, query, database, table)
+		timeout := DefaultQueryTimeout
+		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
+		rows, err = c.queryRows(hookCtx, query, database, table)
 		return err
 	})
 
@@ -267,7 +290,7 @@ func (c *Client) getSortKeys(ctx context.Context, database, table string) ([]str
 
 // handleDistributedTable fetches metadata from the underlying local table
 // referenced by a Distributed table engine.
-func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) *TableInfo {
+func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo, visited map[[2]string]bool) *TableInfo {
 	if len(base.EngineParams) < 3 {
 		c.logger.Warn("distributed table has insufficient engine parameters", "params", base.EngineParams)
 		return base
@@ -286,7 +309,7 @@ func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) *T
 	)
 
 	// Recursively get info for the underlying local table.
-	underlyingInfo, err := c.GetTableInfo(ctx, localDB, localTable)
+	underlyingInfo, err := c.getTableInfo(ctx, localDB, localTable, visited)
 	if err != nil {
 		// If fetching underlying info fails, log a warning and return the original distributed table info.
 		c.logger.Warn("failed to get underlying table info for distributed table",
@@ -306,8 +329,8 @@ func (c *Client) handleDistributedTable(ctx context.Context, base *TableInfo) *T
 		Engine:       base.Engine,       // Keep "Distributed" engine type.
 		EngineParams: base.EngineParams, // Keep distributed engine parameters.
 		CreateQuery:  base.CreateQuery,  // Keep distributed CREATE statement.
-		Columns:      underlyingInfo.Columns,
-		ExtColumns:   underlyingInfo.ExtColumns,
+		Columns:      base.Columns,
+		ExtColumns:   base.ExtColumns,
 		SortKeys:     underlyingInfo.SortKeys,
 	}
 }
@@ -404,11 +427,7 @@ func stripQuotes(s string) string {
 	return s
 }
 
-// parseSortKeys attempts to extract individual column names from the sorting_key string.
-// It handles simple cases and tuple() but might fail on complex expressions.
-// sortKeyIdentifierRe extracts a leading identifier from a sort-key expression.
-var sortKeyIdentifierRe = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*`)
-
+// Preserve sort expressions so a function name is not mistaken for a column.
 func parseSortKeys(sortingKey string) []string {
 	if sortingKey == "" {
 		return nil
@@ -423,36 +442,27 @@ func parseSortKeys(sortingKey string) []string {
 		trimmedKey = trimmedKey[1 : len(trimmedKey)-1]
 	}
 
-	// Split by comma, then trim spaces and quotes.
-	// This won't handle commas inside function calls correctly.
-	rawKeys := strings.Split(trimmedKey, ",")
-	keys := make([]string, 0, len(rawKeys))
-	for _, key := range rawKeys {
-		trimmed := strings.TrimSpace(key)
-		// Further strip potential backticks or quotes if needed, though identifiers
-		// usually don't contain them after parsing functions like tuple().
-		// Basic identifier extraction:
-		match := sortKeyIdentifierRe.FindString(trimmed)
-		if match != "" && !isKeyword(match) { // Check if it's not a keyword
-			keys = append(keys, match)
+	if strings.TrimSpace(trimmedKey) == "" {
+		return nil
+	}
+	statements, err := clickhouseparser.NewParser("SELECT " + trimmedKey).ParseStmts()
+	if err != nil || len(statements) != 1 {
+		return nil
+	}
+	selection, ok := statements[0].(*clickhouseparser.SelectQuery)
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(selection.SelectItems))
+	for _, item := range selection.SelectItems {
+		if ident, ok := item.Expr.(*clickhouseparser.Ident); ok {
+			keys = append(keys, ident.Name)
+		} else {
+			formatter := clickhouseparser.NewFormatter()
+			formatter.WriteExpr(item.Expr)
+			keys = append(keys, formatter.String())
 		}
 	}
 
 	return keys
-}
-
-// isKeyword checks if a string is a common ClickHouse keyword
-// to avoid misinterpreting them as column names in sort keys.
-func isKeyword(s string) bool {
-	// Case-insensitive check.
-	lowerS := strings.ToLower(s)
-	// Add more keywords if needed based on common sort key expressions.
-	keywords := map[string]bool{
-		"tuple": true, "array": true, "map": true,
-		"as": true, "by": true, "in": true, "is": true,
-		"not": true, "null": true, "or": true, "and": true,
-		// Potentially date/time functions if used without args:
-		// "now": true, "today": true,
-	}
-	return keywords[lowerS]
 }

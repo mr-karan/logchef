@@ -1,16 +1,11 @@
 <script setup lang="ts">
-import type { ColumnDef, ColumnMeta, Row } from '@tanstack/vue-table'
+import { logTableFeatures, type ColumnDef, type ColumnMeta, type Row } from './tableFeatures'
 import {
     FlexRender,
-    getCoreRowModel,
-    getSortedRowModel,
-    getExpandedRowModel,
-    getPaginationRowModel,
-    getFilteredRowModel,
-    useVueTable,
+    useTable,
     type SortingState,
     type ExpandedState,
-    type VisibilityState,
+    type ColumnVisibilityState as VisibilityState,
     type PaginationState,
     type ColumnSizingState,
     type ColumnResizeMode,
@@ -473,7 +468,8 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
 }
 
 // Initialize table
-const table = useVueTable({
+const table = useTable({
+    features: logTableFeatures,
     get data() {
         return props.data
     },
@@ -523,11 +519,6 @@ const table = useVueTable({
             : updaterOrValue;
         columnOrder.value = enforceTimestampFirst(nextValue);
     },
-    getCoreRowModel: getCoreRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-    getExpandedRowModel: getExpandedRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
     // Let table derive column sizing info from the state ref

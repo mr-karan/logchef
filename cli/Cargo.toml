@@ -17,7 +17,7 @@ logchef-core = { path = "crates/logchef-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "signal", "sync", "net"] }
 
 # HTTP client
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["json", "query", "form", "rustls"] }
 
 # Serialization
 serde = { version = "1", features = ["derive"] }
@@ -31,7 +31,7 @@ clap_complete = "4"
 include_dir = "0.7"
 
 # Log highlighting
-tailspin = "5"
+tailspin = { version = "7.0.0", default-features = false }
 
 open = "5"
 
@@ -47,7 +47,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 futures = "0.3"
 unicode-width = "0.2"
-inquire = "0.7"
+inquire = "0.9.4"
 iana-time-zone = "0.1"
 
 [profile.release]

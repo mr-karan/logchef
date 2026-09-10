@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { Column } from '@tanstack/vue-table'
+import type { Column } from './tableFeatures'
 import { Input } from '@/components/ui/input'
 import {
   Popover,

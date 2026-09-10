@@ -17,15 +17,13 @@ const (
 	ingestionStatsTimeoutSeconds = 3
 )
 
-func statsQueryContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
+func (c *Client) statsQueryContext(ctx context.Context, timeoutSeconds int) (context.Context, context.CancelFunc) {
 	if timeoutSeconds <= 0 {
 		return ctx, func() {}
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
-	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(clickhouse.Settings{
-		"max_execution_time": timeoutSeconds,
-	}))
+	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(buildQuerySettings(timeoutSeconds, nil, c.querySettings)))
 	return queryCtx, cancel
 }
 
@@ -77,10 +75,10 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 		ORDER BY size DESC
 	`, database, table) // Note: ORDER BY might not be necessary if only one row is expected.
 
-	queryCtx, cancel := statsQueryContext(ctx, tableStatsTimeoutSeconds)
+	queryCtx, cancel := c.statsQueryContext(ctx, tableStatsTimeoutSeconds)
 	defer cancel()
 
-	rows, err := c.conn.Query(queryCtx, query)
+	rows, err := c.queryRows(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error executing table stats query: %w", err)
 	}
@@ -193,11 +191,8 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, ingestionStatsTimeoutSeconds*time.Second)
 	defer cancel()
-	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(clickhouse.Settings{
-		"max_execution_time": ingestionStatsTimeoutSeconds,
-		"max_threads":        2,
-	}))
-	rows, err := c.conn.Query(queryCtx, query)
+	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(buildQuerySettings(ingestionStatsTimeoutSeconds, clickhouse.Settings{"max_threads": 2}, c.querySettings)))
+	rows, err := c.queryRows(queryCtx, query)
 	if err != nil {
 		return nil, activityError(queryCtx, "error executing ingestion activity query", err)
 	}

@@ -274,12 +274,24 @@ func (g *SQLGenerator) generateNestedFieldAccess(baseColumn string, path []strin
 	case g.isMapType(columnType):
 		return g.generateMapAccess(baseColumn, path, operator, formattedValue)
 	case g.isJsonType(columnType):
-		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
+		expression := g.nativeJSONPath(baseColumn, path)
+		if operator == OpRegex || operator == OpNotRegex {
+			expression = "toString(" + expression + ")"
+		}
+		return g.generateComparisonExpression(expression, operator, formattedValue)
 	case g.isStringType(columnType):
 		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
 	default:
 		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
 	}
+}
+
+func (g *SQLGenerator) nativeJSONPath(base string, path []string) string {
+	parts := []string{g.escapeIdentifier(base)}
+	for _, segment := range path {
+		parts = append(parts, g.escapeIdentifier(strings.Trim(segment, "\"'")))
+	}
+	return strings.Join(parts, ".")
 }
 
 func (g *SQLGenerator) generateMapAccess(baseColumn string, path []string, operator Operator, formattedValue string) string {
@@ -352,7 +364,8 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) st
 		nestedField = &f
 		columnType := g.getColumnType(f.Base)
 
-		if columnType != "" && g.isMapType(columnType) {
+		switch {
+		case g.isMapType(columnType):
 			escapedColumn := g.escapeIdentifier(f.Base)
 			var escapedPath []string
 			for _, segment := range f.Path {
@@ -364,7 +377,9 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) st
 			}
 			fullKey := strings.Join(escapedPath, ".")
 			columnExpression = fmt.Sprintf("%s['%s']", escapedColumn, fullKey)
-		} else {
+		case g.isJsonType(columnType):
+			columnExpression = g.nativeJSONPath(f.Base, f.Path)
+		default:
 			escapedColumn := g.escapeIdentifier(f.Base)
 			var pathParams []string
 			for _, segment := range f.Path {

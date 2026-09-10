@@ -1,6 +1,6 @@
 import * as monaco from "monaco-editor";
 import { loader } from "@guolao/vue-monaco-editor";
-import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
+import EditorWorker from "monaco-editor/editor/editor.worker.js?worker";
 import {
   SQL_KEYWORDS,
   CLICKHOUSE_FUNCTIONS,

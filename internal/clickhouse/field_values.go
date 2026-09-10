@@ -41,23 +41,26 @@ type FieldValuesParams struct {
 	Limit          int       // Optional: max values to return (default 10, max 100)
 	Timeout        *int      // Optional: query timeout in seconds
 	LogchefQL      string    // Optional: LogchefQL query string - parsed on backend for proper SQL generation
+	schema         *logchefql.Schema
 }
 
 // buildLogchefQLConditionsSQL parses a LogchefQL query and returns the SQL WHERE clause fragment.
 // This uses the proper LogchefQL parser which handles nested fields, Map columns, JSON extraction, etc.
-// Returns empty string if query is empty or invalid.
-func buildLogchefQLConditionsSQL(query string) string {
+func buildLogchefQLConditionsSQL(query string, schema *logchefql.Schema) (string, error) {
 	if query == "" || strings.TrimSpace(query) == "" {
-		return ""
+		return "", nil
 	}
 
-	result := logchefql.Translate(query, nil)
-	if !result.Valid || result.SQL == "" {
-		return ""
+	result := logchefql.Translate(query, schema)
+	if !result.Valid {
+		return "", fmt.Errorf("invalid field-value filter: %v", result.Error)
+	}
+	if result.SQL == "" {
+		return "", nil
 	}
 
 	// Return the SQL wrapped as " AND (...)" to be appended to WHERE clause
-	return " AND (" + result.SQL + ")"
+	return " AND (" + result.SQL + ")", nil
 }
 
 // GetFieldDistinctValues retrieves the top N distinct values for a field within a time range.
@@ -87,9 +90,19 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 		"field_type", params.FieldType, "limit", limit)
 
 	isLowCard := strings.Contains(params.FieldType, "LowCardinality")
-	startTimeStr := params.StartTime.UTC().Format("2006-01-02 15:04:05")
-	endTimeStr := params.EndTime.UTC().Format("2006-01-02 15:04:05")
-	additionalConditions := buildLogchefQLConditionsSQL(params.LogchefQL)
+	startTimeStr := params.StartTime.UTC().Format("2006-01-02 15:04:05.999999999")
+	endTimeStr := params.EndTime.UTC().Format("2006-01-02 15:04:05.999999999")
+	if strings.TrimSpace(params.LogchefQL) != "" && params.schema == nil {
+		columns, err := c.getColumns(ctx, database, table)
+		if err != nil {
+			return nil, err
+		}
+		params.schema = fieldValueSchema(columns)
+	}
+	additionalConditions, err := buildLogchefQLConditionsSQL(params.LogchefQL, params.schema)
+	if err != nil {
+		return nil, err
+	}
 
 	quotedField := quoteIdentifier(params.FieldName)
 	quotedTS := quoteIdentifier(params.TimestampField)
@@ -102,13 +115,13 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 	}
 
 	query := fmt.Sprintf(`
-		SELECT %s AS value, count() AS cnt
+		SELECT toString(%s) AS value, count() AS cnt
 		FROM %s
-		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
+		PREWHERE %s BETWEEN toDateTime64('%s', 9, 'UTC') AND toDateTime64('%s', 9, 'UTC')
 		WHERE %s%s
 		GROUP BY value ORDER BY cnt DESC LIMIT %d
 	`, quotedField, qualifiedTable,
-		quotedTS, startTimeStr, timezone, endTimeStr, timezone,
+		quotedTS, startTimeStr, endTimeStr,
 		emptyFilter, additionalConditions, limit)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
@@ -118,7 +131,10 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 
 	values := extractFieldValues(result)
 
-	totalDistinct := c.queryTotalDistinct(ctx, database, table, params, startTimeStr, endTimeStr, timezone, additionalConditions, timeoutSeconds)
+	totalDistinct, err := c.queryTotalDistinct(ctx, database, table, params, startTimeStr, endTimeStr, additionalConditions, timeoutSeconds)
+	if err != nil {
+		return nil, err
+	}
 
 	return &FieldValuesResult{
 		FieldName:     params.FieldName,
@@ -127,6 +143,14 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 		Values:        values,
 		TotalDistinct: totalDistinct,
 	}, nil
+}
+
+func fieldValueSchema(columns []models.ColumnInfo) *logchefql.Schema {
+	schema := &logchefql.Schema{Columns: make([]logchefql.ColumnInfo, len(columns))}
+	for i, column := range columns {
+		schema.Columns[i] = logchefql.ColumnInfo{Name: column.Name, Type: column.Type}
+	}
+	return schema
 }
 
 func normalizeFieldValuesParams(params FieldValuesParams) (limit int, timeout *int, timezone string) {
@@ -218,7 +242,7 @@ func extractInt64FromRow(row map[string]any, key string) (int64, bool) {
 	}
 }
 
-func (c *Client) queryTotalDistinct(ctx context.Context, database, table string, params FieldValuesParams, startTimeStr, endTimeStr, timezone, additionalConditions string, timeoutSeconds *int) int64 {
+func (c *Client) queryTotalDistinct(ctx context.Context, database, table string, params FieldValuesParams, startTimeStr, endTimeStr, additionalConditions string, timeoutSeconds *int) (int64, error) {
 	quotedField := quoteIdentifier(params.FieldName)
 	quotedTS := quoteIdentifier(params.TimestampField)
 	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
@@ -230,27 +254,30 @@ func (c *Client) queryTotalDistinct(ctx context.Context, database, table string,
 	query := fmt.Sprintf(`
 		SELECT uniq(%s) AS total
 		FROM %s
-		PREWHERE %s BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')
+		PREWHERE %s BETWEEN toDateTime64('%s', 9, 'UTC') AND toDateTime64('%s', 9, 'UTC')
 		WHERE %s%s
 	`, quotedField, qualifiedTable,
-		quotedTS, startTimeStr, timezone, endTimeStr, timezone,
+		quotedTS, startTimeStr, endTimeStr,
 		emptyFilter, additionalConditions)
 
 	result, err := c.QueryWithTimeout(ctx, query, timeoutSeconds)
-	if err != nil || len(result.Logs) == 0 {
-		return 0
+	if err != nil {
+		return 0, fmt.Errorf("querying distinct count for %s: %w", params.FieldName, err)
+	}
+	if len(result.Logs) == 0 {
+		return 0, fmt.Errorf("distinct count query returned no row")
 	}
 
 	if total, ok := result.Logs[0]["total"]; ok {
 		switch v := total.(type) {
 		case uint64:
 			// #nosec G115 -- distinct count values are bounded by actual row counts
-			return int64(min(v, uint64(math.MaxInt64)))
+			return int64(min(v, uint64(math.MaxInt64))), nil
 		case int64:
-			return v
+			return v, nil
 		}
 	}
-	return 0
+	return 0, fmt.Errorf("distinct count query returned an invalid total")
 }
 
 // AllFieldValuesParams holds parameters for fetching field values for filterable columns.
@@ -332,6 +359,10 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	if err != nil {
 		return nil, fmt.Errorf("failed to get columns: %w", err)
 	}
+	schema := fieldValueSchema(columns)
+	if _, err := buildLogchefQLConditionsSQL(params.LogchefQL, schema); err != nil {
+		return nil, err
+	}
 
 	results := make(map[string]*FieldValuesResult)
 	var mu sync.Mutex
@@ -379,6 +410,7 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 			Limit:          params.Limit,
 			Timeout:        timeout,
 			LogchefQL:      params.LogchefQL, // Pass through user's LogchefQL query
+			schema:         schema,
 		}
 
 		// Acquire a slot, but honor cancellation while all slots are busy

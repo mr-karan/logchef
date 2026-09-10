@@ -10,7 +10,7 @@ import {
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Columns3 } from 'lucide-vue-next'
 import { computed } from 'vue'
-import type { Table } from '@tanstack/vue-table'
+import type { Table } from './tableFeatures'
 
 interface Props {
   table: Table<Record<string, any>>
