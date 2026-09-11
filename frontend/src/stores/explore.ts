@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { computed, markRaw, watch } from "vue";
 import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
-import { logchefqlApi } from "@/api/logchefql";
+import { logchefqlApi, type FilterCondition as CompiledFilterCondition } from "@/api/logchefql";
 import { isCanceledError } from "@/api/error-handler";
 import type {
   ColumnInfo,
@@ -96,6 +96,10 @@ export interface ExploreState {
     logchefqlQuery?: string;
     sqlQuery: string;
     sourceId: number;
+    compilation?: {
+      conditions: CompiledFilterCondition[];
+      fieldsUsed: string[];
+    };
   };
   lastExecutionTimestamp: number | null;
   hasExecutedQuery: boolean;
@@ -748,12 +752,12 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
-  function _updateLastExecutedState() {
+  function captureExecutionState(): NonNullable<ExploreState['lastExecutedState']> {
     const executedSql = state.data.value.activeMode === 'logchefql'
       ? (state.data.value.generatedDisplayQuery || sqlForExecution.value)
       : sqlForExecution.value;
 
-    state.data.value.lastExecutedState = {
+    return {
       timeRange: JSON.stringify(state.data.value.timeRange),
       limit: state.data.value.limit,
       mode: state.data.value.activeMode,
@@ -761,6 +765,10 @@ export const useExploreStore = defineStore("explore", () => {
       sqlQuery: executedSql,
       sourceId: sourceId.value
     };
+  }
+
+  function _updateLastExecutedState(snapshot = captureExecutionState()) {
+    state.data.value.lastExecutedState = snapshot;
     state.data.value.lastExecutionTimestamp = Date.now();
   }
 
@@ -1204,7 +1212,8 @@ export const useExploreStore = defineStore("explore", () => {
       // Mark that a query execution attempt has started (used for initial loading UX)
       state.data.value.hasExecutedQuery = true;
 
-      if (state.data.value.activeMode === 'logchefql') {
+      const executionSnapshot = captureExecutionState();
+      if (executionSnapshot.mode === 'logchefql') {
         try {
           const { getVariablesForApi } = useVariables();
           const variables = getVariablesForApi();
@@ -1257,7 +1266,14 @@ export const useExploreStore = defineStore("explore", () => {
                 queryResponse.data.generated_query || queryResponse.data.generated_sql || null;
             }
 
-            _updateLastExecutedState();
+            _updateLastExecutedState({
+              ...executionSnapshot,
+              sqlQuery: queryResponse.data.generated_query || queryResponse.data.generated_sql || '',
+              compilation: {
+                conditions: queryResponse.data.conditions ?? [],
+                fieldsUsed: queryResponse.data.fields_used ?? [],
+              },
+            });
             persistDraft();
 
             // Query history is recorded server-side on execution and surfaced
@@ -1401,7 +1417,7 @@ export const useExploreStore = defineStore("explore", () => {
               state.data.value.currentQueryId = data.query_id;
             }
 
-            _updateLastExecutedState();
+            _updateLastExecutedState({ ...executionSnapshot, sqlQuery: sql });
             persistDraft();
 
             // Query history is recorded server-side on execution and surfaced

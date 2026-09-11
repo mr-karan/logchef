@@ -35,7 +35,7 @@ import { exploreApi } from "@/api/explore";
 import type { ComponentPublicInstance } from "vue";
 import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
-import { logchefqlApi, type FilterCondition } from "@/api/logchefql";
+import type { FilterCondition } from "@/api/logchefql";
 import { generateCliCommand } from "@/utils/cliCommand";
 
 // Type alias for backwards compatibility
@@ -147,15 +147,6 @@ const EMPTY_PARSED_QUERY = {
   success: false,
   meta: { fieldsUsed: [], conditions: [] },
 };
-
-// Add parsed query structure to highlight columns used in search
-const lastParsedQuery = ref<{
-  success: boolean;
-  meta?: {
-    fieldsUsed: string[];
-    conditions: QueryCondition[];
-  };
-}>(EMPTY_PARSED_QUERY);
 
 // Basic state
 // Sidebar defaults to open, but respects user's saved preference
@@ -269,62 +260,12 @@ const currentQueryContentJson = computed(() => {
   });
 });
 
-// Update the parsed query whenever a new query is executed
-watch(
-  () => exploreStore.lastExecutedState,
-  async (newState) => {
-    if (!newState) {
-      lastParsedQuery.value = EMPTY_PARSED_QUERY;
-      return;
-    }
-
-    if (activeMode.value === "logchefql") {
-      // Check if query is empty
-      if (!logchefQuery.value || logchefQuery.value.trim() === "") {
-        lastParsedQuery.value = EMPTY_PARSED_QUERY;
-      } else {
-        // Parse the query using backend LogchefQL API
-        const teamId = teamsStore.currentTeamId;
-        const sourceId = currentSourceId.value;
-        
-        if (teamId && sourceId) {
-          try {
-            const response = await logchefqlApi.translate(teamId, sourceId, { query: logchefQuery.value });
-            if (response.data && response.data.valid) {
-              lastParsedQuery.value = {
-                success: true,
-                meta: {
-                  fieldsUsed: response.data.fields_used || [],
-                  conditions: response.data.conditions?.map((c: FilterCondition) => ({
-                    field: c.field,
-                    operator: c.operator,
-                    value: c.value,
-                    is_regex: c.is_regex
-                  })) || []
-                }
-              };
-            } else {
-              lastParsedQuery.value = EMPTY_PARSED_QUERY;
-            }
-          } catch (error) {
-            console.warn("Failed to parse query via backend:", error);
-            lastParsedQuery.value = EMPTY_PARSED_QUERY;
-          }
-        } else {
-          lastParsedQuery.value = EMPTY_PARSED_QUERY;
-        }
-      }
-    } else {
-      // Reset when in SQL mode
-      lastParsedQuery.value = EMPTY_PARSED_QUERY;
-    }
-  },
-  { immediate: true }
-);
-
-// Add computed property to get parsed query structure
 const parsedQuery = computed(() => {
-  return lastParsedQuery.value;
+  const executed = exploreStore.lastExecutedState;
+  if (executed?.mode !== 'logchefql' || !executed.logchefqlQuery?.trim() || !executed.compilation) {
+    return EMPTY_PARSED_QUERY;
+  }
+  return { success: true, meta: executed.compilation };
 });
 
 // Use structured data for query fields

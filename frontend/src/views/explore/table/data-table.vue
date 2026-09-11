@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater } from '@/lib/utils'
-import type { QueryStats } from '@/api/explore'
+import type { ColumnInfo, QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
@@ -31,7 +31,7 @@ import { usePreferencesStore } from '@/stores/preferences'
 import CellWithActions from './CellWithActions.vue'
 
 interface Props {
-    columns: ColumnDef<Record<string, any>>[]
+    columns: ColumnInfo[]
     data: Record<string, any>[]
     stats: QueryStats
     sourceId: string
@@ -223,8 +223,16 @@ function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { 
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value, props.timestampField, sourceType.value], // Also watch timestampField changes
-    ([newColumns, newTimezone]) => {
+    () => ({
+        columns: props.columns,
+        timezone: displayTimezone.value,
+        timestampField: props.timestampField,
+        severityField: props.severityField,
+        sourceType: sourceType.value,
+        queryFields: props.queryFields,
+        regexHighlights: props.regexHighlights,
+    }),
+    ({ columns: newColumns, timezone: newTimezone }) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
             // Reset dependent state if columns are cleared
@@ -237,9 +245,9 @@ watch(
 
         // Regenerate columns with the current timezone
         tableColumns.value = createColumns(
-            newColumns as any, // Use the columns directly as was working before
+            newColumns,
             timestampFieldName.value,
-            newTimezone as 'local' | 'utc',
+            newTimezone,
             severityFieldName.value,
             props.queryFields,
             props.regexHighlights

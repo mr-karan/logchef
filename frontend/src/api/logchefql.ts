@@ -70,6 +70,8 @@ export interface QueryRequest {
 }
 
 export interface QueryResponse {
+  conditions?: FilterCondition[] | null;
+  fields_used?: string[] | null;
   logs: Record<string, any>[];
   columns: { name: string; type: string }[];
   stats: {

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -24,6 +25,8 @@ type queryStreamConfig struct {
 	generatedSQL      string
 	generatedQuery    string
 	generatedLanguage models.QueryLanguage
+	conditions        []logchefql.FilterCondition
+	fieldsUsed        []string
 }
 
 // queryStreamWriter incrementally writes a success envelope
@@ -178,6 +181,12 @@ func (w *queryStreamWriter) closeEnvelope(stats models.QueryStats, streamErr err
 	}
 
 	if w.cfg.includeGenerated {
+		if err := w.writeJSONField("conditions", w.cfg.conditions); err != nil {
+			return err
+		}
+		if err := w.writeJSONField("fields_used", w.cfg.fieldsUsed); err != nil {
+			return err
+		}
 		if err := w.writeStringField("generated_sql", w.cfg.generatedSQL); err != nil {
 			return err
 		}

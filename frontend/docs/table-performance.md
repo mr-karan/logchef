@@ -73,15 +73,39 @@ performance budgets or production guarantees.
 Also check hover, keyboard focus, copy, filter drill-down, row expansion,
 timezone changes, and switching between table, compact, and JSON views.
 
-## Further candidates
+## Follow-up changes
 
-- Reuse compilation metadata from query execution instead of making the
-  Explorer's additional post-execution translation request. Cover variables,
-  cached responses, and stale requests before changing that flow.
-- Compile per-column highlight patterns once when column definitions change.
-  First correct the watcher dependencies for highlight/query-field changes.
-- Profile timestamp formatting after the DOM reduction. Add a bounded cache
-  only if repeated formatting remains significant.
+Query responses now include compilation conditions and fields used. Explorer
+uses that metadata from the accepted execution snapshot rather than making
+another translation request. The snapshot preserves the executed query when
+the user edits the query, mode, or limit while the request is in flight.
+ClickHouse streaming and VictoriaLogs buffered responses include the metadata,
+including dashboard cache fills.
+
+Column definitions compile literal highlight patterns once. Their watcher now
+tracks highlight patterns, query fields, and severity fields in addition to
+schema and timezone changes.
+
+A browser microbenchmark of the existing timestamp formatter took a median of
+0.5 ms per 1,000 UTC timestamps and 0.8 ms per 1,000 local timestamps. The local
+browser timezone was Asia/Calcutta. Each mode used 15 batches of 1,000 distinct
+ISO timestamps through the Vite-served module, without CPU throttling.
+This measures formatting only, not table rendering or end-to-end query time.
+These measurements do not justify a timestamp-format cache.
+
+Reproduce on the local Vite frontend:
+
+```sh
+agent-browser --session table-perf eval --stdin \
+  < frontend/scripts/benchmark-timestamps.js
+```
+
+Timestamp sorting separately compares UTC nanosecond keys. It handles
+variable-width fractions and timezone offsets without rounding to milliseconds.
+Invalid or missing timestamps compare before valid timestamps in ascending order.
+
+The production-build comparison above measures the initial DOM reduction.
+It has not been rerun for these follow-up changes.
 
 PR #93 is a design reference. Its old compact-view virtualization and manual
 pagination code were not imported; current main already limits rendered rows

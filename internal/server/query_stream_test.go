@@ -5,8 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -84,6 +86,11 @@ func TestQueryStreamWriter_NativeShapeAllRows(t *testing.T) {
 	if _, present := data["generated_sql"]; present {
 		t.Fatalf("native shape should not include generated_sql")
 	}
+	for _, key := range []string{"conditions", "fields_used"} {
+		if _, present := data[key]; present {
+			t.Fatalf("native shape should not include %s", key)
+		}
+	}
 }
 
 func TestQueryStreamWriter_ZeroRowsEmitsEmptyArray(t *testing.T) {
@@ -123,6 +130,8 @@ func TestQueryStreamWriter_LogchefQLShape(t *testing.T) {
 		generatedSQL:      "SELECT 1",
 		generatedQuery:    "SELECT 1",
 		generatedLanguage: models.QueryLanguageClickHouseSQL,
+		conditions:        []logchefql.FilterCondition{{Field: "msg", Operator: "~", Value: "hi", IsRegex: true}},
+		fieldsUsed:        []string{"msg"},
 	}, "qid-2")
 
 	if err := w.Begin([]models.ColumnInfo{{Name: "msg", Type: "String"}}); err != nil {
@@ -154,6 +163,13 @@ func TestQueryStreamWriter_LogchefQLShape(t *testing.T) {
 	}
 	if data["generated_query_language"] != string(models.QueryLanguageClickHouseSQL) {
 		t.Fatalf("generated_query_language = %v", data["generated_query_language"])
+	}
+	if !reflect.DeepEqual(data["fields_used"], []any{"msg"}) {
+		t.Fatalf("fields_used = %v", data["fields_used"])
+	}
+	wantConditions := []any{map[string]any{"field": "msg", "operator": "~", "value": "hi", "is_regex": true}}
+	if !reflect.DeepEqual(data["conditions"], wantConditions) {
+		t.Fatalf("conditions = %v", data["conditions"])
 	}
 }
 
