@@ -5,6 +5,7 @@ import { formatTimestamp, formatLogContent } from "@/lib/utils";
 import { getSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';
 import { columnFilterFn } from './columnFilter';
+import { compareTimestamps } from './timestampSort';
 
 // Width configurations for each column type
 // maxWidth is set very high to allow free resizing - users should be able to expand columns as needed
@@ -146,6 +147,10 @@ export function createColumns(
     const widthConfig = COLUMN_WIDTH_CONFIG[columnType];
     const isFieldInQuery = queryFields.includes(col.name);
     const hasRegexHighlight = !!regexHighlights[col.name];
+    const highlightInfo = regexHighlights[col.name];
+    const highlightRegex = highlightInfo?.pattern && !highlightInfo.isNegated
+      ? new RegExp(`(${highlightInfo.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi')
+      : null;
 
     // Make sure we have a valid id, but avoid adding accessorKey
     const id = col.name || `col_${Math.random().toString(36).substr(2, 9)}`;
@@ -169,6 +174,9 @@ export function createColumns(
       size: widthConfig.defaultWidth,
       minSize: widthConfig.minWidth,
       maxSize: widthConfig.maxWidth,
+      sortFn: columnType === 'timestamp'
+        ? (left, right, columnId) => compareTimestamps(left.getValue(columnId), right.getValue(columnId))
+        : 'auto',
 
       // Accessor function for data
       accessorFn: (row: Record<string, any>) => {
@@ -318,35 +326,12 @@ export function createColumns(
         // --- Column-specific Highlighting Logic ---
         let highlightedContent = null;
 
-        // Check if we have a regex highlight specifically for this column
-        if (col.name && regexHighlights[col.name] && !isJsonObject) {
-          const highlightInfo = regexHighlights[col.name];
-
-          if (!highlightInfo.isNegated) { // Only highlight for non-negated patterns
-            try {
-              // Create a regex that escapes special characters
-              const escapedPattern = highlightInfo.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-              const regex = new RegExp(`(${escapedPattern})`, 'gi');
-
-              // Split by the regex
-              const parts = textValue.split(regex);
-
-              // Only render highlighted content if we found matches
-              if (parts.length > 1) {
-                highlightedContent = [];
-
-                // Build the highlighted content
-                parts.forEach((part, i) => {
-                  if (i % 2 === 1) { // Match parts (odd indices)
-                    highlightedContent.push(h('span', { class: 'search-highlight' }, part));
-                  } else if (part) { // Non-match parts
-                    highlightedContent.push(part);
-                  }
-                });
-              }
-            } catch (err) {
-              console.warn('Error highlighting regex pattern:', err);
-            }
+        if (highlightRegex && !isJsonObject) {
+          const parts = textValue.split(highlightRegex);
+          if (parts.length > 1) {
+            highlightedContent = parts.map((part, index) =>
+              index % 2 === 1 ? h('span', { class: 'search-highlight' }, part) : part
+            );
           }
         }
 

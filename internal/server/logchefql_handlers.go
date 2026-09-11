@@ -467,6 +467,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 			generatedSQL:      executableQuery,
 			generatedQuery:    executableQuery,
 			generatedLanguage: executableQueryLanguage,
+			conditions:        compiled.Conditions,
+			fieldsUsed:        compiled.FieldsUsed,
 		}
 		// OOM guardrail: only the dashboard-directive path buffers (bounded by
 		// max_entry_bytes); on overflow the fill errors and we fall through to the
@@ -500,6 +502,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 				"generated_query":          executableQuery,
 				"generated_query_language": executableQueryLanguage,
 				"warnings":                 result.Warnings,
+				"conditions":               compiled.Conditions,
+				"fields_used":              compiled.FieldsUsed,
 			}
 			return json.Marshal(NewSuccessResponse(resp))
 		}
@@ -573,6 +577,8 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		"generated_query":          executableQuery,
 		"generated_query_language": executableQueryLanguage,
 		"warnings":                 result.Warnings,
+		"conditions":               compiled.Conditions,
+		"fields_used":              compiled.FieldsUsed,
 	}
 
 	return SendSuccess(c, fiber.StatusOK, responseData)

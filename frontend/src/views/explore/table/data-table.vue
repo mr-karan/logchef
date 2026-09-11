@@ -18,7 +18,7 @@ import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
 import { valueUpdater } from '@/lib/utils'
-import type { QueryStats } from '@/api/explore'
+import type { ColumnInfo, QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
@@ -28,9 +28,10 @@ import { hasSourceCapability } from '@/lib/queryMetadata'
 import TableControls from './TableControls.vue'
 import ColumnFilterButton from './ColumnFilterButton.vue'
 import { usePreferencesStore } from '@/stores/preferences'
+import CellWithActions from './CellWithActions.vue'
 
 interface Props {
-    columns: ColumnDef<Record<string, any>>[]
+    columns: ColumnInfo[]
     data: Record<string, any>[]
     stats: QueryStats
     sourceId: string
@@ -222,8 +223,16 @@ function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { 
 
 // Watch for changes in columns OR search terms to regenerate table columns
 watch(
-    () => [props.columns, displayTimezone.value, props.timestampField, sourceType.value], // Also watch timestampField changes
-    ([newColumns, newTimezone]) => {
+    () => ({
+        columns: props.columns,
+        timezone: displayTimezone.value,
+        timestampField: props.timestampField,
+        severityField: props.severityField,
+        sourceType: sourceType.value,
+        queryFields: props.queryFields,
+        regexHighlights: props.regexHighlights,
+    }),
+    ({ columns: newColumns, timezone: newTimezone }) => {
         if (!newColumns || newColumns.length === 0) {
             tableColumns.value = []; // Clear columns if input is empty
             // Reset dependent state if columns are cleared
@@ -236,9 +245,9 @@ watch(
 
         // Regenerate columns with the current timezone
         tableColumns.value = createColumns(
-            newColumns as any, // Use the columns directly as was working before
+            newColumns,
             timestampFieldName.value,
-            newTimezone as 'local' | 'utc',
+            newTimezone,
             severityFieldName.value,
             props.queryFields,
             props.regexHighlights
@@ -797,39 +806,40 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
                                             flex: isLastVisibleColumn(cell.column.id) ? '1 1 auto' : undefined,
                                         }">
-                                        <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
-                                            :title="formatCellValue(cell.getValue())">
-                                            <FlexRender v-if="cell.column.columnDef.cell"
-                                                :render="cell.column.columnDef.cell" :props="cell.getContext()" />
-                                        </div>
-                                        <!-- Minimal hover actions - positioned absolute, doesn't take content space -->
-                                        <div class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
-                                            <!-- Copy button - always available -->
-                                            <button 
-                                                class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                @click.stop="handleCellClick($event, cell)"
-                                                title="Copy value"
-                                            >
-                                                <Copy class="h-3 w-3" />
-                                            </button>
-                                            <!-- Filter buttons - only in logchefQL mode -->
-                                            <template v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
-                                                <button 
-                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
-                                                    title="Filter = this value"
-                                                >
-                                                    <Equal class="h-3 w-3" />
-                                                </button>
-                                                <button 
-                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
-                                                    title="Filter ≠ this value"
-                                                >
-                                                    <EqualNot class="h-3 w-3" />
-                                                </button>
+                                        <CellWithActions>
+                                            <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
+                                                :title="formatCellValue(cell.getValue())">
+                                                <FlexRender v-if="cell.column.columnDef.cell"
+                                                    :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                                            </div>
+                                            <template #actions>
+                                                <div class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
+                                                    <button
+                                                        class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                        @click.stop="handleCellClick($event, cell)"
+                                                        title="Copy value"
+                                                    >
+                                                        <Copy class="h-3 w-3" />
+                                                    </button>
+                                                    <template v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
+                                                        <button
+                                                            class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                            @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
+                                                            title="Filter = this value"
+                                                        >
+                                                            <Equal class="h-3 w-3" />
+                                                        </button>
+                                                        <button
+                                                            class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                            @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
+                                                            title="Filter ≠ this value"
+                                                        >
+                                                            <EqualNot class="h-3 w-3" />
+                                                        </button>
+                                                    </template>
+                                                </div>
                                             </template>
-                                        </div>
+                                        </CellWithActions>
                                     </td>
                                 </tr>
 
@@ -1113,20 +1123,10 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     cursor: pointer;
 }
 
-/* Hover action buttons - appear on row hover, positioned outside content flow */
+/* Cell actions stay outside content flow. */
 .cell-actions {
     pointer-events: auto;
     z-index: 5;
-}
-
-/* Only show actions on direct cell hover, not entire row */
-.cell-hover-target .cell-actions {
-    opacity: 0;
-    transition: opacity 0.15s ease;
-}
-
-.cell-hover-target:hover .cell-actions {
-    opacity: 1;
 }
 
 /* Style for drop indicator */

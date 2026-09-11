@@ -657,12 +657,56 @@ describe("explore store", () => {
           logs: [{ msg: "stale" }],
           columns: [{ name: "msg", type: "String" }],
           stats: {},
+          conditions: [{ field: 'msg', operator: '~', value: 'stale', is_regex: true }],
+          fields_used: ['msg'],
         },
       });
       const result = await exec;
 
       expect(store.logs).toEqual([]); // stale result never applied
       expect(result.error?.error_type).toBe("StaleResponse");
+      expect(store.lastExecutedState?.compilation).toBeUndefined();
+    });
+
+    it("pairs compiled metadata with the executed query rather than later editor changes", async () => {
+      const { store, resolveQuery } = armInFlightLogchefql();
+      const exec = store.executeQuery();
+      await nextTick();
+      store.setLogchefqlCode('level="warn"');
+      store.setLimit(500);
+      store.setActiveMode('native');
+      const conditions = [{ field: 'level', operator: '=', value: 'error', is_regex: false }];
+      resolveQuery({ data: {
+        logs: [{ level: 'error' }], columns: [], stats: {},
+        generated_query: "SELECT * FROM logs WHERE level = 'error'",
+        conditions, fields_used: ['level'],
+      } });
+      await exec;
+      expect(store.lastExecutedState).toMatchObject({
+        mode: 'logchefql', logchefqlQuery: 'level="error"', limit: 100,
+        compilation: { conditions, fieldsUsed: ['level'] },
+      });
+      expect(store.logchefqlCode).toBe('level="warn"');
+
+      store.setNativeQuery('SELECT 1');
+      mocks.exploreGetLogs.mockResolvedValue({ status: 'success', data: { data: [{ n: 1 }], columns: [], stats: {} } });
+      await store.executeQuery();
+      expect(store.lastExecutedState?.mode).toBe('native');
+      expect(store.lastExecutedState?.compilation).toBeUndefined();
+    });
+
+    it("clears compiled filters after executing an empty LogchefQL query", async () => {
+      const { store, resolveQuery } = armInFlightLogchefql();
+      const exec = store.executeQuery();
+      await nextTick();
+      resolveQuery({ data: { logs: [], columns: [], stats: {}, fields_used: ['level'],
+        conditions: [{ field: 'level', operator: '=', value: 'error', is_regex: false }],
+      } });
+      await exec;
+      store.setLogchefqlCode('');
+      mocks.logchefqlQuery.mockResolvedValue({ data: { logs: [], columns: [], stats: {}, conditions: null, fields_used: null } });
+      await store.executeQuery();
+      expect(store.lastExecutedState?.compilation).toEqual({ conditions: [], fieldsUsed: [] });
     });
   });
 });
