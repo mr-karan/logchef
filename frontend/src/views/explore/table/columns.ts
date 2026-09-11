@@ -5,6 +5,7 @@ import { formatTimestamp, formatLogContent } from "@/lib/utils";
 import { getSeverityClasses } from "@/lib/utils";
 import type { ColumnInfo } from '@/api/explore';
 import { columnFilterFn } from './columnFilter';
+import { compareTimestamps } from './timestampSort';
 
 // Width configurations for each column type
 // maxWidth is set very high to allow free resizing - users should be able to expand columns as needed
@@ -169,6 +170,9 @@ export function createColumns(
       size: widthConfig.defaultWidth,
       minSize: widthConfig.minWidth,
       maxSize: widthConfig.maxWidth,
+      sortFn: columnType === 'timestamp'
+        ? (left, right, columnId) => compareTimestamps(left.getValue(columnId), right.getValue(columnId))
+        : 'auto',
 
       // Accessor function for data
       accessorFn: (row: Record<string, any>) => {
