@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -392,6 +393,10 @@ func TestIntegrationVictoriaLogs(t *testing.T) {
 		}
 		if got := fmt.Sprint(result.Logs[0]["value"]); got != fmt.Sprint(len(rows)) {
 			t.Fatalf("expected alert value %d, got %q", len(rows), got)
+		}
+		value, err := util.ExtractFirstNumeric(result)
+		if err != nil || value != float64(len(rows)) {
+			t.Fatalf("alert evaluator got (%v, %v), want (%d, nil)", value, err, len(rows))
 		}
 	})
 

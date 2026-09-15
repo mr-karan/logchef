@@ -713,6 +713,9 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	for _, item := range result.Data.Result {
 		row := map[string]interface{}{}
 		for key, value := range item.Metric {
+			if key == "value" {
+				continue // Reserved for the numeric sample.
+			}
 			row[key] = value
 			labelSet[key] = struct{}{}
 		}
@@ -722,9 +725,8 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 		rows = append(rows, row)
 	}
 
-	// Declare a column per metric label (sorted for determinism) plus the
-	// numeric value, so the schema matches the rows. Hardcoding only "value"
-	// dropped the group-by labels that the rows actually carry.
+	// Alert evaluation reads the first column. Keep the sample before labels,
+	// including __name__, which contains the aggregation name rather than a number.
 	labelNames := make([]string, 0, len(labelSet))
 	for name := range labelSet {
 		labelNames = append(labelNames, name)
@@ -732,10 +734,10 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 	slices.Sort(labelNames)
 
 	columns := make([]models.ColumnInfo, 0, len(labelNames)+1)
+	columns = append(columns, models.ColumnInfo{Name: "value", Type: "Float64"})
 	for _, name := range labelNames {
 		columns = append(columns, models.ColumnInfo{Name: name, Type: "String"})
 	}
-	columns = append(columns, models.ColumnInfo{Name: "value", Type: "Float64"})
 
 	return &models.QueryResult{
 		Logs:    rows,

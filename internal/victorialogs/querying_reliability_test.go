@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -425,6 +426,43 @@ func TestEvaluateAlertColumnsIncludeLabels(t *testing.T) {
 	}
 	if names["value"] != "Float64" {
 		t.Fatalf("expected value column Float64, got %q", names["value"])
+	}
+}
+
+func TestEvaluateAlertExtractsSampleBeforeLabels(t *testing.T) {
+	t.Parallel()
+	for _, labels := range []string{
+		`{"__name__":"value"}`,
+		`{"__name__":"value","service":"api","level":"error"}`,
+		`{"__name__":"count()","code":"500"}`,
+		`{"code":"500"}`,
+		`{"__name__":"count()","value":"label"}`,
+	} {
+		t.Run(labels, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = w.Write([]byte(`{"status":"success","data":{"resultType":"vector","result":[{"metric":` + labels + `,"value":[1712570460,"12"]}]}}`))
+			}))
+			defer server.Close()
+			provider := newTestProvider(server)
+			source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+			result, err := provider.EvaluateAlert(context.Background(), source, datasource.AlertQueryRequest{
+				Query: `level:="error" | stats count() as value`,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			value, err := util.ExtractFirstNumeric(result)
+			if err != nil || value != 12 {
+				t.Fatalf("alert evaluator got (%v, %v), want (12, nil)", value, err)
+			}
+			seen := make(map[string]bool)
+			for _, column := range result.Columns {
+				if seen[column.Name] {
+					t.Fatalf("duplicate column %q", column.Name)
+				}
+				seen[column.Name] = true
+			}
+		})
 	}
 }
 
