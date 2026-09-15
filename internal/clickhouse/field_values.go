@@ -108,17 +108,15 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 	quotedTS := quoteIdentifier(params.TimestampField)
 	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
 
-	// For string-like fields, exclude empty strings. For numeric fields, no such filter.
-	emptyFilter := fmt.Sprintf("%s != ''", quotedField)
-	if isNumericColumnType(params.FieldType) {
-		emptyFilter = "1"
-	}
+	// Enum columns can contain an empty enum value, but comparing an Enum to
+	// the string literal '' raises UNKNOWN_ELEMENT_OF_ENUM in ClickHouse. Only
+	// String columns need the empty-value filter.
+	emptyFilter := emptyValueFilter(params.FieldType, quotedField)
 
 	query := fmt.Sprintf(`
 		SELECT toString(%s) AS value, count() AS cnt
 		FROM %s
-		PREWHERE %s BETWEEN toDateTime64('%s', 9, 'UTC') AND toDateTime64('%s', 9, 'UTC')
-		WHERE %s%s
+		WHERE %s BETWEEN toDateTime64('%s', 9, 'UTC') AND toDateTime64('%s', 9, 'UTC') AND %s%s
 		GROUP BY value ORDER BY cnt DESC LIMIT %d
 	`, quotedField, qualifiedTable,
 		quotedTS, startTimeStr, endTimeStr,
@@ -129,7 +127,7 @@ func (c *Client) GetFieldDistinctValues(ctx context.Context, database, table str
 		return nil, fmt.Errorf("failed to query distinct values for %s: %w", params.FieldName, err)
 	}
 
-	values := extractFieldValues(result)
+	values := extractFieldValues(result, isStringColumnType(params.FieldType))
 
 	totalDistinct, err := c.queryTotalDistinct(ctx, database, table, params, startTimeStr, endTimeStr, additionalConditions, timeoutSeconds)
 	if err != nil {
@@ -175,11 +173,11 @@ func normalizeFieldValuesParams(params FieldValuesParams) (limit int, timeout *i
 	return
 }
 
-func extractFieldValues(result *models.QueryResult) []FieldValueInfo {
+func extractFieldValues(result *models.QueryResult, excludeEmpty bool) []FieldValueInfo {
 	values := make([]FieldValueInfo, 0, len(result.Logs))
 	for _, row := range result.Logs {
 		val, ok := extractStringFromRow(row, "value")
-		if !ok || val == "" {
+		if !ok || (excludeEmpty && val == "") {
 			continue
 		}
 
@@ -246,16 +244,12 @@ func (c *Client) queryTotalDistinct(ctx context.Context, database, table string,
 	quotedField := quoteIdentifier(params.FieldName)
 	quotedTS := quoteIdentifier(params.TimestampField)
 	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
-	emptyFilter := fmt.Sprintf("%s != ''", quotedField)
-	if isNumericColumnType(params.FieldType) {
-		emptyFilter = "1"
-	}
+	emptyFilter := emptyValueFilter(params.FieldType, quotedField)
 
 	query := fmt.Sprintf(`
 		SELECT uniq(%s) AS total
 		FROM %s
-		PREWHERE %s BETWEEN toDateTime64('%s', 9, 'UTC') AND toDateTime64('%s', 9, 'UTC')
-		WHERE %s%s
+		WHERE %s BETWEEN toDateTime64('%s', 9, 'UTC') AND toDateTime64('%s', 9, 'UTC') AND %s%s
 	`, quotedField, qualifiedTable,
 		quotedTS, startTimeStr, endTimeStr,
 		emptyFilter, additionalConditions)
@@ -291,31 +285,47 @@ type AllFieldValuesParams struct {
 	LogchefQL      string    // Optional: LogchefQL query string - parsed on backend for proper SQL generation
 }
 
-// isNumericColumnType returns true for integer, float, and decimal types.
-// Handles any nesting order of LowCardinality/Nullable wrappers.
-func isNumericColumnType(colType string) bool {
-	clean := strings.ToLower(colType)
-	// Strip all wrapper layers regardless of order
+// unwrapColumnType returns the scalar type after removing ClickHouse's
+// LowCardinality and Nullable wrappers, in either nesting order.
+func unwrapColumnType(colType string) string {
+	clean := strings.ToLower(strings.TrimSpace(colType))
 	for {
-		prev := clean
-		clean = strings.TrimPrefix(clean, "lowcardinality(")
-		clean = strings.TrimPrefix(clean, "nullable(")
-		clean = strings.TrimSuffix(clean, ")")
-		if clean == prev {
-			break
+		switch {
+		case strings.HasPrefix(clean, "lowcardinality("):
+			clean = strings.TrimSuffix(strings.TrimPrefix(clean, "lowcardinality("), ")")
+		case strings.HasPrefix(clean, "nullable("):
+			clean = strings.TrimSuffix(strings.TrimPrefix(clean, "nullable("), ")")
+		default:
+			return clean
 		}
 	}
+}
 
+// isNumericColumnType returns true for integer, float, and decimal types.
+func isNumericColumnType(colType string) bool {
+	clean := unwrapColumnType(colType)
 	return strings.HasPrefix(clean, "uint") ||
 		strings.HasPrefix(clean, "int") ||
 		strings.HasPrefix(clean, "float") ||
 		strings.HasPrefix(clean, "decimal")
 }
 
+func isStringColumnType(colType string) bool {
+	return unwrapColumnType(colType) == "string"
+}
+
+func emptyValueFilter(colType, quotedField string) string {
+	if isStringColumnType(colType) {
+		return fmt.Sprintf("%s != ''", quotedField)
+	}
+	return "1"
+}
+
 // isFilterableColumnType returns true if the column type is suitable for distinct value queries.
 // LowCardinality fields are always fast. String and numeric fields are included with timeout protection.
 func isFilterableColumnType(colType string) bool {
-	lowerType := strings.ToLower(colType)
+	lowerType := strings.ToLower(strings.TrimSpace(colType))
+	baseType := unwrapColumnType(lowerType)
 	if strings.HasPrefix(lowerType, "map(") ||
 		strings.HasPrefix(lowerType, "array(") ||
 		strings.HasPrefix(lowerType, "tuple(") ||
@@ -323,21 +333,24 @@ func isFilterableColumnType(colType string) bool {
 		strings.HasPrefix(lowerType, "json(") {
 		return false
 	}
-
-	// DateTime types are not useful for distinct value filtering
-	if strings.HasPrefix(lowerType, "datetime") || lowerType == "date" || lowerType == "date32" {
+	if strings.HasPrefix(baseType, "map(") ||
+		strings.HasPrefix(baseType, "array(") ||
+		strings.HasPrefix(baseType, "tuple(") ||
+		baseType == "json" ||
+		strings.HasPrefix(baseType, "json(") {
 		return false
 	}
 
-	if strings.Contains(colType, "LowCardinality") {
+	// DateTime types are not useful for distinct value filtering
+	if strings.HasPrefix(baseType, "datetime") || baseType == "date" || baseType == "date32" {
+		return false
+	}
+
+	if baseType == "string" {
 		return true
 	}
 
-	if colType == "String" || colType == "Nullable(String)" {
-		return true
-	}
-
-	if strings.HasPrefix(colType, "Enum") {
+	if strings.HasPrefix(baseType, "enum") {
 		return true
 	}
 

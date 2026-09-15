@@ -48,6 +48,7 @@ export function useSavedQueries(
   const isLoadingQueryDetails = ref(false)
   const openingQueryId = ref<number | null>(null)
   const searchQuery = ref('')
+  const saveAsNewQuery = ref(false)
 
   const isEditingExistingQuery = computed(() => !!route.query.id);
 
@@ -79,12 +80,14 @@ export function useSavedQueries(
     searchQuery.value = ''
   }
 
-  async function handleSaveQueryClick() {
+  async function handleSaveQueryClick(options: { asNew?: boolean } = {}) {
+    saveAsNewQuery.value = options.asNew === true
     const query = exploreStore.activeMode === 'logchefql'
         ? exploreStore.logchefqlCode
         : exploreStore.nativeQuery
 
     if (!query?.trim()) {
+      saveAsNewQuery.value = false
       toast({
         title: 'Cannot Add to Collection',
         variant: 'destructive',
@@ -95,7 +98,7 @@ export function useSavedQueries(
     }
 
     const queryId = route.query.id
-    if (queryId) {
+    if (queryId && !saveAsNewQuery.value) {
       try {
         isLoadingQueryDetails.value = true
         const result = await savedQueriesApi.get(queryId as string);
@@ -122,12 +125,22 @@ export function useSavedQueries(
     }
   }
 
+  function handleSaveAsNewQueryClick() {
+    return handleSaveQueryClick({ asNew: true })
+  }
+
+  function closeSaveQueryModal() {
+    showSaveQueryModal.value = false
+    editingQuery.value = null
+    saveAsNewQuery.value = false
+  }
+
   async function handleSaveQuery(formData: SaveQueryFormData) {
     try {
       let response;
 
       const queryIdFromUrl = route.query.id as string | undefined;
-      const isUpdate = !!editingQuery.value || !!queryIdFromUrl;
+      const isUpdate = !saveAsNewQuery.value && (!!editingQuery.value || !!queryIdFromUrl);
       const queryId = editingQuery.value?.id.toString() || queryIdFromUrl;
 
       if (!formData.source_id) {
@@ -187,6 +200,7 @@ export function useSavedQueries(
       if (response && response.success) {
         showSaveQueryModal.value = false;
         editingQuery.value = null;
+        saveAsNewQuery.value = false;
 
         const savedQueryName = formData.name;
         if (savedQueryName) {
@@ -579,6 +593,8 @@ export function useSavedQueries(
     isAnyTeamCollectionMutator,
 
     handleSaveQueryClick,
+    handleSaveAsNewQueryClick,
+    closeSaveQueryModal,
     handleSaveQuery,
     loadSavedQuery,
     updateSavedQuery,

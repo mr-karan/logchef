@@ -64,7 +64,8 @@ type DashboardCacheConfig struct {
 	MaxEntryBytes int `koanf:"max_entry_bytes"`
 	// MaxEntries caps the number of cached entries.
 	MaxEntries int `koanf:"max_entries"`
-	// MaxConcurrentFills bounds concurrent distinct datasource fills, capping
+	// MaxConcurrentFills bounds concurrent distinct datasource fills globally
+	// and is also the per-user admission cap for fills, capping
 	// worst-case in-flight buffering at MaxConcurrentFills × MaxEntryBytes so a
 	// burst of unique cache-directive queries cannot exhaust memory.
 	MaxConcurrentFills int `koanf:"max_concurrent_fills"`
@@ -101,9 +102,10 @@ type QueryConfig struct {
 	DefaultTimeoutSeconds int `koanf:"default_timeout_seconds"`
 	// MaxTimeoutSeconds caps preview query timeout requests.
 	MaxTimeoutSeconds int `koanf:"max_timeout_seconds"`
-	// MaxConcurrentPerUser limits active preview queries per user.
+	// MaxConcurrentPerUser limits active queries per user, counted separately
+	// for each interactive class (preview, histogram).
 	MaxConcurrentPerUser int `koanf:"max_concurrent_per_user"`
-	// MaxConcurrentGlobal limits active preview queries globally.
+	// MaxConcurrentGlobal limits active queries globally, per class.
 	MaxConcurrentGlobal int `koanf:"max_concurrent_global"`
 }
 

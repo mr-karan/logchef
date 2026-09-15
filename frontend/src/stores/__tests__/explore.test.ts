@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
+import { CalendarDateTime, ZonedDateTime } from "@internationalized/date";
 import type { Source } from "@/api/sources";
 
 // ---------------------------------------------------------------------------
@@ -356,6 +357,86 @@ describe("explore store", () => {
           signal: expect.any(AbortSignal),
           timeout: expect.any(Number),
         }),
+      );
+    });
+
+    it("sends CalendarDateTime wall clocks paired with the selected timezone", async () => {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(VL_SOURCE.id);
+
+      const store = useExploreStore();
+      store.setTimezoneIdentifier("Asia/Kolkata");
+      store.setTimeConfiguration({
+        absoluteRange: {
+          start: new CalendarDateTime(2026, 8, 8, 10, 0, 0),
+          end: new CalendarDateTime(2026, 8, 8, 10, 15, 0),
+        },
+      });
+      store.setLogchefqlCode('lvl="WARN"');
+      mocks.logchefqlQuery.mockResolvedValue({
+        data: {
+          logs: [],
+          columns: [],
+          stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 },
+        },
+      });
+
+      await store.executeQuery();
+
+      expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
+        1,
+        VL_SOURCE.id,
+        expect.objectContaining({
+          start_time: "2026-08-08 10:00:00",
+          end_time: "2026-08-08 10:15:00",
+          timezone: "Asia/Kolkata",
+        }),
+        expect.anything(),
+      );
+    });
+
+    it("converts a ZonedDateTime instant to UTC wall clocks", async () => {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(VL_SOURCE.id);
+
+      const store = useExploreStore();
+      store.setTimezoneIdentifier("UTC");
+      store.setTimeConfiguration({
+        absoluteRange: {
+          start: new ZonedDateTime(2026, 8, 8, "Asia/Kolkata", 19_800_000, 10, 0, 0),
+          end: new ZonedDateTime(2026, 8, 8, "Asia/Kolkata", 19_800_000, 10, 15, 0),
+        },
+      });
+      store.setLogchefqlCode('lvl="WARN"');
+      mocks.logchefqlQuery.mockResolvedValue({
+        data: {
+          logs: [],
+          columns: [],
+          stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 },
+        },
+      });
+
+      await store.executeQuery();
+
+      expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
+        1,
+        VL_SOURCE.id,
+        expect.objectContaining({
+          start_time: "2026-08-08 04:30:00",
+          end_time: "2026-08-08 04:45:00",
+          timezone: "UTC",
+        }),
+        expect.anything(),
       );
     });
   });

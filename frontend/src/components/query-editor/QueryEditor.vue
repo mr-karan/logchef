@@ -101,7 +101,8 @@
         <!-- Saved Queries Dropdown -->
         <SavedQueriesDropdown :selected-source-id="props.sourceId" :selected-team-id="props.teamId"
           @select-saved-query="(query: SavedQuery) => $emit('select-saved-query', query)"
-          @save="$emit('save-query')" class="h-8" />
+          @save="$emit('save-query')"
+          @save-as-new="$emit('save-query-as-new')" class="h-8" />
 
         <!-- Live Tail Toggle - gated by the live_tail capability -->
         <TooltipProvider v-if="props.showRunButton && liveTailSupported">
@@ -481,6 +482,7 @@ import { useMetaStore } from "@/stores/meta";
 import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
 import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
+import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
 import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
 import type { AcceptableValue } from "reka-ui";
@@ -545,8 +547,7 @@ const emit = defineEmits<{
   // SavedQueries events
   (e: "select-saved-query", query: SavedQuery): void;
   (e: "save-query"): void;
-  // Additional emits to prevent Vue warnings
-  (e: "saveQueryAsNew"): void;
+  (e: "save-query-as-new"): void;
   (e: "generateAiSql", payload: any): void;
   // Run button
   (e: "execute"): void;
@@ -794,7 +795,7 @@ const submitQuery = async () => {
 
   let queryForValidation = currentContent;
   if (props.activeMode === "logchefql") {
-    queryForValidation = currentContent.replace(/{{(\w+)}}/g, '"placeholder"');
+    queryForValidation = prepareLogchefQLTemplate(currentContent);
   } else {
     queryForValidation = convertVariables(currentContent);
   }

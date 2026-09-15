@@ -28,25 +28,34 @@ func Translate(query string, schema *Schema) *TranslateResult {
 		return result
 	}
 
-	ast := ConvertToAST(pq)
+	return translateAST(ConvertToAST(pq), schema)
+}
 
-	generator := NewSQLGenerator(schema)
-	sql := generator.Generate(ast)
-
-	var selectClause string
-	if queryNode, ok := ast.(*QueryNode); ok && len(queryNode.Select) > 0 {
-		selectClause = generator.GenerateSelectClause(queryNode.Select, "")
+func translateAST(ast ASTNode, schema *Schema) *TranslateResult {
+	result := &TranslateResult{
+		Valid:      false,
+		Conditions: []FilterCondition{},
+		FieldsUsed: []string{},
 	}
-
-	fieldsUsed := extractFieldsFromAST(ast)
-	conditions := extractConditionsFromAST(ast)
-
+	generator := NewSQLGenerator(schema)
+	sql, genErr := generator.Generate(ast)
+	if genErr != nil {
+		result.Error = genErr
+		return result
+	}
+	selectClause := ""
+	if queryNode, ok := ast.(*QueryNode); ok && len(queryNode.Select) > 0 {
+		selectClause, genErr = generator.GenerateSelectClause(queryNode.Select, "")
+		if genErr != nil {
+			result.Error = genErr
+			return result
+		}
+	}
 	result.Valid = true
 	result.SQL = sql
 	result.SelectClause = selectClause
-	result.FieldsUsed = fieldsUsed
-	result.Conditions = conditions
-
+	result.FieldsUsed = extractFieldsFromAST(ast)
+	result.Conditions = extractConditionsFromAST(ast)
 	return result
 }
 
@@ -223,6 +232,8 @@ func formatConditionValue(v any) string {
 	switch val := v.(type) {
 	case string:
 		return val
+	case NumericLiteral:
+		return string(val)
 	case bool:
 		if val {
 			return "true"
@@ -303,23 +314,15 @@ func validateTableName(name string) *ParseError {
 // BuildFullQuery builds a complete SQL query from LogchefQL with time range and other parameters.
 // This is used when executing the query against ClickHouse.
 func BuildFullQuery(params QueryBuildParams) (string, error) {
-	if err := validateTimeFormat(params.StartTime); err != nil {
-		return "", err
-	}
-	if err := validateTimeFormat(params.EndTime); err != nil {
-		return "", err
-	}
-	if err := validateTimezone(params.Timezone); err != nil {
-		return "", err
-	}
-	if err := validateTableName(params.TableName); err != nil {
-		return "", err
-	}
-	if err := validateIdentifier(params.TimestampField, "timestamp field"); err != nil {
+	if err := validateQueryBuildParams(params); err != nil {
 		return "", err
 	}
 
-	translateResult := Translate(params.LogchefQL, params.Schema)
+	pq, parseErr := ParseLogchefQL(params.LogchefQL)
+	if parseErr != nil {
+		return "", convertParticipleError(parseErr)
+	}
+	translateResult := translateAST(ConvertToAST(pq), params.Schema)
 	if !translateResult.Valid {
 		if translateResult.Error != nil {
 			return "", translateResult.Error
@@ -327,6 +330,48 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
 	}
 
+	return buildFullQueryFromTranslation(params, translateResult)
+}
+
+// BuildFullQueryFromTranslation builds a complete SQL query from an already
+// translated query. Callers that need both preview metadata and executable SQL
+// can translate once and pass that result here.
+func BuildFullQueryFromTranslation(params QueryBuildParams, translateResult *TranslateResult) (string, error) {
+	if err := validateQueryBuildParams(params); err != nil {
+		return "", err
+	}
+	if translateResult == nil {
+		return "", &ParseError{Code: ErrUnexpectedToken, Message: "translation result is required"}
+	}
+	if !translateResult.Valid {
+		if translateResult.Error != nil {
+			return "", translateResult.Error
+		}
+		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
+	}
+	return buildFullQueryFromTranslation(params, translateResult)
+}
+
+func validateQueryBuildParams(params QueryBuildParams) error {
+	if err := validateTimeFormat(params.StartTime); err != nil {
+		return err
+	}
+	if err := validateTimeFormat(params.EndTime); err != nil {
+		return err
+	}
+	if err := validateTimezone(params.Timezone); err != nil {
+		return err
+	}
+	if err := validateTableName(params.TableName); err != nil {
+		return err
+	}
+	if err := validateIdentifier(params.TimestampField, "timestamp field"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func buildFullQueryFromTranslation(params QueryBuildParams, translateResult *TranslateResult) (string, error) {
 	var query strings.Builder
 
 	query.WriteString("SELECT ")

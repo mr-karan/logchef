@@ -50,7 +50,26 @@ const (
 	QueryClassPreview QueryClass = "preview"
 	QueryClassExport  QueryClass = "export"
 	QueryClassTail    QueryClass = "tail"
+	// Histograms and dashboard fills are admitted apart from preview. An
+	// explorer view issues a log query and a histogram together, and a
+	// dashboard refresh issues one fill per panel; charging either to the
+	// preview budget makes ordinary exploration reject itself.
+	QueryClassHistogram QueryClass = "histogram"
+	QueryClassDashboard QueryClass = "dashboard"
 )
+
+// admissionLimits returns the per-user and global caps for class. Dashboard
+// fills use the cache's own fill budget: the fill is shared work on behalf of
+// every waiter on that panel, and a multi-panel refresh would reject its own
+// panels under the interactive preview cap.
+func (s *Server) admissionLimits(class QueryClass) (maxPerUser, maxGlobal int) {
+	if class == QueryClassDashboard {
+		// The cache's fill semaphore already bounds concurrent fills globally,
+		// so admission only has to keep one user from taking the whole budget.
+		return s.config.DashboardCache.MaxConcurrentFills, 0
+	}
+	return s.config.Query.MaxConcurrentPerUser, s.config.Query.MaxConcurrentGlobal
+}
 
 type QueryAdmissionError struct {
 	Message string
@@ -270,6 +289,32 @@ func (qt *QueryTracker) Cleanup() {
 	}
 }
 
+func (s *Server) handleLogsQueryError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
+	var admissionErr *QueryAdmissionError
+	if errors.As(err, &admissionErr) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+	}
+	// A cached fill surfaces the caller's own cancellation, which the explorer
+	// and dashboard both trigger on every re-query. That is not a failure.
+	if errors.Is(err, context.Canceled) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, core.ErrSourceNotFound) {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	}
+	if errors.Is(err, datasource.ErrOperationNotSupported) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
+	}
+	if datasource.IsValidationError(err) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
+	}
+	s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
+	return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
+}
+
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
 func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
@@ -410,8 +455,11 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
 		if cacheable {
 			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
-			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(sourceID, params, cfg)); handled {
+			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, params, cfg)); handled {
 				return err
+			} else if err != nil {
+				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "sql")
+				return writeDashboardStreamError(c, err)
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
@@ -423,22 +471,24 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	// panels from the cache when eligible.
 	if cacheable {
 		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
-		fill := func(ctx context.Context) ([]byte, error) {
+		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
 			result, err := core.QueryLogs(ctx, s.datasources, sourceID, params)
 			if err != nil {
 				return nil, err
 			}
 			resp := map[string]any{
-				"query_id": uuid.New().String(),
+				"query_id": queryID,
 				"data":     result.Logs,
 				"stats":    result.Stats,
 				"columns":  normalizeResultColumns(nil, result),
 				"warnings": result.Warnings,
 			}
 			return json.Marshal(NewSuccessResponse(resp))
-		}
+		})
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
+		} else if err != nil {
+			return s.handleLogsQueryError(c, sourceID, err)
 		}
 	}
 
@@ -470,17 +520,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	// Execute query via core function with cancellable context.
 	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, params)
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
-		}
-		if datasource.IsValidationError(err) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
-		}
-		s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
+		return s.handleLogsQueryError(c, sourceID, err)
 	}
 
 	// Log successful query execution

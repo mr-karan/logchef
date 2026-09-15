@@ -60,6 +60,18 @@ func (f *fakeClickHouseCompiler) PopulateSourceDetails(ctx context.Context, sour
 	return nil
 }
 
+func (f *fakeClickHouseCompiler) InspectSource(context.Context, *models.Source) (*datasource.SourceInspection, error) {
+	return &datasource.SourceInspection{Schema: &datasource.SourceSchemaInspection{
+		Fields: []datasource.SourceSchemaField{{Name: "level", Type: "String"}},
+	}}, nil
+}
+
+// The inspection above supplies the schema required by the ClickHouse compile
+// path. This fake has no separate schema endpoint because inspection is cached.
+func (f *fakeClickHouseCompiler) GetSourceSchema(context.Context, *models.Source) ([]models.ColumnInfo, error) {
+	return nil, fmt.Errorf("schema unavailable")
+}
+
 func (f *fakeClickHouseCompiler) CompileLogchefQL(ctx context.Context, source *models.Source, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
 	compiled := &datasource.CompiledLogchefQL{
 		Language:   models.QueryLanguageClickHouseSQL,

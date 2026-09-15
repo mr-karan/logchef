@@ -143,39 +143,29 @@ func (c *Client) getExtendedColumns(ctx context.Context, database, table string)
 		WHERE database = ? AND table = ?
 		ORDER BY position
 	`
-	var rows driver.Rows
-	var err error
-
-	// Use hook wrapper for consistency, though less critical for metadata queries.
-	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		timeout := DefaultQueryTimeout
-		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
-		rows, err = c.queryRows(hookCtx, query, database, table)
-		return err
-	})
-
+	var columns []ExtendedColumnInfo
+	err := c.queryMetadata(ctx, query, func(rows driver.Rows) error {
+		for rows.Next() {
+			var col ExtendedColumnInfo
+			err := rows.Scan(
+				&col.Name, &col.Type,
+				&col.IsPrimaryKey,
+				&col.DefaultExpression,
+				&col.Comment,
+			)
+			if err != nil {
+				return fmt.Errorf("failed to scan extended column: %w", err)
+			}
+			// Determine nullability from the type string since is_nullable column may not be available
+			col.IsNullable = strings.HasPrefix(strings.TrimPrefix(col.Type, "LowCardinality("), "Nullable(")
+			columns = append(columns, col)
+		}
+		return rows.Err()
+	}, database, table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query extended columns: %w", err)
 	}
-	defer rows.Close()
-
-	var columns []ExtendedColumnInfo
-	for rows.Next() {
-		var col ExtendedColumnInfo
-		err := rows.Scan(
-			&col.Name, &col.Type,
-			&col.IsPrimaryKey,
-			&col.DefaultExpression,
-			&col.Comment,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan extended column: %w", err)
-		}
-		// Determine nullability from the type string since is_nullable column may not be available
-		col.IsNullable = strings.HasPrefix(strings.TrimPrefix(col.Type, "LowCardinality("), "Nullable(")
-		columns = append(columns, col)
-	}
-	return columns, rows.Err() // Return any error encountered during iteration.
+	return columns, nil
 }
 
 // getTableEngine retrieves the table engine, full engine string, and CREATE statement.
@@ -185,30 +175,22 @@ func (c *Client) getTableEngine(ctx context.Context, database, table string) (en
 		FROM system.tables
 		WHERE database = ? AND name = ?
 	`
-	var rows driver.Rows
-
-	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		timeout := DefaultQueryTimeout
-		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
-		rows, err = c.queryRows(hookCtx, query, database, table)
-		return err
-	})
-
+	var engineFull string
+	err = c.queryMetadata(ctx, query, func(rows driver.Rows) error {
+		if rows.Next() {
+			if scanErr := rows.Scan(&engine, &engineFull, &createQuery); scanErr != nil {
+				return fmt.Errorf("failed to scan table engine: %w", scanErr)
+			}
+		} else {
+			if rowsErr := rows.Err(); rowsErr != nil {
+				return rowsErr
+			}
+			return fmt.Errorf("table %s.%s not found in system.tables", database, table)
+		}
+		return rows.Err()
+	}, database, table)
 	if err != nil {
 		return "", nil, "", fmt.Errorf("failed to query table engine: %w", err)
-	}
-	defer rows.Close()
-
-	var engineFull string
-	if rows.Next() {
-		if scanErr := rows.Scan(&engine, &engineFull, &createQuery); scanErr != nil {
-			return "", nil, "", fmt.Errorf("failed to scan table engine: %w", scanErr)
-		}
-	} else {
-		return "", nil, "", fmt.Errorf("table %s.%s not found in system.tables", database, table)
-	}
-	if rowsErr := rows.Err(); rowsErr != nil {
-		return "", nil, "", fmt.Errorf("error iterating table engine results: %w", rowsErr)
 	}
 
 	if strings.HasPrefix(engine, "Distributed") {
@@ -225,30 +207,21 @@ func (c *Client) getColumns(ctx context.Context, database, table string) ([]mode
 		WHERE database = ? AND table = ?
 		ORDER BY position
 	`
-	var rows driver.Rows
-	var err error
-
-	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		timeout := DefaultQueryTimeout
-		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
-		rows, err = c.queryRows(hookCtx, query, database, table)
-		return err
-	})
-
+	var columns []models.ColumnInfo
+	err := c.queryMetadata(ctx, query, func(rows driver.Rows) error {
+		for rows.Next() {
+			var col models.ColumnInfo
+			if err := rows.Scan(&col.Name, &col.Type); err != nil {
+				return fmt.Errorf("failed to scan column: %w", err)
+			}
+			columns = append(columns, col)
+		}
+		return rows.Err()
+	}, database, table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query columns: %w", err)
 	}
-	defer rows.Close()
-
-	var columns []models.ColumnInfo
-	for rows.Next() {
-		var col models.ColumnInfo
-		if err := rows.Scan(&col.Name, &col.Type); err != nil {
-			return nil, fmt.Errorf("failed to scan column: %w", err)
-		}
-		columns = append(columns, col)
-	}
-	return columns, rows.Err()
+	return columns, nil
 }
 
 // getSortKeys retrieves the sorting key expression for MergeTree family tables.
@@ -259,33 +232,44 @@ func (c *Client) getSortKeys(ctx context.Context, database, table string) ([]str
 		FROM system.tables
 		WHERE database = ? AND name = ?
 	`
-	var rows driver.Rows
-	var err error
-
-	err = c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
-		timeout := DefaultQueryTimeout
-		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
-		rows, err = c.queryRows(hookCtx, query, database, table)
-		return err
-	})
-
+	var sortKeys string
+	err := c.queryMetadata(ctx, query, func(rows driver.Rows) error {
+		if rows.Next() {
+			if err := rows.Scan(&sortKeys); err != nil {
+				return fmt.Errorf("failed to scan sort keys: %w", err)
+			}
+		}
+		return rows.Err()
+	}, database, table)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query sort keys: %w", err)
-	}
-	defer rows.Close()
-
-	var sortKeys string
-	if rows.Next() {
-		if err := rows.Scan(&sortKeys); err != nil {
-			return nil, fmt.Errorf("failed to scan sort keys: %w", err)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating sort key results: %w", err)
 	}
 
 	// Parse the potentially complex sorting_key string into individual column names.
 	return parseSortKeys(sortKeys), nil
+}
+
+// queryMetadata keeps consumption and closing inside the query metrics lifecycle.
+func (c *Client) queryMetadata(ctx context.Context, query string, consume func(driver.Rows) error, args ...any) error {
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(DefaultQueryTimeout)*time.Second+queryTimeoutGrace)
+	defer cancel()
+	return c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) (err error) {
+		timeout := DefaultQueryTimeout
+		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
+		rows, err := c.queryRows(hookCtx, query, args...)
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if err != nil {
+				cancel()
+			}
+			if closeErr := rows.Close(); err == nil {
+				err = closeErr
+			}
+		}()
+		return consume(rows)
+	})
 }
 
 // handleDistributedTable fetches metadata from the underlying local table

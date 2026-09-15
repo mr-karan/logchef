@@ -7,7 +7,6 @@ import (
 
 // SQLGenerator converts an AST into ClickHouse SQL
 type SQLGenerator struct {
-	schema *Schema
 	// colTypes and defaultMapCol are derived from schema once at construction so
 	// column lookups during generation are O(1) instead of a linear scan per
 	// expression/select field.
@@ -17,7 +16,7 @@ type SQLGenerator struct {
 
 // NewSQLGenerator creates a new SQL generator with optional schema
 func NewSQLGenerator(schema *Schema) *SQLGenerator {
-	g := &SQLGenerator{schema: schema}
+	g := &SQLGenerator{}
 	if schema != nil {
 		g.colTypes = make(map[string]string, len(schema.Columns))
 		for _, col := range schema.Columns {
@@ -33,18 +32,18 @@ func NewSQLGenerator(schema *Schema) *SQLGenerator {
 	return g
 }
 
-// Generate converts an AST node to SQL WHERE clause conditions
-func (g *SQLGenerator) Generate(node ASTNode) string {
+// Generate converts an AST node to SQL WHERE clause conditions.
+func (g *SQLGenerator) Generate(node ASTNode) (string, *ParseError) {
 	if node == nil {
-		return ""
+		return "", nil
 	}
 	return g.visit(node)
 }
 
 // GenerateSelectClause generates the SELECT clause from select fields
-func (g *SQLGenerator) GenerateSelectClause(selectFields []SelectField, defaultTimestampField string) string {
+func (g *SQLGenerator) GenerateSelectClause(selectFields []SelectField, defaultTimestampField string) (string, *ParseError) {
 	if len(selectFields) == 0 {
-		return "*"
+		return "*", nil
 	}
 
 	var columns []string
@@ -56,102 +55,98 @@ func (g *SQLGenerator) GenerateSelectClause(selectFields []SelectField, defaultT
 
 	// Generate column expressions for each select field
 	for _, sf := range selectFields {
-		expr := g.generateSelectFieldExpression(sf)
+		expr, err := g.generateSelectFieldExpression(sf)
+		if err != nil {
+			return "", err
+		}
 		if expr != "" {
 			columns = append(columns, expr)
 		}
 	}
 
 	if len(columns) == 0 {
-		return "*"
+		return "*", nil
 	}
 
-	return strings.Join(columns, ", ")
+	return strings.Join(columns, ", "), nil
 }
 
-func (g *SQLGenerator) visit(node ASTNode) string {
+func (g *SQLGenerator) visit(node ASTNode) (string, *ParseError) {
 	switch n := node.(type) {
 	case *ExpressionNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitExpression(n)
 	case *LogicalNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitLogical(n)
 	case *GroupNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitGroup(n)
 	case *QueryNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitQuery(n)
 	default:
-		return ""
+		return "", unsupportedASTNode(node)
 	}
 }
 
-func (g *SQLGenerator) visitQuery(node *QueryNode) string {
+func (g *SQLGenerator) visitQuery(node *QueryNode) (string, *ParseError) {
 	if node.Where != nil {
 		return g.visit(node.Where)
 	}
-	return ""
+	return "", nil
 }
 
-func (g *SQLGenerator) visitExpression(node *ExpressionNode) string {
-	// Check if we have a nested field
-	if nf, ok := node.Key.(NestedField); ok {
-		columnType := g.getColumnType(nf.Base)
-		return g.generateNestedFieldAccess(nf.Base, nf.Path, columnType, node.Operator, node.Value)
+func (g *SQLGenerator) visitExpression(node *ExpressionNode) (string, *ParseError) {
+	field := g.resolveField(node.Key)
+	if field.resolutionError != nil {
+		return "", field.resolutionError
 	}
-
-	// Handle simple field access
-	key, ok := node.Key.(string)
-	if !ok {
-		return ""
+	if field.sql == "" {
+		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
 	}
-
-	column := g.escapeIdentifier(key)
-	value := g.formatValue(node.Value, node.Operator)
-
-	switch node.Operator {
-	case OpRegex:
-		return fmt.Sprintf("positionCaseInsensitive(%s, %s) > 0", column, value)
-	case OpNotRegex:
-		return fmt.Sprintf("positionCaseInsensitive(%s, %s) = 0", column, value)
-	case OpEquals:
-		return fmt.Sprintf("%s = %s", column, value)
-	case OpNotEquals:
-		return fmt.Sprintf("%s != %s", column, value)
-	case OpGT:
-		return fmt.Sprintf("%s > %s", column, value)
-	case OpLT:
-		return fmt.Sprintf("%s < %s", column, value)
-	case OpGTE:
-		return fmt.Sprintf("%s >= %s", column, value)
-	case OpLTE:
-		return fmt.Sprintf("%s <= %s", column, value)
-	default:
-		return ""
+	if _, numeric := node.Value.(NumericLiteral); numeric && g.isStringType(field.columnType) {
+		return "", &ParseError{
+			Code:    ErrUnsupportedFeature,
+			Message: "numeric comparisons require a numeric field; quote the value to compare text",
+		}
 	}
+	return g.generateComparisonExpression(field, node.Operator, g.formatValue(node.Value))
 }
 
-func (g *SQLGenerator) visitLogical(node *LogicalNode) string {
+func (g *SQLGenerator) visitLogical(node *LogicalNode) (string, *ParseError) {
+	if node.Operator != BoolAnd && node.Operator != BoolOr {
+		return "", &ParseError{Code: ErrUnsupportedFeature, Message: fmt.Sprintf("unsupported boolean operator %q", node.Operator)}
+	}
 	if len(node.Children) == 0 {
-		return ""
+		return "", &ParseError{Code: ErrUnsupportedFeature, Message: "logical expression has no children"}
 	}
 
 	if len(node.Children) == 1 {
+		if node.Children[0] == nil {
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "logical expression contains a nil child"}
+		}
 		return g.visit(node.Children[0])
 	}
 
 	var conditions []string
 	for _, child := range node.Children {
-		sql := g.visit(child)
-		if sql != "" {
-			conditions = append(conditions, sql)
+		sql, err := g.visit(child)
+		if err != nil {
+			return "", err
 		}
-	}
-
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	if len(conditions) == 1 {
-		return conditions[0]
+		if sql == "" {
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "logical expression contains an empty child"}
+		}
+		conditions = append(conditions, sql)
 	}
 
 	// Wrap each condition in parentheses and join with operator
@@ -160,36 +155,35 @@ func (g *SQLGenerator) visitLogical(node *LogicalNode) string {
 		wrapped = append(wrapped, fmt.Sprintf("(%s)", c))
 	}
 
-	return strings.Join(wrapped, fmt.Sprintf(" %s ", node.Operator))
+	return strings.Join(wrapped, fmt.Sprintf(" %s ", node.Operator)), nil
 }
 
-func (g *SQLGenerator) visitGroup(node *GroupNode) string {
+func (g *SQLGenerator) visitGroup(node *GroupNode) (string, *ParseError) {
 	if len(node.Children) == 0 {
-		return ""
+		return "", &ParseError{Code: ErrUnsupportedFeature, Message: "group has no children"}
 	}
 
 	if len(node.Children) == 1 {
+		if node.Children[0] == nil {
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "group contains a nil child"}
+		}
 		return g.visit(node.Children[0])
 	}
 
 	// Handle multiple expressions in a group - default to AND
 	var conditions []string
 	for _, child := range node.Children {
-		sql := g.visit(child)
-		if sql != "" {
-			conditions = append(conditions, sql)
+		sql, err := g.visit(child)
+		if err != nil {
+			return "", err
 		}
+		if sql == "" {
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "group contains an empty child"}
+		}
+		conditions = append(conditions, sql)
 	}
 
-	if len(conditions) == 0 {
-		return ""
-	}
-
-	if len(conditions) == 1 {
-		return conditions[0]
-	}
-
-	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND "))
+	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
 }
 
 func (g *SQLGenerator) escapeIdentifier(identifier string) string {
@@ -208,7 +202,7 @@ func (g *SQLGenerator) escapeSQLString(value string) string {
 	return result
 }
 
-func (g *SQLGenerator) formatValue(value any, _ Operator) string {
+func (g *SQLGenerator) formatValue(value any) string {
 	if value == nil {
 		return "NULL"
 	}
@@ -219,6 +213,8 @@ func (g *SQLGenerator) formatValue(value any, _ Operator) string {
 			return "1"
 		}
 		return "0"
+	case NumericLiteral:
+		return string(v)
 	case int, int32, int64, float32, float64:
 		return fmt.Sprintf("%v", v)
 	case string:
@@ -244,57 +240,104 @@ func (g *SQLGenerator) findDefaultMapColumn() string {
 }
 
 func (g *SQLGenerator) isMapType(columnType string) bool {
-	lower := strings.ToLower(columnType)
+	lower := strings.ToLower(unwrapType(columnType))
 	return strings.HasPrefix(lower, "map(")
 }
 
 func (g *SQLGenerator) isJsonType(columnType string) bool {
-	lower := strings.ToLower(columnType)
+	lower := strings.ToLower(unwrapType(columnType))
 	return lower == "json" || strings.HasPrefix(lower, "json(") || lower == "newjson"
 }
 
 func (g *SQLGenerator) isStringType(columnType string) bool {
-	lower := strings.ToLower(columnType)
-	return lower == "string" ||
-		strings.HasPrefix(lower, "string(") ||
-		strings.HasPrefix(lower, "fixedstring(") ||
-		strings.HasPrefix(lower, "lowcardinality(string)")
+	lower := strings.ToLower(unwrapType(columnType))
+	return lower == "string" || strings.HasPrefix(lower, "string(") ||
+		strings.HasPrefix(lower, "fixedstring(")
 }
 
-func (g *SQLGenerator) generateNestedFieldAccess(baseColumn string, path []string, columnType string, operator Operator, value any) string {
-	formattedValue := g.formatValue(value, operator)
-
-	// If no schema info, fallback to JSON extraction
-	if columnType == "" {
-		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
-	}
-
-	// Handle different column types
-	switch {
-	case g.isMapType(columnType):
-		return g.generateMapAccess(baseColumn, path, operator, formattedValue)
-	case g.isJsonType(columnType):
-		expression := g.nativeJSONPath(baseColumn, path)
-		if operator == OpRegex || operator == OpNotRegex {
-			expression = "toString(" + expression + ")"
+func unwrapType(columnType string) string {
+	trimmed := strings.TrimSpace(columnType)
+	for _, wrapper := range []string{"nullable", "lowcardinality"} {
+		if inner, ok := typeArguments(trimmed, wrapper); ok {
+			return unwrapType(inner)
 		}
-		return g.generateComparisonExpression(expression, operator, formattedValue)
-	case g.isStringType(columnType):
-		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
+	}
+	return trimmed
+}
+
+type sqlField struct {
+	sql             string
+	columnType      string
+	resolutionError *ParseError
+}
+
+// resolveField is shared by WHERE comparisons and pipe projections.
+func (g *SQLGenerator) resolveField(field any) sqlField {
+	switch f := field.(type) {
+	case string:
+		if strings.TrimSpace(f) == "" {
+			return sqlField{}
+		}
+		return sqlField{sql: g.escapeIdentifier(f), columnType: g.getColumnType(f)}
+	case NestedField:
+		if strings.TrimSpace(f.Base) == "" || len(f.Path) == 0 {
+			return sqlField{}
+		}
+		for _, segment := range f.Path {
+			if segment == "" {
+				return sqlField{}
+			}
+		}
+		columnType := g.getColumnType(f.Base)
+		switch {
+		case g.isMapType(columnType):
+			return sqlField{sql: g.mapAccess(f.Base, f.Path), columnType: g.mapValueType(columnType)}
+		case g.isJsonType(columnType):
+			pathType := g.jsonPathType(columnType, f.Path)
+			if pathType == "" {
+				pathType = "Dynamic"
+			}
+			return sqlField{sql: g.nativeJSONPath(f.Base, f.Path, columnType), columnType: pathType}
+		case columnType == "" || g.isStringType(columnType):
+			return sqlField{sql: g.jsonExtraction(f.Base, f.Path), columnType: "String"}
+		default:
+			return sqlField{resolutionError: &ParseError{
+				Code:    ErrUnsupportedFeature,
+				Message: fmt.Sprintf("nested field access is unsupported for column %q of type %q", f.Base, columnType),
+			}}
+		}
 	default:
-		return g.generateJsonExtraction(baseColumn, path, operator, formattedValue)
+		return sqlField{}
 	}
 }
 
-func (g *SQLGenerator) nativeJSONPath(base string, path []string) string {
-	parts := []string{g.escapeIdentifier(base)}
+func (g *SQLGenerator) nativeJSONPath(base string, path []string, columnType string) string {
+	baseExpression := g.escapeIdentifier(base)
+	if isNullableType(columnType) {
+		baseExpression = "assumeNotNull(" + baseExpression + ")"
+	}
+	parts := []string{baseExpression}
 	for _, segment := range path {
 		parts = append(parts, g.escapeIdentifier(strings.Trim(segment, "\"'")))
 	}
 	return strings.Join(parts, ".")
 }
 
-func (g *SQLGenerator) generateMapAccess(baseColumn string, path []string, operator Operator, formattedValue string) string {
+func isNullableType(columnType string) bool {
+	trimmed := strings.TrimSpace(columnType)
+	for {
+		if _, ok := typeArguments(trimmed, "nullable"); ok {
+			return true
+		}
+		inner, ok := typeArguments(trimmed, "lowcardinality")
+		if !ok {
+			return false
+		}
+		trimmed = inner
+	}
+}
+
+func (g *SQLGenerator) mapAccess(baseColumn string, path []string) string {
 	escapedColumn := g.escapeIdentifier(baseColumn)
 
 	// For ClickHouse Maps, access nested keys using dot notation as a single key
@@ -308,12 +351,66 @@ func (g *SQLGenerator) generateMapAccess(baseColumn string, path []string, opera
 		escapedPath = append(escapedPath, g.escapeSQLString(s))
 	}
 	fullKey := strings.Join(escapedPath, ".")
-	mapAccess := fmt.Sprintf("%s['%s']", escapedColumn, fullKey)
-
-	return g.generateComparisonExpression(mapAccess, operator, formattedValue)
+	return fmt.Sprintf("%s['%s']", escapedColumn, fullKey)
 }
 
-func (g *SQLGenerator) generateJsonExtraction(baseColumn string, path []string, operator Operator, formattedValue string) string {
+func (g *SQLGenerator) mapValueType(columnType string) string {
+	inner, ok := typeArguments(unwrapType(columnType), "map")
+	if !ok {
+		return ""
+	}
+	parts := splitTypeArguments(inner)
+	if len(parts) != 2 {
+		return ""
+	}
+	return strings.TrimSpace(parts[1])
+}
+
+func (g *SQLGenerator) jsonPathType(columnType string, path []string) string {
+	inner, ok := typeArguments(unwrapType(columnType), "json")
+	if !ok || len(path) == 0 {
+		return ""
+	}
+	for _, declaration := range splitTypeArguments(inner) {
+		name, valueType, ok := strings.Cut(strings.TrimSpace(declaration), " ")
+		if ok && strings.Trim(name, "`\"'") == path[0] {
+			return strings.TrimSpace(valueType)
+		}
+	}
+	return ""
+}
+
+func typeArguments(columnType, typeName string) (string, bool) {
+	trimmed := strings.TrimSpace(columnType)
+	prefix := typeName + "("
+	if len(trimmed) <= len(prefix) || !strings.EqualFold(trimmed[:len(prefix)], prefix) || !strings.HasSuffix(trimmed, ")") {
+		return "", false
+	}
+	return trimmed[len(prefix) : len(trimmed)-1], true
+}
+
+func splitTypeArguments(value string) []string {
+	var parts []string
+	start, depth := 0, 0
+	for i, r := range value {
+		switch r {
+		case '(':
+			depth++
+		case ')':
+			if depth > 0 {
+				depth--
+			}
+		case ',':
+			if depth == 0 {
+				parts = append(parts, value[start:i])
+				start = i + 1
+			}
+		}
+	}
+	return append(parts, value[start:])
+}
+
+func (g *SQLGenerator) jsonExtraction(baseColumn string, path []string) string {
 	escapedColumn := g.escapeIdentifier(baseColumn)
 
 	// ClickHouse JSONExtractString requires separate parameters for nested access
@@ -327,93 +424,88 @@ func (g *SQLGenerator) generateJsonExtraction(baseColumn string, path []string, 
 		pathParams = append(pathParams, fmt.Sprintf("'%s'", g.escapeSQLString(s)))
 	}
 
-	jsonExtract := fmt.Sprintf("JSONExtractString(%s, %s)", escapedColumn, strings.Join(pathParams, ", "))
-	return g.generateComparisonExpression(jsonExtract, operator, formattedValue)
+	return fmt.Sprintf("JSONExtractString(%s, %s)", escapedColumn, strings.Join(pathParams, ", "))
 }
 
-func (g *SQLGenerator) generateComparisonExpression(columnExpression string, operator Operator, formattedValue string) string {
+func (g *SQLGenerator) generateComparisonExpression(field sqlField, operator Operator, formattedValue string) (string, *ParseError) {
+	columnExpression := field.sql
+	switch operator {
+	case OpEquals, OpNotEquals, OpRegex, OpNotRegex, OpGT, OpLT, OpGTE, OpLTE:
+	default:
+		return "", &ParseError{Code: ErrUnknownOperator, Message: fmt.Sprintf("unsupported operator %q", operator)}
+	}
+	if operator == OpEquals && formattedValue == "NULL" {
+		return fmt.Sprintf("isNull(%s)", columnExpression), nil
+	}
+	if operator == OpNotEquals && formattedValue == "NULL" {
+		return fmt.Sprintf("isNotNull(%s)", columnExpression), nil
+	}
+	if formattedValue == "NULL" {
+		return "", &ParseError{Code: ErrUnsupportedFeature, Message: fmt.Sprintf("operator %q cannot be used with NULL", operator)}
+	}
+	if (operator == OpRegex || operator == OpNotRegex) && field.columnType != "" && !g.isStringType(field.columnType) {
+		columnExpression = "toString(" + columnExpression + ")"
+	}
 	switch operator {
 	case OpRegex:
-		return fmt.Sprintf("positionCaseInsensitive(%s, %s) > 0", columnExpression, formattedValue)
+		return fmt.Sprintf("positionCaseInsensitive(%s, %s) > 0", columnExpression, formattedValue), nil
 	case OpNotRegex:
-		return fmt.Sprintf("positionCaseInsensitive(%s, %s) = 0", columnExpression, formattedValue)
+		return fmt.Sprintf("positionCaseInsensitive(%s, %s) = 0", columnExpression, formattedValue), nil
 	case OpEquals:
-		return fmt.Sprintf("%s = %s", columnExpression, formattedValue)
+		return fmt.Sprintf("%s = %s", columnExpression, formattedValue), nil
 	case OpNotEquals:
-		return fmt.Sprintf("%s != %s", columnExpression, formattedValue)
+		return fmt.Sprintf("%s != %s", columnExpression, formattedValue), nil
 	case OpGT:
-		return fmt.Sprintf("%s > %s", columnExpression, formattedValue)
+		return fmt.Sprintf("%s > %s", columnExpression, formattedValue), nil
 	case OpLT:
-		return fmt.Sprintf("%s < %s", columnExpression, formattedValue)
+		return fmt.Sprintf("%s < %s", columnExpression, formattedValue), nil
 	case OpGTE:
-		return fmt.Sprintf("%s >= %s", columnExpression, formattedValue)
+		return fmt.Sprintf("%s >= %s", columnExpression, formattedValue), nil
 	case OpLTE:
-		return fmt.Sprintf("%s <= %s", columnExpression, formattedValue)
+		return fmt.Sprintf("%s <= %s", columnExpression, formattedValue), nil
 	default:
-		return ""
+		return "", &ParseError{Code: ErrUnknownOperator, Message: fmt.Sprintf("unsupported operator %q", operator)}
 	}
 }
 
-func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) string {
-	var columnExpression string
+func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) (string, *ParseError) {
+	field := g.resolveField(selectField.Field)
+	if field.resolutionError != nil {
+		return "", field.resolutionError
+	}
+	columnExpression := field.sql
+	if columnExpression == "" {
+		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
+	}
 	var nestedField *NestedField
 	var simpleFieldName string
 
 	switch f := selectField.Field.(type) {
 	case NestedField:
 		nestedField = &f
-		columnType := g.getColumnType(f.Base)
-
-		switch {
-		case g.isMapType(columnType):
-			escapedColumn := g.escapeIdentifier(f.Base)
-			var escapedPath []string
-			for _, segment := range f.Path {
-				s := strings.TrimPrefix(segment, "\"")
-				s = strings.TrimSuffix(s, "\"")
-				s = strings.TrimPrefix(s, "'")
-				s = strings.TrimSuffix(s, "'")
-				escapedPath = append(escapedPath, g.escapeSQLString(s))
-			}
-			fullKey := strings.Join(escapedPath, ".")
-			columnExpression = fmt.Sprintf("%s['%s']", escapedColumn, fullKey)
-		case g.isJsonType(columnType):
-			columnExpression = g.nativeJSONPath(f.Base, f.Path)
-		default:
-			escapedColumn := g.escapeIdentifier(f.Base)
-			var pathParams []string
-			for _, segment := range f.Path {
-				s := strings.TrimPrefix(segment, "\"")
-				s = strings.TrimSuffix(s, "\"")
-				s = strings.TrimPrefix(s, "'")
-				s = strings.TrimSuffix(s, "'")
-				pathParams = append(pathParams, fmt.Sprintf("'%s'", g.escapeSQLString(s)))
-			}
-			columnExpression = fmt.Sprintf("JSONExtractString(%s, %s)", escapedColumn, strings.Join(pathParams, ", "))
-		}
 	case string:
 		simpleFieldName = f
-		if g.columnExists(f) {
-			columnExpression = g.escapeIdentifier(f)
-		} else if mapCol := g.findDefaultMapColumn(); mapCol != "" {
-			columnExpression = fmt.Sprintf("%s['%s']", g.escapeIdentifier(mapCol), g.escapeSQLString(f))
-		} else {
-			columnExpression = g.escapeIdentifier(f)
+		if !g.columnExists(f) {
+			if mapCol := g.findDefaultMapColumn(); mapCol != "" {
+				columnExpression = g.mapAccess(mapCol, []string{f})
+			}
 		}
-	default:
-		return ""
 	}
 
 	// Add alias if provided, or generate one for nested/map fields
 	switch {
 	case selectField.Alias != "":
-		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(selectField.Alias))
+		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(selectField.Alias)), nil
 	case nestedField != nil:
 		autoAlias := nestedField.Base + "_" + strings.Join(nestedField.Path, "_")
-		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(autoAlias))
+		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(autoAlias)), nil
 	case simpleFieldName != "" && !g.columnExists(simpleFieldName):
-		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(simpleFieldName))
+		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(simpleFieldName)), nil
 	default:
-		return columnExpression
+		return columnExpression, nil
 	}
+}
+
+func unsupportedASTNode(node ASTNode) *ParseError {
+	return &ParseError{Code: ErrUnsupportedFeature, Message: fmt.Sprintf("unsupported LogchefQL node type %T", node)}
 }

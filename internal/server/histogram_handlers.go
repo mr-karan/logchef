@@ -54,6 +54,16 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	if errMsg != "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, errMsg, models.ValidationErrorType)
 	}
+	user, ok := c.Locals("user").(*models.User)
+	if !ok || user == nil {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication required", models.AuthenticationErrorType)
+	}
+	teamID, err := core.ParseTeamID(c.Params("teamID"))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	}
+	// Capture IDs, not the Fiber context, for fills that outlive this request.
+	userID := user.ID
 
 	// Dashboard panel requests may opt into the per-dashboard result cache.
 	// Histogram results always buffer (no streaming path), so the whole response
@@ -82,7 +92,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 					QueryTimeoutSecs: int64(*params.QueryTimeout),
 				})
 				fill := func(ctx context.Context) ([]byte, error) {
-					result, err := core.GetHistogramData(ctx, s.datasources, sourceID, params)
+					result, err := s.executeHistogram(ctx, QueryClassDashboard, userID, teamID, sourceID, params)
 					if err != nil {
 						return nil, err
 					}
@@ -90,6 +100,8 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 				}
 				if handled, err := s.tryServeDashboardCache(c, key, effTTL, HistogramTimeout, fill); handled {
 					return err
+				} else if err != nil {
+					return s.handleHistogramError(c, sourceID, err)
 				}
 			}
 		}
@@ -100,12 +112,12 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.Context(), HistogramTimeout)
 	defer cancel()
 
-	result, err := core.GetHistogramData(ctx, s.datasources, sourceID, params)
+	result, err := s.executeHistogram(ctx, QueryClassHistogram, userID, teamID, sourceID, params)
 	if err != nil {
-		if ctx.Err() == context.Canceled {
+		if ctx.Err() == context.Canceled || errors.Is(err, context.Canceled) {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
-		if ctx.Err() == context.DeadlineExceeded {
+		if ctx.Err() == context.DeadlineExceeded || errors.Is(err, context.DeadlineExceeded) {
 			s.log.Warn("histogram request timed out", "source_id", sourceID, "timeout", HistogramTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
@@ -113,6 +125,25 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+// executeHistogram owns admission for actual work, including shared cache
+// fills. class selects the budget: a dashboard panel fill is bounded by the
+// cache fill budget, an explorer histogram by its own interactive budget.
+func (s *Server) executeHistogram(ctx context.Context, class QueryClass, userID models.UserID, teamID models.TeamID, sourceID models.SourceID, params core.HistogramParams) (*core.HistogramResponse, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	maxPerUser, maxGlobal := s.admissionLimits(class)
+	queryID, err := queryTracker.StartQuery(class, userID, sourceID, teamID, params.Query, cancel,
+		maxPerUser, maxGlobal)
+	if err != nil {
+		return nil, err
+	}
+	defer queryTracker.RemoveQuery(queryID)
+	return core.GetHistogramData(ctx, s.datasources, sourceID, params)
 }
 
 // resolveHistogramQueryText validates that all template variables referenced
@@ -171,6 +202,9 @@ func buildHistogramParams(req models.APIHistogramRequest, processedQuery string)
 	}
 	params.StartTime = startTime
 	params.EndTime = endTime
+	if startTime != nil && endTime.Before(*startTime) {
+		return params, "start_time must not be after end_time"
+	}
 
 	// Only add groupBy if it's not empty
 	if req.GroupBy != "" && strings.TrimSpace(req.GroupBy) != "" {
@@ -202,6 +236,19 @@ func buildHistogramParams(req models.APIHistogramRequest, processedQuery string)
 // handleHistogramError maps a core.GetHistogramData error to the appropriate
 // HTTP error response.
 func (s *Server) handleHistogramError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
+	if errors.Is(err, context.Canceled) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, models.ErrHistogramBudgetExceeded) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	var admissionErr *QueryAdmissionError
+	if errors.As(err, &admissionErr) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+	}
 	if errors.Is(err, core.ErrSourceNotFound) {
 		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}

@@ -98,9 +98,9 @@ type PPathSegment struct {
 
 // PValue can be a string, number, or bare identifier (for booleans/null/unquoted values)
 type PValue struct {
-	String *string  `parser:"( @String"`
-	Number *float64 `parser:"| @Number"`
-	Ident  *string  `parser:"| @Ident )"`
+	String *string `parser:"( @String"`
+	Number *string `parser:"| @Number"`
+	Ident  *string `parser:"| @Ident )"`
 }
 
 type PSelectItem struct {
@@ -329,7 +329,7 @@ func convertValue(v *PValue) (any, bool) {
 	}
 
 	if v.Number != nil {
-		return *v.Number, false
+		return NumericLiteral(*v.Number), false
 	}
 
 	if v.Ident != nil {

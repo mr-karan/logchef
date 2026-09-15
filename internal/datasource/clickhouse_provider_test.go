@@ -1,9 +1,12 @@
 package datasource
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
+	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestHasLeadingTimestampSortKey(t *testing.T) {
@@ -24,5 +27,27 @@ func TestHasLeadingTimestampSortKey(t *testing.T) {
 				t.Fatalf("hasLeadingTimestampSortKey() = %t, want %t", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestCompileLogchefQLWithoutColumnsDoesNotMutateSource(t *testing.T) {
+	provider := &ClickHouseProvider{}
+	source := &models.Source{}
+	var wg sync.WaitGroup
+	for range 12 {
+		wg.Go(func() {
+			result, err := provider.CompileLogchefQL(context.Background(), source, LogchefQLCompileRequest{Query: `message = "hello"`})
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			if !result.Valid {
+				t.Error("expected valid best-effort translation")
+			}
+		})
+	}
+	wg.Wait()
+	if source.Columns != nil {
+		t.Fatal("compilation mutated source columns")
 	}
 }

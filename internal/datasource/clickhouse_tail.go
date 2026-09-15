@@ -16,10 +16,9 @@ import (
 const (
 	// tailBatchLimit caps rows fetched per poll. A poll returning a full batch
 	// signals more rows are waiting past this poll's LIMIT; TailLogs re-polls
-	// immediately (up to tailMaxConsecutiveDrains times) instead of waiting for
-	// the next tick, so a busy boundary drains rather than silently losing the
-	// remainder. The row-rate ceiling upstream (server-side) is what actually
-	// drops excess rows for a sustained firehose.
+	// immediately instead of waiting for the next tick, so a busy boundary drains
+	// rather than silently losing the remainder. The row-rate ceiling upstream
+	// (server-side) is what actually drops excess rows for a sustained firehose.
 	tailBatchLimit = 1000
 	// tailPollTimeoutSeconds bounds each poll query tightly — a tail must never
 	// block on a slow poll.
@@ -27,17 +26,18 @@ const (
 	// tailMaxConsecutiveFailures ends the stream after this many back-to-back
 	// poll errors; transient errors below the threshold are retried next tick.
 	tailMaxConsecutiveFailures = 5
-	// tailMaxConsecutiveDrains caps back-to-back immediate re-polls triggered by
-	// full batches. Without a cap, a source ingesting faster than tailBatchLimit
-	// per poll would keep this goroutine draining forever and never reach the
-	// select that checks ctx.Done(), so cancellation (client disconnect, TTL,
-	// admission eviction) would never be observed.
+	// tailMaxConsecutiveDrains bounds immediate drain pages so the ticker can
+	// service cancellation and newly arriving rows between larger page bursts.
 	tailMaxConsecutiveDrains = 5
 	// defaultTailPollInterval is the fallback cadence when the request carries none.
 	defaultTailPollInterval = 2 * time.Second
 	// defaultTailLookbackMargin is the fallback re-scan window when the request
 	// carries none (e.g. a caller that doesn't populate it, such as a test).
 	defaultTailLookbackMargin = 5 * time.Second
+	// tailMaxDedupEntries bounds memory used by the overlap deduplicator. A
+	// source with more events than this in the lookback window can still be
+	// tailed, but an event may be emitted again after its key is evicted.
+	tailMaxDedupEntries = tailBatchLimit * 10
 )
 
 // TailLogs polls the source table on a ticker, emitting rows newer than a
@@ -47,14 +47,14 @@ const (
 // the cursor — not just the cursor itself — so rows that finish ingesting
 // slightly behind the cursor (ingestion lag, batched inserts arriving after
 // their own timestamp was already polled past) are still picked up; the
-// dedup set (ported from the Rust CLI's tail command) absorbs the resulting
-// overlap so nothing already emitted surfaces twice. The margin window never
+// bounded dedup set suppresses overlap while event keys remain retained.
+// The margin window never
 // reaches before the session's start time, so it cannot re-scan history from
-// before the tail began. A poll returning a full batch triggers an immediate
-// re-poll (capped) instead of waiting for the next tick, draining a busy
-// boundary rather than silently dropping the remainder. req.Query is a
-// ClickHouse SQL WHERE-fragment (conditions only), which is composed into the
-// poll query.
+// before the tail began. A poll returning a full batch triggers a forward drain
+// from the same lower bound using OFFSET, instead of re-fetching the same first
+// page. The drain yields to the ticker after a bounded burst while retaining
+// its page offset and frozen upper bound. req.Query is a ClickHouse SQL
+// WHERE-fragment (conditions only), which is composed into the poll query.
 func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source, req TailRequest, emit TailEmitter) error {
 	if source == nil {
 		return fmt.Errorf("source is required")
@@ -76,7 +76,10 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 	if margin <= 0 {
 		margin = defaultTailLookbackMargin
 	}
+	return p.pollTailLogs(ctx, client, source, req, emit, interval, margin)
+}
 
+func (p *ClickHouseProvider) pollTailLogs(ctx context.Context, client *clickhouse.Client, source *models.Source, req TailRequest, emit TailEmitter, interval, margin time.Duration) error {
 	tsField := source.MetaTSField
 	filter := strings.TrimSpace(req.Query)
 	dedup := newTailDedup()
@@ -88,21 +91,42 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 		sessionStart = time.Now().UTC()
 	}
 	cursor := sessionStart
+	scanUpperBound := sessionStart
 
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	consecutiveFailures := 0
 	consecutiveDrains := 0
+	draining := false
+	drainWindowStart := time.Time{}
+	drainOffset := 0
 	for {
+		if !draining {
+			scanUpperBound, err = p.now64(ctx, client)
+			if err != nil {
+				p.log.Warn("tail: SELECT now64() failed, falling back to app clock for scan upper bound",
+					"source_id", source.ID, "error", err)
+				scanUpperBound = time.Now().UTC()
+			}
+		}
 		windowStart := tailPollWindowStart(sessionStart, cursor, margin)
-		rows, err := p.pollTail(ctx, client, source, tsField, filter, windowStart)
+		offset := 0
+		if draining {
+			// Keep the lower bound fixed while draining. Advancing it to the
+			// newest timestamp would return the same first page when many rows
+			// fit inside the overlap window. OFFSET also makes a batch of rows
+			// with identical timestamps progress without requiring a universal
+			// tie-break column.
+			windowStart = drainWindowStart
+			offset = drainOffset
+		}
+		rows, err := p.pollTail(ctx, client, source, tsField, filter, windowStart, scanUpperBound, offset)
 		if err != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
 			consecutiveFailures++
-			consecutiveDrains = 0
 			p.log.Warn("tail poll failed",
 				"source_id", source.ID,
 				"consecutive_failures", consecutiveFailures,
@@ -112,6 +136,10 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 			}
 		} else {
 			consecutiveFailures = 0
+			if !draining {
+				drainWindowStart = windowStart
+				drainOffset = 0
+			}
 			fresh, newest := dedup.process(rows, tsField)
 			if !newest.IsZero() && newest.After(cursor) {
 				cursor = newest
@@ -123,18 +151,29 @@ func (p *ClickHouseProvider) TailLogs(ctx context.Context, source *models.Source
 				}
 			}
 
-			if len(rows) >= tailBatchLimit && consecutiveDrains < tailMaxConsecutiveDrains {
+			if len(rows) >= tailBatchLimit {
+				draining = true
+				drainOffset += len(rows)
 				consecutiveDrains++
-				// Still observe cancellation promptly during a drain burst rather
-				// than looping straight back into pollTail.
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				default:
-					continue
+				if consecutiveDrains >= tailMaxConsecutiveDrains {
+					// Yield to the ticker, but keep draining and the offset. The next
+					// tick resumes this frozen scan instead of starting page one.
+					consecutiveDrains = 0
+				} else {
+					// Still observe cancellation promptly during a drain burst rather
+					// than looping straight back into pollTail.
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					default:
+						continue
+					}
 				}
+			} else {
+				draining = false
+				drainOffset = 0
+				consecutiveDrains = 0
 			}
-			consecutiveDrains = 0
 		}
 
 		select {
@@ -180,13 +219,18 @@ func (p *ClickHouseProvider) now64(ctx context.Context, client *clickhouse.Clien
 }
 
 // pollTail builds and runs a single poll query for rows at/after the cursor.
-func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Client, source *models.Source, tsField, filter string, cursor time.Time) ([]map[string]any, error) {
-	sql := buildTailPollSQL(source.GetFullTableName(), tsField, filter, cursor)
+func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Client, source *models.Source, tsField, filter string, cursor, upperBound time.Time, offset int) ([]map[string]any, error) {
+	sql := buildTailPollSQL(source.GetFullTableName(), tsField, filter, cursor, upperBound)
 
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), tailBatchLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(sql, tailBatchLimit, tailBatchLimit, tailBatchLimit)
 	if err != nil {
 		return nil, fmt.Errorf("build tail query: %w", err)
+	}
+	if offset > 0 {
+		// The query builder owns LIMIT. Append OFFSET after it so a drain page
+		// cannot be reset to offset zero when the builder applies its limit.
+		buildResult.SQL = fmt.Sprintf("%s OFFSET %d", buildResult.SQL, offset)
 	}
 
 	timeout := tailPollTimeoutSeconds
@@ -206,11 +250,12 @@ func (p *ClickHouseProvider) pollTail(ctx context.Context, client *clickhouse.Cl
 	return result.Logs, nil
 }
 
-// buildTailPollSQL composes the poll SELECT. The cursor is emitted as a
-// nanosecond DateTime64 literal so it composes with either DateTime or
-// DateTime64 timestamp columns via implicit conversion.
-func buildTailPollSQL(fullTableName, tsField, filter string, cursor time.Time) string {
+// buildTailPollSQL composes one bounded scan page. Both bounds are emitted as
+// nanosecond DateTime64 literals so they compose with DateTime and DateTime64
+// timestamp columns via implicit conversion.
+func buildTailPollSQL(fullTableName, tsField, filter string, cursor, upperBound time.Time) string {
 	cursorLiteral := fmt.Sprintf("toDateTime64('%s', 9, 'UTC')", cursor.UTC().Format("2006-01-02 15:04:05.999999999"))
+	upperBoundLiteral := fmt.Sprintf("toDateTime64('%s', 9, 'UTC')", upperBound.UTC().Format("2006-01-02 15:04:05.999999999"))
 
 	var sb strings.Builder
 	sb.WriteString("SELECT * FROM ")
@@ -219,6 +264,10 @@ func buildTailPollSQL(fullTableName, tsField, filter string, cursor time.Time) s
 	sb.WriteString(tsField)
 	sb.WriteString("` >= ")
 	sb.WriteString(cursorLiteral)
+	sb.WriteString(" AND `")
+	sb.WriteString(tsField)
+	sb.WriteString("` <= ")
+	sb.WriteString(upperBoundLiteral)
 	if filter != "" {
 		sb.WriteString(" AND (")
 		sb.WriteString(filter)
@@ -226,18 +275,28 @@ func buildTailPollSQL(fullTableName, tsField, filter string, cursor time.Time) s
 	}
 	sb.WriteString(" ORDER BY `")
 	sb.WriteString(tsField)
-	sb.WriteString("` ASC")
+	// Hashing and serializing tuple(*) provide a stable value-based tie-break for
+	// rows sharing a timestamp without ordering native JSON or Map values
+	// directly. Truly identical rows remain indistinguishable and are
+	// intentionally handled by tailDedup's documented limitation.
+	sb.WriteString("` ASC, cityHash64(toJSONString(tuple(*))) ASC, toJSONString(tuple(*)) ASC")
 	return sb.String()
 }
 
 // tailDedup tracks the rows already emitted so a re-fetched boundary timestamp
 // (from the inclusive >= cursor window) does not surface a row twice.
 type tailDedup struct {
-	seen map[string]time.Time
+	seen  map[string]time.Time
+	order []tailDedupEntry
+}
+
+type tailDedupEntry struct {
+	key string
+	ts  time.Time
 }
 
 func newTailDedup() *tailDedup {
-	return &tailDedup{seen: make(map[string]time.Time)}
+	return &tailDedup{seen: make(map[string]time.Time), order: make([]tailDedupEntry, 0, tailMaxDedupEntries)}
 }
 
 // process returns the rows not previously emitted and the newest timestamp
@@ -253,6 +312,14 @@ func (d *tailDedup) process(rows []map[string]any, tsField string) (fresh []map[
 			continue
 		}
 		d.seen[key] = ts
+		d.order = append(d.order, tailDedupEntry{key: key, ts: ts})
+		for len(d.seen) > tailMaxDedupEntries && len(d.order) > 0 {
+			oldest := d.order[0]
+			d.order = d.order[1:]
+			if seenTS, ok := d.seen[oldest.key]; ok && seenTS.Equal(oldest.ts) {
+				delete(d.seen, oldest.key)
+			}
+		}
 		fresh = append(fresh, row)
 	}
 	return fresh, newest
@@ -266,6 +333,16 @@ func (d *tailDedup) evictBefore(cursor time.Time) {
 			delete(d.seen, key)
 		}
 	}
+	if len(d.order) == 0 {
+		return
+	}
+	kept := d.order[:0]
+	for _, entry := range d.order {
+		if ts, ok := d.seen[entry.key]; ok && ts.Equal(entry.ts) {
+			kept = append(kept, entry)
+		}
+	}
+	d.order = kept
 }
 
 // tailDedupKey fingerprints a row: the timestamp plus a hash over its sorted

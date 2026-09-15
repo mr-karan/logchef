@@ -5,6 +5,7 @@ package server
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -28,8 +29,16 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	if req.Timestamp <= 0 {
+	if req.Timestamp <= 0 && req.TimestampRFC3339 == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Timestamp is required and must be positive", models.ValidationErrorType)
+	}
+	targetTime := time.UnixMilli(req.Timestamp)
+	if req.TimestampRFC3339 != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, req.TimestampRFC3339)
+		if err != nil || parsed.IsZero() {
+			return SendErrorWithType(c, fiber.StatusBadRequest, "timestamp_rfc3339 must be a valid RFC3339 timestamp", models.ValidationErrorType)
+		}
+		targetTime = parsed.UTC()
 	}
 
 	beforeLimit := req.BeforeLimit
@@ -49,7 +58,8 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 	}
 
 	result, err := core.GetLogContext(c.Context(), s.datasources, sourceID, core.LogContextParams{
-		TargetTimestamp: req.Timestamp,
+		TargetTimestamp: targetTime.UnixMilli(),
+		TargetTime:      &targetTime,
 		BeforeLimit:     beforeLimit,
 		AfterLimit:      afterLimit,
 		BeforeOffset:    req.BeforeOffset,

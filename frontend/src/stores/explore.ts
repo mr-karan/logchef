@@ -30,7 +30,7 @@ import { SqlManager } from '@/services/SqlManager';
 import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
-import { createTimeRangeCondition } from '@/utils/time-utils';
+import { createTimeRangeCondition, formatDateForSQL } from '@/utils/time-utils';
 import { asClickHouseConnection } from '@/api/sources';
 import {
   getExploreModeForQueryLanguage,
@@ -1221,22 +1221,11 @@ export const useExploreStore = defineStore("explore", () => {
           const timeRange = state.data.value.timeRange as TimeRange;
           const timezone = state.data.value.selectedTimezoneIdentifier || getTimezoneIdentifier();
           const queryTimeout = state.data.value.queryTimeout;
-          
-          const formatDateTime = (dt: any) => {
-            if (!dt) return '';
-            const year = dt.year;
-            const month = String(dt.month).padStart(2, '0');
-            const day = String(dt.day).padStart(2, '0');
-            const hour = String(dt.hour || 0).padStart(2, '0');
-            const minute = String(dt.minute || 0).padStart(2, '0');
-            const second = String(dt.second || 0).padStart(2, '0');
-            return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-          };
 
           const queryResponse = await logchefqlApi.query(currentTeamId, sourceId.value, {
             query: state.data.value.logchefqlCode,
-            start_time: formatDateTime(timeRange.start),
-            end_time: formatDateTime(timeRange.end),
+            start_time: formatDateForSQL(timeRange.start, false, timezone),
+            end_time: formatDateForSQL(timeRange.end, false, timezone),
             timezone: timezone,
             limit: state.data.value.limit,
             query_timeout: queryTimeout,

@@ -364,17 +364,34 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	}
 	applyScopeFilters(form, conn)
 
-	var result hitsResponse
-	if err := p.decodeJSONRequest(ctx, conn, "/select/logsql/hits", form, &result); err != nil {
+	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/hits", form)
+	if err != nil {
 		return nil, err
 	}
+	defer resp.Body.Close()
+	result, err := readHistogramResponse(resp.Body)
+	if err != nil {
+		return nil, err
+	}
+	return buildHistogramResult(result, groupBy, defaultWindow(req.Window))
+}
 
+func buildHistogramResult(result *hitsResponse, groupBy, window string) (*datasource.HistogramResult, error) {
 	data := make([]datasource.HistogramBucket, 0)
+	buckets := make(map[time.Time]struct{})
+	maxRows := models.MaxHistogramBuckets
+	if groupBy != "" {
+		maxRows *= defaultHistogramSeriesLimit + 1
+	}
+	responseBytes := 0
 	// truncated tracks whether VL returned its catch-all aggregate series, which
 	// it emits only when the real group count exceeded fields_limit (see
 	// getTopHitsSeries in VL app/vlselect/logsql/logsql.go).
 	truncated := false
 	for _, series := range result.Hits {
+		if len(series.Timestamps) != len(series.Values) {
+			return nil, fmt.Errorf("victorialogs histogram response has mismatched timestamps and values")
+		}
 		groupValue := ""
 		isOther := false
 		if groupBy != "" {
@@ -392,13 +409,23 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 				groupValue = value
 			}
 		}
+		encodedGroupValue, err := json.Marshal(groupValue)
+		if err != nil {
+			return nil, fmt.Errorf("encode victorialogs histogram group value: %w", err)
+		}
+		// The hits API sends the label once per series; our response repeats it
+		// per bucket. Measure JSON escaping once, then reserve enough fixed space
+		// for field names, a timestamp, a 64-bit count, flags, and a separator.
+		rowBytes := len(encodedGroupValue) + 128
 		for i, timestampRaw := range series.Timestamps {
-			if i >= len(series.Values) {
-				break
-			}
 			bucket, err := time.Parse(time.RFC3339, timestampRaw)
 			if err != nil {
 				return nil, fmt.Errorf("parse victorialogs histogram timestamp %q: %w", timestampRaw, err)
+			}
+			buckets[bucket.UTC()] = struct{}{}
+			responseBytes += rowBytes
+			if len(buckets) > models.MaxHistogramBuckets || len(data) >= maxRows || responseBytes > models.MaxHistogramResponseBytes {
+				return nil, models.ErrHistogramBudgetExceeded
 			}
 			data = append(data, datasource.HistogramBucket{
 				Bucket:     bucket,
@@ -427,10 +454,26 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	}
 
 	return &datasource.HistogramResult{
-		Granularity: defaultWindow(req.Window),
+		Granularity: window,
 		Data:        data,
 		Notice:      notice,
 	}, nil
+}
+
+// readHistogramResponse checks the wire budget before allocating decoded series.
+func readHistogramResponse(body io.Reader) (*hitsResponse, error) {
+	data, err := io.ReadAll(io.LimitReader(body, models.MaxHistogramResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read victorialogs histogram response: %w", err)
+	}
+	if len(data) > models.MaxHistogramResponseBytes {
+		return nil, models.ErrHistogramBudgetExceeded
+	}
+	var result hitsResponse
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("decode victorialogs histogram response: %w", err)
+	}
+	return &result, nil
 }
 
 func (p *Provider) GetFieldValues(ctx context.Context, source *models.Source, req datasource.FieldValuesRequest) (*datasource.FieldValuesResult, error) {

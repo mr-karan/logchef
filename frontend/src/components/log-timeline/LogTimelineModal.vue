@@ -12,6 +12,7 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { ref, watch } from 'vue'
 import { exploreApi } from '@/api/explore'
 import { Clock, ArrowDown, ArrowUp } from 'lucide-vue-next'
+import { timestampIdentity } from './timestampIdentity'
 
 const props = defineProps<{
     isOpen: boolean
@@ -29,6 +30,8 @@ const { toast } = useToast()
 const isLoading = ref(false)
 const loadingMore = ref<'before' | 'after' | null>(null)
 const targetTimestamp = ref<number>(0)
+const targetTimestampRFC3339 = ref<string | null>(null)
+const targetTimestampIdentity = ref<string | null>(null)
 const expandedLogId = ref<string | null>(null)
 const batchSize = ref<number>(20)
 const batchOptions = [10, 20, 50, 100]
@@ -54,8 +57,9 @@ function getLogId(prefix: string, idx: number, log: Record<string, any>): string
 
 // Check if a log is at the target timestamp (for highlighting)
 const isTargetLog = (log: Record<string, any>) => {
-    const logTs = new Date(getTimestamp(log)).getTime()
-    return logTs === targetTimestamp.value
+    const logValue = getTimestamp(log)
+    if (typeof logValue !== 'string' && typeof logValue !== 'number') return false
+    return timestampIdentity(logValue) === targetTimestampIdentity.value
 }
 
 // Get the timestamp field from props or use default
@@ -107,11 +111,18 @@ async function loadContextLogs() {
     afterOffset.value = 0
     
     try {
-        const timestamp = new Date(tsValue).getTime()
+        const timestampDate = new Date(tsValue)
+        const timestamp = timestampDate.getTime()
+        const timestampRFC3339 = typeof tsValue === 'string'
+            ? tsValue
+            : timestampDate.toISOString()
         targetTimestamp.value = timestamp
+        targetTimestampRFC3339.value = timestampRFC3339
+        targetTimestampIdentity.value = timestampIdentity(tsValue)
         const result = await exploreApi.getLogContext(parseInt(props.sourceId), {
             source_id: parseInt(props.sourceId),
             timestamp,
+            timestamp_rfc3339: timestampRFC3339,
             before_limit: batchSize.value,
             after_limit: batchSize.value
         }, props.teamId)
@@ -144,6 +155,8 @@ watch(() => props.isOpen, (open) => {
         // Reset state when modal closes
         contextLogs.value = null
         targetTimestamp.value = 0
+        targetTimestampRFC3339.value = null
+        targetTimestampIdentity.value = null
         expandedLogId.value = null
         noMoreBefore.value = false
         noMoreAfter.value = false
@@ -169,6 +182,7 @@ async function loadMore(direction: 'before' | 'after') {
         const result = await exploreApi.getLogContext(parseInt(props.sourceId), {
             source_id: parseInt(props.sourceId),
             timestamp: targetTimestamp.value,  // Always use the original target timestamp
+            timestamp_rfc3339: targetTimestampRFC3339.value || undefined,
             before_limit: direction === 'before' ? batchSize.value : 0,
             after_limit: direction === 'after' ? batchSize.value : 0,
             before_offset: currentBeforeOffset,

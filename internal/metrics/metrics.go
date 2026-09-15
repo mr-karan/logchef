@@ -46,21 +46,17 @@ func RecordHTTPError(method, endpoint, errorType string, statusCode int, user *m
 }
 
 // RecordQuery records query execution metrics with source context
-func RecordQuery(source *models.Source, queryType string, success bool, duration time.Duration, rowsReturned int64, user *models.User) {
+func RecordQuery(source *models.Source, queryType string, success bool, duration time.Duration, rowsReturned int64) {
 	result := "success"
 	if !success {
 		result = "failure"
 	}
 
-	// Query metrics with meaningful source and user labels
-	var labels string
-	if user != nil {
-		labels = fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email=%q,user_role=%q}`,
-			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result, user.Email, string(user.Role))
-	} else {
-		labels = fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email="",user_role=""}`,
-			source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result)
-	}
+	// The user labels stay in the series, always empty: no caller has ever
+	// supplied a user here, and dropping the labels would break dashboards
+	// that already match on them.
+	labels := fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email="",user_role=""}`,
+		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result)
 	metrics.GetOrCreateCounter(labels).Inc()
 
 	// Duration histogram with source context
@@ -274,14 +270,4 @@ func DetermineErrorType(err error) string {
 	}
 
 	return "other"
-}
-
-// contains checks if a string contains a substring
-func contains(s, substr string) bool {
-	return strings.Contains(s, substr)
-}
-
-// trimAndLower trims whitespace and converts to lowercase
-func trimAndLower(s string) string {
-	return strings.ToLower(strings.TrimSpace(s))
 }

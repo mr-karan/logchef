@@ -140,6 +140,9 @@ max_preview_limit = 100000
 max_response_bytes = 67108864
 default_timeout_seconds = 30
 max_timeout_seconds = 300
+# Counted per query class: an explorer log query and the histogram beside it
+# each hold a slot, in separate budgets. Dashboard panel fills are bounded by
+# dashboard_cache max_concurrent_fills instead.
 max_concurrent_per_user = 3
 max_concurrent_global = 30
 

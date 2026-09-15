@@ -119,7 +119,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Query, schema, and lifecycle compatibility
-        run: go test -race ./internal/clickhouse ./internal/datasource -count=1
+        run: go test -race ./internal/clickhouse ./internal/datasource ./internal/logchefql -count=1
 
   lint:
     runs-on: ubuntu-latest

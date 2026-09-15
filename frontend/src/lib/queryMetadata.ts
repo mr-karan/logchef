@@ -104,6 +104,7 @@ export function getNativeQueryLanguageForSource(source: SourceDescriptor): Query
 }
 
 export function resolveSavedQueryMetadata(input: {
+  active_mode?: ExploreMode;
   query_language?: string | null;
   editor_mode?: string | null;
   source_type?: string | null;
@@ -115,8 +116,12 @@ export function resolveSavedQueryMetadata(input: {
     query_languages: input.query_languages ?? null,
     saved_query_editor_modes: input.saved_query_editor_modes ?? null,
   };
-  const explicitLanguage = input.query_language;
-  const explicitEditorMode = input.editor_mode;
+  const explicitLanguage = input.active_mode
+    ? (input.active_mode === "logchefql" ? "logchefql" : getNativeQueryLanguageForSource(source))
+    : input.query_language;
+  const explicitEditorMode = input.active_mode
+    ? (input.active_mode === "logchefql" ? "builder" : "native")
+    : input.editor_mode;
 
   let queryLanguage: QueryLanguage;
   if (explicitLanguage === "logchefql" || explicitLanguage === "clickhouse-sql" || explicitLanguage === "logsql") {

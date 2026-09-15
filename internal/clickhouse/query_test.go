@@ -38,6 +38,31 @@ func TestScanRowMapJSON(t *testing.T) {
 	}
 }
 
+func TestNormalizeResultValueLosslessJSON(t *testing.T) {
+	value := map[string]any{
+		"safe":          int64(9007199254740991),
+		"wide_signed":   int64(9007199254740993),
+		"wide_unsigned": uint64(9007199254740993),
+		"nested": []any{
+			map[string]any{"id": uint64(18446744073709551615)},
+			json.RawMessage(`{"id":9007199254740993,"safe":42,"fraction":1.25}`),
+		},
+	}
+
+	encoded, err := json.Marshal(normalizeResultValue(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"nested":[{"id":"18446744073709551615"},{"fraction":1.25,"id":"9007199254740993","safe":42}],"safe":9007199254740991,"wide_signed":"9007199254740993","wide_unsigned":"9007199254740993"}`
+	if string(encoded) != want {
+		t.Fatalf("normalized result = %s, want %s", encoded, want)
+	}
+
+	if got := normalizeResultValue(json.RawMessage(`{"n":9007199254740993}`)); got.(map[string]any)["n"] != "9007199254740993" {
+		t.Fatalf("raw JSON wide integer = %#v", got)
+	}
+}
+
 func TestResponseSizeAccountsForEscapes(t *testing.T) {
 	for _, value := range []string{"simple", "\"\\\n\x00<>&", "\u2028\u2029", "a\xffb", "é日志"} {
 		encoded, err := json.Marshal(value)
@@ -196,6 +221,69 @@ func TestScanRowMapJSONClickHouse(t *testing.T) {
 	}
 }
 
+func TestQueryLosslessWideIntegersClickHouse(t *testing.T) {
+	client, ctx := integrationClient(t)
+	query := `SELECT
+		toUInt64(9007199254740993) AS unsigned_value,
+		toInt128('170141183460469231731687303715884105727') AS signed_value,
+		toDecimal64('123456789012345.67', 2) AS decimal_value,
+		[toUInt64(9007199254740993), toUInt64(42)] AS array_value,
+		map('wide', toUInt64(9007199254740993), 'safe', toUInt64(42)) AS map_value`
+
+	result, err := client.Query(ctx, query)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(result.Logs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `[{"array_value":["9007199254740993",42],"decimal_value":"123456789012345.67","map_value":{"safe":42,"wide":"9007199254740993"},"signed_value":"170141183460469231731687303715884105727","unsigned_value":"9007199254740993"}]`
+	if string(encoded) != want {
+		t.Fatalf("lossless result = %s, want %s", encoded, want)
+	}
+
+	writer := &testRowWriter{}
+	if _, err := client.QueryStream(ctx, query, QueryOptions{}, writer); err != nil {
+		t.Fatal(err)
+	}
+	if !writer.finished || !reflect.DeepEqual(result.Logs, writer.rows) {
+		t.Fatalf("stream differs from buffered response: %+v", writer)
+	}
+
+	t.Run("native JSON", func(t *testing.T) {
+		version, err := client.connection().ServerVersion()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version.Version.Major < 25 || version.Version.Major == 25 && version.Version.Minor < 3 {
+			t.Skip("native JSON requires ClickHouse 25.3 or newer")
+		}
+
+		query := `SELECT CAST('{"id":9007199254740993,"safe":42}' AS JSON) AS native_json`
+		result, err := client.Query(ctx, query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		encoded, err := json.Marshal(result.Logs)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := `[{"native_json":{"id":"9007199254740993","safe":42}}]`
+		if string(encoded) != want {
+			t.Fatalf("native JSON result = %s, want %s", encoded, want)
+		}
+
+		writer := &testRowWriter{}
+		if _, err := client.QueryStream(ctx, query, QueryOptions{}, writer); err != nil {
+			t.Fatal(err)
+		}
+		if !writer.finished || !reflect.DeepEqual(result.Logs, writer.rows) {
+			t.Fatalf("native JSON stream differs from buffered response: %+v", writer)
+		}
+	})
+}
+
 func TestScanRowMapCompatibility(t *testing.T) {
 	client, ctx := integrationClient(t)
 	queries := []struct{ sql, want string }{
@@ -207,7 +295,7 @@ func TestScanRowMapCompatibility(t *testing.T) {
 		{`SELECT map('one', 1, 'two', 2) AS value`, `{"value":{"one":1,"two":2}}`},
 		{`SELECT CAST(('name', 42), 'Tuple(name String, count UInt32)') AS value`, `{"value":{"count":42,"name":"name"}}`},
 		{`SELECT toDecimal64('123.45', 2) AS value`, `{"value":"123.45"}`},
-		{`SELECT toUInt64(18446744073709551615) AS value`, `{"value":18446744073709551615}`},
+		{`SELECT toUInt64(18446744073709551615) AS value`, `{"value":"18446744073709551615"}`},
 		{`SELECT toDateTime64('2026-09-09 17:08:36.237280221',9,'Asia/Kolkata') AS value`, `{"value":"2026-09-09T17:08:36.237280221+05:30"}`},
 		{`SELECT arrayJoin(CAST([true,NULL,false,NULL], 'Array(Nullable(Bool))')) AS value`, `[{"value":true},{"value":null},{"value":false},{"value":null}]`},
 		{`SELECT arrayJoin([toNullable(toUUID('00000000-0000-0000-0000-000000000001')),NULL]) AS value`, `[{"value":"00000000-0000-0000-0000-000000000001"},{"value":null}]`},
@@ -216,7 +304,7 @@ func TestScanRowMapCompatibility(t *testing.T) {
 		{`SELECT CAST([1,2,3], 'Array(UInt8)') AS value`, `{"value":[1,2,3]}`},
 		{`SELECT CAST([[1,2],[3]], 'Array(Array(UInt8))') AS value`, `{"value":[[1,2],[3]]}`},
 		{`SELECT [nan, inf, -inf, 1.] AS value`, `{"value":[null,null,null,1]}`},
-		{`SELECT toInt128('170141183460469231731687303715884105727') AS value`, `{"value":170141183460469231731687303715884105727}`},
+		{`SELECT toInt128('170141183460469231731687303715884105727') AS value`, `{"value":"170141183460469231731687303715884105727"}`},
 	}
 	for _, query := range queries {
 		t.Run(query.sql, func(t *testing.T) {

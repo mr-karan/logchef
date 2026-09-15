@@ -149,13 +149,14 @@ type LogQueryResult struct {
 
 // LogContextRequest represents a request to get temporal context around a log
 type LogContextRequest struct {
-	SourceID        SourceID `json:"source_id"`
-	Timestamp       int64    `json:"timestamp"`        // Target timestamp in milliseconds
-	BeforeLimit     int      `json:"before_limit"`     // Optional, defaults to 10
-	AfterLimit      int      `json:"after_limit"`      // Optional, defaults to 10
-	BeforeOffset    int      `json:"before_offset"`    // Offset for before query (for pagination)
-	AfterOffset     int      `json:"after_offset"`     // Offset for after query (for pagination)
-	ExcludeBoundary bool     `json:"exclude_boundary"` // When true, excludes logs at exact timestamp (for pagination)
+	SourceID         SourceID `json:"source_id"`
+	Timestamp        int64    `json:"timestamp"`                   // Legacy target timestamp in milliseconds
+	TimestampRFC3339 string   `json:"timestamp_rfc3339,omitempty"` // Optional target timestamp with sub-millisecond precision
+	BeforeLimit      int      `json:"before_limit"`                // Optional, defaults to 10
+	AfterLimit       int      `json:"after_limit"`                 // Optional, defaults to 10
+	BeforeOffset     int      `json:"before_offset"`               // Offset for before query (for pagination)
+	AfterOffset      int      `json:"after_offset"`                // Offset for after query (for pagination)
+	ExcludeBoundary  bool     `json:"exclude_boundary"`            // When true, excludes logs at exact timestamp (for pagination)
 }
 
 // LogContextResponse represents temporal context query results

@@ -3,7 +3,7 @@
 LogChef uses the native `clickhouse-go` API. The driver is pinned to v2.48.0.
 Upstream's supported server range starts at 25.8. LogChef also tests its query
 paths against 23.7.4.5 and 24.1.2.5 for existing installations. These tests cover
-LogChef behavior; they do not extend upstream's support policy.
+LogChef behavior. They do not extend upstream's support policy.
 
 ## Result values
 
@@ -19,7 +19,7 @@ Both buffered queries and streaming queries use the same result normalization:
 - NaN and infinite floats become null, matching ClickHouse's default JSON
   output policy. Decimal values retain the driver's string representation.
 - Maps become JSON objects with string keys. Integer values retain their Go
-  precision during encoding; browser consumers still have JavaScript's numeric
+  precision during encoding. Browser consumers still have JavaScript's numeric
   precision limits.
 
 Scan targets are allocated after the first data block is decoded. JSON's scan
@@ -55,6 +55,46 @@ row limits. Reconnecting clears the cached capability result.
   the parser cannot understand returns a histogram error.
 - Distributed sources retain their declared columns and comments. Local table
   inspection supplies sorting metadata and detects cyclic references.
+- Dashboard cache execution errors return without repeating the query. A
+  ClickHouse cache-buffer overflow can fall back to uncached streaming.
+
+## Query statistics and schema reuse
+
+Buffered and streaming query responses collect scanned rows and bytes from
+ClickHouse progress packets. `rows_returned` counts the result rows separately.
+An aggregate can return one row after scanning many rows. An empty result can
+also report scan work.
+
+Canceled or truncated queries report only progress received before cancellation.
+The driver may not deliver a final progress packet. Zero counters therefore do
+not distinguish an empty scan from unavailable progress. JSON capability probes
+do not contribute to the result query's scan statistics.
+Counters saturate at the platform's maximum integer instead of wrapping on overflow.
+
+LogChef owns the progress callback for result queries. Other driver callbacks
+and query IDs remain available. Execution metrics count each query once across
+buffered, streaming, and DDL paths.
+
+LogchefQL compilation reuses the source inspection cache when column metadata
+is missing. The cache expires after one minute and checks the source revision.
+Concurrent requests share a cache fill. Compilation uses a source copy rather
+than changing shared source columns. If inspection fails, compilation continues
+without schema metadata.
+
+## Histogram limits
+
+Histogram execution shares preview concurrency limits. A shared dashboard cache
+fill uses one execution slot. Cache hits do not need an execution slot.
+
+ClickHouse and VictoriaLogs reject results with more than 5,000 distinct time
+buckets or an approximate response size above 16 MiB. VictoriaLogs also limits
+the raw response body to 16 MiB before decoding it. Grouped results retain the
+top ten series plus Other, within the same bucket and response budgets.
+
+An oversized histogram returns a validation error with guidance. It does not
+return partial counts or change the requested interval. The bucket budget
+counts returned buckets, not empty intervals in a sparse time range. Queries
+with time filters inside SQL can still omit a separate request time range.
 
 ## Running the tests
 

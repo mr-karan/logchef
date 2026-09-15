@@ -59,7 +59,8 @@ type AlertQueryRequest struct {
 
 // LogContextRequest asks for logs surrounding a specific timestamp.
 type LogContextRequest struct {
-	TargetTimestamp int64 // Unix timestamp in milliseconds
+	TargetTimestamp int64      // Unix timestamp in milliseconds
+	TargetTime      *time.Time // Optional precise target time; takes precedence over TargetTimestamp
 	BeforeLimit     int
 	AfterLimit      int
 	BeforeOffset    int

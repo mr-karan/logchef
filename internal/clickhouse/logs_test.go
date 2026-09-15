@@ -1,6 +1,8 @@
 package clickhouse
 
 import (
+	"context"
+	"fmt"
 	"testing"
 	"time"
 )
@@ -136,6 +138,75 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 	}
 }
 
+func TestGetSurroundingLogsDateTime64Nanoseconds(t *testing.T) {
+	client, ctx := integrationClient(t)
+	conn := client.connection()
+	table := fmt.Sprintf("log_context_test_%d", time.Now().UnixNano())
+	if err := conn.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (ts DateTime64(9, 'UTC'), msg String) ENGINE=MergeTree ORDER BY (ts, msg)", table)); err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Exec(context.Background(), "DROP TABLE "+table)
+
+	target := time.Date(2026, 9, 15, 12, 0, 0, 123000000, time.UTC)
+	rows := []struct {
+		ts  time.Time
+		msg string
+	}{
+		{target.Add(-time.Nanosecond), "before-ns"},
+		{target, "target-a"},
+		{target, "target-b"},
+		{target.Add(time.Nanosecond), "after-ns"},
+	}
+	for _, row := range rows {
+		query := fmt.Sprintf("INSERT INTO %s (ts, msg) VALUES (toDateTime64('%s', 9, 'UTC'), '%s')", table, row.ts.UTC().Format("2006-01-02 15:04:05.000000000"), row.msg)
+		if err := conn.Exec(ctx, query); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := client.GetSurroundingLogs(ctx, "default."+table, "ts", LogContextParams{
+		TargetTime:  target,
+		BeforeLimit: 10,
+		AfterLimit:  10,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.BeforeLogs) != 3 || result.BeforeLogs[0]["msg"] != "before-ns" || result.BeforeLogs[1]["msg"] != "target-a" || result.BeforeLogs[2]["msg"] != "target-b" {
+		t.Fatalf("before logs = %+v, want before plus both equal target rows", result.BeforeLogs)
+	}
+	if len(result.AfterLogs) != 1 || result.AfterLogs[0]["msg"] != "after-ns" {
+		t.Fatalf("after logs = %+v, want after-ns only", result.AfterLogs)
+	}
+
+	excluded, err := client.GetSurroundingLogs(ctx, "default."+table, "ts", LogContextParams{
+		TargetTime:      target,
+		BeforeLimit:     10,
+		AfterLimit:      10,
+		ExcludeBoundary: true,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(excluded.BeforeLogs) != 1 || excluded.BeforeLogs[0]["msg"] != "before-ns" {
+		t.Fatalf("exclusive before logs = %+v, want before-ns only", excluded.BeforeLogs)
+	}
+}
+
+func TestContextTimestampFormattingAndIdentifierQuoting(t *testing.T) {
+	t.Parallel()
+	target := time.Date(2026, 9, 15, 12, 0, 0, 123999999, time.FixedZone("IST", 19800))
+	if got, want := formatContextTimestamp(target), "2026-09-15 06:30:00.123999999"; got != want {
+		t.Fatalf("formatContextTimestamp = %q, want %q", got, want)
+	}
+	if got, want := quoteTableName("default.logs"), "`default`.`logs`"; got != want {
+		t.Fatalf("quoteTableName = %q, want %q", got, want)
+	}
+	if got, want := quoteIdentifier("event`time"), "`event``time`"; got != want {
+		t.Fatalf("quoteIdentifier = %q, want %q", got, want)
+	}
+}
+
 // TestRemoveLimitClause tests the QueryBuilder's RemoveLimitClause function
 func TestRemoveLimitClause(t *testing.T) {
 	tests := []struct {
@@ -173,6 +244,26 @@ func TestRemoveLimitClause(t *testing.T) {
 			name:  "LIMIT with newline",
 			query: "SELECT * FROM logs\nLIMIT 100",
 			want:  "SELECT * FROM logs",
+		},
+		{
+			name:  "preserves placeholder text in string literal",
+			query: "SELECT '___ESCAPED_QUOTE___' AS value FROM logs LIMIT 100",
+			want:  "SELECT '___ESCAPED_QUOTE___' AS value FROM logs",
+		},
+		{
+			name:  "preserves escaped quote in string literal",
+			query: "SELECT 'it''s' AS value FROM logs LIMIT 100",
+			want:  "SELECT 'it''s' AS value FROM logs",
+		},
+		{
+			name:  "preserves empty string literal",
+			query: "SELECT '' AS value FROM logs LIMIT 100",
+			want:  "SELECT '' AS value FROM logs",
+		},
+		{
+			name:  "preserves placeholder text in quoted identifier",
+			query: "SELECT `___ESCAPED_QUOTE___` FROM logs LIMIT 100",
+			want:  "SELECT `___ESCAPED_QUOTE___` FROM logs",
 		},
 		{
 			name:    "empty query returns error",

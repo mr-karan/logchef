@@ -951,8 +951,12 @@ func (p *ClickHouseProvider) GetLogContext(ctx context.Context, source *models.S
 		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
+	targetTime := time.UnixMilli(req.TargetTimestamp)
+	if req.TargetTime != nil {
+		targetTime = req.TargetTime.UTC()
+	}
 	result, err := client.GetSurroundingLogs(ctx, source.GetFullTableName(), source.MetaTSField, clickhouse.LogContextParams{
-		TargetTime:      time.UnixMilli(req.TargetTimestamp),
+		TargetTime:      targetTime,
 		BeforeLimit:     req.BeforeLimit,
 		AfterLimit:      req.AfterLimit,
 		BeforeOffset:    req.BeforeOffset,
@@ -994,21 +998,12 @@ func buildLogchefQLSchema(source *models.Source) *logchefql.Schema {
 // When a complete time window is supplied it returns the full SELECT ... WHERE
 // ... query with the time range baked in; otherwise Query and FilterOnly both
 // carry the WHERE-clause-only SQL.
-func (p *ClickHouseProvider) CompileLogchefQL(ctx context.Context, source *models.Source, req LogchefQLCompileRequest) (*CompiledLogchefQL, error) {
+func (p *ClickHouseProvider) CompileLogchefQL(_ context.Context, source *models.Source, req LogchefQLCompileRequest) (*CompiledLogchefQL, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
 	}
 
-	// Schema-aware SQL generation needs column types. The source resolved by
-	// the service does not carry populated columns, so fetch the schema on
-	// demand when it's missing. This is best-effort: a nil schema still yields a
-	// valid (if less type-aware) translation, matching the behaviour when a
-	// source is disconnected.
-	if len(source.Columns) == 0 {
-		if columns, err := p.GetSourceSchema(ctx, source); err == nil {
-			source.Columns = columns
-		}
-	}
+	// The service resolves cached column types before translation.
 	schema := buildLogchefQLSchema(source)
 
 	translateResult := logchefql.Translate(req.Query, schema)
@@ -1032,7 +1027,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(ctx context.Context, source *model
 	// Build the full executable SQL (with time range) only when the caller
 	// supplied a complete time window.
 	if req.StartTime != "" && req.EndTime != "" && req.Timezone != "" {
-		fullSQL, err := logchefql.BuildFullQuery(logchefql.QueryBuildParams{
+		fullSQL, err := logchefql.BuildFullQueryFromTranslation(logchefql.QueryBuildParams{
 			LogchefQL:      req.Query,
 			Schema:         schema,
 			TableName:      source.GetFullTableName(),
@@ -1041,7 +1036,7 @@ func (p *ClickHouseProvider) CompileLogchefQL(ctx context.Context, source *model
 			EndTime:        req.EndTime,
 			Timezone:       req.Timezone,
 			Limit:          req.Limit,
-		})
+		}, translateResult)
 		if err != nil {
 			return compiled, err
 		}

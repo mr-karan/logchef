@@ -4,14 +4,17 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -103,13 +106,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	timezone := c.Query("timezone", "UTC")
 
 	// Parse optional limit query parameter (default 10, max 100)
-	limit := c.QueryInt("limit", 10)
-	if limit <= 0 {
-		limit = 10
-	}
-	if limit > 100 {
-		limit = 100
-	}
+	limit := fieldValuesLimit(c.QueryInt("limit", 10))
 
 	filterQuery := c.Query("query", "")
 	queryLanguage := models.QueryLanguage(c.Query("query_language", ""))
@@ -118,6 +115,14 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 		if queryLanguage == "" && filterQuery != "" {
 			queryLanguage = models.QueryLanguageLogchefQL
 		}
+	}
+	variables, err := parseFieldValuesVariables(c.Query("variables", ""))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid variables format", models.ValidationErrorType)
+	}
+	filterQuery, err = prepareFieldValuesQuery(filterQuery, queryLanguage, variables)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid query variables: %v", err), models.ValidationErrorType)
 	}
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
@@ -213,6 +218,14 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 			queryLanguage = models.QueryLanguageLogchefQL
 		}
 	}
+	variables, err := parseFieldValuesVariables(c.Query("variables", ""))
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid variables format", models.ValidationErrorType)
+	}
+	filterQuery, err = prepareFieldValuesQuery(filterQuery, queryLanguage, variables)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid query variables: %v", err), models.ValidationErrorType)
+	}
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
@@ -251,4 +264,38 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
+}
+
+func fieldValuesLimit(limit int) int {
+	if limit <= 0 {
+		return 10
+	}
+	return min(limit, 100)
+}
+
+func parseFieldValuesVariables(raw string) ([]models.TemplateVariable, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var variables []models.TemplateVariable
+	if err := json.Unmarshal([]byte(raw), &variables); err != nil {
+		return nil, err
+	}
+	return variables, nil
+}
+
+func prepareFieldValuesQuery(query string, language models.QueryLanguage, variables []models.TemplateVariable) (string, error) {
+	if strings.TrimSpace(query) == "" || models.NormalizeQueryLanguage(language) != models.QueryLanguageLogchefQL {
+		return query, nil
+	}
+
+	converted := make([]template.Variable, len(variables))
+	for i, variable := range variables {
+		converted[i] = template.Variable{
+			Name:  variable.Name,
+			Type:  template.VariableType(variable.Type),
+			Value: variable.Value,
+		}
+	}
+	return template.SubstituteLogchefQLVariables(query, converted)
 }

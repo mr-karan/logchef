@@ -154,13 +154,33 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 		return nil, err
 	}
 
-	result, err := c.QueryWithTimeout(ctx, query, params.QueryTimeout)
+	maxRows := models.MaxHistogramBuckets
+	if params.GroupBy != "" {
+		maxRows *= defaultHistogramSeriesLimit + 1 // top series plus Other
+	}
+	result, err := c.QueryWithOptions(ctx, query, QueryOptions{
+		TimeoutSeconds:   params.QueryTimeout,
+		MaxRows:          maxRows,
+		MaxResponseBytes: models.MaxHistogramResponseBytes,
+	})
 	if err != nil {
 		c.logger.Error("failed to execute histogram query", "error", err, "table", tableName)
 		return nil, fmt.Errorf("failed to execute histogram query: %w", err)
 	}
+	if result.Stats.Truncated {
+		return nil, models.ErrHistogramBudgetExceeded
+	}
 
 	results := c.parseHistogramResults(result, params.GroupBy != "")
+	// Grouped results can contain fewer than eleven rows per bucket. The row
+	// bound alone cannot enforce the distinct time bucket budget for sparse data.
+	buckets := make(map[time.Time]struct{}, min(len(results), models.MaxHistogramBuckets))
+	for _, row := range results {
+		buckets[row.Bucket] = struct{}{}
+		if len(buckets) > models.MaxHistogramBuckets {
+			return nil, models.ErrHistogramBudgetExceeded
+		}
+	}
 
 	notice := ""
 	if params.GroupBy != "" {
@@ -475,8 +495,12 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 	var result LogContextResult
 	var totalExecutionMs float64
 
-	// Format the target timestamp for ClickHouse DateTime64
-	targetTimeStr := params.TargetTime.UTC().Format("2006-01-02 15:04:05.000")
+	quotedTableName := quoteTableName(tableName)
+	quotedTimestampField := quoteIdentifier(timestampField)
+	// Preserve the caller's full timestamp precision. Context rows can use
+	// DateTime64(9), so reducing this value to milliseconds can move a row
+	// across the before/after boundary.
+	targetLiteral := formatContextTimestamp(params.TargetTime)
 
 	// Determine comparison operator for before query
 	// Use < (exclusive) for pagination to avoid duplicates, <= (inclusive) for initial load
@@ -491,10 +515,10 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 	// (SELECT * doesn't include MATERIALIZED columns in ClickHouse)
 	beforeQuery := fmt.Sprintf(`
 		SELECT %s, * FROM %s
-		WHERE %s %s toDateTime64('%s', 3, 'UTC')
+		WHERE %s %s toDateTime64('%s', 9, 'UTC')
 		ORDER BY %s DESC
 		LIMIT %d OFFSET %d
-	`, timestampField, tableName, timestampField, beforeOp, targetTimeStr, timestampField, params.BeforeLimit, params.BeforeOffset)
+	`, quotedTimestampField, quotedTableName, quotedTimestampField, beforeOp, targetLiteral, quotedTimestampField, params.BeforeLimit, params.BeforeOffset)
 
 	beforeResult, err := c.QueryWithTimeout(ctx, beforeQuery, queryTimeout)
 	if err != nil {
@@ -510,10 +534,10 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 	// Note: Explicitly include timestamp field in SELECT to handle MATERIALIZED columns
 	afterQuery := fmt.Sprintf(`
 		SELECT %s, * FROM %s
-		WHERE %s > toDateTime64('%s', 3, 'UTC')
+		WHERE %s > toDateTime64('%s', 9, 'UTC')
 		ORDER BY %s ASC
 		LIMIT %d OFFSET %d
-	`, timestampField, tableName, timestampField, targetTimeStr, timestampField, params.AfterLimit, params.AfterOffset)
+	`, quotedTimestampField, quotedTableName, quotedTimestampField, targetLiteral, quotedTimestampField, params.AfterLimit, params.AfterOffset)
 
 	afterResult, err := c.QueryWithTimeout(ctx, afterQuery, queryTimeout)
 	if err != nil {
@@ -538,6 +562,19 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 		"total_execution_ms", totalExecutionMs)
 
 	return &result, nil
+}
+
+func formatContextTimestamp(target time.Time) string {
+	return target.UTC().Format("2006-01-02 15:04:05.000000000")
+}
+
+func quoteTableName(name string) string {
+	parts := strings.Split(strings.TrimSpace(name), ".")
+	quoted := make([]string, 0, len(parts))
+	for _, part := range parts {
+		quoted = append(quoted, quoteIdentifier(part))
+	}
+	return strings.Join(quoted, ".")
 }
 
 // reverseLogSlice reverses a slice of log maps in place and returns it.

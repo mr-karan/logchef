@@ -5,6 +5,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -141,6 +142,10 @@ func TestCacheBypassOversizedEntry(t *testing.T) {
 }
 
 func TestCacheSingleflightCollapse(t *testing.T) {
+	synctest.Test(t, testCacheSingleflightCollapse)
+}
+
+func testCacheSingleflightCollapse(t *testing.T) {
 	c := New(testConfig())
 	defer c.Close()
 
@@ -178,7 +183,7 @@ func TestCacheSingleflightCollapse(t *testing.T) {
 	}
 
 	close(start)
-	time.Sleep(75 * time.Millisecond) // let all callers coalesce onto the one leader
+	synctest.Wait() // all callers have joined the blocked fill
 	close(release)
 	wg.Wait()
 

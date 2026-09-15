@@ -375,7 +375,40 @@ func (s *Service) CompileLogchefQL(ctx context.Context, sourceID models.SourceID
 	if !ok {
 		return nil, ErrOperationNotSupported
 	}
+	// ClickHouse translation needs column types. Share inspection fills with the
+	// source page, including its revision checks and short schema freshness TTL.
+	// Keep enrichment local so concurrent compiles never mutate the source.
+	if provider.Type() == models.SourceTypeClickHouse && len(source.Columns) == 0 {
+		columns, cerr := s.compileColumns(ctx, source, provider)
+		if cerr != nil {
+			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: %w", cerr)
+		}
+		if len(columns) == 0 {
+			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: schema is unavailable")
+		}
+		sourceCopy := *source
+		sourceCopy.Columns = columns
+		source = &sourceCopy
+	}
 	return compiler.CompileLogchefQL(ctx, source, req)
+}
+
+// compileColumns resolves the column types LogchefQL translation needs from the
+// shared inspection cache. Compiling without types silently downgrades typed
+// comparisons to string ones, so unavailable metadata is an error.
+func (s *Service) compileColumns(ctx context.Context, source *models.Source, provider Provider) ([]models.ColumnInfo, error) {
+	inspection, err := s.inspectionForSource(ctx, source, provider, false)
+	if err != nil {
+		return nil, err
+	}
+	if inspection != nil && inspection.Schema != nil {
+		columns := make([]models.ColumnInfo, len(inspection.Schema.Fields))
+		for i, field := range inspection.Schema.Fields {
+			columns[i] = models.ColumnInfo{Name: field.Name, Type: field.Type}
+		}
+		return columns, nil
+	}
+	return nil, fmt.Errorf("schema is unavailable")
 }
 
 func (s *Service) EvaluateAlert(ctx context.Context, sourceID models.SourceID, req AlertQueryRequest) (*models.QueryResult, error) {

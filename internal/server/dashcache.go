@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -77,20 +76,29 @@ func writeCachedBytes(c *fiber.Ctx, data []byte, status cache.Status, age time.D
 // tryServeDashboardCache serves key from the dashboard cache, running fill under
 // singleflight on a miss. It returns handled=true when it has written a
 // response (HIT/MISS/COALESCED, or a served-but-uncached BYPASS), and
-// handled=false when the caller must fall back to its normal execution path
-// (the fill errored or exceeded the buffered entry budget); in that case the
-// BYPASS header is already set.
+// handled=false, err=nil only when caching is unavailable or the fill exceeded
+// the buffered entry budget. The caller may then use its normal execution path.
+// Other fill errors are returned unchanged for the caller's endpoint-specific
+// error response. Callers must check err before deciding to fall back.
 func (s *Server) tryServeDashboardCache(
 	c *fiber.Ctx,
 	key [32]byte,
 	effTTL, fillTimeout time.Duration,
 	fill func(ctx context.Context) ([]byte, error),
 ) (handled bool, err error) {
+	if s.dashCache == nil || !s.dashCache.Enabled() {
+		metrics.RecordDashboardCacheRequest("bypass")
+		c.Set("X-Logchef-Cache", string(cache.StatusBypass))
+		return false, nil
+	}
 	data, status, age, ferr := s.dashCache.GetOrFill(c.Context(), key, effTTL, fillTimeout, fill)
 	if ferr != nil {
 		metrics.RecordDashboardCacheRequest("bypass")
 		c.Set("X-Logchef-Cache", string(cache.StatusBypass))
-		return false, nil
+		if errors.Is(ferr, errCacheBudgetExceeded) {
+			return false, nil
+		}
+		return false, ferr
 	}
 	return true, writeCachedBytes(c, data, status, age)
 }
@@ -110,22 +118,87 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return b.buf.Write(p)
 }
 
+type dashboardStreamError struct {
+	err     error
+	body    []byte
+	queryID string
+}
+
+func (e *dashboardStreamError) Error() string { return e.err.Error() }
+func (e *dashboardStreamError) Unwrap() error { return e.err }
+
+// writeDashboardStreamError preserves the streaming response, including any
+// partial rows, without executing the failed query again.
+func writeDashboardStreamError(c *fiber.Ctx, err error) error {
+	var admissionErr *QueryAdmissionError
+	if errors.As(err, &admissionErr) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+	}
+	var streamErr *dashboardStreamError
+	if errors.As(err, &streamErr) {
+		c.Set("X-LogChef-Query-ID", streamErr.queryID)
+		c.Set(fiber.HeaderContentType, "application/json; charset=utf-8")
+		return c.Status(fiber.StatusOK).Send(streamErr.body)
+	}
+	// No complete envelope is available when the cache times out before the
+	// fill starts or encoding the execution error exceeds the buffer budget.
+	// Nothing has been committed to the response here, so a real status is
+	// still possible: status-driven consumers must not read a failure as
+	// success.
+	if errors.Is(err, context.Canceled) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+	}
+	return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.DatabaseErrorType)
+}
+
 // fillClickHouseStream returns a cache fill that buffers a ClickHouse query
 // result into the exact streamed JSON envelope (via queryStreamWriter, so cached
 // bytes are byte-identical to the streaming response), bounded by
 // max_entry_bytes. On overflow it returns errCacheBudgetExceeded and the caller
 // falls back to the unbuffered streaming path.
-func (s *Server) fillClickHouseStream(sourceID models.SourceID, params datasource.QueryRequest, cfg queryStreamConfig) func(ctx context.Context) ([]byte, error) {
-	return func(ctx context.Context) ([]byte, error) {
+func (s *Server) fillClickHouseStream(userID models.UserID, teamID models.TeamID, sourceID models.SourceID, params datasource.QueryRequest, cfg queryStreamConfig) func(ctx context.Context) ([]byte, error) {
+	return s.dashboardQueryFill(userID, teamID, sourceID, params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
 		cb := &cappedBuffer{limit: s.config.DashboardCache.MaxEntryBytes}
 		bw := bufio.NewWriter(cb)
-		writer := newQueryStreamWriter(bw, cfg, uuid.New().String())
+		writer := newQueryStreamWriter(bw, cfg, queryID)
 		if _, err := s.datasources.QueryLogsStream(ctx, sourceID, params, writer); err != nil {
-			return nil, err
+			if errors.Is(err, errCacheBudgetExceeded) {
+				return nil, err
+			}
+			if writeErr := writer.WriteError(err); writeErr != nil {
+				// An execution failure must not become a budget fallback merely
+				// because its error envelope also exceeds the buffer limit.
+				return nil, err
+			}
+			return nil, &dashboardStreamError{err: err, body: cb.buf.Bytes(), queryID: queryID}
 		}
 		if err := bw.Flush(); err != nil {
 			return nil, err
 		}
 		return cb.buf.Bytes(), nil
+	})
+}
+
+// dashboardQueryFill admits only actual singleflight work, not hits or waiters,
+// under the dashboard class so a panel refresh cannot starve the interactive
+// preview budget.
+func (s *Server) dashboardQueryFill(userID models.UserID, teamID models.TeamID, sourceID models.SourceID, query string, fill func(context.Context, string) ([]byte, error)) func(context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		maxPerUser, maxGlobal := s.admissionLimits(QueryClassDashboard)
+		queryID, err := queryTracker.StartQuery(QueryClassDashboard, userID, sourceID, teamID, query, cancel,
+			maxPerUser, maxGlobal)
+		if err != nil {
+			return nil, err
+		}
+		defer queryTracker.RemoveQuery(queryID)
+		return fill(ctx, queryID)
 	}
 }

@@ -65,21 +65,28 @@ const props = withDefaults(defineProps<{
 
 // Get time range and query from explore store
 const exploreStore = useExploreStore()
-const { convertVariables } = useVariables()
+const { getVariablesForApi } = useVariables()
 
 // Get the current datasource-native query for filtering field values.
 const getCurrentFilterQuery = (): string => {
   if (exploreStore.activeMode === 'logchefql') {
     const query = exploreStore.logchefqlCode || ''
-    return query ? convertVariables(query) : ''
+    return query
   }
 
   if (!supportsQueryLanguage(props.source, 'logchefql')) {
     const query = exploreStore.nativeQuery || ''
-    return query ? convertVariables(query) : ''
+    return query
   }
 
   return ''
+}
+
+const getCurrentFilterVariables = () => {
+  if (exploreStore.activeMode !== 'logchefql') {
+    return []
+  }
+  return getVariablesForApi()
 }
 
 const getCurrentFilterQueryLanguage = (): QueryLanguage | undefined => {
@@ -112,6 +119,7 @@ const loaderOptions = computed(() => ({
   getTimeRange: getTimeRangeForApi,
   getFilterQuery: getCurrentFilterQuery,
   getFilterQueryLanguage: getCurrentFilterQueryLanguage,
+  getFilterVariables: getCurrentFilterVariables,
   timezone: undefined,
   limit: 10
 }))

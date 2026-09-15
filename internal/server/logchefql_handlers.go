@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
-	"github.com/google/uuid"
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
@@ -20,11 +19,12 @@ import (
 
 // TranslateRequest represents the request body for LogchefQL translation
 type TranslateRequest struct {
-	Query     string `json:"query"`
-	StartTime string `json:"start_time"` // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
-	EndTime   string `json:"end_time"`   // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
-	Timezone  string `json:"timezone"`   // Optional. e.g., "UTC", "Asia/Kolkata" - required for full_sql
-	Limit     int    `json:"limit"`      // Optional. e.g., 100 - defaults to 100
+	Query     string                    `json:"query"`
+	StartTime string                    `json:"start_time"` // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
+	EndTime   string                    `json:"end_time"`   // Optional. Format: "2006-01-02 15:04:05" - required for full_sql
+	Timezone  string                    `json:"timezone"`   // Optional. e.g., "UTC", "Asia/Kolkata" - required for full_sql
+	Limit     int                       `json:"limit"`      // Optional. e.g., 100 - defaults to 100
+	Variables []models.TemplateVariable `json:"variables,omitempty"`
 }
 
 // TranslateResponse represents the response for LogchefQL translation
@@ -165,6 +165,10 @@ func parseTranslateRequest(c *fiber.Ctx) (sourceID models.SourceID, req Translat
 		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 		return 0, TranslateRequest{}, false, false
 	}
+	if err := substituteTranslateVariables(&req); err != nil {
+		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Variable substitution failed: "+err.Error(), models.ValidationErrorType)
+		return 0, TranslateRequest{}, false, false
+	}
 
 	// Apply defaults
 	if req.Limit <= 0 {
@@ -176,6 +180,27 @@ func parseTranslateRequest(c *fiber.Ctx) (sourceID models.SourceID, req Translat
 	hasTimeParams = req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 
 	return sourceID, req, hasTimeParams, true
+}
+
+func substituteTranslateVariables(req *TranslateRequest) error {
+	if req == nil {
+		return fmt.Errorf("translate request is required")
+	}
+
+	variables := make([]template.Variable, len(req.Variables))
+	for i, variable := range req.Variables {
+		variables[i] = template.Variable{
+			Name:  variable.Name,
+			Type:  template.VariableType(variable.Type),
+			Value: variable.Value,
+		}
+	}
+	query, err := template.SubstituteLogchefQLVariables(req.Query, variables)
+	if err != nil {
+		return err
+	}
+	req.Query = query
+	return nil
 }
 
 // validateTranslateSource fetches the source and confirms it supports
@@ -266,6 +291,26 @@ func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, response)
 }
 
+func (s *Server) handleLogchefQLQueryError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
+	var admissionErr *QueryAdmissionError
+	if errors.As(err, &admissionErr) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
+	}
+	// A cached fill surfaces the caller's own cancellation, which the explorer
+	// and dashboard both trigger on every re-query. That is not a failure.
+	if errors.Is(err, context.Canceled) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
+	}
+	if errors.Is(err, datasource.ErrOperationNotSupported) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
+	}
+	s.log.Error("failed to execute logchefql query", "error", err, "source_id", sourceID)
+	return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
+}
+
 // handleLogchefQLQuery executes a LogchefQL query directly.
 // This is an alternative to the existing logs/query endpoint that accepts raw SQL.
 // The backend handles the full translation and execution.
@@ -338,22 +383,17 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
 	}
 
-	// Substitute variables in the query if provided
-	query := req.Query
-	if len(req.Variables) > 0 {
-		vars := make([]template.Variable, len(req.Variables))
-		for i, v := range req.Variables {
-			vars[i] = template.Variable{
-				Name:  v.Name,
-				Type:  template.VariableType(v.Type),
-				Value: v.Value,
-			}
+	vars := make([]template.Variable, len(req.Variables))
+	for i, v := range req.Variables {
+		vars[i] = template.Variable{
+			Name:  v.Name,
+			Type:  template.VariableType(v.Type),
+			Value: v.Value,
 		}
-		substituted, err := template.SubstituteVariables(query, vars)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Variable substitution failed: "+err.Error(), models.ValidationErrorType)
-		}
-		query = substituted
+	}
+	query, err := template.SubstituteLogchefQLVariables(req.Query, vars)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Variable substitution failed: "+err.Error(), models.ValidationErrorType)
 	}
 
 	// Compile the query into the source's native language behind the
@@ -475,8 +515,11 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
 		if cacheable {
 			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
-			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(sourceID, queryParams, cfg)); handled {
+			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, queryParams, cfg)); handled {
 				return err
+			} else if err != nil {
+				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "logchefql")
+				return writeDashboardStreamError(c, err)
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, queryParams,
@@ -488,7 +531,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 	// panels from the cache when eligible.
 	if cacheable {
 		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
-		fill := func(ctx context.Context) ([]byte, error) {
+		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, queryParams.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
 			result, err := core.QueryLogs(ctx, s.datasources, sourceID, queryParams)
 			if err != nil {
 				return nil, err
@@ -497,7 +540,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 				"logs":                     result.Logs,
 				"columns":                  normalizeResultColumns(source, result),
 				"stats":                    result.Stats,
-				"query_id":                 uuid.New().String(),
+				"query_id":                 queryID,
 				"generated_sql":            executableQuery,
 				"generated_query":          executableQuery,
 				"generated_query_language": executableQueryLanguage,
@@ -506,9 +549,11 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 				"fields_used":              compiled.FieldsUsed,
 			}
 			return json.Marshal(NewSuccessResponse(resp))
-		}
+		})
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
+		} else if err != nil {
+			return s.handleLogchefQLQueryError(c, sourceID, err)
 		}
 	}
 
@@ -540,11 +585,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 	// Execute via core function
 	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, queryParams)
 	if err != nil {
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
-		}
-		s.log.Error("failed to execute logchefql query", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
+		return s.handleLogchefQLQueryError(c, sourceID, err)
 	}
 
 	// Log successful query execution

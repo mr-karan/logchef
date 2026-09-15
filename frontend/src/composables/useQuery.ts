@@ -8,6 +8,8 @@ import { getErrorMessage } from '@/api/types';
 import type { TimeRange } from '@/types/query';
 import { logchefqlApi } from '@/api/logchefql';
 import { useVariables } from "@/composables/useVariables";
+import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
+import { formatDateForSQL } from '@/utils/time-utils';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'native';
@@ -28,7 +30,7 @@ export function useQuery() {
   const exploreStore = useExploreStore();
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
-  const { convertVariables } = useVariables();
+  const { convertVariables, getVariablesForApi } = useVariables();
   // Local state that isn't persisted in the store
   const queryError = ref<string>('');
   const sqlWarnings = ref<string[]>([]);
@@ -146,27 +148,19 @@ export function useQuery() {
           try {
             // Format time range for backend
             const timeRange = exploreStore.timeRange as TimeRange;
-            const formatDateTime = (dt: any) => {
-              if (!dt) return '';
-              const year = dt.year;
-              const month = String(dt.month).padStart(2, '0');
-              const day = String(dt.day).padStart(2, '0');
-              const hour = String(dt.hour || 0).padStart(2, '0');
-              const minute = String(dt.minute || 0).padStart(2, '0');
-              const second = String(dt.second || 0).padStart(2, '0');
-              return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
-            };
 
-            // Replace variables with placeholders for translation (if query exists)
+            // Let the backend substitute typed variables exactly once.
             const query = logchefQuery.value?.trim() || '';
-            const queryWithPlaceholders = query.replace(/{{(\w+)}}/g, '"placeholder"');
+            const variables = getVariablesForApi();
+            const timezone = exploreStore.getTimezoneIdentifier();
 
             const response = await logchefqlApi.translate(currentTeamId, sourceId, {
-              query: queryWithPlaceholders,
-              start_time: formatDateTime(timeRange?.start),
-              end_time: formatDateTime(timeRange?.end),
-              timezone: exploreStore.getTimezoneIdentifier(),
-              limit: exploreStore.limit
+              query,
+              start_time: formatDateForSQL(timeRange?.start, false, timezone),
+              end_time: formatDateForSQL(timeRange?.end, false, timezone),
+              timezone,
+              limit: exploreStore.limit,
+              variables: variables.length > 0 ? variables : undefined,
             });
 
             if (response.data && !response.data.valid) {
@@ -284,7 +278,7 @@ export function useQuery() {
       // Validate query before execution
       if (mode === 'logchefql' && query.trim()) {
         // For LogchefQL validation, use placeholder values
-        const queryForValidation = query.replace(/{{(\w+)}}/g, '"placeholder"');
+        const queryForValidation = prepareLogchefQLTemplate(query);
         const validation = await validateLogchefQL(queryForValidation);
         if (!validation.valid) {
           queryError.value = validation.error || 'Invalid LogchefQL syntax';

@@ -122,6 +122,7 @@ export interface HistogramResponse {
 export interface LogContextRequest {
   source_id: number;
   timestamp: number;
+  timestamp_rfc3339?: string;
   before_limit?: number;
   after_limit?: number;
   before_offset?: number;

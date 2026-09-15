@@ -342,7 +342,7 @@ func TestConvertToAST(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected ExpressionNode, got %T", ast)
 		}
-		if v, ok := expr.Value.(float64); !ok || v != 42 {
+		if v, ok := expr.Value.(NumericLiteral); !ok || v != "42" {
 			t.Errorf("expected numeric value 42, got %v (%T)", expr.Value, expr.Value)
 		}
 	})

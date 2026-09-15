@@ -6,6 +6,10 @@ package logchefql
 // Operator represents comparison operators in LogchefQL
 type Operator string
 
+// NumericLiteral preserves the source spelling of a numeric query value.
+// Keeping it as text avoids rounding large integers through float64.
+type NumericLiteral string
+
 const (
 	OpEquals    Operator = "="
 	OpNotEquals Operator = "!="

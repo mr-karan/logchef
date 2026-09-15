@@ -1,5 +1,6 @@
 import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { sourcesApi, type FieldValuesResult } from '@/api/sources'
+import type { TemplateVariable } from '@/api/logchefql'
 import { useFieldValuesStore } from '@/stores/exploreFieldValues'
 import type { QueryLanguage } from '@/lib/queryMetadata'
 import {
@@ -30,6 +31,7 @@ export interface LoaderOptions {
   getTimeRange: () => { startTime: string; endTime: string } | null
   getFilterQuery: () => string
   getFilterQueryLanguage: () => QueryLanguage | undefined
+  getFilterVariables: () => TemplateVariable[]
   timezone?: string
   limit?: number
 }
@@ -127,6 +129,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
     // Snapshot query before async work to avoid TOCTOU race
     const filterQuery = opts.getFilterQuery()
     const filterQueryLanguage = opts.getFilterQueryLanguage()
+    const filterVariables = opts.getFilterVariables()
 
     // Set loading state immediately
     setFieldState(fieldName, { status: 'loading' })
@@ -149,6 +152,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
             opts.limit || 10,
             filterQueryLanguage,
             filterQuery,
+            filterVariables,
             controller.signal
           )
 

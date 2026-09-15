@@ -137,6 +137,8 @@ async function handleSourceChange(sourceId: number) {
 const {
   showSaveQueryModal,
   handleSaveQueryClick: openSaveModalFlow,
+  handleSaveAsNewQueryClick: openSaveAsNewModalFlow,
+  closeSaveQueryModal,
   handleSaveQuery: processSaveQueryFromComposable,
   loadSavedQuery,
   loadSourceQueries,
@@ -531,7 +533,7 @@ const handleSaveOrUpdateClick = async () => {
 };
 
 // Handle updating an existing query
-async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
+async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, done?: () => void) {
   try {
     const response = await savedQueriesStore.update(queryId, {
       name: formData.name,
@@ -557,6 +559,8 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData) {
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
+  } finally {
+    done?.();
   }
 }
 
@@ -1044,12 +1048,16 @@ const filteredSortKeys = computed(() => {
 // New handler for save-as-new request from QueryEditor
 const handleRequestSaveAsNew = () => {
   editQueryData.value = null; // Ensure modal opens in "new query" mode
-  openSaveModalFlow(); // Call the composable's function to open the modal
+  openSaveAsNewModalFlow(); // Keep the current route query from selecting update mode.
 };
 
 // Wrapper for the modal's @save event
-const onSaveQueryModalSave = (formData: SaveQueryFormData) => {
-  processSaveQueryFromComposable(formData);
+const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => void) => {
+  try {
+    await processSaveQueryFromComposable(formData);
+  } finally {
+    done?.();
+  }
 };
 
 // Handle saved query id changes from URL, especially when component is kept alive
@@ -1548,7 +1556,7 @@ onMounted(async () => {
         <!-- Save Query Modal -->
         <SaveQueryModal v-if="showSaveQueryModal" :is-open="showSaveQueryModal" :query-type="exploreStore.activeMode"
           :edit-data="editQueryData" :query-content="currentQueryContentJson"
-          @close="showSaveQueryModal = false" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
+          @close="closeSaveQueryModal" @save="onSaveQueryModalSave" @update="handleUpdateQuery" />
 
 
       </div>

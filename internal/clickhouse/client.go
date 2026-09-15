@@ -156,9 +156,8 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	// Apply a default hook for basic query logging.
 	client.AddQueryHook(NewLogQueryHook(logger, false)) // Verbose logging disabled by default.
 
-	// Add metrics hook if source is provided
+	// Execution metrics are recorded once by executeQueryWithHooks.
 	if opts.Source != nil {
-		client.AddQueryHook(metrics.NewMetricsQueryHook(opts.Source))
 		client.metrics = metrics.NewClickHouseMetrics(opts.Source)
 	}
 
@@ -172,18 +171,27 @@ func (c *Client) AddQueryHook(hook QueryHook) {
 
 // executeQueryWithHooks wraps the execution of a query function (`fn`)
 // with the registered BeforeQuery and AfterQuery hooks.
-func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn func(context.Context) error) error {
-	var err error
+func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn func(context.Context) error) (err error) {
 	start := time.Now()
+	result := &queryMetricsResult{rowsReturned: -1}
+	ctx = context.WithValue(ctx, queryMetricsResultKey{}, result)
+	defer func() {
+		if c.metrics != nil {
+			c.metrics.RecordQueryMetrics(metrics.DetermineQueryType(query), err == nil,
+				time.Since(start), result.rowsReturned, metrics.DetermineErrorType(err), isTimeoutError(err))
+		}
+	}()
 
 	// Execute BeforeQuery hooks.
 	for _, hook := range c.queryHooks {
-		ctx, err = hook.BeforeQuery(ctx, query)
+		hookCtx, hookErr := hook.BeforeQuery(ctx, query)
+		err = hookErr
 		if err != nil {
 			// If a hook fails, log and return the error immediately.
 			c.logger.Error("query hook BeforeQuery failed", "hook", fmt.Sprintf("%T", hook), "error", err)
 			return fmt.Errorf("BeforeQuery hook failed: %w", err)
 		}
+		ctx = hookCtx
 	}
 
 	// Execute the actual query function.
@@ -246,13 +254,16 @@ func (c *Client) queryRows(ctx context.Context, query string, args ...any) (driv
 	return c.conn.Query(ctx, query, args...)
 }
 
-func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions) (driver.Rows, error) {
+func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (driver.Rows, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	if c.closed {
 		return nil, net.ErrClosed
 	}
 	ctx = c.contextWithNativeJSON(ctx, opts)
+	// LogChef owns the progress callback for result queries. Other driver
+	// options and callbacks are inherited from the hook context.
+	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add))
 	return c.conn.Query(ctx, query)
 }
 

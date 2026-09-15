@@ -1,6 +1,7 @@
 import { apiClient } from "./apiUtils";
 import type { Team } from "./types";
 import type { QueryLanguage } from "@/lib/queryMetadata";
+import type { TemplateVariable } from "@/api/logchefql";
 
 // Optional per-source ClickHouse query settings applied to every query run
 // against the source. All keys are optional; keys left unset are omitted from
@@ -246,6 +247,7 @@ export const sourcesApi = {
     limit?: number,
     queryLanguage?: QueryLanguage,
     query?: string,      // Optional datasource-native query to filter field values
+    variables?: TemplateVariable[], // LogchefQL template values for query filtering
     signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/${encodeURIComponent(fieldName)}/values?` +
@@ -262,6 +264,9 @@ export const sourcesApi = {
     if (query) {
       url += `&query=${encodeURIComponent(query)}`;
     }
+    if (variables?.length) {
+      url += `&variables=${encodeURIComponent(JSON.stringify(variables))}`;
+    }
     return apiClient.get<FieldValuesResult>(url, { signal });
   },
   getAllFieldValues: (
@@ -273,6 +278,7 @@ export const sourcesApi = {
     limit?: number,
     queryLanguage?: QueryLanguage,
     query?: string,      // Optional datasource-native query to filter field values
+    variables?: TemplateVariable[], // LogchefQL template values for query filtering
     signal?: AbortSignal // Optional abort signal for request cancellation
   ) => {
     let url = `/teams/${teamId}/sources/${sourceId}/fields/values?` +
@@ -287,6 +293,9 @@ export const sourcesApi = {
     }
     if (query) {
       url += `&query=${encodeURIComponent(query)}`;
+    }
+    if (variables?.length) {
+      url += `&variables=${encodeURIComponent(JSON.stringify(variables))}`;
     }
     return apiClient.get<AllFieldValuesResult>(url, { signal });
   },

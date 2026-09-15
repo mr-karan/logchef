@@ -150,12 +150,24 @@ func (g *LogsQLGenerator) Generate(node ASTNode) (string, *ParseError) {
 func (g *LogsQLGenerator) visit(node ASTNode) (string, *ParseError) {
 	switch n := node.(type) {
 	case *ExpressionNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitExpression(n)
 	case *LogicalNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitLogical(n)
 	case *GroupNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitGroup(n)
 	case *QueryNode:
+		if n == nil {
+			return "", unsupportedASTNode(node)
+		}
 		return g.visitQuery(n)
 	default:
 		return "", &ParseError{Code: ErrUnsupportedFeature, Message: fmt.Sprintf("unsupported LogchefQL node type %T", node)}
@@ -178,7 +190,10 @@ func (g *LogsQLGenerator) visitQuery(node *QueryNode) (string, *ParseError) {
 		return whereQuery, nil
 	}
 
-	fields := g.buildFieldsPipe(node.Select)
+	fields, err := g.buildFieldsPipe(node.Select)
+	if err != nil {
+		return "", err
+	}
 	if fields == "" {
 		return whereQuery, nil
 	}
@@ -187,6 +202,9 @@ func (g *LogsQLGenerator) visitQuery(node *QueryNode) (string, *ParseError) {
 }
 
 func (g *LogsQLGenerator) visitLogical(node *LogicalNode) (string, *ParseError) {
+	if node.Operator != BoolAnd && node.Operator != BoolOr {
+		return "", &ParseError{Code: ErrUnsupportedFeature, Message: fmt.Sprintf("unsupported boolean operator %q", node.Operator)}
+	}
 	if len(node.Children) == 0 {
 		return "", nil
 	}
@@ -197,12 +215,15 @@ func (g *LogsQLGenerator) visitLogical(node *LogicalNode) (string, *ParseError) 
 
 	parts := make([]string, 0, len(node.Children))
 	for _, child := range node.Children {
+		if child == nil {
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "logical expression contains a nil child"}
+		}
 		part, err := g.visit(child)
 		if err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(part) == "" {
-			continue
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "logical expression contains an empty child"}
 		}
 		parts = append(parts, fmt.Sprintf("(%s)", part))
 	}
@@ -230,12 +251,15 @@ func (g *LogsQLGenerator) visitGroup(node *GroupNode) (string, *ParseError) {
 
 	parts := make([]string, 0, len(node.Children))
 	for _, child := range node.Children {
+		if child == nil {
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "group contains a nil child"}
+		}
 		part, err := g.visit(child)
 		if err != nil {
 			return "", err
 		}
 		if strings.TrimSpace(part) == "" {
-			continue
+			return "", &ParseError{Code: ErrUnsupportedFeature, Message: "group contains an empty child"}
 		}
 		parts = append(parts, part)
 	}
@@ -246,6 +270,9 @@ func (g *LogsQLGenerator) visitGroup(node *GroupNode) (string, *ParseError) {
 }
 
 func (g *LogsQLGenerator) visitExpression(node *ExpressionNode) (string, *ParseError) {
+	if nested, ok := node.Key.(NestedField); ok && (nested.Base == "" || len(nested.Path) == 0) {
+		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
+	}
 	fieldName := g.formatFieldName(getFieldName(node.Key))
 	if fieldName == "" {
 		return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
@@ -295,9 +322,9 @@ func (g *LogsQLGenerator) visitExpression(node *ExpressionNode) (string, *ParseE
 	}
 }
 
-func (g *LogsQLGenerator) buildFieldsPipe(selectFields []SelectField) string {
+func (g *LogsQLGenerator) buildFieldsPipe(selectFields []SelectField) (string, *ParseError) {
 	if len(selectFields) == 0 {
-		return ""
+		return "", nil
 	}
 
 	seen := make(map[string]struct{}, len(selectFields)+1)
@@ -318,10 +345,14 @@ func (g *LogsQLGenerator) buildFieldsPipe(selectFields []SelectField) string {
 	addField(g.formatFieldName(g.defaultTimestampField))
 
 	for _, selectField := range selectFields {
-		addField(g.formatFieldName(getFieldName(selectField.Field)))
+		fieldName := getFieldName(selectField.Field)
+		if fieldName == "" {
+			return "", &ParseError{Code: ErrInvalidIdentifier, Message: "field name is required"}
+		}
+		addField(g.formatFieldName(fieldName))
 	}
 
-	return strings.Join(fields, ", ")
+	return strings.Join(fields, ", "), nil
 }
 
 func (g *LogsQLGenerator) formatFieldName(fieldName string) string {
@@ -347,6 +378,8 @@ func (g *LogsQLGenerator) formatValue(value interface{}) (string, *ParseError) {
 			return "true", nil
 		}
 		return "false", nil
+	case NumericLiteral:
+		return string(v), nil
 	case int:
 		return strconv.Itoa(v), nil
 	case int32, int64, float32, float64:

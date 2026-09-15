@@ -32,7 +32,7 @@ import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import { storeToRefs } from "pinia";
-import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata } from '@/lib/queryMetadata';
+import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata, type ExploreMode } from '@/lib/queryMetadata';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -40,15 +40,15 @@ const props = defineProps<{
   editData?: any;    // For editing an existing query
   queryContent?: string;
   isEditMode?: boolean;
-  queryType?: string; // Add the queryType prop
+  queryType?: ExploreMode;
 }>();
 
 const route = useRoute();
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'save', data: any): void;
-  (e: 'update', queryId: string, data: any): void;
+  (e: 'save', data: any, done?: () => void): void;
+  (e: 'update', queryId: string, data: any, done?: () => void): void;
 }>();
 
 const savedQueriesStore = useSavedQueriesStore();
@@ -151,6 +151,7 @@ const isValid = computed(() => {
 
 const resolvedQueryMetadata = computed(() =>
   resolveSavedQueryMetadata({
+    active_mode: props.queryType,
     query_language: props.editData?.query_language || props.initialData?.query_language,
     editor_mode: props.editData?.editor_mode || props.initialData?.editor_mode,
     source_type: currentSourceDescriptor.value?.source_type,
@@ -510,12 +511,15 @@ function getTimestampFromDateValue(dateValue: any): number {
 async function handleSubmit(event: Event) {
   event.preventDefault();
 
-  if (!isValid.value) {
+  if (isSubmitting.value || !isValid.value) {
     return;
   }
 
   try {
     isSubmitting.value = true;
+    const done = () => {
+      isSubmitting.value = false;
+    };
 
     const queryMetadata = resolvedQueryMetadata.value;
 
@@ -539,10 +543,10 @@ async function handleSubmit(event: Event) {
 
       if (isEditing.value && queryId.value) {
         // We're updating an existing query
-        emit('update', queryId.value, payload);
+        emit('update', queryId.value, payload, done);
       } else {
         // We're creating a new query
-        emit('save', payload);
+        emit('save', payload, done);
       }
     } catch (contentError) {
       console.error('Error preparing query content:', contentError);
@@ -553,12 +557,11 @@ async function handleSubmit(event: Event) {
         duration: TOAST_DURATION.ERROR
       });
       emit('close');
+      isSubmitting.value = false;
       throw contentError;
     }
   } catch (error) {
     // The parent component will handle showing the error toast
-  } finally {
-    isSubmitting.value = false;
   }
 }
 

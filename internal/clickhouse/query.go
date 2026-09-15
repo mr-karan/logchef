@@ -4,26 +4,30 @@ package clickhouse
 // timeout classification.
 
 import (
+	"bytes"
 	"context"
 	"encoding"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"math"
 	"math/big"
 	"net"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode/utf8"
 
-	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/chcol"
 	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+	"github.com/shopspring/decimal"
 )
 
 // QueryOptions controls ClickHouse execution and LogChef-side result handling.
@@ -41,6 +45,49 @@ type RowStreamWriter interface {
 	Begin(columns []models.ColumnInfo) error
 	WriteRow(row map[string]any) error
 	Finish(stats models.QueryStats) error
+}
+
+type queryMetricsResultKey struct{}
+
+type queryMetricsResult struct {
+	rowsReturned int64
+}
+
+func recordRowsReturned(ctx context.Context, rows int) {
+	if result, ok := ctx.Value(queryMetricsResultKey{}).(*queryMetricsResult); ok {
+		result.rowsReturned = int64(rows)
+	}
+}
+
+// Progress packets contain increments, not cumulative totals. The driver may
+// deliver them from its reader goroutine while the caller processes result rows.
+// For canceled or truncated queries these are only the increments received.
+type queryProgress struct {
+	mu    sync.Mutex
+	rows  uint64
+	bytes uint64
+}
+
+func (p *queryProgress) add(delta *clickhouse.Progress) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.rows += min(delta.Rows, math.MaxUint64-p.rows)
+	p.bytes += min(delta.Bytes, math.MaxUint64-p.bytes)
+}
+
+func (p *queryProgress) apply(stats *models.QueryStats) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	// QueryStats uses int. Saturate oversized counters rather than wrapping
+	// them into negative or smaller scan totals.
+	stats.RowsRead = math.MaxInt
+	if p.rows <= math.MaxInt {
+		stats.RowsRead = int(p.rows)
+	}
+	stats.BytesRead = math.MaxInt
+	if p.bytes <= math.MaxInt {
+		stats.BytesRead = int(p.bytes)
+	}
 }
 
 // Query executes a SELECT query, processes the results, and applies query hooks.
@@ -61,13 +108,6 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	start := time.Now()          // Used for calculating total duration including hook overhead.
 	queryStartTime := time.Now() // Separate timer for actual DB execution
 	var queryDuration time.Duration
-
-	// Start query metrics tracking
-	var queryHelper *metrics.QueryMetricsHelper
-	if c.metrics != nil {
-		queryType := metrics.DetermineQueryType(query)
-		queryHelper = c.metrics.StartQuery(queryType, nil) // User context not available in client
-	}
 
 	// Ensure timeout is provided (should always be the case now)
 	if opts.TimeoutSeconds == nil {
@@ -98,6 +138,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 	var columnsInfo []models.ColumnInfo
 	var bytesReturned int
 	truncatedReason := ""
+	var progress queryProgress
 
 	// Execute the core query logic within the hook wrapper.
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
@@ -106,7 +147,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 
 		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
 
-		rows, queryErr = c.queryResultRows(hookCtx, query, opts)
+		rows, queryErr = c.queryResultRows(hookCtx, query, opts, &progress)
 		if queryErr != nil {
 			return queryErr
 		}
@@ -157,20 +198,9 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 		queryDuration = time.Since(queryStartTime) // Capture DB execution duration
 
 		// Check for errors during row iteration.
+		recordRowsReturned(hookCtx, len(resultData))
 		return rows.Err()
 	})
-
-	// Complete metrics tracking
-	if queryHelper != nil {
-		success := err == nil
-		rowsReturned := int64(-1)
-		if success && resultData != nil {
-			rowsReturned = int64(len(resultData))
-		}
-		errorType := metrics.DetermineErrorType(err)
-		timedOut := isTimeoutError(err)
-		queryHelper.Finish(success, rowsReturned, errorType, timedOut)
-	}
 
 	// Handle errors from either query execution or row processing.
 	if err != nil {
@@ -183,8 +213,6 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 		Columns:  columnsInfo,
 		Warnings: opts.Warnings,
 		Stats: models.QueryStats{
-			RowsRead:        len(resultData), // Use length of returned data as approximation
-			BytesRead:       0,               // Cannot reliably get BytesRead currently
 			RowsReturned:    len(resultData),
 			BytesReturned:   bytesReturned,
 			LimitApplied:    opts.LimitApplied,
@@ -193,6 +221,7 @@ func (c *Client) QueryWithOptions(ctx context.Context, query string, opts QueryO
 			ExecutionTimeMs: float64(queryDuration.Milliseconds()),
 		},
 	}
+	progress.apply(&queryResult.Stats)
 
 	return queryResult, nil
 }
@@ -218,10 +247,11 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 
 	var stats models.QueryStats
 	var rowsReturned int
+	var progress queryProgress
 	err := c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) error {
 		hookCtx = c.contextWithQuerySettings(hookCtx, opts)
 
-		rows, err := c.queryResultRows(hookCtx, query, opts)
+		rows, err := c.queryResultRows(hookCtx, query, opts, &progress)
 		if err != nil {
 			return err
 		}
@@ -257,7 +287,12 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 			return err
 		}
 
-		stats.RowsRead = rowsReturned
+		// Stop the reader before taking the final progress snapshot, including
+		// when the client-side row budget stopped iteration early.
+		cancel()
+		rows.Close()
+		progress.apply(&stats)
+		recordRowsReturned(hookCtx, rowsReturned)
 		stats.RowsReturned = rowsReturned
 		stats.LimitApplied = opts.LimitApplied
 		stats.ExecutionTimeMs = float64(time.Since(start).Milliseconds())
@@ -444,13 +479,59 @@ func scanRowMap(ptrs []reflect.Value, columnsInfo []models.ColumnInfo) map[strin
 	return rowMap
 }
 
+const maxSafeJSONInteger = int64(1<<53 - 1)
+
 // Normalize native driver values to JSON-compatible values before retaining rows.
+// Values outside JavaScript's exact integer range become decimal strings. This
+// keeps ordinary small counters numeric while preventing browsers from
+// rounding identifiers and other wide ClickHouse integers.
 func normalizeResultValue(value any) any {
 	switch v := value.(type) {
 	case jsonScanValue:
 		return normalizeResultValue(v.value)
-	case nil, string, bool, int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
+	case json.RawMessage:
+		return normalizeRawJSON(v)
+	case json.Number:
+		return normalizeJSONNumber(v)
+	case nil, string, bool:
 		return value
+	case int:
+		return normalizeSignedInteger(int64(v), value)
+	case int8:
+		return normalizeSignedInteger(int64(v), value)
+	case int16:
+		return normalizeSignedInteger(int64(v), value)
+	case int32:
+		return normalizeSignedInteger(int64(v), value)
+	case int64:
+		return normalizeSignedInteger(v, value)
+	case uint:
+		return normalizeUnsignedInteger(uint64(v), value)
+	case uint8:
+		return normalizeUnsignedInteger(uint64(v), value)
+	case uint16:
+		return normalizeUnsignedInteger(uint64(v), value)
+	case uint32:
+		return normalizeUnsignedInteger(uint64(v), value)
+	case uint64:
+		return normalizeUnsignedInteger(v, value)
+	case float64:
+		return normalizeFloat(v)
+	case float32:
+		return normalizeFloat(v)
+	}
+	return normalizeDriverValue(value)
+}
+
+func normalizeFloat[T float32 | float64](value T) any {
+	if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
+		return nil
+	}
+	return value
+}
+
+func normalizeDriverValue(value any) any {
+	switch v := value.(type) {
 	case chcol.JSON:
 		return normalizeResultValue(v.NestedMap())
 	case *chcol.JSON:
@@ -461,21 +542,99 @@ func normalizeResultValue(value any) any {
 	case chcol.Variant:
 		return normalizeResultValue(v.Any())
 	case big.Int:
-		return &v
-	case float64:
-		if math.IsNaN(v) || math.IsInf(v, 0) {
+		return normalizeBigInteger(&v)
+	case *big.Int:
+		return normalizeBigInteger(v)
+	case decimal.Decimal:
+		return v.String()
+	case *decimal.Decimal:
+		if v == nil {
 			return nil
 		}
-		return v
-	case float32:
-		if math.IsNaN(float64(v)) || math.IsInf(float64(v), 0) {
+		return v.String()
+	case decimal.NullDecimal:
+		if !v.Valid {
 			return nil
 		}
-		return v
+		return v.Decimal.String()
+	case *decimal.NullDecimal:
+		if v == nil || !v.Valid {
+			return nil
+		}
+		return v.Decimal.String()
 	case json.Marshaler, encoding.TextMarshaler:
 		return value
 	}
 	return normalizeReflectedValue(value)
+}
+
+func normalizeSignedInteger(value int64, original any) any {
+	if value < -maxSafeJSONInteger || value > maxSafeJSONInteger {
+		return strconv.FormatInt(value, 10)
+	}
+	return original
+}
+
+func normalizeUnsignedInteger(value uint64, original any) any {
+	if value > uint64(maxSafeJSONInteger) {
+		return strconv.FormatUint(value, 10)
+	}
+	return original
+}
+
+func normalizeBigInteger(value *big.Int) any {
+	if value == nil {
+		return nil
+	}
+	if value.IsInt64() {
+		return normalizeSignedInteger(value.Int64(), value.Int64())
+	}
+	return value.String()
+}
+
+// normalizeRawJSON decodes native JSON strings with UseNumber. The default
+// encoding/json decoder turns every number into float64, which would already
+// lose wide integers before the result reaches the response encoder.
+func normalizeRawJSON(raw json.RawMessage) any {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		return raw
+	}
+	var extra any
+	if err := decoder.Decode(&extra); err != io.EOF {
+		return raw
+	}
+	return normalizeResultValue(decoded)
+}
+
+func normalizeJSONNumber(value json.Number) any {
+	text := value.String()
+	if !strings.ContainsAny(text, ".eE") {
+		integer, ok := new(big.Int).SetString(text, 10)
+		if ok {
+			if integer.IsInt64() {
+				return normalizeSignedInteger(integer.Int64(), value)
+			}
+			return integer.String()
+		}
+	}
+
+	// Keep JSON decimals that round-trip to the same mathematical value when
+	// represented as a JavaScript Number. A decimal whose binary conversion
+	// changes its value is emitted as a string instead.
+	parsed, err := strconv.ParseFloat(text, 64)
+	if err != nil || math.IsInf(parsed, 0) || math.IsNaN(parsed) {
+		return text
+	}
+	original, originalOK := new(big.Rat).SetString(text)
+	formatted := strconv.FormatFloat(parsed, 'g', -1, 64)
+	converted, convertedOK := new(big.Rat).SetString(formatted)
+	if !originalOK || !convertedOK || original.Cmp(converted) != 0 {
+		return text
+	}
+	return value
 }
 
 func normalizeReflectedValue(value any) any {

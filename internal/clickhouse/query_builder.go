@@ -82,11 +82,10 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 // default/max limit policy. The default limit is used for SQL without LIMIT;
 // the max limit is only a ceiling.
 func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
-	// Handle escaped quotes
-	const placeholder = "___ESCAPED_QUOTE___"
-	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
-
-	parser := clickhouseparser.NewParser(processedSQL)
+	// The parser lexer accepts ClickHouse's doubled apostrophes and keeps them
+	// in StringLiteral.Literal. Do not preprocess raw SQL: the formatter emits
+	// literal contents verbatim, while comments are intentionally omitted.
+	parser := clickhouseparser.NewParser(rawSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
 		return QueryBuildResult{}, fmt.Errorf("invalid SQL syntax: %w", err)
@@ -130,7 +129,6 @@ func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLim
 	}
 
 	result.SQL = formatSQL(stmt)
-	result.SQL = strings.ReplaceAll(result.SQL, placeholder, "''")
 
 	return result, nil
 }
@@ -287,10 +285,7 @@ func legacyDefaultLimit(maxLimit int) int {
 
 // RemoveLimitClause parses the SQL and removes any LIMIT clause.
 func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
-	const placeholder = "___ESCAPED_QUOTE___"
-	processedSQL := strings.ReplaceAll(rawSQL, "''", placeholder)
-
-	parser := clickhouseparser.NewParser(processedSQL)
+	parser := clickhouseparser.NewParser(rawSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
 		return "", fmt.Errorf("invalid SQL syntax: %w", err)
@@ -312,7 +307,6 @@ func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
 	selectQuery.Limit = nil
 
 	result := formatSQL(stmt)
-	result = strings.ReplaceAll(result, placeholder, "''")
 
 	return result, nil
 }

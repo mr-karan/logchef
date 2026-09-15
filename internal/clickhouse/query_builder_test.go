@@ -225,3 +225,62 @@ func TestQueryBuilderDefaultLimitFallback(t *testing.T) {
 		t.Fatalf("BuildRawQuery() = %q, should contain %q", result, "LIMIT 1000")
 	}
 }
+
+func TestQueryBuilderPreservesSQLLiteralsAndIdentifiers(t *testing.T) {
+	qb := NewExtendedQueryBuilder("mydb.logs", 10000)
+
+	tests := []struct {
+		name       string
+		sql        string
+		wantParts  []string
+		wantAbsent []string
+	}{
+		{
+			name:      "placeholder text in a string literal",
+			sql:       "SELECT '___ESCAPED_QUOTE___' AS value FROM mydb.logs",
+			wantParts: []string{"'___ESCAPED_QUOTE___'"},
+		},
+		{
+			name:      "escaped quote in a string literal",
+			sql:       "SELECT 'it''s' AS value FROM mydb.logs",
+			wantParts: []string{"'it''s'"},
+		},
+		{
+			name:      "empty string literal",
+			sql:       "SELECT '' AS value FROM mydb.logs",
+			wantParts: []string{"''"},
+		},
+		{
+			name:      "placeholder text in a quoted identifier",
+			sql:       "SELECT `___ESCAPED_QUOTE___` FROM mydb.logs",
+			wantParts: []string{"`___ESCAPED_QUOTE___`"},
+		},
+		{
+			name:      "placeholder text in a comment is not parsed as SQL",
+			sql:       "SELECT 'value' AS value FROM mydb.logs -- ___ESCAPED_QUOTE___",
+			wantParts: []string{"'value'"},
+			// The formatter intentionally omits comments. It must not turn the
+			// comment marker text into a quote in the formatted SQL.
+			wantAbsent: []string{"'___ESCAPED_QUOTE___'"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := qb.BuildRawQuery(tt.sql, 0)
+			if err != nil {
+				t.Fatalf("BuildRawQuery() error = %v", err)
+			}
+			for _, part := range tt.wantParts {
+				if !strings.Contains(result, part) {
+					t.Errorf("BuildRawQuery() = %q, want substring %q", result, part)
+				}
+			}
+			for _, part := range tt.wantAbsent {
+				if strings.Contains(result, part) {
+					t.Errorf("BuildRawQuery() = %q, must not contain %q", result, part)
+				}
+			}
+		})
+	}
+}
