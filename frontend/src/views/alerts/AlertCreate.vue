@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Bell } from "lucide-vue-next";
@@ -14,6 +16,8 @@ import { useSourcesStore } from "@/stores/sources";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextSync } from "@/composables/useContextSync";
 import type { Alert, CreateAlertRequest } from "@/api/alerts";
+
+const { t } = useI18n();
 
 const router = useRouter();
 const route = useRoute();
@@ -101,31 +105,31 @@ function handleCancel() {
   <EmptyState
     v-if="!metaStore.alertsEnabled"
     :icon="Bell"
-    title="Alerting is disabled"
-    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+    :title="t('ui.alertingIsDisabled')"
+    :description="t('ui.alertingIsDisabledOnThisServerAskYourAdministratorToSetAlerts')"
   />
   <div v-else class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div class="space-y-1">
         <h1 class="text-2xl font-semibold tracking-tight">
-          {{ isDuplicating ? "Duplicate Alert" : "Create Alert" }}
+          {{ isDuplicating ? t('ui.duplicateAlert') : t('ui.createAlert2') }}
         </h1>
         <p class="text-muted-foreground">
           {{ isDuplicating
-            ? "Create a new alert based on an existing configuration."
-            : "Configure an alert rule for the currently selected team and source."
+            ? t('ui.createANewAlertBasedOnAnExistingConfiguration')
+            : t('ui.configureAnAlertRuleForTheCurrentlySelectedTeamAndSource')
           }}
         </p>
       </div>
-      <Button variant="outline" @click="handleCancel">Cancel</Button>
+      <Button variant='outline' @click="handleCancel">{{ t('ui.cancel') }}</Button>
     </div>
 
     <Card>
       <CardHeader class="flex flex-col gap-2 space-y-0">
         <div>
-          <CardTitle>Scope</CardTitle>
+          <CardTitle>{{ t('ui.scope') }}</CardTitle>
           <CardDescription>
-            Alerts run against the selected team and source. Adjust the context here if needed.
+            {{ t('ui.alertsRunAgainstTheSelectedTeamAndSourceAdjustTheContextHere') }}
           </CardDescription>
         </div>
         <TeamSourceSelector
@@ -154,7 +158,7 @@ function handleCancel() {
       </CardContent>
       <CardContent v-else>
         <p class="text-sm text-muted-foreground">
-          Select a team and source to create an alert.
+          {{ t('ui.selectATeamAndSourceToCreateAnAlert') }}
         </p>
       </CardContent>
     </Card>

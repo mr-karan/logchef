@@ -23,6 +23,10 @@ import {
 } from "@internationalized/date";
 import { cn } from "@/lib/utils";
 import { usePreferencesStore } from "@/stores/preferences";
+import { useI18n } from "vue-i18n";
+
+const { t, locale } = useI18n();
+
 
 interface Props {
   modelValue?: DateRange | null;
@@ -87,26 +91,32 @@ const DATE_TIME_WITH_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/;
 
 // Quick ranges organized by category
 const quickRanges = [
-  { label: "Last 5 minutes", value: "5m", duration: { minutes: 5 } },
-  { label: "Last 15 minutes", value: "15m", duration: { minutes: 15 } },
-  { label: "Last 30 minutes", value: "30m", duration: { minutes: 30 } },
-  { label: "Last 1 hour", value: "1h", duration: { hours: 1 } },
-  { label: "Last 3 hours", value: "3h", duration: { hours: 3 } },
-  { label: "Last 6 hours", value: "6h", duration: { hours: 6 } },
-  { label: "Last 12 hours", value: "12h", duration: { hours: 12 } },
-  { label: "Last 24 hours", value: "24h", duration: { hours: 24 } },
-  { label: "Last 2 days", value: "2d", duration: { days: 2 } },
-  { label: "Last 7 days", value: "7d", duration: { days: 7 } },
-  { label: "Last 30 days", value: "30d", duration: { days: 30 } },
-  { label: "Last 90 days", value: "90d", duration: { days: 90 } },
+  { value: "5m", duration: { minutes: 5 } },
+  { value: "15m", duration: { minutes: 15 } },
+  { value: "30m", duration: { minutes: 30 } },
+  { value: "1h", duration: { hours: 1 } },
+  { value: "3h", duration: { hours: 3 } },
+  { value: "6h", duration: { hours: 6 } },
+  { value: "12h", duration: { hours: 12 } },
+  { value: "24h", duration: { hours: 24 } },
+  { value: "2d", duration: { days: 2 } },
+  { value: "7d", duration: { days: 7 } },
+  { value: "30d", duration: { days: 30 } },
+  { value: "90d", duration: { days: 90 } },
 ] as const;
+
+function quickRangeLabel(range: typeof quickRanges[number]): string {
+  if ("minutes" in range.duration) return t("time.lastMinutes", { count: range.duration.minutes }, range.duration.minutes);
+  if ("hours" in range.duration) return t("time.lastHours", { count: range.duration.hours }, range.duration.hours);
+  return t("time.lastDays", { count: range.duration.days }, range.duration.days);
+}
 
 // Filtered quick ranges based on search
 const filteredQuickRanges = computed(() => {
   if (!quickRangeSearch.value) return quickRanges;
   const search = quickRangeSearch.value.toLowerCase();
   return quickRanges.filter(r => 
-    r.label.toLowerCase().includes(search) || 
+    quickRangeLabel(r).toLowerCase().includes(search) ||
     r.value.toLowerCase().includes(search)
   );
 });
@@ -328,11 +338,12 @@ function clearRecentRanges() {
 // Display text for trigger button
 const triggerDisplayText = computed(() => {
   if (selectedQuickRange.value) {
-    return selectedQuickRange.value;
+    const range = quickRanges.find(range => selectedQuickRange.value === `Last ${range.value}`);
+    return range ? quickRangeLabel(range) : selectedQuickRange.value;
   }
   
   if (!dateRange.value?.start || !dateRange.value?.end) {
-    return "Select time range";
+    return t("time.selectRange");
   }
   
   const start = toZoned(dateRange.value.start as CalendarDateTime, currentTimezoneId.value);
@@ -348,7 +359,7 @@ function openDatePicker() {
 // Get current timezone display
 const timezoneDisplay = computed(() => {
   if (timezonePreference.value === "local") {
-    return `Browser Time (${getLocalTimeZone()})`;
+    return t("time.browser", { zone: getLocalTimeZone() });
   }
   return "UTC";
 });
@@ -389,11 +400,11 @@ defineExpose({
         <div class="flex">
           <!-- Left Panel: Absolute time range -->
           <div class="w-[260px] p-4 border-r">
-            <h4 class="text-sm font-medium mb-3">Absolute time range</h4>
+            <h4 class="text-sm font-medium mb-3">{{ t('time.absolute') }}</h4>
             
             <!-- From input -->
             <div class="space-y-1.5 mb-3">
-              <label class="text-xs text-muted-foreground">From</label>
+              <label class="text-xs text-muted-foreground">{{ t('time.from') }}</label>
               <div class="relative">
                 <Input
                   v-model="draftState.from"
@@ -411,6 +422,7 @@ defineExpose({
                   </PopoverTrigger>
                   <PopoverContent class="w-auto p-0" side="right" align="start">
                     <Calendar
+                      :locale="locale"
                       class="rounded-md border"
                       :placeholder="todayDate"
                       @update:model-value="(date) => handleCalendarSelect('from', date)"
@@ -422,7 +434,7 @@ defineExpose({
             
             <!-- To input -->
             <div class="space-y-1.5 mb-4">
-              <label class="text-xs text-muted-foreground">To</label>
+              <label class="text-xs text-muted-foreground">{{ t('time.to') }}</label>
               <div class="relative">
                 <Input
                   v-model="draftState.to"
@@ -440,6 +452,7 @@ defineExpose({
                   </PopoverTrigger>
                   <PopoverContent class="w-auto p-0" side="right" align="start">
                     <Calendar
+                      :locale="locale"
                       class="rounded-md border"
                       :placeholder="todayDate"
                       @update:model-value="(date) => handleCalendarSelect('to', date)"
@@ -454,18 +467,18 @@ defineExpose({
               class="w-full h-8" 
               @click="applyAbsoluteRange"
             >
-              Apply time range
+              {{ t('time.apply') }}
             </Button>
             
             <!-- Recently used -->
             <div v-if="recentRanges.length > 0" class="mt-4 pt-4 border-t">
               <div class="flex items-center justify-between mb-2">
-                <span class="text-xs text-muted-foreground">Recently used</span>
+                <span class="text-xs text-muted-foreground">{{ t('time.recent') }}</span>
                 <button 
                   class="text-xs text-muted-foreground hover:text-foreground"
                   @click="clearRecentRanges"
                 >
-                  Clear
+                  {{ t('ui.clear') }}
                 </button>
               </div>
               <div class="space-y-1">
@@ -475,7 +488,7 @@ defineExpose({
                   class="w-full text-left text-xs p-1.5 hover:bg-muted rounded truncate"
                   @click="applyRecentRange(range)"
                 >
-                  {{ range.from }} to {{ range.to }}
+                  {{ t('time.range', { from: range.from, to: range.to }) }}
                 </button>
               </div>
             </div>
@@ -488,7 +501,7 @@ defineExpose({
                   class="text-xs text-primary hover:underline"
                   @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
                 >
-                  Change
+                  {{ t('time.change') }}
                 </button>
               </div>
             </div>
@@ -502,7 +515,7 @@ defineExpose({
               <Input
                 v-model="quickRangeSearch"
                 class="h-8 pl-8 text-sm"
-                placeholder="Search quick ranges"
+                :placeholder="t('time.searchRanges')"
               />
             </div>
             
@@ -519,11 +532,11 @@ defineExpose({
                 ]"
                 @click="applyQuickRange(range)"
               >
-                {{ range.label }}
+                {{ quickRangeLabel(range) }}
               </button>
               
               <div v-if="filteredQuickRanges.length === 0" class="text-sm text-muted-foreground text-center py-4">
-                No matching ranges
+                {{ t('time.noRanges') }}
               </div>
             </div>
           </div>
@@ -539,7 +552,7 @@ defineExpose({
       @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
       title="Click to toggle timezone"
     >
-      {{ timezonePreference === "local" ? "Local" : "UTC" }}
+      {{ timezonePreference === "local" ? t('ui.local') : "UTC" }}
     </Button>
   </div>
 </template>

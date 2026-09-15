@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
+
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
@@ -54,6 +57,8 @@ import { useMetaStore } from "@/stores/meta";
 import { useContextSync } from "@/composables/useContextSync";
 import type { Alert } from "@/api/alerts";
 
+const { t, locale } = useI18n();
+
 const router = useRouter();
 const route = useRoute();
 
@@ -97,16 +102,16 @@ const loadError = computed((): { message: string; operation?: string } | null =>
 
 const emptyStateMessage = computed(() => {
   if (!currentTeamId.value) {
-    return "Select a team to manage alerts.";
+    return t('ui.selectATeamToManageAlerts');
   }
   if (!currentSourceId.value) {
-    return "Select a source to view its alert rules.";
+    return t('ui.selectASourceToViewItsAlertRules');
   }
   if (isLoadingAlerts.value) {
     return "";
   }
   if (!alerts.value.length) {
-    return "No alerts yet. Create your first alert to receive notifications when log conditions are met.";
+    return t('ui.noAlertsYetCreateYourFirstAlertToReceiveNotificationsWhenLog');
   }
   return "";
 });
@@ -204,27 +209,28 @@ function formatThreshold(alert: Alert) {
 function formatDate(dateStr: string): string {
   const normalizedDateStr = dateStr.includes('T') || dateStr.includes('Z') || dateStr.includes('+') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
   const date = new Date(normalizedDateStr);
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return date.toLocaleDateString(locale.value, { month: "short", day: "numeric", year: "numeric" });
 }
 
 function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr || dateStr === "") return "Never";
+  if (!dateStr || dateStr === "") return t('ui.never');
   const normalizedDateStr = dateStr.includes('T') || dateStr.includes('Z') || dateStr.includes('+') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
   const date = new Date(normalizedDateStr);
-  if (isNaN(date.getTime())) return "Never";
+  if (isNaN(date.getTime())) return t('ui.never');
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
   
-  if (diffMs < 0) return "Just now";
+  if (diffMs < 0) return t('ui.justNow');
   
   const diffMins = Math.floor(diffMs / 60000);
   const diffHours = Math.floor(diffMs / 3600000);
   const diffDays = Math.floor(diffMs / 86400000);
 
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 30) return `${diffDays}d ago`;
+  if (diffMins < 1) return t('ui.justNow');
+  const relative = new Intl.RelativeTimeFormat(locale.value, { numeric: "auto" });
+  if (diffMins < 60) return relative.format(-diffMins, "minute");
+  if (diffHours < 24) return relative.format(-diffHours, "hour");
+  if (diffDays < 30) return relative.format(-diffDays, "day");
   return formatDate(dateStr);
 }
 
@@ -263,25 +269,25 @@ onMounted(async () => {
   <EmptyState
     v-if="!metaStore.alertsEnabled"
     :icon="Bell"
-    title="Alerting is disabled"
-    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+    :title="t('ui.alertingIsDisabled')"
+    :description="t('ui.alertingIsDisabledOnThisServerAskYourAdministratorToSetAlerts')"
   />
   <div v-else class="space-y-6">
     <div class="flex items-start justify-between gap-4">
       <div class="space-y-1">
-        <h1 class="text-2xl font-semibold tracking-tight">Alert Rules</h1>
+        <h1 class='text-2xl font-semibold tracking-tight'>{{ t('ui.alertRules') }}</h1>
         <p class="text-muted-foreground">
-          Monitor log activity and receive notifications when your thresholds are crossed.
+          {{ t('ui.monitorLogActivityAndReceiveNotificationsWhenYourThresholdsAreCrossed') }}
         </p>
       </div>
       <div class="flex items-center gap-2">
         <Button variant="outline" @click="refreshAlerts" :disabled="isLoadingAlerts">
           <RefreshCcw class="-ml-1 mr-2 h-4 w-4" />
-          Refresh
+          {{ t('ui.refresh') }}
         </Button>
         <Button @click="openCreateForm" :disabled="!currentTeamId || !currentSourceId">
           <Plus class="-ml-1 mr-2 h-4 w-4" />
-          New Alert
+          {{ t('ui.newAlert') }}
         </Button>
       </div>
     </div>
@@ -289,9 +295,9 @@ onMounted(async () => {
     <Card>
       <CardHeader class="flex items-start justify-between gap-4 space-y-0">
         <div>
-          <CardTitle>Scope</CardTitle>
+          <CardTitle>{{ t('ui.scope') }}</CardTitle>
           <CardDescription>
-            Alerts run against the selected team and source. Switch context from here.
+            {{ t('ui.alertsRunAgainstTheSelectedTeamAndSourceSwitchContextFromHere') }}
           </CardDescription>
         </div>
         <TeamSourceSelector
@@ -305,35 +311,35 @@ onMounted(async () => {
       </CardHeader>
       <CardContent>
         <div v-if="loadError" class="mb-4">
-          <ErrorAlert :error="loadError" title="Failed to load alerts" @retry="retryLoad" />
+          <ErrorAlert :error="loadError" :title="t('ui.failedToLoadAlerts')" @retry="retryLoad" />
         </div>
         <div v-if="emptyStateMessage && !isLoadingAlerts" class="rounded-lg border border-dashed py-12 text-center">
           <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
             <BellRing class="h-6 w-6" />
           </div>
-          <h3 class="mt-4 text-lg font-semibold">Alerts</h3>
+          <h3 class="mt-4 text-lg font-semibold">{{ t('ui.alerts') }}</h3>
           <p class="mt-1 text-sm text-muted-foreground">
             {{ emptyStateMessage }}
           </p>
       <Button v-if="currentTeamId && currentSourceId && !alerts.length" class="mt-4" @click="openCreateForm">
             <Plus class="-ml-1 mr-2 h-4 w-4" />
-            Create alert
+            {{ t('ui.createAlert') }}
           </Button>
         </div>
 
         <div v-else>
           <div v-if="isLoadingAlerts" class="py-8 text-center text-sm text-muted-foreground">
-            Loading alerts…
+            {{ t('ui.loadingAlerts') }}
           </div>
           <Table v-else>
             <TableHeader>
               <TableRow>
-                <TableHead class="w-12">Active</TableHead>
-                <TableHead>Alert</TableHead>
-                <TableHead>Condition</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Last Triggered</TableHead>
-                <TableHead class="w-24 text-right">Actions</TableHead>
+                <TableHead class="w-12">{{ t('ui.active') }}</TableHead>
+                <TableHead>{{ t('ui.alert') }}</TableHead>
+                <TableHead>{{ t('ui.condition') }}</TableHead>
+                <TableHead>{{ t('ui.status') }}</TableHead>
+                <TableHead>{{ t('ui.lastTriggered') }}</TableHead>
+                <TableHead class="w-24 text-right">{{ t('ui.actions') }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -343,7 +349,7 @@ onMounted(async () => {
                   <Switch 
                     :model-value="alert.is_active"
                     @update:model-value="toggleAlert(alert)"
-                    :title="alert.is_active ? 'Disable alert' : 'Enable alert'"
+                    :title="alert.is_active ? t('ui.disableAlert') : t('ui.enableAlert')"
                   />
                 </TableCell>
                 <!-- Alert Name & Description -->
@@ -357,7 +363,7 @@ onMounted(async () => {
                         {{ alert.name }}
                       </router-link>
                       <Badge :variant="mapSeverityVariant(alert.severity)" class="capitalize shrink-0 text-xs">
-                        {{ alert.severity }}
+                        {{ t(severityLabels[alert.severity]) }}
                       </Badge>
                     </div>
                     <p v-if="alert.description" class="text-sm text-muted-foreground line-clamp-1">
@@ -373,7 +379,7 @@ onMounted(async () => {
                     </div>
                     <div class="text-xs text-muted-foreground flex items-center gap-1">
                       <Clock3 class="h-3 w-3" />
-                      Every {{ formatFrequency(alert) }}
+                      {{ t('ui.every') }} {{ formatFrequency(alert) }}
                     </div>
                   </div>
                 </TableCell>
@@ -384,7 +390,7 @@ onMounted(async () => {
                       class="h-2 w-2 rounded-full shrink-0"
                       :class="alert.last_state === 'firing' ? 'bg-red-500 animate-pulse' : 'bg-green-500'"
                     />
-                    <span class="text-sm capitalize">{{ alert.last_state }}</span>
+                    <span class="text-sm">{{ t(alertStateLabels[alert.last_state]) }}</span>
                   </div>
                 </TableCell>
                 <!-- Last Triggered -->
@@ -398,10 +404,10 @@ onMounted(async () => {
                 <!-- Actions -->
                 <TableCell class="py-3 text-right">
                   <div class="inline-flex items-center gap-0.5">
-                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openEditForm(alert)" title="Edit">
+                    <Button variant='ghost' size="icon" class='h-8 w-8' @click="openEditForm(alert)" :title="t('ui.edit')">
                       <Pencil class="h-4 w-4" />
                     </Button>
-                    <Button variant="ghost" size="icon" class="h-8 w-8" @click="openHistory(alert)" title="History">
+                    <Button variant='ghost' size="icon" class='h-8 w-8' @click="openHistory(alert)" :title="t('ui.history')">
                       <History class="h-4 w-4" />
                     </Button>
                     <DropdownMenu>
@@ -413,12 +419,12 @@ onMounted(async () => {
                       <DropdownMenuContent align="end" class="w-40">
                         <DropdownMenuItem @click="duplicateAlert(alert)">
                           <Copy class="mr-2 h-4 w-4" />
-                          Duplicate
+                          {{ t('ui.duplicate') }}
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem class="text-destructive focus:text-destructive" @click="confirmDelete(alert)">
                           <Trash2 class="mr-2 h-4 w-4" />
-                          Delete
+                          {{ t('ui.delete') }}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
@@ -434,14 +440,14 @@ onMounted(async () => {
     <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete alert</AlertDialogTitle>
+          <AlertDialogTitle>{{ t('ui.deleteAlert3') }}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete the alert "{{ alertToDelete?.name }}"? This action cannot be undone.
+            {{ t('alerts.confirmDelete', { name: alertToDelete?.name ?? '' }) }}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel @click="cancelDelete">Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="handleDelete">Delete</AlertDialogAction>
+          <AlertDialogCancel @click="cancelDelete">{{ t('ui.cancel') }}</AlertDialogCancel>
+          <AlertDialogAction variant='destructive' @click="handleDelete">{{ t('ui.delete') }}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

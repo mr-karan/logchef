@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { escapeHtml } from "@/lib/html";
 import {
-  escapeHtml,
   sanitizeChartColor,
   resolveBarMode,
   shouldUseCrosshairYStacked,

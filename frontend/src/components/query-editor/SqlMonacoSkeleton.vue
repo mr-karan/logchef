@@ -1,8 +1,13 @@
+<script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+</script>
 <template>
   <div class="sql-editor-skeleton">
     <div class="sql-editor-skeleton__header">
       <div class="sql-editor-skeleton__spinner" />
-      <span>Loading SQL editor…</span>
+      <span>{{ t('ui.loadingSQLEditor') }}</span>
     </div>
     <div class="sql-editor-skeleton__lines">
       <div class="sql-editor-skeleton__line sql-editor-skeleton__line--long" />

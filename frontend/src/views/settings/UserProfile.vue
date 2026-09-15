@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, onMounted } from 'vue'
 import { PageHeader, PageSection, EmptyState, LoadingState } from '@/components/layout'
 import { Button } from '@/components/ui/button'
@@ -19,6 +21,8 @@ import { formatDate } from '@/utils/format'
 import { formatScopes, READ_ONLY_SCOPES, type TokenScope } from '@/lib/tokenScopes'
 import { getExpiryStatus, isTokenExpired } from '@/lib/tokenExpiry'
 
+const { t } = useI18n();
+
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const apiTokensStore = useAPITokensStore()
@@ -37,10 +41,10 @@ const showTokenDisplay = ref(false)
 const tokenToDelete = ref<{ id: number; name: string } | null>(null)
 
 const expiryOptions = [
-    { value: '7d', label: '7 days', hours: 7 * 24 },
-    { value: '30d', label: '30 days', hours: 30 * 24 },
-    { value: '90d', label: '90 days', hours: 90 * 24 },
-    { value: 'never', label: 'Never expires', hours: null }
+    { value: '7d', get label() { return t('settings.days', { count: 7 }); }, hours: 7 * 24 },
+    { value: '30d', get label() { return t('settings.days', { count: 30 }); }, hours: 30 * 24 },
+    { value: '90d', get label() { return t('settings.days', { count: 90 }); }, hours: 90 * 24 },
+    { value: 'never', get label() { return t('ui.neverExpires'); }, hours: null }
 ]
 
 onMounted(async () => {
@@ -78,8 +82,8 @@ const handleSubmit = async () => {
 const handleCreateToken = async () => {
     if (!newTokenName.value.trim()) {
         toast({
-            title: "Error",
-            description: "Please enter a token name",
+            get title() { return t('ui.error'); },
+            get description() { return t('ui.pleaseEnterATokenName'); },
             variant: "destructive"
         })
         return
@@ -125,8 +129,8 @@ const copyToClipboard = async (text: string) => {
         await navigator.clipboard.writeText(text)
     } catch (err) {
         toast({
-            title: "Error",
-            description: "Failed to copy to clipboard",
+            get title() { return t('ui.error'); },
+            get description() { return t('ui.failedToCopyToClipboard'); },
             variant: "destructive"
         })
     }
@@ -141,77 +145,77 @@ const closeTokenDisplay = () => {
 
 <template>
     <div class="space-y-6">
-        <PageHeader title="Profile" description="Manage your account information." />
+        <PageHeader :title="t('ui.profile')" :description="t('ui.manageYourAccountInformation')" />
 
-        <PageSection title="Account information" description="View your account details.">
+        <PageSection :title="t('ui.accountInformation')" :description="t('ui.viewYourAccountDetails')">
             <dl class="space-y-4 text-sm">
                 <div class="flex flex-col space-y-1">
-                    <dt class="text-muted-foreground">Email</dt>
+                    <dt class='text-muted-foreground'>{{ t('ui.email') }}</dt>
                     <dd class="font-medium">{{ authStore.user?.email }}</dd>
                 </div>
                 <div class="flex flex-col space-y-1">
-                    <dt class="text-muted-foreground">Role</dt>
+                    <dt class='text-muted-foreground'>{{ t('ui.role') }}</dt>
                     <dd class="font-medium capitalize">{{ authStore.user?.role }}</dd>
                 </div>
                 <div class="flex flex-col space-y-1">
-                    <dt class="text-muted-foreground">Last Login</dt>
+                    <dt class='text-muted-foreground'>{{ t('ui.lastLogin') }}</dt>
                     <dd class="font-medium">
-                        {{ authStore.user?.last_login_at ? formatDate(authStore.user.last_login_at) : 'Never' }}
+                        {{ authStore.user?.last_login_at ? formatDate(authStore.user.last_login_at) : t('ui.never') }}
                     </dd>
                 </div>
                 <div class="flex flex-col space-y-1">
-                    <dt class="text-muted-foreground">Account Created</dt>
+                    <dt class='text-muted-foreground'>{{ t('ui.accountCreated') }}</dt>
                     <dd class="font-medium">{{ formatDate(authStore.user?.created_at || '') }}</dd>
                 </div>
             </dl>
         </PageSection>
 
-        <PageSection title="Profile settings" description="Update your profile information.">
+        <PageSection :title="t('ui.profileSettings')" :description="t('ui.updateYourProfileInformation')">
             <form @submit.prevent="handleSubmit" class="space-y-6">
                 <div class="grid gap-2">
-                    <Label for="full_name">Full Name</Label>
+                    <Label for="full_name">{{ t('ui.fullName') }}</Label>
                     <Input id="full_name" v-model="fullName" required />
                 </div>
                 <div class="flex justify-end">
                     <Button type="submit" :disabled="isSubmitting">
                         <Loader2 v-if="isSubmitting" class="mr-2 h-4 w-4 animate-spin" />
-                        Save Changes
+                        {{ t('ui.saveChanges') }}
                     </Button>
                 </div>
             </form>
         </PageSection>
 
-        <PageSection title="API tokens" description="Manage your personal access tokens for API authentication.">
+        <PageSection :title="t('ui.aPITokens')" :description="t('ui.manageYourPersonalAccessTokensForAPIAuthentication')">
             <template #actions>
                 <Dialog v-model:open="showCreateTokenDialog">
                             <DialogTrigger asChild>
                                 <Button class="flex items-center gap-2">
                                     <Plus class="h-4 w-4" />
-                                    Generate Token
+                                    {{ t('ui.generateToken') }}
                                 </Button>
                             </DialogTrigger>
                             <DialogContent class="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
                                 <DialogHeader>
-                                    <DialogTitle>Create API Token</DialogTitle>
+                                    <DialogTitle>{{ t('ui.createAPIToken') }}</DialogTitle>
                                     <DialogDescription>
-                                        Create a new personal access token for API authentication.
+                                        {{ t('ui.createANewPersonalAccessTokenForAPIAuthentication') }}
                                     </DialogDescription>
                                 </DialogHeader>
                                 <div class="grid gap-4 py-4">
                                     <div class="grid gap-2">
-                                        <Label for="token-name">Token Name</Label>
+                                        <Label for="token-name">{{ t('ui.tokenName') }}</Label>
                                         <Input 
                                             id="token-name" 
                                             v-model="newTokenName"
-                                            placeholder="e.g., My App Integration"
+                                            :placeholder="t('ui.eGMyAppIntegration')"
                                             @keydown.enter="handleCreateToken"
                                         />
                                     </div>
                                     <div class="grid gap-2">
-                                        <Label for="token-expiry">Expiration</Label>
+                                        <Label for="token-expiry">{{ t('ui.expiration') }}</Label>
                                         <Select v-model="newTokenExpiry">
                                             <SelectTrigger id="token-expiry">
-                                                <SelectValue placeholder="Select expiration" />
+                                                <SelectValue :placeholder="t('ui.selectExpiration')" />
                                             </SelectTrigger>
                                             <SelectContent>
                                                 <SelectItem 
@@ -225,13 +229,13 @@ const closeTokenDisplay = () => {
                                         </Select>
                                     </div>
                                     <div class="grid gap-2">
-                                        <Label>Scopes</Label>
+                                        <Label>{{ t('ui.scopes') }}</Label>
                                         <TokenScopePicker v-model="newTokenScopes" />
                                     </div>
                                     <Alert>
                                         <Shield class="h-4 w-4" />
                                         <AlertDescription>
-                                            The token will be shown only once. Make sure to copy it and store it securely.
+                                            {{ t('ui.theTokenWillBeShownOnlyOnceMakeSureToCopyIt') }}
                                         </AlertDescription>
                                     </Alert>
                                 </div>
@@ -241,14 +245,14 @@ const closeTokenDisplay = () => {
                                         variant="outline" 
                                         @click="showCreateTokenDialog = false"
                                     >
-                                        Cancel
+                                        {{ t('ui.cancel') }}
                                     </Button>
                                     <Button 
                                         @click="handleCreateToken"
                                         :disabled="isCreatingToken || !newTokenName.trim() || newTokenScopes.length === 0"
                                     >
                                         <Loader2 v-if="isCreatingToken" class="mr-2 h-4 w-4 animate-spin" />
-                                        Create Token
+                                        {{ t('ui.createToken') }}
                                     </Button>
                                 </DialogFooter>
                             </DialogContent>
@@ -260,8 +264,8 @@ const closeTokenDisplay = () => {
             <EmptyState
                 v-else-if="apiTokensStore.tokens.length === 0"
                 :icon="Key"
-                title="No API tokens"
-                description="Create your first token to get started."
+                :title="t('ui.noAPITokens')"
+                :description="t('ui.createYourFirstTokenToGetStarted')"
             />
 
             <div v-else class="space-y-3">
@@ -296,15 +300,15 @@ const closeTokenDisplay = () => {
                                 <div class="flex items-center gap-4 text-sm text-muted-foreground">
                                     <div class="flex items-center gap-1">
                                         <Calendar class="h-3 w-3" />
-                                        Created {{ formatDate(token.created_at) }}
+                                        {{ t('ui.created') }} {{ formatDate(token.created_at) }}
                                     </div>
                                     <div v-if="token.last_used_at" class="flex items-center gap-1">
                                         <Clock class="h-3 w-3" />
-                                        Last used {{ formatDate(token.last_used_at) }}
+                                        {{ t('ui.lastUsed') }} {{ formatDate(token.last_used_at) }}
                                     </div>
                                     <div v-else class="flex items-center gap-1">
                                         <Clock class="h-3 w-3" />
-                                        Never used
+                                        {{ t('ui.neverUsed') }}
                                     </div>
                                 </div>
                             </div>
@@ -326,29 +330,29 @@ const closeTokenDisplay = () => {
                 <DialogHeader>
                     <DialogTitle class="flex items-center gap-2">
                         <Key class="h-5 w-5" />
-                        API Token Created
+                        {{ t('ui.aPITokenCreated') }}
                     </DialogTitle>
                     <DialogDescription>
-                        Your API token has been created successfully. Copy it now as it won't be shown again.
+                        {{ t('ui.yourAPITokenHasBeenCreatedSuccessfullyCopyItNowAsIt') }}
                     </DialogDescription>
                 </DialogHeader>
                 <div class="space-y-4">
                     <div>
-                        <Label>Token Name</Label>
+                        <Label>{{ t('ui.tokenName') }}</Label>
                         <div class="mt-1 font-medium">{{ createdTokenData?.api_token?.name }}</div>
                     </div>
                     <div v-if="createdTokenData?.api_token?.expires_at">
-                        <Label>Expires</Label>
+                        <Label>{{ t('ui.expires') }}</Label>
                         <div class="mt-1 text-sm text-muted-foreground">
                             {{ formatDate(createdTokenData.api_token.expires_at) }}
                         </div>
                     </div>
                     <div v-else>
-                        <Label>Expires</Label>
-                        <div class="mt-1 text-sm text-muted-foreground">Never</div>
+                        <Label>{{ t('ui.expires') }}</Label>
+                        <div class="mt-1 text-sm text-muted-foreground">{{ t('ui.never') }}</div>
                     </div>
                     <div>
-                        <Label>Your API Token</Label>
+                        <Label>{{ t('ui.yourAPIToken') }}</Label>
                         <div class="mt-2 p-3 bg-muted rounded-md">
                             <div class="flex items-center justify-between">
                                 <code class="text-sm font-mono break-all">{{ createdTokenData?.token }}</code>
@@ -366,14 +370,13 @@ const closeTokenDisplay = () => {
                     <Alert>
                         <Shield class="h-4 w-4" />
                         <AlertDescription>
-                            <strong>Important:</strong> This token will only be displayed once. 
-                            Store it securely and treat it like a password.
+                            <strong>{{ t('ui.important') }}</strong> {{ t('ui.thisTokenWillOnlyBeDisplayedOnceStoreItSecurelyAndTreat') }}
                         </AlertDescription>
                     </Alert>
                 </div>
                 <DialogFooter>
                     <Button @click="closeTokenDisplay" class="w-full">
-                        I've copied my token
+                        {{ t('ui.iVeCopiedMyToken') }}
                     </Button>
                 </DialogFooter>
             </DialogContent>
@@ -381,9 +384,9 @@ const closeTokenDisplay = () => {
 
         <ConfirmDialog
             :open="tokenToDelete !== null"
-            title="Delete API token?"
-            :description="tokenToDelete ? `Delete &quot;${tokenToDelete.name}&quot;? Any applications using it will lose access. This cannot be undone.` : undefined"
-            confirm-text="Delete"
+            :title="t('ui.deleteAPIToken')"
+            :description="tokenToDelete ? t('settings.deleteToken', { name: tokenToDelete.name }) : undefined"
+            :confirm-text="t('ui.delete')"
             destructive
             @update:open="(v) => { if (!v) tokenToDelete = null }"
             @confirm="confirmDeleteToken"

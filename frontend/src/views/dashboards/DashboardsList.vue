@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import {
@@ -38,6 +40,8 @@ import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useDashboardsStore } from "@/stores/dashboards";
 import { useMetaStore } from "@/stores/meta";
 import type { Dashboard } from "@/api/dashboards";
+
+const { t, locale } = useI18n();
 
 const router = useRouter();
 const store = useDashboardsStore();
@@ -80,7 +84,7 @@ function panelTypeIcons(d: Dashboard) {
 
 function updatedLabel(d: Dashboard): string {
   const date = new Date(d.updated_at);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString();
+  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(locale.value);
 }
 
 // --- Create dialog ----------------------------------------------------------
@@ -136,20 +140,20 @@ async function doDelete() {
     <div class="mb-5 flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-2">
         <LayoutDashboard class="h-5 w-5 text-muted-foreground" />
-        <h1 class="text-lg font-semibold">Dashboards</h1>
+        <h1 class='text-lg font-semibold'>{{ t('ui.dashboards') }}</h1>
       </div>
       <div class="flex items-center gap-2">
         <div v-if="dashboards.length > 0" class="relative">
           <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-          <Input v-model="search" placeholder="Search dashboards…" class="h-9 w-56 pl-8" />
+          <Input v-model="search" :placeholder="t('ui.searchDashboards')" class='h-9 w-56 pl-8' />
         </div>
         <Button v-if="!demoReadOnly" size="sm" class="gap-1.5" @click="openCreate">
           <Plus class="h-4 w-4" />
-          New dashboard
+          {{ t('ui.newDashboard') }}
         </Button>
         <Button v-else size="sm" variant="outline" class="gap-1.5" disabled>
           <LockKeyhole class="h-4 w-4" />
-          Read-only demo
+          {{ t('ui.readOnlyDemo') }}
         </Button>
       </div>
     </div>
@@ -177,15 +181,14 @@ async function doDelete() {
         <LayoutGrid class="h-8 w-8" />
       </div>
       <div>
-        <p class="text-base font-semibold">No dashboards yet</p>
+        <p class='text-base font-semibold'>{{ t('ui.noDashboardsYet') }}</p>
         <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-          Build a dashboard to group saved queries into a shared view — errors by service, latency
-          trends, or anything you check often.
+          {{ t('ui.buildADashboardToGroupSavedQueriesIntoASharedViewErrors') }}
         </p>
       </div>
       <Button v-if="!demoReadOnly" size="sm" class="mt-1 gap-1.5" @click="openCreate">
         <Plus class="h-4 w-4" />
-        Create your first dashboard
+        {{ t('ui.createYourFirstDashboard') }}
       </Button>
     </div>
 
@@ -194,8 +197,8 @@ async function doDelete() {
       v-else-if="filteredDashboards.length === 0"
       class="flex flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed py-14 text-center"
     >
-      <p class="text-sm font-medium">No dashboards match “{{ search }}”</p>
-      <p class="text-sm text-muted-foreground">Try a different name or clear the search.</p>
+      <p class='text-sm font-medium'>{{ t('dashboards.noMatches', { search }) }}</p>
+      <p class='text-sm text-muted-foreground'>{{ t('ui.tryADifferentNameOrClearTheSearch') }}</p>
     </div>
 
     <!-- Cards -->
@@ -221,7 +224,7 @@ async function doDelete() {
             <DropdownMenuContent align="end" class="w-32">
               <DropdownMenuItem class="text-destructive text-xs" @click.stop="confirmDelete(d)">
                 <Trash2 class="mr-2 h-3.5 w-3.5" />
-                Delete
+                {{ t('ui.delete') }}
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -233,18 +236,18 @@ async function doDelete() {
 
         <div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
           <span class="rounded bg-muted px-1.5 py-0.5 font-medium">
-            {{ panelCount(d) }} panel{{ panelCount(d) === 1 ? "" : "s" }}
+            {{ t('dashboards.panelCount', { count: panelCount(d) }, panelCount(d)) }}
           </span>
           <span v-if="panelTypeIcons(d).length" class="flex items-center gap-1 text-muted-foreground/70">
             <component :is="icon" v-for="(icon, i) in panelTypeIcons(d)" :key="i" class="h-3 w-3" />
           </span>
           <span class="ml-auto flex items-center gap-1 truncate">
             <User class="h-3 w-3 shrink-0" />
-            <span class="truncate">{{ d.created_by_name || d.created_by_email || "Unknown" }}</span>
+            <span class="truncate">{{ d.created_by_name || d.created_by_email || t('common.unknown') }}</span>
           </span>
         </div>
         <p v-if="updatedLabel(d)" class="mt-1 text-[11px] text-muted-foreground/70">
-          Updated {{ updatedLabel(d) }}
+          {{ t('ui.updated2') }} {{ updatedLabel(d) }}
         </p>
       </div>
     </div>
@@ -253,34 +256,34 @@ async function doDelete() {
     <Dialog v-model:open="createOpen">
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>New dashboard</DialogTitle>
-          <DialogDescription>Give your dashboard a name. Add panels after creating it.</DialogDescription>
+          <DialogTitle>{{ t('ui.newDashboard') }}</DialogTitle>
+          <DialogDescription>{{ t('ui.giveYourDashboardANameAddPanelsAfterCreatingIt') }}</DialogDescription>
         </DialogHeader>
         <div class="space-y-3 py-1">
           <div class="space-y-1.5">
-            <Label for="dash-name">Name</Label>
+            <Label for="dash-name">{{ t('ui.name') }}</Label>
             <Input
               id="dash-name"
               v-model="newName"
-              placeholder="e.g. HTTP error overview"
+              :placeholder="t('ui.eGHTTPErrorOverview')"
               autofocus
               @keydown.enter.prevent="submitCreate"
             />
           </div>
           <div class="space-y-1.5">
-            <Label for="dash-desc">Description</Label>
+            <Label for="dash-desc">{{ t('ui.description') }}</Label>
             <Textarea
               id="dash-desc"
               v-model="newDescription"
-              placeholder="Optional"
+              :placeholder="t('ui.optional')"
               rows="2"
             />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" @click="createOpen = false">Cancel</Button>
+          <Button variant='outline' @click="createOpen = false">{{ t('ui.cancel') }}</Button>
           <Button :disabled="!newName.trim() || isCreating" @click="submitCreate">
-            {{ isCreating ? "Creating…" : "Create" }}
+            {{ isCreating ? t('ui.creating') : t('ui.create') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -289,9 +292,9 @@ async function doDelete() {
     <!-- Delete confirm -->
     <ConfirmDialog
       v-model:open="deleteOpen"
-      title="Delete dashboard?"
+      :title="t('ui.deleteDashboard')"
       :description="`This permanently deletes “${deleteTarget?.name}”. This can't be undone.`"
-      confirm-text="Delete"
+      :confirm-text="t('ui.delete')"
       destructive
       @confirm="doDelete"
     />

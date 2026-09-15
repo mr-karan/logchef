@@ -1,4 +1,5 @@
 import { createApp, h, nextTick, reactive } from 'vue'
+import { i18n } from '@/i18n'
 import { createPinia } from 'pinia'
 import { expect, it } from 'vitest'
 import DataTable from '../data-table.vue'
@@ -27,6 +28,7 @@ it('updates literal highlights and query markers without changing columns', asyn
     sourceId: 'highlight-test', teamId: null,
   }) })
   app.use(createPinia())
+  app.use(i18n)
   try {
     app.mount(host)
     await nextTick()

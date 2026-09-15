@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useSourcesStore } from '@/stores/sources'
@@ -11,6 +13,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+
+const { t } = useI18n();
 
 interface Props {
   availableFields: Array<{name: string, type: string}>
@@ -54,23 +58,23 @@ const hasRecommendedFields = computed(() => {
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" class="w-3.5 h-3.5">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16" />
       </svg>
-      Group By:
+      {{ t('ui.groupBy') }}
     </label>
     <Select v-model="groupByField" class="max-w-[180px] h-8">
       <SelectTrigger class="h-8 text-xs border-dashed">
-        <SelectValue placeholder="No Grouping">
-          {{ groupByField === '__none__' ? 'No Grouping' : groupByField }}
+        <SelectValue :placeholder="t('ui.noGrouping')">
+          {{ groupByField === '__none__' ? t('ui.noGrouping') : groupByField }}
         </SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectGroup>
-          <SelectLabel class="text-xs">Time Series Grouping</SelectLabel>
-          <SelectItem value="__none__">No Grouping</SelectItem>
+          <SelectLabel class='text-xs'>{{ t('ui.timeSeriesGrouping') }}</SelectLabel>
+          <SelectItem value="__none__">{{ t('ui.noGrouping') }}</SelectItem>
         </SelectGroup>
         
         <!-- Combined recommended fields group -->
         <SelectGroup v-if="hasRecommendedFields">
-          <SelectLabel class="text-xs">Recommended Fields</SelectLabel>
+          <SelectLabel class='text-xs'>{{ t('ui.recommendedFields') }}</SelectLabel>
           
           <!-- Severity field if available -->
           <SelectItem v-if="sourcesStore.currentSourceDetails?._meta_severity_field" 
@@ -88,7 +92,7 @@ const hasRecommendedFields = computed(() => {
         </SelectGroup>
         
         <SelectGroup>
-          <SelectLabel class="text-xs">Available Fields</SelectLabel>
+          <SelectLabel class='text-xs'>{{ t('ui.availableFields') }}</SelectLabel>
           <SelectItem v-for="field in availableFields.filter(f => 
             f.name !== sourcesStore.currentSourceDetails?._meta_severity_field && 
             f.name !== sourcesStore.currentSourceDetails?._meta_ts_field &&

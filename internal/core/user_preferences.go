@@ -12,6 +12,7 @@ import (
 
 // DefaultUserPreferences defines the baseline preferences for users.
 var DefaultUserPreferences = models.UserPreferences{
+	Locale:          models.LocaleAuto,
 	Theme:           models.ThemePreferenceAuto,
 	Timezone:        models.TimezonePreferenceLocal,
 	DisplayMode:     models.DisplayModeTable,
@@ -69,6 +70,9 @@ func UpdateUserPreferences(ctx context.Context, db store.StoreOps, userID models
 
 func applyUserPreferencesUpdate(current models.UserPreferences, update models.UpdateUserPreferencesRequest) models.UserPreferences {
 	next := current
+	if update.Locale != nil {
+		next.Locale = *update.Locale
+	}
 	if update.Theme != nil {
 		next.Theme = *update.Theme
 	}
@@ -85,6 +89,9 @@ func applyUserPreferencesUpdate(current models.UserPreferences, update models.Up
 }
 
 func validateUserPreferencesUpdate(update models.UpdateUserPreferencesRequest) error {
+	if update.Locale != nil && !isValidLocalePreference(*update.Locale) {
+		return &ValidationError{Field: "locale", Message: "unsupported interface language"}
+	}
 	if update.Theme != nil && !isValidThemePreference(*update.Theme) {
 		return &ValidationError{Field: "theme", Message: "theme must be one of: light, dark, auto"}
 	}
@@ -99,6 +106,9 @@ func validateUserPreferencesUpdate(update models.UpdateUserPreferencesRequest) e
 
 func normalizeUserPreferences(prefs models.UserPreferences) models.UserPreferences {
 	normalized := prefs
+	if !isValidLocalePreference(normalized.Locale) {
+		normalized.Locale = DefaultUserPreferences.Locale
+	}
 
 	if !isValidThemePreference(normalized.Theme) {
 		normalized.Theme = DefaultUserPreferences.Theme
@@ -116,6 +126,18 @@ func normalizeUserPreferences(prefs models.UserPreferences) models.UserPreferenc
 func isValidThemePreference(value models.ThemePreference) bool {
 	switch value {
 	case models.ThemePreferenceLight, models.ThemePreferenceDark, models.ThemePreferenceAuto:
+		return true
+	default:
+		return false
+	}
+}
+
+func isValidLocalePreference(value models.LocalePreference) bool {
+	switch value {
+	case models.LocaleAuto, models.LocaleEnglish, models.LocaleChineseSimplified,
+		models.LocaleChineseTraditional, models.LocaleSpanish, models.LocaleFrench,
+		models.LocaleGerman, models.LocalePortugueseBrazil, models.LocaleJapanese,
+		models.LocaleKorean, models.LocaleHindi, models.LocaleItalian:
 		return true
 	default:
 		return false

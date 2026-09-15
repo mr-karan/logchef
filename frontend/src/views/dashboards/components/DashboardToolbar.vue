@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, ref } from "vue";
 import type { DateRange } from "reka-ui";
 import { RefreshCw, ChevronDown } from "lucide-vue-next";
@@ -17,11 +19,13 @@ import {
   calendarDateTimeToTimestamp,
 } from "@/utils/time";
 
+const { t } = useI18n();
+
 const store = useDashboardsStore();
 const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
 
 const REFRESH_OPTIONS = [
-  { label: "Off", ms: 0 },
+  { get label() { return t('ui.off'); }, ms: 0 },
   { label: "30s", ms: 30_000 },
   { label: "1m", ms: 60_000 },
   { label: "5m", ms: 300_000 },
@@ -104,7 +108,7 @@ function manualRefresh() {
 
     <DropdownMenu>
       <DropdownMenuTrigger as-child>
-        <Button variant="outline" size="sm" class="h-8 gap-1 text-xs" title="Auto-refresh interval">
+        <Button variant='outline' size="sm" class='h-8 gap-1 text-xs' :title="t('ui.autoRefreshInterval')">
           <RefreshCw class="h-3.5 w-3.5" />
           <span>{{ refreshLabel }}</span>
           <ChevronDown class="h-3 w-3 opacity-60" />
@@ -127,7 +131,7 @@ function manualRefresh() {
       variant="outline"
       size="sm"
       class="h-8 w-8 p-0"
-      title="Refresh now"
+      :title="t('ui.refreshNow')"
       :disabled="isRefreshing"
       @click="manualRefresh"
     >
@@ -137,9 +141,9 @@ function manualRefresh() {
     <span
       v-if="appliedRangeLabel"
       class="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap"
-      title="Time window actually queried (may be snapped to the cache bucket)"
+      :title="t('ui.timeWindowActuallyQueriedMayBeSnappedToTheCacheBucket')"
     >
-      Queried: {{ appliedRangeLabel }}
+      {{ t('ui.queried') }} {{ appliedRangeLabel }}
     </span>
   </div>
 </template>

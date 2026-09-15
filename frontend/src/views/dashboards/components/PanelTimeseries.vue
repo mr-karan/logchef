@@ -2,29 +2,6 @@
 // Pure helpers shared with <script setup> below (same module scope) and
 // exported so they're independently unit-testable without mounting the chart.
 
-// HTML-escape untrusted text before interpolating it into a raw HTML string.
-// s.label in buildTooltipHtml is a grouped log-field value (e.g. a `service`
-// or `severity` column value) chosen by whoever produced the underlying log
-// line - treat it as attacker-controllable and never trust it to be inert.
-export function escapeHtml(value: unknown): string {
-  return String(value ?? "").replace(/[&<>"']/g, (ch) => {
-    switch (ch) {
-      case "&":
-        return "&amp;";
-      case "<":
-        return "&lt;";
-      case ">":
-        return "&gt;";
-      case '"':
-        return "&quot;";
-      case "'":
-        return "&#39;";
-      default:
-        return ch;
-    }
-  });
-}
-
 // s.color comes from the histogram chart model's fixed palette (see
 // utils/histogram-chart.ts), so it isn't expected to be attacker-controlled -
 // but it still ends up in a raw HTML string via buildTooltipHtml, so whitelist
@@ -68,6 +45,8 @@ export function shouldUseCrosshairYStacked(
 </script>
 
 <script setup lang="ts">
+import { escapeHtml } from "@/lib/html";
+import { useI18n } from "vue-i18n";
 import { computed } from "vue";
 import { VisArea, VisAxis, VisGroupedBar, VisLine, VisStackedBar, VisXYContainer } from "@unovis/vue";
 import { ChartContainer, ChartCrosshair, ChartLegendContent, ChartTooltip } from "@/components/ui/chart";
@@ -79,6 +58,8 @@ import {
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
 import type { HistogramData } from "@/services/HistogramService";
+
+const { t } = useI18n();
 
 // A prop-driven timeseries panel. It reuses the same chart model + unovis stacked
 // bar the explorer histogram uses, but takes its data via props (the explorer's
@@ -201,7 +182,7 @@ function buildTooltipHtml(datum: HistogramChartRow): string {
 
   const totalHtml =
     model.series.length > 1
-      ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);"><span>Total</span><strong>${totalCount.toLocaleString()}</strong></div>`
+      ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);"><span>${escapeHtml(t('common.total'))}</span><strong>${totalCount.toLocaleString()}</strong></div>`
       : "";
 
   return `<div style="min-width:150px;padding:0.5rem 0.65rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">

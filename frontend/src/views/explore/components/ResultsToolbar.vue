@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Braces, Share2 } from 'lucide-vue-next'
@@ -10,6 +12,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+
+const { t } = useI18n();
 
 interface FieldInfo {
   name: string
@@ -59,8 +63,8 @@ const formattedQueryTime = computed(() => {
 const warningText = computed(() => {
   if (queryStats.value?.truncated) {
     return queryStats.value.truncated_reason === 'byte_limit'
-      ? 'Response size capped'
-      : 'Result capped'
+      ? t('ui.responseSizeCapped')
+      : t('ui.resultCapped')
   }
   return queryWarnings.value?.[0]?.message || null
 })
@@ -75,21 +79,21 @@ const warningText = computed(() => {
         v-if="isHistogramEligible"
         class="flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors"
         @click="emit('toggle-histogram')"
-        :title="isHistogramVisible ? 'Hide histogram' : 'Show histogram'"
+        :title="isHistogramVisible ? t('ui.hideHistogram') : t('ui.showHistogram')"
       >
         <ChevronUp v-if="isHistogramVisible" class="h-3.5 w-3.5" />
         <ChevronDown v-else class="h-3.5 w-3.5" />
-        <span class="font-medium">Histogram</span>
+        <span class='font-medium'>{{ t('ui.histogram') }}</span>
       </button>
 
       <div v-if="isHistogramEligible" class="h-4 w-px bg-border" />
 
       <!-- Stats -->
       <div class="flex items-center gap-2 text-muted-foreground">
-        <span v-if="isLoading" class="animate-pulse">Loading...</span>
+        <span v-if="isLoading" class='animate-pulse'>{{ t('ui.loading') }}</span>
         <template v-else>
           <span class="font-medium text-foreground">{{ logsCount.toLocaleString() }}</span>
-          <span>logs</span>
+          <span>{{ t('ui.logs') }}</span>
           <template v-if="formattedQueryTime">
             <span class="text-muted-foreground/50">•</span>
             <span>{{ formattedQueryTime }}</span>
@@ -125,7 +129,7 @@ const warningText = computed(() => {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Share query</p>
+            <p class='text-xs'>{{ t('ui.shareQuery') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -145,7 +149,7 @@ const warningText = computed(() => {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Copy CLI command</p>
+            <p class='text-xs'>{{ t('ui.copyCLICommand') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -165,7 +169,7 @@ const warningText = computed(() => {
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">{{ isExporting ? 'Preparing download…' : 'Download results' }}</p>
+            <p class='text-xs'>{{ isExporting ? t('ui.preparingDownload') : t('ui.downloadResults') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -179,7 +183,7 @@ const warningText = computed(() => {
             <TooltipTrigger asChild>
               <button
                 class="h-6 w-6 rounded flex items-center justify-center transition-colors"
-                aria-label="Compact view"
+                :aria-label="t('ui.compactView')"
                 :class="displayMode === 'compact' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
                 @click="emit('update:displayMode', 'compact')"
               >
@@ -187,7 +191,7 @@ const warningText = computed(() => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p class="text-xs">Compact view</p>
+              <p class='text-xs'>{{ t('ui.compactView') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -197,7 +201,7 @@ const warningText = computed(() => {
             <TooltipTrigger asChild>
               <button
                 class="h-6 w-6 rounded flex items-center justify-center transition-colors"
-                aria-label="JSON view"
+                :aria-label="t('explore.jsonView')"
                 :class="displayMode === 'json' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
                 @click="emit('update:displayMode', 'json')"
               >
@@ -205,7 +209,7 @@ const warningText = computed(() => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p class="text-xs">JSON view</p>
+              <p class="text-xs">{{ t('explore.jsonView') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -215,7 +219,7 @@ const warningText = computed(() => {
             <TooltipTrigger asChild>
               <button
                 class="h-6 w-6 rounded flex items-center justify-center transition-colors"
-                aria-label="Table view"
+                :aria-label="t('ui.tableView')"
                 :class="displayMode === 'table' ? 'bg-background shadow-sm' : 'hover:bg-background/50'"
                 @click="emit('update:displayMode', 'table')"
               >
@@ -223,7 +227,7 @@ const warningText = computed(() => {
               </button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p class="text-xs">Table view</p>
+              <p class='text-xs'>{{ t('ui.tableView') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>

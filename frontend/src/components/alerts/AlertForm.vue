@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import {
   Dialog,
   DialogContent,
@@ -15,6 +17,8 @@ import AlertQuerySection from "./AlertQuerySection.vue";
 import AlertScheduleSection from "./AlertScheduleSection.vue";
 import AlertNotificationSection from "./AlertNotificationSection.vue";
 import { useAlertForm, type ExtendedUpdateAlertRequest, type FormCreatePayload } from "@/composables/useAlertForm";
+
+const { t } = useI18n();
 
 // Extended types for local usage until API types are updated.
 // The form doesn't include source_id — the parent adds it from context.
@@ -82,10 +86,10 @@ function handleClose() {
     <DialogContent class="max-h-[90vh] max-w-4xl overflow-y-auto">
       <DialogHeader>
         <DialogTitle>
-          {{ mode === "create" ? "Create alert" : "Edit alert" }}
+          {{ mode === "create" ? t('ui.createAlert') : t('ui.editAlert') }}
         </DialogTitle>
         <DialogDescription>
-          Configure the evaluation query, thresholds, and delivery targets for this alert rule.
+          {{ t('ui.configureTheEvaluationQueryThresholdsAndDeliveryTargetsForThisAlertRule') }}
         </DialogDescription>
       </DialogHeader>
 
@@ -135,9 +139,9 @@ function handleClose() {
         <section class="space-y-4">
           <div class="flex items-center justify-between rounded-lg border bg-muted/20 p-4">
             <div>
-              <h3 class="text-sm font-medium">Alert status</h3>
+              <h3 class='text-sm font-medium'>{{ t('ui.alertStatus') }}</h3>
               <p class="text-xs text-muted-foreground mt-0.5">
-                {{ form.is_active ? "This alert will evaluate on schedule" : "Disabled alerts are skipped until re-enabled" }}
+                {{ form.is_active ? t('ui.thisAlertWillEvaluateOnSchedule') : t('ui.disabledAlertsAreSkippedUntilReEnabled') }}
               </p>
             </div>
             <Switch :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
@@ -146,10 +150,10 @@ function handleClose() {
 
         <DialogFooter class="pt-4">
           <Button type="button" variant="ghost" @click="handleClose" :disabled="isSubmitting">
-            Cancel
+            {{ t('ui.cancel') }}
           </Button>
           <Button type="submit" :disabled="!isValid || isDisabled">
-            {{ isSubmitting ? "Saving..." : mode === "create" ? "Create alert" : "Save changes" }}
+            {{ isSubmitting ? t('ui.saving2') : mode === "create" ? t('ui.createAlert') : t('ui.saveChanges2') }}
           </Button>
         </DialogFooter>
       </form>
@@ -203,9 +207,9 @@ function handleClose() {
     <section class="space-y-4">
       <div class="flex items-center justify-between rounded-lg border bg-muted/20 p-4">
         <div>
-          <h3 class="text-sm font-medium">Alert status</h3>
+          <h3 class='text-sm font-medium'>{{ t('ui.alertStatus') }}</h3>
           <p class="text-xs text-muted-foreground mt-0.5">
-            {{ form.is_active ? "This alert will evaluate on schedule" : "Disabled alerts are skipped until re-enabled" }}
+            {{ form.is_active ? t('ui.thisAlertWillEvaluateOnSchedule') : t('ui.disabledAlertsAreSkippedUntilReEnabled') }}
           </p>
         </div>
         <Switch :model-value="form.is_active" :disabled="isDisabled" @update:model-value="(checked) => (form.is_active = Boolean(checked))" />
@@ -214,7 +218,7 @@ function handleClose() {
 
     <div class="flex items-center justify-end gap-2 pt-4">
       <Button type="submit" :disabled="!isValid || isDisabled">
-        {{ isSubmitting ? "Saving..." : mode === "create" ? "Create alert" : "Save changes" }}
+        {{ isSubmitting ? t('ui.saving2') : mode === "create" ? t('ui.createAlert') : t('ui.saveChanges2') }}
       </Button>
     </div>
   </form>

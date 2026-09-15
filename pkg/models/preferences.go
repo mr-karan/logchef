@@ -1,5 +1,22 @@
 package models
 
+type LocalePreference string
+
+const (
+	LocaleAuto               LocalePreference = "auto"
+	LocaleEnglish            LocalePreference = "en"
+	LocaleChineseSimplified  LocalePreference = "zh-CN"
+	LocaleChineseTraditional LocalePreference = "zh-TW"
+	LocaleSpanish            LocalePreference = "es"
+	LocaleFrench             LocalePreference = "fr"
+	LocaleGerman             LocalePreference = "de"
+	LocalePortugueseBrazil   LocalePreference = "pt-BR"
+	LocaleJapanese           LocalePreference = "ja"
+	LocaleKorean             LocalePreference = "ko"
+	LocaleHindi              LocalePreference = "hi"
+	LocaleItalian            LocalePreference = "it"
+)
+
 // ThemePreference represents the UI theme preference.
 type ThemePreference string
 
@@ -28,6 +45,7 @@ const (
 
 // UserPreferences represents persisted user preferences.
 type UserPreferences struct {
+	Locale          LocalePreference      `json:"locale"`
 	Theme           ThemePreference       `json:"theme"`
 	Timezone        TimezonePreference    `json:"timezone"`
 	DisplayMode     DisplayModePreference `json:"display_mode"`
@@ -36,6 +54,7 @@ type UserPreferences struct {
 
 // UpdateUserPreferencesRequest represents a partial update to user preferences.
 type UpdateUserPreferencesRequest struct {
+	Locale          *LocalePreference      `json:"locale,omitempty"`
 	Theme           *ThemePreference       `json:"theme,omitempty"`
 	Timezone        *TimezonePreference    `json:"timezone,omitempty"`
 	DisplayMode     *DisplayModePreference `json:"display_mode,omitempty"`

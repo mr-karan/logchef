@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { CalendarRootEmits, CalendarRootProps, DateValue } from "reka-ui"
 import type { HTMLAttributes, Ref } from "vue"
-import { ref } from "vue"
+import { ref, watch } from "vue"
 import { getLocalTimeZone, today } from "@internationalized/date"
 import { reactiveOmit, useVModel } from "@vueuse/core"
 import { CalendarRoot, useDateFormatter, useForwardPropsEmits } from "reka-ui"
@@ -37,6 +37,7 @@ const placeholder = useVModel(props, "placeholder", emits, {
 }) as Ref<DateValue>
 
 const formatter = useDateFormatter(props.locale ?? "en")
+watch(() => props.locale, locale => formatter.setLocale(locale ?? "en"))
 
 type View = "days" | "months" | "years"
 const view = ref<View>("days")

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import {
   ref,
   computed,
@@ -50,6 +52,8 @@ import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
+
+const { t } = useI18n();
 
 // Router and stores
 const route = useRoute();
@@ -106,9 +110,9 @@ const currentSourceId = computed(() => contextStore.sourceId);
 const availableTeams = computed(() => teamsStore.teams || []);
 const selectedTeamName = computed(() => teamsStore.currentTeam?.name || 'Select team');
 const selectedSourceName = computed(() => {
-  if (!currentSourceId.value) return 'Select source';
+  if (!currentSourceId.value) return t('ui.selectSource');
   const source = availableSources.value.find(s => s.id === currentSourceId.value);
-  return source ? source.name : 'Select source';
+  return source ? source.name : t('ui.selectSource');
 });
 
 // Available fields for sidebar/autocompletion
@@ -491,9 +495,9 @@ const handleSaveOrUpdateClick = async () => {
   // Check if we can save
   if (!canSaveOrUpdateQuery.value) {
     toast({
-      title: "Cannot Save Query",
+      get title() { return t('ui.cannotSaveQuery'); },
       variant: "destructive",
-      description: "Missing required fields (Team, Source, Query).",
+      get description() { return t('ui.missingRequiredFieldsTeamSourceQuery'); },
       duration: TOAST_DURATION.WARNING,
     });
     return;
@@ -517,8 +521,8 @@ const handleSaveOrUpdateClick = async () => {
     } catch (error) {
       console.error(`Error loading query for edit:`, error);
       toast({
-        title: "Error",
-        description: "Failed to load query details for editing.",
+        get title() { return t('ui.error'); },
+        get description() { return t('ui.failedToLoadQueryDetailsForEditing'); },
         variant: "destructive",
         duration: TOAST_DURATION.ERROR,
       });
@@ -554,7 +558,7 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, d
   } catch (error) {
     console.error("Error updating query:", error);
     toast({
-      title: "Error",
+      get title() { return t('ui.error'); },
       description: getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
@@ -575,9 +579,8 @@ const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
   } catch (e) {
     console.error("Error handling histogram time range:", e);
     toast({
-      title: "Time Range Error",
-      description:
-        "There was an error updating the time range from chart selection.",
+      get title() { return t('ui.timeRangeError'); },
+      get description() { return t('ui.thereWasAnErrorUpdatingTheTimeRangeFromChartSelection'); },
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
@@ -644,8 +647,8 @@ const handleExport = async () => {
     (exploreStore.activeMode === "native" ? exploreStore.sqlForExecution : "");
   if (!sql?.trim()) {
     toast({
-      title: "Cannot Download",
-      description: "Run the query before downloading results.",
+      get title() { return t('ui.cannotDownload'); },
+      get description() { return t('ui.runTheQueryBeforeDownloadingResults'); },
       variant: "destructive",
       duration: TOAST_DURATION.WARNING,
     });
@@ -679,7 +682,7 @@ const handleExport = async () => {
   } catch (error: any) {
     if (error instanceof ExportAbortedError) return;
     toast({
-      title: "Download Failed",
+      get title() { return t('ui.downloadFailed'); },
       description: getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
@@ -749,8 +752,8 @@ const copyTextWithFallback = async (text: string) => {
 const handleCopyCliCommand = async () => {
   if (!currentTeamId.value || !currentSourceId.value) {
     toast({
-      title: "Cannot copy CLI command",
-      description: "Team and source must be selected.",
+      get title() { return t('ui.cannotCopyCLICommand'); },
+      get description() { return t('ui.teamAndSourceMustBeSelected'); },
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
@@ -776,13 +779,13 @@ const handleCopyCliCommand = async () => {
 
     await copyTextWithFallback(command);
     toast({
-      title: "CLI Command Copied",
-      description: "Paste in your terminal to run the same query.",
+      get title() { return t('ui.cLICommandCopied'); },
+      get description() { return t('ui.pasteInYourTerminalToRunTheSameQuery'); },
       duration: TOAST_DURATION.SUCCESS,
     });
   } catch (error: any) {
     toast({
-      title: "Copy Failed",
+      get title() { return t('ui.copyFailed'); },
       description: error?.message || "Failed to copy CLI command.",
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
@@ -805,13 +808,13 @@ const handleShare = async () => {
     await copyTextWithFallback(share.share_url);
 
     toast({
-      title: "Share Link Copied",
-      description: "URL updated to the share link and copied to clipboard.",
+      get title() { return t('ui.shareLinkCopied'); },
+      get description() { return t('ui.uRLUpdatedToTheShareLinkAndCopiedToClipboard'); },
       duration: TOAST_DURATION.SUCCESS,
     });
   } catch (error: any) {
     toast({
-      title: "Share Failed",
+      get title() { return t('ui.shareFailed'); },
       description: error?.message || getErrorMessage(error),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
@@ -897,8 +900,8 @@ const handleGenerateAISQL = async ({ naturalLanguageQuery }: { naturalLanguageQu
   try {
     if (!currentSourceId.value) {
       toast({
-        title: "Error",
-        description: "Please select a source before using the AI Assistant",
+        get title() { return t('ui.error'); },
+        get description() { return t('ui.pleaseSelectASourceBeforeUsingTheAIAssistant'); },
         variant: "destructive",
         duration: TOAST_DURATION.ERROR,
       });
@@ -1128,7 +1131,7 @@ watch(
         } else {
           console.error("Failed to load query:", fetchResult.error);
           toast({
-            title: "Error Loading Query",
+            get title() { return t('ui.errorLoadingQuery'); },
             description: fetchResult.error?.message || "Failed to load the selected query",
             variant: "destructive",
             duration: TOAST_DURATION.ERROR,
@@ -1137,7 +1140,7 @@ watch(
       } catch (error) {
         console.error("Error loading query from URL:", error);
         toast({
-          title: "Error",
+          get title() { return t('ui.error'); },
           description: getErrorMessage(error),
           variant: "destructive",
           duration: TOAST_DURATION.ERROR,
@@ -1155,9 +1158,8 @@ onMounted(async () => {
   } catch (error) {
     console.error("Error during LogExplorer mount:", error);
     toast({
-      title: "Explorer Error",
-      description:
-        "Error initializing the explorer. Please try refreshing the page.",
+      get title() { return t('ui.explorerError'); },
+      get description() { return t('ui.errorInitializingTheExplorerPleaseTryRefreshingThePage'); },
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
@@ -1170,7 +1172,7 @@ onMounted(async () => {
     <div class="log-explorer-wrapper">
       <!-- Loading State -->
       <div v-if="showLoadingState" class="flex items-center justify-center h-[calc(100vh-12rem)]">
-        <p class="text-muted-foreground animate-pulse">Loading Explorer...</p>
+        <p class='text-muted-foreground animate-pulse'>{{ t('ui.loadingExplorer') }}</p>
       </div>
 
       <!-- Initialization Error State -->
@@ -1185,7 +1187,7 @@ onMounted(async () => {
             <line x1="12" y1="16" x2="12.01" y2="16"></line>
           </svg>
         </div>
-        <h2 class="text-xl font-semibold">Unable to Load Explorer</h2>
+        <h2 class='text-xl font-semibold'>{{ t('ui.unableToLoadExplorer') }}</h2>
         <p class="text-muted-foreground max-w-md">{{ initializationError }}</p>
         <div class="flex gap-3">
           <Button variant="outline" @click="urlState.initialize()">
@@ -1196,7 +1198,7 @@ onMounted(async () => {
               <path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"></path>
               <path d="M16 21h5v-5"></path>
             </svg>
-            Retry
+            {{ t('ui.retry') }}
           </Button>
         </div>
       </div>
@@ -1214,9 +1216,9 @@ onMounted(async () => {
             <path d="M16 3.13a4 4 0 0 1 0 7.75"></path>
           </svg>
         </div>
-        <h2 class="text-xl font-semibold">No Teams Available</h2>
+        <h2 class='text-xl font-semibold'>{{ t('ui.noTeamsAvailable') }}</h2>
         <p class="text-muted-foreground max-w-md">
-          You need to be part of a team to explore logs. Contact your administrator to get access.
+          {{ t('ui.youNeedToBePartOfATeamToExploreLogsContact') }}
         </p>
       </div>
 
@@ -1235,10 +1237,9 @@ onMounted(async () => {
         </div>
         <!-- Empty state content -->
         <div class="flex flex-col items-center justify-center flex-1 gap-4 text-center">
-          <h2 class="text-2xl font-semibold">No Log Sources Found</h2>
+          <h2 class='text-2xl font-semibold'>{{ t('ui.noLogSourcesFound') }}</h2>
           <p class="text-muted-foreground max-w-md">
-            The selected team '{{ selectedTeamName }}' has no sources
-            configured. Add one or switch teams.
+            {{ t('explore.noTeamSources', { name: selectedTeamName }) }}
           </p>
         </div>
       </div>
@@ -1266,11 +1267,9 @@ onMounted(async () => {
               <path d="M18 6 6 18"></path>
               <path d="m6 6 12 12"></path>
             </svg>
-            <h2 class="text-xl font-semibold mb-2">Source Not Connected</h2>
+            <h2 class='text-xl font-semibold mb-2'>{{ t('ui.sourceNotConnected') }}</h2>
             <p class="text-muted-foreground mb-4">
-              The selected source "{{ selectedSourceName }}" is not properly
-              connected to the database. Please check the source configuration
-              or select a different source.
+              {{ t('explore.disconnectedSource', { name: selectedSourceName }) }}
             </p>
 
             <div class="flex items-center justify-center gap-3">
@@ -1280,10 +1279,10 @@ onMounted(async () => {
                   params: { sourceId: currentSourceId },
                 })
                 ">
-                Configure Source
+                {{ t('ui.configureSource') }}
               </Button>
               <Button variant="default" @click="router.push({ name: 'NewSource' })">
-                Add New Source
+                {{ t('ui.addNewSource') }}
               </Button>
             </div>
           </div>
@@ -1336,8 +1335,8 @@ onMounted(async () => {
                     </svg>
                     <span>{{
                       isChangingContext
-                        ? "Loading context data..."
-                        : "Loading source details..."
+                        ? t('ui.loadingContextData')
+                        : t('ui.loadingSourceDetails')
                     }}</span>
                   </div>
                 </div>
@@ -1396,19 +1395,22 @@ onMounted(async () => {
                       <line x1="12" y1="8" x2="12.01" y2="8"></line>
                     </svg>
                     <span class="text-blue-700 dark:text-blue-300">
-                      <span class="font-medium">Tip:</span> Filter by
-                      <span v-for="(key, idx) in filteredSortKeys" :key="key">
-                        <code class="px-1 bg-blue-100 dark:bg-blue-900/40 rounded text-blue-800 dark:text-blue-200">{{ key }}</code>
-                        <span v-if="idx < filteredSortKeys.length - 1">, </span>
-                      </span>
-                      for faster queries
+                      <span class="font-medium">{{ t('ui.tip') }}</span>
+                      <i18n-t keypath="explore.filterHint" scope="global">
+                        <template #fields>
+                          <span v-for="(key, idx) in filteredSortKeys" :key="key">
+                            <code class="px-1 bg-blue-100 dark:bg-blue-900/40 rounded text-blue-800 dark:text-blue-200">{{ key }}</code>
+                            <span v-if="idx < filteredSortKeys.length - 1">, </span>
+                          </span>
+                        </template>
+                      </i18n-t>
                     </span>
                     <button 
                       v-if="activeMode === 'logchefql'" 
                       @click="addSortKeyExample"
                       class="ml-auto px-2 py-0.5 text-xs bg-blue-600/10 hover:bg-blue-600/20 rounded transition-colors text-blue-700 dark:text-blue-300"
                     >
-                      Add Example
+                      {{ t('ui.addExample') }}
                     </button>
                   </div>
                 </div>
@@ -1426,12 +1428,12 @@ onMounted(async () => {
                         <polyline points="3,7 12,13 21,7" />
                       </svg>
                     </div>
-                    <h3 class="text-lg font-medium mb-2">Select a Log Source</h3>
+                    <h3 class='text-lg font-medium mb-2'>{{ t('ui.selectALogSource') }}</h3>
                     <p class="text-sm text-muted-foreground mb-4">
-                      Choose a log source from the dropdown above to start exploring your data.
+                      {{ t('ui.chooseALogSourceFromTheDropdownAboveToStartExploringYour') }}
                     </p>
                     <div class="text-xs text-muted-foreground/70">
-                      Need to add a new source? Click "Add Source" in the selector.
+                      {{ t('ui.needToAddANewSourceClickAddSourceInTheSelector') }}
                     </div>
                   </div>
                 </div>
@@ -1442,7 +1444,7 @@ onMounted(async () => {
                 <div class="flex items-center justify-center p-6 border rounded-md bg-card shadow-sm">
                   <div class="text-center">
                     <p class="text-sm text-muted-foreground">
-                      Loading explorer...
+                      {{ t('ui.loadingExplorer2') }}
                     </p>
                   </div>
                 </div>
@@ -1539,7 +1541,7 @@ onMounted(async () => {
                   <div v-else-if="isExecutingQuery || isInitialQueryPending"
                     class="absolute inset-0 flex items-center justify-center bg-background/70 z-10">
                     <p class="text-muted-foreground animate-pulse">
-                      Loading results...
+                      {{ t('ui.loadingResults') }}
                     </p>
                   </div>
                 </template>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, ref, watch } from "vue";
 import { ChevronLeft, ChevronRight } from "lucide-vue-next";
 import {
@@ -11,6 +13,8 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import type { PanelColumn } from "@/stores/dashboards";
+
+const { t } = useI18n();
 
 // A "table" panel: rows from /logs/query or /logchefql/query. When the panel
 // declares an explicit column subset (options.columns) we show only those, in
@@ -45,10 +49,10 @@ const pagedRows = computed(() => {
   return props.rows.slice(start, start + PAGE_SIZE);
 });
 const rangeLabel = computed(() => {
-  if (props.rows.length === 0) return "0 rows";
+  if (props.rows.length === 0) return t('explore.rowCount', { count: 0 }, 0);
   const start = page.value * PAGE_SIZE + 1;
   const end = Math.min(props.rows.length, start + PAGE_SIZE - 1);
-  return `${start.toLocaleString()}–${end.toLocaleString()} of ${props.rows.length.toLocaleString()}`;
+  return t('explore.resultRange', { start: start.toLocaleString(), end: end.toLocaleString(), total: props.rows.length.toLocaleString() });
 });
 
 function prevPage() {
@@ -127,7 +131,7 @@ function cellValue(row: Record<string, any>, column: string): string {
           size="sm"
           class="h-6 w-6 p-0"
           :disabled="page === 0"
-          aria-label="Previous page"
+          :aria-label="t('ui.previousPage')"
           @click="prevPage"
         >
           <ChevronLeft class="h-3.5 w-3.5" />
@@ -139,7 +143,7 @@ function cellValue(row: Record<string, any>, column: string): string {
           size="sm"
           class="h-6 w-6 p-0"
           :disabled="page >= pageCount - 1"
-          aria-label="Next page"
+          :aria-label="t('ui.nextPage')"
           @click="nextPage"
         >
           <ChevronRight class="h-3.5 w-3.5" />

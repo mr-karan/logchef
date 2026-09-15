@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Input } from '@/components/ui/input'
@@ -9,6 +11,8 @@ import DataTableColumnSelector from './data-table-column-selector.vue'
 import type { Table } from './tableFeatures'
 import type { QueryStats } from '@/api/explore'
 import { usePreferencesStore } from '@/stores/preferences'
+
+const { t } = useI18n();
 
 interface Props {
   table: Table<Record<string, unknown>>
@@ -88,14 +92,14 @@ function clearColumnFilters() {
     <!-- Left zone: compact query stats -->
     <div class="flex items-center gap-2 text-xs text-muted-foreground">
       <RefreshCw v-if="isLoading" class="h-3.5 w-3.5 text-primary animate-spin" />
-      <span v-if="isLoading" class="text-primary animate-pulse hidden sm:inline">Loading…</span>
+      <span v-if="isLoading" class='text-primary animate-pulse hidden sm:inline'>{{ t('ui.loading2') }}</span>
       <template v-else-if="showStats && stats">
         <span v-if="stats.execution_time_ms !== undefined" :title="`Query time: ${formatExecutionTime(stats.execution_time_ms)}`">
           {{ formatExecutionTime(stats.execution_time_ms) }}
         </span>
         <span v-if="stats.execution_time_ms !== undefined && stats.rows_read !== undefined" class="text-muted-foreground/40">·</span>
         <span v-if="stats.rows_read !== undefined" :title="`Rows read: ${stats.rows_read.toLocaleString()}`">
-          {{ stats.rows_read.toLocaleString() }} rows
+          {{ stats.rows_read.toLocaleString() }} {{ t('ui.rows') }}
         </span>
       </template>
 
@@ -104,19 +108,19 @@ function clearColumnFilters() {
         <span v-if="!isLoading && (stats || showStats)" class="text-muted-foreground/40">·</span>
         <span
           class="text-primary font-medium"
-          title="Column filters only narrow the rows already loaded on this page"
+          :title="t('ui.columnFiltersOnlyNarrowTheRowsAlreadyLoadedOnThisPage')"
         >
-          {{ filteredRowCount.toLocaleString() }} of {{ totalRowCount.toLocaleString() }} rows
+          {{ t('explore.filteredRows', { count: filteredRowCount.toLocaleString(), total: totalRowCount.toLocaleString() }) }}
         </span>
         <Button
           variant="ghost"
           size="sm"
           class="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground"
-          title="Clear all column filters"
+          :title="t('ui.clearAllColumnFilters')"
           @click="clearColumnFilters"
         >
           <FilterX class="h-3 w-3 mr-1" />
-          Clear filters
+          {{ t('ui.clearFilters') }}
         </Button>
       </template>
     </div>
@@ -130,9 +134,9 @@ function clearColumnFilters() {
           class="h-6 px-2 rounded text-xs transition-colors"
           :class="displayTimezone === 'local' ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'"
           @click="displayTimezone = 'local'"
-          title="Local Time"
+          :title="t('ui.localTime')"
         >
-          Local
+          {{ t('ui.local') }}
         </button>
         <button
           type="button"
@@ -162,8 +166,8 @@ function clearColumnFilters() {
       <div v-if="showSearch" class="relative hidden md:block w-48 lg:w-64">
         <Search class="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
         <Input
-          placeholder="Search…"
-          aria-label="Search in all columns"
+          :placeholder="t('ui.search')"
+          :aria-label="t('ui.searchInAllColumns')"
           v-model="globalFilter"
           class="pl-8 h-8 text-sm"
         />

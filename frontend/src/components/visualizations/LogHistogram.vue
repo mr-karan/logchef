@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { escapeHtml } from "@/lib/html";
+import { useI18n } from "vue-i18n";
 import { computed, ref } from "vue";
 import {
   VisAxis,
@@ -21,6 +23,8 @@ import {
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
 import { useHistogramBrush } from "@/composables/useHistogramBrush";
+
+const { t } = useI18n();
 
 interface Props {
   isLoading?: boolean;
@@ -106,12 +110,12 @@ const chartSubtitle = computed(() => {
     return null;
   }
 
-  const parts = ["Hover to inspect", "drag to select range", "click bar to zoom"];
+  const parts = [t('chart.interactions')];
   if (currentGranularity.value) {
-    parts.unshift(`${currentGranularity.value} buckets`);
+    parts.unshift(t('chart.buckets', { interval: currentGranularity.value }));
   }
   if (props.groupBy) {
-    parts.unshift(`Grouped by ${props.groupBy}`);
+    parts.unshift(t('chart.groupedBy', { field: props.groupBy }));
   }
   return parts.join(" • ");
 });
@@ -128,7 +132,7 @@ function buildTooltipHtml(datum: HistogramChartRow): string {
       <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
         <div style="display:flex;align-items:center;gap:0.5rem;">
           <span style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;"></span>
-          <span>${s.label}</span>
+          <span>${escapeHtml(s.label)}</span>
         </div>
         <strong style="font-variant-numeric:tabular-nums;">${val.toLocaleString()}</strong>
       </div>`;
@@ -136,7 +140,7 @@ function buildTooltipHtml(datum: HistogramChartRow): string {
 
   const totalHtml = model.series.length > 1
     ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);">
-        <span>Total</span><strong>${totalCount.toLocaleString()}</strong>
+        <span>${escapeHtml(t('common.total'))}</span><strong>${totalCount.toLocaleString()}</strong>
        </div>`
     : "";
 

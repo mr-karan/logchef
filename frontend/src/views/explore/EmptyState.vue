@@ -1,5 +1,9 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { Search } from 'lucide-vue-next'
+
+const { t } = useI18n();
 </script>
 
 <template>
@@ -7,9 +11,9 @@ import { Search } from 'lucide-vue-next'
     <div class="rounded-full bg-muted p-4">
       <Search class="h-8 w-8 text-muted-foreground" />
     </div>
-    <h3 class="text-lg font-medium">No logs found</h3>
+    <h3 class='text-lg font-medium'>{{ t('ui.noLogsFound') }}</h3>
     <p class="text-sm text-muted-foreground max-w-[400px]">
-      Try adjusting your search query, time range, or selected source to find the logs you're looking for.
+      {{ t('ui.tryAdjustingYourSearchQueryTimeRangeOrSelectedSourceToFind') }}
     </p>
   </div>
 </template>

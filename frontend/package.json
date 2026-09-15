@@ -40,6 +40,7 @@
     "vaul-vue": "^0.4.1",
     "vee-validate": "^4.15.1",
     "vue": "^3.5.42",
+    "vue-i18n": "11.4.10",
     "vue-json-pretty": "^2.6.0",
     "vue-router": "^5.3.1",
     "vue-sonner": "^2.0.9",

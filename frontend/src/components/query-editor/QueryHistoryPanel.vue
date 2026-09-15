@@ -3,14 +3,14 @@
     <SheetTrigger asChild>
       <Button variant="outline" size="sm" class="h-7 gap-1.5">
         <History class="w-3.5 h-3.5" />
-        <span class="text-xs font-medium hidden sm:inline">History</span>
+        <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.history') }}</span>
       </Button>
     </SheetTrigger>
     <SheetContent side="right" class="w-[480px] max-w-[92vw] flex flex-col p-0">
       <SheetHeader class="p-4 pb-3 border-b">
-        <SheetTitle class="text-sm font-medium">Query History</SheetTitle>
+        <SheetTitle class='text-sm font-medium'>{{ t('ui.queryHistory') }}</SheetTitle>
         <SheetDescription class="text-xs">
-          Your recent queries across all sources. Click one to re-run it.
+          {{ t('ui.yourRecentQueriesAcrossAllSourcesClickOneToReRunIt') }}
         </SheetDescription>
       </SheetHeader>
 
@@ -18,21 +18,21 @@
       <div v-if="isLoading" class="flex items-center justify-center p-10">
         <div class="flex items-center gap-2 text-sm text-muted-foreground">
           <Loader2 class="w-4 h-4 animate-spin" />
-          Loading history…
+          {{ t('ui.loadingHistory2') }}
         </div>
       </div>
 
       <!-- Error -->
       <div v-else-if="error" class="flex flex-col items-center justify-center p-10 text-center">
         <p class="text-sm text-muted-foreground mb-3">{{ error }}</p>
-        <Button variant="outline" size="sm" @click="loadHistory">Retry</Button>
+        <Button variant='outline' size="sm" @click="loadHistory">{{ t('ui.retry') }}</Button>
       </div>
 
       <!-- Empty -->
       <div v-else-if="entries.length === 0" class="flex flex-col items-center justify-center p-10 text-center">
         <History class="w-8 h-8 text-muted-foreground mb-2" />
-        <p class="text-sm text-muted-foreground mb-1">No query history yet</p>
-        <p class="text-xs text-muted-foreground">Execute queries to see them appear here.</p>
+        <p class='text-sm text-muted-foreground mb-1'>{{ t('ui.noQueryHistoryYet') }}</p>
+        <p class='text-xs text-muted-foreground'>{{ t('ui.executeQueriesToSeeThemAppearHere') }}</p>
       </div>
 
       <!-- List -->
@@ -70,7 +70,7 @@
               </span>
               <span class="inline-flex items-center gap-1">
                 <Rows3 class="w-3 h-3" />
-                {{ entry.row_count.toLocaleString() }} {{ entry.row_count === 1 ? "row" : "rows" }}
+                {{ t('explore.rowCount', { count: entry.row_count }, entry.row_count) }}
               </span>
             </div>
           </button>
@@ -78,13 +78,15 @@
       </ScrollArea>
 
       <div v-if="entries.length > 0" class="p-3 border-t text-[11px] text-muted-foreground">
-        {{ entries.length }} recent {{ entries.length === 1 ? "query" : "queries" }}
+        {{ t('explore.recentQueries', { count: entries.length }, entries.length) }}
       </div>
     </SheetContent>
   </Sheet>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
@@ -108,6 +110,8 @@ import {
   formatHistoryDuration,
 } from "@/lib/queryHistory";
 import { useSourcesStore } from "@/stores/sources";
+
+const { t } = useI18n();
 
 const HISTORY_LIMIT = 100;
 

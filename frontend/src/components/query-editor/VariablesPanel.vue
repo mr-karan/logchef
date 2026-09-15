@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { storeToRefs } from 'pinia'
 import { Settings, ChevronDown } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -22,6 +24,8 @@ import { SingleDatePicker } from '@/components/date-time-picker'
 import { useVariableStore, type VariableState } from '@/stores/variables'
 import { hasVariableValue, inputTypeFor, getPlaceholderForType } from './variableUtils'
 
+const { t } = useI18n();
+
 const emit = defineEmits<{
   (e: 'open-config'): void
 }>()
@@ -32,12 +36,12 @@ const { allVariables } = storeToRefs(variableStore)
 // Multi-select helper functions
 const getMultiSelectDisplay = (variable: VariableState): string => {
   const values = Array.isArray(variable.value) ? variable.value : []
-  if (values.length === 0) return variable.isOptional ? 'Select (optional)' : 'Select...'
+  if (values.length === 0) return variable.isOptional ? t('ui.selectOptional') : t('ui.select')
   if (values.length === 1) {
     const opt = variable.options?.find(o => o.value === values[0])
     return opt?.label || values[0]
   }
-  return `${values.length} selected`
+  return t('variables.selectedCount', { count: values.length })
 }
 
 const getMultiSelectValues = (variable: VariableState): string[] => {
@@ -72,15 +76,15 @@ const clearMultiSelectValues = (variable: VariableState) => {
     <div class="flex items-center justify-between mb-2 px-1">
       <div class="flex items-center gap-2">
         <div class="w-1 h-3 bg-primary rounded-full"></div>
-        <span class="text-xs font-medium text-foreground">Variables</span>
+        <span class='text-xs font-medium text-foreground'>{{ t('ui.variables') }}</span>
         <span class="text-xs text-muted-foreground bg-muted px-1.5 py-0.5 rounded">
           {{ allVariables.length }}
         </span>
       </div>
       <Button variant="ghost" size="sm" class="h-6 px-2 text-xs" @click="emit('open-config')"
-        title="Configure variables">
+        :title="t('ui.configureVariables')">
         <Settings class="h-3 w-3 mr-1" />
-        Configure
+        {{ t('ui.configure') }}
       </Button>
     </div>
 
@@ -94,14 +98,14 @@ const clearMultiSelectValues = (variable: VariableState) => {
             <Label :for="`var-${variable.name}`"
               class="text-xs font-medium truncate cursor-pointer min-w-0"
               :class="variable.isOptional ? 'text-muted-foreground' : 'text-foreground'"
-              :title="(variable.label || variable.name) + (variable.isOptional ? ' (optional)' : '')">
+              :title="(variable.label || variable.name) + (variable.isOptional ? t('ui.optional4') : '')">
               {{ variable.label || variable.name }}
             </Label>
             <span class="text-xs px-1 py-0.5 bg-muted text-muted-foreground rounded font-mono flex-shrink-0">
               {{ variable.type[0] }}
             </span>
             <span v-if="variable.isOptional" class="text-[10px] px-1 py-0.5 bg-muted/50 text-muted-foreground/70 rounded flex-shrink-0 italic">
-              optional
+              {{ t('ui.optional3') }}
             </span>
           </div>
 
@@ -140,7 +144,7 @@ const clearMultiSelectValues = (variable: VariableState) => {
               <div v-if="getMultiSelectValues(variable).length > 0" class="border-t mt-2 pt-2">
                 <Button variant="ghost" size="sm" class="w-full h-7 text-xs text-muted-foreground"
                   @click="clearMultiSelectValues(variable)">
-                  Clear selection
+                  {{ t('ui.clearSelection') }}
                 </Button>
               </div>
             </PopoverContent>
@@ -157,11 +161,11 @@ const clearMultiSelectValues = (variable: VariableState) => {
                 'border-dashed border-muted-foreground/20': !hasVariableValue(variable) && !variable.isOptional,
                 'border-dashed border-muted-foreground/10': !hasVariableValue(variable) && variable.isOptional
               }">
-              <SelectValue :placeholder="variable.isOptional ? 'Select (optional)' : 'Select...'" class="truncate" />
+              <SelectValue :placeholder="variable.isOptional ? t('ui.selectOptional') : t('ui.select')" class='truncate' />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-if="variable.isOptional" value="">
-                <span class="text-muted-foreground italic">None</span>
+                <span class='text-muted-foreground italic'>{{ t('ui.none') }}</span>
               </SelectItem>
               <SelectItem v-for="opt in variable.options" :key="opt.value" :value="opt.value">
                 {{ opt.label || opt.value }}
@@ -175,7 +179,7 @@ const clearMultiSelectValues = (variable: VariableState) => {
             :model-value="variable.value ? String(variable.value) : null"
             @update:model-value="(val) => { variable.value = val ?? ''; variableStore.upsertVariable(variable); }"
             :include-time="true"
-            :placeholder="variable.isOptional ? 'Select date (optional)' : 'Select date...'"
+            :placeholder="variable.isOptional ? t('ui.selectDateOptional') : t('ui.selectDate')"
             class="w-full"
           />
 
@@ -184,7 +188,7 @@ const clearMultiSelectValues = (variable: VariableState) => {
             :model-value="String(variable.value ?? '')"
             @update:model-value="(val: string | number) => { variable.value = String(val); variableStore.upsertVariable(variable); }"
             :type="inputTypeFor(variable.type)"
-            :placeholder="variable.isOptional ? 'Leave empty to omit' : getPlaceholderForType(variable.type)"
+            :placeholder="variable.isOptional ? t('ui.leaveEmptyToOmit') : getPlaceholderForType(variable.type)"
             class="h-7 text-xs w-full focus:border-primary/50 transition-colors"
             :class="{
               'border-primary/30 bg-primary/5': hasVariableValue(variable),

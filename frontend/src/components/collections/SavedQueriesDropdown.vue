@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, computed, watch } from 'vue';
 import { ChevronDown, Save, PlusCircle, ListTree, BookMarked, Link } from 'lucide-vue-next';
 import { useRouter } from 'vue-router';
@@ -21,6 +23,8 @@ import { useSavedQueriesStore } from '@/stores/savedQueries';
 import { useExploreStore } from '@/stores/explore';
 import { useAuthStore } from '@/stores/auth';
 import { useSavedQueries } from '@/composables/useSavedQueries';
+
+const { t } = useI18n();
 // Removed contextTransitionInProgress - no longer needed with clean architecture
 
 const props = defineProps<{
@@ -104,8 +108,8 @@ async function loadQueries(_teamId: number | undefined, sourceId: number) {
   } catch (error) {
     console.error('Error triggering query load from store:', error);
     toast({
-      title: 'Error',
-      description: 'Failed to initiate loading saved queries.',
+      get title() { return t('ui.error'); },
+      get description() { return t('ui.failedToInitiateLoadingSavedQueries'); },
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
@@ -120,8 +124,8 @@ function selectQuery(query: SavedQuery) {
   } catch (error) {
     console.error('Error selecting query:', error);
     toast({
-      title: 'Error',
-      description: 'Failed to open the selected query',
+      get title() { return t('ui.error'); },
+      get description() { return t('ui.failedToOpenTheSelectedQuery'); },
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
@@ -159,15 +163,15 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
   try {
     await navigator.clipboard.writeText(url);
     toast({
-      title: 'Link Copied',
-      description: 'Collection URL copied to clipboard',
+      get title() { return t('ui.linkCopied'); },
+      get description() { return t('ui.collectionURLCopiedToClipboard'); },
       duration: TOAST_DURATION.SUCCESS,
     });
   } catch (error) {
     console.error('Failed to copy URL:', error);
     toast({
-      title: 'Error',
-      description: 'Failed to copy URL to clipboard',
+      get title() { return t('ui.error'); },
+      get description() { return t('ui.failedToCopyURLToClipboard'); },
       variant: 'destructive',
       duration: TOAST_DURATION.ERROR,
     });
@@ -180,31 +184,31 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
     <DropdownMenuTrigger as-child>
       <Button variant="outline" class="max-w-[200px]">
         <Save class="w-4 h-4 mr-2 flex-shrink-0" />
-        <span class="truncate">{{ activeSavedQueryName || 'Collections' }}</span>
+        <span class="truncate">{{ activeSavedQueryName || t('common.collections') }}</span>
         <ChevronDown class="w-4 h-4 ml-2 flex-shrink-0" />
       </Button>
     </DropdownMenuTrigger>
     <DropdownMenuContent class="w-64" align="end">
       <DropdownMenuItem v-if="canSaveQuery" @click="handleSave">
         <Save class="w-4 h-4 mr-2" />
-        <span>{{ isEditingExistingQuery ? 'Update Current Query' : 'Save Current Query to Collection...' }}</span>
+        <span>{{ isEditingExistingQuery ? t('ui.updateCurrentQuery') : t('ui.saveCurrentQueryToCollection') }}</span>
       </DropdownMenuItem>
       <DropdownMenuItem v-if="canSaveQuery && isEditingExistingQuery" @click="handleRequestSaveAsNew">
         <PlusCircle class="w-4 h-4 mr-2" />
-        <span>Save as New Query...</span>
+        <span>{{ t('ui.saveAsNewQuery') }}</span>
       </DropdownMenuItem>
 
       <DropdownMenuSeparator v-if="canSaveQuery" />
 
-      <DropdownMenuLabel v-if="hasQueries">Load from Collection</DropdownMenuLabel>
+      <DropdownMenuLabel v-if="hasQueries">{{ t('ui.loadFromCollection') }}</DropdownMenuLabel>
       <DropdownMenuSub v-if="hasQueries">
         <DropdownMenuSubTrigger>
           <ListTree class="w-4 h-4 mr-2" />
-          <span>Select Query ({{ filteredQueryCount }} / {{ totalQueryCount }})</span>
+          <span>{{ t('queries.select', { filtered: filteredQueryCount, total: totalQueryCount }) }}</span>
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent class="max-h-96 overflow-y-auto">
           <DropdownMenuItem v-if="filteredQueries.length === 0" disabled>
-            No matching queries found.
+            {{ t('ui.noMatchingQueriesFound') }}
           </DropdownMenuItem>
           <DropdownMenuItem
             v-for="query in filteredQueries"
@@ -218,7 +222,7 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
             <button
               @click="(e) => copyCollectionUrl(e, query)"
               class="p-0.5 rounded hover:bg-muted transition-colors flex-shrink-0"
-              title="Copy share link"
+              :title="t('ui.copyShareLink')"
             >
               <Link class="h-3.5 w-3.5 text-muted-foreground hover:text-foreground" />
             </button>
@@ -230,7 +234,7 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
 
       <DropdownMenuItem @click="navigateToCollectionsView">
         <BookMarked class="w-4 h-4 mr-2" />
-        <span>View All Collections</span>
+        <span>{{ t('ui.viewAllCollections') }}</span>
       </DropdownMenuItem>
     </DropdownMenuContent>
   </DropdownMenu>

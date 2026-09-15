@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -14,6 +16,8 @@ import { X, Plus, User, Bell } from "lucide-vue-next";
 import type { AcceptableValue } from "reka-ui";
 import type { TeamMember } from "@/api/teams";
 import type { AlertFormState } from "@/composables/useAlertForm";
+
+const { t } = useI18n();
 
 defineProps<{
   form: AlertFormState;
@@ -37,18 +41,18 @@ const newWebhookUrl = defineModel<string>("newWebhookUrl", { required: true });
     <div>
       <h3 class="text-sm font-semibold flex items-center gap-2">
         <Bell class="h-4 w-4" />
-        Notifications & Routing
+        {{ t('ui.notificationsRouting') }}
       </h3>
-      <p class="text-xs text-muted-foreground mt-1">Configure where alerts should be sent when triggered.</p>
+      <p class='text-xs text-muted-foreground mt-1'>{{ t('ui.configureWhereAlertsShouldBeSentWhenTriggered') }}</p>
     </div>
 
     <!-- Recipients -->
     <div class="space-y-3">
-       <Label class="text-xs font-medium">Team Members <span class="font-normal text-muted-foreground ml-1">· Notify via email</span></Label>
+       <Label class='text-xs font-medium'>{{ t('ui.teamMembers') }} <span class='font-normal text-muted-foreground ml-1'>{{ t('ui.notifyViaEmail') }}</span></Label>
        <div class="flex gap-2">
           <Select @update:model-value="onAddRecipient">
             <SelectTrigger class="w-full">
-              <SelectValue placeholder="Select team member to notify..." />
+              <SelectValue :placeholder="t('ui.selectTeamMemberToNotify')" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="member in teamMembers" :key="member.user_id" :value="String(member.user_id)">
@@ -78,7 +82,7 @@ const newWebhookUrl = defineModel<string>("newWebhookUrl", { required: true });
 
     <!-- Webhooks -->
     <div class="space-y-3">
-      <Label class="text-xs font-medium">Webhook URLs <span class="font-normal text-muted-foreground ml-1">· Send JSON payload</span></Label>
+      <Label class='text-xs font-medium'>{{ t('ui.webhookURLs') }} <span class='font-normal text-muted-foreground ml-1'>{{ t('ui.sendJSONPayload') }}</span></Label>
       <div class="flex gap-2">
         <Input v-model="newWebhookUrl" placeholder="https://api.example.com/hooks/..." @keydown.enter.prevent="onAddWebhook" />
         <Button type="button" variant="secondary" @click="onAddWebhook">
@@ -102,40 +106,40 @@ const newWebhookUrl = defineModel<string>("newWebhookUrl", { required: true });
       <!-- Labels -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <Label class="text-xs font-medium">Labels <span class="font-normal text-muted-foreground ml-1">· Grouping</span></Label>
+          <Label class='text-xs font-medium'>{{ t('ui.labels') }} <span class='font-normal text-muted-foreground ml-1'>{{ t('ui.grouping2') }}</span></Label>
           <Button type="button" variant="outline" size="sm" @click="onAddLabel" :disabled="disabled">
-            + Add Label
+            {{ t('ui.addLabel') }}
           </Button>
         </div>
         <div class="space-y-2">
           <div v-for="label in form.labels" :key="label.id" class="flex gap-2">
-            <Input v-model="label.key" placeholder="Key" class="flex-1" :disabled="disabled" />
-            <Input v-model="label.value" placeholder="Value" class="flex-1" :disabled="disabled" />
+            <Input v-model="label.key" :placeholder="t('ui.key')" class="flex-1" :disabled="disabled" />
+            <Input v-model="label.value" :placeholder="t('ui.value2')" class="flex-1" :disabled="disabled" />
             <Button type="button" variant="ghost" size="icon" @click="onRemoveLabel(label.id)" :disabled="disabled">
               <X class="h-4 w-4" />
             </Button>
           </div>
-          <p v-if="form.labels.length === 0" class="text-xs text-muted-foreground">No custom labels.</p>
+          <p v-if="form.labels.length === 0" class='text-xs text-muted-foreground'>{{ t('ui.noCustomLabels') }}</p>
         </div>
       </div>
 
       <!-- Annotations -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <Label class="text-xs font-medium">Annotations <span class="font-normal text-muted-foreground ml-1">· Context</span></Label>
+          <Label class='text-xs font-medium'>{{ t('ui.annotations') }} <span class='font-normal text-muted-foreground ml-1'>{{ t('ui.context') }}</span></Label>
           <Button type="button" variant="outline" size="sm" @click="onAddAnnotation" :disabled="disabled">
-            + Add Annotation
+            {{ t('ui.addAnnotation') }}
           </Button>
         </div>
         <div class="space-y-2">
           <div v-for="annotation in form.annotations" :key="annotation.id" class="flex gap-2">
-            <Input v-model="annotation.key" placeholder="Key" class="flex-1" :disabled="disabled" />
-            <Input v-model="annotation.value" placeholder="Value" class="flex-1" :disabled="disabled" />
+            <Input v-model="annotation.key" :placeholder="t('ui.key')" class="flex-1" :disabled="disabled" />
+            <Input v-model="annotation.value" :placeholder="t('ui.value2')" class="flex-1" :disabled="disabled" />
             <Button type="button" variant="ghost" size="icon" @click="onRemoveAnnotation(annotation.id)" :disabled="disabled">
               <X class="h-4 w-4" />
             </Button>
           </div>
-          <p v-if="form.annotations.length === 0" class="text-xs text-muted-foreground">No custom annotations.</p>
+          <p v-if="form.annotations.length === 0" class='text-xs text-muted-foreground'>{{ t('ui.noCustomAnnotations') }}</p>
         </div>
       </div>
     </div>

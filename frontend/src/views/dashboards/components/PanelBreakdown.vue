@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from "vue";
 import { VisDonut, VisSingleContainer } from "@unovis/vue";
 import type { HistogramData } from "@/services/HistogramService";
@@ -7,6 +9,8 @@ import {
   buildDonutBreakdownChartModel,
   type BreakdownCategory,
 } from "@/utils/breakdown-chart";
+
+const { t } = useI18n();
 
 interface Props {
   buckets: HistogramData[];
@@ -37,7 +41,7 @@ const donutHeight = computed(() => Math.max(90, props.height - (props.notice ? 2
           central-sub-label="Total"
         />
       </VisSingleContainer>
-      <div class="panel-breakdown__legend" aria-label="Breakdown legend">
+      <div class="panel-breakdown__legend" :aria-label="t('ui.breakdownLegend')">
         <div v-for="category in donut.categories" :key="`${category.isOther}:${category.value}`" class="panel-breakdown__legend-row">
           <span class="panel-breakdown__swatch" :style="{ backgroundColor: category.color }" />
           <span class="panel-breakdown__label" :title="category.label">{{ category.label }}</span>
@@ -45,7 +49,7 @@ const donutHeight = computed(() => Math.max(90, props.height - (props.notice ? 2
         </div>
       </div>
     </div>
-    <div v-else class="panel-breakdown__bars" aria-label="Breakdown bars">
+    <div v-else class="panel-breakdown__bars" :aria-label="t('ui.breakdownBars')">
       <div v-for="category in bars.categories" :key="`${category.isOther}:${category.value}`" class="panel-breakdown__bar-row">
         <span class="panel-breakdown__label" :title="category.label">{{ category.label }}</span>
         <div class="panel-breakdown__track" aria-hidden="true">

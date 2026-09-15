@@ -1,4 +1,5 @@
 import { createApp, nextTick } from 'vue'
+import { i18n } from '@/i18n'
 import { createPinia } from 'pinia'
 import { expect, it } from 'vitest'
 import DataTable from '../data-table.vue'
@@ -18,6 +19,7 @@ it('opens and closes the JSON detail panel when a flat log row is clicked', asyn
     teamId: null,
   })
   app.use(createPinia())
+  app.use(i18n)
   try {
     app.mount(host)
     await nextTick()

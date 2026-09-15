@@ -5,6 +5,7 @@ import { preferencesApi, type UserPreferences, type UserPreferencesResponse } fr
 import { useThemeStore, type ThemeMode } from "./theme";
 import { useAuthStore } from "./auth";
 import { useMetaStore } from "./meta";
+import { isLocalePreference } from "@/i18n/locales";
 
 interface PreferencesState {
   preferences: UserPreferences;
@@ -18,6 +19,7 @@ const LEGACY_DISPLAY_MODE_KEY = "logchef_display_mode";
 const LEGACY_FIELDS_PANEL_KEY = "logchef_fields_panel";
 
 const DEFAULT_PREFERENCES: UserPreferences = {
+  locale: "auto",
   theme: "auto",
   timezone: "local",
   display_mode: "table",
@@ -30,6 +32,7 @@ function isThemeMode(value: string): value is ThemeMode {
 
 function normalizePreferences(preferences: UserPreferences): UserPreferences {
   return {
+    locale: isLocalePreference(preferences.locale) ? preferences.locale : "auto",
     theme: isThemeMode(preferences.theme) ? preferences.theme : DEFAULT_PREFERENCES.theme,
     timezone: preferences.timezone === "utc" || preferences.timezone === "local" ? preferences.timezone : DEFAULT_PREFERENCES.timezone,
     display_mode:
@@ -97,6 +100,7 @@ function persistLegacyKeys(preferences: UserPreferences) {
 
 function preferencesEqual(a: UserPreferences, b: UserPreferences) {
   return (
+    a.locale === b.locale &&
     a.theme === b.theme &&
     a.timezone === b.timezone &&
     a.display_mode === b.display_mode &&
@@ -110,6 +114,10 @@ export const usePreferencesStore = defineStore("preferences", () => {
   const metaStore = useMetaStore();
 
   const initialPreferences = readStoredPreferences(themeStore.preference);
+  let loadedForUser: string | null | undefined;
+  let preferencesRevision = 0;
+  let pendingSave: Promise<unknown> = Promise.resolve();
+  let pendingLoad: Promise<unknown> | undefined;
 
   const state = useBaseStore<PreferencesState>({
     preferences: initialPreferences,
@@ -135,76 +143,91 @@ export const usePreferencesStore = defineStore("preferences", () => {
   applyPreferences(state.data.value.preferences, { syncTheme: false });
 
   async function loadPreferences(forceReload = false) {
+    const userId = authStore.user?.id ?? null;
+    if (loadedForUser !== userId && !metaStore.demoReadOnly) {
+      state.data.value.isLoaded = false;
+      applyPreferences({ ...preferences.value, locale: "auto" });
+      loadedForUser = userId;
+    }
     // A public demo uses one shared account, so server preferences would make
     // visitors overwrite each other's theme and explorer defaults. Keep the
     // already-persisted browser copy authoritative in demo mode.
     if (!authStore.isAuthenticated || metaStore.demoReadOnly) {
       state.data.value.isLoaded = true;
+      loadedForUser = userId;
       return { success: true, data: preferences.value };
     }
 
-    if (isLoaded.value && !forceReload) {
+    if (isLoaded.value && loadedForUser === userId && !forceReload) {
       return { success: true, data: preferences.value };
     }
 
-    return await state.withLoading("loadPreferences", async () => {
-      return await state.callApi<UserPreferencesResponse>({
+    const revision = ++preferencesRevision;
+    const loading = state.withLoading("loadPreferences", async () => {
+      // A read during a save must see the saved value, not the old server copy.
+      await pendingSave;
+      if ((authStore.user?.id ?? null) !== userId || revision !== preferencesRevision) return { success: false };
+      const result = await state.callApi<UserPreferencesResponse>({
         apiCall: () => preferencesApi.getPreferences(),
         operationKey: "loadPreferences",
         showToast: false,
-        onSuccess: async (response) => {
-          const payload = response as UserPreferencesResponse | null;
-          if (!payload) {
-            state.data.value.isLoaded = true;
-            return;
-          }
-
-          const serverPreferences = normalizePreferences({
-            ...DEFAULT_PREFERENCES,
-            ...payload.preferences,
-          });
-
-          if (payload.is_default) {
-            const localPreferences = normalizePreferences(preferences.value);
-            const merged = normalizePreferences({
-              ...serverPreferences,
-              ...localPreferences,
-            });
-
-            applyPreferences(merged);
-            state.data.value.isDefault = true;
-
-            if (!preferencesEqual(serverPreferences, merged)) {
-              await syncPreferencesToServer(merged);
-            }
-          } else {
-            applyPreferences(serverPreferences);
-            state.data.value.isDefault = false;
-          }
-
-          state.data.value.isLoaded = true;
-        },
       });
+      if (!result.success || !result.data || (authStore.user?.id ?? null) !== userId || revision !== preferencesRevision) return result;
+      const payload = result.data;
+      const serverPreferences = normalizePreferences({ ...DEFAULT_PREFERENCES, ...payload.preferences });
+      if (payload.is_default) {
+        const merged = normalizePreferences({
+          ...serverPreferences,
+          ...preferences.value,
+          // Do not copy another account's language from this browser.
+          locale: serverPreferences.locale,
+        });
+        applyPreferences(merged);
+        state.data.value.isDefault = true;
+        if (!preferencesEqual(serverPreferences, merged)) await savePreferences(merged, "syncPreferences");
+      } else {
+        applyPreferences(serverPreferences);
+        state.data.value.isDefault = false;
+      }
+      if ((authStore.user?.id ?? null) === userId && revision === preferencesRevision) {
+        state.data.value.isLoaded = true;
+        loadedForUser = userId;
+      }
+      return result;
     });
+    pendingLoad = loading;
+    try {
+      return await loading;
+    } finally {
+      if (pendingLoad === loading) pendingLoad = undefined;
+    }
   }
 
-  async function syncPreferencesToServer(next: UserPreferences) {
-    if (!authStore.isAuthenticated || metaStore.demoReadOnly) {
-      return { success: true, data: next };
-    }
-
-    return await state.callApi<UserPreferencesResponse>({
-      apiCall: () => preferencesApi.updatePreferences(next),
-      operationKey: "syncPreferences",
-      showToast: false,
+  function savePreferences(partial: Partial<UserPreferences>, operationKey: string) {
+    const userId = authStore.user?.id;
+    const result = pendingSave.then(() => {
+      if (!userId || authStore.user?.id !== userId) return { success: false };
+      return state.callApi<UserPreferencesResponse>({
+        apiCall: () => preferencesApi.updatePreferences(partial),
+        operationKey,
+        showToast: false,
+      });
     });
+    pendingSave = result;
+    return result;
   }
 
   async function updatePreferences(partial: Partial<UserPreferences>, options?: { syncTheme?: boolean }) {
+    const userId = authStore.user?.id;
+    if (userId && !metaStore.demoReadOnly && !isLoaded.value) {
+      await (pendingLoad ?? loadPreferences());
+      if (authStore.user?.id !== userId) return { success: false };
+    }
+    preferencesRevision++;
     const next = normalizePreferences({
       ...preferences.value,
       ...partial,
-    } as UserPreferences);
+    });
 
     applyPreferences(next, { syncTheme: options?.syncTheme });
 
@@ -212,12 +235,7 @@ export const usePreferencesStore = defineStore("preferences", () => {
       return { success: true, data: next };
     }
 
-    return await state.callApi<UserPreferencesResponse>({
-      apiCall: () => preferencesApi.updatePreferences(partial),
-      operationKey: "updatePreferences",
-      successMessage: "Preferences updated",
-      showToast: false,
-    });
+    return await savePreferences(partial, "updatePreferences");
   }
 
   return {

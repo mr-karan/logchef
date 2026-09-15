@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+import { alertStateLabels } from "@/i18n/alertLabels";
+
 import { computed, watch, ref } from "vue";
 import { storeToRefs } from "pinia";
 import {
@@ -18,6 +21,8 @@ import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useAlertsStore } from "@/stores/alerts";
 import type { Alert } from "@/api/alerts";
 import { getQueryLanguageLabel, resolveAlertMetadata } from "@/lib/queryMetadata";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   open: boolean;
@@ -57,7 +62,7 @@ const alertSummary = computed(() => {
     query_language: props.alert.query_language,
     editor_mode: props.alert.editor_mode,
   });
-  const queryLabel = metadata.editorMode === "condition" ? "Log condition" : `${getQueryLanguageLabel(metadata.queryLanguage)} query`;
+  const queryLabel = metadata.editorMode === "condition" ? t('ui.logCondition') : `${getQueryLanguageLabel(metadata.queryLanguage)} query`;
   return `${queryLabel} • ${props.alert.threshold_operator} ${props.alert.threshold_value}, every ${props.alert.frequency_seconds}s`;
 });
 
@@ -114,11 +119,11 @@ watch(
 
       <div class="mt-6 flex flex-1 flex-col gap-6">
         <div v-if="isLoadingHistory" class="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-          Loading history…
+          {{ t('ui.loadingHistory2') }}
         </div>
 
         <div v-else-if="!entries.length" class="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-          No alert activity recorded yet.
+          {{ t('ui.noAlertActivityRecordedYet') }}
         </div>
 
         <ScrollArea v-else class="max-h-[50vh] rounded-lg border p-4">
@@ -127,28 +132,28 @@ watch(
               class="rounded-lg border bg-muted/40 p-3">
               <div class="flex items-center justify-between">
                 <Badge :variant="entry.status === 'triggered' ? 'destructive' : 'secondary'">
-                  {{ entry.status }}
+                  {{ t(alertStateLabels[entry.status]) }}
                 </Badge>
                 <span class="text-xs text-muted-foreground">
-                  Triggered {{ formatDate(entry.triggered_at) }}
+                  {{ t('ui.triggered') }} {{ formatDate(entry.triggered_at) }}
                 </span>
               </div>
               <div class="mt-3 space-y-3 text-xs text-muted-foreground">
                 <div class="flex items-center justify-between">
-                  <span>Latest value</span>
+                  <span>{{ t('ui.latestValue') }}</span>
                   <span class="font-medium text-foreground">
                     {{ entry.value != null ? entry.value : "—" }}
                   </span>
                 </div>
                 <div v-if="entry.resolved_at">
-                  Resolved {{ formatDate(entry.resolved_at) }}
+                  {{ t('ui.resolved') }} {{ formatDate(entry.resolved_at) }}
                 </div>
                 <p v-if="entry.message" class="text-foreground">
                   {{ entry.message }}
                 </p>
                 <div v-if="entry.payload && (entry.payload.labels || entry.payload.annotations)" class="space-y-2">
                   <div v-if="entry.payload.labels">
-                    <h4 class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Labels</h4>
+                    <h4 class='text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>{{ t('ui.labels') }}</h4>
                     <div class="mt-1 grid gap-1">
                       <div
                         v-for="(labelValue, labelKey) in (entry.payload.labels as Record<string, string>)"
@@ -161,7 +166,7 @@ watch(
                     </div>
                   </div>
                   <div v-if="entry.payload.annotations">
-                    <h4 class="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Annotations</h4>
+                    <h4 class='text-[11px] font-semibold uppercase tracking-wide text-muted-foreground'>{{ t('ui.annotations') }}</h4>
                     <div class="mt-1 grid gap-1">
                       <div
                         v-for="(annotationValue, annotationKey) in (entry.payload.annotations as Record<string, string>)"
@@ -181,25 +186,25 @@ watch(
 
         <div v-if="alert && hasActiveIncident" class="rounded-lg border bg-muted/40 p-4 space-y-3">
           <div>
-            <h3 class="text-sm font-medium">Resolve alert</h3>
+            <h3 class='text-sm font-medium'>{{ t('ui.resolveAlert') }}</h3>
             <p class="text-xs text-muted-foreground">
-              Provide optional context for the resolution. This will be stored alongside the alert history.
+              {{ t('ui.provideOptionalContextForTheResolutionThisWillBeStoredAlongsideThe') }}
             </p>
           </div>
-          <Textarea v-model="resolveMessage" placeholder="Resolved after scaling worker pool…" :rows="3" />
+          <Textarea v-model="resolveMessage" :placeholder="t('ui.resolvedAfterScalingWorkerPool')" :rows="3" />
           <div class="flex justify-end gap-2">
             <Button variant="outline" size="sm" @click="resolveMessage = ''">
-              Clear
+              {{ t('ui.clear') }}
             </Button>
             <Button size="sm" @click="handleResolve" :disabled="isResolving">
-              {{ isResolving ? "Resolving…" : "Resolve alert" }}
+              {{ isResolving ? t('ui.resolving') : t('ui.resolveAlert') }}
             </Button>
           </div>
         </div>
       </div>
 
       <SheetFooter class="mt-6">
-        <Button variant="ghost" @click="handleClose">Close</Button>
+        <Button variant='ghost' @click="handleClose">{{ t('ui.close') }}</Button>
       </SheetFooter>
     </SheetContent>
   </Sheet>

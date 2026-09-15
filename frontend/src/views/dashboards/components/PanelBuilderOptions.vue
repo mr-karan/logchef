@@ -1,10 +1,14 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, ref } from "vue";
 import { X } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { DashboardPanelOptions, DashboardPanelType } from "@/api/dashboards";
+
+const { t } = useI18n();
 
 // Per-type option fields for the panel builder drawer. Kept as a separate
 // component so PanelBuilderDrawer.vue doesn't grow a third editing surface —
@@ -20,18 +24,18 @@ const emit = defineEmits<{
 }>();
 
 const CHART_STYLES: { value: NonNullable<DashboardPanelOptions["chart"]>; label: string }[] = [
-  { value: "line", label: "Line" },
-  { value: "area", label: "Area" },
-  { value: "bars", label: "Bars" },
+  { value: "line", get label() { return t('ui.line'); } },
+  { value: "area", get label() { return t('ui.area'); } },
+  { value: "bars", get label() { return t('ui.bars'); } },
 ];
 
 const BAR_MODES: { value: NonNullable<DashboardPanelOptions["bar_mode"]>; label: string }[] = [
-  { value: "stacked", label: "Stacked" },
-  { value: "grouped", label: "Grouped" },
+  { value: "stacked", get label() { return t('ui.stacked'); } },
+  { value: "grouped", get label() { return t('ui.grouped'); } },
 ];
 const BREAKDOWN_VIEWS: { value: NonNullable<DashboardPanelOptions["breakdown_view"]>; label: string }[] = [
-  { value: "horizontal-bars", label: "Horizontal bars" },
-  { value: "donut", label: "Donut" },
+  { value: "horizontal-bars", get label() { return t('ui.horizontalBars'); } },
+  { value: "donut", get label() { return t('ui.donut'); } },
 ];
 
 // The effective chart style, matching what PanelTimeseries renders.
@@ -74,12 +78,12 @@ function removeColumn(name: string) {
   <!-- Timeseries: group-by field + chart render style. -->
   <div v-if="type === 'timeseries'" class="space-y-4">
     <div class="space-y-1.5">
-      <Label for="panel-groupby">Group by <span class="text-muted-foreground">(optional)</span></Label>
+      <Label for="panel-groupby">{{ t('ui.groupBy2') }} <span class='text-muted-foreground'>{{ t('ui.optional2') }}</span></Label>
       <Input
         id="panel-groupby"
         :model-value="options.group_by ?? ''"
         list="panel-field-suggestions"
-        placeholder="e.g. service"
+        :placeholder="t('ui.eGService')"
         @update:model-value="(v) => emit('update:options', { group_by: String(v ?? '') })"
       />
       <datalist id="panel-field-suggestions">
@@ -87,7 +91,7 @@ function removeColumn(name: string) {
       </datalist>
     </div>
     <div class="space-y-1.5">
-      <Label>Chart style</Label>
+      <Label>{{ t('ui.chartStyle') }}</Label>
       <div class="grid grid-cols-3 gap-1.5">
         <Button
           v-for="style in CHART_STYLES"
@@ -103,7 +107,7 @@ function removeColumn(name: string) {
       </div>
     </div>
     <div v-if="effectiveChart === 'bars'" class="space-y-1.5">
-      <Label>Bar mode</Label>
+      <Label>{{ t('ui.barMode') }}</Label>
       <div class="grid grid-cols-2 gap-1.5">
         <Button
           v-for="mode in BAR_MODES"
@@ -123,12 +127,12 @@ function removeColumn(name: string) {
   <!-- Breakdown: a required grouping field and a view-only selector. -->
   <div v-else-if="type === 'breakdown'" class="space-y-4">
     <div class="space-y-1.5">
-      <Label for="panel-breakdown-groupby">Group by <span class="text-destructive">(required)</span></Label>
+      <Label for="panel-breakdown-groupby">{{ t('ui.groupBy2') }} <span class='text-destructive'>{{ t('ui.required') }}</span></Label>
       <Input
         id="panel-breakdown-groupby"
         :model-value="options.group_by ?? ''"
         list="panel-field-suggestions"
-        placeholder="e.g. service"
+        :placeholder="t('ui.eGService')"
         @update:model-value="(v) => emit('update:options', { group_by: String(v ?? '') })"
       />
       <datalist id="panel-field-suggestions">
@@ -136,7 +140,7 @@ function removeColumn(name: string) {
       </datalist>
     </div>
     <div class="space-y-1.5">
-      <Label>View</Label>
+      <Label>{{ t('ui.view') }}</Label>
       <div class="grid grid-cols-2 gap-1.5">
         <Button v-for="view in BREAKDOWN_VIEWS" :key="view.value" type="button" size="sm"
           :variant="(options.breakdown_view ?? 'horizontal-bars') === view.value ? 'default' : 'outline'"
@@ -149,13 +153,13 @@ function removeColumn(name: string) {
 
   <!-- Stat: no options yet. -->
   <p v-else-if="type === 'stat'" class="text-xs text-muted-foreground">
-    Stat panels show the total match count over the selected time range. No options yet.
+    {{ t('ui.statPanelsShowTheTotalMatchCountOverTheSelectedTimeRange') }}
   </p>
 
   <!-- Table: row limit + column subset. -->
   <div v-else-if="type === 'table'" class="space-y-4">
     <div class="space-y-1.5">
-      <Label for="panel-limit">Row limit</Label>
+      <Label for="panel-limit">{{ t('ui.rowLimit') }}</Label>
       <Input
         id="panel-limit"
         type="number"
@@ -167,7 +171,7 @@ function removeColumn(name: string) {
       />
     </div>
     <div class="space-y-1.5">
-      <Label for="panel-columns">Columns <span class="text-muted-foreground">(optional; all if empty)</span></Label>
+      <Label for="panel-columns">{{ t('ui.columns') }} <span class='text-muted-foreground'>{{ t('ui.optionalAllIfEmpty') }}</span></Label>
       <div class="flex flex-wrap gap-1.5">
         <span
           v-for="col in options.columns ?? []"
@@ -184,7 +188,7 @@ function removeColumn(name: string) {
         id="panel-columns"
         v-model="columnInput"
         list="panel-field-suggestions"
-        placeholder="Type a column and press Enter"
+        :placeholder="t('ui.typeAColumnAndPressEnter')"
         @keydown.enter.prevent="addColumn"
         @keydown="(e: KeyboardEvent) => e.key === ',' && (e.preventDefault(), addColumn())"
       />

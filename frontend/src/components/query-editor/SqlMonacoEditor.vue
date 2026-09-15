@@ -12,15 +12,17 @@
   />
 
   <div v-else-if="loadError" class="sql-editor-load-error">
-    <p class="sql-editor-load-error__title">Unable to initialize SQL editor</p>
+    <p class="sql-editor-load-error__title">{{ t('ui.unableToInitializeSQLEditor') }}</p>
     <p class="sql-editor-load-error__description">{{ loadError }}</p>
     <button class="sql-editor-load-error__button" type="button" @click="retryLoadRuntimeDependencies">
-      Retry
+      {{ t('ui.retry') }}
     </button>
   </div>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, shallowRef, watch, type Component } from "vue";
 import { SQL_KEYWORDS } from "@/utils/clickhouse-sql";
 import { useFieldValuesStore } from "@/stores/exploreFieldValues";
@@ -33,6 +35,8 @@ import {
   buildValueInsertText,
   filterValuesByPartial,
 } from "@/utils/logchefql-autocomplete";
+
+const { t } = useI18n();
 
 interface SqlMonacoEditorProps {
   value: string;
@@ -277,7 +281,7 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
                 range: replaceRange,
                 detail: formatFieldDetail(fieldType, summary?.totalDistinct ?? null),
                 sortText: String(i).padStart(3, "0"),
-                command: { id: "editor.action.triggerSuggest", title: "Re-trigger" },
+                command: { id: "editor.action.triggerSuggest", get title() { return t('ui.reTrigger'); } },
               };
             }),
           };
@@ -299,7 +303,7 @@ function registerLogchefQLCompletionProvider(deps: DepsType) {
               label: op.label, kind: deps.monaco.languages.CompletionItemKind.Text,
               insertText: op.label, range: insertRange,
               detail: op.detail, sortText: String(i).padStart(2, "0"),
-              command: { id: "editor.action.triggerSuggest", title: "Re-trigger" },
+              command: { id: "editor.action.triggerSuggest", get title() { return t('ui.reTrigger'); } },
             })),
           };
         }
@@ -428,7 +432,7 @@ async function initializeEditor(editor: MonacoEditor) {
     editor.onDidBlurEditorWidget(() => emit("focus-change", false)),
     editor.addAction({
       id: "submit-query",
-      label: "Run Query",
+      get label() { return t('ui.runQuery'); },
       keybindings: [deps.monaco.KeyMod.CtrlCmd | deps.monaco.KeyCode.Enter],
       run: () => emit("submit"),
     })
@@ -688,7 +692,7 @@ async function loadRuntimeDependencies(force = false) {
     loadError.value =
       error instanceof Error
         ? error.message
-        : "The SQL editor dependencies could not be loaded.";
+        : t('ui.theSQLEditorDependenciesCouldNotBeLoaded');
     console.error("Failed to load SQL editor", error);
   } finally {
     isLoadingRuntimeDependencies.value = false;

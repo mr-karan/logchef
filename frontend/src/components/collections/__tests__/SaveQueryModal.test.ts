@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, nextTick, ref } from "vue";
+import { i18n } from "@/i18n";
 
 type QueryContentFixture = {
   version: number;
@@ -177,6 +178,7 @@ describe("SaveQueryModal submission lock", () => {
     });
 
     const app = createApp(Harness);
+    app.use(i18n);
     app.mount(host);
     await nextTick();
 

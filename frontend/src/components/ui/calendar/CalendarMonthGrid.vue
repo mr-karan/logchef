@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import type { DateRange, DateValue } from "reka-ui"
 import type { HTMLAttributes } from "vue"
-import { computed } from "vue"
+import { computed, watch } from "vue"
 import { CalendarDate, getLocalTimeZone, today } from "@internationalized/date"
 import { useDateFormatter } from "reka-ui"
 import { ChevronLeft, ChevronRight } from "lucide-vue-next"
@@ -35,6 +35,7 @@ const emit = defineEmits<{
 }>()
 
 const formatter = useDateFormatter(props.locale)
+watch(() => props.locale, locale => formatter.setLocale(locale))
 const todayDate = today(getLocalTimeZone())
 
 const months = computed(() =>

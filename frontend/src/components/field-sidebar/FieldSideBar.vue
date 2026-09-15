@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, computed, watch, onUnmounted } from 'vue'
 import type { Source } from '@/api/sources'
 import { Input } from '@/components/ui/input'
@@ -42,6 +44,8 @@ import {
 } from '@/composables/useFieldValuesLoader'
 import { getNativeQueryLanguageForSource, supportsQueryLanguage, type QueryLanguage } from '@/lib/queryMetadata'
 import { buildSourceFieldGroups, type SourceFieldGroup } from '@/lib/sourceFields'
+
+const { t } = useI18n();
 
 // Define field type for auto-completion
 interface FieldInfo {
@@ -348,7 +352,7 @@ onUnmounted(() => {
       <!-- Header -->
       <div class="px-3 py-2 border-b bg-muted/30">
         <div class="flex items-center justify-between mb-2">
-          <span class="text-sm font-semibold text-foreground">Fields</span>
+          <span class='text-sm font-semibold text-foreground'>{{ t('ui.fields') }}</span>
           <div class="flex items-center gap-1">
             <TooltipProvider>
               <Tooltip>
@@ -366,7 +370,7 @@ onUnmounted(() => {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">
-                  <p class="text-xs">Refresh field values</p>
+                  <p class='text-xs'>{{ t('ui.refreshFieldValues') }}</p>
                 </TooltipContent>
               </Tooltip>
             </TooltipProvider>
@@ -378,7 +382,7 @@ onUnmounted(() => {
           <Search class="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             v-model="fieldSearch"
-            placeholder="Search fields..."
+            :placeholder="t('ui.searchFields')"
             class="h-7 text-xs pl-7 pr-7"
           />
           <button
@@ -402,13 +406,13 @@ onUnmounted(() => {
                   :is="group.id === 'system' || group.id === 'other' ? Database : Tag"
                   :class="cn('h-3 w-3', getGroupHeaderIconClass(group.id))"
                 />
-                <span>{{ group.label }}</span>
+                <span>{{ t(`fields.${group.id}.label`) }}</span>
                 <Badge variant="secondary" class="ml-auto text-[9px] h-4 px-1">
                   {{ group.fields.length }}
                 </Badge>
               </div>
               <p class="px-2 pb-1 text-[10px] leading-relaxed text-muted-foreground/80">
-                {{ group.description }}
+                {{ t(`fields.${group.id}.description`) }}
               </p>
 
               <div class="space-y-0.5">
@@ -454,7 +458,7 @@ onUnmounted(() => {
                           variant="outline"
                           class="text-[9px] h-4 px-1 font-normal flex-shrink-0 text-muted-foreground"
                         >
-                          click
+                          {{ t('ui.click') }}
                         </Badge>
                         <Badge
                           variant="outline"
@@ -476,14 +480,14 @@ onUnmounted(() => {
                         <template v-else-if="getFieldState(field.name).status === 'error'">
                           <div class="flex items-center gap-2 text-xs text-amber-600 dark:text-amber-500 py-1 px-2">
                             <AlertTriangle class="h-3.5 w-3.5 flex-shrink-0" />
-                            <span class="flex-1">Failed to load</span>
+                            <span class="flex-1">{{ t('ui.failedToLoad') }}</span>
                             <Button
                               variant="ghost"
                               size="sm"
                               class="h-5 px-2 text-xs"
                               @click.stop="loadField(field.name, field.type)"
                             >
-                              Retry
+                              {{ t('ui.retry') }}
                             </Button>
                           </div>
                         </template>
@@ -497,10 +501,10 @@ onUnmounted(() => {
                               @click.stop="loadField(field.name, field.type)"
                             >
                               <RefreshCw class="h-3 w-3 mr-1.5" />
-                              Load values
+                              {{ t('ui.loadValues') }}
                             </Button>
                             <p class="text-[10px] text-muted-foreground mt-1.5 text-center">
-                              May be slow for high-cardinality fields
+                              {{ t('ui.mayBeSlowForHighCardinalityFields') }}
                             </p>
                           </div>
                         </template>
@@ -536,7 +540,7 @@ onUnmounted(() => {
                                     </button>
                                   </TooltipTrigger>
                                   <TooltipContent side="right" class="text-xs">
-                                    <p>Exclude: {{ field.name }}!="{{ valueInfo.value }}"</p>
+                                    <p>{{ t('ui.exclude') }} {{ field.name }}!="{{ valueInfo.value }}"</p>
                                   </TooltipContent>
                                 </Tooltip>
                               </TooltipProvider>
@@ -546,14 +550,14 @@ onUnmounted(() => {
                               v-if="fieldValues[field.name].total_distinct > fieldValues[field.name].values.length"
                               class="text-[10px] text-muted-foreground px-2 pt-1"
                             >
-                              +{{ fieldValues[field.name].total_distinct - fieldValues[field.name].values.length }} more values
+                              +{{ fieldValues[field.name].total_distinct - fieldValues[field.name].values.length }} {{ t('ui.moreValues') }}
                             </div>
                           </div>
                         </template>
 
                         <template v-else-if="getFieldState(field.name).status === 'loaded'">
                           <div class="text-xs text-muted-foreground italic py-1 px-2">
-                            No values found
+                            {{ t('ui.noValuesFound') }}
                           </div>
                         </template>
                       </div>
@@ -596,10 +600,10 @@ onUnmounted(() => {
             <Database class="h-8 w-8 mx-auto text-muted-foreground/40 mb-2" />
             <p class="text-sm text-muted-foreground">
               <template v-if="fieldSearch">
-                No fields match "{{ fieldSearch }}"
+                {{ t('explore.noFieldMatches', { search: fieldSearch }) }}
               </template>
               <template v-else>
-                No fields available
+                {{ t('ui.noFieldsAvailable') }}
               </template>
             </p>
           </div>
@@ -610,11 +614,11 @@ onUnmounted(() => {
       <div class="px-3 py-2 border-t bg-muted/20 text-[10px] text-muted-foreground">
         <div class="flex items-center gap-1">
           <Plus class="h-3 w-3" />
-          <span>Click value to add filter</span>
+          <span>{{ t('ui.clickValueToAddFilter') }}</span>
         </div>
         <div class="flex items-center gap-1 mt-0.5">
           <Minus class="h-3 w-3" />
-          <span>Click minus to exclude</span>
+          <span>{{ t('ui.clickMinusToExclude') }}</span>
         </div>
       </div>
     </div>

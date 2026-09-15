@@ -1,12 +1,12 @@
 <template>
   <div :class="['query-editor', props.class]">
     <!-- Header Bar (Keep existing structure) -->
-    <div class="flex items-center justify-between bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
-      <div class="flex items-center gap-3">
+    <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 bg-muted/40 rounded-t-md px-3 py-1.5 border border-b-0">
+      <div class="flex min-w-0 max-w-full flex-wrap items-center gap-3">
         <!-- Fields Panel Toggle -->
         <button class="p-1 text-muted-foreground hover:text-foreground flex items-center"
-          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? 'Hide fields panel' : 'Show fields panel'
-            " aria-label="Toggle fields panel">
+          @click="$emit('toggle-fields')" :title="props.showFieldsPanel ? t('ui.hideFieldsPanel') : t('ui.showFieldsPanel')
+            " :aria-label="t('ui.toggleFieldsPanel')">
           <PanelRightClose v-if="props.showFieldsPanel" class="h-4 w-4" />
           <PanelRightOpen v-else class="h-4 w-4" />
         </button>
@@ -19,7 +19,7 @@
             <TabsTrigger v-if="supportsLogchefQL" value="logchefql">
               <div class="flex-fix">
                 <Search class="w-4 h-4" />
-                <span>Search</span>
+                <span>{{ t('ui.search2') }}</span>
               </div>
             </TabsTrigger>
             <TabsTrigger value="clickhouse-sql">
@@ -37,11 +37,11 @@
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="showAiDialog = true">
                 <Wand2 class="h-3.5 w-3.5 text-purple-600" />
-                <span class="text-xs font-medium hidden sm:inline">AI Assistant</span>
+                <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.aIAssistant') }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>Generate SQL using natural language</p>
+              <p>{{ t('ui.generateSQLUsingNaturalLanguage') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -52,32 +52,32 @@
         <!-- Table name indicator - hidden on small screens -->
         <div class="text-xs text-muted-foreground ml-3 hidden md:block">
           <template v-if="props.tableName">
-            <span class="mr-1">Table:</span>
+            <span class='mr-1'>{{ t('ui.table2') }}</span>
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">{{
               props.tableName
             }}</code>
           </template>
           <template v-else-if="isVictoriaLogsSource">
-            <span class="mr-1">Datasource:</span>
+            <span class='mr-1'>{{ t('ui.datasource') }}</span>
             <code class="bg-muted px-1.5 py-0.5 rounded text-xs">VictoriaLogs</code>
           </template>
-          <span v-else class="italic text-orange-500">No table selected</span>
+          <span v-else class="italic text-orange-500">{{ t('ui.noTableSelected') }}</span>
         </div>
 
       </div>
 
-      <div class="flex items-center gap-2">
+      <div class="ml-auto flex max-w-full flex-wrap items-center gap-2">
         <!-- New: New Query Button - Only show when editing a saved query -->
         <TooltipProvider v-if="isEditingExistingQuery">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button variant="outline" size="sm" class="h-7 gap-1" @click="handleNewQueryClick">
                 <FilePlus2 class="h-3.5 w-3.5" />
-                <span class="text-xs hidden sm:inline">New</span>
+                <span class='text-xs hidden sm:inline'>{{ t('ui.new') }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>Create a new query</p>
+              <p>{{ t('ui.createANewQuery') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -89,11 +89,11 @@
               <Button variant="outline" size="sm" class="h-7 gap-1" @click="toggleSqlEditorVisibility">
                 <EyeOff v-if="isEditorVisible" class="h-3.5 w-3.5" />
                 <Eye v-else class="h-3.5 w-3.5" />
-                <span class="text-xs hidden sm:inline">{{ isEditorVisible ? "Hide" : "Show" }} {{ nativeEditorLabel }}</span>
+                <span class='text-xs hidden sm:inline'>{{ isEditorVisible ? t('ui.hide') : t('ui.show') }} {{ nativeEditorLabel }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p>{{ isEditorVisible ? "Hide" : "Show" }} {{ nativeEditorLabel }} query editor</p>
+              <p>{{ isEditorVisible ? t('ui.hide') : t('ui.show') }} {{ nativeEditorLabel }} {{ t('ui.queryEditor') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -114,20 +114,20 @@
                 class="h-7 gap-1.5"
                 :class="isLive ? 'bg-emerald-600 hover:bg-emerald-700 text-white' : ''"
                 :disabled="!isLive && !canGoLive"
-                aria-label="Live tail"
+                :aria-label="t('ui.liveTail')"
                 @click="toggleLive"
               >
                 <Radio class="h-3.5 w-3.5" :class="isLive ? 'animate-pulse' : ''" />
-                <span class="text-xs font-medium hidden sm:inline">Live</span>
+                <span class='text-xs font-medium hidden sm:inline'>{{ t('ui.live') }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
               <p class="text-xs">
                 {{ isLive
-                  ? 'Stop live tail'
+                  ? t('ui.stopLiveTail')
                   : (canGoLive
-                    ? 'Stream new logs as they arrive'
-                    : 'Live tail needs LogchefQL (or LogsQL for VictoriaLogs)') }}
+                    ? t('ui.streamNewLogsAsTheyArrive')
+                    : t('ui.liveTailNeedsLogchefQLOrLogsQLForVictoriaLogs')) }}
               </p>
             </TooltipContent>
           </Tooltip>
@@ -167,11 +167,11 @@
                 @click="toggleLive"
               >
                 <Square class="h-3.5 w-3.5" />
-                <span class="font-medium">Stop</span>
+                <span class='font-medium'>{{ t('ui.stop') }}</span>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p class="text-xs">Stop live tail</p>
+              <p class='text-xs'>{{ t('ui.stopLiveTail') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -188,12 +188,12 @@
                 @click="$emit('execute')"
               >
                 <Play class="h-3.5 w-3.5" />
-                <span class="font-medium">Run</span>
+                <span class='font-medium'>{{ t('ui.run') }}</span>
                 <kbd class="ml-1 text-[10px] bg-emerald-700/50 px-1 py-0.5 rounded hidden sm:inline">⌘↵</kbd>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p class="text-xs">Execute query (Ctrl+Enter)</p>
+              <p class='text-xs'>{{ t('ui.executeQueryCtrlEnter') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -211,17 +211,17 @@
               >
                 <template v-if="props.isCancelling">
                   <RefreshCw class="h-3.5 w-3.5 animate-spin" />
-                  <span class="font-medium">Cancelling...</span>
+                  <span class='font-medium'>{{ t('ui.cancelling') }}</span>
                 </template>
                 <template v-else>
                   <Square class="h-3.5 w-3.5" />
-                  <span class="font-medium">Cancel</span>
+                  <span class='font-medium'>{{ t('ui.cancel') }}</span>
                   <kbd class="ml-1 text-[10px] bg-red-700/50 px-1 py-0.5 rounded hidden sm:inline">Esc</kbd>
                 </template>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
-              <p class="text-xs">Cancel running query (Escape)</p>
+              <p class='text-xs'>{{ t('ui.cancelRunningQueryEscape') }}</p>
             </TooltipContent>
           </Tooltip>
         </TooltipProvider>
@@ -229,7 +229,7 @@
         <!-- Help Icon -->
         <HoverCard :open-delay="200">
           <HoverCardTrigger as-child>
-            <button class="p-1 text-muted-foreground hover:text-foreground" aria-label="Show syntax help">
+            <button class="p-1 text-muted-foreground hover:text-foreground" :aria-label="t('ui.showSyntaxHelp')">
               <HelpCircle class="h-4 w-4" />
             </button>
           </HoverCardTrigger>
@@ -239,57 +239,47 @@
             <div class="space-y-2">
               <h4 class="text-sm font-semibold">
                 {{ props.activeMode === "logchefql" ? "LogchefQL" : nativeEditorLabel }}
-                Syntax
+                {{ t('ui.syntax') }}
               </h4>
               <div v-if="props.activeMode === 'logchefql'" class="text-xs space-y-1.5">
                 <div>
-                  <code class="bg-muted px-1 rounded">field="value"</code> -
-                  Exact match
+                  <code class='bg-muted px-1 rounded'>field="value"</code> {{ t('ui.exactMatch') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">field!="value"</code> -
-                  Not equal
+                  <code class='bg-muted px-1 rounded'>field!="value"</code> {{ t('ui.notEqual') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">field~"pattern"</code> -
-                  Regex match
+                  <code class='bg-muted px-1 rounded'>field~"pattern"</code> {{ t('ui.regexMatch') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">field!~"pattern"</code> -
-                  Regex exclusion
+                  <code class='bg-muted px-1 rounded'>field!~"pattern"</code> {{ t('ui.regexExclusion') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">field>100</code> -
-                  Comparison
+                  <code class='bg-muted px-1 rounded'>field>100</code> {{ t('ui.comparison') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">(c1 and c2) or c3</code> -
-                  Grouping
+                  <code class='bg-muted px-1 rounded'>(c1 and c2) or c3</code> {{ t('ui.grouping') }}
                 </div>
                 <div class="pt-1">
-                  <em>Example:
+                  <em>{{ t('ui.example') }}
                     <code class="bg-muted px-1 rounded">level="error" and status>=500</code></em>
                 </div>
               </div>
               <div v-else-if="isVictoriaLogsSource" class="text-xs space-y-1.5">
                 <div>
-                  <code class="bg-muted px-1 rounded">level:="error"</code> -
-                  Exact match
+                  <code class='bg-muted px-1 rounded'>level:="error"</code> {{ t('ui.exactMatch') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">*timeout*</code> -
-                  Message substring search
+                  <code class='bg-muted px-1 rounded'>*timeout*</code> {{ t('ui.messageSubstringSearch') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">service:="api" level:="error"</code> -
-                  Combine filters
+                  <code class='bg-muted px-1 rounded'>service:="api" level:="error"</code> {{ t('ui.combineFilters') }}
                 </div>
                 <div>
-                  <code class="bg-muted px-1 rounded">| stats by (level) count()</code> -
-                  Pipe operators
+                  <code class='bg-muted px-1 rounded'>| stats by (level) count()</code> {{ t('ui.pipeOperators') }}
                 </div>
                 <div class="pt-1">
-                  <em>Use native VictoriaLogs LogsQL. Time range is applied separately from the picker.</em>
+                  <em>{{ t('ui.useNativeVictoriaLogsLogsQLTimeRangeIsAppliedSeparatelyFromThePicker') }}</em>
                 </div>
               </div>
               <div v-else class="text-xs space-y-1.5">
@@ -304,8 +294,7 @@
                   <code class="bg-muted px-1 rounded">GROUP BY user ORDER BY count() DESC</code>
                 </div>
                 <div class="pt-1">
-                  <em>Time range & limit applied if not specified. Use standard
-                    ClickHouse SQL.</em>
+                  <em>{{ t('ui.timeRangeLimitAppliedIfNotSpecifiedUseStandardClickHouseSQL') }}</em>
                 </div>
               </div>
             </div>
@@ -328,10 +317,10 @@
         :data-mode="isVictoriaLogsSource ? 'logsql' : 'clickhouse-sql'"
       >
         <div v-if="sqlEditorLoadError" class="sql-editor-error">
-          <p class="sql-editor-error__title">Unable to load SQL editor</p>
+          <p class="sql-editor-error__title">{{ t('ui.unableToLoadSQLEditor') }}</p>
           <p class="sql-editor-error__description">{{ sqlEditorLoadError }}</p>
           <Button size="sm" variant="outline" @click="retrySqlEditorLoad">
-            Retry
+            {{ t('ui.retry') }}
           </Button>
         </div>
 
@@ -368,11 +357,11 @@
       @click="isEditorVisible = true">
       <div class="flex items-center justify-between">
         <div class="text-muted-foreground text-xs font-medium mb-1">
-          {{ nativeEditorLabel }} Query (collapsed)
+          {{ nativeEditorLabel }} {{ t('ui.queryCollapsed') }}
         </div>
         <Button variant="ghost" size="sm" class="h-6 px-2" @click.stop="isEditorVisible = true">
           <Eye class="h-3.5 w-3.5 mr-1" />
-          <span class="text-xs">Show</span>
+          <span class='text-xs'>{{ t('ui.show') }}</span>
         </Button>
       </div>
       <div class="truncate text-xs text-muted-foreground">
@@ -385,12 +374,14 @@
       class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
       <AlertCircle class="h-4 w-4 flex-shrink-0" />
       <span>
-        <span class="font-medium">Validation Error: </span>
+        <span class='font-medium'>{{ t('ui.validationError') }} </span>
         {{ validationError }}
         <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
-          Hint: Use <code class="bg-muted px-1 rounded">and</code> or
-          <code class="bg-muted px-1 rounded">or</code> between conditions.
-          Example:
+          <i18n-t keypath="explore.conditionHint" tag="span" scope="global">
+            <template #and><code class="bg-muted px-1 rounded">and</code></template>
+            <template #or><code class="bg-muted px-1 rounded">or</code></template>
+          </i18n-t>
+          {{ t('ui.example') }}
           <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
         </span>
       </span>
@@ -418,6 +409,8 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import {
   computed,
   nextTick,
@@ -486,6 +479,8 @@ import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
 import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
 import type { AcceptableValue } from "reka-ui";
+
+const { t } = useI18n();
 
 type EditorMode = "logchefql" | "clickhouse-sql";
 type EditorChangeEvent = {
@@ -639,9 +634,9 @@ const currentPlaceholder = computed(() => {
   if (props.placeholder) return props.placeholder;
 
   return props.activeMode === "logchefql"
-    ? 'Filter logs… e.g. method="GET" and status>=500'
+    ? t('query.filterExample', { example: 'method="GET" and status>=500' })
     : isVictoriaLogsSource.value
-      ? 'Enter LogsQL query (e.g., level:="error" service:="api")'
+      ? t('query.logsQLExample', { example: 'level:="error" service:="api"' })
       : `SELECT * FROM ${props.tableName || "your_table"} WHERE …`;
 });
 
@@ -881,7 +876,7 @@ async function ensureSqlEditorLoaded() {
     sqlEditorLoadError.value =
       error instanceof Error
         ? error.message
-        : "The SQL editor chunk could not be loaded. Please retry.";
+        : t('ui.theSQLEditorChunkCouldNotBeLoadedPleaseRetry');
   } finally {
     isSqlEditorLoading.value = false;
   }

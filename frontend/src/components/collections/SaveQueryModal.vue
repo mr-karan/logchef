@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, computed, onMounted, watch } from 'vue';
 import { SaveIcon, Pencil } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
@@ -33,6 +35,8 @@ import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import { storeToRefs } from "pinia";
 import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata, type ExploreMode } from '@/lib/queryMetadata';
+
+const { t } = useI18n();
 
 const props = defineProps<{
   isOpen: boolean;
@@ -551,8 +555,8 @@ async function handleSubmit(event: Event) {
     } catch (contentError) {
       console.error('Error preparing query content:', contentError);
       toast({
-        title: 'Error',
-        description: 'Failed to prepare query content',
+        get title() { return t('ui.error'); },
+        get description() { return t('ui.failedToPrepareQueryContent'); },
         variant: 'destructive',
         duration: TOAST_DURATION.ERROR
       });
@@ -582,11 +586,11 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
         <DialogTitle>
           <span v-if="isEditing" class="flex items-center">
             <Pencil class="h-4 w-4 mr-2" />
-            Edit Saved Query
+            {{ t('ui.editSavedQuery') }}
           </span>
           <span v-else class="flex items-center">
             <SaveIcon class="h-4 w-4 mr-2" />
-            Save Query
+            {{ t('ui.saveQuery') }}
           </span>
         </DialogTitle>
         <DialogDescription>
@@ -598,7 +602,7 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
         <!-- Source information (non-editable) -->
         <div class="border rounded-md p-3 bg-muted/20">
           <div>
-            <div class="text-sm font-medium">Source</div>
+            <div class='text-sm font-medium'>{{ t('ui.source') }}</div>
             <div class="text-sm text-muted-foreground mt-1">
               {{ sourceName }}
             </div>
@@ -608,7 +612,7 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
         <!-- Query Content Preview -->
         <div class="border rounded-md p-3">
           <div class="text-sm font-medium mb-2">
-            {{ displayQueryLanguageLabel }} Query
+            {{ displayQueryLanguageLabel }} {{ t('ui.query') }}
           </div>
           <pre
             class="text-xs bg-muted p-2 rounded overflow-auto max-h-[120px] whitespace-pre-wrap break-all">{{ displayQueryContent }}</pre>
@@ -616,34 +620,34 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
 
         <!-- Query Name -->
         <div class="grid gap-2">
-          <Label for="name" class="required">Name</Label>
-          <Input id="name" v-model="name" placeholder="Enter a descriptive name" required />
+          <Label for="name" class="required">{{ t('ui.name') }}</Label>
+          <Input id="name" v-model="name" :placeholder="t('ui.enterADescriptiveName')" required />
         </div>
 
         <!-- Description -->
         <div class="grid gap-2">
-          <Label for="description">Description (Optional)</Label>
-          <Textarea id="description" v-model="description" placeholder="Provide details about this query" rows="3" />
+          <Label for="description">{{ t('ui.descriptionOptional') }}</Label>
+          <Textarea id="description" v-model="description" :placeholder="t('ui.provideDetailsAboutThisQuery')" rows="3" />
           <p class="text-sm text-muted-foreground">
-            Briefly describe the purpose of this query.
+            {{ t('ui.brieflyDescribeThePurposeOfThisQuery') }}
           </p>
         </div>
 
         <!-- Add to collection (new queries only) -->
         <div v-if="!isEditing" class="grid gap-2">
-          <Label>Add to collection</Label>
+          <Label>{{ t('ui.addToCollection2') }}</Label>
           <Select v-model="selectedCollectionId">
             <SelectTrigger>
-              <SelectValue placeholder="Choose a collection" />
+              <SelectValue :placeholder="t('ui.chooseACollection')" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem v-for="c in collectionOptions" :key="c.id" :value="String(c.id)">
-                {{ c.name }}<span v-if="c.is_personal" class="ml-1 text-xs text-muted-foreground">· personal</span>
+                {{ c.name }}<span v-if="c.is_personal" class="ml-1 text-xs text-muted-foreground">{{ t('ui.personal') }}</span>
               </SelectItem>
             </SelectContent>
           </Select>
           <p class="text-sm text-muted-foreground">
-            Saves the query and adds it to this collection in one step.
+            {{ t('ui.savesTheQueryAndAddsItToThisCollectionInOneStep') }}
           </p>
         </div>
 
@@ -651,19 +655,19 @@ const saveDescription = 'Save this query for reuse. Collections can organize it 
         <div class="flex items-start space-x-3 space-y-0 rounded-md border p-4">
           <Checkbox id="save_timestamp" :model-value="saveTimestamp" @update:model-value="onToggleSaveTimestamp" />
           <div class="space-y-1 leading-none">
-            <Label for="save_timestamp">Save current timestamp</Label>
+            <Label for="save_timestamp">{{ t('ui.saveCurrentTimestamp') }}</Label>
             <p class="text-sm text-muted-foreground">
-              Include the current time range and limit in the saved query.
+              {{ t('ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery') }}
             </p>
           </div>
         </div>
 
         <div class="flex justify-end space-x-4 pt-4">
-          <Button type="button" variant="outline" @click="handleClose">Cancel</Button>
+          <Button type="button" variant='outline' @click="handleClose">{{ t('ui.cancel') }}</Button>
           <Button type="submit" :disabled="isSubmitting || !isValid">
             <SaveIcon v-if="!isSubmitting" class="mr-2 h-4 w-4" />
             <Loader2 v-else class="mr-2 h-4 w-4 animate-spin" />
-            {{ isEditing ? 'Update Query' : 'Save Query' }}
+            {{ isEditing ? t('ui.updateQuery') : t('ui.saveQuery') }}
           </Button>
         </div>
       </form>

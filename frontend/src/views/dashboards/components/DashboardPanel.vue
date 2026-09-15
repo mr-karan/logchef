@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from "vue";
 import { Lock, AlertCircle, BarChart3, Hash, Table2, ListFilter } from "lucide-vue-next";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -8,6 +10,8 @@ import PanelBreakdown from "./PanelBreakdown.vue";
 import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
+
+const { t } = useI18n();
 
 interface Props {
   panel: DashboardPanel;
@@ -72,7 +76,7 @@ const typeIcon = computed(() => {
       <Lock
         v-if="isLocked"
         class="dash-panel__lock"
-        title="You don't have access to this panel's source."
+        :title="t('ui.youDonTHaveAccessToThisPanelSSource')"
       />
     </div>
 
@@ -82,7 +86,7 @@ const typeIcon = computed(() => {
            (panelState.status === 'locked'), unified via isLocked. -->
       <div v-if="isLocked" class="dash-panel__message">
         <Lock class="dash-panel__message-icon" />
-        <span>No access to this source</span>
+        <span>{{ t('ui.noAccessToThisSource') }}</span>
       </div>
 
       <!-- Loading -->
@@ -98,7 +102,7 @@ const typeIcon = computed(() => {
 
       <!-- Empty -->
       <div v-else-if="panelState.status === 'empty'" class="dash-panel__message">
-        <span>No data for this time range</span>
+        <span>{{ t('ui.noDataForThisTimeRange') }}</span>
       </div>
 
       <!-- Success -->

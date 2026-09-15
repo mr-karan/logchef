@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Settings, Type, ChevronDown, X, Plus, List, CalendarIcon } from 'lucide-vue-next'
@@ -23,6 +25,8 @@ import {
 import { SingleDatePicker } from '@/components/date-time-picker'
 import { useVariableStore, type VariableState } from '@/stores/variables'
 import { hasVariableValue, inputTypeFor, formatVariableValue } from './variableUtils'
+
+const { t } = useI18n();
 
 interface VariableConfigSheetProps {
   open: boolean
@@ -124,10 +128,10 @@ watch(
         <SheetTitle class="text-lg flex items-center gap-2">
           <div class="w-2 h-2 bg-primary rounded-full"></div>
           <Settings class="h-5 w-5" />
-          Variable Configuration
+          {{ t('ui.variableConfiguration') }}
         </SheetTitle>
         <SheetDescription class="text-sm">
-          Configure variables used in your query. Variables are replaced with actual values when the query runs.
+          {{ t('ui.configureVariablesUsedInYourQueryVariablesAreReplacedWithActualValues') }}
         </SheetDescription>
       </SheetHeader>
 
@@ -141,7 +145,7 @@ watch(
                 <div class="w-2 h-2 bg-primary/60 rounded-full flex-shrink-0"></div>
                 <div>
                   <h4 class="font-medium text-foreground">{{ variable.name }}</h4>
-                  <p class="text-xs text-muted-foreground">Variable {{ index + 1 }} of {{ allVariables.length }}</p>
+                  <p class="text-xs text-muted-foreground">{{ t('variables.position', { index: index + 1, total: allVariables.length }) }}</p>
                 </div>
               </div>
               <div class="flex items-center gap-2">
@@ -157,7 +161,7 @@ watch(
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Data Type
+                  {{ t('ui.dataType') }}
                 </Label>
                 <Select v-model="variable.type" @update:model-value="() => updateVariableType(variable)">
                   <SelectTrigger class="h-9">
@@ -167,19 +171,19 @@ watch(
                     <SelectItem value="text">
                       <div class="flex items-center gap-2">
                         <div class="w-2 h-2 bg-blue-500 rounded-full"></div>
-                        Text
+                        {{ t('ui.text') }}
                       </div>
                     </SelectItem>
                     <SelectItem value="number">
                       <div class="flex items-center gap-2">
                         <div class="w-2 h-2 bg-green-500 rounded-full"></div>
-                        Number
+                        {{ t('ui.number') }}
                       </div>
                     </SelectItem>
                     <SelectItem value="date">
                       <div class="flex items-center gap-2">
                         <div class="w-2 h-2 bg-purple-500 rounded-full"></div>
-                        Date
+                        {{ t('ui.date') }}
                       </div>
                     </SelectItem>
                   </SelectContent>
@@ -190,7 +194,7 @@ watch(
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Input Widget
+                  {{ t('ui.inputWidget') }}
                 </Label>
                 <Select
                   v-model="variable.inputType"
@@ -204,25 +208,25 @@ watch(
                     <SelectItem v-if="variable.type !== 'date'" value="input">
                       <div class="flex items-center gap-2">
                         <Type class="w-3.5 h-3.5 text-muted-foreground" />
-                        Text Input
+                        {{ t('ui.textInput') }}
                       </div>
                     </SelectItem>
                     <SelectItem v-if="variable.type === 'date'" value="datepicker">
                       <div class="flex items-center gap-2">
                         <CalendarIcon class="w-3.5 h-3.5 text-muted-foreground" />
-                        Date Picker
+                        {{ t('ui.datePicker') }}
                       </div>
                     </SelectItem>
                     <SelectItem v-if="variable.type !== 'date'" value="dropdown">
                       <div class="flex items-center gap-2">
                         <ChevronDown class="w-3.5 h-3.5 text-muted-foreground" />
-                        Dropdown List
+                        {{ t('ui.dropdownList') }}
                       </div>
                     </SelectItem>
                     <SelectItem v-if="variable.type !== 'date'" value="multiselect">
                       <div class="flex items-center gap-2">
                         <List class="w-3.5 h-3.5 text-muted-foreground" />
-                        Multi-Select
+                        {{ t('ui.multiSelect') }}
                       </div>
                     </SelectItem>
                   </SelectContent>
@@ -233,14 +237,14 @@ watch(
               <div v-if="variable.inputType === 'dropdown' || variable.inputType === 'multiselect'" class="space-y-3">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  {{ variable.inputType === 'multiselect' ? 'Multi-Select Options' : 'Dropdown Options' }}
+                  {{ variable.inputType === 'multiselect' ? t('ui.multiSelectOptions') : t('ui.dropdownOptions') }}
                 </Label>
 
                 <div class="bg-muted/30 rounded-md p-3 border border-border/50 space-y-3">
                   <!-- Header -->
                   <div v-if="variable.options?.length" class="grid grid-cols-[1fr_1fr_32px] gap-2 px-1">
-                    <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Value</span>
-                    <span class="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Label</span>
+                    <span class='text-[10px] font-medium text-muted-foreground uppercase tracking-wider'>{{ t('ui.value2') }}</span>
+                    <span class='text-[10px] font-medium text-muted-foreground uppercase tracking-wider'>{{ t('ui.label') }}</span>
                     <span></span>
                   </div>
 
@@ -248,9 +252,9 @@ watch(
                   <div class="space-y-2">
                     <div v-for="(opt, optIndex) in (variable.options || [])" :key="optIndex"
                       class="grid grid-cols-[1fr_1fr_auto] gap-2 items-center group">
-                      <Input v-model="opt.value" placeholder="Value" class="h-8 text-xs bg-background"
+                      <Input v-model="opt.value" :placeholder="t('ui.value2')" class='h-8 text-xs bg-background'
                         @input="() => variableStore.upsertVariable(variable)" />
-                      <Input v-model="opt.label" placeholder="Label" class="h-8 text-xs bg-background"
+                      <Input v-model="opt.label" :placeholder="t('ui.label')" class='h-8 text-xs bg-background'
                         @input="() => variableStore.upsertVariable(variable)" />
                       <Button variant="ghost" size="icon"
                         class="h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
@@ -264,12 +268,12 @@ watch(
                     class="w-full h-8 text-xs border-dashed text-muted-foreground hover:text-foreground bg-transparent hover:bg-muted/50"
                     @click="addDropdownOption(variable)">
                     <Plus class="h-3.5 w-3.5 mr-1" />
-                    Add Option
+                    {{ t('ui.addOption') }}
                   </Button>
                 </div>
 
                 <p class="text-xs text-muted-foreground">
-                  Enter values users can select from. Label is optional display text.
+                  {{ t('ui.enterValuesUsersCanSelectFromLabelIsOptionalDisplayText') }}
                 </p>
               </div>
 
@@ -277,9 +281,9 @@ watch(
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Display Label
+                  {{ t('ui.displayLabel') }}
                 </Label>
-                <Input v-model="variable.label" placeholder="Enter display name..." class="h-9"
+                <Input v-model="variable.label" :placeholder="t('ui.enterDisplayName')" class='h-9'
                   @input="() => variableStore.upsertVariable(variable)" />
               </div>
 
@@ -287,7 +291,7 @@ watch(
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Default Value{{ variable.inputType === 'multiselect' ? 's' : '' }}
+                  {{ t('ui.defaultValue') }}
                 </Label>
                 <!-- Multi-select default values -->
                 <div v-if="variable.inputType === 'multiselect' && variable.options?.length" class="space-y-2">
@@ -305,7 +309,7 @@ watch(
                     </div>
                   </div>
                   <p class="text-xs text-muted-foreground">
-                    Select default values for multi-select. {{ getDefaultMultiSelectCount(variable) }} selected.
+                    {{ t('ui.selectDefaultValuesForMultiSelect') }} {{ t('variables.selectedCount', { count: getDefaultMultiSelectCount(variable) }) }}
                   </p>
                 </div>
                 <!-- Single-select dropdown default -->
@@ -313,11 +317,11 @@ watch(
                   :model-value="String(variable.defaultValue ?? '')"
                   @update:model-value="(val) => { variable.defaultValue = val as string; variableStore.upsertVariable(variable); }">
                   <SelectTrigger class="h-9">
-                    <SelectValue placeholder="No default" />
+                    <SelectValue :placeholder="t('ui.noDefault')" />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="">
-                      <span class="text-muted-foreground italic">No default</span>
+                      <span class='text-muted-foreground italic'>{{ t('ui.noDefault') }}</span>
                     </SelectItem>
                     <SelectItem v-for="opt in variable.options" :key="opt.value" :value="opt.value">
                       {{ opt.label || opt.value }}
@@ -330,7 +334,7 @@ watch(
                   :model-value="variable.defaultValue ? String(variable.defaultValue) : null"
                   @update:model-value="(val) => { variable.defaultValue = val ?? ''; variableStore.upsertVariable(variable); }"
                   :include-time="true"
-                  placeholder="Select default date..."
+                  :placeholder="t('ui.selectDefaultDate')"
                   class="w-full"
                 />
                 <!-- Text/number input default -->
@@ -341,7 +345,7 @@ watch(
                   :placeholder="'Default ' + variable.type + ' value'"
                   class="h-9" />
                 <p v-if="variable.inputType !== 'multiselect'" class="text-xs text-muted-foreground">
-                  Pre-filled when loading the query. Leave empty for no default.
+                  {{ t('ui.preFilledWhenLoadingTheQueryLeaveEmptyForNoDefault') }}
                 </p>
               </div>
 
@@ -349,14 +353,14 @@ watch(
               <div class="space-y-2">
                 <Label class="text-sm font-medium flex items-center gap-2">
                   <div class="w-1 h-1 bg-muted-foreground/40 rounded-full"></div>
-                  Current Value
+                  {{ t('ui.currentValue') }}
                 </Label>
                 <div class="px-3 py-2 bg-muted/30 rounded-md border text-sm font-mono min-h-[36px] flex items-center">
                   <span v-if="hasVariableValue(variable)" class="text-foreground">
                     {{ formatVariableValue(variable) }}
                   </span>
                   <span v-else class="text-muted-foreground italic">
-                    No value set
+                    {{ t('ui.noValueSet') }}
                   </span>
                 </div>
               </div>
@@ -370,11 +374,12 @@ watch(
         <div class="w-12 h-12 bg-muted/50 rounded-full flex items-center justify-center mx-auto mb-4">
           <Settings class="h-6 w-6 opacity-50" />
         </div>
-        <p class="text-sm font-medium mb-2">No variables found in your query</p>
-        <p class="text-xs">Use <code class="bg-muted px-1.5 py-0.5 rounded">&#123;&#123;variable_name&#125;&#125;</code>
-          syntax to create variables</p>
+        <p class='text-sm font-medium mb-2'>{{ t('ui.noVariablesFoundInYourQuery') }}</p>
+        <i18n-t keypath="variables.syntaxHelp" tag="p" class="text-xs" scope="global">
+          <template #syntax><code class="bg-muted px-1.5 py-0.5 rounded">&#123;&#123;variable_name&#125;&#125;</code></template>
+        </i18n-t>
         <div class="mt-4 text-xs text-muted-foreground/60">
-          <p>Example: <code class="bg-muted px-1.5 py-0.5 rounded">namespace=&#123;&#123;env&#125;&#125;</code></p>
+          <p>{{ t('ui.example') }} <code class='bg-muted px-1.5 py-0.5 rounded'>namespace=&#123;&#123;env&#125;&#125;</code></p>
         </div>
       </div>
     </SheetContent>

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import {
@@ -40,6 +42,8 @@ import {
   type GridGeometry,
 } from "@/utils/dashboardPanels";
 import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
+
+const { t, locale } = useI18n();
 
 const route = useRoute();
 const router = useRouter();
@@ -141,7 +145,7 @@ function removePanel(id: string) {
 // when the server advertises no policy). We never rewrite a dashboard's saved
 // cache_ttl_seconds just because the current server would clamp it differently.
 const CACHE_TTL_OPTIONS = [
-  { label: "Off", seconds: 0 },
+  { get label() { return t('ui.off'); }, seconds: 0 },
   { label: "1m", seconds: 60 },
   { label: "5m", seconds: 300 },
   { label: "10m", seconds: 600 },
@@ -382,11 +386,11 @@ const updatedLabel = computed(() => {
   const ts = store.current?.updated_at;
   if (!ts) return "";
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString();
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(locale.value);
 });
 
 const creatorLabel = computed(
-  () => store.current?.created_by_name || store.current?.created_by_email || "Unknown"
+  () => store.current?.created_by_name || store.current?.created_by_email || t('common.unknown')
 );
 
 // --- Auto-refresh timer (cleaned up on unmount and route leave) -------------
@@ -497,23 +501,23 @@ onBeforeRouteUpdate((to, from) => {
           </Button>
           <LayoutDashboard class="h-5 w-5 text-muted-foreground shrink-0" />
           <h1 class="text-lg font-semibold truncate">
-            {{ dashboard?.name || (isLoading ? "Loading…" : "Dashboard") }}
+            {{ dashboard?.name || (isLoading ? t('ui.loading2') : t('ui.dashboard')) }}
           </h1>
           <span
             v-if="isEditing"
             class="rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400"
           >
-            Editing{{ store.isDirty ? " · unsaved" : "" }}
+            {{ t('ui.editing') }}{{ store.isDirty ? t('ui.unsaved') : "" }}
           </span>
         </div>
         <p v-if="dashboard?.description" class="mt-1 text-sm text-muted-foreground">
           {{ dashboard.description }}
         </p>
         <p v-if="dashboard && !isEditing" class="mt-1 text-xs text-muted-foreground">
-          Created by {{ creatorLabel }}<span v-if="updatedLabel"> · Updated {{ updatedLabel }}</span>
+          {{ t('ui.createdBy') }} {{ creatorLabel }}<span v-if="updatedLabel"> {{ t('ui.updated') }} {{ updatedLabel }}</span>
         </p>
         <p v-else-if="isEditing" class="mt-1 text-xs text-muted-foreground">
-          Drag a panel by its header to move it · drag the bottom-right corner to resize.
+          {{ t('ui.dragAPanelByItsHeaderToMoveItDragTheBottom') }}
         </p>
       </div>
 
@@ -522,7 +526,7 @@ onBeforeRouteUpdate((to, from) => {
         <template v-if="dashboard && !isEditing && canEdit">
           <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="startEdit">
             <Pencil class="h-3.5 w-3.5" />
-            Edit
+            {{ t('ui.edit') }}
           </Button>
         </template>
         <template v-else-if="dashboard && isEditing">
@@ -532,10 +536,10 @@ onBeforeRouteUpdate((to, from) => {
                 variant="outline"
                 size="sm"
                 class="h-8 gap-1.5 text-xs"
-                title="Per-dashboard result cache TTL"
+                :title="t('ui.perDashboardResultCacheTTL')"
               >
                 <Database class="h-3.5 w-3.5" />
-                <span>Cache: {{ cacheTtlLabel }}</span>
+                <span>{{ t('ui.cache') }} {{ cacheTtlLabel }}</span>
                 <ChevronDown class="h-3 w-3 opacity-60" />
               </Button>
             </DropdownMenuTrigger>
@@ -553,11 +557,11 @@ onBeforeRouteUpdate((to, from) => {
           </DropdownMenu>
           <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" @click="openAddPanel">
             <Plus class="h-3.5 w-3.5" />
-            Add panel
+            {{ t('ui.addPanel') }}
           </Button>
           <Button variant="ghost" size="sm" class="h-8 gap-1.5 text-xs" :disabled="isSaving" @click="cancelEdit">
             <X class="h-3.5 w-3.5" />
-            Cancel
+            {{ t('ui.cancel') }}
           </Button>
           <Button
             size="sm"
@@ -566,7 +570,7 @@ onBeforeRouteUpdate((to, from) => {
             @click="saveEdit"
           >
             <Save class="h-3.5 w-3.5" />
-            {{ isSaving ? "Saving…" : "Save" }}
+            {{ isSaving ? t('ui.saving') : t('ui.save') }}
           </Button>
         </template>
       </div>
@@ -578,8 +582,8 @@ onBeforeRouteUpdate((to, from) => {
       class="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed py-16 text-center"
     >
       <LayoutDashboard class="h-8 w-8 text-muted-foreground" />
-      <p class="text-sm text-muted-foreground">Dashboard not found or you don't have access.</p>
-      <Button variant="outline" size="sm" @click="router.push('/dashboards')">Back to dashboards</Button>
+      <p class='text-sm text-muted-foreground'>{{ t('ui.dashboardNotFoundOrYouDonTHaveAccess') }}</p>
+      <Button variant='outline' size="sm" @click="router.push('/dashboards')">{{ t('ui.backToDashboards') }}</Button>
     </div>
 
     <!-- Edit-mode grid canvas: dot-grid background, absolute-positioned panels,
@@ -613,18 +617,18 @@ onBeforeRouteUpdate((to, from) => {
       >
         <div
           class="dash-item__header"
-          title="Drag to move"
+          :title="t('ui.dragToMove')"
           @pointerdown="beginDrag('move', item.id, $event)"
         >
           <GripVertical class="h-3.5 w-3.5 opacity-60 shrink-0" />
           <span class="dash-item__title">{{ panelById.get(item.id)?.title || "Panel" }}</span>
           <span class="dash-item__actions">
-            <button class="dash-item__btn" title="Edit panel" @pointerdown.stop @click="openEditPanel(item.id)">
+            <button class="dash-item__btn" :title="t('ui.editPanel')" @pointerdown.stop @click="openEditPanel(item.id)">
               <Pencil class="h-3.5 w-3.5" />
             </button>
             <button
               class="dash-item__btn dash-item__btn--danger"
-              title="Remove panel"
+              :title="t('ui.removePanel')"
               @pointerdown.stop
               @click="removePanel(item.id)"
             >
@@ -642,7 +646,7 @@ onBeforeRouteUpdate((to, from) => {
         <!-- SE resize handle -->
         <span
           class="dash-item__resize"
-          title="Drag to resize"
+          :title="t('ui.dragToResize')"
           @pointerdown="beginDrag('resize', item.id, $event)"
         />
       </div>
@@ -655,7 +659,7 @@ onBeforeRouteUpdate((to, from) => {
         @click="openAddPanel"
       >
         <Plus class="h-5 w-5" />
-        <span class="text-xs font-medium">Add panel</span>
+        <span class='text-xs font-medium'>{{ t('ui.addPanel') }}</span>
       </button>
     </div>
 
@@ -665,14 +669,14 @@ onBeforeRouteUpdate((to, from) => {
         <LayoutDashboard class="h-7 w-7" />
       </div>
       <div>
-        <p class="text-base font-semibold">This dashboard is empty</p>
+        <p class='text-base font-semibold'>{{ t('ui.thisDashboardIsEmpty') }}</p>
         <p class="mx-auto mt-1 max-w-sm text-sm text-muted-foreground">
-          Add a panel to start visualizing logs — pick a source, write a query, and choose how to chart it.
+          {{ t('ui.addAPanelToStartVisualizingLogsPickASourceWriteA') }}
         </p>
       </div>
       <Button v-if="canEdit" size="sm" class="mt-1 gap-1.5" @click="startEdit">
         <Plus class="h-4 w-4" />
-        Add your first panel
+        {{ t('ui.addYourFirstPanel') }}
       </Button>
     </div>
 

@@ -9,6 +9,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { useI18n } from "vue-i18n";
+
+const { t } = useI18n();
+
 
 // Small reusable confirm dialog that wraps shadcn's AlertDialog with two-way
 // `open` binding and a confirm-callback prop. Use for "are you sure?" prompts
@@ -23,8 +27,6 @@ const props = withDefaults(
     destructive?: boolean;
   }>(),
   {
-    confirmText: "Confirm",
-    cancelText: "Cancel",
     destructive: false,
   }
 );
@@ -54,12 +56,12 @@ function handleCancel() {
         <AlertDialogDescription v-if="description">{{ description }}</AlertDialogDescription>
       </AlertDialogHeader>
       <AlertDialogFooter>
-        <AlertDialogCancel @click="handleCancel">{{ cancelText }}</AlertDialogCancel>
+        <AlertDialogCancel @click="handleCancel">{{ cancelText ?? t('ui.cancel') }}</AlertDialogCancel>
         <Button
           :variant="destructive ? 'destructive' : 'default'"
           @click="handleConfirm"
         >
-          {{ confirmText }}
+          {{ confirmText ?? t('common.confirm') }}
         </Button>
       </AlertDialogFooter>
     </AlertDialogContent>

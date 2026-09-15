@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, ref } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useTimeRange } from '@/composables/useTimeRange'
@@ -40,6 +42,8 @@ import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/query
 import TeamSourceSelector from './TeamSourceSelector.vue'
 import type { Source } from '@/api/sources'
 import type { TeamWithMemberCount, UserTeamMembership } from '@/api/teams'
+
+const { t } = useI18n();
 
 const { toast } = useToast()
 const exploreStore = useExploreStore()
@@ -92,10 +96,10 @@ const isNativeSqlMode = computed(() =>
 const isLive = computed(() => exploreStore.isLive)
 const timeControlsDisabled = computed(() => isNativeSqlMode.value || isLive.value)
 const timeControlsDisabledReason = computed(() =>
-  isLive.value ? 'Paused during live tail' : 'Time range is controlled in your SQL query'
+  isLive.value ? t('ui.pausedDuringLiveTail') : t('ui.timeRangeIsControlledInYourSQLQuery')
 )
 const limitControlsDisabledReason = computed(() =>
-  isLive.value ? 'Paused during live tail' : 'Limit is controlled by LIMIT clause in your SQL query'
+  isLive.value ? t('ui.pausedDuringLiveTail') : t('ui.limitIsControlledByLIMITClauseInYourSQLQuery')
 )
 
 // Query timeout
@@ -136,8 +140,8 @@ function copyUrlToClipboard() {
     navigator.clipboard.writeText(window.location.href)
   } catch (error) {
     toast({
-      title: "Copy Failed",
-      description: "Failed to copy URL.",
+      get title() { return t('ui.copyFailed'); },
+      get description() { return t('ui.failedToCopyURL'); },
       variant: "destructive",
       duration: TOAST_DURATION.ERROR
     })
@@ -147,8 +151,8 @@ function copyUrlToClipboard() {
 function copyCliCommand() {
   if (!props.currentTeamId || !props.currentSourceId) {
     toast({
-      title: "Cannot copy CLI command",
-      description: "Team and source must be selected.",
+      get title() { return t('ui.cannotCopyCLICommand'); },
+      get description() { return t('ui.teamAndSourceMustBeSelected'); },
       variant: "destructive",
       duration: TOAST_DURATION.ERROR
     })
@@ -192,14 +196,14 @@ function copyCliCommand() {
   try {
     navigator.clipboard.writeText(command)
     toast({
-      title: "CLI command copied",
-      description: "Paste in your terminal to run the same query.",
+      get title() { return t('ui.cLICommandCopied2'); },
+      get description() { return t('ui.pasteInYourTerminalToRunTheSameQuery'); },
       duration: TOAST_DURATION.SUCCESS
     })
   } catch {
     toast({
-      title: "Copy Failed",
-      description: "Failed to copy CLI command.",
+      get title() { return t('ui.copyFailed'); },
+      get description() { return t('ui.failedToCopyCLICommand'); },
       variant: "destructive",
       duration: TOAST_DURATION.ERROR
     })
@@ -272,8 +276,8 @@ defineExpose({
         <Tooltip>
           <TooltipTrigger asChild>
             <Button variant="ghost" size="sm" class="h-7 text-xs px-2 gap-1 opacity-50 cursor-not-allowed" disabled>
-              <span class="text-muted-foreground">Limit:</span>
-              <span class="font-medium">{{ isLive ? 'Live' : 'SQL' }}</span>
+              <span class='text-muted-foreground'>{{ t('ui.limit') }}</span>
+              <span class='font-medium'>{{ isLive ? t('ui.live') : 'SQL' }}</span>
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
@@ -283,12 +287,12 @@ defineExpose({
       </TooltipProvider>
       <DropdownMenu v-else>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" size="sm" class="h-7 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal" title="Result limit">
-            {{ currentLimit.toLocaleString() }} rows
+          <Button variant='ghost' size="sm" class='h-7 text-xs px-2 bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal' :title="t('ui.resultLimit')">
+            {{ currentLimit.toLocaleString() }} {{ t('ui.rows') }}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="start" class="w-32">
-          <DropdownMenuLabel class="text-xs">Results Limit</DropdownMenuLabel>
+          <DropdownMenuLabel class='text-xs'>{{ t('ui.resultsLimit') }}</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem 
             v-for="limit in limitOptions" 
@@ -296,7 +300,7 @@ defineExpose({
             @click="handleLimitChange(limit)" 
             :class="{ 'bg-muted': currentLimit === limit }"
           >
-            {{ limit.toLocaleString() }} rows
+            {{ limit.toLocaleString() }} {{ t('ui.rows') }}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
@@ -318,7 +322,7 @@ defineExpose({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Copy CLI command</p>
+            <p class='text-xs'>{{ t('ui.copyCLICommand') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -332,7 +336,7 @@ defineExpose({
             </Button>
           </TooltipTrigger>
           <TooltipContent side="bottom">
-            <p class="text-xs">Copy shareable link</p>
+            <p class='text-xs'>{{ t('ui.copyShareableLink') }}</p>
           </TooltipContent>
         </Tooltip>
       </TooltipProvider>
@@ -347,7 +351,7 @@ defineExpose({
         <PopoverContent class="w-48 p-2" align="end">
           <div class="space-y-3">
             <div class="space-y-1.5">
-              <label class="text-xs font-medium text-muted-foreground">Query Timeout</label>
+              <label class='text-xs font-medium text-muted-foreground'>{{ t('ui.queryTimeout') }}</label>
               <Select v-model="selectedTimeout">
                 <SelectTrigger class="h-8 text-xs">
                   <div class="flex items-center gap-1.5">

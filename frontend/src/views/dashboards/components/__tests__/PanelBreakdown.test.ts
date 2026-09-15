@@ -1,4 +1,5 @@
 import { createApp, nextTick } from "vue";
+import { i18n } from "@/i18n";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@unovis/vue", () => ({
@@ -22,7 +23,7 @@ afterEach(() => {
 async function render(view: "horizontal-bars" | "donut" = "horizontal-bars", notice?: string) {
   host = document.createElement("div");
   document.body.appendChild(host);
-  createApp(PanelBreakdown, { buckets, groupBy: "service", view, notice }).mount(host);
+  createApp(PanelBreakdown, { buckets, groupBy: "service", view, notice }).use(i18n).mount(host);
   await nextTick();
   return host;
 }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { logTableFeatures, type ColumnDef, type ColumnMeta, type Row } from './tableFeatures'
 import {
     FlexRender,
@@ -29,6 +31,8 @@ import TableControls from './TableControls.vue'
 import ColumnFilterButton from './ColumnFilterButton.vue'
 import { usePreferencesStore } from '@/stores/preferences'
 import CellWithActions from './CellWithActions.vue'
+
+const { t } = useI18n();
 
 interface Props {
     columns: ColumnInfo[]
@@ -739,7 +743,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                         <!-- Drag Handle -->
                                         <span v-if="header.column.id !== timestampFieldName"
                                             class="flex items-center justify-center flex-shrink-0 w-5 h-full mr-1 cursor-grab text-muted-foreground/50 group-hover:text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                                            title="Drag to reorder column">
+                                            :title="t('ui.dragToReorderColumn')">
                                             <GripVertical class="h-4 w-4" />
                                         </span>
 
@@ -763,7 +767,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             @mousedown="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @touchstart="(e) => { e.preventDefault(); e.stopPropagation(); handleResize(e, header); }"
                                             @dblclick.stop="autoFitColumn(header)"
-                                            @click.stop title="Drag to resize • Double-click to auto-fit">
+                                            @click.stop :title="t('ui.dragToResizeDoubleClickToAutoFit')">
                                             <!-- Resize Grip Visual -->
                                             <div class="h-full w-4 flex flex-col items-center justify-center">
                                                 <div
@@ -817,7 +821,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     <button
                                                         class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
                                                         @click.stop="handleCellClick($event, cell)"
-                                                        title="Copy value"
+                                                        :title="t('ui.copyValue')"
                                                     >
                                                         <Copy class="h-3 w-3" />
                                                     </button>
@@ -825,14 +829,14 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                         <button
                                                             class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
                                                             @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
-                                                            title="Filter = this value"
+                                                            :title="t('ui.filterThisValue')"
                                                         >
                                                             <Equal class="h-3 w-3" />
                                                         </button>
                                                         <button
                                                             class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
                                                             @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
-                                                            title="Filter ≠ this value"
+                                                            :title="t('ui.filterThisValue2')"
                                                         >
                                                             <EqualNot class="h-3 w-3" />
                                                         </button>
@@ -853,7 +857,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     @click.stop="row.toggleExpanded()"
                                                 >
                                                     <ChevronUp class="h-3 w-3" />
-                                                    <span>Collapse</span>
+                                                    <span>{{ t('ui.collapse') }}</span>
                                                 </button>
                                                 <Button 
                                                     v-if="supportsLogContext"
@@ -863,7 +867,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                                     @click.stop="openContextModal(row.original)"
                                                 >
                                                     <Clock class="h-3 w-3 mr-1" />
-                                                    Show Context
+                                                    {{ t('ui.showContext') }}
                                                 </Button>
                                             </div>
                                             <JsonViewer :value="row.original" :expanded="false" class="text-xs" />
@@ -881,7 +885,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             </div>
             <!-- Optional: Add a loading indicator if table is not yet defined -->
             <div v-else class="h-full flex items-center justify-center">
-                <p class="text-muted-foreground">Initializing table...</p>
+                <p class='text-muted-foreground'>{{ t('ui.initializingTable') }}</p>
             </div>
         </div>
     </div>

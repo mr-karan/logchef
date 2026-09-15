@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -15,6 +17,8 @@ import {
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { TestAlertQueryResponse } from "@/api/alerts";
 import type { AlertFormState, ConditionTemplate, QueryTemplate } from "@/composables/useAlertForm";
+
+const { t } = useI18n();
 
 defineProps<{
   form: AlertFormState;
@@ -43,11 +47,11 @@ defineProps<{
   <section class="space-y-4 rounded-lg border bg-muted/20 p-5">
     <div class="flex items-start justify-between gap-4">
       <div>
-        <h3 class="text-sm font-semibold">Evaluation query</h3>
+        <h3 class='text-sm font-semibold'>{{ t('ui.evaluationQuery') }}</h3>
         <p class="text-xs text-muted-foreground mt-1">
           {{ form.editor_mode === 'condition'
-            ? 'Write a simple filter condition. The time filter is auto-applied.'
-            : `Write a ${nativeEditorLabel} query that returns a single numeric value.` }}
+            ? t('ui.writeASimpleFilterConditionTheTimeFilterIsAutoApplied')
+            : t('alerts.nativeQueryHint', { language: nativeEditorLabel }) }}
         </p>
       </div>
       <!-- Query Type Toggle -->
@@ -63,14 +67,14 @@ defineProps<{
     <template v-if="form.editor_mode === 'condition'">
       <!-- Condition Templates -->
       <div class="space-y-2">
-        <Label for="condition-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+        <Label for="condition-template">{{ t('ui.startFromATemplate') }} <span class='text-xs text-muted-foreground'>{{ t('ui.optional2') }}</span></Label>
         <Select @update:model-value="(value: any) => onApplyConditionTemplate(conditionTemplates[parseInt(value)])">
           <SelectTrigger id="condition-template">
-            <SelectValue placeholder="Choose a template..." />
+            <SelectValue :placeholder="t('ui.chooseATemplate')" />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              <SelectLabel>Condition Templates</SelectLabel>
+              <SelectLabel>{{ t('ui.conditionTemplates') }}</SelectLabel>
               <SelectItem v-for="(template, index) in conditionTemplates" :key="index" :value="String(index)">
                 <div class="flex flex-col gap-0.5">
                   <span class="font-medium">{{ template.name }}</span>
@@ -85,27 +89,27 @@ defineProps<{
       <!-- Aggregate Function -->
       <div class="grid gap-4 sm:grid-cols-2">
         <div class="space-y-2">
-          <Label for="aggregate-function">Aggregate function</Label>
+          <Label for="aggregate-function">{{ t('ui.aggregateFunction') }}</Label>
           <Select :model-value="form.aggregate_function" @update:model-value="(v: any) => form.aggregate_function = v">
             <SelectTrigger id="aggregate-function">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="count">count(*) - Count matching logs</SelectItem>
-              <SelectItem value="sum">sum(field) - Sum of a field</SelectItem>
-              <SelectItem value="avg">avg(field) - Average of a field</SelectItem>
-              <SelectItem value="min">min(field) - Minimum of a field</SelectItem>
-              <SelectItem value="max">max(field) - Maximum of a field</SelectItem>
+              <SelectItem value="count">count(*) · {{ t('alerts.aggregateCount') }}</SelectItem>
+              <SelectItem value="sum">sum(field) · {{ t('alerts.aggregateSum') }}</SelectItem>
+              <SelectItem value="avg">avg(field) · {{ t('alerts.aggregateAverage') }}</SelectItem>
+              <SelectItem value="min">min(field) · {{ t('alerts.aggregateMinimum') }}</SelectItem>
+              <SelectItem value="max">max(field) · {{ t('alerts.aggregateMaximum') }}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div v-if="form.aggregate_function !== 'count'" class="space-y-2">
-          <Label for="aggregate-field" class="required">Field to aggregate</Label>
+          <Label for="aggregate-field" class="required">{{ t('ui.fieldToAggregate') }}</Label>
           <Input
             id="aggregate-field"
             v-model="form.aggregate_field"
             list="aggregate-field-suggestions"
-            placeholder="numeric field, e.g. duration_ms"
+            :placeholder="t('ui.numericFieldEGDurationMs')"
           />
           <datalist id="aggregate-field-suggestions">
             <option v-for="name in aggregateFieldSuggestions" :key="name" :value="name" />
@@ -116,7 +120,7 @@ defineProps<{
       <!-- Condition Input -->
       <div class="space-y-2">
         <div class="flex items-center justify-between">
-          <Label for="alert-condition">Filter condition</Label>
+          <Label for="alert-condition">{{ t('ui.filterCondition') }}</Label>
           <Button
             type="button"
             variant="outline"
@@ -124,26 +128,26 @@ defineProps<{
             :disabled="!generatedQuery || disabled || isTestingQuery"
             @click="onTestQuery"
           >
-            {{ isTestingQuery ? "Testing..." : "Test Query" }}
+            {{ isTestingQuery ? t('ui.testing') : t('ui.testQuery') }}
           </Button>
         </div>
         <Input
           id="alert-condition"
           v-model="form.condition_json"
-          placeholder='severity = "ERROR" and status_code >= 500'
+          placeholder="severity = &quot;ERROR&quot; and status_code >= 500"
           :disabled="disabled"
           class="font-mono text-sm"
         />
         <p v-if="conditionError" class="text-xs text-destructive">{{ conditionError }}</p>
         <p class="text-xs text-muted-foreground">
-          Examples: <code class="bg-muted px-1 rounded">severity = "ERROR"</code>,
+          {{ t('ui.examples2') }} <code class='bg-muted px-1 rounded'>severity = "ERROR"</code>,
           <code class="bg-muted px-1 rounded">status_code >= 500</code>,
           <code class="bg-muted px-1 rounded">message ~ "timeout"</code>
         </p>
       </div>
 
       <div v-if="generatedQuery" class="space-y-2">
-        <Label class="text-xs text-muted-foreground">{{ generatedQueryLanguageLabel }} (read-only)</Label>
+        <Label class='text-xs text-muted-foreground'>{{ generatedQueryLanguageLabel }} {{ t('ui.readOnly') }}</Label>
         <pre class="bg-muted/50 border rounded-md p-3 text-xs font-mono overflow-x-auto whitespace-pre-wrap">{{ generatedQuery }}</pre>
       </div>
     </template>
@@ -152,14 +156,14 @@ defineProps<{
     <template v-else>
       <!-- Query Templates -->
       <div class="space-y-2">
-        <Label for="query-template">Start from a template <span class="text-xs text-muted-foreground">(optional)</span></Label>
+        <Label for="query-template">{{ t('ui.startFromATemplate') }} <span class='text-xs text-muted-foreground'>{{ t('ui.optional2') }}</span></Label>
         <Select @update:model-value="(value: any) => onApplyTemplate(queryTemplates[parseInt(value)])">
           <SelectTrigger id="query-template">
-            <SelectValue placeholder="Choose a template..." />
+            <SelectValue :placeholder="t('ui.chooseATemplate')" />
           </SelectTrigger>
           <SelectContent>
             <SelectGroup>
-              <SelectLabel>Query Templates</SelectLabel>
+              <SelectLabel>{{ t('ui.queryTemplates') }}</SelectLabel>
               <SelectItem v-for="(template, index) in queryTemplates" :key="index" :value="String(index)">
                 <div class="flex flex-col gap-0.5">
                   <span class="font-medium">{{ template.name }}</span>
@@ -181,7 +185,7 @@ defineProps<{
             :disabled="!form.query.trim() || disabled || isTestingQuery"
             @click="onTestQuery"
           >
-            {{ isTestingQuery ? "Testing..." : "Test Query" }}
+            {{ isTestingQuery ? t('ui.testing') : t('ui.testQuery') }}
           </Button>
         </div>
         <Textarea
@@ -202,17 +206,17 @@ defineProps<{
     <div v-if="testQueryResult" class="rounded-lg border bg-background p-4 space-y-3">
       <div class="flex items-start justify-between gap-4">
         <div class="flex-1 space-y-1">
-          <h4 class="text-sm font-medium">Test Result</h4>
+          <h4 class='text-sm font-medium'>{{ t('ui.testResult') }}</h4>
           <div class="flex items-baseline gap-3">
             <span class="text-2xl font-semibold tabular-nums">{{ testQueryResult.value }}</span>
             <span class="text-sm text-muted-foreground">
-              {{ testQueryResult.threshold_met ? '✓ Threshold met' : '✗ Threshold not met' }}
+              {{ testQueryResult.threshold_met ? t('ui.thresholdMet') : t('ui.thresholdNotMet') }}
             </span>
           </div>
         </div>
         <div class="text-right space-y-1">
-          <div class="text-xs text-muted-foreground">Execution time</div>
-          <div class="text-sm font-medium tabular-nums">{{ testQueryResult.execution_time_ms }}ms</div>
+          <div class='text-xs text-muted-foreground'>{{ t('ui.executionTime') }}</div>
+          <div class='text-sm font-medium tabular-nums'>{{ testQueryResult.execution_time_ms }}{{ t('ui.ms') }}</div>
         </div>
       </div>
 

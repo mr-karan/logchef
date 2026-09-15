@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, watch, nextTick } from 'vue'
 import { Wand2, AlertCircle } from 'lucide-vue-next'
 import { Button } from '@/components/ui/button'
@@ -13,6 +15,8 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { useToast } from '@/composables/useToast'
+
+const { t } = useI18n();
 
 interface AiSqlDialogProps {
   open: boolean
@@ -74,8 +78,8 @@ const copyToClipboard = async (text: string) => {
     console.error('Failed to copy to clipboard:', error)
     const { toast } = useToast()
     toast({
-      title: 'Copy failed',
-      description: 'Unable to copy to clipboard',
+      get title() { return t('ui.copyFailed2'); },
+      get description() { return t('ui.unableToCopyToClipboard'); },
       variant: 'destructive',
       duration: 3000,
     })
@@ -90,56 +94,58 @@ const copyToClipboard = async (text: string) => {
       <DialogHeader class="border-b pb-4">
         <DialogTitle class="flex items-center gap-3">
           <Wand2 class="h-6 w-6 text-purple-600" />
-          <span class="text-xl font-semibold text-foreground">AI SQL Assistant</span>
+          <span class='text-xl font-semibold text-foreground'>{{ t('ui.aISQLAssistant') }}</span>
         </DialogTitle>
         <DialogDescription class="text-muted-foreground mt-2">
-          Describe the data you want to retrieve in natural language, and I'll generate SQL for you.
+          {{ t('ui.describeTheDataYouWantToRetrieveInNaturalLanguageAndI') }}
         </DialogDescription>
       </DialogHeader>
 
       <div class="flex flex-col gap-6 py-4 overflow-y-auto max-h-[60vh]">
         <!-- Input Section -->
         <div class="space-y-3">
-          <Label class="text-sm font-medium text-foreground">What data are you looking for?</Label>
+          <Label class='text-sm font-medium text-foreground'>{{ t('ui.whatDataAreYouLookingFor') }}</Label>
           <Textarea
             ref="aiTextareaRef"
             v-model="aiNaturalQuery"
-            placeholder="show logs from syslog namespace for the Scarface service from the past 12 hours."
+            :placeholder="t('query.naturalLanguageExample')"
             class="min-h-[120px] resize-y border-2 border-input focus-visible:border-purple-500 focus-visible:ring-2 focus-visible:ring-purple-500 shadow-sm"
             @keydown.meta.enter="handleSubmit"
             @keydown.ctrl.enter="handleSubmit"
           />
           <div class="flex items-center justify-between text-xs text-muted-foreground">
             <div>
-              Press <kbd class="px-1.5 py-0.5 bg-muted rounded font-mono">Ctrl+Enter</kbd> to generate
+              <i18n-t keypath="query.generateShortcut" scope="global">
+                <template #shortcut><kbd class="px-1.5 py-0.5 bg-muted rounded font-mono">Ctrl+Enter</kbd></template>
+              </i18n-t>
             </div>
             <details class="text-xs">
-              <summary class="cursor-pointer hover:text-foreground font-medium">Examples</summary>
+              <summary class="cursor-pointer hover:text-foreground font-medium">{{ t('ui.examples') }}</summary>
               <div class="absolute z-10 mt-2 right-0 bg-popover border border-border rounded-md shadow-lg p-3 w-80">
                 <div class="space-y-2">
                   <div
                     @click="setExamplePrompt('Show me all error logs from the past hour')"
                     class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
-                    Show me all error logs from the past hour
+                    {{ t('ui.showMeAllErrorLogsFromThePastHour') }}
                   </div>
                   <div
                     @click="setExamplePrompt('Count log entries by level for today')"
                     class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
-                    Count log entries by level for today
+                    {{ t('ui.countLogEntriesByLevelForToday') }}
                   </div>
                   <div
                     @click="setExamplePrompt('Find logs containing authentication failed in the past 24 hours')"
                     class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
-                    Find logs containing "authentication failed" in the past 24 hours
+                    {{ t('ui.findLogsContainingAuthenticationFailedInThePast24Hours') }}
                   </div>
                   <div
                     @click="setExamplePrompt('Show top 10 most frequent error messages this week')"
                     class="cursor-pointer p-2 hover:bg-muted rounded text-sm border border-border"
                   >
-                    Show top 10 most frequent error messages this week
+                    {{ t('ui.showTop10MostFrequentErrorMessagesThisWeek') }}
                   </div>
                 </div>
               </div>
@@ -150,10 +156,10 @@ const copyToClipboard = async (text: string) => {
         <!-- Generated SQL Section -->
         <div class="space-y-3">
           <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-foreground">Generated SQL</span>
+            <span class='text-sm font-medium text-foreground'>{{ t('ui.generatedSQL') }}</span>
             <div v-if="isGenerating" class="flex items-center gap-2 text-xs text-muted-foreground">
               <div class="w-3 h-3 border-2 border-border border-t-purple-500 rounded-full animate-spin"></div>
-              Generating...
+              {{ t('ui.generating') }}
             </div>
           </div>
 
@@ -169,7 +175,7 @@ const copyToClipboard = async (text: string) => {
             <!-- Empty State -->
             <div v-else-if="!generatedSql && !error" class="p-8 text-center text-muted-foreground">
               <Wand2 class="h-8 w-8 mx-auto mb-2 opacity-50" />
-              <p class="text-sm">Your generated SQL will appear here</p>
+              <p class='text-sm'>{{ t('ui.yourGeneratedSQLWillAppearHere') }}</p>
             </div>
 
             <!-- Generated SQL Display -->
@@ -180,7 +186,7 @@ const copyToClipboard = async (text: string) => {
                 size="sm"
                 class="absolute top-2 right-2 h-6 w-6 p-0"
                 @click="copyToClipboard(generatedSql)"
-                title="Copy to clipboard"
+                :title="t('ui.copyToClipboard')"
               >
                 <div class="h-3 w-3">📋</div>
               </Button>
@@ -191,7 +197,7 @@ const copyToClipboard = async (text: string) => {
               <div class="flex items-start gap-2">
                 <AlertCircle class="h-4 w-4 flex-shrink-0 mt-0.5" />
                 <div>
-                  <div class="font-medium">Generation Failed</div>
+                  <div class='font-medium'>{{ t('ui.generationFailed') }}</div>
                   <div class="text-xs mt-1 text-destructive/80">{{ error }}</div>
                 </div>
               </div>
@@ -203,7 +209,7 @@ const copyToClipboard = async (text: string) => {
       <!-- Footer Actions -->
       <DialogFooter class="border-t pt-4 flex justify-between items-center">
         <Button variant="outline" @click="resetDialog">
-          Cancel
+          {{ t('ui.cancel') }}
         </Button>
 
         <div class="flex gap-2">
@@ -215,7 +221,7 @@ const copyToClipboard = async (text: string) => {
           >
             <Wand2 v-if="!isGenerating" class="h-4 w-4 mr-2" />
             <div v-if="isGenerating" class="w-4 h-4 border-2 border-purple-300 border-t-purple-600 rounded-full animate-spin mr-2"></div>
-            {{ isGenerating ? 'Generating...' : (generatedSql ? 'Regenerate' : 'Generate SQL') }}
+            {{ isGenerating ? t('ui.generating') : (generatedSql ? t('ui.regenerate') : t('ui.generateSQL')) }}
           </Button>
 
           <Button
@@ -223,7 +229,7 @@ const copyToClipboard = async (text: string) => {
             :disabled="!generatedSql || isGenerating"
             class="bg-purple-600 hover:bg-purple-700 text-white font-medium"
           >
-            Insert into Editor
+            {{ t('ui.insertIntoEditor') }}
           </Button>
         </div>
       </DialogFooter>

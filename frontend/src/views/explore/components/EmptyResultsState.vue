@@ -1,6 +1,10 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { Button } from '@/components/ui/button'
 import { CalendarIcon } from 'lucide-vue-next'
+
+const { t } = useI18n();
 
 interface Props {
   hasExecutedQuery: boolean;
@@ -30,13 +34,13 @@ const openDatePicker = () => emit('openDatePicker')
         <line x1="12" x2="12" y1="18" y2="12"></line>
         <line x1="9" x2="15" y1="15" y2="15"></line>
       </svg>
-      <h3 class="text-lg font-medium mb-1">No Logs Found</h3>
+      <h3 class='text-lg font-medium mb-1'>{{ t('ui.noLogsFound2') }}</h3>
       <p class="text-sm text-muted-foreground max-w-md">
-        Your query returned no results for the selected time range. Try adjusting the query or time.
+        {{ t('ui.yourQueryReturnedNoResultsForTheSelectedTimeRangeTryAdjusting') }}
       </p>
       <Button variant="outline" size="sm" class="mt-4 h-8" @click="openDatePicker">
         <CalendarIcon class="h-3.5 w-3.5 mr-2" />
-        Adjust Timerange
+        {{ t('ui.adjustTimerange') }}
       </Button>
     </div>
   </template>
@@ -54,9 +58,9 @@ const openDatePicker = () => emit('openDatePicker')
           <line x1="8" x2="14" y1="11" y2="11"></line>
         </svg>
       </div>
-      <h3 class="text-xl font-medium mb-2">Ready to Explore</h3>
+      <h3 class='text-xl font-medium mb-2'>{{ t('ui.readyToExplore') }}</h3>
       <p class="text-sm text-muted-foreground max-w-md mb-4">
-        Enter a query or use the default, then click 'Run' to see logs.
+        {{ t('ui.enterAQueryOrUseTheDefaultThenClickRunToSee') }}
       </p>
       <Button variant="outline" size="sm" @click="runDefaultQuery"
         class="border-primary/20 text-primary hover:bg-primary/5 hover:text-primary hover:border-primary/30">
@@ -64,7 +68,7 @@ const openDatePicker = () => emit('openDatePicker')
           stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="5 3 19 12 5 21 5 3"></polygon>
         </svg>
-        Run default query
+        {{ t('ui.runDefaultQuery') }}
       </Button>
     </div>
   </template>

@@ -1,19 +1,23 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { cn } from "@/lib/utils";
 import { SlidersHorizontal, UserCircle2 } from "lucide-vue-next";
 
+const { t } = useI18n();
+
 const route = useRoute();
 
 const navItems = [
   {
-    label: "Profile",
+    get label() { return t('ui.profile'); },
     to: "/settings/profile",
     icon: UserCircle2,
   },
   {
-    label: "Preferences",
+    get label() { return t('ui.preferences'); },
     to: "/settings/preferences",
     icon: SlidersHorizontal,
   },

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import type { Table } from './tableFeatures'
 import { Button } from '@/components/ui/button'
 import {
@@ -20,6 +22,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
+
+const { t } = useI18n();
 
 interface Props {
   table: Table<Record<string, any>>
@@ -49,7 +53,7 @@ const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
           </Select>
         </TooltipTrigger>
         <TooltipContent :sideOffset="4" side="top" align="center" class="text-xs">
-          <p>Rows per page</p>
+          <p>{{ t('ui.rowsPerPage') }}</p>
         </TooltipContent>
       </Tooltip>
     </TooltipProvider>
@@ -59,14 +63,14 @@ const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
       <!-- First Page -->
       <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanPreviousPage()"
         @click="table.setPageIndex(0)">
-        <span class="sr-only">Go to first page</span>
+        <span class="sr-only">{{ t('ui.goToFirstPage') }}</span>
         <ChevronsLeft class="h-3 w-3" />
       </Button>
 
       <!-- Previous Page -->
       <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanPreviousPage()"
         @click="table.previousPage()">
-        <span class="sr-only">Go to previous page</span>
+        <span class="sr-only">{{ t('ui.goToPreviousPage') }}</span>
         <ChevronLeft class="h-3 w-3" />
       </Button>
 
@@ -77,14 +81,14 @@ const pageSizes = [10, 25, 50, 100, 250, 500, 1000]
       <!-- Next Page -->
       <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanNextPage()"
         @click="table.nextPage()">
-        <span class="sr-only">Go to next page</span>
+        <span class="sr-only">{{ t('ui.goToNextPage') }}</span>
         <ChevronRight class="h-3 w-3" />
       </Button>
 
       <!-- Last Page -->
       <Button variant="ghost" size="icon" class="h-6 w-6 p-0" :disabled="!table.getCanNextPage()"
         @click="table.setPageIndex(table.getPageCount() - 1)">
-        <span class="sr-only">Go to last page</span>
+        <span class="sr-only">{{ t('ui.goToLastPage') }}</span>
         <ChevronsRight class="h-3 w-3" />
       </Button>
     </div>

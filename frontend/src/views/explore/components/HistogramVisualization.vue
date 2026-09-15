@@ -1,7 +1,11 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import LogHistogram from '@/components/visualizations/LogHistogram.vue'
+
+const { t } = useI18n();
 
 interface TimeRangeEvent {
   start: Date;
@@ -42,7 +46,7 @@ const handleZoomTimeRange = (range: TimeRangeEvent) => {
   <!-- Show message when histogram is not available -->
   <div v-else class="histogram-unavailable-message">
     <div class="flex items-center justify-center h-16 text-sm text-muted-foreground">
-      <span>Histogram is not available for this query mode</span>
+      <span>{{ t('ui.histogramIsNotAvailableForThisQueryMode') }}</span>
     </div>
   </div>
 </template>

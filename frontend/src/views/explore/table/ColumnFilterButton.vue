@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from 'vue'
 import type { Column } from './tableFeatures'
 import { Input } from '@/components/ui/input'
@@ -8,6 +10,8 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { ListFilter } from 'lucide-vue-next'
+
+const { t } = useI18n();
 
 interface Props {
   column: Column<Record<string, any>, unknown>
@@ -39,7 +43,7 @@ function clearFilter() {
         :class="isActive
           ? 'text-primary bg-primary/10'
           : 'text-muted-foreground/50 opacity-0 group-hover:opacity-100 hover:text-foreground hover:bg-muted'"
-        :title="isActive ? `Filtered: ${filterValue}` : 'Filter this column'"
+        :title="isActive ? t('explore.filteredValue', { value: filterValue }) : t('ui.filterThisColumn')"
         @mousedown.stop
         @dragstart.stop.prevent
         @click.stop
@@ -56,13 +60,13 @@ function clearFilter() {
       <div class="space-y-1.5">
         <Input
           v-model="filterValue"
-          placeholder="Contains… or >, >=, <, <=, ="
+          :placeholder="t('ui.containsOr')"
           class="h-7 text-xs"
           autofocus
         />
         <div class="flex items-center justify-between">
           <p class="text-[11px] text-muted-foreground">
-            Filters this page only
+            {{ t('ui.filtersThisPageOnly') }}
           </p>
           <button
             v-if="isActive"
@@ -70,7 +74,7 @@ function clearFilter() {
             class="text-[11px] text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
             @click="clearFilter"
           >
-            Clear
+            {{ t('ui.clear') }}
           </button>
         </div>
       </div>

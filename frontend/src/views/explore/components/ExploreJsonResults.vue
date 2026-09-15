@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, ref, watch } from "vue";
 import {
   useTable,
@@ -8,6 +10,8 @@ import { logTableFeatures, type ColumnDef } from '../table/tableFeatures';
 import JsonViewer from "@/components/json-viewer/JsonViewer.vue";
 import DataTablePagination from "@/views/explore/table/data-table-pagination.vue";
 import { valueUpdater } from "@/lib/utils";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   data: Record<string, any>[];
@@ -73,7 +77,7 @@ const rangeEnd = computed(() =>
       v-if="isLoading"
       class="flex h-full min-h-[240px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground"
     >
-      Loading results...
+      {{ t('ui.loadingResults') }}
     </div>
     <template v-else>
       <div
@@ -81,15 +85,14 @@ const rangeEnd = computed(() =>
         class="flex items-center justify-between gap-2 px-4 py-2 border-b flex-shrink-0"
       >
         <span class="text-xs text-muted-foreground">
-          Showing {{ rangeStart.toLocaleString() }}-{{ rangeEnd.toLocaleString() }} of
-          {{ data.length.toLocaleString() }} rows
+          {{ t('explore.resultRange', { start: rangeStart, end: rangeEnd, total: data.length }) }}
         </span>
         <DataTablePagination :table="table" />
       </div>
       <div class="flex-1 min-h-0 overflow-auto p-4">
         <JsonViewer v-if="data.length > 0" :value="pageData" :expanded="true" />
         <div v-else class="p-4 text-center text-sm text-muted-foreground">
-          No logs to display
+          {{ t('ui.noLogsToDisplay') }}
         </div>
       </div>
     </template>

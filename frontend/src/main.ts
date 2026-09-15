@@ -1,10 +1,13 @@
 import { createApp } from "vue";
+import { watch } from "vue";
 import { createPinia } from "pinia";
 import "./assets/index.css";
 import "@unovis/ts/styles";
 import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "@/stores/auth";
+import { usePreferencesStore } from "@/stores/preferences";
+import { i18n, setLocale } from "@/i18n";
 
 async function initializeApp() {
   try {
@@ -25,6 +28,24 @@ async function initializeApp() {
     // Initialize auth store before router
     const authStore = useAuthStore(pinia);
     await authStore.initialize();
+
+    app.use(i18n);
+    const preferencesStore = usePreferencesStore(pinia);
+    await preferencesStore.loadPreferences();
+    try {
+      await setLocale(preferencesStore.preferences.locale ?? "auto");
+    } catch (error) {
+      console.error("Failed to load language pack; using English", error);
+      await setLocale("en");
+    }
+    watch(() => preferencesStore.preferences.locale, (locale) => {
+      setLocale(locale ?? "auto").catch((error) => {
+        console.error("Failed to load language pack", error);
+      });
+    });
+    watch(() => authStore.user?.id, () => {
+      void preferencesStore.loadPreferences(true);
+    });
 
     // Use router after auth is initialized
     app.use(router);

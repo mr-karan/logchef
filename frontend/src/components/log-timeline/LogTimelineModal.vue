@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import {
     Dialog,
     DialogContent,
@@ -13,6 +15,8 @@ import { ref, watch } from 'vue'
 import { exploreApi } from '@/api/explore'
 import { Clock, ArrowDown, ArrowUp } from 'lucide-vue-next'
 import { timestampIdentity } from './timestampIdentity'
+
+const { t } = useI18n();
 
 const props = defineProps<{
     isOpen: boolean
@@ -74,8 +78,8 @@ async function loadContextLogs() {
     
     if (!tsValue) {
         toast({
-            title: 'Error',
-            description: 'No timestamp found in log',
+            get title() { return t('ui.error'); },
+            get description() { return t('ui.noTimestampFoundInLog'); },
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -84,8 +88,8 @@ async function loadContextLogs() {
     
     if (!props.sourceId) {
         toast({
-            title: 'Error',
-            description: 'Source ID is required',
+            get title() { return t('ui.error'); },
+            get description() { return t('ui.sourceIDIsRequired'); },
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -94,8 +98,8 @@ async function loadContextLogs() {
 
     if (!props.teamId) {
         toast({
-            title: 'Error',
-            description: 'Team ID is required',
+            get title() { return t('ui.error'); },
+            get description() { return t('ui.teamIDIsRequired'); },
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -137,8 +141,8 @@ async function loadContextLogs() {
         }
     } catch (error) {
         toast({
-            title: 'Error',
-            description: error instanceof Error ? error.message : 'Failed to load log context',
+            get title() { return t('ui.error'); },
+            description: error instanceof Error ? error.message : t('ui.failedToLoadLogContext'),
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -213,8 +217,8 @@ async function loadMore(direction: 'before' | 'after') {
         }
     } catch (error) {
         toast({
-            title: 'Error',
-            description: error instanceof Error ? error.message : 'Failed to load more logs',
+            get title() { return t('ui.error'); },
+            description: error instanceof Error ? error.message : t('ui.failedToLoadMoreLogs'),
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -287,10 +291,10 @@ function formatValue(value: any): string {
                 <div class="flex items-center justify-between pr-8">
                     <DialogTitle class="flex items-center gap-2">
                         <Clock class="h-5 w-5" />
-                        Log Context
+                        {{ t('ui.logContext') }}
                     </DialogTitle>
                     <div class="flex items-center gap-2 text-sm">
-                        <span class="text-muted-foreground">Batch:</span>
+                        <span class='text-muted-foreground'>{{ t('ui.batch') }}</span>
                         <select 
                             v-model="batchSize" 
                             class="h-7 px-2 rounded border bg-background text-xs"
@@ -321,10 +325,10 @@ function formatValue(value: any): string {
                             @click="loadMore('before')">
                             <ArrowUp v-if="loadingMore !== 'before'" class="mr-1 h-3 w-3" />
                             <Skeleton v-else class="h-3 w-3 rounded-full mr-1" />
-                            {{ loadingMore === 'before' ? 'Loading...' : `Load ${batchSize} Before` }}
+                            {{ loadingMore === 'before' ? t('ui.loading') : `Load ${batchSize} Before` }}
                         </Button>
                         <div v-else class="text-center text-xs text-muted-foreground py-1">
-                            — Beginning of logs —
+                            {{ t('ui.beginningOfLogs') }}
                         </div>
                     </div>
 
@@ -391,10 +395,10 @@ function formatValue(value: any): string {
                             @click="loadMore('after')">
                             <ArrowDown v-if="loadingMore !== 'after'" class="mr-1 h-3 w-3" />
                             <Skeleton v-else class="h-3 w-3 rounded-full mr-1" />
-                            {{ loadingMore === 'after' ? 'Loading...' : `Load ${batchSize} After` }}
+                            {{ loadingMore === 'after' ? t('ui.loading') : `Load ${batchSize} After` }}
                         </Button>
                         <div v-else class="text-center text-xs text-muted-foreground py-1">
-                            — End of logs —
+                            {{ t('ui.endOfLogs') }}
                         </div>
                     </div>
                 </div>
@@ -402,7 +406,7 @@ function formatValue(value: any): string {
                 <!-- Empty State -->
                 <div v-else class="flex flex-col items-center justify-center py-12 text-muted-foreground">
                     <Clock class="h-12 w-12 mb-4" />
-                    <p>No context logs available</p>
+                    <p>{{ t('ui.noContextLogsAvailable') }}</p>
                 </div>
             </div>
         </DialogContent>

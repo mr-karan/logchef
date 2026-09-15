@@ -1,10 +1,12 @@
 import { apiClient } from "./apiUtils";
 import type { ThemeMode } from "@/stores/theme";
+import type { LocalePreference } from "@/i18n/locales";
 
 export type TimezonePreference = "local" | "utc";
 export type DisplayModePreference = "table" | "compact" | "json";
 
 export interface UserPreferences {
+  locale?: LocalePreference;
   theme: ThemeMode;
   timezone: TimezonePreference;
   display_mode: DisplayModePreference;

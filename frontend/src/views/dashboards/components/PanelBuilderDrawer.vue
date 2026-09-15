@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useDark } from "@vueuse/core";
 import type { DateRange } from "reka-ui";
@@ -34,6 +36,8 @@ import type {
   DashboardPanelType,
 } from "@/api/dashboards";
 
+const { t } = useI18n();
+
 // Full-height panel builder drawer. Draft-first: every field reads from and
 // writes to `store.editDraft` via `store.updateDraftPanel` — there is no
 // detached local copy of the panel config. DashboardView owns `open` +
@@ -54,10 +58,10 @@ const isDark = useDark();
 const monacoTheme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
 const PANEL_TYPES: { value: DashboardPanelType; label: string }[] = [
-  { value: "timeseries", label: "Time series" },
-  { value: "stat", label: "Stat" },
-  { value: "breakdown", label: "Breakdown" },
-  { value: "table", label: "Table" },
+  { value: "timeseries", get label() { return t('ui.timeSeries'); } },
+  { value: "stat", get label() { return t('ui.stat'); } },
+  { value: "breakdown", get label() { return t('ui.breakdown'); } },
+  { value: "table", get label() { return t('ui.table'); } },
 ];
 
 const panel = computed<PanelModel | null>(() => {
@@ -335,10 +339,9 @@ function onOpenChange(value: boolean) {
       class="w-[min(1280px,96vw)] max-w-none sm:max-w-none gap-0 overflow-hidden p-0 flex flex-col"
     >
       <SheetHeader class="sr-only">
-        <SheetTitle>{{ panel ? `Edit panel — ${panel.title || "Untitled"}` : "Panel builder" }}</SheetTitle>
+        <SheetTitle>{{ panel ? `Edit panel — ${panel.title || "Untitled"}` : t('ui.panelBuilder') }}</SheetTitle>
         <SheetDescription>
-          Configure the panel's source, query, visualization, and time range. Changes apply to the
-          dashboard draft immediately; the dashboard's own Save/Cancel controls persist or discard them.
+          {{ t('ui.configureThePanelSSourceQueryVisualizationAndTimeRangeChangesApply') }}
         </SheetDescription>
       </SheetHeader>
 
@@ -347,8 +350,8 @@ function onOpenChange(value: boolean) {
         <div class="flex flex-wrap items-center gap-3 border-b px-4 py-3 pr-12 shrink-0">
           <Input
             :model-value="panel.title"
-            aria-label="Title"
-            placeholder="Panel title"
+            :aria-label="t('ui.title')"
+            :placeholder="t('ui.panelTitle')"
             class="h-8 max-w-xs font-medium"
             @update:model-value="(v) => patchPanel({ title: String(v ?? '') })"
           />
@@ -381,7 +384,7 @@ function onOpenChange(value: boolean) {
               @click="runNow"
             >
               <Play class="h-3.5 w-3.5" />
-              {{ isPreviewing ? "Running…" : "Run" }}
+              {{ isPreviewing ? t('ui.running') : t('ui.run') }}
             </Button>
           </div>
         </div>
@@ -393,7 +396,7 @@ function onOpenChange(value: boolean) {
               v-if="!canPreview"
               class="flex h-full items-center justify-center px-6 text-center text-xs text-muted-foreground"
             >
-              Pick a team and source, then write a query to see a live preview.
+              {{ t('ui.pickATeamAndSourceThenWriteAQueryToSeeA') }}
             </div>
             <DashboardPanel v-else :panel="panel" :height-px="previewHeightPx" :state="previewState" />
           </div>
@@ -410,7 +413,7 @@ function onOpenChange(value: boolean) {
                 @update:source="onSourceChange"
               />
               <div class="flex items-center justify-between shrink-0">
-                <Label class="text-xs text-muted-foreground">Query</Label>
+                <Label class='text-xs text-muted-foreground'>{{ t('ui.query') }}</Label>
                 <div v-if="supportsLogsql" class="flex items-center gap-1 rounded-md border p-0.5">
                   <button
                     type="button"
@@ -450,14 +453,14 @@ function onOpenChange(value: boolean) {
                   @submit="runNow"
                 />
                 <div v-else class="flex h-full items-center justify-center text-xs text-muted-foreground">
-                  Pick a team and source to write a query
+                  {{ t('ui.pickATeamAndSourceToWriteAQuery') }}
                 </div>
               </div>
             </div>
 
             <!-- Options column -->
             <div class="flex min-h-0 flex-col gap-2 overflow-y-auto pl-0.5">
-              <Label class="text-xs text-muted-foreground">Options</Label>
+              <Label class='text-xs text-muted-foreground'>{{ t('ui.options') }}</Label>
               <PanelBuilderOptions
                 :type="panel.type"
                 :options="panel.options ?? {}"

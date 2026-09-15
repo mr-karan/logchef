@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
+
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History } from "lucide-vue-next";
@@ -23,6 +26,8 @@ import { useMetaStore } from "@/stores/meta";
 import AlertForm from "@/components/alerts/AlertForm.vue";
 import EmptyState from "@/components/layout/EmptyState.vue";
 import type { Alert, UpdateAlertRequest } from "@/api/alerts";
+
+const { t, locale } = useI18n();
 
 const route = useRoute();
 const router = useRouter();
@@ -131,8 +136,8 @@ onMounted(async () => {
   <EmptyState
     v-if="!metaStore.alertsEnabled"
     :icon="Bell"
-    title="Alerting is disabled"
-    description="Alerting is disabled on this server. Ask your administrator to set alerts.enabled = true and restart the server to enable."
+    :title="t('ui.alertingIsDisabled')"
+    :description="t('ui.alertingIsDisabledOnThisServerAskYourAdministratorToSetAlerts')"
   />
   <div v-else class="space-y-6">
     <!-- Header Section -->
@@ -145,9 +150,9 @@ onMounted(async () => {
           <div class="flex items-center gap-2 flex-wrap">
             <h1 class="text-2xl font-bold tracking-tight">{{ alert?.name || "Alert" }}</h1>
             <Badge v-if="alert" :variant="mapSeverityVariant(alert.severity)" class="capitalize">
-              {{ alert.severity }}
+              {{ t(severityLabels[alert.severity]) }}
             </Badge>
-            <Badge v-if="alert && !alert.is_active" variant="outline">Disabled</Badge>
+            <Badge v-if="alert && !alert.is_active" variant='outline'>{{ t('ui.disabled') }}</Badge>
           </div>
           <p v-if="alert?.description" class="text-muted-foreground">
             {{ alert.description }}
@@ -156,28 +161,28 @@ onMounted(async () => {
       </div>
       <Button variant="outline" @click="confirmDelete" :disabled="!alert">
         <Trash2 class="mr-2 h-4 w-4" />
-        Delete
+        {{ t('ui.delete') }}
       </Button>
     </div>
 
     <!-- Loading State -->
     <div v-if="!alert" class="rounded-lg border border-dashed py-12 text-center">
-      <p class="text-sm text-muted-foreground">Alert not found or still loading...</p>
-      <Button class="mt-4" variant="outline" @click="goBack">Go back</Button>
+      <p class='text-sm text-muted-foreground'>{{ t('ui.alertNotFoundOrStillLoading') }}</p>
+      <Button class="mt-4" variant='outline' @click="goBack">{{ t('ui.goBack') }}</Button>
     </div>
 
     <!-- Main Content with Tabs -->
     <Tabs v-else v-model="currentTab" class="space-y-6">
       <TabsList>
-        <TabsTrigger value="edit">Configuration</TabsTrigger>
-        <TabsTrigger value="history">History</TabsTrigger>
+        <TabsTrigger value="edit">{{ t('ui.configuration') }}</TabsTrigger>
+        <TabsTrigger value="history">{{ t('ui.history') }}</TabsTrigger>
       </TabsList>
 
       <!-- Edit Configuration Tab -->
       <TabsContent value="edit">
         <Card>
           <CardHeader>
-            <CardTitle>Alert Configuration</CardTitle>
+            <CardTitle>{{ t('ui.alertConfiguration') }}</CardTitle>
           </CardHeader>
           <CardContent>
             <AlertForm
@@ -198,13 +203,13 @@ onMounted(async () => {
       <TabsContent value="history">
         <Card>
           <CardHeader>
-            <CardTitle>Alert History</CardTitle>
+            <CardTitle>{{ t('ui.alertHistory') }}</CardTitle>
           </CardHeader>
           <CardContent>
             <!-- Loading State -->
             <div v-if="isLoadingHistory" class="py-8 text-center">
               <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3"></div>
-              <p class="text-sm text-muted-foreground">Loading history...</p>
+              <p class='text-sm text-muted-foreground'>{{ t('ui.loadingHistory') }}</p>
             </div>
 
             <!-- Empty State -->
@@ -214,9 +219,9 @@ onMounted(async () => {
                   <History class="h-8 w-8 text-muted-foreground" />
                 </div>
               </div>
-              <h3 class="text-lg font-semibold mb-2">No history yet</h3>
+              <h3 class='text-lg font-semibold mb-2'>{{ t('ui.noHistoryYet') }}</h3>
               <p class="text-sm text-muted-foreground">
-                This alert hasn't been triggered yet. History will appear here once the alert fires.
+                {{ t('ui.thisAlertHasnTBeenTriggeredYetHistoryWillAppearHereOnce') }}
               </p>
             </div>
 
@@ -262,17 +267,17 @@ onMounted(async () => {
                           :variant="entry.status === 'triggered' ? 'destructive' : entry.status === 'error' ? 'outline' : 'secondary'"
                           class="capitalize text-xs"
                         >
-                          {{ entry.status }}
+                          {{ t(alertStateLabels[entry.status]) }}
                         </Badge>
                         <span class="text-sm text-muted-foreground">
-                          {{ new Date(entry.triggered_at).toLocaleString('en-US', {
+                          {{ new Date(entry.triggered_at).toLocaleString(locale, {
                             dateStyle: 'medium',
                             timeStyle: 'short'
                           }) }}
                         </span>
                         <!-- Value Display Inline -->
                         <span v-if="entry.value != null" class="text-sm text-muted-foreground">
-                          · Value: <code class="font-mono font-semibold">{{ entry.value }}</code>
+                          {{ t('ui.value') }} <code class='font-mono font-semibold'>{{ entry.value }}</code>
                         </span>
                       </div>
                       <!-- Message -->
@@ -288,13 +293,13 @@ onMounted(async () => {
                       size="sm"
                       @click="handleResolve(entry.id, 'Manually resolved')"
                     >
-                      Resolve
+                      {{ t('ui.resolve') }}
                     </Button>
                   </div>
 
                   <!-- Resolution Info -->
                   <div v-if="entry.resolved_at" class="text-xs text-muted-foreground">
-                    Resolved {{ new Date(entry.resolved_at).toLocaleString('en-US', {
+                    {{ t('ui.resolved') }} {{ new Date(entry.resolved_at).toLocaleString(locale, {
                       dateStyle: 'medium',
                       timeStyle: 'short'
                     }) }}
@@ -311,15 +316,15 @@ onMounted(async () => {
     <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete alert?</AlertDialogTitle>
+          <AlertDialogTitle>{{ t('ui.deleteAlert') }}</AlertDialogTitle>
           <AlertDialogDescription>
-            Are you sure you want to delete <strong>{{ alert?.name }}</strong>? This action cannot be undone and all associated history will be permanently deleted.
+            {{ t('alerts.confirmDeleteHistory', { name: alert?.name ?? '' }) }}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogCancel>{{ t('ui.cancel') }}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" @click="handleDelete">
-            Delete Alert
+            {{ t('ui.deleteAlert2') }}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

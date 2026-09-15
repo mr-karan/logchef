@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 
 import {
@@ -56,6 +58,8 @@ import { useMetaStore } from "@/stores/meta";
 import { ref, watch, onMounted, computed } from "vue";
 import { useTeamsStore } from "@/stores/teams";
 import { useExploreStore } from "@/stores/explore";
+
+const { t } = useI18n();
 
 const authStore = useAuthStore();
 const themeStore = useThemeStore();
@@ -138,22 +142,22 @@ interface NavItem {
 // when the server advertises `alerts_enabled: false` via /api/v1/meta.
 const allMainNavItems: NavItem[] = [
   {
-    title: "Explorer",
+    get title() { return t('ui.explorer'); },
     icon: Search,
     url: "/logs/explore",
   },
   {
-    title: "Library",
+    get title() { return t('ui.library'); },
     icon: FolderOpen,
     url: "/logs/library",
   },
   {
-    title: "Alerts",
+    get title() { return t('ui.alerts'); },
     icon: Bell,
     url: "/logs/alerts",
   },
   {
-    title: "Dashboards",
+    get title() { return t('ui.dashboards'); },
     icon: LayoutDashboard,
     url: "/dashboards",
   },
@@ -165,37 +169,37 @@ const mainNavItems = computed(() =>
 
 const adminNavItems: NavItem[] = [
   {
-    title: "Sources",
+    get title() { return t('ui.sources'); },
     icon: Database,
     url: "/admin/sources",
     adminOnly: true,
   },
   {
-    title: "Users",
+    get title() { return t('ui.users'); },
     icon: UsersRound,
     url: "/admin/users",
     adminOnly: true,
   },
   {
-    title: "Service Tokens",
+    get title() { return t('ui.serviceTokens'); },
     icon: KeyRound,
     url: "/admin/service-tokens",
     adminOnly: true,
   },
   {
-    title: "Teams",
+    get title() { return t('ui.teams'); },
     icon: Users,
     url: "/admin/teams",
     adminOnly: true,
   },
   {
-    title: "System Settings",
+    get title() { return t('ui.systemSettings'); },
     icon: Wrench,
     url: "/admin/settings",
     adminOnly: true,
   },
   {
-    title: "Query Activity",
+    get title() { return t('ui.queryActivity'); },
     icon: Activity,
     url: "/admin/query-activity",
     adminOnly: true,
@@ -204,12 +208,12 @@ const adminNavItems: NavItem[] = [
 
 const navItems = [
   {
-    title: "Profile",
+    get title() { return t('ui.profile'); },
     icon: UserCircle2,
     url: "/settings/profile",
   },
   {
-    title: "Preferences",
+    get title() { return t('ui.preferences'); },
     icon: Settings,
     url: "/settings/preferences",
   },
@@ -241,7 +245,7 @@ const navItems = [
         <SidebarContent>
           <!-- Main Navigation -->
           <SidebarGroup>
-            <SidebarGroupLabel v-if="sidebarOpen">Main</SidebarGroupLabel>
+            <SidebarGroupLabel v-if="sidebarOpen">{{ t('ui.main') }}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <template v-for="item in mainNavItems" :key="item.title">
@@ -265,11 +269,11 @@ const navItems = [
           <!-- Administration section: visible to global admins and any-team admins.
                Global admins see every item; team admins see only Teams. -->
           <SidebarGroup v-if="isGlobalAdmin || isAnyTeamAdmin" class="mt-4">
-            <SidebarGroupLabel v-if="sidebarOpen">Administration</SidebarGroupLabel>
+            <SidebarGroupLabel v-if="sidebarOpen">{{ t('ui.administration') }}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <template v-for="item in adminNavItems" :key="item.title">
-                  <SidebarMenuItem v-if="isGlobalAdmin || item.title === 'Teams'">
+                  <SidebarMenuItem v-if="isGlobalAdmin || item.url === '/admin/teams'">
                     <SidebarMenuButton asChild :tooltip="item.title"
                       class="hover:bg-primary hover:text-primary-foreground py-2 data-[active=true]:bg-sidebar-accent data-[active=true]:text-sidebar-accent-foreground rounded-md transition-colors duration-150">
                       <router-link :to="item.url" class="flex items-center" active-class="font-medium">
@@ -285,7 +289,7 @@ const navItems = [
 
           <!-- User Settings Navigation -->
           <SidebarGroup class="mt-4">
-            <SidebarGroupLabel v-if="sidebarOpen">User</SidebarGroupLabel>
+            <SidebarGroupLabel v-if="sidebarOpen">{{ t('ui.user') }}</SidebarGroupLabel>
             <SidebarGroupContent>
               <SidebarMenu>
                 <template v-for="item in navItems" :key="item.title">
@@ -307,11 +311,11 @@ const navItems = [
         <SidebarFooter class="border-t border-sidebar-border pt-2">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton size="sm" @click="cycleTheme" :tooltip="themeStore.preference === 'light' ? 'Light mode' : themeStore.preference === 'dark' ? 'Dark mode' : 'System'">
+              <SidebarMenuButton size="sm" @click="cycleTheme" :tooltip="themeStore.preference === 'light' ? t('ui.lightMode') : themeStore.preference === 'dark' ? t('ui.darkMode') : t('ui.system')">
                 <Sun v-if="themeStore.preference === 'light'" class="size-4" />
                 <Moon v-else-if="themeStore.preference === 'dark'" class="size-4" />
                 <Monitor v-else class="size-4" />
-                <span>{{ themeStore.preference === 'light' ? 'Light' : themeStore.preference === 'dark' ? 'Dark' : 'System' }}</span>
+                <span>{{ themeStore.preference === 'light' ? t('ui.light') : themeStore.preference === 'dark' ? t('ui.dark') : t('ui.system') }}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
             <SidebarMenuItem>
@@ -358,13 +362,13 @@ const navItems = [
                   <DropdownMenuItem asChild>
                     <router-link to="/settings/profile" class="cursor-pointer">
                       <UserCircle2 class="mr-2 h-4 w-4" />
-                      <span>Profile</span>
+                      <span>{{ t('ui.profile') }}</span>
                     </router-link>
                   </DropdownMenuItem>
                   <DropdownMenuItem class="text-destructive focus:text-destructive cursor-pointer"
                     @click="authStore.logout">
                     <LogOut class="mr-2 h-4 w-4" />
-                    <span>Log out</span>
+                    <span>{{ t('ui.logOut') }}</span>
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -382,8 +386,8 @@ const navItems = [
         >
           <LockKeyhole class="h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" />
           <span>
-            <strong class="font-semibold">Public demo:</strong>
-            explore dashboards and logs freely. Changes are disabled.
+            <strong class='font-semibold'>{{ t('ui.publicDemo') }}</strong>
+            {{ t('ui.exploreDashboardsAndLogsFreelyChangesAreDisabled') }}
           </span>
           <a
             href="https://logchef.app/getting-started/quickstart/"
@@ -391,7 +395,7 @@ const navItems = [
             rel="noreferrer"
             class="inline-flex shrink-0 items-center gap-1 font-medium underline decoration-amber-500/50 underline-offset-2 hover:decoration-current"
           >
-            Self-host LogChef
+            {{ t('ui.selfHostLogChef') }}
             <ExternalLink class="h-3 w-3" />
           </a>
         </div>

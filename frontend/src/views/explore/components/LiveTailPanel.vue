@@ -1,8 +1,12 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, nextTick, ref, watch } from "vue";
 import { Button } from "@/components/ui/button";
 import { Radio, Pause, ArrowUp, AlertTriangle, RotateCw } from "lucide-vue-next";
 import type { LiveTailStatus } from "@/stores/explore";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   rows: Record<string, any>[];
@@ -67,15 +71,15 @@ watch(
 const statusLabel = computed(() => {
   switch (props.status) {
     case "connecting":
-      return "Connecting…";
+      return t('ui.connecting');
     case "streaming":
-      return "Live";
+      return t('ui.live');
     case "ended":
-      return "Tail ended";
+      return t('ui.tailEnded2');
     case "error":
-      return "Error";
+      return t('ui.error');
     default:
-      return "Idle";
+      return t('ui.idle');
   }
 });
 
@@ -118,13 +122,13 @@ function timestampOf(row: Record<string, any>): string {
           {{ statusLabel }}
         </span>
         <span class="text-xs text-muted-foreground">
-          {{ rows.length.toLocaleString() }} row{{ rows.length === 1 ? "" : "s" }}
-          <span v-if="rows.length >= 500" class="italic">(buffer full)</span>
+          {{ t('explore.rowCount', { count: rows.length }, rows.length) }}
+          <span v-if="rows.length >= 500" class="italic">{{ t('ui.bufferFull') }}</span>
         </span>
       </div>
       <Button variant="destructive" size="sm" class="h-7 gap-1.5 px-3" @click="emit('stop')">
         <Pause class="h-3.5 w-3.5" />
-        <span class="font-medium">Stop</span>
+        <span class='font-medium'>{{ t('ui.stop') }}</span>
       </Button>
     </div>
 
@@ -136,7 +140,7 @@ function timestampOf(row: Record<string, any>): string {
       <AlertTriangle class="h-3.5 w-3.5 flex-shrink-0" />
       <span>{{ notice }}</span>
       <span v-if="droppedCount > 0" class="ml-auto font-medium">
-        {{ droppedCount.toLocaleString() }} dropped
+        {{ droppedCount.toLocaleString() }} {{ t('ui.dropped') }}
       </span>
     </div>
 
@@ -149,7 +153,7 @@ function timestampOf(row: Record<string, any>): string {
         @click="scrollToTop"
       >
         <ArrowUp class="h-3.5 w-3.5" />
-        {{ newRowsCount.toLocaleString() }} new row{{ newRowsCount === 1 ? "" : "s" }}
+        {{ t('explore.newRowCount', { count: newRowsCount }, newRowsCount) }}
       </button>
 
       <div ref="scrollRef" class="h-full overflow-y-auto font-mono text-xs" @scroll="onScroll">
@@ -174,9 +178,9 @@ function timestampOf(row: Record<string, any>): string {
           class="flex h-full items-center justify-center p-6 text-center"
         >
           <p class="text-sm text-muted-foreground">
-            <template v-if="status === 'error'">Live tail failed.</template>
-            <template v-else-if="status === 'ended'">Tail ended.</template>
-            <template v-else>Waiting for new log lines…</template>
+            <template v-if="status === 'error'">{{ t('ui.liveTailFailed') }}</template>
+            <template v-else-if="status === 'ended'">{{ t('ui.tailEnded') }}</template>
+            <template v-else>{{ t('ui.waitingForNewLogLines') }}</template>
           </p>
         </div>
       </div>
@@ -191,7 +195,7 @@ function timestampOf(row: Record<string, any>): string {
       <span class="flex-1">{{ error || "Live tail connection failed." }}</span>
       <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="emit('resume')">
         <RotateCw class="h-3.5 w-3.5" />
-        Retry
+        {{ t('ui.retry') }}
       </Button>
     </div>
     <div
@@ -199,13 +203,13 @@ function timestampOf(row: Record<string, any>): string {
       class="flex items-center gap-2 border-t bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
     >
       <span class="flex-1">
-        Tail ended<template v-if="endReason"> ({{ endReason }})</template>.
+        {{ t('ui.tailEnded2') }}<template v-if="endReason"> ({{ endReason }})</template>.
         <template v-if="endMessage"> {{ endMessage }}</template>
-        No automatic reconnect.
+        {{ t('ui.noAutomaticReconnect') }}
       </span>
       <Button variant="outline" size="sm" class="h-7 gap-1.5" @click="emit('resume')">
         <RotateCw class="h-3.5 w-3.5" />
-        Resume
+        {{ t('ui.resume') }}
       </Button>
     </div>
   </div>

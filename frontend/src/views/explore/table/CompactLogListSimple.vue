@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed, ref, watch } from 'vue'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Button } from '@/components/ui/button'
@@ -16,6 +18,8 @@ import type { QueryStats } from '@/api/explore'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import { isPrimaryMessageField } from './fieldSemantics'
+
+const { t } = useI18n();
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
@@ -469,7 +473,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
                 @click="openContextModal(row.raw, $event)"
               >
                 <Clock class="h-3 w-3 mr-1" />
-                Show Context
+                {{ t('ui.showContext') }}
               </Button>
             </div>
           </div>
@@ -479,10 +483,10 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       <!-- Empty state -->
       <div v-else class="p-4 text-center text-muted-foreground">
         <template v-if="globalFilter">
-          No logs matching "{{ globalFilter }}"
+          {{ t('explore.noMatches', { search: globalFilter }) }}
         </template>
         <template v-else>
-          No logs to display
+          {{ t('ui.noLogsToDisplay') }}
         </template>
       </div>
     </ScrollArea>

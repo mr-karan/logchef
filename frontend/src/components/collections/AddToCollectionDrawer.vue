@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { ref, computed, watch } from "vue";
 import { Loader2, Plus, ExternalLink, Check } from "lucide-vue-next";
 import {
@@ -16,6 +18,8 @@ import { useCollectionsStore } from "@/stores/collections";
 import { collectionsApi, type CollectionItem } from "@/api/collections";
 import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useRouter } from "vue-router";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   open: boolean;
@@ -127,7 +131,7 @@ function navigateToCollection(collectionId: number) {
   <Sheet :open="props.open" @update:open="emit('update:open', $event)">
     <SheetContent side="right" class="w-[380px] sm:w-[420px]">
       <SheetHeader>
-        <SheetTitle>Add to Collection</SheetTitle>
+        <SheetTitle>{{ t('ui.addToCollection') }}</SheetTitle>
         <SheetDescription class="truncate">
           {{ queryName }}
         </SheetDescription>
@@ -136,7 +140,7 @@ function navigateToCollection(collectionId: number) {
       <div class="mt-6 space-y-4">
         <div v-if="isLoadingIndex" class="flex items-center justify-center py-8">
           <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
-          <span class="ml-2 text-sm text-muted-foreground">Loading collections…</span>
+          <span class="ml-2 text-sm text-muted-foreground">{{ t('ui.loadingCollections') }}</span>
         </div>
 
         <template v-else>
@@ -159,8 +163,8 @@ function navigateToCollection(collectionId: number) {
                 <div class="min-w-0">
                   <div class="truncate font-medium">{{ c.name }}</div>
                   <div class="text-xs text-muted-foreground">
-                    {{ c.item_count }} {{ c.item_count === 1 ? "item" : "items" }}
-                    <span v-if="!c.is_personal"> · {{ c.member_count }} {{ c.member_count === 1 ? "member" : "members" }}</span>
+                    {{ t('collections.items', { count: c.item_count }, c.item_count) }}
+                    <span v-if="!c.is_personal"> · {{ t('collections.members', { count: c.member_count }, c.member_count) }}</span>
                   </div>
                 </div>
               </div>
@@ -170,7 +174,7 @@ function navigateToCollection(collectionId: number) {
                   v-if="!c.is_personal"
                   type="button"
                   class="p-1 rounded hover:bg-muted-foreground/10"
-                  title="Manage collection"
+                  :title="t('ui.manageCollection')"
                   @click.stop="navigateToCollection(c.id)"
                 >
                   <ExternalLink class="h-3.5 w-3.5 text-muted-foreground" />
@@ -184,23 +188,23 @@ function navigateToCollection(collectionId: number) {
           <div v-if="!showInlineCreate && isAnyTeamCollectionMutator">
             <Button variant="ghost" size="sm" class="w-full justify-start" @click="showInlineCreate = true">
               <Plus class="mr-2 h-4 w-4" />
-              New Collection
+              {{ t('ui.newCollection') }}
             </Button>
           </div>
           <div v-else class="space-y-2 px-1">
-            <Label for="new-collection-name">Collection name</Label>
+            <Label for="new-collection-name">{{ t('ui.collectionName') }}</Label>
             <div class="flex gap-2">
               <Input
                 id="new-collection-name"
                 v-model="newName"
-                placeholder="e.g. On-call runbook"
+                :placeholder="t('ui.eGOnCallRunbook')"
                 class="h-8 text-sm"
                 @keydown.enter="handleCreate"
                 @keydown.escape="showInlineCreate = false"
               />
               <Button size="sm" class="h-8 shrink-0" :disabled="isCreating || !newName.trim()" @click="handleCreate">
                 <Loader2 v-if="isCreating" class="h-3.5 w-3.5 animate-spin" />
-                <span v-else>Add</span>
+                <span v-else>{{ t('ui.add') }}</span>
               </Button>
             </div>
           </div>

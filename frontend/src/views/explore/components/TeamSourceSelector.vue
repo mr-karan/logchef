@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
+
 import { computed } from 'vue'
 import type { TeamWithMemberCount, UserTeamMembership } from '@/api/teams'
 import type { Source } from '@/api/sources'
@@ -13,6 +15,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import type { AcceptableValue } from 'reka-ui'
+
+const { t } = useI18n();
 
 type TeamOption = UserTeamMembership | TeamWithMemberCount
 
@@ -42,10 +46,10 @@ const selectedTeamName = computed(() => {
 })
 
 const selectedSourceName = computed(() => {
-  if (!props.currentSourceId) return 'Select source'
+  if (!props.currentSourceId) return t('ui.selectSource')
 
   const source = props.availableSources.find(item => item.id === props.currentSourceId)
-  return source ? formatSourceName(source) : 'Select source'
+  return source ? formatSourceName(source) : t('ui.selectSource')
 })
 
 const isToolbarVariant = computed(() => props.variant === 'toolbar')
@@ -87,11 +91,11 @@ function handleSourceChange(value: AcceptableValue) {
       @update:model-value="handleTeamChange"
     >
       <SelectTrigger :class="teamTriggerClass">
-        <SelectValue placeholder="Select team">{{ selectedTeamName }}</SelectValue>
+        <SelectValue :placeholder="t('ui.selectTeam')">{{ selectedTeamName }}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectGroup>
-          <SelectLabel>Teams</SelectLabel>
+          <SelectLabel>{{ t('ui.teams') }}</SelectLabel>
           <SelectItem
             v-for="team in availableTeams"
             :key="team.id"
@@ -111,16 +115,16 @@ function handleSourceChange(value: AcceptableValue) {
       @update:model-value="handleSourceChange"
     >
       <SelectTrigger :class="sourceTriggerClass">
-        <SelectValue placeholder="Select source">{{ selectedSourceName }}</SelectValue>
+        <SelectValue :placeholder="t('ui.selectSource')">{{ selectedSourceName }}</SelectValue>
       </SelectTrigger>
       <SelectContent>
         <SelectGroup>
-          <SelectLabel>Log Sources</SelectLabel>
+          <SelectLabel>{{ t('ui.logSources') }}</SelectLabel>
           <SelectItem v-if="!currentTeamId" value="no-team" disabled>
-            Select a team first
+            {{ t('ui.selectATeamFirst') }}
           </SelectItem>
           <SelectItem v-else-if="availableSources.length === 0" value="no-sources" disabled>
-            No sources available
+            {{ t('ui.noSourcesAvailable') }}
           </SelectItem>
           <SelectItem
             v-for="source in availableSources"

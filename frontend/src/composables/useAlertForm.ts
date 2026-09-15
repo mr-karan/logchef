@@ -1,4 +1,5 @@
 import { computed, reactive, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useAlertsStore } from "@/stores/alerts";
 import { useSourcesStore } from "@/stores/sources";
 import { useTeamsStore } from "@/stores/teams";
@@ -80,6 +81,7 @@ export interface UseAlertFormEmit {
  * section components.
  */
 export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
+  const { t } = useI18n();
   const alertsStore = useAlertsStore();
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
@@ -113,12 +115,12 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
   }
   const nativeQueryLanguage = computed(() => getNativeQueryLanguageForSource(currentSource.value));
   const nativeEditorLabel = computed(() => getQueryLanguageLabel(nativeQueryLanguage.value));
-  const nativeQueryLabel = computed(() => `${nativeEditorLabel.value} Query`);
+  const nativeQueryLabel = computed(() => t('alerts.nativeQueryLabel', { language: nativeEditorLabel.value }));
   const generatedQueryLanguageLabel = computed(() => {
     if (alertMetadata.value.queryLanguage === "logsql") {
-      return "Generated LogsQL";
+      return t('alerts.generatedQuery', { language: 'LogsQL' });
     }
-    return "Generated SQL";
+    return t('alerts.generatedQuery', { language: 'SQL' });
   });
 
   // Get current source table name for SQL generation
@@ -186,10 +188,10 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
 
   const nativeQueryHelpText = computed(() => {
     if (sourceType.value === "victorialogs") {
-      return "Use a template above to start with a valid LogsQL stats query. The alert lookback window is applied automatically.";
+      return t("alerts.logsQLTemplateHint");
     }
 
-    return "Use a template above to auto-fill with the correct table, timestamp field, and lookback window.";
+    return t("alerts.sqlTemplateHint");
   });
 
   // Generated executable query from LogchefQL condition
@@ -225,7 +227,7 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     const teamId = props.teamId;
 
     if (!teamId || !props.sourceId) {
-      conditionError.value = "Team or source not available";
+      conditionError.value = t("alerts.missingContext");
       return;
     }
 
@@ -261,14 +263,14 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
           generatedQuery.value = `SELECT ${aggFunc} as value\nFROM ${tableName}\nWHERE ${whereClause}`;
         }
       } else if (response.data && !response.data.valid) {
-        conditionError.value = response.data.error?.message || "Invalid condition";
+        conditionError.value = response.data.error?.message || t("alerts.invalidCondition");
         generatedQuery.value = "";
       } else {
-        conditionError.value = 'status' in response && response.status === 'error' ? response.message : "Translation failed";
+        conditionError.value = 'status' in response && response.status === 'error' ? response.message : t("alerts.translationFailed");
         generatedQuery.value = "";
       }
     } catch (error: any) {
-      conditionError.value = error.message || "Translation error";
+      conditionError.value = error.message || t("alerts.translationFailed");
       generatedQuery.value = "";
     } finally {
       isTranslating.value = false;
@@ -310,8 +312,8 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
 
     return [
       {
-        name: "High Error Count",
-        description: "Alert when error count exceeds threshold in lookback window",
+        name: t("alerts.templates.highErrorCount"),
+        description: t("alerts.templates.highErrorCountHelp"),
         editorMode: "native" as const,
         query: `SELECT count(*) as value
 FROM ${tableName}
@@ -319,8 +321,8 @@ WHERE severity = 'ERROR'
   AND \`${tsField}\` >= ${lookback}`,
       },
       {
-        name: "Critical Logs",
-        description: "Alert on any critical severity logs",
+        name: t("alerts.templates.criticalLogs"),
+        description: t("alerts.templates.criticalLogsHelp"),
         editorMode: "native" as const,
         query: `SELECT count(*) as value
 FROM ${tableName}
@@ -328,16 +330,16 @@ WHERE severity = 'CRITICAL'
   AND \`${tsField}\` >= ${lookback}`,
       },
       {
-        name: "High Response Time",
-        description: "Alert when average response time is high",
+        name: t("alerts.templates.highResponseTime"),
+        description: t("alerts.templates.highResponseTimeHelp"),
         editorMode: "native" as const,
         query: `SELECT avg(response_time) as value
 FROM ${tableName}
 WHERE \`${tsField}\` >= ${lookback}`,
       },
       {
-        name: "Failed Requests",
-        description: "Alert on HTTP 5xx status codes",
+        name: t("alerts.templates.failedRequests"),
+        description: t("alerts.templates.failedRequestsHelp"),
         editorMode: "native" as const,
         query: `SELECT count(*) as value
 FROM ${tableName}
@@ -345,8 +347,8 @@ WHERE status_code >= 500
   AND \`${tsField}\` >= ${lookback}`,
       },
       {
-        name: "Low Success Rate",
-        description: "Alert when success rate drops below threshold",
+        name: t("alerts.templates.lowSuccessRate"),
+        description: t("alerts.templates.lowSuccessRateHelp"),
         editorMode: "native" as const,
         query: `SELECT (countIf(status_code < 400) * 100.0 / count(*)) as value
 FROM ${tableName}
@@ -358,26 +360,26 @@ WHERE \`${tsField}\` >= ${lookback}`,
   function getVictoriaLogsQueryTemplates(): QueryTemplate[] {
     return [
       {
-        name: "High Error Count",
-        description: "Alert when error logs exceed the threshold in the lookback window",
+        name: t("alerts.templates.highErrorCount"),
+        description: t("alerts.templates.highErrorCountHelp"),
         editorMode: "native",
         query: `level:="ERROR" | stats count() as value`,
       },
       {
-        name: "Critical Logs",
-        description: "Alert on any critical severity logs",
+        name: t("alerts.templates.criticalLogs"),
+        description: t("alerts.templates.criticalLogsHelp"),
         editorMode: "native",
         query: `level:="CRITICAL" | stats count() as value`,
       },
       {
-        name: "Failed Requests",
-        description: "Alert on HTTP 5xx status codes",
+        name: t("alerts.templates.failedRequests"),
+        description: t("alerts.templates.failedRequestsHelp"),
         editorMode: "native",
         query: `status_code:>=500 | stats count() as value`,
       },
       {
-        name: "High Response Time",
-        description: "Alert when the average response time is high",
+        name: t("alerts.templates.highResponseTime"),
+        description: t("alerts.templates.highResponseTimeHelp"),
         editorMode: "native",
         query: `response_time:* | stats avg(response_time) as value`,
       },
@@ -389,38 +391,38 @@ WHERE \`${tsField}\` >= ${lookback}`,
   );
 
   // LogChefQL condition templates
-  const conditionTemplates: ConditionTemplate[] = [
+  const conditionTemplates = computed<ConditionTemplate[]>(() => [
     {
-      name: "Error Logs",
-      description: "Match logs with ERROR severity",
+      name: t("alerts.templates.errorLogs"),
+      description: t("alerts.templates.errorLogsHelp"),
       condition: `severity = "ERROR"`,
       aggregate: "count",
     },
     {
-      name: "Critical Logs",
-      description: "Match logs with CRITICAL severity",
+      name: t("alerts.templates.criticalLogs"),
+      description: t("alerts.templates.criticalConditionHelp"),
       condition: `severity = "CRITICAL"`,
       aggregate: "count",
     },
     {
-      name: "Server Errors",
-      description: "Match HTTP 5xx status codes",
+      name: t("alerts.templates.serverErrors"),
+      description: t("alerts.templates.serverErrorsHelp"),
       condition: `status_code >= 500`,
       aggregate: "count",
     },
     {
-      name: "Slow Requests",
-      description: "Match requests taking over 1 second",
+      name: t("alerts.templates.slowRequests"),
+      description: t("alerts.templates.slowRequestsHelp"),
       condition: `response_time > 1000`,
       aggregate: "count",
     },
     {
-      name: "Error Messages",
-      description: "Match logs containing 'error' in the message",
+      name: t("alerts.templates.errorMessages"),
+      description: t("alerts.templates.errorMessagesHelp"),
       condition: `message ~ "error"`,
       aggregate: "count",
     },
-  ];
+  ]);
 
   function applyConditionTemplate(template: ConditionTemplate) {
     form.condition_json = template.condition;
@@ -591,7 +593,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
       });
       testQueryResult.value = result.data;
     } catch (error: any) {
-      testQueryError.value = error?.response?.data?.message || error.message || "Failed to test query";
+      testQueryError.value = error?.response?.data?.message || error.message || t("alerts.testFailed");
     } finally {
       isTestingQuery.value = false;
     }
