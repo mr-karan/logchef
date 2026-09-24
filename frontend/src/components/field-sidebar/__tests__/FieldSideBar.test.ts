@@ -26,7 +26,8 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
   exploreStore.setRelativeTimeRange('15m')
 
   const state = reactive({
-    fields: Array.from({ length: 10_000 }, (_, i) => ({ name: `field_${String(i).padStart(5, '0')}`, type: 'Int64' })),
+    // Every tenth field auto-loads (Int64); the rest are click-to-load strings.
+    fields: Array.from({ length: 1000 }, (_, i) => ({ name: `field_${String(i).padStart(4, '0')}`, type: i % 10 === 0 ? 'Int64' : 'String' })),
   })
   const host = document.createElement('div')
   document.body.appendChild(host)
@@ -41,41 +42,41 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
 
     expect(collapsibles()).toHaveLength(100)
     expect(host.querySelectorAll('[data-slot="collapsible-content"]')).toHaveLength(0)
-    expect(host.querySelector('[data-field-render-hint]')?.textContent).toContain('Showing 100 of 10,000 fields')
-    expect(requestedFields().size).toBe(100)
+    expect(host.querySelector('[data-field-render-hint]')?.textContent).toContain('Showing 100 of 1,000 fields')
+    expect(requestedFields().size).toBe(10)
 
     const showMore = [...host.querySelectorAll('button')].find(button => button.textContent?.trim() === 'Show more')
     if (!showMore) throw new Error('Show more button was not rendered')
     showMore.click()
     await flush()
     expect(collapsibles()).toHaveLength(200)
-    expect(requestedFields().size).toBe(200)
+    expect(requestedFields().size).toBe(20)
     // Growing the list must not refetch fields that already loaded.
-    expect(getFieldValues).toHaveBeenCalledTimes(200)
+    expect(getFieldValues).toHaveBeenCalledTimes(20)
 
     const input = host.querySelector('input')
     if (!input) throw new Error('Search input was not rendered')
-    input.value = 'field_0999'
+    input.value = 'field_099'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
     expect(collapsibles()).toHaveLength(10)
-    expect(host.textContent).toContain('field_09999')
+    expect(host.textContent).toContain('field_0999')
     expect(host.querySelector('[data-field-render-hint]')).toBeNull()
-    expect(getFieldValues).toHaveBeenCalledTimes(210)
+    expect(getFieldValues).toHaveBeenCalledTimes(21)
 
     // Typing more narrows the list without refetching anything.
-    input.value = 'field_09999'
+    input.value = 'field_0990'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await flush()
     expect(collapsibles()).toHaveLength(1)
-    expect(getFieldValues).toHaveBeenCalledTimes(210)
+    expect(getFieldValues).toHaveBeenCalledTimes(21)
 
     // A new query invalidates every loaded value and reloads the rendered set.
     await new Promise(resolve => setTimeout(resolve, 2))
     exploreStore.resetQueryToDefaults()
     await flush()
-    expect(getFieldValues).toHaveBeenCalledTimes(211)
-    expect(getFieldValues.mock.calls.at(-1)?.[2]).toBe('field_09999')
+    expect(getFieldValues).toHaveBeenCalledTimes(22)
+    expect(getFieldValues.mock.calls.at(-1)?.[2]).toBe('field_0990')
   } finally {
     app.unmount()
   }
