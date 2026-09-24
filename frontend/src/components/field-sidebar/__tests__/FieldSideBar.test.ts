@@ -11,6 +11,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+// Mounting hundreds of sidebar rows takes about 3 s under coverage on CI.
+const WIDE_MOUNT_TIMEOUT_MS = 15_000
+
 const flush = async () => {
   for (let i = 0; i < 10; i++) await new Promise(resolve => setTimeout(resolve, 0))
 }
@@ -80,4 +83,4 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
   } finally {
     app.unmount()
   }
-})
+}, WIDE_MOUNT_TIMEOUT_MS)

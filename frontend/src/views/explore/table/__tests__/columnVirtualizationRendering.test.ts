@@ -11,6 +11,9 @@ vi.mock('@tanstack/vue-table', async importOriginal => {
   return { ...actual, useTable: vi.fn(actual.useTable) }
 })
 
+// Full DataTable mounts take seconds under coverage on CI.
+const WIDE_MOUNT_TIMEOUT_MS = 15_000
+
 it('renders only the columns under the horizontal viewport, with spacers keeping alignment', async () => {
   const host = document.createElement('div')
   document.body.appendChild(host)
@@ -60,10 +63,14 @@ it('renders only the columns under the horizontal viewport, with spacers keeping
   }
 })
 
-it('bounds first-mount work with 268 saved visible columns and does not populate full-row cell caches', async () => {
+it('bounds first-mount work with every saved column visible and does not populate full-row cell caches', async () => {
   const host = document.createElement('div')
   document.body.appendChild(host)
-  const names = Array.from({ length: 268 }, (_, i) => `field_${String(i).padStart(3, '0')}`)
+  // Far wider than the viewport window (about 14 columns); a full schema-width
+  // header costs seconds under coverage without testing anything more.
+  const columnCount = 60
+  const names = Array.from({ length: columnCount }, (_, i) => `field_${String(i).padStart(3, '0')}`)
+  const last = names[columnCount - 1]
   const storageKey = 'logchef-tableState-7-wide-mount-test'
   localStorage.setItem(storageKey, JSON.stringify({
     columnOrder: names,
@@ -85,7 +92,7 @@ it('bounds first-mount work with 268 saved visible columns and does not populate
     app.mount(host)
     // Check synchronously, before nextTick/ResizeObserver can hide a costly
     // first mount. Old saved choices must remain enabled without mounting all.
-    expect(host.querySelectorAll('thead th')).toHaveLength(269)
+    expect(host.querySelectorAll('thead th')).toHaveLength(columnCount + 1)
     const initialCells = host.querySelectorAll('td[data-cell-id]').length
     expect(initialCells).toBeGreaterThan(0)
     expect(initialCells).toBeLessThan(50 * 15)
@@ -103,28 +110,28 @@ it('bounds first-mount work with 268 saved visible columns and does not populate
     Object.defineProperty(container, 'clientWidth', { value: 600, configurable: true })
     container.scrollLeft = 1_000_000
     container.dispatchEvent(new Event('scroll'))
-    await vi.waitFor(() => expect(host.querySelector('td[data-cell-id="0_field_267"]')).not.toBeNull())
+    await vi.waitFor(() => expect(host.querySelector(`td[data-cell-id="0_${last}"]`)).not.toBeNull())
     expect(host.querySelector('td[data-cell-id="0_field_000"]')).toBeNull()
     expectNoFullRowCaches()
 
     host.querySelector<HTMLTableCellElement>('td[data-cell-id]')!.click()
     await nextTick()
-    expect(host.querySelector('.expanded-json-row td')?.getAttribute('colspan')).toBe('269')
+    expect(host.querySelector('.expanded-json-row td')?.getAttribute('colspan')).toBe(String(columnCount + 1))
     expectNoFullRowCaches()
 
     table.nextPage()
     await nextTick()
-    expect(host.querySelector('td[data-cell-id="50_field_267"]')?.textContent).toContain('50-field_267')
-    expect(host.querySelector('td[data-cell-id="0_field_267"]')).toBeNull()
+    expect(host.querySelector(`td[data-cell-id="50_${last}"]`)?.textContent).toContain(`50-${last}`)
+    expect(host.querySelector(`td[data-cell-id="0_${last}"]`)).toBeNull()
     expectNoFullRowCaches()
 
     table.previousPage()
     await nextTick()
-    expect(host.querySelector('td[data-cell-id="0_field_267"]')?.textContent).toContain('0-field_267')
+    expect(host.querySelector(`td[data-cell-id="0_${last}"]`)?.textContent).toContain(`0-${last}`)
     expectNoFullRowCaches()
   } finally {
     app.unmount()
     host.remove()
     localStorage.removeItem(storageKey)
   }
-})
+}, WIDE_MOUNT_TIMEOUT_MS)
