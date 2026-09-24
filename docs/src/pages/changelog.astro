@@ -152,20 +152,20 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 
       <p class="release-kicker">Fast at any width</p>
       <p class="release-intro">
-        <strong>Logchef 2.1 keeps the Explorer fast as your logs get wider.</strong> A VictoriaLogs source with a few hundred fields used to push the browser past a gigabyte of memory and make it stop responding. On a source with 3,000 fields, the first rows now appear in under two seconds instead of about 42. With 1,000 rows on screen and every column switched on, the tab uses about 73 MB instead of 1.8 GB. The release also adds eleven interface languages and a Helm chart. We fixed many problems that made queries quietly return slightly incorrect results.
+        <strong>Logchef 2.1 makes the Explorer usable on sources with hundreds or thousands of fields</strong>, adds eleven interface languages, and ships a Helm chart. On a 3,000-field VictoriaLogs source, first rows appear in 1.6 seconds instead of 42, and 1,000 rows with every column shown use 73 MB instead of 1.8 GB. There are no database migrations.
       </p>
 
       <ul class="release-highlights">
-        <li><strong>Wide schemas no longer freeze the tab</strong>The table, the Fields sidebar, and Group by render only what you can see. Paging to 1,000 rows went from 17 seconds to under half a second.</li>
-        <li><strong>Eleven languages</strong>Choose English, Chinese (Simplified and Traditional), Spanish, French, German, Brazilian Portuguese, Japanese, Korean, Hindi, or Italian. Your account saves your choice.</li>
-        <li><strong>A lighter table everywhere</strong>Cell buttons appear on hover instead of on every cell. An ordinary 1,000-row page dropped from about 9,600 elements to 3,600. Paging is about 2.5 times faster.</li>
-        <li><strong>Helm chart</strong>Deploy Logchef, Dex, and ClickHouse on Kubernetes, with optional Ingress or Gateway API routes.</li>
-        <li><strong>Exact answers</strong>Your browser preserves large IDs, precise decimals, and nanosecond timestamps.</li>
-        <li><strong>Honest query stats</strong>"Rows read" reports what ClickHouse actually scanned, and <code>logchef_query_total</code> stops counting every query twice.</li>
+        <li><strong>Fast on wide schemas</strong>The table, Fields sidebar, and Group by no longer render every field. Switching to 1,000 rows per page takes 0.4 s instead of 17 s.</li>
+        <li><strong>Eleven languages</strong>English plus Chinese (Simplified and Traditional), Spanish, French, German, Portuguese, Japanese, Korean, Hindi, and Italian, saved to your account.</li>
+        <li><strong>Helm chart</strong>Deploy Logchef with Dex and ClickHouse, with optional Ingress or Gateway API routes.</li>
+        <li><strong>Exact values</strong>Large integers, precise decimals, and nanosecond timestamps are no longer rounded.</li>
+        <li><strong>Accurate query stats</strong>"Rows read" reports what ClickHouse scanned, and <code>logchef_query_total</code> counts each query once.</li>
+        <li><strong>VictoriaLogs alerts</strong>Alert queries read the metric value instead of a label, so Test Query works again.</li>
       </ul>
 
       <aside class="upgrade-note">
-        <strong>Before upgrading:</strong> this release needs no database migrations. On VictoriaLogs sources, Logchef resets column visibility saved by older versions once to the default six columns. It keeps the column order and widths. LogchefQL now asks you to quote numbers compared with text fields. Using <code>&gt;</code>, <code>&lt;</code>, or <code>~</code> with <code>null</code> is an error. <a href="#v2-1-upgrade">All upgrade notes &darr;</a>
+        <strong>Before upgrading:</strong> there are no database migrations. VictoriaLogs column visibility saved by older versions resets once to the six-column default, keeping order and widths. LogchefQL now requires quoting numbers compared with string fields, and <code>&gt;</code>, <code>&lt;</code>, or <code>~</code> with <code>null</code> is an error. <a href="#v2-1-upgrade">All upgrade notes &darr;</a>
       </aside>
 
       <div class="change-section">
@@ -174,10 +174,10 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Added
         </div>
         <ul class="change-list">
-          <li><strong>Interface languages</strong>: Choose a language under Settings → Preferences. The default follows your browser. Packs load on demand. Your account keeps that choice between machines. The non-English catalogs are first drafts. We welcome corrections from native speakers.</li>
-          <li><strong>Helm chart</strong>: <code>deployment/helm</code> deploys Logchef with Dex for OIDC and ClickHouse through the Altinity operator. It generates an API token secret once and keeps it across upgrades.</li>
-          <li><strong>Bedrock reasoning effort</strong>: Set <code>ai.reasoning_effort</code> (<code>none</code> to <code>max</code>) for reasoning-capable Bedrock models. AI requests can now run for 90 seconds.</li>
-          <li><strong>"Show more" in the Fields sidebar</strong>: The sidebar shows 100 fields at a time. Search still covers every field.</li>
+          <li><strong>Interface languages</strong>: English, Chinese (Simplified and Traditional), Spanish, French, German, Brazilian Portuguese, Japanese, Korean, Hindi, and Italian, under Settings → Preferences. Non-English translations are first drafts; corrections are welcome.</li>
+          <li><strong>Helm chart</strong>: <code>deployment/helm</code> deploys Logchef with Dex and ClickHouse, with optional Ingress or Gateway API routes.</li>
+          <li><strong>Bedrock reasoning effort</strong>: <code>ai.reasoning_effort</code> (<code>none</code> to <code>max</code>) for reasoning-capable Bedrock models. AI requests can now run for up to 90 seconds.</li>
+          <li><strong>Show more in the Fields sidebar</strong>, which lists 100 fields at a time, and a <strong>searchable Group by picker</strong>. Search covers all fields.</li>
         </ul>
       </div>
 
@@ -187,11 +187,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Changed
         </div>
         <ul class="change-list">
-          <li><strong>Only visible columns render</strong>: Enabling all 268 columns of a wide source now costs about 120 MB instead of about 1.8 GB.</li>
-          <li><strong>Searchable Group by</strong>: It no longer builds thousands of options before you open it. Opening it went from 8 seconds to about a tenth of a second on a wide source.</li>
-          <li><strong>VictoriaLogs sources start with six columns</strong>: New fields from a query no longer become visible columns automatically. Logchef keeps your choices.</li>
-          <li><strong>One request per query</strong>: A LogchefQL run returns its parsed conditions with the results. The Explorer no longer sends a second translate request.</li>
-          <li><strong>Clearer failures</strong>: Cancelled or timed-out queries return <code>408</code>. Logchef rejects histograms beyond 5,000 buckets or 16 MiB and advises you to widen the interval. This applies to both backends.</li>
+          <li><strong>Column rendering</strong>: The table renders only the columns in view, and cell actions appear on hover or focus instead of on every cell.</li>
+          <li><strong>VictoriaLogs defaults</strong>: Sources show six columns by default. New fields from a query are no longer added as visible columns.</li>
+          <li><strong>Query stats</strong>: "Rows read" and "bytes read" report what ClickHouse scanned, not the number of rows returned.</li>
+          <li><strong>Fewer requests</strong>: LogchefQL results include their parsed conditions, removing a second translate request per query.</li>
+          <li><strong>Error responses</strong>: Cancelled and timed-out queries return <code>408</code>. Histograms over 5,000 buckets or 16 MiB are rejected with a hint to widen the interval.</li>
         </ul>
       </div>
 
@@ -201,11 +201,11 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Notable fixes
         </div>
         <ul class="change-list">
-          <li><strong>LogchefQL correctness</strong>: Number literals stay exact. <code>= null</code> and <code>!= null</code> become real null checks. LogchefQL reports errors on malformed queries instead of silently removing conditions.</li>
-          <li><strong>ClickHouse values render the same everywhere</strong>: JSON, Dynamic, Variant, nullable, map, and byte-array values decode the same way in buffered and streamed results.</li>
-          <li><strong>Saved queries</strong>: "Save as new" always creates a new query. Double-clicking Save no longer creates duplicates. Saved queries remember their editor mode.</li>
-          <li><strong>Live tail</strong> handles bursts of rows that share a timestamp. <strong>VictoriaLogs alerts</strong> read the metric value instead of a numeric-looking label.</li>
-          <li><strong>Other fixes you may notice</strong>: Clicking a log row opens its detail panel again. <code>level</code> no longer shows as "L". Collapsed sidebar fields stay collapsed. The ClickHouse source form's auth switch works.</li>
+          <li><strong>LogchefQL</strong>: Number literals stay exact, <code>= null</code> and <code>!= null</code> compile to null checks, and malformed queries are rejected instead of dropping conditions.</li>
+          <li><strong>ClickHouse values</strong>: JSON, Dynamic, Variant, map, and byte-array values render the same in buffered and streamed results.</li>
+          <li><strong>Saved queries</strong>: "Save as new" always creates a new query, double-clicking Save no longer creates duplicates, and template variables are escaped correctly.</li>
+          <li><strong>Live tail</strong> keeps up with bursts of rows that share a timestamp.</li>
+          <li><strong>Explorer</strong>: Log rows open their detail panel again, <code>level</code> is no longer truncated to one letter, and collapsed sidebar fields stay collapsed. The ClickHouse source form's auth toggle works again.</li>
         </ul>
       </div>
 
@@ -215,16 +215,16 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Upgrade notes
         </div>
         <ul class="change-list">
-          <li><strong>Stricter LogchefQL</strong>: Quote numbers compared with String fields (<code>status_text="500"</code>). Use <code>= null</code> or <code>!= null</code> instead of ordering operators. Saved queries and alerts that relied on the old behavior need that edit.</li>
-          <li><strong>SQL histograms</strong> with <code>GROUP BY</code>, <code>DISTINCT</code>, or set operations must select the timestamp column explicitly.</li>
-          <li><strong>Separate histogram budget</strong>: <code>query.max_concurrent_per_user</code> and <code>query.max_concurrent_global</code> count previews and histograms separately. A busy Explorer can receive <code>429</code> for histograms.</li>
-          <li><strong>Metrics</strong>: <code>logchef_query_total</code> roughly halves. Adjust dashboards and alerts that use it.</li>
-          <li><strong>Helm defaults are for evaluation</strong>: Before production, pin <code>logchef.image.tag</code> to <code>v2.1.0</code>. Replace the default OIDC client secret and Dex demo users.</li>
-          <li><strong>Building from source</strong> needs Go 1.26.</li>
+          <li><strong>Stricter LogchefQL</strong>: Quote numbers compared with string fields (<code>status_text="500"</code>), and use <code>= null</code> or <code>!= null</code> instead of ordering operators. Update saved queries and alerts that rely on the old behavior.</li>
+          <li><strong>SQL histograms</strong> using <code>GROUP BY</code>, <code>DISTINCT</code>, or set operations must select the timestamp column explicitly.</li>
+          <li><strong>Histogram concurrency</strong>: <code>query.max_concurrent_per_user</code> and <code>query.max_concurrent_global</code> apply to previews and histograms separately, so histograms can return <code>429</code> under load.</li>
+          <li><strong>Metrics</strong>: <code>logchef_query_total</code> roughly halves because of the double-count fix. Adjust dashboards and alerts.</li>
+          <li><strong>Helm</strong>: The chart defaults are for evaluation. For production, pin <code>logchef.image.tag</code> to <code>v2.1.0</code> and replace the default OIDC client secret and Dex demo users.</li>
+          <li><strong>Building from source</strong> requires Go 1.26.</li>
         </ul>
       </div>
 
-      <p class="contributors">Thank you to <a href="https://github.com/AndreyCreativecode" target="_blank">@AndreyCreativecode</a> for reporting, profiling, and patching the wide-schema slowdown (<a href="https://github.com/mr-karan/logchef/issues/106" target="_blank">#106</a>). Measurements are medians of five runs. The method is in <code>frontend/docs/table-performance.md</code>.</p>
+      <p class="contributors">Thanks to <a href="https://github.com/AndreyCreativecode" target="_blank">@AndreyCreativecode</a> for reporting and profiling the wide-schema slowdown (<a href="https://github.com/mr-karan/logchef/issues/106" target="_blank">#106</a>) and contributing the sidebar and Group by fixes. Performance figures are medians of five runs; the method is in <code>frontend/docs/table-performance.md</code>.</p>
     </article>
 
     <!-- v2.0.2 -->
