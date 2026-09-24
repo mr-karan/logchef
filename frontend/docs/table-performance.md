@@ -166,39 +166,40 @@ hint to type to narrow the list.
 
 ### Measurements with the sidebar and Group by changes
 
-Same harness as below: Chrome via agent-browser, `Performance.getMetrics` after
+Medians of 5 runs of `frontend/scripts/benchmark-wide-schema.ts` (see Reproduce):
+Chrome via agent-browser, a fresh tab per run, `Performance.getMetrics` after
 `HeapProfiler.collectGarbage`, production builds served by `vite preview`,
 Fields sidebar open, `limit=1000`. Baseline is main at `ebb896da` and the first
-table-only commit `0aeb817e`. The `Wide XL` fixture reports 2988 fields from
-`field_names` but stores 392 rows, because VictoriaLogs drops blocks with more
-than 2000 unique field names.
+table-only commit `0aeb817e`.
 
 Scenario C is the reported case: table state saved by v2.0.2 with all 267
-fields of the 268-field source visible, then 1000 rows per page.
+fields of the `env="perf"` source visible, then 1000 rows per page.
 
 | | main | `0aeb817e` | final |
 | --- | ---: | ---: | ---: |
 | visible columns | 267 | 267 | 6 |
-| first rows | 3.3 s | 4.7 s | 0.9 s |
-| switch to 1000 rows per page | 16.2 s | 0.8 s | 0.4 s |
-| DOM nodes at 1000 rows | 2,305,641 | 126,020 | 55,543 |
-| JS event listeners at 1000 rows | 1,117,752 | 16,950 | 2,118 |
-| JS heap used at 1000 rows | 1,897 MB | 192 MB | 61 MB |
-| open Group by | 7.4 s | 0.5 s | 0.1 s |
+| first rows | 3.1 s | 2.3 s | 0.7 s |
+| switch to 1000 rows per page | 17.0 s | 0.8 s | 0.4 s |
+| DOM nodes at 1000 rows | 2,308,984 | 126,034 | 62,650 |
+| JS event listeners at 1000 rows | 1,138,340 | 16,950 | 2,900 |
+| JS heap used at 1000 rows | 1,762 MB | 192 MB | 73 MB |
+| open Group by | 8.0 s | 0.6 s | 0.09 s |
 
-Scenario D is a 2988-field schema with fresh table state.
+Scenario D is the `env="perf-xl"` source (3006 field names) with fresh table
+state.
 
 | | main | `0aeb817e` | final |
 | --- | ---: | ---: | ---: |
-| first rows | 42.4 s | 49.4 s | 1.3 s |
-| sidebar field rows mounted | 2987 | 2987 | 99 |
-| DOM nodes | 260,234 | 155,484 | 15,979 |
-| JS event listeners | 102,247 | 47,657 | 1,888 |
-| JS heap used | 411 MB | 339 MB | 59 MB |
-| open Group by | 3.3 s | 3.4 s | 0.05 s |
+| first rows | 41.8 s | 43.8 s | 1.6 s |
+| sidebar field rows mounted | 3006 | 3006 | 99 |
+| DOM nodes at 1000 rows | 320,290 | 303,490 | 62,660 |
+| JS event listeners at 1000 rows | 105,884 | 80,694 | 2,900 |
+| JS heap used at 1000 rows | 833 MB | 816 MB | 94 MB |
+| open Group by | 3.7 s | 3.6 s | 0.09 s |
 
-With all 268 columns chosen in the current version and 1000 rows per page, the
-final build keeps every column and uses 98,076 DOM nodes and 105 MB of heap.
+With all 267 fields chosen in the current version (`chosen-all-visible`), the
+final build keeps every column: 109,780 DOM nodes and 122 MB of heap at 1000
+rows, and the switch to 1000 rows per page takes 0.7 s.
 
 ### Measurements of the table-only commit
 
@@ -236,20 +237,28 @@ because longer runs crashed the renderer. The final column ran all 10.
 
 ### Reproduce
 
-1. Ingest a wide fixture into the dev VictoriaLogs at `:9428` with
-   `/insert/jsonline?_stream_fields=service,env&_time_field=timestamp&_msg_field=message`:
-   four services, 20 shared fields, 60 service-specific fields each.
-2. Open the VictoriaLogs Demo source in Table view with `limit=1000`, clear
-   `localStorage` keys starting with `logchef-tableState`, run
-   `service="wide-a"` then `env="perf"`, and count `thead th`.
-3. Tick Select All in the column picker, set 1000 rows per page, and read
-   `Performance.getMetrics` over CDP after `HeapProfiler.collectGarbage`.
-4. Re-run with `limit=2000` and time `Go to next page` and `Go to previous page`
-   over 10 iterations.
-5. For scenarios C and D, send the fixtures with
-   `Content-Type: application/stream+json`. With a form content type
-   VictoriaLogs parses the body as a form and drops most lines. Add two
-   VictoriaLogs sources scoped with `{env="perf"}` and `{env="perf-xl"}`. The
-   XL fixture has 3000 lines, each with 40 fields drawn from a pool of 3000.
-6. For scenario C, write `logchef-tableState-<team>-<source>` with every schema
-   field visible and no `visibilityVersion`, then load Explore.
+1. Ingest both fixtures into the dev VictoriaLogs at `:9428` with
+   `just dev-ingest-wide`. `env="perf"` has 267 field names;
+   `env="perf-xl"` has 3000 attribute names spread over ten streams so that no
+   VictoriaLogs block exceeds its limit of 2000 unique field names.
+2. Add two VictoriaLogs sources for `http://localhost:9428`, scoped with
+   `{env="perf"}` and `{env="perf-xl"}`, and link them to a team.
+3. Serve each build with `bunx vite preview --outDir <dist> --port <port>`, log
+   in once, and pass the browser's CDP URL (`agent-browser get cdp-url`) to
+   `frontend/scripts/benchmark-wide-schema.ts`:
+
+   ```sh
+   bun frontend/scripts/benchmark-wide-schema.ts --cdp "$CDP_URL" \
+     --origin http://localhost:4173 --team 1 --source <id> \
+     --scenario legacy-all-visible --runs 5
+   ```
+
+   Each run opens a fresh tab, writes the scenario's saved table state, loads
+   Explore with `limit=1000`, and records first rows, memory after a forced
+   garbage collection, the switch to 1000 rows per page, and opening Group by.
+   The script prints each run to stderr and the medians to stdout.
+4. For scenario A, clear `localStorage` keys starting with `logchef-tableState`,
+   run `service="wide-a"` then `env="perf"`, and count `thead th`. For scenario
+   B, tick Select All in the column picker, set 1000 rows per page, and time
+   `Go to next page` and `Go to previous page` over 10 iterations with
+   `limit=2000`.
