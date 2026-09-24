@@ -1614,13 +1614,12 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     /* Required for flex truncation to work */
 }
 
-/* Refined header text display to work with any column name */
+/* Refined header text display to work with any column name. The icons are
+   flex-shrink-0 siblings, so the label needs no reserved width of its own. */
 .table-fixed th :deep(.flex-grow) {
     flex: 1 1 auto;
     min-width: 0;
     /* Critical for text-overflow to work in flex containers */
-    max-width: calc(100% - 25px);
-    /* Leave room for icons */
 }
 
 /* Add better spacing for header content */
