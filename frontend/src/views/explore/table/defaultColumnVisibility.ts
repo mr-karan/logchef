@@ -8,6 +8,11 @@ import {
 } from '@/lib/sourceFields'
 const MAX_VICTORIALOGS_VISIBLE_COLUMNS = 6
 
+// Before the visible-column cap, schemaless sources saved every field any query
+// returned as visible. Saved visibility without this version is not the user's
+// choice, so schemaless sources discard it. Order and widths are kept.
+export const COLUMN_VISIBILITY_VERSION = 2
+
 function isSchemalessSource(source: Pick<Source, 'source_type'> | null | undefined): boolean {
   return source?.source_type === 'victorialogs'
 }
@@ -82,6 +87,17 @@ export function getDefaultColumnVisibility(
   return Object.fromEntries(
     columnIds.map(columnId => [columnId, visibleColumnIds.has(columnId) && !isSystemField(source, columnId)]),
   )
+}
+
+export function getTrustedSavedVisibility(
+  source: Pick<Source, 'source_type'> | null | undefined,
+  savedVisibility: Record<string, boolean> | undefined,
+  savedVersion: number | undefined,
+): Record<string, boolean> {
+  if (isSchemalessSource(source) && savedVersion !== COLUMN_VISIBILITY_VERSION) {
+    return {}
+  }
+  return savedVisibility ?? {}
 }
 
 /**

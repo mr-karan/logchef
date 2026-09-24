@@ -4,8 +4,10 @@ import { getVisibleColumnRange } from '../columnVirtualization'
 const widths = Array.from({ length: 50 }, () => 100)
 
 describe('getVisibleColumnRange', () => {
-  it('renders every column while the viewport is unmeasured', () => {
-    expect(getVisibleColumnRange(widths, 1200, 0)).toEqual({ start: 0, end: 50 })
+  it('bounds the initial render before the viewport is measured', () => {
+    expect(getVisibleColumnRange(widths, 0, 0)).toEqual({ start: 0, end: 14 })
+    expect(getVisibleColumnRange(widths, 1200, 0)).toEqual({ start: 9, end: 26 })
+    expect(getVisibleColumnRange([], 0, 0)).toEqual({ start: 0, end: 0 })
   })
 
   it('renders the columns under the viewport plus overscan', () => {

@@ -3,6 +3,7 @@ import { i18n } from '@/i18n'
 import { createPinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import DataTable from '../data-table.vue'
+import { COLUMN_VISIBILITY_VERSION } from '../defaultColumnVisibility'
 
 const storageKey = 'logchef-tableState-7-vl-source'
 
@@ -50,6 +51,7 @@ it('keeps a schemaless source at the default column cap across queries with new 
     columnOrder: ['_time', '_msg', 'level', 'service', 'host', 'pod'],
     columnSizing: {},
     columnVisibility: { _time: true, _msg: true, level: true, service: true, host: true, pod: true, trace_id: false },
+    visibilityVersion: COLUMN_VISIBILITY_VERSION,
   }))
   const newFields = Array.from({ length: 30 }, (_, i) => `attr_${i}`)
   const { host, app, state } = mountTable(['_time', '_msg', '_stream', 'trace_id', ...newFields])
@@ -80,6 +82,7 @@ it('lets new fields fill the cap when fewer columns are saved as visible', async
     columnOrder: ['_time', '_msg'],
     columnSizing: {},
     columnVisibility: { _time: true, _msg: true },
+    visibilityVersion: COLUMN_VISIBILITY_VERSION,
   }))
   const { host, app } = mountTable(['_time', '_msg', '_stream', 'level', 'service', 'a', 'b', 'c', 'd'])
   try {
@@ -88,6 +91,24 @@ it('lets new fields fill the cap when fewer columns are saved as visible', async
     expect(headers).toHaveLength(6)
     expect(headers).toEqual(expect.arrayContaining(['_time', '_msg', 'level', 'service']))
     expect(headers).not.toContain('_stream')
+  } finally {
+    app.unmount()
+    host.remove()
+  }
+})
+
+it('discards visibility that older versions accumulated, keeping column order', async () => {
+  const accumulated = Array.from({ length: 200 }, (_, i) => `attr_${String(i).padStart(3, '0')}`)
+  localStorage.setItem(storageKey, JSON.stringify({
+    columnOrder: ['_time', 'level', '_msg', ...accumulated],
+    columnSizing: {},
+    columnVisibility: Object.fromEntries(['_time', 'level', '_msg', ...accumulated].map(name => [name, true])),
+  }))
+  const { host, app } = mountTable(['_time', 'level', '_msg', ...accumulated])
+  try {
+    await nextTick()
+    expect(headerNames(host)).toHaveLength(6)
+    expect(headerNames(host).slice(0, 3)).toEqual(['_time', 'level', '_msg'])
   } finally {
     app.unmount()
     host.remove()

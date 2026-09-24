@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { resolveColumnVisibility } from '../defaultColumnVisibility'
+import { COLUMN_VISIBILITY_VERSION, getTrustedSavedVisibility, resolveColumnVisibility } from '../defaultColumnVisibility'
 
 const victoriaLogs = { source_type: 'victorialogs' }
 const clickhouse = { source_type: 'clickhouse' }
@@ -70,5 +70,21 @@ describe('resolveColumnVisibility', () => {
     const visibility = resolveColumnVisibility(columns, clickhouse, saved, 'timestamp')
 
     expect(visibleIds(visibility)).toHaveLength(31)
+  })
+})
+
+describe('getTrustedSavedVisibility', () => {
+  const saved = { a: true, b: true, c: false }
+
+  it('discards unversioned schemaless visibility accumulated by older versions', () => {
+    expect(getTrustedSavedVisibility(victoriaLogs, saved, undefined)).toEqual({})
+  })
+
+  it('keeps schemaless visibility saved by the current version', () => {
+    expect(getTrustedSavedVisibility(victoriaLogs, saved, COLUMN_VISIBILITY_VERSION)).toEqual(saved)
+  })
+
+  it('keeps fixed-schema visibility regardless of version', () => {
+    expect(getTrustedSavedVisibility(clickhouse, saved, undefined)).toEqual(saved)
   })
 })

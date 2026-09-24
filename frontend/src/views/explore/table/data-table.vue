@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { logTableFeatures, type ColumnDef, type ColumnMeta, type Row } from './tableFeatures'
 import {
     FlexRender,
+    constructCell,
     useTable,
     type SortingState,
     type ExpandedState,
@@ -24,7 +25,12 @@ import type { ColumnInfo, QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
-import { getDefaultColumnVisibility, resolveColumnVisibility } from './defaultColumnVisibility'
+import {
+    COLUMN_VISIBILITY_VERSION,
+    getDefaultColumnVisibility,
+    getTrustedSavedVisibility,
+    resolveColumnVisibility,
+} from './defaultColumnVisibility'
 import { getVisibleColumnRange } from './columnVirtualization'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
@@ -55,6 +61,7 @@ interface DataTableState {
     columnOrder: string[];
     columnSizing: ColumnSizingState;
     columnVisibility: VisibilityState;
+    visibilityVersion?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -188,11 +195,13 @@ function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { 
         initialVisibility = resolveColumnVisibility(
             columns,
             props.source,
-            savedState.columnVisibility || {},
+            getTrustedSavedVisibility(props.source, savedState.columnVisibility, savedState.visibilityVersion),
             timestampFieldName.value,
             severityFieldName.value
         );
-        isReadyToPersistState.value = true;
+        // Persisting before the source type is known would stamp untrusted
+        // visibility with the current version.
+        isReadyToPersistState.value = hasResolvedSourceType;
     } else {
         // --- Generate Default State ---
         // Generate default order with timestamp first
@@ -296,7 +305,8 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
         debouncedSaveStateToStorage({
             columnOrder: columnOrder.value,
             columnSizing: columnSizing.value,
-            columnVisibility: columnVisibility.value
+            columnVisibility: columnVisibility.value,
+            visibilityVersion: COLUMN_VISIBILITY_VERSION,
         });
     }
 }, { deep: true });
@@ -365,20 +375,17 @@ function autoFitColumn(header: any) {
     
     // Measure each cell's content width
     rows.forEach(row => {
-        const cell = row.getVisibleCells().find(c => c.column.id === columnId);
-        if (cell) {
-            const value = cell.getValue();
-            let text = '';
-            if (value === null || value === undefined) {
-                text = '-';
-            } else if (typeof value === 'object') {
-                text = JSON.stringify(value);
-            } else {
-                text = String(value);
-            }
-            const textWidth = ctx.measureText(text).width + 60; // Padding for cell + action buttons
-            maxWidth = Math.max(maxWidth, textWidth);
+        const value = row.getValue(columnId);
+        let text = '';
+        if (value === null || value === undefined) {
+            text = '-';
+        } else if (typeof value === 'object') {
+            text = JSON.stringify(value);
+        } else {
+            text = String(value);
         }
+        const textWidth = ctx.measureText(text).width + 60; // Padding for cell + action buttons
+        maxWidth = Math.max(maxWidth, textWidth);
     });
     
     // Clamp to reasonable bounds
@@ -653,8 +660,18 @@ const trailingSpacer = computed(() => ({
     width: sumWidths(visibleColumnWidths.value, visibleColumnRange.value.end, visibleColumnWidths.value.length),
 }))
 
+// getVisibleCells() first constructs cells for EVERY schema column, including
+// hidden ones. Slice columns before constructing cells instead. Keep only the
+// current page/viewport; paging and scrolling must not grow a cell cache.
+const viewportCells = computed(() => {
+    const columns = visibleLeafColumns.value.slice(visibleColumnRange.value.start, visibleColumnRange.value.end)
+    return new Map(table.getRowModel().rows.map(row => [
+        row, columns.map(column => constructCell(column, row, table)),
+    ]))
+})
+
 function renderedCells(row: Row<Record<string, any>>) {
-    return row.getVisibleCells().slice(visibleColumnRange.value.start, visibleColumnRange.value.end)
+    return viewportCells.value.get(row) ?? []
 }
 
 // Copy feedback state
@@ -966,7 +983,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                 </tr>
 
                                 <tr v-if="row.getIsExpanded()" class="expanded-json-row">
-                                    <td :colspan="row.getVisibleCells().length + 1" class="p-0">
+                                    <td :colspan="visibleLeafColumns.length + 1" class="p-0">
                                         <div class="p-3 bg-muted/30 border-y border-y-primary/40">
                                             <div class="flex items-center justify-between mb-2 gap-2">
                                                 <!-- Collapse hint -->

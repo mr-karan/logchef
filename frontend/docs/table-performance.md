@@ -131,9 +131,76 @@ Body rows render only the columns under the horizontal viewport plus three
 overscan columns on each side. Hidden columns on each side collapse into one
 spacer `<td>` with a matching `colspan` and explicit width. The header stays
 fully rendered, so `table-layout: fixed` still takes widths from it. An
-unmeasured container renders every column, which keeps jsdom tests unchanged.
+unmeasured container initially uses a provisional 1024px viewport. This bounds
+the first mount too: waiting for measurement after rendering every column could
+freeze the renderer before the observer runs, especially with older saved state
+that explicitly enables all columns.
 
-### Measurements
+The body constructs TanStack cells only for the current page's viewport columns.
+Calling `row.getVisibleCells().slice(...)` would first allocate cells for every
+schema column (including hidden columns), retaining them in TanStack's row
+cache. Auto-fit reads row values directly and expanded-row colspan uses the
+visible column count, so neither operation populates that cache either.
+The viewport cell map is replaced on page/range changes rather than retaining
+cells from previously visited pages or horizontal ranges.
+
+Saved table state carries a `visibilityVersion`. Versions before the cap saved
+every field a schemaless source ever returned as visible, so for VictoriaLogs
+the table discards saved visibility without the current version and falls back
+to the default 6 columns. Column order and widths are kept. The table persists
+only after the source type is known, so untrusted visibility is never stamped
+with the current version.
+
+The table was not the only component that mounted the whole source schema. The
+Fields sidebar rendered one disclosure per schema field and auto-loaded values
+for every priority field. It now renders 100 fields at a time with a "Show
+more" control, and search still covers every field. Field values load only for
+rendered fields; growing the list or searching loads the new fields and keeps
+the rest. A new query, source, or reopened panel resets them.
+
+The Group by picker used Reka `Select`, which mounts every option even while
+closed and registers each option with a linear scan, so a 3000-field schema
+cost seconds before the picker was ever opened. It now uses `SearchableSelect`,
+which mounts nothing while closed and renders the first 100 matches, with a
+hint to type to narrow the list.
+
+### Measurements with the sidebar and Group by changes
+
+Same harness as below: Chrome via agent-browser, `Performance.getMetrics` after
+`HeapProfiler.collectGarbage`, production builds served by `vite preview`,
+Fields sidebar open, `limit=1000`. Baseline is main at `ebb896da` and the first
+table-only commit `0aeb817e`. The `Wide XL` fixture reports 2988 fields from
+`field_names` but stores 392 rows, because VictoriaLogs drops blocks with more
+than 2000 unique field names.
+
+Scenario C is the reported case: table state saved by v2.0.2 with all 267
+fields of the 268-field source visible, then 1000 rows per page.
+
+| | main | `0aeb817e` | final |
+| --- | ---: | ---: | ---: |
+| visible columns | 267 | 267 | 6 |
+| first rows | 3.3 s | 4.7 s | 0.9 s |
+| switch to 1000 rows per page | 16.2 s | 0.8 s | 0.4 s |
+| DOM nodes at 1000 rows | 2,305,641 | 126,020 | 55,543 |
+| JS event listeners at 1000 rows | 1,117,752 | 16,950 | 2,118 |
+| JS heap used at 1000 rows | 1,897 MB | 192 MB | 61 MB |
+| open Group by | 7.4 s | 0.5 s | 0.1 s |
+
+Scenario D is a 2988-field schema with fresh table state.
+
+| | main | `0aeb817e` | final |
+| --- | ---: | ---: | ---: |
+| first rows | 42.4 s | 49.4 s | 1.3 s |
+| sidebar field rows mounted | 2987 | 2987 | 99 |
+| DOM nodes | 260,234 | 155,484 | 15,979 |
+| JS event listeners | 102,247 | 47,657 | 1,888 |
+| JS heap used | 411 MB | 339 MB | 59 MB |
+| open Group by | 3.3 s | 3.4 s | 0.05 s |
+
+With all 268 columns chosen in the current version and 1000 rows per page, the
+final build keeps every column and uses 98,076 DOM nodes and 105 MB of heap.
+
+### Measurements of the table-only commit
 
 Fixture: 6000 lines across four VictoriaLogs streams, 88 fields per stream and
 268 distinct fields for `env="perf"`. Chrome via agent-browser, metrics from
@@ -179,3 +246,10 @@ because longer runs crashed the renderer. The final column ran all 10.
    `Performance.getMetrics` over CDP after `HeapProfiler.collectGarbage`.
 4. Re-run with `limit=2000` and time `Go to next page` and `Go to previous page`
    over 10 iterations.
+5. For scenarios C and D, send the fixtures with
+   `Content-Type: application/stream+json`. With a form content type
+   VictoriaLogs parses the body as a form and drops most lines. Add two
+   VictoriaLogs sources scoped with `{env="perf"}` and `{env="perf-xl"}`. The
+   XL fixture has 3000 lines, each with 40 fields drawn from a pool of 3000.
+6. For scenario C, write `logchef-tableState-<team>-<source>` with every schema
+   field visible and no `visibilityVersion`, then load Explore.

@@ -195,25 +195,24 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
   }
 
   /**
-   * Initialize field states and auto-load priority fields
+   * Initialize states for fields without one and auto-load the priority ones.
+   * Fields that already have a state keep it, so callers can pass a growing
+   * list without refetching. Call clearCache() first to start over.
    */
   const loadPriorityFields = (fields: FieldInfo[]) => {
-    // Cancel all existing requests
-    cancelAll()
-
-    // Initialize states based on field type
-    const newStates = new Map<string, FieldLoadingState>()
-    fields.forEach(field => {
+    const newStates = new Map(fieldStates.value)
+    const priorityFields: FieldInfo[] = []
+    for (const field of fields) {
+      if (newStates.has(field.name)) continue
       if (isPriorityField(field.type)) {
         newStates.set(field.name, { status: 'idle' })
+        priorityFields.push(field)
       } else if (isClickToLoadField(field.type)) {
         newStates.set(field.name, { status: 'click-to-load' })
       }
-    })
+    }
     fieldStates.value = newStates
 
-    // Auto-load priority fields (LowCardinality, Enum)
-    const priorityFields = fields.filter(f => isPriorityField(f.type))
     priorityFields.forEach(field => {
       loadField(field.name, field.type)
     })

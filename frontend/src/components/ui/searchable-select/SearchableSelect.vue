@@ -4,6 +4,7 @@
 // on Popover + a filtered list so it degrades gracefully and stays keyboard
 // navigable. v-model binds the selected item's `value` (string).
 import { ref, computed, watch, nextTick } from "vue"
+import { useI18n } from "vue-i18n"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Check, ChevronsUpDown, Search } from "lucide-vue-next"
 import { cn } from "@/lib/utils"
@@ -21,18 +22,24 @@ const props = withDefaults(
     placeholder?: string
     searchPlaceholder?: string
     emptyText?: string
+    // Renders at most this many matches. Search still covers every item, so
+    // a schema with thousands of fields stays cheap to open and type into.
+    maxVisibleItems?: number
+    triggerClass?: string
     disabled?: boolean
   }>(),
   {
     placeholder: "Select…",
     searchPlaceholder: "Search…",
     emptyText: "No results found.",
+    maxVisibleItems: Number.POSITIVE_INFINITY,
     disabled: false,
   },
 )
 
 const emit = defineEmits<{ "update:modelValue": [value: string] }>()
 
+const { t } = useI18n()
 const open = ref(false)
 const search = ref("")
 const highlighted = ref(0)
@@ -48,6 +55,8 @@ const filtered = computed(() => {
       (i.sublabel?.toLowerCase().includes(q) ?? false),
   )
 })
+
+const visibleItems = computed(() => filtered.value.slice(0, props.maxVisibleItems))
 
 const selectedLabel = computed(
   () => props.items.find((i) => i.value === props.modelValue)?.label ?? "",
@@ -79,7 +88,7 @@ function scrollHighlightedIntoView() {
 function onKeydown(e: KeyboardEvent) {
   if (e.key === "ArrowDown") {
     e.preventDefault()
-    highlighted.value = Math.min(highlighted.value + 1, filtered.value.length - 1)
+    highlighted.value = Math.max(0, Math.min(highlighted.value + 1, visibleItems.value.length - 1))
     scrollHighlightedIntoView()
   } else if (e.key === "ArrowUp") {
     e.preventDefault()
@@ -87,7 +96,7 @@ function onKeydown(e: KeyboardEvent) {
     scrollHighlightedIntoView()
   } else if (e.key === "Enter") {
     e.preventDefault()
-    const item = filtered.value[highlighted.value]
+    const item = visibleItems.value[highlighted.value]
     if (item) select(item.value)
   } else if (e.key === "Escape") {
     open.value = false
@@ -106,6 +115,7 @@ function onKeydown(e: KeyboardEvent) {
         :class="cn(
           'border-input flex h-9 w-full items-center justify-between gap-2 rounded-md border bg-transparent px-3 py-2 text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30 dark:hover:bg-input/50',
           !selectedLabel && 'text-muted-foreground',
+          triggerClass,
         )"
       >
         <span class="line-clamp-1 text-left">{{ selectedLabel || placeholder }}</span>
@@ -134,7 +144,7 @@ function onKeydown(e: KeyboardEvent) {
           {{ emptyText }}
         </div>
         <button
-          v-for="(item, idx) in filtered"
+          v-for="(item, idx) in visibleItems"
           :key="item.value"
           data-item
           type="button"
@@ -154,6 +164,13 @@ function onKeydown(e: KeyboardEvent) {
           </span>
         </button>
       </div>
+      <p
+        v-if="filtered.length > visibleItems.length"
+        class="border-t px-3 py-2 text-xs text-muted-foreground"
+        data-truncation-hint
+      >
+        {{ t("ui.showingFirstOfTotal", { shown: visibleItems.length.toLocaleString(), total: filtered.length.toLocaleString() }) }}
+      </p>
     </PopoverContent>
   </Popover>
 </template>

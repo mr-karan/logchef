@@ -8,8 +8,9 @@ export interface ColumnRange {
 /**
  * Picks the columns whose horizontal extent intersects the viewport, plus
  * `overscan` extra columns on each side. `leadingOffset` is the width of any
- * fixed cells before the first column. A viewport width of 0 means the
- * container has not been measured, so every column is rendered.
+ * fixed cells before the first column. Before layout is measured, use a
+ * bounded provisional viewport. Rendering every column on the initial mount
+ * can exhaust memory before the ResizeObserver ever gets a chance to run.
  */
 export function getVisibleColumnRange(
   widths: readonly number[],
@@ -18,12 +19,13 @@ export function getVisibleColumnRange(
   leadingOffset = 0,
   overscan = 3,
 ): ColumnRange {
-  if (viewportWidth <= 0 || widths.length === 0) {
-    return { start: 0, end: widths.length }
+  if (widths.length === 0) {
+    return { start: 0, end: 0 }
   }
 
+  const effectiveWidth = viewportWidth > 0 ? viewportWidth : 1024
   const viewportLeft = Math.max(0, scrollLeft - leadingOffset)
-  const viewportRight = viewportLeft + viewportWidth
+  const viewportRight = viewportLeft + effectiveWidth
 
   let start = widths.length
   let end = 0
