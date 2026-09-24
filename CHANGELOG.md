@@ -9,136 +9,138 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [2.1.0] - 2026-09-24
 
-Logchef 2.1 is about the Explorer staying fast no matter how wide your logs
-get. It also speaks eleven languages, ships a Helm chart, and fixes a long list
-of cases where a query quietly returned something slightly wrong.
+Logchef 2.1 keeps the Explorer fast as your logs get wider. It also adds
+eleven interface languages and a Helm chart. We fixed many problems that made
+queries quietly return slightly incorrect results.
 
-**Wide schemas no longer take down the tab.** If you pointed Logchef at a
-VictoriaLogs source with a few hundred fields, you may have watched the browser
-climb past a gigabyte of memory and stop responding. That is fixed, and not by a
-little:
+**Wide schemas no longer freeze the tab.** With a VictoriaLogs source of a few
+hundred fields, you may have seen the browser use over a gigabyte of memory.
+It could then stop responding. Logchef fixes that:
 
 - On a source with 3,000 fields, the first rows used to take about 42 seconds
-  to appear. They now show up in under two.
+  to appear. They now appear in under two seconds.
 - With 1,000 rows on screen and every column switched on, the tab used about
   1.8 GB of memory. It now uses about 73 MB.
 - Switching to 1,000 rows per page took 17 seconds. It now takes under half a
-  second, and opening Group by went from 8 seconds to a tenth of one.
+  second. Opening Group by went from 8 seconds to a tenth of a second.
 
-Three things were building the whole schema at once: the results table, the
-Fields sidebar, and the Group by picker. Each now renders only what you can
-see. Thanks to [@AndreyCreativecode](https://github.com/AndreyCreativecode),
-who reported this, profiled it in their own deployment, and sent the patches
-that found the last two culprits
+Three parts of the Explorer built the whole schema at once: the results table,
+the Fields sidebar, and the Group by picker. Each now renders only what you
+can see. Thank you to
+[@AndreyCreativecode](https://github.com/AndreyCreativecode), who reported the
+problem and profiled it in their own deployment. They sent the patches that
+identified the sidebar and Group by problems
 ([#106](https://github.com/mr-karan/logchef/issues/106),
 [#107](https://github.com/mr-karan/logchef/pull/107)).
 
-These are medians of five runs on one machine; the method and fixtures are in
-`frontend/docs/table-performance.md`, so you can reproduce them.
+These are medians of five runs on one machine. You can reproduce them with the
+method and fixtures in `frontend/docs/table-performance.md`.
 
 ### Added
-- **Eleven interface languages.** Pick English, Simplified or Traditional
+- **Eleven interface languages.** Choose a language under Settings →
+  Preferences → Language. The options are English, Simplified or Traditional
   Chinese, Spanish, French, German, Brazilian Portuguese, Japanese, Korean,
-  Hindi, or Italian under Settings → Preferences → Language. The default follows
-  your browser, and the choice is saved to your account, so it follows you
-  between machines. Language packs load on demand, so English users download
-  nothing extra. The non-English catalogs are first drafts; corrections from
-  native speakers are very welcome.
+  Hindi, or Italian. The default follows your browser, and your account keeps
+  that choice between machines. Language packs load on demand, so English
+  users download nothing extra. The non-English catalogs are first drafts. We
+  welcome corrections from native speakers.
 - **Helm chart.** `deployment/helm` deploys Logchef with Dex for OIDC and
   ClickHouse through the Altinity operator, with optional Ingress or Gateway
   API routes. It generates an API token secret once and keeps it across
   upgrades. See the upgrade notes before using its defaults in production.
-- **Reasoning effort for Bedrock.** Set `ai.reasoning_effort` to `none`, `low`,
-  `medium`, `high`, `xhigh`, or `max` for reasoning-capable Bedrock models. It
-  is off by default. AI requests can now run for 90 seconds instead of 15,
-  because reasoning takes longer.
-- **"Show more" in the Fields sidebar.** The sidebar shows 100 fields at a time,
-  and search still covers every field in the source.
+- **Reasoning effort for Bedrock.** Set `ai.reasoning_effort` to `none`,
+  `low`, `medium`, `high`, `xhigh`, or `max` for reasoning-capable Bedrock
+  models. It is off by default. AI requests can now run for 90 seconds instead
+  of 15, because reasoning takes longer.
+- **"Show more" in the Fields sidebar.** The sidebar shows 100 fields at a
+  time, and search still covers every field in the source.
 
 ### Changed
-- **The Explorer table got lighter everywhere, not only on wide sources.** Cell
-  copy and filter buttons now appear when you hover or focus a cell instead of
-  sitting on every cell. On a plain 1,000-row result that cut the page from
-  about 9,600 elements to about 3,600, and paging now takes about 60 ms instead
-  of 150 ms.
+- **The Explorer table is lighter for everyone.** Cell copy and filter buttons
+  now appear when you hover or focus a cell. They no longer appear on every
+  cell at once. On an ordinary 1,000-row result, this reduced the page from
+  about 9,600 elements to about 3,600. Paging now takes about 60 ms instead of
+  150 ms.
 - **Only the visible columns render.** Wide tables render the columns in view
-  plus a few on each side, so enabling all 268 columns of a source costs about
+  plus a few on each side. Enabling all 268 columns of a source costs about
   120 MB instead of about 1.8 GB.
 - **Group by is searchable.** It no longer builds thousands of options before
   you open it. It shows the first 100 matches and lets you type to find the
   rest.
-- **VictoriaLogs sources start with six columns.** New fields a query returns no
-  longer pile up as visible columns. Your own choices from the Columns menu
-  stick.
+- **VictoriaLogs sources start with six columns.** New fields a query returns
+  no longer become visible columns automatically. Logchef keeps your choices
+  from the Columns menu.
 - **Query stats show real work.** "Rows read" and "bytes read" now report what
   ClickHouse actually scanned, not the number of rows returned.
-- **One translate request per query, not two.** A LogchefQL run now returns its
-  parsed conditions with the results, and highlights follow the query that
+- **One translate request per query, not two.** A LogchefQL run now returns
+  its parsed conditions with the results. Highlights follow the query that
   actually ran rather than later edits.
 - **Clearer failures.** Cancelled or timed-out queries return `408` instead of
-  `500`. Histograms that would produce more than 5,000 time buckets or 16 MiB of
-  data are rejected with advice to widen the interval, instead of arriving
-  partly empty. This applies to both ClickHouse and VictoriaLogs.
+  `500`. Logchef rejects histograms that would produce more than 5,000 time
+  buckets or 16 MiB of data. It advises you to widen the interval instead of
+  returning partly empty histograms. This applies to both ClickHouse and
+  VictoriaLogs.
 
 ### Fixed
-- **Exact numbers.** Large integer IDs and precise decimals no longer get
-  rounded by the browser, and LogchefQL keeps number literals exactly as you
-  typed them.
+- **Exact numbers.** The browser no longer rounds large integer IDs and
+  precise decimals. LogchefQL keeps number literals exactly as you typed them.
 - **Nulls in LogchefQL.** `field = null` and `field != null` now compile to
-  proper null checks.
-- **Malformed LogchefQL errors instead of dropping conditions** it could not
-  translate.
+  real null checks.
+- **Malformed LogchefQL reports errors** instead of silently removing
+  conditions it could not translate.
 - **Timestamps to the nanosecond.** Sorting, the surrounding-logs view, and
-  sidebar field values keep nanosecond precision, so rows no longer land on the
+  sidebar field values keep nanosecond precision. Rows no longer appear on the
   wrong side of their neighbours.
 - **ClickHouse values render the same everywhere.** Native JSON, Dynamic and
-  Variant columns, nullable values, maps, and byte arrays decode the same way in
-  buffered and streamed results. Byte arrays no longer show up as base64.
+  Variant columns, nullable values, maps, and byte arrays decode the same way
+  in buffered and streamed results. Byte arrays no longer appear as base64.
 - **Enum fields** show their values in the sidebar, including empty ones.
-- **Saved queries.** "Save as new" makes a new query even when one is open,
-  double-clicking Save no longer creates duplicates, and saved queries remember
+- **Saved queries.** "Save as new" creates a new query even when one is open.
+  Double-clicking Save no longer creates duplicates. Saved queries remember
   which editor mode they came from.
-- **Template variables** are escaped properly and also filter the sidebar's
-  field values.
+- **Template variables.** Logchef escapes them correctly. They also filter the
+  sidebar's field values.
 - **The generated SQL uses your selected timezone** for its time range.
-- **Live tail** keeps up with bursts of rows that share a timestamp, and its
-  memory stays bounded.
+- **Live tail** handles bursts of rows that share a timestamp. Its memory
+  stays bounded.
 - **VictoriaLogs alerts** read the metric value, not a label that happens to
   look numeric.
 - **Clicking a log row opens its detail panel** again.
-- **Short column names are no longer cut to one letter.** A narrow column such
+- **Short column names no longer shrink to one letter.** A narrow column such
   as `level` shows its full name instead of "L".
 - **The ClickHouse source form's auth switch** works again.
-- **Switching pages no longer bounces you back** to a view you had open before.
+- **Switching pages no longer returns you** to a view you had open before.
 - **A field you collapse in the sidebar stays collapsed** while other fields
   load.
 
 ### Upgrade notes
 
-There are no database migrations. Most people can just upgrade. A few things
-behave differently, so skim this list:
+This release needs no database migrations. Most deployments can just upgrade,
+but a few things behave differently:
 
-- **VictoriaLogs column choices reset once.** Earlier versions saved every field
-  a query ever returned as a visible column. On VictoriaLogs sources, Logchef
-  discards that saved visibility once and falls back to the default six columns.
-  Column order and widths are kept. Choose columns again from the Columns menu,
-  and from then on your choices stick. ClickHouse sources are not affected.
-- **LogchefQL is stricter.** Comparing a String field to a bare number now asks
-  you to quote the value, for example `status_text="500"`. Using `>`, `<`, or
-  `~` with `null` is an error; use `= null` or `!= null`. Saved queries and
-  alerts that relied on the old behavior need that small edit.
+- **VictoriaLogs column choices reset once.** Earlier versions saved every
+  field a query ever returned as a visible column. On VictoriaLogs sources,
+  Logchef discards that saved visibility once and starts from the default six
+  columns. It keeps the column order and widths. Choose columns again from the
+  Columns menu. Logchef then saves your choices. ClickHouse sources are not
+  affected.
+- **LogchefQL is stricter.** Comparing a String field to a bare number now
+  asks you to quote the value, for example `status_text="500"`. Using `>`,
+  `<`, or `~` with `null` is an error. Use `= null` or `!= null`. Saved
+  queries and alerts that relied on the old behavior need that edit.
 - **SQL histograms** that use `GROUP BY`, `DISTINCT`, or set operations must
   select the timestamp column explicitly.
-- **Histograms have their own concurrency budget.** `query.max_concurrent_per_user`
-  and `query.max_concurrent_global` now count previews and histograms
-  separately, so a busy Explorer can return `429` for histograms. Dashboard
-  cache fills are limited per user by `dashboard_cache.max_concurrent_fills`.
-- **`logchef_query_total` roughly halves.** It counted every query twice before.
-  Adjust dashboards and alerts that use it.
+- **Histograms have their own concurrency budget.**
+  `query.max_concurrent_per_user` and `query.max_concurrent_global` now count
+  previews and histograms separately. A busy Explorer can receive `429` for
+  histograms. `dashboard_cache.max_concurrent_fills` limits dashboard cache
+  fills per user.
+- **`logchef_query_total` roughly halves.** It counted every query twice
+  before. Adjust dashboards and alerts that use it.
 - **Building from source needs Go 1.26.**
-- **Helm defaults are for trying it out.** Before running the chart in
-  production, pin `logchef.image.tag` to `v2.1.0` instead of `latest`, and
-  replace the default OIDC client secret and the Dex demo users.
+- **Helm defaults are for evaluation.** Before running the chart in
+  production, pin `logchef.image.tag` to `v2.1.0` instead of `latest`. Replace
+  the default OIDC client secret and the Dex demo users.
 
 ## [2.0.2] - 2026-08-08
 
