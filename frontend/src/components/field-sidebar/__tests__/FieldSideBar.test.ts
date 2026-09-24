@@ -84,3 +84,42 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
     app.unmount()
   }
 }, WIDE_MOUNT_TIMEOUT_MS)
+
+it('auto-expands a low-cardinality field once and keeps it collapsed after the user closes it', async () => {
+  vi.spyOn(sourcesApi, 'getFieldValues').mockImplementation(async (_team, _source, fieldName, fieldType) => ({
+    status: 'success',
+    data: {
+      field_name: fieldName, field_type: fieldType, is_low_cardinality: false,
+      values: [{ value: `${fieldName}-a`, count: 2 }],
+      total_distinct: fieldName === 'level' ? 3 : 50,
+    },
+  }))
+  const pinia = createPinia()
+  setActivePinia(pinia)
+  useExploreStore().setRelativeTimeRange('15m')
+  const fields = [{ name: 'level', type: 'Int64' }, { name: 'message', type: 'String' }]
+  const host = document.createElement('div')
+  document.body.appendChild(host)
+  const app = createApp({ render: () => h(FieldSideBar, { fields, expanded: true, sourceId: 1, teamId: 1 }) })
+  app.use(pinia)
+  app.use(i18n)
+  const trigger = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('[data-slot="collapsible-trigger"]')]
+    .find(button => button.textContent?.includes(name))
+  try {
+    app.mount(host)
+    await flush()
+    expect(host.textContent).toContain('level-a')
+
+    trigger('level')?.click()
+    await flush()
+    expect(host.textContent).not.toContain('level-a')
+
+    // Loading another field must not reopen the one the user closed.
+    trigger('message')?.click()
+    await flush()
+    expect(host.textContent).toContain('message-a')
+    expect(host.textContent).not.toContain('level-a')
+  } finally {
+    app.unmount()
+  }
+})
