@@ -193,8 +193,10 @@ dev-reset:
     docker exec dev-clickhouse-local-1 clickhouse-client --query "TRUNCATE TABLE IF EXISTS default.http"
     docker exec dev-clickhouse-local-1 clickhouse-client --query "TRUNCATE TABLE IF EXISTS default.syslogs"
     echo "Resetting VictoriaLogs data..."
-    docker exec dev-victorialogs-local-1 sh -c 'rm -rf /victoria-logs-data/*'
-    docker restart dev-victorialogs-local-1 > /dev/null
+    # The VictoriaLogs image has no shell, so recreate its data volume instead.
+    (cd dev && docker compose rm --stop --force victorialogs-local > /dev/null)
+    docker volume rm dev_victorialogs-data > /dev/null
+    (cd dev && docker compose up -d victorialogs-local > /dev/null)
     echo "Waiting for VictoriaLogs to come back..."
     for i in {1..30}; do
       if curl -fsS http://localhost:9428/health > /dev/null 2>&1; then
@@ -226,6 +228,10 @@ dev-ingest-logs duration="60":
     sleep {{duration}}
     kill $pid0 $pid1 $pid2 2>/dev/null
     echo "Done."
+
+# Wide-schema VictoriaLogs fixtures for Explorer performance work
+dev-ingest-wide:
+    python3 dev/ingest-wide-fixture.py
 
 # View webhook receiver logs (for testing alerts)
 dev-webhook-logs:

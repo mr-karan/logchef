@@ -78,13 +78,17 @@ buffered, streaming, and DDL paths.
 LogchefQL compilation reuses the source inspection cache when column metadata
 is missing. The cache expires after one minute and checks the source revision.
 Concurrent requests share a cache fill. Compilation uses a source copy rather
-than changing shared source columns. If inspection fails, compilation continues
-without schema metadata.
+than changing shared source columns. ClickHouse compilation needs column types,
+so if inspection fails or returns no columns, compilation returns an error
+instead of producing untyped SQL.
 
 ## Histogram limits
 
-Histogram execution shares preview concurrency limits. A shared dashboard cache
-fill uses one execution slot. Cache hits do not need an execution slot.
+Histograms use the same `query.max_concurrent_per_user` and
+`query.max_concurrent_global` numbers as previews, but count only against
+other histograms, so a histogram never takes a preview slot. A shared dashboard
+cache fill uses one slot under `dashboard_cache.max_concurrent_fills`. Cache
+hits do not need an execution slot.
 
 ClickHouse and VictoriaLogs reject results with more than 5,000 distinct time
 buckets or an approximate response size above 16 MiB. VictoriaLogs also limits

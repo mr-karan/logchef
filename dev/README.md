@@ -145,6 +145,7 @@ just dev-test-webhook
 | `provisioning.toml` | Example datasource-aware provisioning config for dev |
 | `victorialogs.toml` | Vector config for the local VictoriaLogs demo stream |
 | `ingest-victorialogs.sh` | Fallback helper that sends sample JSONL logs directly to VictoriaLogs |
+| `ingest-wide-fixture.py` | Wide-schema VictoriaLogs fixtures for Explorer performance work (`just dev-ingest-wide`) |
 | `http.toml` | Vector config for HTTP demo logs |
 | `syslog.toml` | Vector config for syslog demo logs |
 | `dex/config.yaml` | Dex OIDC configuration |

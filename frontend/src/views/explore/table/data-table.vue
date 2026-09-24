@@ -4,6 +4,7 @@ import { useI18n } from "vue-i18n";
 import { logTableFeatures, type ColumnDef, type ColumnMeta, type Row } from './tableFeatures'
 import {
     FlexRender,
+    constructCell,
     useTable,
     type SortingState,
     type ExpandedState,
@@ -13,7 +14,7 @@ import {
     type ColumnResizeMode,
     type ColumnFiltersState,
 } from '@tanstack/vue-table'
-import { ref, computed, watch, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useDebounceFn } from '@vueuse/core'
 import { Button } from '@/components/ui/button'
@@ -24,13 +25,18 @@ import type { ColumnInfo, QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
-import { getDefaultColumnVisibility } from './defaultColumnVisibility'
+import {
+    COLUMN_VISIBILITY_VERSION,
+    getDefaultColumnVisibility,
+    getTrustedSavedVisibility,
+    resolveColumnVisibility,
+} from './defaultColumnVisibility'
+import { getVisibleColumnRange } from './columnVirtualization'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import TableControls from './TableControls.vue'
 import ColumnFilterButton from './ColumnFilterButton.vue'
 import { usePreferencesStore } from '@/stores/preferences'
-import CellWithActions from './CellWithActions.vue'
 
 const { t } = useI18n();
 
@@ -55,6 +61,7 @@ interface DataTableState {
     columnOrder: string[];
     columnSizing: ColumnSizingState;
     columnVisibility: VisibilityState;
+    visibilityVersion?: number;
 }
 
 const props = withDefaults(defineProps<Props>(), {
@@ -170,30 +177,31 @@ function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { 
 
     if (savedState && savedState.columnOrder && savedState.columnOrder.length > 0) {
         // --- Use Saved State ---
-        // Validate saved order against current columns
+        // Saved entries for columns absent from this result are kept in place, so
+        // order, widths and hidden columns survive queries that return a different
+        // field set. TanStack ignores state for ids that have no column.
         const savedOrder = savedState.columnOrder;
-        const filteredSavedOrder = savedOrder.filter(id => currentColumnIds.includes(id));
-        const newColumnIds = currentColumnIds.filter(id => !filteredSavedOrder.includes(id));
-        initialOrder = [...filteredSavedOrder, ...newColumnIds];
-        initialOrder = enforceTimestampFirst(initialOrder);
+        const newColumnIds = currentColumnIds.filter(id => !savedOrder.includes(id));
+        initialOrder = enforceTimestampFirst([...savedOrder, ...newColumnIds]);
 
-        // Process column sizing and visibility from saved state
-        const savedSizing = savedState.columnSizing || {};
-        const savedVisibility = savedState.columnVisibility || {};
-
+        initialSizing = { ...(savedState.columnSizing || {}) };
         currentColumnIds.forEach(id => {
-            // Handle sizing (prioritize saved state)
-            if (savedSizing[id] !== undefined) {
-                initialSizing[id] = savedSizing[id];
-            } else {
+            if (initialSizing[id] === undefined) {
                 const columnDef = columns.find(c => c.id === id);
                 initialSizing[id] = columnDef?.size ?? defaultColumn.size;
             }
-
-            // Handle visibility (prioritize saved state)
-            initialVisibility[id] = savedVisibility[id] !== undefined ? savedVisibility[id] : true;
         });
-        isReadyToPersistState.value = true;
+
+        initialVisibility = resolveColumnVisibility(
+            columns,
+            props.source,
+            getTrustedSavedVisibility(props.source, savedState.columnVisibility, savedState.visibilityVersion),
+            timestampFieldName.value,
+            severityFieldName.value
+        );
+        // Persisting before the source type is known would stamp untrusted
+        // visibility with the current version.
+        isReadyToPersistState.value = hasResolvedSourceType;
     } else {
         // --- Generate Default State ---
         // Generate default order with timestamp first
@@ -297,7 +305,8 @@ watch([columnOrder, columnSizing, columnVisibility], () => {
         debouncedSaveStateToStorage({
             columnOrder: columnOrder.value,
             columnSizing: columnSizing.value,
-            columnVisibility: columnVisibility.value
+            columnVisibility: columnVisibility.value,
+            visibilityVersion: COLUMN_VISIBILITY_VERSION,
         });
     }
 }, { deep: true });
@@ -366,20 +375,17 @@ function autoFitColumn(header: any) {
     
     // Measure each cell's content width
     rows.forEach(row => {
-        const cell = row.getVisibleCells().find(c => c.column.id === columnId);
-        if (cell) {
-            const value = cell.getValue();
-            let text = '';
-            if (value === null || value === undefined) {
-                text = '-';
-            } else if (typeof value === 'object') {
-                text = JSON.stringify(value);
-            } else {
-                text = String(value);
-            }
-            const textWidth = ctx.measureText(text).width + 60; // Padding for cell + action buttons
-            maxWidth = Math.max(maxWidth, textWidth);
+        const value = row.getValue(columnId);
+        let text = '';
+        if (value === null || value === undefined) {
+            text = '-';
+        } else if (typeof value === 'object') {
+            text = JSON.stringify(value);
+        } else {
+            text = String(value);
         }
+        const textWidth = ctx.measureText(text).width + 60; // Padding for cell + action buttons
+        maxWidth = Math.max(maxWidth, textWidth);
     });
     
     // Clamp to reasonable bounds
@@ -550,6 +556,124 @@ const handleRowClick = (row: Row<Record<string, any>>) => (e: MouseEvent) => {
     row.toggleExpanded();
 }
 
+// Cell actions (copy / filter) mount only for the single hovered or focused
+// cell. Hover and focus are tracked with delegated listeners on <tbody>, so a
+// wide result page costs no per-cell listeners or component instances.
+const hoveredCellId = ref<string | null>(null)
+const focusedCellId = ref<string | null>(null)
+const activeCellId = computed(() => focusedCellId.value ?? hoveredCellId.value)
+
+function cellIdFromEventTarget(target: EventTarget | null): string | null {
+    if (!(target instanceof Element)) return null
+    return target.closest<HTMLElement>('td[data-cell-id]')?.dataset.cellId ?? null
+}
+
+const onCellPointerOver = (event: MouseEvent) => {
+    hoveredCellId.value = cellIdFromEventTarget(event.target)
+}
+
+const onCellFocusIn = (event: FocusEvent) => {
+    focusedCellId.value = cellIdFromEventTarget(event.target)
+}
+
+// Focus moving between a cell and its action buttons fires focusout followed
+// by focusin in the same task, so clearing here never causes a visible flicker.
+const onCellFocusOut = () => {
+    focusedCellId.value = null
+}
+
+// Column virtualization: body rows render only the columns under the
+// horizontal viewport (plus overscan). Hidden columns on each side collapse
+// into one spacer <td> whose colspan keeps the cells aligned with the fully
+// rendered header, since table-layout: fixed takes widths from the header row.
+// A wide schema with every column enabled therefore costs a viewport of cells
+// per row, not the whole schema.
+const EXPANDER_CELL_WIDTH = 24
+const scrollContainer = ref<HTMLElement | null>(null)
+const scrollLeft = ref(0)
+const viewportWidth = ref(0)
+let scrollFrame = 0
+
+function syncViewport() {
+    const el = scrollContainer.value
+    if (!el) return
+    scrollLeft.value = el.scrollLeft
+    viewportWidth.value = el.clientWidth
+}
+
+const onTableScroll = () => {
+    if (scrollFrame) return
+    scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = 0
+        syncViewport()
+    })
+}
+
+let viewportObserver: ResizeObserver | null = null
+watch(scrollContainer, el => {
+    viewportObserver?.disconnect()
+    viewportObserver = null
+    if (!el) return
+    syncViewport()
+    if (typeof ResizeObserver !== 'undefined') {
+        viewportObserver = new ResizeObserver(syncViewport)
+        viewportObserver.observe(el)
+    }
+})
+
+onBeforeUnmount(() => {
+    viewportObserver?.disconnect()
+    if (scrollFrame) cancelAnimationFrame(scrollFrame)
+})
+
+const visibleLeafColumns = computed(() => {
+    // Touch the state refs so the computed re-evaluates on visibility, order
+    // and sizing changes even when TanStack serves a memoized column list.
+    void columnVisibility.value
+    void columnOrder.value
+    void columnSizing.value
+    void tableColumns.value
+    return table.getVisibleLeafColumns()
+})
+
+const visibleColumnWidths = computed(() => visibleLeafColumns.value.map(column => column.getSize()))
+
+const visibleColumnRange = computed(() =>
+    getVisibleColumnRange(visibleColumnWidths.value, scrollLeft.value, viewportWidth.value, EXPANDER_CELL_WIDTH),
+)
+
+const sumWidths = (widths: number[], from: number, to: number) => {
+    let total = 0
+    for (let index = from; index < to; index++) total += widths[index]
+    return total
+}
+
+// Spacers carry both colspan and an explicit width: in Chromium an empty
+// spanning cell collapsed to zero width even under table-layout: fixed, which
+// pulled the rendered cells out from under their header columns.
+const leadingSpacer = computed(() => ({
+    span: visibleColumnRange.value.start,
+    width: sumWidths(visibleColumnWidths.value, 0, visibleColumnRange.value.start),
+}))
+const trailingSpacer = computed(() => ({
+    span: visibleColumnWidths.value.length - visibleColumnRange.value.end,
+    width: sumWidths(visibleColumnWidths.value, visibleColumnRange.value.end, visibleColumnWidths.value.length),
+}))
+
+// getVisibleCells() first constructs cells for EVERY schema column, including
+// hidden ones. Slice columns before constructing cells instead. Keep only the
+// current page/viewport; paging and scrolling must not grow a cell cache.
+const viewportCells = computed(() => {
+    const columns = visibleLeafColumns.value.slice(visibleColumnRange.value.start, visibleColumnRange.value.end)
+    return new Map(table.getRowModel().rows.map(row => [
+        row, columns.map(column => constructCell(column, row, table)),
+    ]))
+})
+
+function renderedCells(row: Row<Record<string, any>>) {
+    return viewportCells.value.get(row) ?? []
+}
+
 // Copy feedback state
 const copiedCellId = ref<string | null>(null)
 
@@ -712,7 +836,9 @@ const isLastVisibleColumn = (columnId: string): boolean => {
             <!-- Add v-if="table" here -->
             <div v-if="table && table.getRowModel().rows?.length" class="absolute inset-0">
                 <div
-                    class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;">
+                    ref="scrollContainer"
+                    class="w-full h-full overflow-auto transition-opacity duration-150" style="scrollbar-width: thin; scrollbar-color: rgba(156, 163, 175, 0.5) transparent;"
+                    @scroll.passive="onTableScroll">
                     <table class="table-fixed border-separate border-spacing-0 text-sm shadow-sm"
                         :data-resizing="isResizing">
                         <thead class="sticky top-0 z-10 bg-card border-b shadow-sm">
@@ -789,7 +915,11 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                             </tr>
                         </thead>
 
-                        <tbody>
+                        <tbody
+                            @mouseover="onCellPointerOver"
+                            @mouseleave="hoveredCellId = null"
+                            @focusin="onCellFocusIn"
+                            @focusout="onCellFocusOut">
                             <template v-for="(row, index) in table.getRowModel().rows" :key="row.id">
                                 <tr class="group cursor-pointer border-b transition-colors hover:bg-muted/30 h-8" :class="[
                                     row.getIsExpanded() ? 'expanded-row bg-primary/15' : index % 2 === 0 ? 'bg-transparent' : 'bg-muted/5'
@@ -799,7 +929,12 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                         <ChevronDown v-if="!row.getIsExpanded()" class="h-3.5 w-3.5 inline-block" />
                                         <ChevronUp v-else class="h-3.5 w-3.5 inline-block text-primary" />
                                     </td>
-                                    <td v-for="cell in row.getVisibleCells()" :key="cell.id"
+                                    <td v-if="leadingSpacer.span > 0" :colspan="leadingSpacer.span"
+                                        :style="{ width: `${leadingSpacer.width}px`, minWidth: `${leadingSpacer.width}px`, padding: 0 }"
+                                        class="virtual-spacer" aria-hidden="true"></td>
+                                    <td v-for="cell in renderedCells(row)" :key="cell.id"
+                                        :data-cell-id="cell.id"
+                                        tabindex="0"
                                         class="px-3 py-1.5 align-middle font-mono text-xs overflow-hidden border-r border-muted/20 relative cell-hover-target whitespace-nowrap transition-colors duration-200"
                                         :class="[
                                             cell.column.getIsResizing() ? 'border-r-2 border-r-primary' : '',
@@ -810,45 +945,45 @@ const isLastVisibleColumn = (columnId: string): boolean => {
                                             minWidth: `${cell.column.columnDef.minSize ?? defaultColumn.minSize}px`,
                                             flex: isLastVisibleColumn(cell.column.id) ? '1 1 auto' : undefined,
                                         }">
-                                        <CellWithActions>
-                                            <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
-                                                :title="formatCellValue(cell.getValue())">
-                                                <FlexRender v-if="cell.column.columnDef.cell"
-                                                    :render="cell.column.columnDef.cell" :props="cell.getContext()" />
-                                            </div>
-                                            <template #actions>
-                                                <div class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
-                                                    <button
-                                                        class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                        @click.stop="handleCellClick($event, cell)"
-                                                        :title="t('ui.copyValue')"
-                                                    >
-                                                        <Copy class="h-3 w-3" />
-                                                    </button>
-                                                    <template v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
-                                                        <button
-                                                            class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                            @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
-                                                            :title="t('ui.filterThisValue')"
-                                                        >
-                                                            <Equal class="h-3 w-3" />
-                                                        </button>
-                                                        <button
-                                                            class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
-                                                            @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
-                                                            :title="t('ui.filterThisValue2')"
-                                                        >
-                                                            <EqualNot class="h-3 w-3" />
-                                                        </button>
-                                                    </template>
-                                                </div>
+                                        <div class="cell-content-wrapper w-full overflow-hidden whitespace-nowrap text-ellipsis"
+                                            :title="formatCellValue(cell.getValue())">
+                                            <FlexRender v-if="cell.column.columnDef.cell"
+                                                :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                                        </div>
+                                        <div v-if="activeCellId === cell.id"
+                                            class="cell-actions absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-0.5 bg-background/95 backdrop-blur-sm rounded px-0.5 shadow-sm border border-border/50">
+                                            <button
+                                                class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                @click.stop="handleCellClick($event, cell)"
+                                                :title="t('ui.copyValue')"
+                                            >
+                                                <Copy class="h-3 w-3" />
+                                            </button>
+                                            <template v-if="props.activeMode === 'logchefql' && cell.column.id !== timestampFieldName">
+                                                <button
+                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '=')"
+                                                    :title="t('ui.filterThisValue')"
+                                                >
+                                                    <Equal class="h-3 w-3" />
+                                                </button>
+                                                <button
+                                                    class="p-0.5 hover:bg-muted rounded text-muted-foreground hover:text-foreground"
+                                                    @click.stop="handleDrillDown(cell.column.id, cell.getValue(), '!=')"
+                                                    :title="t('ui.filterThisValue2')"
+                                                >
+                                                    <EqualNot class="h-3 w-3" />
+                                                </button>
                                             </template>
-                                        </CellWithActions>
+                                        </div>
                                     </td>
+                                    <td v-if="trailingSpacer.span > 0" :colspan="trailingSpacer.span"
+                                        :style="{ width: `${trailingSpacer.width}px`, minWidth: `${trailingSpacer.width}px`, padding: 0 }"
+                                        class="virtual-spacer" aria-hidden="true"></td>
                                 </tr>
 
                                 <tr v-if="row.getIsExpanded()" class="expanded-json-row">
-                                    <td :colspan="row.getVisibleCells().length + 1" class="p-0">
+                                    <td :colspan="visibleLeafColumns.length + 1" class="p-0">
                                         <div class="p-3 bg-muted/30 border-y border-y-primary/40">
                                             <div class="flex items-center justify-between mb-2 gap-2">
                                                 <!-- Collapse hint -->
@@ -1479,13 +1614,12 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     /* Required for flex truncation to work */
 }
 
-/* Refined header text display to work with any column name */
+/* Refined header text display to work with any column name. The icons are
+   flex-shrink-0 siblings, so the label needs no reserved width of its own. */
 .table-fixed th :deep(.flex-grow) {
     flex: 1 1 auto;
     min-width: 0;
     /* Critical for text-overflow to work in flex containers */
-    max-width: calc(100% - 25px);
-    /* Leave room for icons */
 }
 
 /* Add better spacing for header content */

@@ -141,12 +141,136 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- v2.1.0 -->
+    <article class="version milestone" id="v2.1.0">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.1.0">v2.1.0</a>
+        <span class="version-date">Sep 24, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.1.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p class="release-kicker">Fast at any width</p>
+      <p class="release-intro">
+        <strong>Logchef 2.1 keeps the Explorer fast no matter how wide your logs get.</strong> A VictoriaLogs source with a few hundred fields used to push the browser past a gigabyte of memory until it stopped responding. On a source with 3,000 fields, the first rows now appear in under two seconds instead of about 42. With 1,000 rows on screen and every column switched on, the tab uses about 73 MB instead of 1.8 GB. The release also speaks eleven languages, ships a Helm chart, and fixes a long list of queries that quietly returned slightly wrong answers.
+      </p>
+
+      <ul class="release-highlights">
+        <li><strong>Wide schemas, handled</strong>The table, the Fields sidebar, and Group by render only what you can see. Paging to 1,000 rows went from 17 seconds to under half a second.</li>
+        <li><strong>Eleven languages</strong>English, Chinese (Simplified and Traditional), Spanish, French, German, Brazilian Portuguese, Japanese, Korean, Hindi, and Italian, saved to your account.</li>
+        <li><strong>A lighter table everywhere</strong>Cell buttons appear on hover instead of on every cell. A plain 1,000-row page dropped from about 9,600 elements to 3,600, and paging is about 2.5 times faster.</li>
+        <li><strong>Helm chart</strong>Deploy Logchef, Dex, and ClickHouse on Kubernetes, with optional Ingress or Gateway API routes.</li>
+        <li><strong>Exact answers</strong>Large IDs, precise decimals, and nanosecond timestamps survive the trip to your browser unchanged.</li>
+        <li><strong>Honest query stats</strong>"Rows read" reports what ClickHouse actually scanned, and <code>logchef_query_total</code> stops counting every query twice.</li>
+      </ul>
+
+      <aside class="upgrade-note">
+        <strong>Before upgrading:</strong> there are no database migrations. On VictoriaLogs sources, column visibility saved by older versions resets once to the default six columns (order and widths are kept). LogchefQL now asks you to quote numbers compared with text fields, and <code>&gt;</code>, <code>&lt;</code>, or <code>~</code> with <code>null</code> is an error. <a href="#v2-1-upgrade">All upgrade notes &darr;</a>
+      </aside>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Interface languages</strong>: Choose a language under Settings → Preferences. The default follows your browser, packs load on demand, and the choice follows your account between machines. The non-English catalogs are first drafts; corrections from native speakers are welcome.</li>
+          <li><strong>Helm chart</strong>: <code>deployment/helm</code> deploys Logchef with Dex for OIDC and ClickHouse through the Altinity operator. It generates an API token secret once and keeps it across upgrades.</li>
+          <li><strong>Bedrock reasoning effort</strong>: Set <code>ai.reasoning_effort</code> (<code>none</code> to <code>max</code>) for reasoning-capable Bedrock models. AI requests can now run for 90 seconds.</li>
+          <li><strong>"Show more" in the Fields sidebar</strong>: The sidebar shows 100 fields at a time; search still covers every field.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Only visible columns render</strong>: Enabling all 268 columns of a wide source now costs about 120 MB instead of about 1.8 GB.</li>
+          <li><strong>Searchable Group by</strong>: It no longer builds thousands of options before you open it. Opening it went from 8 seconds to about a tenth of a second on a wide source.</li>
+          <li><strong>VictoriaLogs sources start with six columns</strong>: New fields from a query no longer pile up as visible columns. Your own choices stick.</li>
+          <li><strong>One request per query</strong>: A LogchefQL run returns its parsed conditions with the results, so the Explorer stops sending a second translate request.</li>
+          <li><strong>Clearer failures</strong>: Cancelled or timed-out queries return <code>408</code>. Histograms beyond 5,000 buckets or 16 MiB are rejected with advice to widen the interval, on both backends.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Notable fixes
+        </div>
+        <ul class="change-list">
+          <li><strong>LogchefQL correctness</strong>: Number literals stay exact, <code>= null</code> and <code>!= null</code> become real null checks, and malformed queries error instead of dropping conditions.</li>
+          <li><strong>ClickHouse values render the same everywhere</strong>: JSON, Dynamic, Variant, nullable, map, and byte-array values decode identically in buffered and streamed results.</li>
+          <li><strong>Saved queries</strong>: "Save as new" always creates a new query, double-clicking Save no longer duplicates, and the editor mode is remembered.</li>
+          <li><strong>Live tail</strong> keeps up with bursts of rows that share a timestamp, and <strong>VictoriaLogs alerts</strong> read the metric value instead of a numeric-looking label.</li>
+          <li><strong>Small things you would notice</strong>: log rows open their detail panel again, <code>level</code> no longer shows as "L", collapsed sidebar fields stay collapsed, and the ClickHouse source form's auth switch works.</li>
+        </ul>
+      </div>
+
+      <div class="change-section" id="v2-1-upgrade">
+        <div class="change-type breaking">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 9v4m0 4h.01M10.3 4.2L2.7 17.4A2 2 0 004.4 20h15.2a2 2 0 001.7-2.6L13.7 4.2a2 2 0 00-3.4 0z"/></svg>
+          Upgrade notes
+        </div>
+        <ul class="change-list">
+          <li><strong>Stricter LogchefQL</strong>: Quote numbers compared with String fields (<code>status_text="500"</code>), and use <code>= null</code> or <code>!= null</code> instead of ordering operators. Saved queries and alerts that relied on the old behavior need that edit.</li>
+          <li><strong>SQL histograms</strong> with <code>GROUP BY</code>, <code>DISTINCT</code>, or set operations must select the timestamp column explicitly.</li>
+          <li><strong>Separate histogram budget</strong>: <code>query.max_concurrent_per_user</code> and <code>query.max_concurrent_global</code> count previews and histograms separately, so busy Explorers can see <code>429</code> for histograms.</li>
+          <li><strong>Metrics</strong>: <code>logchef_query_total</code> roughly halves; adjust dashboards and alerts that use it.</li>
+          <li><strong>Helm defaults are for trying it out</strong>: pin <code>logchef.image.tag</code> to <code>v2.1.0</code> and replace the default OIDC client secret and Dex demo users before production use.</li>
+          <li><strong>Building from source</strong> needs Go 1.26.</li>
+        </ul>
+      </div>
+
+      <p class="contributors">Thanks to <a href="https://github.com/AndreyCreativecode" target="_blank">@AndreyCreativecode</a> for reporting, profiling, and patching the wide-schema slowdown (<a href="https://github.com/mr-karan/logchef/issues/106" target="_blank">#106</a>). Measurements are medians of five runs; the method is in <code>frontend/docs/table-performance.md</code>.</p>
+    </article>
+
+    <!-- v2.0.2 -->
+    <article class="version" id="v2.0.2">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.0.2">v2.0.2</a>
+        <span class="version-date">Aug 8, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.2" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>VictoriaLogs queries from Explore</strong>: Valid LogchefQL filters no longer go through the old ClickHouse-only SQL check, which rejected VictoriaLogs sources with <code>Missing required parameters</code>.</li>
+          <li><strong>CLI errors from streamed queries</strong>: When a streaming response fails after it has started, the CLI now shows the server's database error instead of a confusing parse failure.</li>
+        </ul>
+      </div>
+    </article>
+
+    <!-- v2.0.1 -->
+    <article class="version" id="v2.0.1">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.0.1">v2.0.1</a>
+        <span class="version-date">Aug 8, 2026</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.1" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Demo login credentials</strong>: Public demos can opt in with <code>[demo] show_login_credentials = true</code> to show and prefill the local login on the sign-in page. It is off by default, because turning it on makes those credentials public.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v2.0.0 -->
     <article class="version milestone" id="v2.0.0">
       <div class="version-header">
         <a class="version-tag" href="#v2.0.0">v2.0.0</a>
         <span class="version-date">Aug 8, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.0.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

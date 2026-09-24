@@ -4,15 +4,7 @@ import { useI18n } from "vue-i18n";
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useSourcesStore } from '@/stores/sources'
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { SearchableSelect } from '@/components/ui/searchable-select'
 
 const { t } = useI18n();
 
@@ -20,7 +12,7 @@ interface Props {
   availableFields: Array<{name: string, type: string}>
 }
 
-defineProps<Props>()
+const props = defineProps<Props>()
 const exploreStore = useExploreStore()
 const sourcesStore = useSourcesStore()
 
@@ -45,11 +37,22 @@ const sortKeysToShow = computed(() => {
   );
 });
 
-// Computed property to check if we have any recommended fields
-const hasRecommendedFields = computed(() => {
-  return !!sourcesStore.currentSourceDetails?._meta_severity_field || 
-         sortKeysToShow.value.length > 0;
-});
+// Sources can expose thousands of fields. The picker renders a bounded
+// slice and searches the rest, so it never mounts the whole schema.
+const MAX_VISIBLE_FIELDS = 100
+
+const items = computed(() => {
+  const severity = sourcesStore.currentSourceDetails?._meta_severity_field
+  const timestamp = sourcesStore.currentSourceDetails?._meta_ts_field
+  const recommended = [...new Set([severity, ...sortKeysToShow.value].filter((name): name is string => Boolean(name)))]
+  const recommendedSet = new Set(recommended)
+  return [
+    { value: '__none__', label: t('ui.noGrouping') },
+    ...recommended.map(name => ({ value: name, label: name, sublabel: t('ui.recommendedFields') })),
+    ...props.availableFields.filter(field => field.name !== timestamp && !recommendedSet.has(field.name))
+      .map(field => ({ value: field.name, label: field.name })),
+  ]
+})
 </script>
 
 <template>
@@ -60,49 +63,15 @@ const hasRecommendedFields = computed(() => {
       </svg>
       {{ t('ui.groupBy') }}
     </label>
-    <Select v-model="groupByField" class="max-w-[180px] h-8">
-      <SelectTrigger class="h-8 text-xs border-dashed">
-        <SelectValue :placeholder="t('ui.noGrouping')">
-          {{ groupByField === '__none__' ? t('ui.noGrouping') : groupByField }}
-        </SelectValue>
-      </SelectTrigger>
-      <SelectContent>
-        <SelectGroup>
-          <SelectLabel class='text-xs'>{{ t('ui.timeSeriesGrouping') }}</SelectLabel>
-          <SelectItem value="__none__">{{ t('ui.noGrouping') }}</SelectItem>
-        </SelectGroup>
-        
-        <!-- Combined recommended fields group -->
-        <SelectGroup v-if="hasRecommendedFields">
-          <SelectLabel class='text-xs'>{{ t('ui.recommendedFields') }}</SelectLabel>
-          
-          <!-- Severity field if available -->
-          <SelectItem v-if="sourcesStore.currentSourceDetails?._meta_severity_field" 
-                      :value="sourcesStore.currentSourceDetails._meta_severity_field">
-            {{ sourcesStore.currentSourceDetails._meta_severity_field }}
-          </SelectItem>
-          
-          <!-- Sort keys (except timestamp and severity fields) -->
-          <SelectItem 
-            v-for="sortKey in sortKeysToShow"
-            :key="sortKey"
-            :value="sortKey">
-            {{ sortKey }}
-          </SelectItem>
-        </SelectGroup>
-        
-        <SelectGroup>
-          <SelectLabel class='text-xs'>{{ t('ui.availableFields') }}</SelectLabel>
-          <SelectItem v-for="field in availableFields.filter(f => 
-            f.name !== sourcesStore.currentSourceDetails?._meta_severity_field && 
-            f.name !== sourcesStore.currentSourceDetails?._meta_ts_field &&
-            !sourcesStore.currentSourceDetails?.sort_keys?.includes(f.name))"
-            :key="field.name" 
-            :value="field.name">
-            {{ field.name }}
-          </SelectItem>
-        </SelectGroup>
-      </SelectContent>
-    </Select>
+    <div class="w-[180px]">
+      <SearchableSelect
+        v-model="groupByField"
+        :items="items"
+        :max-visible-items="MAX_VISIBLE_FIELDS"
+        :placeholder="t('ui.noGrouping')"
+        :search-placeholder="t('ui.searchFields')"
+        trigger-class="h-8 text-xs border-dashed"
+      />
+    </div>
   </div>
 </template>

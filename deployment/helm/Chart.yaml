@@ -2,8 +2,8 @@ apiVersion: v2
 name: logchef
 description: Logchef log explorer stack (Logchef UI, Dex OIDC, ClickHouse via Altinity CHI)
 type: application
-version: 0.1.0
-appVersion: "2.0.2"
+version: 0.1.1
+appVersion: "2.1.0"
 home: https://github.com/mr-karan/logchef
 sources:
   - https://github.com/mr-karan/logchef
