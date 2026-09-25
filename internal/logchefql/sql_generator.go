@@ -189,7 +189,7 @@ func (g *SQLGenerator) visitGroup(node *GroupNode) (string, *ParseError) {
 func (g *SQLGenerator) escapeIdentifier(identifier string) string {
 	// Escape backticks by doubling them
 	escaped := strings.ReplaceAll(identifier, "`", "``")
-	return fmt.Sprintf("`%s`", escaped)
+	return "`" + escaped + "`"
 }
 
 func (g *SQLGenerator) escapeSQLString(value string) string {
