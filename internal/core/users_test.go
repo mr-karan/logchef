@@ -167,7 +167,6 @@ func TestConcurrentAdminDeactivationKeepsOneAdmin(t *testing.T) {
 	targets := []models.UserID{a.ID, b.ID}
 	wg.Add(2)
 	for i := range targets {
-		i := i
 		go func() {
 			defer wg.Done()
 			errs[i] = UpdateUser(ctx, db, log, targets[i], models.User{Status: models.UserStatusInactive})

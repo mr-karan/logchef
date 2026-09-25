@@ -9,13 +9,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
+func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
@@ -30,7 +30,7 @@ func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
 	}
 
 	var req models.CreateQueryShareRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 	payloadBytes := []byte(req.Payload)
@@ -92,7 +92,7 @@ func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
 		ExpiresAt: now.Add(ttl),
 		CreatedAt: now,
 	}
-	if err := s.sqlite.CreateQueryShare(c.Context(), share); err != nil {
+	if err := s.sqlite.CreateQueryShare(c.RequestCtx(), share); err != nil {
 		s.log.Error("failed to create query share", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create share link", models.GeneralErrorType)
 	}
@@ -100,7 +100,7 @@ func (s *Server) handleCreateQueryShare(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusCreated, queryShareResponse(share, buildQueryShareURL(c, s.config.Server.FrontendURL, token)))
 }
 
-func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
+func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 	token := strings.TrimSpace(c.Params("token"))
 	if token == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Share token is required", models.ValidationErrorType)
@@ -110,7 +110,7 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	share, err := s.sqlite.GetQueryShare(c.Context(), token)
+	share, err := s.sqlite.GetQueryShare(c.RequestCtx(), token)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
@@ -119,13 +119,13 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get share link", models.GeneralErrorType)
 	}
 	if time.Now().UTC().After(share.ExpiresAt) {
-		_ = s.sqlite.DeleteQueryShare(c.Context(), token)
+		_ = s.sqlite.DeleteQueryShare(c.RequestCtx(), token)
 		return SendErrorWithType(c, fiber.StatusGone, "Share link has expired", models.NotFoundErrorType)
 	}
 
 	// Admins do not get a free pass on share visibility — they must be a
 	// member of a team that has the source.
-	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, share.SourceID)
 	if err != nil {
 		s.log.Error("failed to check query share access", "error", err, "token", token, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
@@ -134,14 +134,14 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this shared query", models.AuthorizationErrorType)
 	}
 
-	if err := s.sqlite.TouchQueryShare(c.Context(), token, time.Now().UTC()); err != nil {
+	if err := s.sqlite.TouchQueryShare(c.RequestCtx(), token, time.Now().UTC()); err != nil {
 		s.log.Warn("failed to touch query share", "error", err, "token", token)
 	}
 
 	// Resolve a team the recipient actually belongs to for this source, so
 	// the client can issue team-scoped API calls without hitting auth failures
 	// (the creator's stored team may differ from the recipient's team).
-	recipientTeam, err := s.sqlite.GetUserTeamForSource(c.Context(), user.ID, share.SourceID)
+	recipientTeam, err := s.sqlite.GetUserTeamForSource(c.RequestCtx(), user.ID, share.SourceID)
 	if err != nil {
 		if models.IsNotFound(err) {
 			// The recipient belongs to no team with access to this source, so they
@@ -157,7 +157,7 @@ func (s *Server) handleGetQueryShare(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, queryShareResponse(share, buildQueryShareURL(c, s.config.Server.FrontendURL, token)))
 }
 
-func (s *Server) handleDeleteQueryShare(c *fiber.Ctx) error {
+func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 	token := strings.TrimSpace(c.Params("token"))
 	if token == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Share token is required", models.ValidationErrorType)
@@ -167,7 +167,7 @@ func (s *Server) handleDeleteQueryShare(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	share, err := s.sqlite.GetQueryShare(c.Context(), token)
+	share, err := s.sqlite.GetQueryShare(c.RequestCtx(), token)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
@@ -177,7 +177,7 @@ func (s *Server) handleDeleteQueryShare(c *fiber.Ctx) error {
 	if user.Role != models.UserRoleAdmin && share.CreatedBy != user.ID {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or an admin can delete this share link", models.AuthorizationErrorType)
 	}
-	if err := s.sqlite.DeleteQueryShare(c.Context(), token); err != nil {
+	if err := s.sqlite.DeleteQueryShare(c.RequestCtx(), token); err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
 		}
@@ -207,7 +207,7 @@ func queryShareResponse(share *models.QueryShare, shareURL string) models.QueryS
 	}
 }
 
-func buildQueryShareURL(c *fiber.Ctx, frontendURL, token string) string {
+func buildQueryShareURL(c fiber.Ctx, frontendURL, token string) string {
 	base := strings.TrimRight(frontendURL, "/")
 	if base == "" {
 		base = strings.TrimRight(c.BaseURL(), "/")

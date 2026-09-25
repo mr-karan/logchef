@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
 )
@@ -52,7 +52,7 @@ func TestRedirectToFrontendRejectsOpenRedirect(t *testing.T) {
 			config: &config.Config{Server: config.ServerConfig{FrontendURL: ""}},
 		}
 		app := fiber.New()
-		app.Get("/go", func(c *fiber.Ctx) error {
+		app.Get("/go", func(c fiber.Ctx) error {
 			return s.redirectToFrontend(c, path, nil)
 		})
 		return app
@@ -69,7 +69,6 @@ func TestRedirectToFrontendRejectsOpenRedirect(t *testing.T) {
 		{"valid local path", "/logs/explore", "/logs/explore"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			resp, err := newApp(tc.path).Test(httptest.NewRequest(http.MethodGet, "/go", http.NoBody))

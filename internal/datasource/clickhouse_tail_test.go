@@ -296,7 +296,7 @@ func TestTailLogsDrainsNativeJSONRowsClickHouse(t *testing.T) {
 	if major < 25 || major == 25 && minor < 3 {
 		t.Skipf("native JSON requires ClickHouse >= 25.3, found %s", version)
 	}
-	runTailProgressWithConnection(t, addr, ctx, cancel, setupConn, log, true)
+	runTailProgressWithConnection(t, ctx, addr, cancel, setupConn, log, true)
 }
 
 func runTailProgressClickHouse(t *testing.T, includeJSON bool) {
@@ -313,10 +313,10 @@ func runTailProgressClickHouse(t *testing.T, includeJSON bool) {
 		t.Fatal(err)
 	}
 	defer setupConn.Close()
-	runTailProgressWithConnection(t, addr, ctx, cancel, setupConn, log, includeJSON)
+	runTailProgressWithConnection(t, ctx, addr, cancel, setupConn, log, includeJSON)
 }
 
-func runTailProgressWithConnection(t *testing.T, addr string, ctx context.Context, cancel context.CancelFunc, setupConn ch.Conn, log *slog.Logger, includeJSON bool) {
+func runTailProgressWithConnection(t *testing.T, ctx context.Context, addr string, cancel context.CancelFunc, setupConn ch.Conn, log *slog.Logger, includeJSON bool) {
 	t.Helper()
 
 	table := fmt.Sprintf("tail_progress_%d", time.Now().UnixNano())

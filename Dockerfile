@@ -4,7 +4,7 @@
 # Vite is configured to write its build output to ../cmd/server/ui (relative to
 # frontend/) so the Go binary can embed it. We mirror that layout here so the
 # resolved path lands inside this stage's /app workdir.
-FROM oven/bun:1-debian AS frontend-builder
+FROM oven/bun:1.4.2-debian AS frontend-builder
 
 WORKDIR /app
 
@@ -22,7 +22,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
     cd frontend && bun run build
 
 # --- Backend builder stage (Go) ---
-FROM golang:1.26-bookworm AS builder
+FROM golang:1.27-bookworm AS builder
 
 # Declare build arguments
 ARG APP_VERSION=unknown
@@ -72,7 +72,7 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     ./cmd/server
 
 # Use a minimal base image for the final stage
-FROM alpine:3.21.3
+FROM alpine:3.24.2
 
 # Install CA certificates and timezone data
 RUN apk --no-cache add ca-certificates tzdata

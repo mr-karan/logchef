@@ -189,11 +189,11 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 	}
 	recipientUserIDs := sanitizeUserIDs(req.RecipientUserIDs)
 	if err := validateRecipientUserIDs(ctx, db, recipientUserIDs); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 	webhookURLs := sanitizeWebhookURLs(req.WebhookURLs)
 	if err := validateWebhookURLs(webhookURLs); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 	owner := createdBy
 	alert := &models.Alert{
@@ -218,7 +218,7 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		CreatedBy:         &owner,
 	}
 	if err := validateAlertModel(ctx, ds, sourceID, alert); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
 	if err := db.CreateAlert(ctx, alert); err != nil {
@@ -262,16 +262,16 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 	}
 	if req.RecipientUserIDs != nil {
 		if err := validateRecipientUserIDs(ctx, db, existing.RecipientUserIDs); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 		}
 	}
 	if req.WebhookURLs != nil {
 		if err := validateWebhookURLs(existing.WebhookURLs); err != nil {
-			return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 		}
 	}
 	if err := validateAlertModel(ctx, ds, existing.SourceID, existing); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
@@ -489,7 +489,7 @@ func TestAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		Severity:          models.AlertSeverityWarning,
 	}
 	if err := validateAlertModel(ctx, ds, sourceID, tempAlert); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidAlertConfiguration, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
 	// Execute query with timing

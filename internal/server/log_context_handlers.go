@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -17,7 +17,7 @@ import (
 // handleGetLogContext returns logs surrounding a specific timestamp (grep -C
 // for logs). Routed through the datasource service; sources whose provider
 // lacks the log_context capability get a 400.
-func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
+func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -25,7 +25,7 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 	}
 
 	var req models.LogContextRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
@@ -57,7 +57,7 @@ func (s *Server) handleGetLogContext(c *fiber.Ctx) error {
 		afterLimit = 100
 	}
 
-	result, err := core.GetLogContext(c.Context(), s.datasources, sourceID, core.LogContextParams{
+	result, err := core.GetLogContext(c.RequestCtx(), s.datasources, sourceID, core.LogContextParams{
 		TargetTimestamp: targetTime.UnixMilli(),
 		TargetTime:      &targetTime,
 		BeforeLimit:     beforeLimit,

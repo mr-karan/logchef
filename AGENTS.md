@@ -87,6 +87,8 @@ frontend parsing in `frontend/src/utils/logchefql/` and run its vitest suite.
 
 - **Run `just check` before committing.** It regenerates sqlc — commit the generated
   diff alongside your query changes.
+- **golangci-lint is pinned** in `.github/workflows/go-tests.yml`. `just lint` fails
+  when the local version differs. To upgrade, bump the pin and fix new findings together.
 - **Never edit generated files**: `internal/store/*/sqlc/` (sqlc). Edit `queries.sql`
   + migrations and regenerate instead.
 - Migrations run automatically at startup via golang-migrate (embedded `go:embed`).

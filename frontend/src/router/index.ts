@@ -5,6 +5,7 @@ import {
 } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useMetaStore } from "@/stores/meta";
+import { basePath } from "@/utils/basePath";
 import { error } from "@/utils/debug";
 import { contextRouterGuard } from "./contextGuard";
 import ComponentLoadError from "@/views/error/ComponentLoadError.vue";
@@ -264,7 +265,7 @@ const routes: RouteRecordRaw[] = [
 ];
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(basePath),
   routes,
   scrollBehavior(_to, _from, savedPosition) {
     return savedPosition ?? { top: 0 };

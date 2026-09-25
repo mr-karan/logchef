@@ -2,11 +2,12 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -15,7 +16,7 @@ import (
 // Runs after auth middleware so user context is available.
 // See: https://stripe.com/blog/canonical-log-lines
 func requestLogger(log *slog.Logger) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		// Skip noisy paths
 		path := c.Path()
 		if strings.HasPrefix(path, "/api/v1/health") ||
@@ -36,7 +37,7 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// If the handler returned an error that Fiber's error handler processed,
 		// the status code is already set correctly on the response.
 		if chainErr != nil {
-			if e, ok := chainErr.(*fiber.Error); ok {
+			if e, ok := errors.AsType[*fiber.Error](chainErr); ok {
 				status = e.Code
 			} else if status == 200 {
 				status = 500 // raw error with no status set

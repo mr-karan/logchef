@@ -8,11 +8,11 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // getUserIDFromContext extracts the user ID from the context
-func getUserIDFromContext(c *fiber.Ctx) models.UserID {
+func getUserIDFromContext(c fiber.Ctx) models.UserID {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		return 0
@@ -21,7 +21,7 @@ func getUserIDFromContext(c *fiber.Ctx) models.UserID {
 }
 
 // isUserAdmin checks if the user in context has admin role
-func isUserAdmin(c *fiber.Ctx) bool {
+func isUserAdmin(c fiber.Ctx) bool {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		return false
@@ -34,7 +34,7 @@ func isUserAdmin(c *fiber.Ctx) bool {
 // session-based authentication (session cookie). It validates the authentication,
 // retrieves the associated user, and stores the user information in the request
 // context (c.Locals) for subsequent handlers.
-func (s *Server) requireAuth(c *fiber.Ctx) error {
+func (s *Server) requireAuth(c fiber.Ctx) error {
 	// Try API token authentication first
 	authHeader := c.Get("Authorization")
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
@@ -46,7 +46,7 @@ func (s *Server) requireAuth(c *fiber.Ctx) error {
 }
 
 // authenticateWithToken handles API token authentication
-func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
+func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 	// Extract token from "Bearer <token>"
 	token := strings.TrimPrefix(authHeader, "Bearer ")
 	if token == authHeader || token == "" {
@@ -55,7 +55,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 	}
 
 	// Authenticate token and get associated user
-	user, apiToken, err := core.AuthenticateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, token)
+	user, apiToken, err := core.AuthenticateAPIToken(c.RequestCtx(), s.sqlite, s.log, &s.config.Auth, token)
 	if err != nil {
 		metrics.RecordAuthAttempt("token", false, nil)
 
@@ -80,7 +80,7 @@ func (s *Server) authenticateWithToken(c *fiber.Ctx, authHeader string) error {
 }
 
 // authenticateWithSession handles session-based authentication (existing logic)
-func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
+func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 	// Retrieve session ID from cookie.
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr == "" {
@@ -90,7 +90,7 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	sessionID := models.SessionID(sessionIDStr)
 
 	// Validate the session exists and is not expired.
-	session, err := core.ValidateSession(c.Context(), s.sqlite, s.log, sessionID)
+	session, err := core.ValidateSession(c.RequestCtx(), s.sqlite, s.log, sessionID)
 	if err != nil {
 		metrics.RecordSessionOperation("validate", false, nil)
 
@@ -104,7 +104,7 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 	}
 
 	// Retrieve associated user information.
-	user, err := core.GetUser(c.Context(), s.sqlite, session.UserID)
+	user, err := core.GetUser(c.RequestCtx(), s.sqlite, session.UserID)
 	if err != nil {
 		// If user not found for a valid session, treat as an auth issue.
 		if errors.Is(err, core.ErrUserNotFound) {
@@ -138,7 +138,7 @@ func (s *Server) authenticateWithSession(c *fiber.Ctx) error {
 
 // requireAdmin is middleware that ensures the authenticated user has the global 'admin' role.
 // It assumes requireAuth has already run and placed the user in the context.
-func (s *Server) requireAdmin(c *fiber.Ctx) error {
+func (s *Server) requireAdmin(c fiber.Ctx) error {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		s.log.Error("user not found in context for admin check")
@@ -157,7 +157,7 @@ func (s *Server) requireAdmin(c *fiber.Ctx) error {
 }
 
 func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		authMethod, _ := c.Locals("auth_method").(string)
 		if authMethod != "token" {
 			return c.Next()
@@ -174,7 +174,7 @@ func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
 }
 
 // requireSourceNotManaged rejects mutations on config-managed sources.
-func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
+func (s *Server) requireSourceNotManaged(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	if sourceIDStr == "" {
 		return c.Next()
@@ -183,7 +183,7 @@ func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Next() // let handler deal with bad ID
 	}
-	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
+	managed, err := s.sqlite.IsSourceManaged(c.RequestCtx(), sourceID)
 	if err == nil && managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This source is managed by provisioning config and cannot be modified via API",
@@ -193,7 +193,7 @@ func (s *Server) requireSourceNotManaged(c *fiber.Ctx) error {
 }
 
 // requireTeamNotManaged rejects mutations on config-managed teams.
-func (s *Server) requireTeamNotManaged(c *fiber.Ctx) error {
+func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 	teamIDStr := c.Params("teamID")
 	if teamIDStr == "" {
 		return c.Next()
@@ -202,7 +202,7 @@ func (s *Server) requireTeamNotManaged(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Next()
 	}
-	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
+	managed, err := s.sqlite.IsTeamManaged(c.RequestCtx(), teamID)
 	if err == nil && managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This team is managed by provisioning config and cannot be modified via API",
@@ -215,7 +215,7 @@ func (s *Server) requireTeamNotManaged(c *fiber.Ctx) error {
 // or is a global admin. This is used for endpoints that should be accessible to team admins
 // without requiring a specific team context (e.g., listing users to add to teams).
 // It assumes requireAuth has already run.
-func (s *Server) requireAnyTeamAdmin(c *fiber.Ctx) error {
+func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		s.log.Error("user not found in context for any team admin check")
@@ -228,7 +228,7 @@ func (s *Server) requireAnyTeamAdmin(c *fiber.Ctx) error {
 	}
 
 	// Check if the user is an admin of any team.
-	isAnyAdmin, err := core.IsAnyTeamAdmin(c.Context(), s.sqlite, user.ID)
+	isAnyAdmin, err := core.IsAnyTeamAdmin(c.RequestCtx(), s.sqlite, user.ID)
 	if err != nil {
 		s.log.Error("failed to check if user is any team admin", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
@@ -245,7 +245,7 @@ func (s *Server) requireAnyTeamAdmin(c *fiber.Ctx) error {
 // requireTeamMember is middleware that ensures the authenticated user is a member of the team
 // specified by the ':teamID' path parameter, or is a global admin.
 // It assumes requireAuth has already run.
-func (s *Server) requireTeamMember(c *fiber.Ctx) error {
+func (s *Server) requireTeamMember(c fiber.Ctx) error {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		s.log.Error("user not found in context for team member check")
@@ -266,7 +266,7 @@ func (s *Server) requireTeamMember(c *fiber.Ctx) error {
 	}
 
 	// Check membership using core function.
-	isMember, err := core.IsTeamMember(c.Context(), s.sqlite, teamID, user.ID)
+	isMember, err := core.IsTeamMember(c.RequestCtx(), s.sqlite, teamID, user.ID)
 	if err != nil {
 		s.log.Error("failed to verify team membership", "error", err, "team_id", teamID, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team membership")
@@ -285,7 +285,7 @@ func (s *Server) requireTeamMember(c *fiber.Ctx) error {
 }
 
 // requireTeamAdminOrGlobalAdmin checks if a user is either an admin of the requested team or a global admin
-func (s *Server) requireTeamAdminOrGlobalAdmin(c *fiber.Ctx) error {
+func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 	userID := getUserIDFromContext(c)
 	if userID == 0 {
 		return SendError(c, fiber.StatusUnauthorized, "User not authenticated")
@@ -304,7 +304,7 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c *fiber.Ctx) error {
 	}
 
 	// Check if the user is a team admin
-	isTeamAdmin, err := core.IsTeamAdmin(c.Context(), s.sqlite, teamID, userID)
+	isTeamAdmin, err := core.IsTeamAdmin(c.RequestCtx(), s.sqlite, teamID, userID)
 	if err != nil {
 		s.log.Error("Error checking team admin status", "error", err, "team_id", teamID, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
@@ -321,7 +321,7 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c *fiber.Ctx) error {
 
 // requireTeamHasSource is a middleware that verifies if the requested team has access to the specified source.
 // This must be used after requireTeamMember to ensure team membership is already verified.
-func (s *Server) requireTeamHasSource(c *fiber.Ctx) error {
+func (s *Server) requireTeamHasSource(c fiber.Ctx) error {
 	// Extract path parameters
 	teamIDStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
@@ -338,7 +338,7 @@ func (s *Server) requireTeamHasSource(c *fiber.Ctx) error {
 	}
 
 	// Check if the team has access to the source
-	hasAccess, err := core.TeamHasSourceAccess(c.Context(), s.sqlite, teamID, sourceID)
+	hasAccess, err := core.TeamHasSourceAccess(c.RequestCtx(), s.sqlite, teamID, sourceID)
 	if err != nil {
 		s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")
@@ -354,6 +354,6 @@ func (s *Server) requireTeamHasSource(c *fiber.Ctx) error {
 }
 
 // notFoundHandler returns a standardized 404 Not Found error for API routes.
-func (s *Server) notFoundHandler(c *fiber.Ctx) error {
+func (s *Server) notFoundHandler(c fiber.Ctx) error {
 	return SendErrorWithType(c, fiber.StatusNotFound, "API route not found", models.NotFoundErrorType)
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // --- Team Management Handlers ---
@@ -14,8 +14,8 @@ import (
 // handleListTeams lists all teams.
 // URL: GET /api/v1/admin/teams
 // Requires: Admin privileges (requireAdmin middleware)
-func (s *Server) handleListTeams(c *fiber.Ctx) error {
-	teams, err := core.ListTeams(c.Context(), s.sqlite)
+func (s *Server) handleListTeams(c fiber.Ctx) error {
+	teams, err := core.ListTeams(c.RequestCtx(), s.sqlite)
 	if err != nil {
 		s.log.Error("failed to list teams", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing teams")
@@ -26,14 +26,14 @@ func (s *Server) handleListTeams(c *fiber.Ctx) error {
 // handleGetTeam retrieves details for a specific team.
 // URL: GET /api/v1/teams/:teamID
 // Requires: Team membership (requireTeamMember middleware)
-func (s *Server) handleGetTeam(c *fiber.Ctx) error {
+func (s *Server) handleGetTeam(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	team, err := core.GetTeam(c.Context(), s.sqlite, teamID)
+	team, err := core.GetTeam(c.RequestCtx(), s.sqlite, teamID)
 	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
@@ -47,16 +47,16 @@ func (s *Server) handleGetTeam(c *fiber.Ctx) error {
 // handleCreateTeam creates a new team.
 // URL: POST /api/v1/admin/teams
 // Requires: Admin privileges (requireAdmin middleware)
-func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
+func (s *Server) handleCreateTeam(c fiber.Ctx) error {
 	var req struct {
 		Name        string `json:"name"`
 		Description string `json:"description"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	team, err := core.CreateTeam(c.Context(), s.sqlite, s.log, req.Name, req.Description)
+	team, err := core.CreateTeam(c.RequestCtx(), s.sqlite, s.log, req.Name, req.Description)
 	if err != nil {
 		if errors.Is(err, core.ErrTeamAlreadyExists) {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
@@ -76,7 +76,7 @@ func (s *Server) handleCreateTeam(c *fiber.Ctx) error {
 // handleUpdateTeam updates an existing team's details.
 // URL: PUT /api/v1/teams/:teamID
 // Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)
-func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
+func (s *Server) handleUpdateTeam(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
@@ -87,7 +87,7 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 		Name        *string `json:"name"`
 		Description *string `json:"description"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
@@ -101,7 +101,7 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 	}
 
 	// Call core update function.
-	if err := core.UpdateTeam(c.Context(), s.sqlite, s.log, teamID, updateData); err != nil {
+	if err := core.UpdateTeam(c.RequestCtx(), s.sqlite, s.log, teamID, updateData); err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
@@ -116,7 +116,7 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 	}
 
 	// Fetch and return updated team.
-	updatedTeam, err := core.GetTeam(c.Context(), s.sqlite, teamID)
+	updatedTeam, err := core.GetTeam(c.RequestCtx(), s.sqlite, teamID)
 	if err != nil {
 		s.log.Error("failed to fetch updated team after successful update", "error", err, "team_id", teamID)
 		return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team updated successfully, but failed to fetch result"})
@@ -127,14 +127,14 @@ func (s *Server) handleUpdateTeam(c *fiber.Ctx) error {
 // handleDeleteTeam deletes a team.
 // URL: DELETE /api/v1/admin/teams/:teamID
 // Requires: Admin privileges (requireAdmin middleware)
-func (s *Server) handleDeleteTeam(c *fiber.Ctx) error {
+func (s *Server) handleDeleteTeam(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
 	}
 
-	if err := core.DeleteTeam(c.Context(), s.sqlite, s.log, teamID); err != nil {
+	if err := core.DeleteTeam(c.RequestCtx(), s.sqlite, s.log, teamID); err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
@@ -149,14 +149,14 @@ func (s *Server) handleDeleteTeam(c *fiber.Ctx) error {
 // handleListTeamMembers lists members of a specific team.
 // URL: GET /api/v1/teams/:teamID/members
 // Requires: Team membership (requireTeamMember middleware)
-func (s *Server) handleListTeamMembers(c *fiber.Ctx) error {
+func (s *Server) handleListTeamMembers(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
 	}
 
-	members, err := core.ListTeamMembers(c.Context(), s.sqlite, teamID)
+	members, err := core.ListTeamMembers(c.RequestCtx(), s.sqlite, teamID)
 	if err != nil {
 		s.log.Error("failed to list team members", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list team members")
@@ -167,7 +167,7 @@ func (s *Server) handleListTeamMembers(c *fiber.Ctx) error {
 // handleAddTeamMember adds a user to a team.
 // URL: POST /api/v1/teams/:teamID/members
 // Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)
-func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
+func (s *Server) handleAddTeamMember(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
@@ -178,11 +178,11 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 		UserID models.UserID   `json:"user_id"`
 		Role   models.TeamRole `json:"role"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if err := core.AddTeamMember(c.Context(), s.sqlite, s.log, teamID, req.UserID, req.Role); err != nil {
+	if err := core.AddTeamMember(c.RequestCtx(), s.sqlite, s.log, teamID, req.UserID, req.Role); err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 		}
@@ -205,7 +205,7 @@ func (s *Server) handleAddTeamMember(c *fiber.Ctx) error {
 // handleRemoveTeamMember removes a user from a team.
 // URL: DELETE /api/v1/teams/:teamID/members/:userID
 // Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)
-func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
+func (s *Server) handleRemoveTeamMember(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	memberIDStr := c.Params("userID")
 
@@ -218,7 +218,7 @@ func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid user ID: "+err.Error())
 	}
 
-	if err := core.RemoveTeamMember(c.Context(), s.sqlite, s.log, teamID, userID); err != nil {
+	if err := core.RemoveTeamMember(c.RequestCtx(), s.sqlite, s.log, teamID, userID); err != nil {
 		// Core function returns nil if member didn't exist, so only log unexpected errors.
 		s.log.Error("failed to remove team member", "error", err, "team_id", teamID, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team member")
@@ -231,7 +231,7 @@ func (s *Server) handleRemoveTeamMember(c *fiber.Ctx) error {
 // handleListTeamSources lists sources linked to a specific team, including their connection status.
 // URL: GET /api/v1/teams/:teamID/sources
 // Requires: Team membership (requireTeamMember middleware)
-func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
+func (s *Server) handleListTeamSources(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
@@ -239,7 +239,7 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 	}
 
 	// Get source info, including connection status, linked to the team using the updated core function.
-	sources, err := core.ListTeamSources(c.Context(), s.sqlite, s.datasources, s.log, teamID)
+	sources, err := core.ListTeamSources(c.RequestCtx(), s.sqlite, s.datasources, s.log, teamID)
 	if err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) {
 			// Team not found is a valid case, return empty list.
@@ -263,7 +263,7 @@ func (s *Server) handleListTeamSources(c *fiber.Ctx) error {
 // handleGetTeamSource retrieves detailed information for a specific source within a team context.
 // URL: GET /api/v1/teams/:teamID/sources/:sourceID
 // Requires: Team membership (requireTeamMember middleware)
-func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
+func (s *Server) handleGetTeamSource(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -278,7 +278,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
 
-	hasAccess, err := core.TeamHasSourceAccess(c.Context(), s.sqlite, teamID, sourceID)
+	hasAccess, err := core.TeamHasSourceAccess(c.RequestCtx(), s.sqlite, teamID, sourceID)
 	if err != nil {
 		s.log.Error("failed to check team source access", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Error checking source access")
@@ -288,7 +288,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 	}
 
 	// Use the core.GetSource which fetches details (connection, schema).
-	sourceDetails, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	sourceDetails, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -304,7 +304,7 @@ func (s *Server) handleGetTeamSource(c *fiber.Ctx) error {
 // handleLinkSourceToTeam links an existing source to a team.
 // URL: POST /api/v1/teams/:teamID/sources
 // Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)
-func (s *Server) handleLinkSourceToTeam(c *fiber.Ctx) error {
+func (s *Server) handleLinkSourceToTeam(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	teamID, err := core.ParseTeamID(idStr)
 	if err != nil {
@@ -314,7 +314,7 @@ func (s *Server) handleLinkSourceToTeam(c *fiber.Ctx) error {
 	var req struct {
 		SourceID models.SourceID `json:"source_id"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 	if req.SourceID <= 0 {
@@ -322,7 +322,7 @@ func (s *Server) handleLinkSourceToTeam(c *fiber.Ctx) error {
 	}
 
 	// Call core function to create the link.
-	if err := core.AddTeamSource(c.Context(), s.sqlite, s.log, teamID, req.SourceID); err != nil {
+	if err := core.AddTeamSource(c.RequestCtx(), s.sqlite, s.log, teamID, req.SourceID); err != nil {
 		if errors.Is(err, core.ErrTeamNotFound) || errors.Is(err, core.ErrSourceNotFound) {
 			// Return 404 if either team or source doesn't exist.
 			return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
@@ -337,7 +337,7 @@ func (s *Server) handleLinkSourceToTeam(c *fiber.Ctx) error {
 // handleUnlinkSourceFromTeam removes the link between a source and a team.
 // URL: DELETE /api/v1/teams/:teamID/sources/:sourceID
 // Requires: Team admin or global admin (requireTeamAdminOrGlobalAdmin middleware)
-func (s *Server) handleUnlinkSourceFromTeam(c *fiber.Ctx) error {
+func (s *Server) handleUnlinkSourceFromTeam(c fiber.Ctx) error {
 	idStr := c.Params("teamID")
 	sourceIDStr := c.Params("sourceID")
 
@@ -351,7 +351,7 @@ func (s *Server) handleUnlinkSourceFromTeam(c *fiber.Ctx) error {
 	}
 
 	// Call core function to remove the link.
-	if err := core.RemoveTeamSource(c.Context(), s.sqlite, s.log, teamID, sourceID); err != nil {
+	if err := core.RemoveTeamSource(c.RequestCtx(), s.sqlite, s.log, teamID, sourceID); err != nil {
 		// Core function likely doesn't error if link doesn't exist, log unexpected errors.
 		s.log.Error("failed to remove team source", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to remove team source link")

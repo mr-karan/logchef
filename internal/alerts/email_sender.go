@@ -203,7 +203,8 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 	)
 	if s.security == smtpSecurityTLS {
 		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
-		conn, err = tls.DialWithDialer(dialer, "tcp", address, tlsConfig)
+		tlsDialer := &tls.Dialer{NetDialer: dialer, Config: tlsConfig}
+		conn, err = tlsDialer.DialContext(ctx, "tcp", address)
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", address)
 	}

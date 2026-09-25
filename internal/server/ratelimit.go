@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -69,7 +69,7 @@ func (l *windowLimiter) pruneLocked(now time.Time) {
 
 // tooManyRequests writes the shared 429 response used by both limiter
 // middlewares after recording the rejection metric for scope.
-func tooManyRequests(c *fiber.Ctx, scope string) error {
+func tooManyRequests(c fiber.Ctx, scope string) error {
 	metrics.RecordRateLimitRejection(scope)
 	return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many requests, please slow down", models.ValidationErrorType)
 }
@@ -85,7 +85,7 @@ func authRateLimitMiddleware(perIPPerMinute, globalPerMinute int) fiber.Handler 
 		global = newWindowLimiter(time.Minute, globalPerMinute)
 	}
 
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		if global != nil && !global.Allow("global") {
 			return tooManyRequests(c, "auth")
 		}
@@ -103,7 +103,7 @@ func authRateLimitMiddleware(perIPPerMinute, globalPerMinute int) fiber.Handler 
 func queryRateLimitMiddleware(perUserPerMinute int) fiber.Handler {
 	perUser := newWindowLimiter(time.Minute, perUserPerMinute)
 
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		key := c.IP()
 		if user, ok := c.Locals("user").(*models.User); ok && user != nil {
 			key = "user:" + strconv.Itoa(int(user.ID))
