@@ -19,8 +19,9 @@ host = "0.0.0.0"
 http_server_timeout = "15m"
 # Secure cookie flag (set to false for local HTTP development).
 secure_cookie = false
-# Frontend URL for auth redirects and UI links is managed in the Admin UI.
-# For first boot with a separate frontend origin, set LOGCHEF_SERVER__FRONTEND_URL.
+# Public URL of the web UI (auth redirects, share links, and the subpath when
+# served under one, e.g. https://example.com/logchef) is managed in the Admin UI.
+# For first boot, set LOGCHEF_SERVER__FRONTEND_URL.
 
 # -----------------------------------------------------------------------------
 # Public demo safety (optional)

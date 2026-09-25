@@ -56,7 +56,7 @@ Key areas of the docs:
 - Features: collections/saved queries, dashboards, alerting, AI SQL generation, user management, service tokens, and declarative provisioning.
 - Integration: CLI, MCP server (for AI assistants), and schema design guidance.
 - Tutorials: connecting VictoriaLogs, ingesting via Vector/OTEL, and a worked NGINX logs example.
-- Operations: database backends (SQLite vs Postgres) and the Prometheus metrics reference.`,
+- Operations: database backends (SQLite vs Postgres), reverse proxy and subpath setup, and the Prometheus metrics reference.`,
           optionalLinks: [
             {
               label: "GitHub repository",
@@ -239,6 +239,7 @@ Key areas of the docs:
           label: "Operations",
           items: [
             { label: "Database & High Availability", link: "/operations/database-backends" },
+            { label: "Reverse Proxy", link: "/operations/reverse-proxy" },
             { label: "Metrics Reference", link: "/operations/metrics" },
             { label: "Contributing", link: "/contributing/setup" },
           ],
