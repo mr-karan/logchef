@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/url"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -177,6 +178,33 @@ func (s *ServerConfig) IsSecureCookie() bool {
 		return true
 	}
 	return *s.SecureCookie
+}
+
+// BasePath returns the URL path the web UI is served under: the path of
+// FrontendURL with a leading and trailing slash, or "/" when FrontendURL has
+// no path. A reverse proxy serving Logchef under this path must strip it
+// before forwarding requests.
+func (s *ServerConfig) BasePath() string {
+	u, err := url.Parse(s.FrontendURL)
+	if err != nil {
+		// Unreachable: validateConfig and the settings API reject unparseable URLs.
+		return "/"
+	}
+	p := strings.Trim(u.EscapedPath(), "/")
+	if p == "" {
+		return "/"
+	}
+	return "/" + p + "/"
+}
+
+// CookiePath returns the Path attribute for auth cookies: BasePath without its
+// trailing slash, so a Logchef on a shared domain does not send its session
+// cookie to other applications on that domain.
+func (s *ServerConfig) CookiePath() string {
+	if p := s.BasePath(); p != "/" {
+		return strings.TrimSuffix(p, "/")
+	}
+	return "/"
 }
 
 // DatabaseConfig selects which metadata backend logchef uses.
@@ -520,6 +548,10 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 
 	if err := validateTrustedProxies(cfg.Server.TrustedProxies); err != nil {
 		return err
+	}
+
+	if _, err := url.Parse(cfg.Server.FrontendURL); err != nil {
+		return fmt.Errorf("server.frontend_url is not a valid URL: %w", err)
 	}
 
 	// Validate required configurations

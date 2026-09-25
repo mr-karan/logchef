@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Serve Logchef under a subpath** behind a reverse proxy, such as
+  `https://example.com/logchef/`. Set `server.frontend_url` to the public URL,
+  including the subpath, and have the proxy remove the prefix. The new
+  Operations → Reverse Proxy page has nginx, Caddy, and Traefik examples
+  ([#108](https://github.com/mr-karan/logchef/issues/108)).
+
+### Changed
+- Auth cookies use the path of `server.frontend_url`. Deployments at `/` are
+  unchanged.
+- `logchef open` keeps the path of the server URL, so it works with a subpath.
+
 ## [2.1.0] - 2026-09-24
 
 Logchef 2.1 makes the Explorer usable on sources with hundreds or thousands of
