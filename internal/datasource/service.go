@@ -492,7 +492,7 @@ func (s *Service) GetSourceHealth(ctx context.Context, sourceID models.SourceID)
 
 	provider, err := s.ProviderForSource(source)
 	if err != nil {
-		return models.SourceHealth{
+		return models.SourceHealth{ //nolint:nilerr // an unknown provider is reported as an unhealthy status, not a request error
 			SourceID:    sourceID,
 			Status:      models.HealthStatusUnhealthy,
 			Error:       err.Error(),

@@ -124,7 +124,7 @@ func TestHandleCreateDashboardValidation(t *testing.T) {
 
 func tooManyPanelsBody() string {
 	panels := make([]string, 0, 25)
-	for i := 0; i < 25; i++ {
+	for i := range 25 {
 		panels = append(panels, `{"id":"p`+strconv.Itoa(i)+`","type":"stat","team_id":1,"source_id":1,"query_language":"logchefql"}`)
 	}
 	return `{"name":"x","panels":{"version":1,"layout":[],"panels":[` + strings.Join(panels, ",") + `]}}`

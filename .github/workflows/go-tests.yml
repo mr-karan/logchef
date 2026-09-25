@@ -130,9 +130,11 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          # Pinned: each release can add checks that fail CI with no code change.
+          # `just lint` refuses to run with a different local version.
+          version: v2.14.0
 
   sqlc:
     runs-on: ubuntu-latest

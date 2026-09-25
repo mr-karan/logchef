@@ -245,8 +245,7 @@ func (s *Server) handleHistogramError(c *fiber.Ctx, sourceID models.SourceID, er
 	if errors.Is(err, models.ErrHistogramBudgetExceeded) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	var admissionErr *QueryAdmissionError
-	if errors.As(err, &admissionErr) {
+	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
 	if errors.Is(err, core.ErrSourceNotFound) {

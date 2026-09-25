@@ -50,7 +50,7 @@ func parseAndValidateSavedQueryContent(contentJSON string) (*models.SavedQueryCo
 
 	var queryContent models.SavedQueryContent
 	if err := json.Unmarshal([]byte(contentJSON), &queryContent); err != nil {
-		return nil, fmt.Errorf("%w: failed to parse JSON: %v", ErrInvalidQueryContent, err)
+		return nil, fmt.Errorf("%w: failed to parse JSON: %w", ErrInvalidQueryContent, err)
 	}
 
 	if queryContent.Version <= 0 {
@@ -146,11 +146,11 @@ func ValidateContentMatchesLanguage(content string, language models.QueryLanguag
 func resolveSavedQueryMetadata(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, queryLanguage models.QueryLanguage, editorMode models.SavedQueryEditorMode) (models.QueryLanguage, models.SavedQueryEditorMode, error) {
 	normalizedLanguage, normalizedMode, err := models.ResolveSavedQueryMetadata(queryLanguage, editorMode)
 	if err != nil {
-		return "", "", fmt.Errorf("%w: %s", ErrInvalidQueryDefinition, err)
+		return "", "", fmt.Errorf("%w: %w", ErrInvalidQueryDefinition, err)
 	}
 	if ds != nil {
 		if err := ds.ValidateSavedQuerySupport(ctx, sourceID, normalizedLanguage, normalizedMode); err != nil {
-			return "", "", fmt.Errorf("%w: %s", ErrUnsupportedSavedQueryDefinition, err)
+			return "", "", fmt.Errorf("%w: %w", ErrUnsupportedSavedQueryDefinition, err)
 		}
 	}
 	return normalizedLanguage, normalizedMode, nil

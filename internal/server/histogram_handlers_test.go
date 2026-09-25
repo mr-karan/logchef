@@ -80,8 +80,7 @@ func TestHistogramAdmissionLifecycle(t *testing.T) {
 			}
 			t.Cleanup(func() { queryTracker.RemoveQuery(queryID) })
 			_, err = s.executeHistogram(context.Background(), tc.class, userID, teamID, sourceID, params)
-			var admissionErr *QueryAdmissionError
-			if !errors.As(err, &admissionErr) {
+			if _, ok := errors.AsType[*QueryAdmissionError](err); !ok {
 				t.Fatalf("%s class did not bound itself: %v", tc.class, err)
 			}
 		})
@@ -111,7 +110,7 @@ func TestHistogramErrorResponses(t *testing.T) {
 			app := fiber.New()
 			s := &Server{}
 			app.Get("/", func(c *fiber.Ctx) error { return s.handleHistogramError(c, 1, tc.err) })
-			response, err := app.Test(httptest.NewRequest("GET", "/", http.NoBody))
+			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/", http.NoBody))
 			if err != nil {
 				t.Fatal(err)
 			}

@@ -141,24 +141,38 @@ func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (s
 		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
 	}
 
-	schemaJSON = formatSchemaForAI(source)
+	schemaJSON, err = formatSchemaForAI(source)
+	if err != nil {
+		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to encode source schema", models.GeneralErrorType)
+	}
 	tableName = source.GetFullTableName()
 	return source, schemaJSON, tableName, nil
 }
 
-func formatSchemaForAI(source *models.Source) string {
-	columns := make([]map[string]interface{}, 0, len(source.Columns))
+// aiSchemaEntry is one column, or the sort-key note, in the schema sent to the AI.
+type aiSchemaEntry struct {
+	Name string   `json:"name"`
+	Type string   `json:"type,omitempty"`
+	Keys []string `json:"keys,omitempty"`
+	Note string   `json:"note,omitempty"`
+}
+
+func formatSchemaForAI(source *models.Source) (string, error) {
+	columns := make([]aiSchemaEntry, 0, len(source.Columns)+1)
 	for _, col := range source.Columns {
-		columns = append(columns, map[string]interface{}{"name": col.Name, "type": col.Type})
+		columns = append(columns, aiSchemaEntry{Name: col.Name, Type: col.Type})
 	}
 	if len(source.SortKeys) > 0 {
-		columns = append(columns, map[string]interface{}{
-			"name": "_sort_keys", "keys": source.SortKeys,
-			"note": "The columns above are sort keys. Queries filtered by these columns will be faster.",
+		columns = append(columns, aiSchemaEntry{
+			Name: "_sort_keys", Keys: source.SortKeys,
+			Note: "The columns above are sort keys. Queries filtered by these columns will be faster.",
 		})
 	}
-	schemaJSON, _ := json.MarshalIndent(columns, "", "  ")
-	return string(schemaJSON)
+	schemaJSON, err := json.MarshalIndent(columns, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("encoding AI schema: %w", err)
+	}
+	return string(schemaJSON), nil
 }
 
 func (s *Server) callAIToGenerateSQL(ctx context.Context, req models.GenerateSQLRequest, target ai.TargetLanguage, schemaJSON, tableName string) (string, error) {

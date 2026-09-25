@@ -130,12 +130,10 @@ func (e *dashboardStreamError) Unwrap() error { return e.err }
 // writeDashboardStreamError preserves the streaming response, including any
 // partial rows, without executing the failed query again.
 func writeDashboardStreamError(c *fiber.Ctx, err error) error {
-	var admissionErr *QueryAdmissionError
-	if errors.As(err, &admissionErr) {
+	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
-	var streamErr *dashboardStreamError
-	if errors.As(err, &streamErr) {
+	if streamErr, ok := errors.AsType[*dashboardStreamError](err); ok {
 		c.Set("X-LogChef-Query-ID", streamErr.queryID)
 		c.Set(fiber.HeaderContentType, "application/json; charset=utf-8")
 		return c.Status(fiber.StatusOK).Send(streamErr.body)

@@ -36,7 +36,7 @@ func TestWindowLimiterIsolatesKeys(t *testing.T) {
 
 func TestWindowLimiterEmptyKeyAlwaysAllowed(t *testing.T) {
 	l := newWindowLimiter(time.Minute, 1)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if !l.Allow("") {
 			t.Fatalf("empty key rejected on request %d", i)
 		}

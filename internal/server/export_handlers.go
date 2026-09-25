@@ -165,8 +165,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 		s.config.Export.MaxConcurrentGlobal,
 	); err != nil {
 		cancel()
-		var admissionErr *QueryAdmissionError
-		if errors.As(err, &admissionErr) {
+		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)

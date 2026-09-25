@@ -89,8 +89,7 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 	)
 	if err != nil {
 		cancel()
-		var admissionErr *QueryAdmissionError
-		if errors.As(err, &admissionErr) {
+		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track tail query", models.GeneralErrorType)
@@ -351,10 +350,7 @@ func (l *tailRateLimiter) admit(n int) (allowed, dropped int) {
 		l.emitted = 0
 		l.noticeSent = false
 	}
-	remaining := l.maxPerSec - l.emitted
-	if remaining < 0 {
-		remaining = 0
-	}
+	remaining := max(l.maxPerSec-l.emitted, 0)
 	if n <= remaining {
 		l.emitted += n
 		return n, 0

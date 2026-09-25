@@ -92,7 +92,7 @@ func TestQueryLogsEnforcesResponseByteBudget(t *testing.T) {
 		bigMsg[i] = 'x'
 	}
 	body := ""
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		body += `{"_time":"2026-04-08T10:0` + string(rune('0'+i)) + `:00Z","_msg":"` + string(bigMsg) + `"}` + "\n"
 	}
 

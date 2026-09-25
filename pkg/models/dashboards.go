@@ -356,7 +356,7 @@ func validateDashboardLayoutEntries(layout []dashboardPanelLayout) (map[string]s
 
 	// No two panels may occupy overlapping grid cells. O(n^2) is fine given
 	// MaxDashboardPanels.
-	for i := 0; i < len(layout); i++ {
+	for i := range layout {
 		for j := i + 1; j < len(layout); j++ {
 			if layoutRectsOverlap(layout[i], layout[j]) {
 				return nil, fmt.Errorf("layout %q and %q overlap", layout[i].ID, layout[j].ID)

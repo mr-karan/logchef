@@ -95,7 +95,7 @@ func (s *Server) handleCreateUser(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrUserAlreadyExists) {
 			return SendError(c, fiber.StatusConflict, err.Error())
 		}
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 
@@ -150,7 +150,7 @@ func (s *Server) handleUpdateUser(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrUserAlreadyExists) {
 			return SendError(c, fiber.StatusConflict, err.Error())
 		}
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 
@@ -302,7 +302,7 @@ func (s *Server) handleCreateAPIToken(c *fiber.Ctx) error {
 	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, req.Name, req.ExpiresAt, req.Scopes)
 	if err != nil {
 		// Handle specific error types from core
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 
@@ -369,7 +369,7 @@ func (s *Server) handleCreateServiceAccount(c *fiber.Ctx) error {
 
 	account, err := core.CreateServiceAccount(c.Context(), s.sqlite, s.log, req.Name)
 	if err != nil {
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 		s.log.Error("failed to create service account", "error", err)
@@ -434,7 +434,7 @@ func (s *Server) handleCreateServiceAccountToken(c *fiber.Ctx) error {
 
 	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, account.ID, req.Name, req.ExpiresAt, req.Scopes)
 	if err != nil {
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 		s.log.Error("failed to create service account token", "error", err, "user_id", account.ID)
@@ -472,7 +472,7 @@ func (s *Server) handleAddServiceAccountToTeam(c *fiber.Ctx) error {
 		req.Role = models.TeamRoleMember
 	}
 	if err := core.AddTeamMember(c.Context(), s.sqlite, s.log, req.TeamID, account.ID, req.Role); err != nil {
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 		if errors.Is(err, core.ErrTeamNotFound) {
@@ -564,7 +564,7 @@ func (s *Server) handleUpdateUserPreferences(c *fiber.Ctx) error {
 
 	preferences, err := core.UpdateUserPreferences(c.Context(), s.sqlite, user.ID, req)
 	if err != nil {
-		if valErr, ok := err.(*core.ValidationError); ok {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
 
