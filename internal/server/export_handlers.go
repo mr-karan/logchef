@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -42,7 +42,7 @@ type exportLogsRequest struct {
 	Variables    []models.TemplateVariable `json:"variables,omitempty"`
 }
 
-func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
+func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
@@ -59,7 +59,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 	// Gate exports behind the source capability before doing any work or
 	// touching the ClickHouse connection. Non-supporting sources (e.g.
 	// VictoriaLogs) get a clean 400 instead of an opaque connection error.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -72,7 +72,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 	}
 
 	var req exportLogsRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
@@ -152,7 +152,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 	}
 
 	queryID := uuid.New().String()
-	streamCtx, cancel := context.WithCancel(c.Context())
+	streamCtx, cancel := context.WithCancel(c.RequestCtx())
 	if err := queryTracker.StartQueryWithID(
 		queryID,
 		QueryClassExport,
@@ -190,7 +190,7 @@ func (s *Server) handleExportLogs(c *fiber.Ctx) error { //nolint:gocyclo // requ
 	c.Set("X-LogChef-Query-ID", queryID)
 	c.Set("X-LogChef-Limit-Applied", strconv.Itoa(buildResult.AppliedLimit))
 
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
 

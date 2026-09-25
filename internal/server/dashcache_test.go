@@ -11,7 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/valyala/fasthttp"
 
 	"github.com/mr-karan/logchef/internal/cache"
@@ -28,7 +28,7 @@ func newDashboardCacheTestServer(t *testing.T, enabled bool) *Server {
 	return &Server{dashCache: c}
 }
 
-func newDashboardCacheTestContext() (c *fiber.Ctx, release func()) {
+func newDashboardCacheTestContext() (c fiber.Ctx, release func()) {
 	app := fiber.New()
 	var req fasthttp.Request
 	var ctx fasthttp.RequestCtx

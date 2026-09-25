@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
@@ -109,7 +109,7 @@ func TestHistogramErrorResponses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			app := fiber.New()
 			s := &Server{}
-			app.Get("/", func(c *fiber.Ctx) error { return s.handleHistogramError(c, 1, tc.err) })
+			app.Get("/", func(c fiber.Ctx) error { return s.handleHistogramError(c, 1, tc.err) })
 			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/", http.NoBody))
 			if err != nil {
 				t.Fatal(err)

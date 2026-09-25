@@ -21,11 +21,11 @@ import (
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/compress"
-	"github.com/gofiber/fiber/v2/middleware/filesystem"
-	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/gofiber/swagger" // Swagger handler
+	"github.com/gofiber/contrib/v3/swaggo"
+	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/compress"
+	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
+	"github.com/gofiber/fiber/v3/middleware/static"
 
 	// Import generated docs (will be created after running swag init)
 	_ "github.com/mr-karan/logchef/docs"
@@ -91,27 +91,25 @@ func New(opts ServerOptions) *Server {
 
 	// Initialize Fiber app with custom error handler.
 	app := fiber.New(fiber.Config{
-		AppName:               "Logchef API v1",
-		DisableStartupMessage: true, // Avoid default Fiber banner.
-		ReadTimeout:           opts.Config.Server.HTTPServerTimeout,
-		WriteTimeout:          opts.Config.Server.HTTPServerTimeout,
-		IdleTimeout:           30 * time.Second, // Free idle keep-alive connection buffers quickly
+		AppName:      "Logchef API v1",
+		ReadTimeout:  opts.Config.Server.HTTPServerTimeout,
+		WriteTimeout: opts.Config.Server.HTTPServerTimeout,
+		IdleTimeout:  30 * time.Second, // Free idle keep-alive connection buffers quickly
 		// Request bodies here are queries and small JSON payloads, never bulk
 		// data, so a few MB is generous. This is a coarse transport-level
 		// backstop; the LogchefQL parser additionally enforces its own
 		// (much smaller) query length/nesting limits regardless of this cap.
 		BodyLimit: 4 * 1024 * 1024, // 4MB
-		// Client-IP resolution behind a reverse proxy. The check is always on:
-		// with an empty TrustedProxies list Fiber returns the direct peer IP
-		// (default/current behavior); it reads ProxyHeader only when the direct
-		// peer is a configured trusted proxy, so an untrusted caller can't spoof
-		// it. EnableIPValidation makes c.IP() return the first *valid* header
-		// entry (falling back to the peer) rather than the raw header string.
-		EnableTrustedProxyCheck: true,
-		TrustedProxies:          opts.Config.Server.TrustedProxies,
-		ProxyHeader:             opts.Config.Server.ProxyHeader,
-		EnableIPValidation:      true,
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
+		// Client-IP resolution behind a reverse proxy. With an empty
+		// trusted_proxies list Fiber returns the direct peer IP; it reads
+		// ProxyHeader only when the direct peer is a configured trusted proxy,
+		// so an untrusted caller can't spoof it. EnableIPValidation makes c.IP()
+		// skip invalid header entries, reading the chain right to left.
+		TrustProxy:         true,
+		TrustProxyConfig:   fiber.TrustProxyConfig{Proxies: opts.Config.Server.TrustedProxies},
+		ProxyHeader:        opts.Config.Server.ProxyHeader,
+		EnableIPValidation: true,
+		ErrorHandler: func(c fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
 			if e, ok := errors.AsType[*fiber.Error](err); ok {
 				code = e.Code // Use Fiber's error code if available.
@@ -128,7 +126,7 @@ func New(opts ServerOptions) *Server {
 	app.Use(compress.New(compress.Config{
 		// SSE streams (live tail) must not be buffered/compressed: the compressor
 		// holds the whole body, which never completes for an open stream.
-		Next: func(c *fiber.Ctx) bool {
+		Next: func(c fiber.Ctx) bool {
 			return strings.HasSuffix(c.Path(), "/logs/tail")
 		},
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
@@ -181,7 +179,7 @@ func New(opts ServerOptions) *Server {
 func recoverMiddleware(log *slog.Logger) fiber.Handler {
 	return fiberrecover.New(fiberrecover.Config{
 		EnableStackTrace: true,
-		StackTraceHandler: func(c *fiber.Ctx, panicValue any) {
+		StackTraceHandler: func(c fiber.Ctx, panicValue any) {
 			log.Error("panic recovered",
 				"path", c.Path(),
 				"method", c.Method(),
@@ -195,7 +193,7 @@ func recoverMiddleware(log *slog.Logger) fiber.Handler {
 // setupRoutes configures all API endpoints, applying necessary middleware.
 func (s *Server) setupRoutes() {
 	// Swagger documentation route
-	s.app.Get("/swagger/*", swagger.HandlerDefault)
+	s.app.Get("/swagger/*", swaggo.New())
 
 	// Metrics endpoint
 	s.app.Get("/metrics", metrics.MetricsHandler())
@@ -203,27 +201,25 @@ func (s *Server) setupRoutes() {
 	api := s.app.Group("/api/v1")
 
 	// Build rate-limit middleware once so limiter state persists across
-	// requests. When disabled, both helpers below register no middleware.
+	// requests. When disabled, registerLimited adds no middleware.
 	var authLimiter, queryLimiter fiber.Handler
 	if s.config.RateLimit.Enabled {
 		authLimiter = authRateLimitMiddleware(s.config.RateLimit.AuthPerIPPerMinute, s.config.RateLimit.AuthGlobalPerMinute)
 		queryLimiter = queryRateLimitMiddleware(s.config.RateLimit.QueryPerUserPerMinute)
 	}
-	// withAuthLimit / withQueryLimit prepend the relevant limiter to a route's
-	// handler chain when limiting is enabled, and are no-ops otherwise. The
-	// query limiter runs after the group-level requireAuth, so the user context
-	// is populated when it computes its per-user key.
-	withAuthLimit := func(handlers ...fiber.Handler) []fiber.Handler {
-		if authLimiter != nil {
-			return append([]fiber.Handler{authLimiter}, handlers...)
+	// registerLimited prepends the limiter to a route's handler chain when
+	// limiting is enabled. The query limiter runs after the group-level
+	// requireAuth, so the user context is populated when it computes its
+	// per-user key. Fiber v3 takes the first handler as its own argument.
+	registerLimited := func(router fiber.Router, method, path string, limiter fiber.Handler, handlers ...fiber.Handler) {
+		chain := make([]any, 0, len(handlers)+1)
+		if limiter != nil {
+			chain = append(chain, limiter)
 		}
-		return handlers
-	}
-	withQueryLimit := func(handlers ...fiber.Handler) []fiber.Handler {
-		if queryLimiter != nil {
-			return append([]fiber.Handler{queryLimiter}, handlers...)
+		for _, handler := range handlers {
+			chain = append(chain, handler)
 		}
-		return handlers
+		router.Add([]string{method}, path, chain[0], chain[1:]...)
 	}
 
 	// --- Public Routes ---
@@ -234,13 +230,13 @@ func (s *Server) setupRoutes() {
 	// --- Authentication Routes ---
 	// The unauthenticated auth/token endpoints are rate-limited per client IP
 	// (plus an optional global cap) to blunt credential-stuffing / brute force.
-	api.Get("/auth/login", withAuthLimit(s.handleLogin)...)
-	api.Post("/auth/local/login", withAuthLimit(s.handleLocalLogin)...)
-	api.Get("/auth/callback", withAuthLimit(s.handleCallback)...)
+	registerLimited(api, fiber.MethodGet, "/auth/login", authLimiter, s.handleLogin)
+	registerLimited(api, fiber.MethodPost, "/auth/local/login", authLimiter, s.handleLocalLogin)
+	registerLimited(api, fiber.MethodGet, "/auth/callback", authLimiter, s.handleCallback)
 	api.Post("/auth/logout", s.handleLogout)
 
 	// --- CLI Authentication ---
-	api.Post("/cli/token", withAuthLimit(s.handleCLITokenExchange)...)
+	registerLimited(api, fiber.MethodPost, "/cli/token", authLimiter, s.handleCLITokenExchange)
 
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetCurrentUser)
@@ -386,7 +382,7 @@ func (s *Server) setupRoutes() {
 	// Query and explore logs. The heavy query/exploration endpoints are
 	// rate-limited per authenticated user (queryLimiter runs after the group's
 	// requireAuth, so the user context is available).
-	teamSourceOps.Post("/logs/query", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)...)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/query", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
 	teamSourceOps.Get("/logs/tail", s.requireTokenScope(models.TokenScopeLogsRead), s.handleTailLogs)
 	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
 	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
@@ -394,7 +390,7 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
 	teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
 	teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
-	teamSourceOps.Post("/logs/histogram", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)...)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/histogram", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
 	teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
 	teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
 	teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
@@ -405,8 +401,8 @@ func (s *Server) setupRoutes() {
 	teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 	// Field value exploration for sidebar
-	teamSourceOps.Get("/fields/values", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)...)         // Get all LowCardinality field values
-	teamSourceOps.Get("/fields/:fieldName/values", withQueryLimit(s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues)...) // Get values for a specific field
+	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
+	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin
@@ -435,18 +431,25 @@ func (s *Server) setupRoutes() {
 
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
-	s.app.Use("/assets", filesystem.New(filesystem.Config{
-		Root:       s.fs,
-		PathPrefix: "assets",
-		Browse:     false,
-		MaxAge:     86400,
+	// Embedded files have no modification time. Drop the zero Last-Modified
+	// header so browsers do not revalidate against year 1 and get 304 forever.
+	dropLastModified := func(c fiber.Ctx) error {
+		c.Response().Header.Del(fiber.HeaderLastModified)
+		return nil
+	}
+	s.app.Use("/assets", static.New("assets", static.Config{
+		FS:             httpFSAdapter{s.fs},
+		Browse:         false,
+		MaxAge:         86400,
+		ModifyResponse: dropLastModified,
 	}))
 	// Files at the UI root (logo.svg, ...). "/" and "/index.html" skip this so
 	// they get the rendered index.html from handleIndex.
-	s.app.Use("/", filesystem.New(filesystem.Config{
-		Root:   s.fs,
-		Browse: false,
-		Next: func(c *fiber.Ctx) bool {
+	s.app.Use("/", static.New("", static.Config{
+		FS:             httpFSAdapter{s.fs},
+		Browse:         false,
+		ModifyResponse: dropLastModified,
+		Next: func(c fiber.Ctx) bool {
 			return c.Path() == "/" || c.Path() == "/index.html"
 		},
 	}))
@@ -458,7 +461,7 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 	s.log.Info("starting http server", "address", addr)
-	return s.app.Listen(addr)
+	return s.app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true})
 }
 
 // Shutdown gracefully shuts down the Fiber server within the given context timeout.

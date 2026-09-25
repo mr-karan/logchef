@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -16,7 +16,7 @@ import (
 // Runs after auth middleware so user context is available.
 // See: https://stripe.com/blog/canonical-log-lines
 func requestLogger(log *slog.Logger) fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		// Skip noisy paths
 		path := c.Path()
 		if strings.HasPrefix(path, "/api/v1/health") ||

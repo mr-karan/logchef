@@ -4,7 +4,7 @@ import (
 	"crypto/subtle"
 	"regexp"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -20,7 +20,7 @@ var publicDemoQueryPath = regexp.MustCompile(`^/api/v1/teams/[^/]+/sources/[^/]+
 // public demo mode. Query endpoints remain POST because their bodies contain
 // queries, but they do not mutate Logchef metadata or the underlying log
 // stores. Authentication login/logout must also remain available.
-func (s *Server) enforceDemoReadOnly(c *fiber.Ctx) error {
+func (s *Server) enforceDemoReadOnly(c fiber.Ctx) error {
 	if s.config == nil || !s.config.Demo.ReadOnly {
 		return c.Next()
 	}

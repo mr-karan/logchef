@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/core"
@@ -18,7 +18,7 @@ import (
 )
 
 // handleGenerateAISQL handles the generation of SQL from natural language queries
-func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
+func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 	if err := s.validateAIConfig(); err != nil {
 		return err(c)
 	}
@@ -33,7 +33,7 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized", models.AuthenticationErrorType)
 	}
 
-	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, teamID, sourceID)
+	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.RequestCtx(), s.sqlite, s.log, user.ID, teamID, sourceID)
 	if accessErr != nil {
 		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
 	}
@@ -42,7 +42,7 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 	}
 
 	var req models.GenerateSQLRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, http.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 	if req.NaturalLanguageQuery == "" {
@@ -58,7 +58,7 @@ func (s *Server) handleGenerateAISQL(c *fiber.Ctx) error {
 	// and the editor mode. The model never chooses the backend.
 	target := deriveAITarget(source.SourceType, req.Mode)
 
-	generatedQuery, err := s.callAIToGenerateSQL(c.Context(), req, target, schemaJSON, tableName)
+	generatedQuery, err := s.callAIToGenerateSQL(c.RequestCtx(), req, target, schemaJSON, tableName)
 	if err != nil {
 		return err
 	}
@@ -88,23 +88,23 @@ func deriveAITarget(sourceType models.SourceType, mode string) ai.TargetLanguage
 	return ai.TargetClickHouseSQL
 }
 
-func (s *Server) validateAIConfig() func(*fiber.Ctx) error {
+func (s *Server) validateAIConfig() func(fiber.Ctx) error {
 	if !s.config.AI.Enabled {
-		return func(c *fiber.Ctx) error {
+		return func(c fiber.Ctx) error {
 			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not enabled", models.GeneralErrorType)
 		}
 	}
 	// The openai provider (default) requires an API key; the bedrock provider
 	// authenticates via the AWS credential chain instead.
 	if (s.config.AI.Provider == "" || s.config.AI.Provider == ai.ProviderOpenAI) && s.config.AI.APIKey == "" {
-		return func(c *fiber.Ctx) error {
+		return func(c fiber.Ctx) error {
 			return SendErrorWithType(c, http.StatusServiceUnavailable, "AI SQL generation is not configured (missing API key)", models.GeneralErrorType)
 		}
 	}
 	return nil
 }
 
-func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamID, error) {
+func (s *Server) parseSourceTeamIDs(c fiber.Ctx) (models.SourceID, models.TeamID, error) {
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
@@ -116,8 +116,8 @@ func (s *Server) parseSourceTeamIDs(c *fiber.Ctx) (models.SourceID, models.TeamI
 	return sourceID, teamID, nil
 }
 
-func (s *Server) getSourceSchemaForAI(c *fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.Context(), s.datasources, sourceID)
+func (s *Server) getSourceSchemaForAI(c fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
+	source, err = core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)

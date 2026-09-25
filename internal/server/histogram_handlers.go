@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
@@ -27,7 +27,7 @@ const HistogramTimeout = 30 * time.Second
 
 // handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
+func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -36,7 +36,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 
 	// Parse request body containing time range, window, groupBy and optional filter query
 	var req models.APIHistogramRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
@@ -70,7 +70,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 	// is a cache candidate. Any source/team resolution hiccup just falls through
 	// to the uncached path below. Explorer requests carry no directive.
 	if effTTL, ok := s.dashboardCacheParams(req.Cache); ok {
-		if source, serr := core.GetSource(c.Context(), s.datasources, sourceID); serr == nil {
+		if source, serr := core.GetSource(c.RequestCtx(), s.datasources, sourceID); serr == nil {
 			if teamID, terr := core.ParseTeamID(c.Params("teamID")); terr == nil {
 				key := dashcache.ComputeKey(dashcache.KeyInput{
 					EndpointKind:     "histogram",
@@ -109,7 +109,7 @@ func (s *Server) handleGetHistogram(c *fiber.Ctx) error {
 
 	// Execute histogram query via core function, bounded by HistogramTimeout so
 	// a slow/misbehaving datasource can't hang the request indefinitely.
-	ctx, cancel := context.WithTimeout(c.Context(), HistogramTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), HistogramTimeout)
 	defer cancel()
 
 	result, err := s.executeHistogram(ctx, QueryClassHistogram, userID, teamID, sourceID, params)
@@ -235,7 +235,7 @@ func buildHistogramParams(req models.APIHistogramRequest, processedQuery string)
 
 // handleHistogramError maps a core.GetHistogramData error to the appropriate
 // HTTP error response.
-func (s *Server) handleHistogramError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
+func (s *Server) handleHistogramError(c fiber.Ctx, sourceID models.SourceID, err error) error {
 	if errors.Is(err, context.Canceled) {
 		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 	}

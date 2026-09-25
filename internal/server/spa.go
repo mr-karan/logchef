@@ -5,15 +5,24 @@ import (
 	"fmt"
 	"html"
 	"io"
+	"io/fs"
 	"net/http"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // baseHrefTag is the <base> tag in frontend/index.html. The UI builds every
 // asset, API, and router URL relative to it, so rewriting its href to the
 // configured base path is all it takes to serve the UI under a subpath.
 const baseHrefTag = `<base href="/" />`
+
+// httpFSAdapter lets Fiber's static middleware serve the same embedded
+// http.FileSystem used to load and rewrite the SPA entrypoint.
+type httpFSAdapter struct{ http.FileSystem }
+
+func (a httpFSAdapter) Open(name string) (fs.File, error) {
+	return a.FileSystem.Open(name)
+}
 
 // loadIndexHTML reads index.html from the embedded UI and sets its <base href>
 // to basePath.
@@ -41,7 +50,7 @@ func renderIndexHTML(index []byte, basePath string) ([]byte, error) {
 
 // handleIndex serves the rendered index.html for "/" and every client-side
 // route, so deep links load the SPA.
-func (s *Server) handleIndex(c *fiber.Ctx) error {
+func (s *Server) handleIndex(c fiber.Ctx) error {
 	if s.indexHTML == nil {
 		return fiber.ErrNotFound
 	}

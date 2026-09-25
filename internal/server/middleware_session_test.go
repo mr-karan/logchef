@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
@@ -39,7 +39,7 @@ func newSessionTestServer(t *testing.T, db *sqlite.DB) *fiber.App {
 		config: &config.Config{},
 	}
 	app := fiber.New()
-	app.Get("/protected", s.requireAuth, func(c *fiber.Ctx) error {
+	app.Get("/protected", s.requireAuth, func(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusOK)
 	})
 	return app

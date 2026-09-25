@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/knadh/koanf/parsers/toml"
-	"github.com/knadh/koanf/providers/env"
+	"github.com/knadh/koanf/parsers/toml/v2"
+	"github.com/knadh/koanf/providers/env/v2"
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 )
@@ -454,12 +454,13 @@ func Load(path string) (*Config, error) {
 
 	// Load environment variables with the prefix LOGCHEF_.
 	// Env vars will override values from the config file if they exist.
-	envCb := func(s string) string {
-		// LOGCHEF_SERVER__PORT -> server.port
-		return strings.ReplaceAll(strings.ToLower(
-			strings.TrimPrefix(s, envPrefix)), "__", ".")
-	}
-	if err := k.Load(env.Provider(envPrefix, ".", envCb), nil); err != nil {
+	if err := k.Load(env.Provider(".", env.Opt{
+		Prefix: envPrefix,
+		TransformFunc: func(key, value string) (string, any) {
+			// LOGCHEF_SERVER__PORT -> server.port
+			return strings.ReplaceAll(strings.ToLower(strings.TrimPrefix(key, envPrefix)), "__", "."), value
+		},
+	}), nil); err != nil {
 		// If loading env vars fails, it's a more critical issue for config setup.
 		log.Printf("error loading config from environment variables: %v", err)
 		return nil, err

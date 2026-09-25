@@ -81,7 +81,9 @@ func TestSPAServesIndexWithConfiguredBaseHref(t *testing.T) {
 	}
 }
 
-func TestSPAServesStaticFilesAndKeepsAPINotFound(t *testing.T) {
+// Routes and files registered before the SPA fallback must not be answered
+// with index.html.
+func TestSPAFallbackDoesNotShadowOtherRoutes(t *testing.T) {
 	t.Parallel()
 	s := newSPATestServer(t, "https://example.com/logchef")
 
@@ -93,6 +95,7 @@ func TestSPAServesStaticFilesAndKeepsAPINotFound(t *testing.T) {
 		{"/logo.svg", http.StatusOK, "<svg/>"},
 		{"/assets/app.js", http.StatusOK, "console.log(1)"},
 		{"/api/v1/does-not-exist", http.StatusNotFound, `"status":"error"`},
+		{"/metrics", http.StatusOK, "go_goroutines"},
 	} {
 		status, body := getSPA(t, s, tc.path)
 		if status != tc.wantStatus || !strings.Contains(body, tc.wantBody) {

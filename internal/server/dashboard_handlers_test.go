@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
@@ -39,7 +39,7 @@ func newDashboardTestServer(t *testing.T) *Server {
 // withUser mounts a handler with the given user injected into c.Locals, standing
 // in for the requireAuth middleware.
 func withUser(app *fiber.App, method, path string, user *models.User, h fiber.Handler) {
-	app.Add(method, path, func(c *fiber.Ctx) error {
+	app.Add([]string{method}, path, func(c fiber.Ctx) error {
 		c.Locals("user", user)
 		return h(c)
 	})

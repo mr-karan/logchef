@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -64,7 +64,7 @@ func canonCacheTime(t *time.Time) string {
 // writeCachedBytes writes an already-encoded JSON response body with the cache
 // status header, adding Age on a HIT. The body is byte-identical to what the
 // uncached path for the same backend would have produced.
-func writeCachedBytes(c *fiber.Ctx, data []byte, status cache.Status, age time.Duration) error {
+func writeCachedBytes(c fiber.Ctx, data []byte, status cache.Status, age time.Duration) error {
 	c.Set("X-Logchef-Cache", string(status))
 	if status == cache.StatusHit {
 		c.Set("Age", strconv.Itoa(int(age.Seconds())))
@@ -81,7 +81,7 @@ func writeCachedBytes(c *fiber.Ctx, data []byte, status cache.Status, age time.D
 // Other fill errors are returned unchanged for the caller's endpoint-specific
 // error response. Callers must check err before deciding to fall back.
 func (s *Server) tryServeDashboardCache(
-	c *fiber.Ctx,
+	c fiber.Ctx,
 	key [32]byte,
 	effTTL, fillTimeout time.Duration,
 	fill func(ctx context.Context) ([]byte, error),
@@ -91,7 +91,7 @@ func (s *Server) tryServeDashboardCache(
 		c.Set("X-Logchef-Cache", string(cache.StatusBypass))
 		return false, nil
 	}
-	data, status, age, ferr := s.dashCache.GetOrFill(c.Context(), key, effTTL, fillTimeout, fill)
+	data, status, age, ferr := s.dashCache.GetOrFill(c.RequestCtx(), key, effTTL, fillTimeout, fill)
 	if ferr != nil {
 		metrics.RecordDashboardCacheRequest("bypass")
 		c.Set("X-Logchef-Cache", string(cache.StatusBypass))
@@ -129,7 +129,7 @@ func (e *dashboardStreamError) Unwrap() error { return e.err }
 
 // writeDashboardStreamError preserves the streaming response, including any
 // partial rows, without executing the failed query again.
-func writeDashboardStreamError(c *fiber.Ctx, err error) error {
+func writeDashboardStreamError(c fiber.Ctx, err error) error {
 	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}

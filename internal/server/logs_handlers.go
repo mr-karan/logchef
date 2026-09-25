@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
@@ -289,7 +289,7 @@ func (qt *QueryTracker) Cleanup() {
 	}
 }
 
-func (s *Server) handleLogsQueryError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
+func (s *Server) handleLogsQueryError(c fiber.Ctx, sourceID models.SourceID, err error) error {
 	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
@@ -316,7 +316,7 @@ func (s *Server) handleLogsQueryError(c *fiber.Ctx, sourceID models.SourceID, er
 
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
+func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -324,7 +324,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	}
 
 	var req models.APIQueryRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
@@ -408,7 +408,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 	// memory stays bounded regardless of result size (the OOM this endpoint used
 	// to hit came from buffering the full result set into a []map before
 	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -493,7 +493,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 
 	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
-	queryCtx, cancel := context.WithCancel(c.Context())
+	queryCtx, cancel := context.WithCancel(c.RequestCtx())
 	defer cancel() // Ensure cleanup
 
 	// Add query to tracker atomically with admission control.
@@ -558,7 +558,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 }
 
 // handleCancelQuery cancels a running query for a specific source
-func (s *Server) handleCancelQuery(c *fiber.Ctx) error {
+func (s *Server) handleCancelQuery(c fiber.Ctx) error {
 	// Get query ID from params
 	queryID := c.Params("queryID")
 	if queryID == "" {

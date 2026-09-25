@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -39,7 +39,7 @@ func TestEnforceDemoReadOnly(t *testing.T) {
 			s := &Server{config: &config.Config{Demo: config.DemoConfig{ReadOnly: true}}}
 			app := fiber.New()
 			app.Use(s.enforceDemoReadOnly)
-			app.Add(tt.method, "/*", func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
+			app.Add([]string{tt.method}, "/*", func(c fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 
 			resp, err := app.Test(httptest.NewRequest(tt.method, tt.path, http.NoBody))
 			if err != nil {
@@ -68,7 +68,7 @@ func TestEnforceDemoReadOnlyDisabled(t *testing.T) {
 	s := &Server{config: &config.Config{}}
 	app := fiber.New()
 	app.Use(s.enforceDemoReadOnly)
-	app.Post("/api/v1/dashboards", func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
+	app.Post("/api/v1/dashboards", func(c fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 
 	resp, err := app.Test(httptest.NewRequest(http.MethodPost, "/api/v1/dashboards", http.NoBody))
 	if err != nil {
@@ -89,7 +89,7 @@ func TestEnforceDemoReadOnlyAllowsTrustedProvisioning(t *testing.T) {
 	}}}
 	app := fiber.New()
 	app.Use(s.enforceDemoReadOnly)
-	app.Post("/api/v1/dashboards", func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
+	app.Post("/api/v1/dashboards", func(c fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboards", http.NoBody)
 	req.Header.Set(demoProvisioningTokenHeader, "private-bootstrap-token")
@@ -112,7 +112,7 @@ func TestEnforceDemoReadOnlyRejectsWrongProvisioningToken(t *testing.T) {
 	}}}
 	app := fiber.New()
 	app.Use(s.enforceDemoReadOnly)
-	app.Post("/api/v1/dashboards", func(c *fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
+	app.Post("/api/v1/dashboards", func(c fiber.Ctx) error { return c.SendStatus(http.StatusNoContent) })
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/dashboards", http.NoBody)
 	req.Header.Set(demoProvisioningTokenHeader, "wrong-token")
@@ -131,7 +131,7 @@ func TestDemoReadOnlyDoesNotExposeSharedQueryHistory(t *testing.T) {
 
 	s := &Server{config: &config.Config{Demo: config.DemoConfig{ReadOnly: true}}}
 	app := fiber.New()
-	app.Get("/api/v1/me/query-history", func(c *fiber.Ctx) error {
+	app.Get("/api/v1/me/query-history", func(c fiber.Ctx) error {
 		c.Locals("user", &models.User{ID: 1})
 		return s.handleListQueryHistory(c)
 	})

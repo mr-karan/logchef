@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -24,7 +24,7 @@ const SchemaTimeout = 20 * time.Second
 
 // handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
 // Access is controlled by the requireSourceAccess middleware.
-func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
+func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -33,7 +33,7 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 
 	// Get schema via core function, bounded by SchemaTimeout so a
 	// slow/misbehaving datasource can't hang the request indefinitely.
-	ctx, cancel := context.WithTimeout(c.Context(), SchemaTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), SchemaTimeout)
 	defer cancel()
 
 	schema, err := core.GetSourceSchema(ctx, s.datasources, sourceID)
@@ -69,7 +69,7 @@ func (s *Server) handleGetSourceSchema(c *fiber.Ctx) error {
 //   - timezone: timezone for time conversion (optional, defaults to UTC)
 //   - query: datasource-native query string (optional, filters field values by the current query)
 //   - logchefql: deprecated alias for query
-func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
+func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -106,7 +106,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 	timezone := c.Query("timezone", "UTC")
 
 	// Parse optional limit query parameter (default 10, max 100)
-	limit := fieldValuesLimit(c.QueryInt("limit", 10))
+	limit := fieldValuesLimit(fiber.Query(c, "limit", 10))
 
 	filterQuery := c.Query("query", "")
 	queryLanguage := models.QueryLanguage(c.Query("query_language", ""))
@@ -127,7 +127,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), FieldValuesTimeout)
 	defer cancel()
 
 	result, err := core.GetFieldValues(ctx, s.datasources, sourceID, core.FieldValuesParams{
@@ -176,7 +176,7 @@ func (s *Server) handleGetFieldValues(c *fiber.Ctx) error {
 //   - timezone: timezone for time conversion (optional, defaults to UTC)
 //   - query: datasource-native query string (optional, filters field values by the current query)
 //   - logchefql: deprecated alias for query
-func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
+func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -202,7 +202,7 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 	timezone := c.Query("timezone", "UTC")
 
 	// Parse optional limit query parameter (default 10, max 100)
-	limit := c.QueryInt("limit", 10)
+	limit := fiber.Query(c, "limit", 10)
 	if limit <= 0 {
 		limit = 10
 	}
@@ -229,7 +229,7 @@ func (s *Server) handleGetAllFieldValues(c *fiber.Ctx) error {
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.Context(), FieldValuesTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), FieldValuesTimeout)
 	defer cancel()
 
 	result, err := core.GetAllFieldValues(ctx, s.datasources, sourceID, core.AllFieldValuesParams{

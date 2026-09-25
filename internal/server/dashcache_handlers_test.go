@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/config"
@@ -118,7 +118,7 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 						}
 						req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(payload+"}"))
 						req.Header.Set("Content-Type", "application/json")
-						resp, err := app.Test(req, 5000)
+						resp, err := app.Test(req, fiber.TestConfig{Timeout: 5 * time.Second, FailOnTimeout: true})
 						if err != nil {
 							t.Error(err)
 							return result{}

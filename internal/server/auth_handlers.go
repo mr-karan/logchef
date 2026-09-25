@@ -14,7 +14,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 const (
@@ -124,7 +124,7 @@ func isSafeLocalPath(path string) bool {
 
 // redirectToFrontend redirects the user's browser to the configured frontend URL,
 // optionally appending an error code as a query parameter if an error occurred.
-func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error {
+func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 	targetURL := s.config.Server.FrontendURL
 	if targetURL == "" {
 		targetURL = "/" // Default to root if no frontend URL is configured.
@@ -174,13 +174,13 @@ func (s *Server) redirectToFrontend(c *fiber.Ctx, path string, err error) error 
 		)
 	}
 
-	return c.Redirect(finalURL, fiber.StatusTemporaryRedirect)
+	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(finalURL)
 }
 
 // handleLogin initiates the OIDC authentication flow.
 // It generates a state parameter, stores it in a cookie, and redirects the user
 // to the OIDC provider's authorization endpoint.
-func (s *Server) handleLogin(c *fiber.Ctx) error {
+func (s *Server) handleLogin(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot initiate login")
 		return SendError(c, fiber.StatusInternalServerError, "Authentication provider not configured")
@@ -219,14 +219,14 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 	}
 
 	authURL := s.oidcProvider.GetAuthURL(state)
-	return c.Redirect(authURL, fiber.StatusTemporaryRedirect)
+	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(authURL)
 }
 
 // handleCallback handles the redirect back from the OIDC provider.
 // It validates the state, exchanges the code for tokens, verifies the ID token,
 // processes the user login (checking existence, status), creates a session,
 // sets the session cookie, and redirects the user back to the frontend.
-func (s *Server) handleCallback(c *fiber.Ctx) error {
+func (s *Server) handleCallback(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot handle callback")
 		return SendError(c, fiber.StatusInternalServerError, "Authentication provider not configured")
@@ -251,7 +251,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
 
 	// Process the OIDC callback using the provider and core functions.
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, state)
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.RequestCtx(), s.sqlite, s.log, &s.config.Auth, code, state)
 	if err != nil {
 		// HandleCallback logs internal errors; map to frontend redirect error.
 		s.log.Error("OIDC callback handling failed", "error", err)
@@ -267,7 +267,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 
 	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
 	// a transient failure here must not block login.
-	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, loginUser); err != nil {
+	if _, err := core.EnsurePersonalCollection(c.RequestCtx(), s.sqlite, s.log, loginUser); err != nil {
 		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", loginUser.ID)
 	}
 
@@ -296,11 +296,11 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 
 // handleLogout handles user logout requests.
 // It revokes the current session (if found) and clears the session cookie.
-func (s *Server) handleLogout(c *fiber.Ctx) error {
+func (s *Server) handleLogout(c fiber.Ctx) error {
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr != "" {
 		// Attempt to revoke the session in the database.
-		if err := core.RevokeSession(c.Context(), s.sqlite, s.log, models.SessionID(sessionIDStr)); err != nil {
+		if err := core.RevokeSession(c.RequestCtx(), s.sqlite, s.log, models.SessionID(sessionIDStr)); err != nil {
 			// Log error but proceed with cookie deletion anyway.
 			s.log.Error("failed to revoke session during logout", "error", err, "session_id_prefix", sessionIDStr[:min(len(sessionIDStr), 8)])
 		}
@@ -324,7 +324,7 @@ func (s *Server) handleLogout(c *fiber.Ctx) error {
 // @Success 200 {object} map[string]interface{}
 // @Failure 401 {object} map[string]interface{}
 // @Router /cli/token [post]
-func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
+func (s *Server) handleCLITokenExchange(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot exchange CLI token")
 		return SendError(c, fiber.StatusInternalServerError, "Authentication provider not configured")
@@ -344,7 +344,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	idTokenString := authHeader[len(bearerPrefix):]
 
 	// Verify the ID token using the OIDC provider's verifier
-	idToken, err := s.oidcProvider.VerifyIDToken(c.Context(), idTokenString)
+	idToken, err := s.oidcProvider.VerifyIDToken(c.RequestCtx(), idTokenString)
 	if err != nil {
 		s.log.Warn("CLI token exchange: invalid ID token", "error", err)
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired ID token", models.AuthenticationErrorType)
@@ -363,7 +363,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	}
 
 	// Look up user in the database
-	user, err := core.GetUserByEmail(c.Context(), s.sqlite, claims.Email)
+	user, err := core.GetUserByEmail(c.RequestCtx(), s.sqlite, claims.Email)
 	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
 			s.log.Warn("CLI token exchange: user not found", "email", claims.Email)
@@ -383,7 +383,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 	// Set expiration to 30 days from now
 	expiresAt := time.Now().Add(30 * 24 * time.Hour)
 
-	tokenResponse, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt, []models.TokenScope{models.TokenScopeAll})
+	tokenResponse, err := core.CreateAPIToken(c.RequestCtx(), s.sqlite, s.log, &s.config.Auth, user.ID, tokenName, &expiresAt, []models.TokenScope{models.TokenScopeAll})
 	if err != nil {
 		s.log.Error("CLI token exchange: failed to create API token", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create API token")
@@ -406,7 +406,7 @@ func (s *Server) handleCLITokenExchange(c *fiber.Ctx) error {
 // handleGetCurrentUser retrieves information about the currently authenticated user.
 // It relies on the requireAuth middleware to populate user details in the context.
 // Supports both session-based and API token authentication.
-func (s *Server) handleGetCurrentUser(c *fiber.Ctx) error {
+func (s *Server) handleGetCurrentUser(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 	if user == nil {
 		s.log.Error("user missing from context in handleGetCurrentUser")
@@ -447,7 +447,7 @@ var localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 // handleLocalLogin authenticates a user with email+password (local auth).
 // Failures are indistinguishable (unknown email, wrong password, inactive,
 // service account) and the endpoint 404s when local auth is disabled.
-func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
+func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 	if !s.config.Auth.Local.Enabled {
 		return SendErrorWithType(c, fiber.StatusNotFound, "Local authentication is not enabled", models.NotFoundErrorType)
 	}
@@ -456,7 +456,7 @@ func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := c.BodyParser(&req); err != nil || req.Email == "" || req.Password == "" {
+	if err := c.Bind().Body(&req); err != nil || req.Email == "" || req.Password == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "email and password are required", models.ValidationErrorType)
 	}
 
@@ -468,7 +468,7 @@ func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
 	}
 
-	user, err := s.sqlite.GetUserByEmail(c.Context(), req.Email)
+	user, err := s.sqlite.GetUserByEmail(c.RequestCtx(), req.Email)
 	if err != nil || user == nil {
 		// Burn a bcrypt comparison so unknown emails aren't timing-distinguishable.
 		auth.VerifyLocalPassword("", req.Password)
@@ -482,7 +482,7 @@ func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
 		return invalid()
 	}
 
-	session, err := core.CreateSession(c.Context(), s.sqlite, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
+	session, err := core.CreateSession(c.RequestCtx(), s.sqlite, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
 	if err != nil {
 		s.log.Error("failed to create session for local login", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create session")
@@ -490,7 +490,7 @@ func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
 
 	s.log.Info("user.login", "email", user.Email, "user_id", user.ID, "method", "local")
 
-	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, user); err != nil {
+	if _, err := core.EnsurePersonalCollection(c.RequestCtx(), s.sqlite, s.log, user); err != nil {
 		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", user.ID)
 	}
 

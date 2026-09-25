@@ -9,7 +9,7 @@ import (
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // --- Admin Source Management Handlers ---
@@ -17,8 +17,8 @@ import (
 // handleListSources is an admin-only endpoint to list all configured sources.
 // URL: GET /api/v1/admin/sources
 // Requires: Admin privileges
-func (s *Server) handleListSources(c *fiber.Ctx) error {
-	sources, err := core.ListSources(c.Context(), s.sqlite, s.datasources)
+func (s *Server) handleListSources(c fiber.Ctx) error {
+	sources, err := core.ListSources(c.RequestCtx(), s.sqlite, s.datasources)
 	if err != nil {
 		s.log.Error("failed to list sources", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing sources")
@@ -36,13 +36,13 @@ func (s *Server) handleListSources(c *fiber.Ctx) error {
 // handleCreateSource creates a new data source.
 // URL: POST /api/v1/admin/sources
 // Requires: Admin privileges
-func (s *Server) handleCreateSource(c *fiber.Ctx) error {
+func (s *Server) handleCreateSource(c fiber.Ctx) error {
 	var req models.CreateSourceRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	createdSource, err := core.CreateSourceFromRequest(c.Context(), s.datasources, &req)
+	createdSource, err := core.CreateSourceFromRequest(c.RequestCtx(), s.datasources, &req)
 	if err != nil {
 		// Handle specific validation or creation errors from core.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
@@ -72,7 +72,7 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 // handleDeleteSource deletes a data source.
 // URL: DELETE /api/v1/admin/sources/:sourceID
 // Requires: Admin privileges
-func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
+func (s *Server) handleDeleteSource(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "Source ID is required")
@@ -83,7 +83,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 	}
 
 	// Call core function to remove from manager and delete from DB.
-	if err := core.DeleteSource(c.Context(), s.datasources, sourceID); err != nil {
+	if err := core.DeleteSource(c.RequestCtx(), s.datasources, sourceID); err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
@@ -97,7 +97,7 @@ func (s *Server) handleDeleteSource(c *fiber.Ctx) error {
 // handleUpdateSource updates a data source's configuration.
 // URL: PUT /api/v1/admin/sources/:sourceID
 // Requires: Admin privileges
-func (s *Server) handleUpdateSource(c *fiber.Ctx) error {
+func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 	sourceIDStr := c.Params("sourceID")
 	if sourceIDStr == "" {
 		return SendError(c, fiber.StatusBadRequest, "Source ID is required")
@@ -108,11 +108,11 @@ func (s *Server) handleUpdateSource(c *fiber.Ctx) error {
 	}
 
 	var req models.UpdateSourceRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updatedSource, err := core.UpdateSource(c.Context(), s.datasources, sourceID, &req)
+	updatedSource, err := core.UpdateSource(c.RequestCtx(), s.datasources, sourceID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
@@ -133,13 +133,13 @@ func (s *Server) handleUpdateSource(c *fiber.Ctx) error {
 // handleValidateSourceConnection validates datasource connection details provided in the request body.
 // URL: POST /api/v1/admin/sources/validate
 // Requires: Admin privileges
-func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
+func (s *Server) handleValidateSourceConnection(c fiber.Ctx) error {
 	var req models.ValidateConnectionRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		s.log.Warn("invalid connection validation request", "error", err)
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
-	result, err := core.ValidateSourceConnection(c.Context(), s.datasources, &req)
+	result, err := core.ValidateSourceConnection(c.RequestCtx(), s.datasources, &req)
 	if err != nil {
 		// Handle specific validation errors.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
@@ -158,7 +158,7 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 // handleGetSourceStats retrieves provider-neutral inspection data for a specific source.
 // URL: GET /api/v1/sources/:sourceID/stats
 // Requires: User must have access to the source via team membership (checked by requireSourceAccess middleware).
-func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
+func (s *Server) handleGetSourceStats(c fiber.Ctx) error {
 	// Source ID access validated by middleware.
 	sourceIDStr := c.Params("sourceID")
 	if sourceIDStr == "" {
@@ -171,9 +171,9 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 
 	var inspection *core.SourceInspection
 	if c.Query("refresh") == "true" {
-		inspection, err = core.RefreshSourceInspection(c.Context(), s.datasources, sourceID)
+		inspection, err = core.RefreshSourceInspection(c.RequestCtx(), s.datasources, sourceID)
 	} else {
-		inspection, err = core.InspectSource(c.Context(), s.datasources, sourceID)
+		inspection, err = core.InspectSource(c.RequestCtx(), s.datasources, sourceID)
 	}
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
@@ -191,7 +191,7 @@ func (s *Server) handleGetSourceStats(c *fiber.Ctx) error {
 
 // handleGetTeamSourceStats handles GET /teams/:teamID/sources/:sourceID/stats
 // Returns inspection data for a specific source in the context of a team
-func (s *Server) handleGetTeamSourceStats(c *fiber.Ctx) error {
+func (s *Server) handleGetTeamSourceStats(c fiber.Ctx) error {
 	// We've already verified that:
 	// 1. The user is a member of the team
 	// 2. The team has access to the source
@@ -210,12 +210,12 @@ func (s *Server) handleGetTeamSourceStats(c *fiber.Ctx) error {
 	return s.handleGetSourceStats(c)
 }
 
-func (s *Server) handleGetSourceActivity(c *fiber.Ctx) error {
+func (s *Server) handleGetSourceActivity(c fiber.Ctx) error {
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
 	}
-	activity, err := core.InspectSourceActivity(c.Context(), s.datasources, sourceID, c.Query("refresh") == "true")
+	activity, err := core.InspectSourceActivity(c.RequestCtx(), s.datasources, sourceID, c.Query("refresh") == "true")
 	if err == nil {
 		return SendSuccess(c, fiber.StatusOK, activity)
 	}
@@ -232,4 +232,4 @@ func (s *Server) handleGetSourceActivity(c *fiber.Ctx) error {
 	return SendError(c, fiber.StatusInternalServerError, "Error getting recent activity")
 }
 
-func (s *Server) handleGetTeamSourceActivity(c *fiber.Ctx) error { return s.handleGetSourceActivity(c) }
+func (s *Server) handleGetTeamSourceActivity(c fiber.Ctx) error { return s.handleGetSourceActivity(c) }

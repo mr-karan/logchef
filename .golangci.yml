@@ -67,6 +67,8 @@ linters:
       disable:
         # Replacing omitempty with omitzero on struct fields changes JSON output.
         - omitzero
+        # Promoted-field literals hide which embedded struct a field belongs to.
+        - embedlit
     nolintlint:
       require-explanation: true
       require-specific: true

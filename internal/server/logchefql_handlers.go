@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
@@ -106,7 +106,7 @@ func parseLogchefQLTimeValue(value string, loc *time.Location) (time.Time, error
 // 3. Validating queries before execution
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/translate
-func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
+func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 	sourceID, req, hasTimeParams, ok := parseTranslateRequest(c)
 	if !ok {
 		return nil
@@ -154,14 +154,14 @@ func (s *Server) handleLogchefQLTranslate(c *fiber.Ctx) error {
 // (the Send* helpers return nil, so their return value is not a safe error
 // sentinel — see the tail_handlers regression test for why this codebase
 // uses an explicit ok bool instead).
-func parseTranslateRequest(c *fiber.Ctx) (sourceID models.SourceID, req TranslateRequest, hasTimeParams, ok bool) {
+func parseTranslateRequest(c fiber.Ctx) (sourceID models.SourceID, req TranslateRequest, hasTimeParams, ok bool) {
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 		return 0, TranslateRequest{}, false, false
 	}
 
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 		return 0, TranslateRequest{}, false, false
 	}
@@ -205,8 +205,8 @@ func substituteTranslateVariables(req *TranslateRequest) error {
 
 // validateTranslateSource fetches the source and confirms it supports
 // LogchefQL, writing the error response and returning false on failure.
-func (s *Server) validateTranslateSource(c *fiber.Ctx, sourceID models.SourceID) bool {
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+func (s *Server) validateTranslateSource(c fiber.Ctx, sourceID models.SourceID) bool {
+	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			_ = SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -232,8 +232,8 @@ func (s *Server) validateTranslateSource(c *fiber.Ctx, sourceID models.SourceID)
 // valid=false rather than an error response. A failure to build full_sql from
 // an otherwise-valid query (e.g. a bad time range) is handled separately here
 // and returns a 400.
-func (s *Server) compileTranslateQuery(c *fiber.Ctx, sourceID models.SourceID, req TranslateRequest, hasTimeParams bool) (compiled *datasource.CompiledLogchefQL, includeFullSQL, ok bool) {
-	compiled, compileErr := s.datasources.CompileLogchefQL(c.Context(), sourceID, datasource.LogchefQLCompileRequest{
+func (s *Server) compileTranslateQuery(c fiber.Ctx, sourceID models.SourceID, req TranslateRequest, hasTimeParams bool) (compiled *datasource.CompiledLogchefQL, includeFullSQL, ok bool) {
+	compiled, compileErr := s.datasources.CompileLogchefQL(c.RequestCtx(), sourceID, datasource.LogchefQLCompileRequest{
 		Query:     req.Query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
@@ -274,9 +274,9 @@ func (s *Server) compileTranslateQuery(c *fiber.Ctx, sourceID models.SourceID, r
 // This is a lightweight endpoint for real-time validation in the editor.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/validate
-func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
+func (s *Server) handleLogchefQLValidate(c fiber.Ctx) error {
 	var req ValidateRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
@@ -291,7 +291,7 @@ func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, response)
 }
 
-func (s *Server) handleLogchefQLQueryError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
+func (s *Server) handleLogchefQLQueryError(c fiber.Ctx, sourceID models.SourceID, err error) error {
 	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
@@ -315,7 +315,7 @@ func (s *Server) handleLogchefQLQueryError(c *fiber.Ctx, sourceID models.SourceI
 // The backend handles the full translation and execution.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/query
-func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
+func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceIDStr := c.Params("sourceID")
 	sourceID, err := core.ParseSourceID(sourceIDStr)
 	if err != nil {
@@ -335,7 +335,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		// explorer/ad-hoc queries so they are never cached.
 		Cache *models.CacheDirective `json:"cache,omitempty"`
 	}
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
@@ -370,7 +370,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 	}
 
 	// Get source information
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -406,7 +406,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		queryEndTime            *time.Time
 	)
 
-	compiled, compileErr := s.datasources.CompileLogchefQL(c.Context(), sourceID, datasource.LogchefQLCompileRequest{
+	compiled, compileErr := s.datasources.CompileLogchefQL(c.RequestCtx(), sourceID, datasource.LogchefQLCompileRequest{
 		Query:     query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
@@ -558,7 +558,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 
 	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
-	queryCtx, cancel := context.WithCancel(c.Context())
+	queryCtx, cancel := context.WithCancel(c.RequestCtx())
 	defer cancel() // Ensure cleanup
 
 	// Add query to tracker atomically with admission control.

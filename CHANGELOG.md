@@ -18,6 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Auth cookies use the path of `server.frontend_url`. Deployments at `/` are
   unchanged.
 - `logchef open` keeps the path of the server URL, so it works with a subpath.
+- Building from source needs Go 1.27. The HTTP server moved from Fiber v2 to
+  Fiber v3, and all Go, frontend, docs, and CLI dependencies are on their
+  latest releases.
+- Docker images use Alpine 3.24.2.
 
 ## [2.1.0] - 2026-09-24
 

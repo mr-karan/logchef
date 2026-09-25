@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -31,7 +31,7 @@ const tailHeartbeatInterval = 15 * time.Second
 //	data: {"reason":"ttl_expired"}
 //
 // GET /api/v1/teams/:teamID/sources/:sourceID/logs/tail?query=&query_language=
-func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
+func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
@@ -47,7 +47,7 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 
 	// Gate on the source capability before any streaming setup so non-supporting
 	// sources get a clean 400.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -76,7 +76,7 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 	}
 
 	// Admission control: class tail, per-user and global caps → 429.
-	streamCtx, cancel := context.WithCancel(c.Context())
+	streamCtx, cancel := context.WithCancel(c.RequestCtx())
 	queryID, err := queryTracker.StartQuery(
 		QueryClassTail,
 		user.ID,
@@ -104,7 +104,7 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 
 	// Stream the response body incrementally: send headers immediately and flush
 	// each frame to the socket rather than buffering the whole (never-ending) body.
-	c.Context().Response.ImmediateHeaderFlush = true
+	c.RequestCtx().Response.ImmediateHeaderFlush = true
 
 	// Detach everything the stream writer needs before returning — the fiber ctx
 	// is not valid inside SetBodyStreamWriter.
@@ -113,7 +113,7 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 	log := s.log
 	email := user.Email
 
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
 
@@ -244,7 +244,7 @@ func (s *Server) handleTailLogs(c *fiber.Ctx) error { //nolint:gocyclo // reques
 // response itself and returns ok=false — the Send* helpers return the nil
 // result of writing the response, so their return value must NOT be used as an
 // error sentinel.
-func (s *Server) resolveTailQuery(c *fiber.Ctx, source *models.Source, sourceID models.SourceID) (string, models.QueryLanguage, bool) {
+func (s *Server) resolveTailQuery(c fiber.Ctx, source *models.Source, sourceID models.SourceID) (string, models.QueryLanguage, bool) {
 	rawQuery := c.Query("query")
 	language := models.NormalizeQueryLanguage(models.QueryLanguage(c.Query("query_language")))
 
@@ -253,7 +253,7 @@ func (s *Server) resolveTailQuery(c *fiber.Ctx, source *models.Source, sourceID 
 			_ = SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
 			return "", "", false
 		}
-		compiled, compileErr := s.datasources.CompileLogchefQL(c.Context(), sourceID, datasource.LogchefQLCompileRequest{
+		compiled, compileErr := s.datasources.CompileLogchefQL(c.RequestCtx(), sourceID, datasource.LogchefQLCompileRequest{
 			Query: rawQuery,
 		})
 		if compiled == nil {

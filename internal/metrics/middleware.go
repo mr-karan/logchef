@@ -5,7 +5,7 @@ import (
 	"time"
 
 	"github.com/VictoriaMetrics/metrics"
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -33,7 +33,7 @@ func Middleware(config ...MetricsConfig) fiber.Handler {
 		cfg = config[0]
 	}
 
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		// Skip metrics collection for the metrics endpoint itself
 		if c.Path() == "/metrics" {
 			return c.Next()
@@ -118,7 +118,7 @@ func NormalizeEndpointPath(path string) string {
 }
 
 // extractErrorType attempts to extract error type information from the Fiber context
-func extractErrorType(c *fiber.Ctx, _ error) string {
+func extractErrorType(c fiber.Ctx, _ error) string {
 	// First, try to get error type from response locals (if set by error handlers)
 	if errorType, ok := c.Locals("error_type").(string); ok {
 		return errorType
@@ -150,7 +150,7 @@ func extractErrorType(c *fiber.Ctx, _ error) string {
 
 // MetricsHandler returns a Fiber handler that serves Prometheus metrics
 func MetricsHandler() fiber.Handler {
-	return func(c *fiber.Ctx) error {
+	return func(c fiber.Ctx) error {
 		c.Set("Content-Type", "text/plain; charset=utf-8")
 
 		// Get metrics in Prometheus format

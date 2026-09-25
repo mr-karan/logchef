@@ -6,11 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -20,7 +21,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
+func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
@@ -37,7 +38,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	// Gate exports behind the source capability before persisting a job or
 	// spawning the async worker. Non-supporting sources (e.g. VictoriaLogs) get
 	// a clean 400 instead of an async job failure.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -50,7 +51,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	}
 
 	var req models.CreateExportJobRequest
-	if err := c.BodyParser(&req); err != nil {
+	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
@@ -126,7 +127,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
 	}
 
-	if err := s.sqlite.CreateExportJob(c.Context(), job); err != nil {
+	if err := s.sqlite.CreateExportJob(c.RequestCtx(), job); err != nil {
 		queryTracker.RemoveQuery(job.ID)
 		cancel()
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
@@ -145,7 +146,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(teamID, job))
 }
 
-func (s *Server) handleGetExportJob(c *fiber.Ctx) error {
+func (s *Server) handleGetExportJob(c fiber.Ctx) error {
 	job, err := s.authorizeExportJob(c)
 	if err != nil {
 		return err
@@ -157,7 +158,7 @@ func (s *Server) handleGetExportJob(c *fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, exportJobResponse(teamID, job))
 }
 
-func (s *Server) handleDownloadExportJob(c *fiber.Ctx) error {
+func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	job, err := s.authorizeExportJob(c)
 	if err != nil {
 		return err
@@ -182,21 +183,25 @@ func (s *Server) handleDownloadExportJob(c *fiber.Ctx) error {
 	}
 
 	if strings.TrimSpace(job.FilePath) == "" {
-		_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
+		_ = s.sqlite.FailExportJob(c.RequestCtx(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
 	if _, err := os.Stat(job.FilePath); err != nil {
 		s.log.Error("failed to stat export artifact", "error", err, "job_id", job.ID, "path", job.FilePath)
 		if errors.Is(err, os.ErrNotExist) {
-			_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
+			_ = s.sqlite.FailExportJob(c.RequestCtx(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
 
-	return c.Download(job.FilePath, job.FileName)
+	// Download would disable byte ranges, and Attachment appends a second charset
+	// to text/csv. Set the header directly and let SendFile pick the type.
+	c.Set(fiber.HeaderContentDisposition, mime.FormatMediaType("attachment", map[string]string{"filename": job.FileName}))
+	// Accept byte ranges so interrupted downloads of large exports can resume.
+	return c.SendFile(job.FilePath, fiber.SendFile{ByteRange: true})
 }
 
-func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
+func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, error) {
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
 		return nil, SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
@@ -214,7 +219,7 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 		return nil, SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	job, err := s.sqlite.GetExportJob(c.Context(), exportID)
+	job, err := s.sqlite.GetExportJob(c.RequestCtx(), exportID)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
