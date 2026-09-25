@@ -56,6 +56,7 @@ type Server struct {
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	fs            http.FileSystem
+	indexHTML     []byte // index.html with <base href> set; nil when the UI is not embedded
 	log           *slog.Logger
 	buildInfo     string
 	version       string
@@ -162,6 +163,12 @@ func New(opts ServerOptions) *Server {
 		}),
 		stop: make(chan struct{}),
 	}
+
+	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())
+	if err != nil {
+		log.Warn("web UI unavailable", "error", err)
+	}
+	s.indexHTML = indexHTML
 
 	// Register all application routes.
 	s.setupRoutes()
@@ -433,12 +440,17 @@ func (s *Server) setupRoutes() {
 		Browse:     false,
 		MaxAge:     86400,
 	}))
+	// Files at the UI root (logo.svg, ...). "/" and "/index.html" skip this so
+	// they get the rendered index.html from handleIndex.
 	s.app.Use("/", filesystem.New(filesystem.Config{
-		Root:         s.fs,
-		Browse:       false,
-		Index:        "index.html",
-		NotFoundFile: "index.html",
+		Root:   s.fs,
+		Browse: false,
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() == "/" || c.Path() == "/index.html"
+		},
 	}))
+	// Everything else is a client-side route.
+	s.app.Get("/*", s.handleIndex)
 }
 
 // Start binds the server to the configured host and port and begins listening.

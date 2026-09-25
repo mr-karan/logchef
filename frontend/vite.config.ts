@@ -43,6 +43,9 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
   }
 
   return {
+    // Relative asset URLs resolve against <base href> in index.html, which the
+    // server sets at runtime, so one build serves any subpath.
+    base: "./",
     define: {
       __VUE_I18N_FULL_INSTALL__: true,
       __VUE_I18N_LEGACY_API__: false,

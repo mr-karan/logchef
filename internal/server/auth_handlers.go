@@ -200,7 +200,7 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
 		SameSite: fiber.CookieSameSiteLaxMode,
-		Path:     "/",
+		Path:     s.config.Server.CookiePath(),
 	})
 
 	// Persist the requested redirect path through the OIDC round-trip. Only
@@ -214,7 +214,7 @@ func (s *Server) handleLogin(c *fiber.Ctx) error {
 			HTTPOnly: true,
 			Secure:   s.config.Server.IsSecureCookie(),
 			SameSite: fiber.CookieSameSiteLaxMode,
-			Path:     "/",
+			Path:     s.config.Server.CookiePath(),
 		})
 	}
 
@@ -248,7 +248,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 	}
 
 	// State is validated, clear the cookie immediately.
-	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
 
 	// Process the OIDC callback using the provider and core functions.
 	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, state)
@@ -279,7 +279,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
 		SameSite: fiber.CookieSameSiteLaxMode,
-		Path:     "/",
+		Path:     s.config.Server.CookiePath(),
 	})
 
 	// Redirect back to the frontend, restoring the path requested before login.
@@ -290,7 +290,7 @@ func (s *Server) handleCallback(c *fiber.Ctx) error {
 		redirectPath = defaultPostLoginPath
 	}
 	// Clear the redirect cookie
-	c.Cookie(&fiber.Cookie{Name: "logchef_redirect", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: "logchef_redirect", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
 	return s.redirectToFrontend(c, redirectPath, nil)
 }
 
@@ -307,7 +307,7 @@ func (s *Server) handleLogout(c *fiber.Ctx) error {
 	}
 
 	// Clear the session cookie in the browser.
-	c.Cookie(&fiber.Cookie{Name: sessionCookieName, Value: "", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: "/"})
+	c.Cookie(&fiber.Cookie{Name: sessionCookieName, Value: "", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
 
 	return SendSuccess(c, fiber.StatusOK, nil) // Send simple success response.
 }
@@ -501,7 +501,7 @@ func (s *Server) handleLocalLogin(c *fiber.Ctx) error {
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
 		SameSite: fiber.CookieSameSiteLaxMode,
-		Path:     "/",
+		Path:     s.config.Server.CookiePath(),
 	})
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"user": user})

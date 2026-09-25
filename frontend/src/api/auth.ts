@@ -1,4 +1,5 @@
 import { apiClient } from "./apiUtils";
+import { apiBaseURL } from "./config";
 import type { APIResponse } from "./types";
 import type { Session, User } from "@/types";
 
@@ -17,7 +18,7 @@ export const authApi = {
    * Get login URL for OIDC authentication
    */
   getLoginUrl(redirectPath?: string): string {
-    const loginUrl = "/api/v1/auth/login";
+    const loginUrl = `${apiBaseURL}/auth/login`;
     const params = redirectPath ? new URLSearchParams({ redirect: redirectPath }) : null;
     return params ? `${loginUrl}?${params}` : loginUrl;
   },
