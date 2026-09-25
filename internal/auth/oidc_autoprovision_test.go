@@ -137,8 +137,6 @@ func (f *fakeOIDCServer) signIDToken(claims OIDCClaims) (string, error) {
 	return jwt.Signed(signer).Claims(std).Claims(custom).Serialize()
 }
 
-func boolPtrAP(b bool) *bool { return &b }
-
 func newAuthTestDB(t *testing.T) *sqlite.DB {
 	t.Helper()
 	db, err := sqlite.New(context.Background(), sqlite.Options{
@@ -197,7 +195,7 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 
 	fake.registerCode("code-first-login", OIDCClaims{
 		Email:         "newhire@example.com",
-		EmailVerified: boolPtrAP(true),
+		EmailVerified: new(true),
 		Name:          "New Hire",
 	})
 
@@ -259,7 +257,7 @@ func TestHandleCallback_AutoProvisionDisabledRejects(t *testing.T) {
 
 	fake.registerCode("code-disabled", OIDCClaims{
 		Email:         "someone@example.com",
-		EmailVerified: boolPtrAP(true),
+		EmailVerified: new(true),
 		Name:          "Someone",
 	})
 
@@ -298,7 +296,7 @@ func TestHandleCallback_AutoProvisionUnlistedDomainRejects(t *testing.T) {
 
 	fake.registerCode("code-unlisted-domain", OIDCClaims{
 		Email:         "outsider@not-allowed.com",
-		EmailVerified: boolPtrAP(true),
+		EmailVerified: new(true),
 		Name:          "Outsider",
 	})
 
@@ -336,7 +334,7 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 		},
 	}
 
-	claims := OIDCClaims{Email: "racer@example.com", EmailVerified: boolPtrAP(true), Name: "Racer"}
+	claims := OIDCClaims{Email: "racer@example.com", EmailVerified: new(true), Name: "Racer"}
 	fake.registerCode("code-race-1", claims)
 	fake.registerCode("code-race-2", claims)
 
@@ -345,7 +343,7 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 	errs := make([]error, 2)
 	codes := []string{"code-race-1", "code-race-2"}
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -354,7 +352,7 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 	}
 	wg.Wait()
 
-	for i := 0; i < 2; i++ {
+	for i := range 2 {
 		if errs[i] != nil {
 			t.Fatalf("HandleCallback[%d]: %v", i, errs[i])
 		}

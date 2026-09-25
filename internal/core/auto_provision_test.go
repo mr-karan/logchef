@@ -73,7 +73,7 @@ func TestGetOrCreateAutoProvisionedUser_ConcurrentLoginsBothSucceed(t *testing.T
 	users := make([]*models.User, n)
 	errs := make([]error, n)
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
@@ -83,7 +83,7 @@ func TestGetOrCreateAutoProvisionedUser_ConcurrentLoginsBothSucceed(t *testing.T
 	wg.Wait()
 
 	var firstID models.UserID
-	for i := 0; i < n; i++ {
+	for i := range n {
 		if errs[i] != nil {
 			t.Fatalf("goroutine %d: GetOrCreateAutoProvisionedUser: %v", i, errs[i])
 		}

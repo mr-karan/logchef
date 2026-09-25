@@ -26,8 +26,7 @@ func normalizeDatasourceError(err error) error {
 		return nil
 	}
 
-	var validationErr *datasource.ValidationError
-	if errors.As(err, &validationErr) {
+	if validationErr, ok := errors.AsType[*datasource.ValidationError](err); ok {
 		return &ValidationError{
 			Field:   validationErr.Field,
 			Message: validationErr.Message,

@@ -100,10 +100,7 @@ func (s *Server) handleAdminQueryActivity(c *fiber.Ctx) error {
 // recentActivity returns the first `limit` rows of the already newest-first
 // window as a fresh slice.
 func recentActivity(window []models.QueryActivityRecord, limit int) []models.QueryActivityRecord {
-	n := limit
-	if n > len(window) {
-		n = len(window)
-	}
+	n := min(limit, len(window))
 	recent := make([]models.QueryActivityRecord, n)
 	copy(recent, window[:n])
 	return recent

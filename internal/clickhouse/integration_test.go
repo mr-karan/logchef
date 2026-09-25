@@ -173,7 +173,7 @@ func TestDailyHistogramDSTClickHouse(t *testing.T) {
 func TestConcurrentReconnectClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	var group sync.WaitGroup
-	for i := 0; i < 4; i++ {
+	for range 4 {
 		group.Go(func() {
 			for range 5 {
 				// An in-flight query may fail when its pool closes; it must not race.

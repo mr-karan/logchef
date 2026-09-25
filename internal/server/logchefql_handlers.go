@@ -292,8 +292,7 @@ func (s *Server) handleLogchefQLValidate(c *fiber.Ctx) error {
 }
 
 func (s *Server) handleLogchefQLQueryError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
-	var admissionErr *QueryAdmissionError
-	if errors.As(err, &admissionErr) {
+	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
 	// A cached fill surfaces the caller's own cancellation, which the explorer
@@ -574,8 +573,7 @@ func (s *Server) handleLogchefQLQuery(c *fiber.Ctx) error { //nolint:gocyclo // 
 		s.config.Query.MaxConcurrentGlobal,
 	)
 	if err != nil {
-		var admissionErr *QueryAdmissionError
-		if errors.As(err, &admissionErr) {
+		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)

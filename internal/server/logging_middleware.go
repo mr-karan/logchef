@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -36,7 +37,7 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// If the handler returned an error that Fiber's error handler processed,
 		// the status code is already set correctly on the response.
 		if chainErr != nil {
-			if e, ok := chainErr.(*fiber.Error); ok {
+			if e, ok := errors.AsType[*fiber.Error](chainErr); ok {
 				status = e.Code
 			} else if status == 200 {
 				status = 500 // raw error with no status set

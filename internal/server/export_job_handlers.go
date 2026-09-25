@@ -120,8 +120,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		s.config.Export.MaxConcurrentGlobal,
 	); err != nil {
 		cancel()
-		var admissionErr *QueryAdmissionError
-		if errors.As(err, &admissionErr) {
+		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
@@ -141,7 +140,7 @@ func (s *Server) handleCreateExportJob(c *fiber.Ctx) error {
 		QueryTimeout: req.QueryTimeout,
 		Variables:    req.Variables,
 	}
-	go s.runExportJob(job.ID, queryCtx, cancel, teamID, sourceID, user.Email, runReq)
+	go s.runExportJob(queryCtx, job.ID, cancel, teamID, sourceID, user.Email, runReq)
 
 	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(teamID, job))
 }
@@ -236,7 +235,7 @@ func (s *Server) authorizeExportJob(c *fiber.Ctx) (*models.ExportJob, error) {
 // runExportJob runs the export pipeline. The caller must have already
 // reserved an admission slot via queryTracker.StartQueryWithID — this
 // function takes ownership and releases it on exit.
-func (s *Server) runExportJob(jobID string, queryCtx context.Context, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req exportLogsRequest) {
+func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req exportLogsRequest) {
 	defer cancel()
 	defer queryTracker.RemoveQuery(jobID)
 	// This runs in its own goroutine: a panic here would crash the whole
@@ -378,8 +377,7 @@ func (s *Server) failExportJob(ctx context.Context, jobID, filePath, message str
 }
 
 func exportFailureMessage(err error) string {
-	var admissionErr *QueryAdmissionError
-	if errors.As(err, &admissionErr) {
+	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return admissionErr.Message
 	}
 	return err.Error()

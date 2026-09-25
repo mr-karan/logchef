@@ -290,8 +290,7 @@ func (qt *QueryTracker) Cleanup() {
 }
 
 func (s *Server) handleLogsQueryError(c *fiber.Ctx, sourceID models.SourceID, err error) error {
-	var admissionErr *QueryAdmissionError
-	if errors.As(err, &admissionErr) {
+	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
 	// A cached fill surfaces the caller's own cancellation, which the explorer
@@ -509,8 +508,7 @@ func (s *Server) handleQueryLogs(c *fiber.Ctx) error { //nolint:gocyclo // reque
 		s.config.Query.MaxConcurrentGlobal,
 	)
 	if err != nil {
-		var admissionErr *QueryAdmissionError
-		if errors.As(err, &admissionErr) {
+		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)

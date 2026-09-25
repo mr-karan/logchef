@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -111,7 +112,7 @@ func New(opts ServerOptions) *Server {
 		EnableIPValidation:      true,
 		ErrorHandler: func(c *fiber.Ctx, err error) error {
 			code := fiber.StatusInternalServerError
-			if e, ok := err.(*fiber.Error); ok {
+			if e, ok := errors.AsType[*fiber.Error](err); ok {
 				code = e.Code // Use Fiber's error code if available.
 			}
 			// Log the internal error details.
@@ -173,7 +174,7 @@ func New(opts ServerOptions) *Server {
 func recoverMiddleware(log *slog.Logger) fiber.Handler {
 	return fiberrecover.New(fiberrecover.Config{
 		EnableStackTrace: true,
-		StackTraceHandler: func(c *fiber.Ctx, panicValue interface{}) {
+		StackTraceHandler: func(c *fiber.Ctx, panicValue any) {
 			log.Error("panic recovered",
 				"path", c.Path(),
 				"method", c.Method(),

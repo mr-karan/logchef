@@ -131,18 +131,14 @@ func TestInspectionCacheSingleflightAndLargeSourceIDs(t *testing.T) {
 		provider := &inspectionCacheProvider{entered: make(chan struct{}, 1), release: release}
 		source := testInspectionSource(4)
 		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			_, _ = service.inspectionForSource(context.Background(), source, provider, false)
-		}()
+		})
 		<-provider.entered
 		for range 8 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				_, _ = service.inspectionForSource(context.Background(), source, provider, false)
-			}()
+			})
 		}
 		close(release)
 		wg.Wait()
@@ -214,13 +210,11 @@ func TestActivityCacheReuseRefreshFailuresAndSingleflight(t *testing.T) {
 		ready := make(chan struct{}, 8)
 		var wg sync.WaitGroup
 		for range 8 {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
+			wg.Go(func() {
 				ready <- struct{}{}
 				<-start
 				_, _ = service.activityForSource(context.Background(), source, provider, false)
-			}()
+			})
 		}
 		for range 8 {
 			<-ready

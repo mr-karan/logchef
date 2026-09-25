@@ -7,8 +7,6 @@ import (
 	"testing"
 )
 
-func boolPtr(b bool) *bool { return &b }
-
 func TestCheckEmailVerified(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
 
@@ -21,13 +19,13 @@ func TestCheckEmailVerified(t *testing.T) {
 		// Default behavior (skipCheck = false)
 		{
 			name:      "default: email_verified true allows login",
-			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: boolPtr(true)},
+			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: new(true)},
 			skipCheck: false,
 			wantErr:   false,
 		},
 		{
 			name:      "default: email_verified explicitly false rejects",
-			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: boolPtr(false)},
+			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: new(false)},
 			skipCheck: false,
 			wantErr:   true,
 		},
@@ -41,13 +39,13 @@ func TestCheckEmailVerified(t *testing.T) {
 		// Cases with skip_email_verified_check enabled.
 		{
 			name:      "skip: email_verified true allows login",
-			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: boolPtr(true)},
+			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: new(true)},
 			skipCheck: true,
 			wantErr:   false,
 		},
 		{
 			name:      "skip: email_verified explicitly false still rejects",
-			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: boolPtr(false)},
+			claims:    OIDCClaims{Email: "a@b.com", EmailVerified: new(false)},
 			skipCheck: true,
 			wantErr:   true,
 		},

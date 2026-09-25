@@ -46,10 +46,7 @@ func TestQueryProgressOverflow(t *testing.T) {
 			progress.add(&ch.Progress{Rows: value, Bytes: value})
 			var stats models.QueryStats
 			progress.apply(&stats)
-			want := uint64(math.MaxInt)
-			if value < want {
-				want = value
-			}
+			want := min(value, uint64(math.MaxInt))
 			if stats.RowsRead < 0 || stats.BytesRead < 0 || uint64(stats.RowsRead) != want || uint64(stats.BytesRead) != want {
 				t.Fatalf("input=%d stats=%+v want=%d", value, stats, want)
 			}

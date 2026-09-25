@@ -182,8 +182,8 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 // the raw wire length (the escaped JSON actually transferred), not the decoded
 // string length. It returns the decoded rows, the column names in first-seen
 // order, the bytes accounted, and a truncation reason ("" if none).
-func readQueryRows(body io.Reader, maxResponseBytes, limitHint int) (logs []map[string]interface{}, columnNames []string, bytesReturned int, truncatedReason string, err error) {
-	logs = make([]map[string]interface{}, 0, limitHint)
+func readQueryRows(body io.Reader, maxResponseBytes, limitHint int) (logs []map[string]any, columnNames []string, bytesReturned int, truncatedReason string, err error) {
+	logs = make([]map[string]any, 0, limitHint)
 	columnSet := make(map[string]struct{})
 	columnNames = make([]string, 0)
 
@@ -205,7 +205,7 @@ func readQueryRows(body io.Reader, maxResponseBytes, limitHint int) (logs []map[
 				return logs, columnNames, bytesReturned, "byte_limit", nil
 			}
 
-			var row map[string]interface{}
+			var row map[string]any
 			dec := json.NewDecoder(bytes.NewReader(trimmed))
 			dec.UseNumber()
 			if decErr := dec.Decode(&row); decErr != nil {
@@ -708,10 +708,10 @@ func (p *Provider) EvaluateAlert(ctx context.Context, source *models.Source, req
 		return nil, fmt.Errorf("victorialogs stats_query returned status %q", result.Status)
 	}
 
-	rows := make([]map[string]interface{}, 0, len(result.Data.Result))
+	rows := make([]map[string]any, 0, len(result.Data.Result))
 	labelSet := make(map[string]struct{})
 	for _, item := range result.Data.Result {
-		row := map[string]interface{}{}
+		row := map[string]any{}
 		for key, value := range item.Metric {
 			if key == "value" {
 				continue // Reserved for the numeric sample.
@@ -823,7 +823,7 @@ func isAlreadyTimeBounded(query string) bool {
 	depth := 0
 	var quote byte
 	escaped := false
-	for i := 0; i < len(query); i++ {
+	for i := range len(query) {
 		c := query[i]
 		if escaped {
 			escaped = false
@@ -872,7 +872,7 @@ func hasTopLevelOr(query string) bool {
 	depth := 0
 	var quote byte
 	escaped := false
-	for i := 0; i < len(query); i++ {
+	for i := range len(query) {
 		c := query[i]
 		if escaped {
 			escaped = false
@@ -1007,7 +1007,7 @@ func formatLookbackDuration(seconds int) string {
 	return fmt.Sprintf("%ds", seconds)
 }
 
-func (p *Provider) decodeJSONRequest(ctx context.Context, conn models.VictoriaLogsConnectionInfo, path string, form url.Values, out interface{}) error {
+func (p *Provider) decodeJSONRequest(ctx context.Context, conn models.VictoriaLogsConnectionInfo, path string, form url.Values, out any) error {
 	resp, err := p.doFormRequest(ctx, conn, path, form)
 	if err != nil {
 		return err
@@ -1230,11 +1230,12 @@ func appendDefaultSort(query string) string {
 			return query
 		}
 	}
-	out := strings.TrimSpace(stages[0]) + " | sort by (_time desc)"
+	var out strings.Builder
+	out.WriteString(strings.TrimSpace(stages[0]) + " | sort by (_time desc)")
 	for _, stage := range stages[1:] {
-		out += " | " + strings.TrimSpace(stage)
+		out.WriteString(" | " + strings.TrimSpace(stage))
 	}
-	return out
+	return out.String()
 }
 
 // isProjectionStage reports whether a pipe stage is a field projection, i.e.

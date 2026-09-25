@@ -69,7 +69,6 @@ func TestRedirectToFrontendRejectsOpenRedirect(t *testing.T) {
 		{"valid local path", "/logs/explore", "/logs/explore"},
 	}
 	for _, tc := range cases {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			resp, err := newApp(tc.path).Test(httptest.NewRequest(http.MethodGet, "/go", http.NoBody))

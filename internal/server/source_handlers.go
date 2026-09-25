@@ -45,7 +45,7 @@ func (s *Server) handleCreateSource(c *fiber.Ctx) error {
 	createdSource, err := core.CreateSourceFromRequest(c.Context(), s.datasources, &req)
 	if err != nil {
 		// Handle specific validation or creation errors from core.
-		if validationErr, ok := err.(*core.ValidationError); ok {
+		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
 		if errors.Is(err, core.ErrSourceAlreadyExists) {
@@ -120,7 +120,7 @@ func (s *Server) handleUpdateSource(c *fiber.Ctx) error {
 		if errors.Is(err, core.ErrSourceAlreadyExists) {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
-		if validationErr, ok := err.(*core.ValidationError); ok {
+		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
 		s.log.Error("failed to update source", "error", err, "source_id", sourceID)
@@ -142,7 +142,7 @@ func (s *Server) handleValidateSourceConnection(c *fiber.Ctx) error {
 	result, err := core.ValidateSourceConnection(c.Context(), s.datasources, &req)
 	if err != nil {
 		// Handle specific validation errors.
-		if validationErr, ok := err.(*core.ValidationError); ok {
+		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			s.log.Warn("connection validation failed", "error", validationErr.Message, "field", validationErr.Field)
 			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}

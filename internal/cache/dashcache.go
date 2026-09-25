@@ -226,7 +226,7 @@ func (c *Cache) GetOrFill(
 	filled := false
 	//nolint:contextcheck // the shared fill runs under its OWN bounded context by
 	// design, so one caller disconnecting cannot cancel everyone's query.
-	fn := func() (interface{}, error) {
+	fn := func() (any, error) {
 		// Re-check under the flight: a concurrent caller may have filled this
 		// key in the window between our Get miss and entering singleflight.
 		// Returning the cached bytes here (filled stays false) surfaces to the
