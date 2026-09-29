@@ -231,6 +231,8 @@ jobs:
         with:
           name: Logchef CLI v${{ steps.version.outputs.version }}
           prerelease: ${{ steps.prerelease.outputs.is_prerelease }}
+          # "Latest" belongs to the server release; the docs point users at it.
+          make_latest: false
           generate_release_notes: true
           files: |
             dist/*.tar.gz
