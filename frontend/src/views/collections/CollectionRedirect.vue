@@ -5,6 +5,7 @@ import { Loader2, AlertCircle } from 'lucide-vue-next';
 import { Button } from '@/components/ui/button';
 import { savedQueriesApi } from '@/api/savedQueries';
 import { getErrorMessage } from '@/api/types';
+import { useI18n } from 'vue-i18n';
 
 // Resolves /logs/saved/:queryId. Loads the saved query, then redirects to
 // /logs/explore?source=...&id=... so the existing explorer hydration path
@@ -12,6 +13,7 @@ import { getErrorMessage } from '@/api/types';
 
 const route = useRoute();
 const router = useRouter();
+const { t } = useI18n();
 
 const error = ref<string | null>(null);
 const isLoading = ref(true);
@@ -24,14 +26,14 @@ async function resolveSavedQuery(queryIdParam: string | string[] | undefined) {
   isLoading.value = true;
 
   if (!rawQueryId) {
-    error.value = 'Invalid saved-query URL. Missing query id.';
+    error.value = t('pages.invalidSavedQueryMissingID');
     isLoading.value = false;
     return;
   }
 
   const queryIdNum = parseInt(rawQueryId, 10);
   if (isNaN(queryIdNum) || queryIdNum <= 0) {
-    error.value = 'Invalid saved-query URL. Query id must be numeric.';
+    error.value = t('pages.invalidSavedQueryID');
     isLoading.value = false;
     return;
   }
@@ -43,7 +45,7 @@ async function resolveSavedQuery(queryIdParam: string | string[] | undefined) {
       return;
     }
     if (!response.data) {
-      throw new Error('Saved query not found.');
+      throw new Error(t('pages.savedQueryNotFound'));
     }
 
     await router.replace({
@@ -59,7 +61,7 @@ async function resolveSavedQuery(queryIdParam: string | string[] | undefined) {
       return;
     }
     console.error('Failed to load saved query:', err);
-    error.value = getErrorMessage(err) || 'Failed to load saved query. It may have been deleted or you may not have access.';
+    error.value = getErrorMessage(err) || t('pages.savedQueryLoadFailed');
     isLoading.value = false;
   }
 }
@@ -81,16 +83,16 @@ function goToCollections() {
   <div class="flex flex-col items-center justify-center h-screen gap-4">
     <template v-if="isLoading && !error">
       <Loader2 class="h-8 w-8 animate-spin text-primary" />
-      <p class="text-muted-foreground">Loading saved query...</p>
+      <p class="text-muted-foreground">{{ t('pages.loadingSavedQuery') }}</p>
     </template>
 
     <template v-if="error">
       <div class="flex flex-col items-center gap-4 text-center">
         <AlertCircle class="h-12 w-12 text-destructive" />
-        <h2 class="text-xl font-semibold">Unable to Load Saved Query</h2>
+        <h2 class="text-xl font-semibold">{{ t('pages.savedQueryLoadFailedTitle') }}</h2>
         <p class="text-muted-foreground max-w-md">{{ error }}</p>
         <Button @click="goToCollections">
-          Go to Collections
+          {{ t('pages.goToCollections') }}
         </Button>
       </div>
     </template>

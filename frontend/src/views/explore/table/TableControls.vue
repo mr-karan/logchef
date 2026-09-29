@@ -94,11 +94,11 @@ function clearColumnFilters() {
       <RefreshCw v-if="isLoading" class="h-3.5 w-3.5 text-primary animate-spin" />
       <span v-if="isLoading" class='text-primary animate-pulse hidden sm:inline'>{{ t('ui.loading2') }}</span>
       <template v-else-if="showStats && stats">
-        <span v-if="stats.execution_time_ms !== undefined" :title="`Query time: ${formatExecutionTime(stats.execution_time_ms)}`">
+        <span v-if="stats.execution_time_ms !== undefined" :title="t('pages.queryTimeTooltip', { duration: formatExecutionTime(stats.execution_time_ms) })">
           {{ formatExecutionTime(stats.execution_time_ms) }}
         </span>
         <span v-if="stats.execution_time_ms !== undefined && stats.rows_read !== undefined" class="text-muted-foreground/40">·</span>
-        <span v-if="stats.rows_read !== undefined" :title="`Rows read: ${stats.rows_read.toLocaleString()}`">
+        <span v-if="stats.rows_read !== undefined" :title="t('pages.rowsReadTooltip', { count: stats.rows_read.toLocaleString() })">
           {{ stats.rows_read.toLocaleString() }} {{ t('ui.rows') }}
         </span>
       </template>

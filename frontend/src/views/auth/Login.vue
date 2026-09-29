@@ -10,9 +10,11 @@ import { useMetaStore } from '@/stores/meta'
 import { prefillEmptyLoginFields } from '@/utils/demoCredentials'
 import { useRoute, useRouter } from 'vue-router'
 import { computed, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const authStore = useAuthStore()
 const metaStore = useMetaStore()
 const isLoggingIn = ref(false)
@@ -51,18 +53,18 @@ const localAuthEnabled = computed(() => metaStore.localAuthEnabled)
 const oidcEnabled = computed(() => metaStore.oidcEnabled)
 
 // Error message mapping
-const errorMessages: Record<string, string> = {
-  'UNAUTHORIZED_USER': 'Access denied. Please contact your administrator to request access.',
-  'USER_INACTIVE': 'Your account is inactive. Please contact your administrator.',
-  'invalid_state': 'Authentication session expired. Please try again.',
-  'invalid_request': 'Invalid authentication request. Please try again.',
-  'authentication_failed': 'Authentication failed. Please try again.',
-}
-
 // Get error message if present
 const errorMessage = computed(() => {
   const code = route.query.error as string
-  return code ? (errorMessages[code] || 'An unexpected error occurred') : null
+  if (!code) return null
+  const messages: Record<string, string> = {
+    UNAUTHORIZED_USER: t('pages.loginUnauthorized'),
+    USER_INACTIVE: t('pages.loginInactive'),
+    invalid_state: t('pages.loginSessionExpired'),
+    invalid_request: t('pages.loginInvalidRequest'),
+    authentication_failed: t('pages.loginFailed'),
+  }
+  return messages[code] || t('pages.unexpectedError')
 })
 
 async function handleLogin() {
@@ -81,7 +83,7 @@ async function handleLogin() {
 
 async function handleLocalLogin() {
   if (!email.value.trim() || !password.value) {
-    localError.value = 'Enter your email and password.'
+    localError.value = t('pages.enterEmailPassword')
     return
   }
   localError.value = null
@@ -92,12 +94,12 @@ async function handleLocalLogin() {
       const redirectPath = (route.query.redirect as string) || '/logs/explore'
       await router.push(redirectPath)
     } else {
-      localError.value = 'Invalid email or password.'
+      localError.value = t('pages.invalidEmailPassword')
       password.value = ''
     }
   } catch (error) {
     console.error('Local login failed:', error)
-    localError.value = 'Invalid email or password.'
+    localError.value = t('pages.invalidEmailPassword')
     password.value = ''
   } finally {
     isLoggingIn.value = false
@@ -110,10 +112,10 @@ async function handleLocalLogin() {
     <Card class="mx-auto w-full max-w-sm">
       <CardHeader>
         <CardTitle class="text-2xl text-center">
-          Welcome to LogChef
+          {{ t('pages.welcomeToLogChef') }}
         </CardTitle>
         <CardDescription class="text-center">
-          Your centralized log analytics platform
+          {{ t('pages.loginDescription') }}
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-4">
@@ -121,7 +123,7 @@ async function handleLocalLogin() {
         <Alert v-if="errorMessage" variant="destructive">
           <AlertCircle class="h-4 w-4 mr-2" />
           <div>
-            <AlertTitle>Authentication Error</AlertTitle>
+            <AlertTitle>{{ t('pages.authenticationError') }}</AlertTitle>
             <AlertDescription>
               {{ errorMessage }}
             </AlertDescription>
@@ -132,30 +134,30 @@ async function handleLocalLogin() {
           class="rounded-md border bg-muted/40 px-3 py-2.5 text-sm">
           <div class="mb-2 flex items-center gap-2 font-medium">
             <KeyRound class="h-4 w-4 text-muted-foreground" />
-            Demo credentials
+            {{ t('pages.demoCredentials') }}
           </div>
           <dl class="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-            <dt class="text-muted-foreground">Email</dt>
+            <dt class="text-muted-foreground">{{ t('ui.email') }}</dt>
             <dd class="select-all font-mono">{{ demoCredentials?.email }}</dd>
-            <dt class="text-muted-foreground">Password</dt>
+            <dt class="text-muted-foreground">{{ t('sources.password') }}</dt>
             <dd class="select-all font-mono">{{ demoCredentials?.password }}</dd>
           </dl>
         </div>
 
         <form v-if="localAuthEnabled" class="space-y-3" @submit.prevent="handleLocalLogin">
           <div class="space-y-1.5">
-            <Label for="login-email">Email</Label>
+            <Label for="login-email">{{ t('ui.email') }}</Label>
             <Input id="login-email" v-model="email" type="email" autocomplete="username" :disabled="isLoggingIn" />
           </div>
           <div class="space-y-1.5">
-            <Label for="login-password">Password</Label>
+            <Label for="login-password">{{ t('sources.password') }}</Label>
             <Input id="login-password" v-model="password" type="password" autocomplete="current-password"
               :disabled="isLoggingIn" />
           </div>
           <p v-if="localError" class="text-sm text-destructive">{{ localError }}</p>
           <Button type="submit" class="w-full" :disabled="isLoggingIn">
             <Loader2 v-if="isLoggingIn" class="mr-2 h-4 w-4 animate-spin" />
-            Sign in
+            {{ t('pages.signIn') }}
           </Button>
         </form>
 
@@ -164,14 +166,14 @@ async function handleLocalLogin() {
             <span class="w-full border-t" />
           </div>
           <div class="relative flex justify-center text-xs uppercase">
-            <span class="bg-card px-2 text-muted-foreground">or</span>
+            <span class="bg-card px-2 text-muted-foreground">{{ t('sources.or') }}</span>
           </div>
         </div>
 
         <Button v-if="oidcEnabled" @click="handleLogin" class="w-full" :variant="localAuthEnabled ? 'outline' : 'default'"
           :disabled="isLoggingIn">
           <Loader2 v-if="isLoggingIn && !localAuthEnabled" class="mr-2 h-4 w-4 animate-spin" />
-          Sign in with SSO
+          {{ t('pages.signInWithSSO') }}
         </Button>
       </CardContent>
     </Card>

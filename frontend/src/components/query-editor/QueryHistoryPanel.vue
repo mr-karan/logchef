@@ -55,7 +55,7 @@
                 </span>
               </div>
               <span class="text-[11px] text-muted-foreground shrink-0">
-                {{ formatHistoryTimeAgo(entry.created_at, nowMs) }}
+                {{ formatHistoryTimeAgo(entry.created_at, nowMs, locale) }}
               </span>
             </div>
 
@@ -66,7 +66,7 @@
             <div class="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground">
               <span class="inline-flex items-center gap-1">
                 <Clock class="w-3 h-3" />
-                {{ formatHistoryDuration(entry.duration_ms) }}
+                {{ formatHistoryDuration(entry.duration_ms, locale) }}
               </span>
               <span class="inline-flex items-center gap-1">
                 <Rows3 class="w-3 h-3" />
@@ -111,7 +111,7 @@ import {
 } from "@/lib/queryHistory";
 import { useSourcesStore } from "@/stores/sources";
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 const HISTORY_LIMIT = 100;
 

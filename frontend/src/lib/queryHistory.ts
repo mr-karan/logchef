@@ -36,7 +36,7 @@ export function buildHistoryRerunQuery(entry: QueryHistoryRecord): Record<string
  * older than a week. Accepts the backend's space-separated timestamps as well
  * as ISO strings.
  */
-export function formatHistoryTimeAgo(createdAt: string, nowMs: number = Date.now()): string {
+export function formatHistoryTimeAgo(createdAt: string, nowMs: number = Date.now(), locale = "en"): string {
   const normalized =
     createdAt.includes("T") || createdAt.includes("Z") || createdAt.includes("+")
       ? createdAt
@@ -51,19 +51,26 @@ export function formatHistoryTimeAgo(createdAt: string, nowMs: number = Date.now
   const diffMinutes = Math.floor(diffMs / 60_000);
   const diffHours = Math.floor(diffMs / 3_600_000);
   const diffDays = Math.floor(diffMs / 86_400_000);
+  const relativeTime = new Intl.RelativeTimeFormat(locale, { numeric: "auto", style: "short" });
 
-  if (diffMinutes < 1) return "just now";
-  if (diffMinutes < 60) return `${diffMinutes}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return new Date(then).toLocaleDateString();
+  if (diffMinutes < 1) return relativeTime.format(0, "second");
+  if (diffMinutes < 60) return relativeTime.format(-diffMinutes, "minute");
+  if (diffHours < 24) return relativeTime.format(-diffHours, "hour");
+  if (diffDays < 7) return relativeTime.format(-diffDays, "day");
+  return new Date(then).toLocaleDateString(locale);
 }
 
 /**
  * Compact duration label for a query's execution time in milliseconds.
  */
-export function formatHistoryDuration(durationMs: number): string {
+export function formatHistoryDuration(durationMs: number, locale = "en"): string {
   if (!Number.isFinite(durationMs) || durationMs < 0) return "—";
-  if (durationMs < 1000) return `${Math.round(durationMs)} ms`;
-  return `${(durationMs / 1000).toFixed(durationMs < 10_000 ? 2 : 1)} s`;
+  if (durationMs < 1000) return `${Math.round(durationMs).toLocaleString(locale)} ms`;
+  const seconds = durationMs / 1000;
+  const fractionDigits = durationMs < 10_000 ? 2 : 1;
+  const formatted = new Intl.NumberFormat(locale, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(seconds);
+  return `${formatted} s`;
 }

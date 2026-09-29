@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { useI18n } from "vue-i18n"
 import type { DateRange, DateValue } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { computed } from "vue"
@@ -23,6 +24,7 @@ const props = withDefaults(defineProps<Props>(), {
   maxValue: undefined,
   class: undefined,
 })
+const { t } = useI18n()
 
 const emit = defineEmits<{
   prev: []
@@ -88,7 +90,7 @@ function isDisabled(year: number) {
       <nav class="flex items-center gap-1 absolute top-0 inset-x-0 justify-between pointer-events-none">
         <button
           type="button"
-          aria-label="Previous decade"
+          :aria-label="t('pages.calendarPreviousDecade')"
           :class="cn(
             buttonVariants({ variant: 'outline' }),
             'size-7 bg-transparent p-0 opacity-50 hover:opacity-100 pointer-events-auto',
@@ -99,7 +101,7 @@ function isDisabled(year: number) {
         </button>
         <button
           type="button"
-          aria-label="Next decade"
+          :aria-label="t('pages.calendarNextDecade')"
           :class="cn(
             buttonVariants({ variant: 'outline' }),
             'size-7 bg-transparent p-0 opacity-50 hover:opacity-100 pointer-events-auto',

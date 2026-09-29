@@ -1,7 +1,8 @@
 <script lang="ts" setup>
+import { useI18n } from "vue-i18n"
 import type { CalendarRootEmits, CalendarRootProps, DateValue } from "reka-ui"
 import type { HTMLAttributes, Ref } from "vue"
-import { ref, watch } from "vue"
+import { ref, toValue, watch } from "vue"
 import { getLocalTimeZone, today } from "@internationalized/date"
 import { reactiveOmit, useVModel } from "@vueuse/core"
 import { CalendarRoot, useDateFormatter, useForwardPropsEmits } from "reka-ui"
@@ -27,6 +28,7 @@ const props = withDefaults(
     modelValue: undefined,
   },
 )
+const { t, locale } = useI18n()
 const emits = defineEmits<CalendarRootEmits>()
 
 const delegatedProps = reactiveOmit(props, "class", "placeholder")
@@ -36,7 +38,7 @@ const placeholder = useVModel(props, "placeholder", emits, {
   defaultValue: props.defaultPlaceholder ?? today(getLocalTimeZone()),
 }) as Ref<DateValue>
 
-const formatter = useDateFormatter(props.locale ?? "en")
+const formatter = useDateFormatter(props.locale ?? toValue(locale))
 watch(() => props.locale, locale => formatter.setLocale(locale ?? "en"))
 
 type View = "days" | "months" | "years"
@@ -85,7 +87,7 @@ const forwarded = useForwardPropsEmits(delegatedProps, emits)
         </nav>
         <button
           type="button"
-          aria-label="Switch to month view"
+          :aria-label="t('pages.calendarSwitchToMonthView')"
           class="block mx-auto h-7 px-2 text-sm font-medium rounded-md hover:bg-accent"
           @click="drillUp"
         >

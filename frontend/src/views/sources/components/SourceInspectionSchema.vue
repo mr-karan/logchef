@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -12,6 +13,7 @@ const props = defineProps<{
 }>()
 
 const schemaFields = computed(() => props.schema?.fields ?? [])
+const { t } = useI18n()
 
 const groupedFields = computed(() => buildSourceFieldGroups(schemaFields.value, props.source))
 
@@ -35,9 +37,9 @@ const hasFieldStorageMetrics = computed(() =>
 <template>
   <Card v-if="props.schema && schemaFields.length > 0">
     <CardHeader>
-      <CardTitle>Schema</CardTitle>
+      <CardTitle>{{ t('sources.schema') }}</CardTitle>
       <CardDescription>
-        Field inventory and datasource-specific structure for this source.
+        {{ t('sources.schemaDescription') }}
       </CardDescription>
     </CardHeader>
     <CardContent class="space-y-6">
@@ -55,13 +57,13 @@ const hasFieldStorageMetrics = computed(() =>
 
         <div v-if="sortKeys.length > 0 || props.schema.ttl" class="grid gap-3 lg:grid-cols-2">
         <div v-if="sortKeys.length > 0" class="rounded-md border bg-muted/30 p-3">
-          <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Sort Keys</div>
+          <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('sources.sortKeys') }}</div>
           <div class="mt-1 font-mono text-sm break-all">
             {{ sortKeys.join(', ') }}
           </div>
         </div>
         <div v-if="props.schema.ttl" class="rounded-md border bg-muted/30 p-3">
-          <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">TTL</div>
+          <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('sources.ttl') }}</div>
           <div class="mt-1 font-mono text-sm break-all">
             {{ props.schema.ttl }}
           </div>
@@ -69,26 +71,26 @@ const hasFieldStorageMetrics = computed(() =>
       </div>
 
       <div v-if="props.schema.create_query" class="rounded-md border bg-muted/30 p-3">
-        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">Create Query</div>
+        <div class="text-xs font-medium uppercase tracking-wider text-muted-foreground">{{ t('sources.createQuery') }}</div>
         <pre class="mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs">{{ props.schema.create_query }}</pre>
       </div>
 
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead>Field</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Role</TableHead>
-            <TableHead>Nullable</TableHead>
-            <TableHead>Primary Key</TableHead>
-            <TableHead>Default</TableHead>
-            <TableHead>Comment</TableHead>
+            <TableHead>{{ t('sources.field') }}</TableHead>
+            <TableHead>{{ t('sources.type') }}</TableHead>
+            <TableHead>{{ t('ui.role') }}</TableHead>
+            <TableHead>{{ t('sources.nullable') }}</TableHead>
+            <TableHead>{{ t('sources.primaryKey') }}</TableHead>
+            <TableHead>{{ t('sources.default') }}</TableHead>
+            <TableHead>{{ t('sources.comment') }}</TableHead>
             <template v-if="hasFieldStorageMetrics">
-              <TableHead>Rows</TableHead>
-              <TableHead>Compressed</TableHead>
-              <TableHead>Uncompressed</TableHead>
-              <TableHead>Ratio</TableHead>
-              <TableHead>Avg Row Size</TableHead>
+              <TableHead>{{ t('sources.rows') }}</TableHead>
+              <TableHead>{{ t('sources.compressed') }}</TableHead>
+              <TableHead>{{ t('sources.uncompressed') }}</TableHead>
+              <TableHead>{{ t('sources.ratio') }}</TableHead>
+              <TableHead>{{ t('sources.averageRowSize') }}</TableHead>
             </template>
           </TableRow>
         </TableHeader>
@@ -101,8 +103,8 @@ const hasFieldStorageMetrics = computed(() =>
                 {{ groupLabelById.get(classifySourceField(props.source, field)) }}
               </Badge>
             </TableCell>
-            <TableCell>{{ field.is_nullable === undefined ? '–' : field.is_nullable ? 'Yes' : 'No' }}</TableCell>
-            <TableCell>{{ field.is_primary_key === undefined ? '–' : field.is_primary_key ? 'Yes' : 'No' }}</TableCell>
+            <TableCell>{{ field.is_nullable === undefined ? '–' : field.is_nullable ? t('sources.yes') : t('sources.no') }}</TableCell>
+            <TableCell>{{ field.is_primary_key === undefined ? '–' : field.is_primary_key ? t('sources.yes') : t('sources.no') }}</TableCell>
             <TableCell class="text-xs">{{ field.default_expression || '–' }}</TableCell>
             <TableCell class="text-xs">{{ field.comment || '–' }}</TableCell>
             <template v-if="hasFieldStorageMetrics">

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import type { InspectionDetail, InspectionMetric } from '@/api/sources'
 
@@ -7,6 +8,7 @@ const props = defineProps<{
   details?: InspectionDetail[] | null
   storage?: InspectionMetric[] | null
 }>()
+const { t } = useI18n()
 
 const visibleDetails = computed(() => props.details ?? [])
 const visibleStorage = computed(() => props.storage ?? [])
@@ -16,9 +18,9 @@ const visibleStorage = computed(() => props.storage ?? [])
   <div class="grid gap-6 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
     <Card v-if="visibleDetails.length > 0">
       <CardHeader>
-        <CardTitle>Source Details</CardTitle>
+        <CardTitle>{{ t('sources.sourceDetails') }}</CardTitle>
         <CardDescription>
-          Provider-specific metadata and connection identity for this datasource.
+          {{ t('sources.providerMetadataDescription') }}
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-3">
@@ -52,9 +54,9 @@ const visibleStorage = computed(() => props.storage ?? [])
 
     <Card v-if="visibleStorage.length > 0">
       <CardHeader>
-        <CardTitle>Storage</CardTitle>
+        <CardTitle>{{ t('sources.storage') }}</CardTitle>
         <CardDescription>
-          Physical storage and compression metrics available from the datasource.
+          {{ t('sources.storageDescription') }}
         </CardDescription>
       </CardHeader>
       <CardContent>

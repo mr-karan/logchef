@@ -550,7 +550,7 @@ defineExpose({
       size="sm"
       class="h-7 px-2 text-xs bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal"
       @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
-      title="Click to toggle timezone"
+       :title="t('pages.toggleTimezone')"
     >
       {{ timezonePreference === "local" ? t('ui.local') : "UTC" }}
     </Button>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
@@ -24,6 +25,7 @@ import { getSourceTypeLabel } from '@/lib/queryMetadata'
 import { formatDate, getSourceConnectionDetails } from '@/utils/format'
 
 const router = useRouter()
+const { t } = useI18n()
 // This route is only accessible by admins
 const sourcesStore = useSourcesStore()
 
@@ -39,6 +41,18 @@ const connectionSearchText = (s: Source): string => {
 }
 const showDeleteDialog = ref(false)
 const sourceToDelete = ref<Source | null>(null)
+
+function translateConnectionLabel(label: string) {
+    switch (label) {
+        case 'Host': return t('sources.connectionHost')
+        case 'Database': return t('sources.database')
+        case 'Table': return t('sources.tableName')
+        case 'Base URL': return t('sources.baseURL')
+        case 'Tenant': return t('sources.tenantScope')
+        case 'Scope': return t('sources.immutableScopeQuery')
+        default: return label
+    }
+}
 
 // Check for loading errors
 const loadingError = computed(() => {
@@ -118,71 +132,71 @@ onMounted(async () => {
 
 <template>
     <div class="space-y-6">
-        <PageHeader title="Sources" description="View and manage all log sources.">
+        <PageHeader :title="t('ui.sources')" :description="t('sources.manageDescription')">
             <template #actions>
                 <Button size="sm" @click="router.push({ name: 'NewSource' })">
                     <Plus class="mr-2 h-4 w-4" />
-                    Add source
+                    {{ t('sources.addSource') }}
                 </Button>
             </template>
         </PageHeader>
 
         <LoadingState
             v-if="sourcesStore.isLoadingOperation('loadAllSourcesForAdmin')"
-            label="Loading sources…"
+            :label="t('sources.loadingSources')"
         />
-        <ErrorAlert v-else-if="loadingError" :error="loadingError" title="Failed to load sources"
+        <ErrorAlert v-else-if="loadingError" :error="loadingError" :title="t('sources.loadingSourcesFailed')"
             @retry="retryLoading" />
         <EmptyState
             v-else-if="sourcesStore.sources.length === 0"
             :icon="Database"
-            title="No sources configured"
-            description="Connect your first ClickHouse log source to get started."
+            :title="t('sources.noSourcesConfigured')"
+            :description="t('sources.noSourcesDescription')"
         >
             <template #action>
                 <Button size="sm" @click="router.push({ name: 'NewSource' })">
                     <Plus class="mr-2 h-4 w-4" />
-                    Add source
+                    {{ t('sources.addSource') }}
                 </Button>
             </template>
         </EmptyState>
         <div v-else class="space-y-4">
                     <div class="relative max-w-sm">
                         <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input v-model="sourceSearch" placeholder="Search sources…" class="pl-8" />
+                        <Input v-model="sourceSearch" :placeholder="t('sources.searchSources')" class="pl-8" />
                     </div>
                     <Table>
                         <TableHeader>
                             <TableRow>
                                 <TableHead class="w-[220px]">
                                     <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('name')">
-                                        Source
+                                        {{ t('sources.source') }}
                                         <component :is="sourceSortKey === 'name' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
                                     </button>
                                 </TableHead>
-                                <TableHead class="w-[120px]">Type</TableHead>
-                                <TableHead class="w-[150px]">Auto Created</TableHead>
-                                <TableHead class="w-[150px]">Timestamp Field</TableHead>
-                                <TableHead class="w-[300px]">Connection</TableHead>
+                                <TableHead class="w-[120px]">{{ t('sources.type') }}</TableHead>
+                                <TableHead class="w-[150px]">{{ t('sources.autoCreated') }}</TableHead>
+                                <TableHead class="w-[150px]">{{ t('sources.timestampField') }}</TableHead>
+                                <TableHead class="w-[300px]">{{ t('sources.connection') }}</TableHead>
                                 <TableHead class="w-[100px]">
                                     <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('status')">
-                                        Status
+                                        {{ t('sources.status') }}
                                         <component :is="sourceSortKey === 'status' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
                                     </button>
                                 </TableHead>
                                 <TableHead class="w-[100px]">
                                     <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('created')">
-                                        Created At
+                                        {{ t('sources.createdAt') }}
                                         <component :is="sourceSortKey === 'created' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
                                     </button>
                                 </TableHead>
-                                <TableHead class="w-[120px] text-right">Actions</TableHead>
+                                <TableHead class="w-[120px] text-right">{{ t('ui.actions') }}</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             <TableRow v-if="sortedSources.length === 0">
                                 <TableCell colspan="8" class="text-center text-muted-foreground py-6">
-                                    No sources match your search
+                                    {{ t('sources.noSourcesMatch') }}
                                 </TableCell>
                             </TableRow>
                             <TableRow v-for="source in sortedSources" :key="source.id">
@@ -201,7 +215,7 @@ onMounted(async () => {
                                 <TableCell>
                                     <Badge :variant="source._meta_is_auto_created ? 'default' : 'secondary'"
                                         class="whitespace-nowrap">
-                                        {{ source._meta_is_auto_created ? 'Yes' : 'No' }}
+                                        {{ source._meta_is_auto_created ? t('sources.yes') : t('sources.no') }}
                                     </Badge>
                                 </TableCell>
                                 <TableCell>
@@ -215,7 +229,7 @@ onMounted(async () => {
                                             :key="`${source.id}-${detail.label}`"
                                             class="flex items-start space-x-2"
                                         >
-                                            <span class="text-muted-foreground">{{ detail.label }}</span>
+                                            <span class="text-muted-foreground">{{ translateConnectionLabel(detail.label) }}</span>
                                             <span :class="detail.monospace ? 'font-mono text-xs break-all' : 'font-medium break-all'">
                                                 {{ detail.value }}
                                             </span>
@@ -225,22 +239,22 @@ onMounted(async () => {
                                 <TableCell>
                                     <Badge :variant="source.is_connected ? 'success' : 'destructive'"
                                         class="whitespace-nowrap">
-                                        {{ source.is_connected ? 'Connected' : 'Disconnected' }}
+                                        {{ source.is_connected ? t('sources.connected') : t('sources.disconnected') }}
                                     </Badge>
                                 </TableCell>
                                 <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                                 <TableCell class="text-right">
                                     <div class="flex items-center justify-end gap-2">
                                         <Button variant="outline" size="icon" @click="handleEdit(source)"
-                                                title="Edit source">
+                                                :title="t('sources.editSource')">
                                             <Pencil class="h-4 w-4" />
                                         </Button>
                                         <Button variant="outline" size="icon" @click="handleDuplicate(source)"
-                                                title="Duplicate source">
+                                                :title="t('sources.duplicateSource')">
                                             <Copy class="h-4 w-4" />
                                         </Button>
                                         <Button variant="destructive" size="icon" @click="handleDelete(source)"
-                                                title="Delete source">
+                                                :title="t('sources.deleteSource')">
                                             <Trash2 class="h-4 w-4" />
                                         </Button>
                                     </div>
@@ -252,9 +266,9 @@ onMounted(async () => {
 
         <ConfirmDialog
             :open="showDeleteDialog"
-            title="Delete source?"
-            :description="sourceToDelete ? `Delete source &quot;${sourceToDelete.name}&quot;? This only removes the source from LogChef — the underlying data stays in the configured backend and must be managed there separately.` : undefined"
-            confirm-text="Delete"
+            :title="t('sources.deleteSourceTitle')"
+            :description="sourceToDelete ? t('sources.deleteSourceConfirmation', { name: sourceToDelete.name }) : undefined"
+            :confirm-text="t('ui.delete')"
             destructive
             @update:open="(v) => { if (!v) { showDeleteDialog = false; sourceToDelete = null } }"
             @confirm="confirmDelete"

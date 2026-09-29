@@ -4,53 +4,53 @@
             <slot>
                 <Button>
                     <Plus class="mr-2 h-4 w-4" />
-                    Add User
+                    {{ t('access.addUser') }}
                 </Button>
             </slot>
         </DialogTrigger>
         <DialogContent class="sm:max-w-[425px]">
             <DialogHeader>
-                <DialogTitle>Add New User</DialogTitle>
+                <DialogTitle>{{ t('access.addNewUser') }}</DialogTitle>
                 <DialogDescription>
-                    Create a new user account by providing their details.
+                    {{ t('access.createUserDescription') }}
                 </DialogDescription>
             </DialogHeader>
             <form @submit.prevent="handleSubmit">
                 <div class="grid gap-4 py-4">
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="full_name" class="text-right">Full Name</Label>
-                        <Input id="full_name" v-model="formData.full_name" placeholder="Enter user's full name"
+                        <Label for="full_name" class="text-right">{{ t('ui.fullName') }}</Label>
+                        <Input id="full_name" v-model="formData.full_name" :placeholder="t('access.enterFullName')"
                             class="col-span-3" required :disabled="isLoading" />
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="email" class="text-right">Email</Label>
-                        <Input id="email" v-model="formData.email" type="email" placeholder="Enter user's email"
+                        <Label for="email" class="text-right">{{ t('ui.email') }}</Label>
+                        <Input id="email" v-model="formData.email" type="email" :placeholder="t('access.enterEmail')"
                             class="col-span-3" required :disabled="isLoading" />
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="role" class="text-right">Role</Label>
+                        <Label for="role" class="text-right">{{ t('ui.role') }}</Label>
                         <div class="col-span-3">
                             <Select v-model="formData.role">
                                 <SelectTrigger>
-                                    <SelectValue placeholder="Select role" />
+                                    <SelectValue :placeholder="t('access.selectRole')" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="admin">Admin</SelectItem>
-                                    <SelectItem value="member">Member</SelectItem>
+                                    <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
+                                    <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="status" class="text-right">Status</Label>
+                        <Label for="status" class="text-right">{{ t('ui.status') }}</Label>
                         <div class="col-span-3">
                             <Select v-model="formData.status">
                                 <SelectTrigger>
-                                    <SelectValue placeholder="Select status" />
+                                    <SelectValue :placeholder="t('access.selectStatus')" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="active">Active</SelectItem>
-                                    <SelectItem value="inactive">Inactive</SelectItem>
+                                    <SelectItem value="active">{{ t('access.statusActive') }}</SelectItem>
+                                    <SelectItem value="inactive">{{ t('access.statusInactive') }}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -58,7 +58,7 @@
                 </div>
                 <DialogFooter>
                     <Button type="submit" :disabled="isLoading">
-                        {{ isLoading ? 'Creating...' : 'Create User' }}
+                        {{ isLoading ? t('access.creating') : t('access.createUser') }}
                     </Button>
                 </DialogFooter>
             </form>
@@ -67,6 +67,7 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
@@ -94,6 +95,7 @@ import { useUsersStore } from '@/stores/users'
 
 
 const usersStore = useUsersStore()
+const { t } = useI18n()
 const showDialog = ref(false)
 
 interface FormData extends CreateUserRequest {

@@ -231,7 +231,7 @@ async function doDelete() {
         </div>
 
         <p class="mt-1 line-clamp-2 min-h-[2.5rem] text-sm text-muted-foreground">
-          {{ d.description || "No description" }}
+           {{ d.description || t('pages.dashboardNoDescription') }}
         </p>
 
         <div class="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
@@ -293,7 +293,7 @@ async function doDelete() {
     <ConfirmDialog
       v-model:open="deleteOpen"
       :title="t('ui.deleteDashboard')"
-      :description="`This permanently deletes “${deleteTarget?.name}”. This can't be undone.`"
+       :description="t('pages.deleteDashboardConfirmation', { name: deleteTarget?.name ?? '' })"
       :confirm-text="t('ui.delete')"
       destructive
       @confirm="doDelete"

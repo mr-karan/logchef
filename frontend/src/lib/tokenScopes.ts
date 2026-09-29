@@ -26,9 +26,9 @@ export type TokenScope =
 
 export interface TokenScopeOption {
   value: TokenScope;
-  label: string;
-  description: string;
-  group: string;
+  labelKey: string;
+  descriptionKey: string;
+  groupKey: string;
 }
 
 export const READ_ONLY_SCOPES: TokenScope[] = [
@@ -47,35 +47,35 @@ export const READ_ONLY_SCOPES: TokenScope[] = [
 ];
 
 export const TOKEN_SCOPE_OPTIONS: TokenScopeOption[] = [
-  { value: "profile:read", label: "Profile read", description: "Read the principal profile and preferences.", group: "Account" },
-  { value: "profile:write", label: "Profile write", description: "Update preferences and profile settings.", group: "Account" },
-  { value: "tokens:read", label: "Tokens read", description: "List token metadata.", group: "Account" },
-  { value: "tokens:write", label: "Tokens write", description: "Create and revoke tokens.", group: "Account" },
-  { value: "users:read", label: "Users read", description: "List users and service accounts.", group: "Administration" },
-  { value: "users:write", label: "Users write", description: "Create, update, and delete users or service accounts.", group: "Administration" },
-  { value: "teams:read", label: "Teams read", description: "Read teams, members, and team source links.", group: "Access" },
-  { value: "teams:write", label: "Teams write", description: "Manage teams, members, and source links.", group: "Access" },
-  { value: "sources:read", label: "Sources read", description: "Read source metadata, schema, and stats.", group: "Logs" },
-  { value: "sources:write", label: "Sources write", description: "Create, validate, update, and delete sources.", group: "Logs" },
-  { value: "logs:read", label: "Logs read", description: "Run queries, histograms, exports, context lookup, and LogchefQL translation.", group: "Logs" },
-  { value: "saved_queries:read", label: "Saved queries read", description: "List and resolve saved queries.", group: "Logs" },
-  { value: "saved_queries:write", label: "Saved queries write", description: "Create, update, and delete saved queries.", group: "Logs" },
-  { value: "collections:read", label: "Collections read", description: "List collections, members, and items.", group: "Collections" },
-  { value: "collections:write", label: "Collections write", description: "Create and manage collections, members, and items.", group: "Collections" },
-  { value: "alerts:read", label: "Alerts read", description: "List alerts and alert history.", group: "Alerts" },
-  { value: "alerts:write", label: "Alerts write", description: "Create, test, update, delete, and resolve alerts.", group: "Alerts" },
-  { value: "dashboards:read", label: "Dashboards read", description: "List and view dashboards and their panels.", group: "Dashboards" },
-  { value: "dashboards:write", label: "Dashboards write", description: "Create, update, and delete dashboards.", group: "Dashboards" },
-  { value: "query_shares:read", label: "Query shares read", description: "Open existing query share links.", group: "Sharing" },
-  { value: "query_shares:write", label: "Query shares write", description: "Create and delete query share links.", group: "Sharing" },
-  { value: "settings:read", label: "Settings read", description: "Read system settings and provisioning export.", group: "Administration" },
-  { value: "settings:write", label: "Settings write", description: "Update system settings and test notifications.", group: "Administration" },
+  { value: "profile:read", labelKey: "tokens.scopes.profileRead", descriptionKey: "tokens.scopeDescriptions.profileRead", groupKey: "tokens.groups.account" },
+  { value: "profile:write", labelKey: "tokens.scopes.profileWrite", descriptionKey: "tokens.scopeDescriptions.profileWrite", groupKey: "tokens.groups.account" },
+  { value: "tokens:read", labelKey: "tokens.scopes.tokensRead", descriptionKey: "tokens.scopeDescriptions.tokensRead", groupKey: "tokens.groups.account" },
+  { value: "tokens:write", labelKey: "tokens.scopes.tokensWrite", descriptionKey: "tokens.scopeDescriptions.tokensWrite", groupKey: "tokens.groups.account" },
+  { value: "users:read", labelKey: "tokens.scopes.usersRead", descriptionKey: "tokens.scopeDescriptions.usersRead", groupKey: "tokens.groups.administration" },
+  { value: "users:write", labelKey: "tokens.scopes.usersWrite", descriptionKey: "tokens.scopeDescriptions.usersWrite", groupKey: "tokens.groups.administration" },
+  { value: "teams:read", labelKey: "tokens.scopes.teamsRead", descriptionKey: "tokens.scopeDescriptions.teamsRead", groupKey: "tokens.groups.access" },
+  { value: "teams:write", labelKey: "tokens.scopes.teamsWrite", descriptionKey: "tokens.scopeDescriptions.teamsWrite", groupKey: "tokens.groups.access" },
+  { value: "sources:read", labelKey: "tokens.scopes.sourcesRead", descriptionKey: "tokens.scopeDescriptions.sourcesRead", groupKey: "tokens.groups.logs" },
+  { value: "sources:write", labelKey: "tokens.scopes.sourcesWrite", descriptionKey: "tokens.scopeDescriptions.sourcesWrite", groupKey: "tokens.groups.logs" },
+  { value: "logs:read", labelKey: "tokens.scopes.logsRead", descriptionKey: "tokens.scopeDescriptions.logsRead", groupKey: "tokens.groups.logs" },
+  { value: "saved_queries:read", labelKey: "tokens.scopes.savedQueriesRead", descriptionKey: "tokens.scopeDescriptions.savedQueriesRead", groupKey: "tokens.groups.logs" },
+  { value: "saved_queries:write", labelKey: "tokens.scopes.savedQueriesWrite", descriptionKey: "tokens.scopeDescriptions.savedQueriesWrite", groupKey: "tokens.groups.logs" },
+  { value: "collections:read", labelKey: "tokens.scopes.collectionsRead", descriptionKey: "tokens.scopeDescriptions.collectionsRead", groupKey: "tokens.groups.collections" },
+  { value: "collections:write", labelKey: "tokens.scopes.collectionsWrite", descriptionKey: "tokens.scopeDescriptions.collectionsWrite", groupKey: "tokens.groups.collections" },
+  { value: "alerts:read", labelKey: "tokens.scopes.alertsRead", descriptionKey: "tokens.scopeDescriptions.alertsRead", groupKey: "tokens.groups.alerts" },
+  { value: "alerts:write", labelKey: "tokens.scopes.alertsWrite", descriptionKey: "tokens.scopeDescriptions.alertsWrite", groupKey: "tokens.groups.alerts" },
+  { value: "dashboards:read", labelKey: "tokens.scopes.dashboardsRead", descriptionKey: "tokens.scopeDescriptions.dashboardsRead", groupKey: "tokens.groups.dashboards" },
+  { value: "dashboards:write", labelKey: "tokens.scopes.dashboardsWrite", descriptionKey: "tokens.scopeDescriptions.dashboardsWrite", groupKey: "tokens.groups.dashboards" },
+  { value: "query_shares:read", labelKey: "tokens.scopes.querySharesRead", descriptionKey: "tokens.scopeDescriptions.querySharesRead", groupKey: "tokens.groups.sharing" },
+  { value: "query_shares:write", labelKey: "tokens.scopes.querySharesWrite", descriptionKey: "tokens.scopeDescriptions.querySharesWrite", groupKey: "tokens.groups.sharing" },
+  { value: "settings:read", labelKey: "tokens.scopes.settingsRead", descriptionKey: "tokens.scopeDescriptions.settingsRead", groupKey: "tokens.groups.administration" },
+  { value: "settings:write", labelKey: "tokens.scopes.settingsWrite", descriptionKey: "tokens.scopeDescriptions.settingsWrite", groupKey: "tokens.groups.administration" },
 ];
 
 export interface TokenScopePreset {
   id: string;
-  label: string;
-  description: string;
+  labelKey: string;
+  descriptionKey: string;
   scopes: TokenScope[];
 }
 
@@ -114,38 +114,38 @@ export const SOURCE_ADMIN_SCOPES: TokenScope[] = [
 export const TOKEN_SCOPE_PRESETS: TokenScopePreset[] = [
   {
     id: "read-only",
-    label: "Read-only",
-    description: "Read across every resource the principal can see.",
+    labelKey: "tokens.presets.readOnly",
+    descriptionKey: "tokens.presetDescriptions.readOnly",
     scopes: READ_ONLY_SCOPES,
   },
   {
     id: "logs-viewer",
-    label: "Logs viewer",
-    description: "Query logs and read saved queries / collections.",
+    labelKey: "tokens.presets.logsViewer",
+    descriptionKey: "tokens.presetDescriptions.logsViewer",
     scopes: LOGS_VIEWER_SCOPES,
   },
   {
     id: "logs-analyst",
-    label: "Logs analyst",
-    description: "Logs viewer + save & share queries.",
+    labelKey: "tokens.presets.logsAnalyst",
+    descriptionKey: "tokens.presetDescriptions.logsAnalyst",
     scopes: LOGS_ANALYST_SCOPES,
   },
   {
     id: "alerts-manager",
-    label: "Alerts manager",
-    description: "Manage alerts end-to-end plus read logs/sources.",
+    labelKey: "tokens.presets.alertsManager",
+    descriptionKey: "tokens.presetDescriptions.alertsManager",
     scopes: ALERTS_MANAGER_SCOPES,
   },
   {
     id: "source-admin",
-    label: "Source admin",
-    description: "Create and update sources and read settings.",
+    labelKey: "tokens.presets.sourceAdmin",
+    descriptionKey: "tokens.presetDescriptions.sourceAdmin",
     scopes: SOURCE_ADMIN_SCOPES,
   },
   {
     id: "full-access",
-    label: "Full access",
-    description: "All scopes. Equivalent to a session token.",
+    labelKey: "tokens.presets.fullAccess",
+    descriptionKey: "tokens.presetDescriptions.fullAccess",
     scopes: ["*"],
   },
 ];
@@ -163,10 +163,10 @@ export function matchingPreset(scopes: TokenScope[]): TokenScopePreset | null {
   return null;
 }
 
-export function formatScopes(scopes: TokenScope[] | undefined): string {
-  if (!scopes || scopes.length === 0) return "No access";
-  if (scopes.includes("*")) return "Full access";
+export function formatScopes(scopes: TokenScope[] | undefined, translate: (key: string, count?: number) => string): string {
+  if (!scopes || scopes.length === 0) return translate("tokens.noAccess");
+  if (scopes.includes("*")) return translate("tokens.presets.fullAccess");
   const preset = matchingPreset(scopes);
-  if (preset) return preset.label;
-  return `${scopes.length} scope${scopes.length === 1 ? "" : "s"}`;
+  if (preset) return translate(preset.labelKey);
+  return translate("tokens.scopeCount", scopes.length);
 }

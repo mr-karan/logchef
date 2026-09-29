@@ -83,4 +83,17 @@ describe("interface languages", () => {
       expect(message).not.toContain("dashboards.panelCount");
     }
   });
+
+  it("uses English fallback for new messages in catalogs not translated yet", async () => {
+    await setLocale("de");
+    expect(i18n.global.t("sources.victoriaLogsConnection")).toBe("VictoriaLogs Connection");
+    expect(i18n.global.t("access.noTeamsYet")).toBe("No teams yet");
+    expect(i18n.global.t("admin.queryActivityDescription")).toBe("Understand query volume, latency, sources, and users without leaving LogChef.");
+    expect(i18n.global.t("library.allQueries")).toBe("All queries");
+    await setLocale("zh-CN");
+    expect(i18n.global.t("sources.victoriaLogsConnection")).toBe("VictoriaLogs 连接");
+    expect(i18n.global.t("access.noTeamsYet")).toBe("尚无团队");
+    expect(i18n.global.t("admin.queryActivityDescription")).toBe("无需离开 LogChef，即可查看查询量、延迟、数据源和用户情况。");
+    expect(i18n.global.t("library.allQueries")).toBe("所有查询");
+  });
 });

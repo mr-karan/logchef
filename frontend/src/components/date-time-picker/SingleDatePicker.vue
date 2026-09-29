@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -29,10 +30,11 @@ interface Props {
 const props = withDefaults(defineProps<Props>(), {
   modelValue: null,
   includeTime: true,
-  placeholder: "Select date...",
   class: "",
   disabled: false,
 });
+const { t, locale } = useI18n();
+const datePlaceholder = computed(() => props.placeholder ?? t("ui.selectDate"));
 
 const emit = defineEmits<{
   'update:modelValue': [value: string | null];
@@ -52,7 +54,7 @@ function formatDateForDisplay(isoString: string | null): string {
     if (isNaN(date.getTime())) return isoString;
     
     if (props.includeTime) {
-      return date.toLocaleString('en-US', {
+       return date.toLocaleString(locale.value, {
         year: 'numeric',
         month: 'short',
         day: 'numeric',
@@ -62,7 +64,7 @@ function formatDateForDisplay(isoString: string | null): string {
         hour12: false
       });
     } else {
-      return date.toLocaleDateString('en-US', {
+       return date.toLocaleDateString(locale.value, {
         year: 'numeric',
         month: 'short',
         day: 'numeric'
@@ -244,7 +246,7 @@ function clear() {
           :disabled="props.disabled"
         >
           <CalendarIcon class="mr-2 h-4 w-4 flex-shrink-0" />
-          <span class="truncate">{{ displayValue || placeholder }}</span>
+          <span class="truncate">{{ displayValue || datePlaceholder }}</span>
         </Button>
       </PopoverTrigger>
       
@@ -257,7 +259,7 @@ function clear() {
         <div class="p-3 space-y-3">
           <div class="space-y-1.5">
             <label class="text-xs text-muted-foreground">
-              {{ includeTime ? 'Date & Time' : 'Date' }}
+              {{ includeTime ? t('pages.dateAndTime') : t('pages.date') }}
             </label>
             <div class="flex gap-2">
               <div class="relative flex-1">
@@ -276,6 +278,7 @@ function clear() {
                   <PopoverContent class="w-auto p-0" side="right" align="start">
                     <Calendar
                       class="rounded-md border"
+                      :locale="locale"
                       @update:model-value="handleCalendarSelect"
                     />
                   </PopoverContent>
@@ -287,7 +290,7 @@ function clear() {
           <div v-if="includeTime" class="space-y-1.5">
             <label class="text-xs text-muted-foreground flex items-center gap-1">
               <Clock class="h-3 w-3 text-muted-foreground" />
-              Time
+              {{ t('pages.time') }}
             </label>
             <Input
               type="time"
@@ -305,7 +308,7 @@ function clear() {
               class="flex-1 h-8"
               @click="setNow"
             >
-              Now
+              {{ t('pages.now') }}
             </Button>
             <Button 
               variant="outline"
@@ -313,14 +316,14 @@ function clear() {
               class="h-8"
               @click="clear"
             >
-              Clear
+              {{ t('ui.clear') }}
             </Button>
             <Button 
               size="sm"
               class="flex-1 h-8"
               @click="applyValue"
             >
-              Apply
+              {{ t('pages.apply') }}
             </Button>
           </div>
         </div>

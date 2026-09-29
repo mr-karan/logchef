@@ -23,6 +23,18 @@ import { getExpiryStatus, isTokenExpired } from '@/lib/tokenExpiry'
 
 const { t } = useI18n();
 
+const formatScopeSummary = (scopes: TokenScope[] | undefined) =>
+    formatScopes(scopes, (key, count) => count === undefined ? t(key) : t(key, { count }, count));
+function expiryText(expiresAt: string | null | undefined) {
+    const status = getExpiryStatus(expiresAt);
+    switch (status.kind) {
+        case "never": return t("access.tokenNeverExpires");
+        case "expired": return t("access.tokenExpired", { date: status.date });
+        case "expiringSoon": return t("access.tokenExpiresSoon", { days: status.days }, status.days);
+        case "expires": return t("access.tokenExpiresOn", { date: status.date });
+    }
+}
+
 const authStore = useAuthStore()
 const usersStore = useUsersStore()
 const apiTokensStore = useAPITokensStore()
@@ -291,10 +303,10 @@ const closeTokenDisplay = () => {
                                         }"
                                     >
                                         <AlertTriangle v-if="getExpiryStatus(token.expires_at).isExpired" class="h-3 w-3 mr-1" />
-                                        {{ getExpiryStatus(token.expires_at).text }}
+                                        {{ expiryText(token.expires_at) }}
                                     </Badge>
                                     <Badge variant="outline" class="text-xs">
-                                        {{ formatScopes(token.scopes) }}
+                                        {{ formatScopeSummary(token.scopes) }}
                                     </Badge>
                                 </div>
                                 <div class="flex items-center gap-4 text-sm text-muted-foreground">

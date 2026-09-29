@@ -8,11 +8,13 @@ import { useRoute } from 'vue-router'
 import { useThemeStore } from '@/stores/theme'
 import { useColorMode, useTitle } from '@vueuse/core'
 import { useExploreStore } from '@/stores/explore'
+import { useI18n } from 'vue-i18n'
 
 const route = useRoute()
 const themeStore = useThemeStore()
 const colorMode = useColorMode()
 const exploreStore = useExploreStore()
+const { t } = useI18n()
 
 onMounted(() => {
   colorMode.value = themeStore.preference
@@ -20,7 +22,7 @@ onMounted(() => {
 
 // Dynamic page title - shows saved query name when viewing a collection
 const pageTitle = computed(() => {
-  const baseTitle = route.meta.title as string | undefined
+  const titleKey = route.meta.title as string | undefined
   const queryName = exploreStore.activeSavedQueryName
   
   const isExplorerRoute = route.name === 'LogExplorer' || route.path.startsWith('/logs/collection')
@@ -29,7 +31,7 @@ const pageTitle = computed(() => {
     return `${queryName} - LogChef`
   }
   
-  return baseTitle ? `${baseTitle} - LogChef` : 'LogChef'
+  return titleKey ? `${t(titleKey)} - LogChef` : 'LogChef'
 })
 
 useTitle(pageTitle)

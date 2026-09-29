@@ -71,7 +71,7 @@ const newWebhookUrl = defineModel<string>("newWebhookUrl", { required: true });
           <Badge v-for="userId in form.recipient_user_ids" :key="userId" variant="secondary" class="flex items-center gap-1 font-normal">
             <User class="h-3 w-3 opacity-50" />
             <span>
-              {{ teamMembers.find(m => m.user_id === userId)?.full_name || teamMembers.find(m => m.user_id === userId)?.email || `User ${userId}` }}
+              {{ teamMembers.find(m => m.user_id === userId)?.full_name || teamMembers.find(m => m.user_id === userId)?.email || t('pages.userNumber', { id: userId }) }}
             </span>
             <button type="button" @click="onRemoveRecipient(userId)" class="ml-1 hover:text-destructive">
               <X class="h-3 w-3" />

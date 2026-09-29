@@ -1,23 +1,25 @@
 <template>
   <div class="component-load-error">
-    <h2>Component Failed to Load</h2>
-    <p>Sorry, we couldn't load this page component. This could be due to:</p>
+    <h2>{{ t('pages.componentLoadFailed') }}</h2>
+    <p>{{ t('pages.componentLoadDescription') }}</p>
     <ul>
-      <li>Network connectivity issues</li>
-      <li>Missing or incorrectly built component</li>
-      <li>Server configuration problems</li>
+      <li>{{ t('pages.networkIssues') }}</li>
+      <li>{{ t('pages.componentBuildIssues') }}</li>
+      <li>{{ t('pages.serverConfigurationIssues') }}</li>
     </ul>
     <div class="actions">
-      <button @click="goBack" class="back-button">Go Back</button>
-      <button @click="reload" class="reload-button">Reload Page</button>
+      <button @click="goBack" class="back-button">{{ t('pages.goBack') }}</button>
+      <button @click="reload" class="reload-button">{{ t('pages.reloadPage') }}</button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 
 const router = useRouter();
+const { t } = useI18n();
 
 function goBack() {
   router.back();

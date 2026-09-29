@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
+import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
@@ -12,15 +13,16 @@ import {
 } from "@/lib/tokenScopes";
 
 const model = defineModel<TokenScope[]>({ required: true });
+const { t } = useI18n();
 
 const groupedScopes = computed(() => {
   const groups = new Map<string, typeof TOKEN_SCOPE_OPTIONS>();
   for (const option of TOKEN_SCOPE_OPTIONS) {
-    const current = groups.get(option.group);
+    const current = groups.get(option.groupKey);
     if (current) {
       current.push(option);
     } else {
-      groups.set(option.group, [option]);
+      groups.set(option.groupKey, [option]);
     }
   }
   return Array.from(groups, ([name, scopes]) => ({ name, scopes }));
@@ -60,21 +62,21 @@ function handleScopeChecked(scope: TokenScope, checked: boolean | "indeterminate
         type="button"
         size="sm"
         :variant="activePreset?.id === preset.id ? 'default' : 'outline'"
-        :title="preset.description"
+        :title="t(preset.descriptionKey)"
         @click="applyPreset(preset)"
       >
-        {{ preset.label }}
+        {{ t(preset.labelKey) }}
       </Button>
       <Button type="button" size="sm" variant="ghost" @click="clearScopes">
-        Clear
+        {{ t('ui.clear') }}
       </Button>
-      <Badge v-if="isFullAccess" variant="destructive">All scopes</Badge>
-      <Badge v-else-if="model.length === 0" variant="outline">No scopes selected</Badge>
+      <Badge v-if="isFullAccess" variant="destructive">{{ t('pages.allScopes') }}</Badge>
+      <Badge v-else-if="model.length === 0" variant="outline">{{ t('pages.noScopesSelected') }}</Badge>
     </div>
 
     <div class="rounded-md border divide-y">
       <section v-for="group in groupedScopes" :key="group.name" class="p-3 space-y-3">
-        <h4 class="text-sm font-medium">{{ group.name }}</h4>
+        <h4 class="text-sm font-medium">{{ t(group.name) }}</h4>
         <div class="grid gap-3 sm:grid-cols-2">
           <label
             v-for="scope in group.scopes"
@@ -88,8 +90,8 @@ function handleScopeChecked(scope: TokenScope, checked: boolean | "indeterminate
               @update:model-value="handleScopeChecked(scope.value, $event)"
             />
             <span class="space-y-1">
-              <span class="block font-medium">{{ scope.label }}</span>
-              <span class="block text-xs text-muted-foreground">{{ scope.description }}</span>
+              <span class="block font-medium">{{ t(scope.labelKey) }}</span>
+              <span class="block text-xs text-muted-foreground">{{ t(scope.descriptionKey) }}</span>
             </span>
           </label>
         </div>

@@ -4,38 +4,38 @@
             <slot>
                 <Button>
                     <Plus class="mr-2 h-4 w-4" />
-                    Add Team
+                    {{ t('access.addTeam') }}
                 </Button>
             </slot>
         </DialogTrigger>
         <DialogContent class="sm:max-w-[425px]">
             <DialogHeader>
-                <DialogTitle>Add New Team</DialogTitle>
+                <DialogTitle>{{ t('access.addNewTeam') }}</DialogTitle>
                 <DialogDescription>
-                    Create a new team by providing a name and description.
+                    {{ t('access.createTeamDescription') }}
                 </DialogDescription>
             </DialogHeader>
             <form @submit.prevent="handleSubmit">
                 <div class="grid gap-4 py-4">
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="teamName" class="text-right">
-                            Team Name
+                            {{ t('access.teamName') }}
                         </Label>
-                        <Input id="teamName" v-model="teamName" placeholder="Enter team name" class="col-span-3"
+                        <Input id="teamName" v-model="teamName" :placeholder="t('access.enterTeamName')" class="col-span-3"
                             required :disabled="isLoading" />
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
                         <Label for="description" class="text-right">
-                            Description
+                            {{ t('ui.description') }}
                         </Label>
-                        <Textarea id="description" v-model="description" placeholder="Enter team description"
+                        <Textarea id="description" v-model="description" :placeholder="t('access.enterTeamDescription')"
                             class="col-span-3" :disabled="isLoading" />
                     </div>
                 </div>
                 <DialogFooter>
                     <Button type="submit" :disabled="isLoading">
                         <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-                        {{ isLoading ? 'Creating...' : 'Create Team' }}
+                        {{ isLoading ? t('access.creating') : t('access.createTeam') }}
                     </Button>
                 </DialogFooter>
             </form>
@@ -44,6 +44,7 @@
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
@@ -67,6 +68,7 @@ const emit = defineEmits<{
 }>()
 
 const teamsStore = useTeamsStore()
+const { t } = useI18n()
 const teamName = ref('')
 const description = ref('')
 const showDialog = ref(false)

@@ -62,7 +62,7 @@ const values = computed(() => props.state?.values)
             v-else-if="!expanded && values?.total_distinct"
             variant="secondary"
             class="text-[9px] h-4 px-1.5 font-normal tabular-nums flex-shrink-0"
-            :title="`${values.total_distinct} unique values`"
+            :title="t('pages.uniqueValueCount', { count: values.total_distinct })"
           >
             {{ values.total_distinct }}
           </Badge>
