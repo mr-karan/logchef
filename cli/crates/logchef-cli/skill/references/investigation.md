@@ -101,16 +101,25 @@ logchef fields service                    # observed values for `service` (autoc
 ## Tail (live follow)
 
 ```bash
-logchef tail 'level="error" and service="payment-api"' -s 1m
-logchef tail 'status>=500' --interval 1 --limit 200 --output jsonl | jq -r '.msg'
+logchef tail 'level="error" and service="payment-api"'
+logchef tail 'status>=500' --output jsonl | jq -r '.msg'
 logchef tail 'level="error"' --max-lines 50        # stop after 50 rows
 ```
 
-`tail` polls (default every 2s), dedupes across polls, and starts from `-s`
-(default `30s`, and unlike other commands it accepts a seconds unit). If a
-single poll hits `--limit`, the oldest rows in that poll can be dropped — raise
-`--limit` or lower `--interval` if you see the backpressure warning on stderr.
-Ctrl-C to stop.
+`tail` follows the server's live stream (SSE) from now; Ctrl-C to stop.
+`--timeout` is the idle read timeout before it reconnects (at least 20s,
+because the server sends a heartbeat every 15s).
+
+`--poll` switches to client-side polling for servers where the stream is
+unavailable. Only in that mode do `-s` (initial lookback, default `30s`; it
+accepts a seconds unit), `--interval` (default `2`), and `--limit` (rows per
+poll, default `100`) apply. If one poll matches more than `--limit` rows, the
+oldest are dropped; raise `--limit` or lower `--interval` when stderr shows the
+warning.
+
+```bash
+logchef tail 'status>=500' --poll -s 1m --interval 1 --limit 200
+```
 
 ## Saved queries and collections
 

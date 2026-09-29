@@ -1,6 +1,5 @@
 ---
 name: logchef
-version: 0.2.0
 description: >-
   Query logs from the terminal with the Logchef CLI. Covers LogchefQL search
   filters (`query`, `tail`), raw ClickHouse SQL and VictoriaLogs LogsQL (`sql`),
@@ -42,7 +41,7 @@ before spending a scan, `find` when you don't yet know which source to look in.
 logchef auth --server https://logs.example.com   # OIDC browser login (once)
 logchef config set team    platform              # set defaults so -t/-S are optional
 logchef config set source  app-logs
-logchef config set timezone Asia/Kolkata         # times are wall-clock in this zone
+logchef config set timezone Asia/Kolkata         # --from/--to are read in this zone
 
 logchef query 'level="error"' -s 15m             # search last 15 minutes
 ```
@@ -116,18 +115,32 @@ logchef query 'level="error" and app="checkout"' -t platform -S vl-app -s 1h
 ```
 
 Operators: `=` `!=` `~` (contains, case-insensitive) `!~` (not-contains) `>` `<` `>=` `<=`.
-`!=` and `!~` **do work** — the server lexer supports them. Full operator/value/
-nested-field detail: `references/logchefql.md`.
+Full operator/value/nested-field detail: `references/logchefql.md`.
 
 ## Time and limits
 
 - **Relative** `--since` / `-s`: integer + `m` / `h` / `d` / `w` (`15m`, `2h`,
   `7d`, `1w`). **No seconds, no fractions** (`90s`, `1.5h` are invalid). Default `15m`.
-  (`tail` is the exception — its `-s` also accepts `s`, default `30s`.)
+  (`tail` follows from now; `-s` applies only with `tail --poll`, where it
+  also accepts `s`.)
 - **Absolute** `--from` / `--to`: pass **both**, format `'YYYY-MM-DD HH:MM:SS'`
-  — a space, no `T`, no `Z`. Interpreted as wall-clock in the effective timezone.
-- **Timezone**: `logchef config set timezone "Asia/Kolkata"` (falls back to the
-  system zone). Check the effective zone with `logchef config show`.
+  — a space, no `T`, no `Z`. Read as wall-clock time in the effective timezone.
+- **Timezone** decides how `--from` / `--to` are read and how `histogram`
+  aligns its buckets.
+  - The effective zone is `config set timezone`, else the system zone, else
+    UTC. `logchef config show` prints it for the current context; `config`
+    commands ignore `--context`, so `config use <name>` first. Use an IANA
+    name (`Asia/Kolkata`, `UTC`); abbreviations like `IST` are rejected.
+  - `--since` is relative to now. In a zone with daylight saving, a window
+    that crosses the autumn fall-back hour can come out wrong, because the
+    bounds are sent as wall-clock times; run
+    `logchef config set timezone UTC` for such windows.
+  - Row timestamps print as the backend stores them, with their own offset
+    (often UTC, `…Z`). They are not converted to your zone. Read the offset
+    before you compare a row's time with your `--from` / `--to`.
+  - Times you write inside a `sql` query are not converted either. Prefer
+    `--from` / `--to` (or `__START__` / `__END__` on ClickHouse); if you write
+    a literal, give it an explicit zone or offset (see the `sql` references).
 - **Limit** `--limit` / `-l`: default `100` for `query`. For `sql`, prefer a
   `LIMIT` in the query itself; `--limit` caps the preview.
 

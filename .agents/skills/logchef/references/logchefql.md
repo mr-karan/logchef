@@ -19,8 +19,9 @@ lone word like `'timeout'` is a syntax error. Search text by filtering a field:
 logchef query 'msg~"timeout"' -s 15m
 ```
 
-An empty query (or just a `| field-list`) matches everything in the window —
-useful for "show me anything from this source".
+An empty query (or just a `| field-list`) matches everything in the window.
+Use it for a quick look at a source, with a short `-s` and a small `-l`; add a
+field filter for anything wider.
 
 ## Operators
 
@@ -31,9 +32,6 @@ useful for "show me anything from this source".
 | `~`  | contains, case-insensitive substring | `msg~"connection refused"` |
 | `!~` | does **not** contain | `path!~"/health"` |
 | `>` `<` `>=` `<=` | numeric comparison | `status>=500`, `duration_ms>1000` |
-
-`!=` and `!~` are fully supported by the server lexer (its operator pattern is
-`!=|!~|>=|<=|[=~><]`). Do not avoid them.
 
 ### What the operators actually do
 
@@ -53,7 +51,14 @@ with `=` on another field.
 - Bare values need no quotes: `status=200`, `level=error`.
 - **Quote** anything with spaces or punctuation: `msg~"connection refused"`,
   `service="payment-api"`.
-- Numbers stay unquoted for comparison operators: `status>=500`.
+- Numbers stay unquoted for comparison operators on numeric fields:
+  `status>=500`.
+- On ClickHouse sources, a number compared with a **string** column must be
+  quoted: `status_text="500"`, not `status_text=500`. Check the type with
+  `logchef schema`. VictoriaLogs has no column types and accepts either.
+- `null`: on ClickHouse, only `=` and `!=` accept it (`trace_id!=null`); any
+  other operator is an error. VictoriaLogs rejects every `null` comparison;
+  use `trace_id!=""` to find non-empty values there.
 - Quote the *value*, using double quotes inside the single-quoted shell arg.
 
 ## Nested / Map / JSON fields

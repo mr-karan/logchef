@@ -21,6 +21,11 @@ and a `LIMIT`. You can supply time two ways:
      GROUP BY service ORDER BY c DESC LIMIT 10"
    ```
 
+   Relative bounds (`now() - INTERVAL …`) are safe. A literal such as
+   `_timestamp > '2026-07-14 09:00:00'` is read in the column's (or server's)
+   timezone, not your Logchef timezone; write
+   `toDateTime('2026-07-14 09:00:00', 'Asia/Kolkata')`, or use option 2.
+
 2. **Let Logchef inject it** — pass `--since` / `--from`+`--to` and Logchef adds
    a `<ts_field> BETWEEN toDateTime('…', tz) AND toDateTime('…', tz)` condition,
    spliced into your top-level `WHERE` (or added as one) ahead of
@@ -108,7 +113,8 @@ than a client disconnect.
 
 ## Reminders
 
-- Parameterize / never build SQL from untrusted input by string-concatenation.
+- `sql` has no parameter binding, and your text runs verbatim. Never splice
+  untrusted text (values copied from log lines, user input) into a query.
 - The table lives at `database.table` — get the exact name from
   `logchef sources` (the `TARGET` column) or `logchef schema`.
 - `sql` does not accept LogchefQL. Filtering-only tasks belong in `logchef query`.

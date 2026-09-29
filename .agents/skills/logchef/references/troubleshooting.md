@@ -10,6 +10,7 @@
 | `Team '…' not found` / `Source '…' not found` | Wrong name/id. List with `logchef teams` / `logchef sources -t <team>`. Source accepts name, id, or `database.table`. |
 | `--from requires --to` (or vice-versa) | Absolute time needs **both** flags. |
 | `invalid time format` | Use `'YYYY-MM-DD HH:MM:SS'` — a space, no `T`, no `Z`. |
+| `Invalid timezone: 'IST'` | Use an IANA zone name: `logchef config set timezone Asia/Kolkata`. `doctor` warns when a hand-edited config holds an invalid zone. |
 | `Invalid duration number` | `--since` is integer + `m`/`h`/`d`/`w` (`15m`, `2h`). No seconds/fractions (`tail` alone allows `s`). |
 | `unexpected token "<EOF>"` / parse error | LogchefQL needs `field op value`; bare words aren't valid. `msg~"timeout"`, not `timeout`. |
 | Shell ate your `!`, `|`, `"`, or `()` | Wrap the whole query in **single quotes**. |
@@ -27,12 +28,13 @@
 2. Widen time a little (`-s 1h`) — maybe nothing happened in the last 15m.
 3. Check field names with `logchef schema` and values with `logchef fields <field>`
    — the column may be named differently than you assumed.
-4. Remember `~` is a **case-insensitive substring**, not tokenized or regex —
-   `msg~"error"` won't match if the text says `ERR` only when spelled that way…
-   actually it will (case-insensitive), but `msg~"err"` also matches `error`.
-   Narrow or broaden the substring accordingly.
-5. Confirm timezone: `logchef config show`. Absolute times are wall-clock in the
-   effective zone; a wrong zone shifts your window.
+4. Remember `~` is a **case-insensitive substring**, not tokenized or regex:
+   `msg~"err"` matches `ERR`, `error`, and `terror`, but `msg~"error"` does not
+   match a line that only says `ERR`. Broaden or narrow the substring.
+5. Confirm timezone: `logchef config show`. `--from` / `--to` are wall-clock
+   in the effective zone, so a wrong zone shifts your window. Row timestamps
+   keep the backend's offset (often UTC), so a row at `03:45:00Z` (09:15 IST) is inside an
+   `Asia/Kolkata` window of `09:00`–`09:30`.
 
 ## Auth and contexts
 

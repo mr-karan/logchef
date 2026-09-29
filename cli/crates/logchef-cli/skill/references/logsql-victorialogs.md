@@ -39,10 +39,14 @@ write raw LogsQL via `logchef sql`, either:
 - write a LogsQL `_time:` filter yourself:
 
 ```
-_time:5m                         last 5 minutes
-_time:[2026-07-14 09:00, 2026-07-14 09:30]
+_time:5m                                           last 5 minutes
+_time:[2026-07-14 09:00+05:30, 2026-07-14 09:30+05:30]   absolute, with offset
 error AND _time:1h
 ```
+
+An absolute `_time` without an offset is read in the VictoriaLogs **server's**
+local zone, not your Logchef timezone. Always add `+hh:mm` / `-hh:mm`, or use
+`--from` / `--to` instead.
 
 ### Pipes
 
