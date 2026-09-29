@@ -38,8 +38,13 @@ fn resolve_timezone_with(configured: Option<&str>, system: Option<&str>) -> Tz {
 }
 
 fn parse_tz(value: Option<&str>) -> Option<Tz> {
-    value
-        .map(str::trim)
+    value.and_then(parse_timezone)
+}
+
+/// Parses an IANA zone name such as `Asia/Kolkata`. Returns `None` for empty
+/// input and for abbreviations like `IST`, which are not IANA names.
+pub fn parse_timezone(value: &str) -> Option<Tz> {
+    Some(value.trim())
         .filter(|s| !s.is_empty())
         .and_then(|s| s.parse::<Tz>().ok())
 }
@@ -190,6 +195,14 @@ mod tests {
     fn unparseable_configured_zone_falls_back_to_injected_system_zone() {
         let tz = resolve_timezone_with(Some("Not/A/Real/Zone"), Some("Asia/Kolkata"));
         assert_eq!(tz, kolkata());
+    }
+
+    #[test]
+    fn parse_timezone_accepts_iana_names_only() {
+        assert_eq!(parse_timezone(" Asia/Kolkata "), Some(kolkata()));
+        assert_eq!(parse_timezone("UTC"), Some(Tz::UTC));
+        assert_eq!(parse_timezone("IST"), None);
+        assert_eq!(parse_timezone(""), None);
     }
 
     #[test]

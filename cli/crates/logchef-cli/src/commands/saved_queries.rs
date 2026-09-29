@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use chrono::{Duration, TimeZone, Utc};
+use chrono::{DateTime, Duration, TimeZone, Utc};
 use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::{
@@ -9,6 +9,7 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
+use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
 use url::Url;
 
@@ -238,7 +239,11 @@ async fn run_saved_query(
         }
     }
 
-    let (start_time, end_time) = parse_time_range(&content)?;
+    let (start, end) = parse_time_range(&content)?;
+    let time_range = resolve_time_range(
+        TimeInput::Instant { start, end },
+        ctx.defaults.timezone.as_deref(),
+    );
     let limit = args.limit.or(content.limit).unwrap_or(ctx.defaults.limit);
 
     if args.show_sql {
@@ -255,7 +260,7 @@ async fn run_saved_query(
         let request = SqlQueryRequest {
             query_text: final_query,
             limit: args.limit,
-            timezone: ctx.defaults.timezone.clone(),
+            timezone: Some(time_range.timezone.clone()),
             start_time: None,
             end_time: None,
             query_timeout: Some(args.timeout),
@@ -267,9 +272,9 @@ async fn run_saved_query(
     } else {
         let request = QueryRequest {
             query: final_query,
-            start_time,
-            end_time,
-            timezone: ctx.defaults.timezone.clone(),
+            start_time: time_range.start,
+            end_time: time_range.end,
+            timezone: Some(time_range.timezone),
             limit: Some(limit),
             query_timeout: Some(args.timeout),
         };
@@ -657,17 +662,11 @@ fn parse_query_param_i64(url: &Url, key: &str) -> Option<i64> {
         .and_then(|(_, v)| v.parse::<i64>().ok())
 }
 
-fn parse_time_range(content: &CollectionQueryContent) -> Result<(String, String)> {
-    let format = "%Y-%m-%d %H:%M:%S";
-
+fn parse_time_range(content: &CollectionQueryContent) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
     if let Some(tr) = &content.time_range {
         if let Some(rel) = &tr.relative {
             let end = Utc::now();
-            let start = end - parse_duration(rel)?;
-            return Ok((
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            ));
+            return Ok((end - parse_duration(rel)?, end));
         }
 
         if let Some(abs) = &tr.absolute {
@@ -679,19 +678,12 @@ fn parse_time_range(content: &CollectionQueryContent) -> Result<(String, String)
                 .timestamp_millis_opt(abs.end)
                 .single()
                 .ok_or_else(|| anyhow::anyhow!("Invalid end timestamp"))?;
-            return Ok((
-                start.format(format).to_string(),
-                end.format(format).to_string(),
-            ));
+            return Ok((start, end));
         }
     }
 
     let end = Utc::now();
-    let start = end - Duration::minutes(15);
-    Ok((
-        start.format(format).to_string(),
-        end.format(format).to_string(),
-    ))
+    Ok((end - Duration::minutes(15), end))
 }
 
 fn parse_duration(s: &str) -> Result<Duration> {

@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
-use logchef_core::timerange::resolve_timezone;
+use logchef_core::timerange::{parse_timezone, resolve_timezone};
 
 #[derive(Args)]
 pub struct ConfigArgs {
@@ -170,7 +170,11 @@ fn show_config() -> Result<()> {
     println!("  since:    {}", ctx.defaults.since);
     let effective_tz = resolve_timezone(ctx.defaults.timezone.as_deref());
     match &ctx.defaults.timezone {
-        Some(tz) => println!("  timezone: {}", tz),
+        Some(tz) if parse_timezone(tz).is_some() => println!("  timezone: {}", tz),
+        Some(tz) => println!(
+            "  timezone: '{}' is not a valid IANA zone, using detected system zone '{}'",
+            tz, effective_tz
+        ),
         None => println!(
             "  timezone: (not set, using detected system zone '{}')",
             effective_tz
@@ -228,7 +232,13 @@ fn set_value(key: &str, value: &str) -> Result<()> {
             ctx.defaults.since = value.to_string();
         }
         "timezone" | "defaults.timezone" => {
-            ctx.defaults.timezone = Some(value.to_string());
+            let tz = parse_timezone(value).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Invalid timezone: '{}'. Use an IANA zone name such as Asia/Kolkata or UTC, not an abbreviation like IST.",
+                    value
+                )
+            })?;
+            ctx.defaults.timezone = Some(tz.to_string());
         }
         _ => anyhow::bail!(
             "Unknown key: '{}'. Valid keys: team, source, limit, since, timezone, timeout, banner, check-updates",

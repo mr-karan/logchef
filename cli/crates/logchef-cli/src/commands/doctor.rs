@@ -3,7 +3,7 @@ use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::Client;
 use logchef_core::config::Context as CtxConfig;
-use logchef_core::timerange::resolve_timezone;
+use logchef_core::timerange::{parse_timezone, resolve_timezone};
 use serde::Serialize;
 use std::io::IsTerminal;
 
@@ -150,14 +150,25 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
             .as_ref()
             .and_then(|(_, c)| c.defaults.timezone.as_deref()),
     );
-    let tz_detail = match resolved
+    let tz_check = match resolved
         .as_ref()
         .and_then(|(_, c)| c.defaults.timezone.clone())
     {
-        Some(tz) => tz,
-        None => format!("{} (detected, not set)", effective_tz),
+        Some(tz) if parse_timezone(&tz).is_some() => Check::ok("Timezone", tz),
+        Some(tz) => {
+            let context = resolved.as_ref().map_or("", |(name, _)| name.as_str());
+            Check::warn(
+                "Timezone",
+                format!("'{}' is not a valid IANA zone, using {}", tz, effective_tz),
+                format!(
+                    "switch to context {:?} with `logchef config use`, then `logchef config set timezone <IANA name>`, e.g. Asia/Kolkata",
+                    context
+                ),
+            )
+        }
+        None => Check::ok("Timezone", format!("{} (detected, not set)", effective_tz)),
     };
-    checks.push(Check::ok("Timezone", tz_detail));
+    checks.push(tz_check);
 
     // ---- Server ----------------------------------------------------------
     let server_url = resolved.as_ref().map(|(_, c)| c.server_url.clone());

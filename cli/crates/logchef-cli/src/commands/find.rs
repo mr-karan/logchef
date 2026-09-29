@@ -3,6 +3,7 @@ use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::{Client, Column, QueryResponse, SqlQueryRequest, Team};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
+use logchef_core::timerange::resolve_timezone;
 use serde::Serialize;
 
 use crate::cli::GlobalArgs;
@@ -180,7 +181,7 @@ pub async fn run(args: FindArgs, global: GlobalArgs) -> Result<()> {
             let request = SqlQueryRequest {
                 query_text: count_query,
                 limit: Some(1),
-                timezone: ctx.defaults.timezone.clone(),
+                timezone: Some(resolve_timezone(ctx.defaults.timezone.as_deref()).to_string()),
                 start_time: None,
                 end_time: None,
                 query_timeout: Some(args.timeout),
