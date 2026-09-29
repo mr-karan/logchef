@@ -9,7 +9,7 @@ use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use logchef_core::highlight::{
     FormatOptions, HighlightOptions, Highlighter, format_log_entry_with_options,
 };
-use logchef_core::timerange::{TimeInput, resolve_time_range};
+use logchef_core::timerange::{ResolvedTimeRange, TimeInput, resolve_time_range};
 use serde::Serialize;
 use url::Url;
 
@@ -239,11 +239,7 @@ async fn run_saved_query(
         }
     }
 
-    let (start, end) = parse_time_range(&content)?;
-    let time_range = resolve_time_range(
-        TimeInput::Instant { start, end },
-        ctx.defaults.timezone.as_deref(),
-    );
+    let time_range = saved_query_time_range(&content, ctx.defaults.timezone.as_deref())?;
     let limit = args.limit.or(content.limit).unwrap_or(ctx.defaults.limit);
 
     if args.show_sql {
@@ -662,6 +658,20 @@ fn parse_query_param_i64(url: &Url, key: &str) -> Option<i64> {
         .and_then(|(_, v)| v.parse::<i64>().ok())
 }
 
+/// The request window for a saved query: bounds formatted in the effective
+/// timezone, returned together with that zone so they are always sent as a
+/// pair.
+fn saved_query_time_range(
+    content: &CollectionQueryContent,
+    configured_tz: Option<&str>,
+) -> Result<ResolvedTimeRange> {
+    let (start, end) = parse_time_range(content)?;
+    Ok(resolve_time_range(
+        TimeInput::Instant { start, end },
+        configured_tz,
+    ))
+}
+
 fn parse_time_range(content: &CollectionQueryContent) -> Result<(DateTime<Utc>, DateTime<Utc>)> {
     if let Some(tr) = &content.time_range {
         if let Some(rel) = &tr.relative {
@@ -796,6 +806,48 @@ fn print_table(entries: &[logchef_core::api::LogEntry], columns: &[logchef_core:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn saved_query_window_is_formatted_in_the_zone_it_is_sent_with() {
+        let start = Utc.with_ymd_and_hms(2026, 7, 14, 3, 30, 0).unwrap();
+        let end = Utc.with_ymd_and_hms(2026, 7, 14, 4, 0, 0).unwrap();
+        let content: CollectionQueryContent = serde_json::from_value(serde_json::json!({
+            "timeRange": { "absolute": {
+                "start": start.timestamp_millis(),
+                "end": end.timestamp_millis(),
+            }}
+        }))
+        .unwrap();
+
+        let range = saved_query_time_range(&content, Some("Asia/Kolkata")).unwrap();
+        assert_eq!(range.start, "2026-07-14 09:00:00");
+        assert_eq!(range.end, "2026-07-14 09:30:00");
+        assert_eq!(range.timezone, "Asia/Kolkata");
+    }
+
+    #[test]
+    fn saved_query_relative_window_spans_the_requested_duration() {
+        let content: CollectionQueryContent = serde_json::from_value(serde_json::json!({
+            "timeRange": { "relative": "1h" }
+        }))
+        .unwrap();
+        let range = saved_query_time_range(&content, Some("Asia/Kolkata")).unwrap();
+        assert_eq!(range.timezone, "Asia/Kolkata");
+        let kolkata = logchef_core::timerange::parse_timezone("Asia/Kolkata").unwrap();
+        let wall = |s: &str| {
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S")
+                .unwrap()
+                .and_local_timezone(kolkata)
+                .unwrap()
+                .with_timezone(&Utc)
+        };
+        let end = wall(&range.end);
+        assert!(
+            (Utc::now() - end).num_seconds().abs() < 5,
+            "end is now, read in Asia/Kolkata"
+        );
+        assert_eq!(end - wall(&range.start), Duration::hours(1));
+    }
 
     #[test]
     fn parses_explorer_url_selector() {
