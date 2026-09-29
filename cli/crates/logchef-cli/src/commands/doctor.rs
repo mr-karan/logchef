@@ -230,18 +230,13 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
                     "ask your admin to set oidc.cli_client_id, or use --token",
                 ));
             }
-            if meta.data.version != CLI_VERSION {
-                checks.push(Check::warn(
-                    "Version",
-                    format!("CLI {} vs server {}", CLI_VERSION, meta.data.version),
-                    "consider updating the CLI to match the server",
-                ));
-            } else {
-                checks.push(Check::ok(
-                    "Version",
-                    format!("CLI and server on {}", CLI_VERSION),
-                ));
-            }
+            // The CLI (0.x) and server (2.x) are versioned independently, so
+            // the numbers are reported, not compared. The update notifier
+            // flags an outdated CLI against the latest cli-v* release.
+            checks.push(Check::ok(
+                "Version",
+                format!("CLI {}, server {}", CLI_VERSION, meta.data.version),
+            ));
         }
         Err(err) => {
             checks.push(Check::fail(
