@@ -20,7 +20,7 @@ Logchef separates configuration into two categories:
 - Alerting configuration (SMTP settings, intervals, timeouts)
 - AI/LLM settings (API keys, models, endpoints)
 - Session management (duration, concurrency)
-- Frontend URL for CORS
+- Frontend URL (public URL of the web UI)
 
 On first boot, Logchef seeds the database with values from `config.toml`. After that, runtime settings are stored in the database and managed through the Admin Settings UI at **Administration → System Settings**.
 
@@ -40,8 +40,9 @@ port = 8125
 # Host address to bind to (default: "0.0.0.0")
 host = "0.0.0.0"
 
-# URL of the frontend application
-# Leave empty in production, used only in development
+# Public URL of the web UI, e.g. "https://logs.example.com". Used for login
+# redirects and share links. To serve Logchef under a subpath, include it:
+# "https://example.com/logchef". See Operations → Reverse Proxy.
 frontend_url = ""
 
 # HTTP server timeout for requests (default: 30s)
@@ -63,6 +64,9 @@ sure that proxy **overwrites** the forwarding header rather than appending a
 client-supplied one — otherwise the client IP can be spoofed. Invalid entries or
 a `0.0.0.0/0` wildcard fail startup.
 :::
+
+To run Logchef under a subpath such as `https://example.com/logchef/`, refer to
+[Reverse Proxy](/operations/reverse-proxy#under-a-subpath).
 
 ## Database Configuration
 

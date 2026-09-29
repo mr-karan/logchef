@@ -389,8 +389,7 @@ func isTimeoutError(err error) bool {
 		return true
 	}
 
-	var exception *clickhouse.Exception
-	if errors.As(err, &exception) {
+	if exception, ok := errors.AsType[*clickhouse.Exception](err); ok {
 		switch exception.Code {
 		case chExceptionTimeoutExceeded, chExceptionSocketTimeout:
 			return true

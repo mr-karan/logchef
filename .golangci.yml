@@ -2,20 +2,49 @@ version: "2"
 run:
   tests: true
 linters:
+  # On top of the "standard" set (errcheck, govet, ineffassign, staticcheck, unused).
   enable:
+    # Bugs and correctness.
+    - asciicheck
+    - bidichk
     - bodyclose
+    - containedctx
     - contextcheck
+    - durationcheck
+    - errchkjson
+    - errorlint
+    - exhaustive
+    - fatcontext
+    - gocheckcompilerdirectives
+    - gosec
+    - makezero
+    - musttag
+    - nilerr
+    - nilnesserr
+    - noctx
+    - reassign
+    - recvcheck
+    - rowserrcheck
+    - sqlclosecheck
+    - unparam
+    - wastedassign
+    # Style and maintainability.
+    - copyloopvar
+    - exptostd
     - gocritic
     - gocyclo
-    - gosec
+    - intrange
     - misspell
+    - modernize
+    - nolintlint
+    - predeclared
     - revive
     - unconvert
-    - unparam
-  disable:
-    - depguard
-    - exhaustruct
+    - usestdlibvars
   settings:
+    exhaustive:
+      # A default case handles the remaining values on purpose.
+      default-signifies-exhaustive: true
     gocritic:
       disabled-checks:
         - hugeParam
@@ -28,20 +57,34 @@ linters:
       min-complexity: 20
     gosec:
       excludes:
-        - G104
+        - G104 # Duplicates errcheck.
     govet:
       disable:
         - fieldalignment
         - shadow
       enable-all: true
+    modernize:
+      disable:
+        # Replacing omitempty with omitzero on struct fields changes JSON output.
+        - omitzero
+        # Promoted-field literals hide which embedded struct a field belongs to.
+        - embedlit
+    nolintlint:
+      require-explanation: true
+      require-specific: true
     revive:
+      enable-default-rules: true
       rules:
         - name: exported
           arguments:
             - checkPrivateReceivers
             - disableStutteringCheck
-          severity: warning
-          disabled: false
+        - name: context-as-argument
+          arguments:
+            - allow-types-before: "*testing.T"
+        # Handlers and interface implementations keep parameters they do not use.
+        - name: unused-parameter
+          disabled: true
   exclusions:
     generated: lax
     presets:
@@ -57,6 +100,7 @@ linters:
           - dupl
           - gocyclo
           - gosec
+          - noctx
         path: _test\.go
       - linters:
           - gosec
@@ -77,8 +121,9 @@ linters:
       - builtin$
       - examples$
 issues:
-  max-issues-per-linter: 50
-  max-same-issues: 3
+  # Report every finding. The defaults (50 per linter, 3 identical) hide most of them.
+  max-issues-per-linter: 0
+  max-same-issues: 0
 formatters:
   enable:
     - gofmt

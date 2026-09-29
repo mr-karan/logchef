@@ -171,7 +171,7 @@ func TestTailLogsDecodeGoroutineDoesNotLeakOnEmitError(t *testing.T) {
 	// off a later row via rowCh at the exact moment the main loop returns.
 	const rowCount = 500
 	var body strings.Builder
-	for i := 0; i < rowCount; i++ {
+	for range rowCount {
 		body.WriteString(`{"_time":"2026-04-08T10:00:00Z","_msg":"a"}` + "\n")
 	}
 

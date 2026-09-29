@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -240,7 +240,7 @@ func (w *queryStreamWriter) writeJSONField(key string, value any) error {
 // are handled by the writer (see WriteError). The caller must have already
 // resolved the source as ClickHouse-backed.
 func (s *Server) streamPreviewQuery(
-	c *fiber.Ctx,
+	c fiber.Ctx,
 	sourceID models.SourceID,
 	teamID models.TeamID,
 	user *models.User,
@@ -253,7 +253,7 @@ func (s *Server) streamPreviewQuery(
 	historyLanguage models.QueryLanguage,
 ) error {
 	queryID := uuid.New().String()
-	streamCtx, cancel := context.WithCancel(c.Context())
+	streamCtx, cancel := context.WithCancel(c.RequestCtx())
 	if err := queryTracker.StartQueryWithID(
 		queryID,
 		QueryClassPreview,
@@ -266,8 +266,7 @@ func (s *Server) streamPreviewQuery(
 		s.config.Query.MaxConcurrentGlobal,
 	); err != nil {
 		cancel()
-		var admissionErr *QueryAdmissionError
-		if errors.As(err, &admissionErr) {
+		if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 			return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
@@ -277,7 +276,7 @@ func (s *Server) streamPreviewQuery(
 	c.Set("Content-Type", "application/json; charset=utf-8")
 	c.Set("X-LogChef-Query-ID", queryID)
 
-	c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
 

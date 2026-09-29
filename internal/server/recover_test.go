@@ -7,19 +7,19 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 func TestRecoverMiddlewareConvertsPanicToHTTPError(t *testing.T) {
 	t.Parallel()
 
 	app := fiber.New(fiber.Config{
-		ErrorHandler: func(c *fiber.Ctx, err error) error {
+		ErrorHandler: func(c fiber.Ctx, err error) error {
 			return c.SendStatus(fiber.StatusInternalServerError)
 		},
 	})
 	app.Use(recoverMiddleware(slog.New(slog.NewTextHandler(io.Discard, nil))))
-	app.Get("/panic", func(*fiber.Ctx) error {
+	app.Get("/panic", func(fiber.Ctx) error {
 		panic("boom")
 	})
 

@@ -2,6 +2,7 @@ package logchefql
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -189,7 +190,7 @@ func (g *SQLGenerator) visitGroup(node *GroupNode) (string, *ParseError) {
 func (g *SQLGenerator) escapeIdentifier(identifier string) string {
 	// Escape backticks by doubling them
 	escaped := strings.ReplaceAll(identifier, "`", "``")
-	return fmt.Sprintf("`%s`", escaped)
+	return "`" + escaped + "`"
 }
 
 func (g *SQLGenerator) escapeSQLString(value string) string {
@@ -244,7 +245,7 @@ func (g *SQLGenerator) isMapType(columnType string) bool {
 	return strings.HasPrefix(lower, "map(")
 }
 
-func (g *SQLGenerator) isJsonType(columnType string) bool {
+func (g *SQLGenerator) isJSONType(columnType string) bool {
 	lower := strings.ToLower(unwrapType(columnType))
 	return lower == "json" || strings.HasPrefix(lower, "json(") || lower == "newjson"
 }
@@ -283,16 +284,14 @@ func (g *SQLGenerator) resolveField(field any) sqlField {
 		if strings.TrimSpace(f.Base) == "" || len(f.Path) == 0 {
 			return sqlField{}
 		}
-		for _, segment := range f.Path {
-			if segment == "" {
-				return sqlField{}
-			}
+		if slices.Contains(f.Path, "") {
+			return sqlField{}
 		}
 		columnType := g.getColumnType(f.Base)
 		switch {
 		case g.isMapType(columnType):
 			return sqlField{sql: g.mapAccess(f.Base, f.Path), columnType: g.mapValueType(columnType)}
-		case g.isJsonType(columnType):
+		case g.isJSONType(columnType):
 			pathType := g.jsonPathType(columnType, f.Path)
 			if pathType == "" {
 				pathType = "Dynamic"

@@ -487,7 +487,7 @@ func TestLogQueryParams(t *testing.T) {
 			params: LogQueryParams{
 				Limit:        100,
 				QueryText:    "SELECT * FROM logs",
-				QueryTimeout: intPtr(30),
+				QueryTimeout: new(30),
 			},
 			wantErr: false,
 		},
@@ -676,7 +676,7 @@ func findIgnoreCase(s, substr string) int {
 
 func toLower(s string) string {
 	result := make([]byte, len(s))
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c >= 'A' && c <= 'Z' {
 			c += 32
@@ -689,7 +689,7 @@ func toLower(s string) string {
 func normalizeWhitespace(s string) string {
 	result := make([]byte, 0, len(s))
 	inWhitespace := false
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		c := s[i]
 		if c == ' ' || c == '\t' || c == '\n' || c == '\r' {
 			if !inWhitespace && len(result) > 0 {
@@ -706,8 +706,4 @@ func normalizeWhitespace(s string) string {
 		result = result[:len(result)-1]
 	}
 	return string(result)
-}
-
-func intPtr(i int) *int {
-	return &i
 }

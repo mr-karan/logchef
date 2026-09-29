@@ -340,3 +340,31 @@ func TestLoad_BedrockRequiresRegionAndModel(t *testing.T) {
 		t.Fatalf("valid bedrock config should load: %v", err)
 	}
 }
+
+func TestServerConfig_BasePathFromFrontendURL(t *testing.T) {
+	for _, tc := range []struct {
+		frontendURL, wantBase, wantCookie string
+	}{
+		{"", "/", "/"},
+		{"http://localhost:5173", "/", "/"},
+		{"https://logs.example.com/", "/", "/"},
+		{"https://example.com/logchef", "/logchef/", "/logchef"},
+		{"https://example.com/logchef/", "/logchef/", "/logchef"},
+		{"https://example.com/tools/logchef//", "/tools/logchef/", "/tools/logchef"},
+		{"https://example.com/log chef", "/log%20chef/", "/log%20chef"},
+	} {
+		s := ServerConfig{FrontendURL: tc.frontendURL}
+		if got := s.BasePath(); got != tc.wantBase {
+			t.Errorf("BasePath(%q) = %q, want %q", tc.frontendURL, got, tc.wantBase)
+		}
+		if got := s.CookiePath(); got != tc.wantCookie {
+			t.Errorf("CookiePath(%q) = %q, want %q", tc.frontendURL, got, tc.wantCookie)
+		}
+	}
+}
+
+func TestLoad_RejectsUnparseableFrontendURL(t *testing.T) {
+	if _, err := Load(writeConfig(t, "[server]\nfrontend_url = \"http://[::1\"\n")); err == nil {
+		t.Fatal("Load with an unparseable server.frontend_url: want error, got nil")
+	}
+}

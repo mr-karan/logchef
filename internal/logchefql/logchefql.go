@@ -1,6 +1,7 @@
 package logchefql
 
 import (
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -87,7 +88,7 @@ func convertParticipleError(err error) *ParseError {
 	// grammar.go) are already a fully-formed *ParseError with the correct
 	// code; passing them through the participle-error heuristics below would
 	// overwrite that code with a generic ErrUnexpectedToken.
-	if pe, ok := err.(*ParseError); ok {
+	if pe, ok := errors.AsType[*ParseError](err); ok {
 		return pe
 	}
 

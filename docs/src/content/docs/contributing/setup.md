@@ -8,13 +8,14 @@ This guide covers multiple ways to set up your Logchef development environment.
 ## Prerequisites
 
 Logchef requires:
-- **Go 1.24+** - Backend development
-- **Node.js 22+** - Frontend development
-- **pnpm** - Frontend package management
+- **Go 1.27+** - Backend development
+- **Bun 1.4.2** - Frontend and docs package manager (the version CI uses)
 - **Rust** - CLI development (optional, only if working on CLI)
 - **Docker** - For running ClickHouse and test infrastructure
 - **just** - Command runner for development tasks
-- **sqlc** - SQL code generation
+- **sqlc v1.31.1** - SQL code generation
+- **golangci-lint v2.14.0** - Go linting. `just lint` fails if your version differs
+  from the one pinned in `.github/workflows/go-tests.yml`.
 
 ## Installation
 
@@ -22,35 +23,27 @@ Install dependencies using your system's package manager (or the methods below).
 
 #### Go Installation
 
-```bash
-# Download and install Go 1.24+
-wget https://go.dev/dl/go1.24.linux-amd64.tar.gz
-sudo tar -C /usr/local -xzf go1.24.linux-amd64.tar.gz
-export PATH=$PATH:/usr/local/go/bin
-```
+Download Go 1.27 or newer from [go.dev/dl](https://go.dev/dl/), or use your
+package manager (for example `brew install go`).
 
-#### Node.js and pnpm
+#### Bun
 
-```bash
-# Using nvm (recommended)
-curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.0/install.sh | bash
-nvm install 22
-nvm use 22
-
-# Install pnpm
-npm install -g pnpm
-```
+Install Bun with your package manager (for example `brew install oven-sh/bun/bun`),
+or follow [bun.sh/docs/installation](https://bun.sh/docs/installation). The
+frontend lockfile is `frontend/bun.lock`; do not use npm, pnpm, or yarn.
 
 #### Additional Tools
 
 ```bash
 # just - command runner
 cargo install just
-# OR
-go install github.com/casey/just@latest
 
-# sqlc - SQL code generator
-go install github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+# sqlc - SQL code generator (pin the version CI uses)
+go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
+# golangci-lint - install the pinned release binary, for example:
+brew install golangci-lint
+golangci-lint version   # must print 2.14.0
 
 # Docker - follow official docs for your OS
 # https://docs.docker.com/engine/install/
@@ -143,13 +136,16 @@ just vet
 cd frontend/
 
 # Development server with hot reload
-pnpm dev
+bun run dev
 
 # Type checking
-pnpm typecheck
+bun run typecheck
+
+# Unit tests
+bun run test
 
 # Build for production
-pnpm build
+bun run build
 ```
 
 ### CLI Development
@@ -199,11 +195,10 @@ sqlc version
 
 ### Frontend Build Errors
 
-Clear pnpm cache and reinstall:
+Reinstall dependencies from the lockfile:
 ```bash
 cd frontend/
-rm -rf node_modules .pnpm-store
-pnpm install
+bun install --frozen-lockfile
 ```
 
 ### Docker Permission Issues

@@ -108,7 +108,7 @@ func waitForFixtures(t *testing.T, provider *Provider, source *models.Source, wi
 	t.Helper()
 
 	const maxAttempts = 40
-	for attempt := 0; attempt < maxAttempts; attempt++ {
+	for range maxAttempts {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		result, err := provider.QueryLogs(ctx, source, datasource.QueryRequest{
 			RawQuery:  "*",

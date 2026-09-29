@@ -152,7 +152,7 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Start background health checks for the ClickHouse manager.
 	// Use 0 to trigger the default interval defined in the manager.
-	a.ClickHouse.StartBackgroundHealthChecks(0)
+	a.ClickHouse.StartBackgroundHealthChecks(0) //nolint:contextcheck // health checks run for the app lifetime on their own context
 
 	// Initialize alerts manager with dynamic senders that read config from DB
 	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)

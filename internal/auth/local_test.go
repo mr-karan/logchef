@@ -23,7 +23,7 @@ func TestHashAndVerifyLocalPassword(t *testing.T) {
 
 func TestLoginRateLimiter(t *testing.T) {
 	l := NewLoginRateLimiter(time.Minute, 10, 5)
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if !l.Allow("1.2.3.4", "a@example.com") {
 			t.Fatalf("attempt %d should be allowed", i+1)
 		}
@@ -36,7 +36,7 @@ func TestLoginRateLimiter(t *testing.T) {
 		t.Error("different email should be allowed under per-IP budget")
 	}
 	// Exhaust the per-IP budget.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		l.Allow("1.2.3.4", "c@example.com")
 	}
 	if l.Allow("1.2.3.4", "d@example.com") {

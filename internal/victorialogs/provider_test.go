@@ -521,7 +521,7 @@ func newTestProvider(server *httptest.Server) *Provider {
 	return provider
 }
 
-func mustJSON(t *testing.T, value interface{}) json.RawMessage {
+func mustJSON(t *testing.T, value any) json.RawMessage {
 	t.Helper()
 
 	payload, err := json.Marshal(value)
@@ -835,7 +835,7 @@ func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
 
 	var wg sync.WaitGroup
-	for i := 0; i < 50; i++ {
+	for range 50 {
 		wg.Add(4)
 		go func() { defer wg.Done(); _ = provider.InitializeSource(context.Background(), source) }()
 		go func() { defer wg.Done(); _ = provider.RemoveSource(source.ID) }()

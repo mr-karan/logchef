@@ -68,10 +68,6 @@ func TestRedactedConnectionConfigVictoriaLogsBlanksSecrets(t *testing.T) {
 	}
 }
 
-func intPtr(v int) *int       { return &v }
-func int64Ptr(v int64) *int64 { return &v }
-func strPtr(v string) *string { return &v }
-
 // TestClickHouseQuerySettingsValidate covers the value validation: numeric
 // settings must be non-negative, readonly must be 0/1/2, and result_overflow_mode
 // must be "throw" or "break".
@@ -88,26 +84,26 @@ func TestClickHouseQuerySettingsValidate(t *testing.T) {
 		{
 			name: "all valid",
 			s: &ClickHouseQuerySettings{
-				MaxExecutionTime:   intPtr(30),
-				MaxResultRows:      int64Ptr(1000),
-				MaxResultBytes:     int64Ptr(1 << 20),
-				MaxRowsToRead:      int64Ptr(5000),
-				MaxBytesToRead:     int64Ptr(1 << 30),
-				Readonly:           intPtr(2),
-				ResultOverflowMode: strPtr("break"),
+				MaxExecutionTime:   new(30),
+				MaxResultRows:      new(int64(1000)),
+				MaxResultBytes:     new(int64(1 << 20)),
+				MaxRowsToRead:      new(int64(5000)),
+				MaxBytesToRead:     new(int64(1 << 30)),
+				Readonly:           new(2),
+				ResultOverflowMode: new("break"),
 			},
 			wantErr: false,
 		},
-		{"negative max_execution_time", &ClickHouseQuerySettings{MaxExecutionTime: intPtr(-1)}, true},
-		{"negative max_result_rows", &ClickHouseQuerySettings{MaxResultRows: int64Ptr(-1)}, true},
-		{"negative max_result_bytes", &ClickHouseQuerySettings{MaxResultBytes: int64Ptr(-1)}, true},
-		{"negative max_rows_to_read", &ClickHouseQuerySettings{MaxRowsToRead: int64Ptr(-1)}, true},
-		{"negative max_bytes_to_read", &ClickHouseQuerySettings{MaxBytesToRead: int64Ptr(-1)}, true},
-		{"readonly too high", &ClickHouseQuerySettings{Readonly: intPtr(3)}, true},
-		{"readonly negative", &ClickHouseQuerySettings{Readonly: intPtr(-1)}, true},
-		{"readonly 0 ok", &ClickHouseQuerySettings{Readonly: intPtr(0)}, false},
-		{"bad overflow mode", &ClickHouseQuerySettings{ResultOverflowMode: strPtr("halt")}, true},
-		{"throw overflow mode", &ClickHouseQuerySettings{ResultOverflowMode: strPtr("throw")}, false},
+		{"negative max_execution_time", &ClickHouseQuerySettings{MaxExecutionTime: new(-1)}, true},
+		{"negative max_result_rows", &ClickHouseQuerySettings{MaxResultRows: new(int64(-1))}, true},
+		{"negative max_result_bytes", &ClickHouseQuerySettings{MaxResultBytes: new(int64(-1))}, true},
+		{"negative max_rows_to_read", &ClickHouseQuerySettings{MaxRowsToRead: new(int64(-1))}, true},
+		{"negative max_bytes_to_read", &ClickHouseQuerySettings{MaxBytesToRead: new(int64(-1))}, true},
+		{"readonly too high", &ClickHouseQuerySettings{Readonly: new(3)}, true},
+		{"readonly negative", &ClickHouseQuerySettings{Readonly: new(-1)}, true},
+		{"readonly 0 ok", &ClickHouseQuerySettings{Readonly: new(0)}, false},
+		{"bad overflow mode", &ClickHouseQuerySettings{ResultOverflowMode: new("halt")}, true},
+		{"throw overflow mode", &ClickHouseQuerySettings{ResultOverflowMode: new("throw")}, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -133,9 +129,9 @@ func TestClickHouseQuerySettingsToSettingsMap(t *testing.T) {
 	}
 
 	s := &ClickHouseQuerySettings{
-		MaxResultRows:      int64Ptr(1000),
-		Readonly:           intPtr(2),
-		ResultOverflowMode: strPtr("throw"),
+		MaxResultRows:      new(int64(1000)),
+		Readonly:           new(2),
+		ResultOverflowMode: new("throw"),
 	}
 	m := s.ToSettingsMap()
 	if len(m) != 3 {
@@ -162,9 +158,9 @@ func TestClickHouseSettingsRoundTripThroughConnectionConfig(t *testing.T) {
 			Database:  "logs",
 			TableName: "app",
 			Settings: &ClickHouseQuerySettings{
-				MaxResultRows:      int64Ptr(500),
-				MaxExecutionTime:   intPtr(15),
-				ResultOverflowMode: strPtr("break"),
+				MaxResultRows:      new(int64(500)),
+				MaxExecutionTime:   new(15),
+				ResultOverflowMode: new("break"),
 			},
 		},
 	}
@@ -209,7 +205,7 @@ func TestRedactedConnectionConfigClickHousePreservesSettings(t *testing.T) {
 			Password:  "super-secret",
 			Database:  "logs",
 			TableName: "app",
-			Settings:  &ClickHouseQuerySettings{MaxResultRows: int64Ptr(1000), Readonly: intPtr(2)},
+			Settings:  &ClickHouseQuerySettings{MaxResultRows: new(int64(1000)), Readonly: new(2)},
 		},
 	}
 

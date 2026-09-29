@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,7 +102,7 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 		provider, err = oidc.NewProvider(ctx, oidcCfg.ProviderURL)
 		if err != nil {
 			log.Error("failed to create OIDC provider for verification", "error", err, "provider_url", oidcCfg.ProviderURL)
-			return nil, fmt.Errorf("%w: %v", ErrOIDCProviderNotConfigured, err)
+			return nil, fmt.Errorf("%w: %w", ErrOIDCProviderNotConfigured, err)
 		}
 	} else {
 		// Explicit endpoints are required.
@@ -171,13 +172,7 @@ func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDT
 		return nil, err
 	}
 	if len(p.allowedIssuers) > 0 {
-		allowed := false
-		for _, iss := range p.allowedIssuers {
-			if idToken.Issuer == iss {
-				allowed = true
-				break
-			}
-		}
+		allowed := slices.Contains(p.allowedIssuers, idToken.Issuer)
 		if !allowed {
 			p.log.Warn("OIDC token issuer not in allow-list", "issuer", idToken.Issuer)
 			return nil, fmt.Errorf("%w: issuer %q not allowed", ErrOIDCInvalidToken, idToken.Issuer)
@@ -210,7 +205,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	oauth2Token, err := p.oauthConf.Exchange(ctx, code)
 	if err != nil {
 		p.log.Error("failed to exchange code for token", "error", err)
-		return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %v", ErrOIDCInvalidToken, err)
+		return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
 	}
 
 	// Extract and verify the ID Token.
@@ -222,14 +217,14 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	idToken, err := p.verify(ctx, rawIDToken)
 	if err != nil {
 		p.log.Error("failed to verify ID token", "error", err)
-		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %v", ErrOIDCInvalidToken, err)
+		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)
 	}
 
 	// Extract required claims.
 	var claims OIDCClaims
 	if err := idToken.Claims(&claims); err != nil {
 		p.log.Error("failed to parse ID token claims", "error", err)
-		return nil, nil, fmt.Errorf("%w: failed to parse ID token claims: %v", ErrOIDCInvalidToken, err)
+		return nil, nil, fmt.Errorf("%w: failed to parse ID token claims: %w", ErrOIDCInvalidToken, err)
 	}
 
 	// Verify email_verified claim.

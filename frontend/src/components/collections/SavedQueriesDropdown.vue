@@ -158,7 +158,7 @@ const navigateToCollectionsView = () => {
 // Copy shareable saved-query URL to clipboard
 async function copyCollectionUrl(event: Event, query: SavedQuery) {
   event.stopPropagation();
-  const url = `${window.location.origin}/logs/saved/${query.id}`;
+  const url = new URL(router.resolve(`/logs/saved/${query.id}`).href, window.location.origin).href;
 
   try {
     await navigator.clipboard.writeText(url);

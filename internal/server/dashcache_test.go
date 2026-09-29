@@ -11,7 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 	"github.com/valyala/fasthttp"
 
 	"github.com/mr-karan/logchef/internal/cache"
@@ -28,7 +28,7 @@ func newDashboardCacheTestServer(t *testing.T, enabled bool) *Server {
 	return &Server{dashCache: c}
 }
 
-func newDashboardCacheTestContext() (c *fiber.Ctx, release func()) {
+func newDashboardCacheTestContext() (c fiber.Ctx, release func()) {
 	app := fiber.New()
 	var req fasthttp.Request
 	var ctx fasthttp.RequestCtx
@@ -52,7 +52,7 @@ func TestDashboardCacheFillErrors(t *testing.T) {
 			key := [32]byte{1}
 			handled, err := s.tryServeDashboardCache(c, key, time.Minute, time.Second,
 				func(context.Context) ([]byte, error) { return nil, want })
-			if handled || err != want {
+			if handled || !errors.Is(err, want) {
 				t.Fatalf("handled=%v, err=%v; want false and original error %v", handled, err, want)
 			}
 			if len(c.Response().Body()) != 0 {
@@ -179,8 +179,7 @@ func TestDashboardCacheAdmissionSuccess(t *testing.T) {
 		}
 		synctest.Wait()
 		_, _, _, err := s.dashCache.GetOrFill(t.Context(), [32]byte{2}, time.Minute, time.Second, fill)
-		var admissionErr *QueryAdmissionError
-		if !errors.As(err, &admissionErr) {
+		if _, ok := errors.AsType[*QueryAdmissionError](err); !ok {
 			t.Fatalf("distinct fill bypassed admission: %v", err)
 		}
 		releaseFill()

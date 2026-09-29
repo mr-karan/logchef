@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -16,12 +16,12 @@ func TestRequireTokenScopeRejectsMissingScope(t *testing.T) {
 	t.Parallel()
 	app := fiber.New()
 	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	app.Post("/saved", func(c *fiber.Ctx) error {
+	app.Post("/saved", func(c fiber.Ctx) error {
 		c.Locals("auth_method", "token")
 		c.Locals("user", &models.User{ID: 1, Email: "svc@example.com", Role: models.UserRoleMember})
 		c.Locals("api_token", &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeLogsRead}})
 		return c.Next()
-	}, s.requireTokenScope(models.TokenScopeSavedQueriesWrite), func(c *fiber.Ctx) error {
+	}, s.requireTokenScope(models.TokenScopeSavedQueriesWrite), func(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 
@@ -39,11 +39,11 @@ func TestRequireTokenScopeAllowsMatchingScope(t *testing.T) {
 	t.Parallel()
 	app := fiber.New()
 	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	app.Post("/logs", func(c *fiber.Ctx) error {
+	app.Post("/logs", func(c fiber.Ctx) error {
 		c.Locals("auth_method", "token")
 		c.Locals("api_token", &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeLogsRead}})
 		return c.Next()
-	}, s.requireTokenScope(models.TokenScopeLogsRead), func(c *fiber.Ctx) error {
+	}, s.requireTokenScope(models.TokenScopeLogsRead), func(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 
@@ -61,10 +61,10 @@ func TestRequireTokenScopeSkipsSessions(t *testing.T) {
 	t.Parallel()
 	app := fiber.New()
 	s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	app.Post("/saved", func(c *fiber.Ctx) error {
+	app.Post("/saved", func(c fiber.Ctx) error {
 		c.Locals("auth_method", "session")
 		return c.Next()
-	}, s.requireTokenScope(models.TokenScopeSavedQueriesWrite), func(c *fiber.Ctx) error {
+	}, s.requireTokenScope(models.TokenScopeSavedQueriesWrite), func(c fiber.Ctx) error {
 		return c.SendStatus(fiber.StatusNoContent)
 	})
 

@@ -191,7 +191,7 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 			c.logger.Error("query hook BeforeQuery failed", "hook", fmt.Sprintf("%T", hook), "error", err)
 			return fmt.Errorf("BeforeQuery hook failed: %w", err)
 		}
-		ctx = hookCtx
+		ctx = hookCtx //nolint:fatcontext // each hook derives from the previous hook's context by design
 	}
 
 	// Execute the actual query function.

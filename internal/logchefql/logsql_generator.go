@@ -369,7 +369,7 @@ func (g *LogsQLGenerator) formatFieldName(fieldName string) string {
 	return strconv.Quote(trimmed)
 }
 
-func (g *LogsQLGenerator) formatValue(value interface{}) (string, *ParseError) {
+func (g *LogsQLGenerator) formatValue(value any) (string, *ParseError) {
 	switch v := value.(type) {
 	case nil:
 		return "", &ParseError{Code: ErrUnsupportedFeature, Message: "null comparisons are not supported for LogsQL translation"}
@@ -391,7 +391,7 @@ func (g *LogsQLGenerator) formatValue(value interface{}) (string, *ParseError) {
 	}
 }
 
-func (g *LogsQLGenerator) formatSubstringAsRegex(value interface{}) (string, *ParseError) {
+func (g *LogsQLGenerator) formatSubstringAsRegex(value any) (string, *ParseError) {
 	text, ok := value.(string)
 	if !ok {
 		return "", &ParseError{Code: ErrUnsupportedFeature, Message: "substring matches require string values"}

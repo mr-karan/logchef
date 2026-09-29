@@ -53,7 +53,7 @@ func buildLogchefQLConditionsSQL(query string, schema *logchefql.Schema) (string
 
 	result := logchefql.Translate(query, schema)
 	if !result.Valid {
-		return "", fmt.Errorf("invalid field-value filter: %v", result.Error)
+		return "", fmt.Errorf("invalid field-value filter: %w", result.Error)
 	}
 	if result.SQL == "" {
 		return "", nil
@@ -457,7 +457,7 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	}
 
 	wg.Wait()
-	return results, nil
+	return results, nil //nolint:nilerr // on cancellation, return the fields already fetched
 }
 
 // GetAllLowCardinalityFieldValues is deprecated, use GetAllFilterableFieldValues instead.

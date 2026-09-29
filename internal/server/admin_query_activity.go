@@ -6,7 +6,7 @@ import (
 
 	"github.com/mr-karan/logchef/pkg/models"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // Query-activity feed bounds. The recent feed length is caller-controlled and
@@ -52,7 +52,7 @@ type queryActivityResponse struct {
 // activity, not authoritative all-time analytics.
 // URL: GET /api/v1/admin/query-activity?limit=<N>
 // Requires: admin (requireAuth + requireAdmin) and logs:read token scope.
-func (s *Server) handleAdminQueryActivity(c *fiber.Ctx) error {
+func (s *Server) handleAdminQueryActivity(c fiber.Ctx) error {
 	limit := queryActivityDefaultLimit
 	if raw := c.Query("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
@@ -80,7 +80,7 @@ func (s *Server) handleAdminQueryActivity(c *fiber.Ctx) error {
 		})
 	}
 
-	window, err := s.sqlite.ListQueryActivity(c.Context(), queryActivityWindow)
+	window, err := s.sqlite.ListQueryActivity(c.RequestCtx(), queryActivityWindow)
 	if err != nil {
 		s.log.Error("failed to list query activity", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing query activity")
@@ -100,10 +100,7 @@ func (s *Server) handleAdminQueryActivity(c *fiber.Ctx) error {
 // recentActivity returns the first `limit` rows of the already newest-first
 // window as a fresh slice.
 func recentActivity(window []models.QueryActivityRecord, limit int) []models.QueryActivityRecord {
-	n := limit
-	if n > len(window) {
-		n = len(window)
-	}
+	n := min(limit, len(window))
 	recent := make([]models.QueryActivityRecord, n)
 	copy(recent, window[:n])
 	return recent

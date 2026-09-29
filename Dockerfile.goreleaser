@@ -1,4 +1,4 @@
-FROM alpine:3.19
+FROM alpine:3.24.2
 
 # Install runtime dependencies
 RUN apk --no-cache add ca-certificates tzdata

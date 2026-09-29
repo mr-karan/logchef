@@ -2,10 +2,13 @@ import axios from "axios";
 import { useAuthStore } from "@/stores/auth";
 import router from "@/router";
 import { showErrorToast } from "@/api/error-handler";
+import { basePath } from "@/utils/basePath";
+
+export const apiBaseURL = `${basePath}api/v1`;
 
 // Create base axios instance with common configuration
 export const api = axios.create({
-  baseURL: `/api/v1`,
+  baseURL: apiBaseURL,
   headers: {
     "Content-Type": "application/json",
   },
@@ -58,9 +61,9 @@ api.interceptors.response.use(
       const authStore = useAuthStore();
       await authStore.clearState();
 
-      // Get current path for redirect, including hash if present
-      const currentPath = window.location.pathname + window.location.search +
-        (window.location.hash ? window.location.hash : '');
+      // Current route (without the base path), including query and hash, to
+      // return to after login.
+      const currentPath = router.options.history.location;
 
       // Check if we're already on the login page (including /auth/login pattern)
       const isOnLoginPage = window.location.pathname.includes("/auth/login") ||

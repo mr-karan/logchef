@@ -276,8 +276,16 @@ test-short:
     @echo "Running tests (short mode)..."
     go test -v ./...
 
-# Run linter
+# Run linter. The local version must match the one pinned in CI.
 lint:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    want=$(grep -oE 'version: v[0-9]+\.[0-9]+\.[0-9]+' .github/workflows/go-tests.yml | head -1 | cut -d' ' -f2)
+    have="v$(golangci-lint version --short)"
+    if [[ "$have" != "$want" ]]; then
+        echo "golangci-lint $have is installed, CI pins $want. Install $want or bump the pin in .github/workflows/go-tests.yml." >&2
+        exit 1
+    fi
     golangci-lint run
 
 # Format Go code

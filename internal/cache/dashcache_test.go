@@ -150,7 +150,7 @@ func testCacheSingleflightCollapse(t *testing.T) {
 	defer c.Close()
 
 	const n = 50
-	var fillCount int32
+	var fillCount atomic.Int32
 	release := make(chan struct{})
 	start := make(chan struct{})
 
@@ -158,14 +158,12 @@ func testCacheSingleflightCollapse(t *testing.T) {
 	statuses := make(map[Status]int)
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range n {
+		wg.Go(func() {
 			<-start
 			data, status, _, err := c.GetOrFill(context.Background(), keyN(7), time.Minute, 5*time.Second,
 				func(context.Context) ([]byte, error) {
-					atomic.AddInt32(&fillCount, 1)
+					fillCount.Add(1)
 					<-release // hold the fill open until all callers have coalesced
 					return []byte("filled"), nil
 				})
@@ -179,7 +177,7 @@ func testCacheSingleflightCollapse(t *testing.T) {
 			mu.Lock()
 			statuses[status]++
 			mu.Unlock()
-		}()
+		})
 	}
 
 	close(start)
@@ -187,7 +185,7 @@ func testCacheSingleflightCollapse(t *testing.T) {
 	close(release)
 	wg.Wait()
 
-	if got := atomic.LoadInt32(&fillCount); got != 1 {
+	if got := fillCount.Load(); got != 1 {
 		t.Fatalf("fill executed %d times, want exactly 1 (singleflight collapse)", got)
 	}
 	if statuses[StatusMiss] != 1 {
@@ -213,7 +211,7 @@ func TestCacheFillConcurrencyCap(t *testing.T) {
 	start := make(chan struct{})
 
 	var wg sync.WaitGroup
-	for i := 0; i < n; i++ {
+	for i := range n {
 		wg.Add(1)
 		go func(id byte) {
 			defer wg.Done()

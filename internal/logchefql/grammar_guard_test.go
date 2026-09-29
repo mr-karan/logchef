@@ -1,6 +1,7 @@
 package logchefql
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -10,11 +11,11 @@ import (
 func nestedParenQuery(n int) string {
 	var b strings.Builder
 	b.Grow(2*n + 8)
-	for i := 0; i < n; i++ {
+	for range n {
 		b.WriteByte('(')
 	}
 	b.WriteString("a=1")
-	for i := 0; i < n; i++ {
+	for range n {
 		b.WriteByte(')')
 	}
 	return b.String()
@@ -36,7 +37,7 @@ func TestParseLogchefQLRejectsExcessiveNesting(t *testing.T) {
 		t.Fatal("expected an error for nesting beyond the max depth, got nil")
 	}
 
-	parseErr, ok := err.(*ParseError)
+	parseErr, ok := errors.AsType[*ParseError](err)
 	if !ok {
 		t.Fatalf("expected *ParseError, got %T: %v", err, err)
 	}
@@ -75,7 +76,7 @@ func TestParseLogchefQLRejectsMassiveNestedQuery(t *testing.T) {
 		t.Fatal("expected a clean error for a massively nested query, got nil")
 	}
 
-	parseErr, ok := err.(*ParseError)
+	parseErr, ok := errors.AsType[*ParseError](err)
 	if !ok {
 		t.Fatalf("expected *ParseError, got %T: %v", err, err)
 	}
@@ -150,7 +151,7 @@ func TestParseLogchefQLRejectsExcessiveLength(t *testing.T) {
 		t.Fatal("expected an error for an overlong query, got nil")
 	}
 
-	parseErr, ok := err.(*ParseError)
+	parseErr, ok := errors.AsType[*ParseError](err)
 	if !ok {
 		t.Fatalf("expected *ParseError, got %T: %v", err, err)
 	}

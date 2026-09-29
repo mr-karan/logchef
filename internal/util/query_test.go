@@ -26,7 +26,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "float64 pointer",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]any{{"count": ptrFloat64(24.576875029)}},
+				Logs:    []map[string]any{{"count": new(24.576875029)}},
 			},
 			expected:    24.576875029,
 			shouldError: false,
@@ -44,7 +44,7 @@ func TestExtractFirstNumeric(t *testing.T) {
 			name: "int64 pointer",
 			result: &models.QueryResult{
 				Columns: []models.ColumnInfo{{Name: "count"}},
-				Logs:    []map[string]any{{"count": ptrInt64(200)}},
+				Logs:    []map[string]any{{"count": new(int64(200))}},
 			},
 			expected:    200.0,
 			shouldError: false,
@@ -134,13 +134,4 @@ func TestExtractFirstNumeric(t *testing.T) {
 			}
 		})
 	}
-}
-
-// Helper functions to create pointers
-func ptrFloat64(v float64) *float64 {
-	return &v
-}
-
-func ptrInt64(v int64) *int64 {
-	return &v
 }

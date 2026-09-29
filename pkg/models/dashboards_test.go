@@ -74,7 +74,7 @@ func TestValidateDashboardPanels_Violations(t *testing.T) {
 	// Build a 25-panel blob to trip the count ceiling.
 	tooMany := func() json.RawMessage {
 		panels := make([]string, 0, 25)
-		for i := 0; i < 25; i++ {
+		for i := range 25 {
 			panels = append(panels, fmt.Sprintf(`{"id":"p%d","title":"x","type":"stat","team_id":1,"source_id":1,"query":"a","query_language":"logchefql"}`, i))
 		}
 		return json.RawMessage(`{"version":1,"layout":[],"panels":[` + strings.Join(panels, ",") + `]}`)

@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // --- Meta Handlers ---
@@ -56,7 +56,7 @@ type MetaResponse struct {
 // @Produce json
 // @Success 200 {object} MetaResponse "Server metadata"
 // @Router /meta [get]
-func (s *Server) handleGetMeta(c *fiber.Ctx) error {
+func (s *Server) handleGetMeta(c fiber.Ctx) error {
 	// Runtime metadata can intentionally include public demo credentials. Never
 	// let a browser or intermediary retain them after opt-out or rotation.
 	c.Set(fiber.HeaderCacheControl, "no-store, private")

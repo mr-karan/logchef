@@ -57,13 +57,7 @@ func (p *bedrockProvider) Complete(ctx context.Context, req CompletionRequest) (
 
 	// MaxTokens is a small, bounded config value; clamp to the int32 range the
 	// Converse API expects.
-	maxTokens := req.MaxTokens
-	if maxTokens < 0 {
-		maxTokens = 0
-	}
-	if maxTokens > math.MaxInt32 {
-		maxTokens = math.MaxInt32
-	}
+	maxTokens := min(max(req.MaxTokens, 0), math.MaxInt32)
 
 	// Reasoning effort is not part of the unified Converse inference config; it
 	// rides along as a model-specific field. Only send it when configured so

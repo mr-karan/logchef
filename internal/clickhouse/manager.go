@@ -51,7 +51,6 @@ func NewManager(log *slog.Logger) *Manager {
 
 // StartBackgroundHealthChecks launches a goroutine to periodically check
 // the health of all managed connections.
-// nolint:contextcheck // Background goroutine intentionally uses its own context
 func (m *Manager) StartBackgroundHealthChecks(interval time.Duration) {
 	if interval <= 0 {
 		interval = DefaultHealthCheckInterval
@@ -99,7 +98,6 @@ func (m *Manager) checkAllSourcesHealth() {
 	var wg sync.WaitGroup
 	for _, id := range idsToCheck {
 		wg.Go(func() {
-			//nolint:contextcheck // Background health check uses its own context
 			m.checkSource(context.Background(), id)
 		})
 	}
@@ -284,8 +282,7 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 	}
 
 	// Trigger an immediate check for the newly added source in the background
-	// nolint:contextcheck // Background goroutine intentionally uses its own context
-	go m.checkSource(context.Background(), source.ID) //nolint:gosec // G118: detached background source check, must outlive request
+	go m.checkSource(context.Background(), source.ID) //nolint:contextcheck,gosec // G118: detached background source check, must outlive request
 
 	return nil
 }

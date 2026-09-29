@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -174,7 +174,7 @@ func TestResolveTailQueryRejectsRawSQL(t *testing.T) {
 
 	s := &Server{}
 	app := fiber.New()
-	app.Get("/probe", func(c *fiber.Ctx) error {
+	app.Get("/probe", func(c fiber.Ctx) error {
 		source := &models.Source{
 			SourceType:     models.SourceTypeClickHouse,
 			QueryLanguages: []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},

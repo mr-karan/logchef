@@ -3,7 +3,7 @@ package server
 import (
 	"time"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 )
 
 // @Summary Health check endpoint
@@ -15,7 +15,7 @@ import (
 // @Router /health [get]
 // handleHealth responds to the health check endpoint, returning the server status,
 // current time, and build information.
-func (s *Server) handleHealth(c *fiber.Ctx) error {
+func (s *Server) handleHealth(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
 		"status":    "ok",
 		"time":      time.Now(),

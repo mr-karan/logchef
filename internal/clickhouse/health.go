@@ -82,11 +82,9 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 		if strings.Contains(err.Error(), "no rows in result set") {
 			c.logger.Debug("table not found in system.tables", "database", database, "table", table)
 			return fmt.Errorf("table '%s.%s' not found: %w", database, table, err)
-		} else {
-			// Log other scan/query errors.
-			c.logger.Debug("table existence check query failed", "database", database, "table", table, "error", err)
-			return fmt.Errorf("checking table '%s.%s' failed: %w", database, table, err)
 		}
+		c.logger.Debug("table existence check query failed", "database", database, "table", table, "error", err)
+		return fmt.Errorf("checking table '%s.%s' failed: %w", database, table, err)
 	}
 
 	// If Scan succeeds without error, the table exists.

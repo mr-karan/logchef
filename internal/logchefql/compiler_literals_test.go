@@ -81,7 +81,7 @@ func TestTypedContainerFieldResolution(t *testing.T) {
 		name  string
 		query string
 		field string
-		type_ string
+		typ   string
 		part  string
 		want  string
 	}{
@@ -93,7 +93,7 @@ func TestTypedContainerFieldResolution(t *testing.T) {
 		{"nullable low cardinality string", `payload~"x"`, "payload", "LowCardinality(Nullable(String))", "positionCaseInsensitive", "`payload`"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			result := Translate(tc.query, &Schema{Columns: []ColumnInfo{{Name: tc.field, Type: tc.type_}}})
+			result := Translate(tc.query, &Schema{Columns: []ColumnInfo{{Name: tc.field, Type: tc.typ}}})
 			if !result.Valid || !strings.Contains(result.SQL, tc.part) || !strings.Contains(result.SQL, tc.want) {
 				t.Fatalf("result = %+v, want %q and %q", result, tc.part, tc.want)
 			}

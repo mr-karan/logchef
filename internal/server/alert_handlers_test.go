@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
 )
@@ -21,7 +21,7 @@ func TestRequireAlertsEnabled(t *testing.T) {
 		s := &Server{config: &config.Config{Alerts: config.AlertsConfig{Enabled: true}}}
 
 		app := fiber.New()
-		app.Get("/probe", s.requireAlertsEnabled, func(c *fiber.Ctx) error {
+		app.Get("/probe", s.requireAlertsEnabled, func(c fiber.Ctx) error {
 			return c.SendString("reached")
 		})
 
@@ -49,7 +49,7 @@ func TestRequireAlertsEnabled(t *testing.T) {
 
 		reached := false
 		app := fiber.New()
-		app.Get("/probe", s.requireAlertsEnabled, func(c *fiber.Ctx) error {
+		app.Get("/probe", s.requireAlertsEnabled, func(c fiber.Ctx) error {
 			reached = true
 			return c.SendString("reached")
 		})

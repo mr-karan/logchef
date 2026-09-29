@@ -1,4 +1,5 @@
 import { apiClient } from "./apiUtils";
+import { apiBaseURL } from "./config";
 import { createSSEParser } from "@/lib/sse";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
@@ -412,7 +413,7 @@ export function buildTailUrl(
     query: query ?? "",
     query_language: queryLanguage,
   });
-  return `/api/v1/teams/${teamId}/sources/${sourceId}/logs/tail?${params.toString()}`;
+  return `${apiBaseURL}/teams/${teamId}/sources/${sourceId}/logs/tail?${params.toString()}`;
 }
 
 function parseJsonSafe<T>(data: string): T | null {

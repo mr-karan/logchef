@@ -61,6 +61,8 @@ func formatLogchefQLValue(variable Variable, quoted bool) (string, error) {
 			return "", err
 		}
 		value = formatted[1 : len(formatted)-1]
+	case TypeString, TypeText:
+		// Used as-is: value is already fmt.Sprint(variable.Value).
 	}
 	value = strings.NewReplacer("\\", "\\\\", "\"", "\\\"", "'", "\\'", "\n", "\\n", "\r", "\\r", "\t", "\\t").Replace(value)
 	if quoted {

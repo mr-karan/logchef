@@ -37,7 +37,7 @@ func CreateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, u
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidDashboard)
 	}
 	if err := models.ValidateDashboardPanels(req.Panels); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidDashboard, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
 	}
 	if err := verifyDashboardPanelRefs(ctx, db, user, req.Panels); err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func CreateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, u
 func verifyDashboardPanelRefs(ctx context.Context, db store.StoreOps, user *models.User, raw json.RawMessage) error {
 	refs, err := models.DashboardPanelRefs(raw)
 	if err != nil {
-		return fmt.Errorf("%w: %s", ErrInvalidDashboard, err)
+		return fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
 	}
 	if len(refs) == 0 {
 		return nil
@@ -226,7 +226,7 @@ func RedactDashboardPanelsForViewer(ctx context.Context, db store.StoreOps, log 
 	if err != nil || len(refs) == 0 {
 		// An unparseable or empty blob has nothing to redact here; corrupt rows
 		// are handled separately on the list path.
-		return nil
+		return nil //nolint:nilerr // nothing to redact in an unparseable blob
 	}
 
 	locked := make(map[string]struct{})
@@ -267,7 +267,7 @@ func UserCanViewDashboard(ctx context.Context, db store.StoreOps, user *models.U
 	}
 	refs, err := models.DashboardPanelRefs(dashboard.PanelsJSON)
 	if err != nil || len(refs) == 0 {
-		return false, nil
+		return false, nil //nolint:nilerr // an unparseable blob grants no team-based visibility
 	}
 	teams, err := db.ListUserTeams(ctx, user.ID)
 	if err != nil {
@@ -303,7 +303,7 @@ func UpdateDashboard(ctx context.Context, db store.StoreOps, log *slog.Logger, i
 		return nil, fmt.Errorf("%w: name is required", ErrInvalidDashboard)
 	}
 	if err := models.ValidateDashboardPanels(req.Panels); err != nil {
-		return nil, fmt.Errorf("%w: %s", ErrInvalidDashboard, err)
+		return nil, fmt.Errorf("%w: %w", ErrInvalidDashboard, err)
 	}
 
 	existing, err := db.GetDashboard(ctx, id)

@@ -124,15 +124,7 @@ pub async fn run(args: OpenArgs, global: GlobalArgs) -> Result<()> {
         pairs.push(("limit", limit.to_string()));
     }
 
-    let mut url = Url::parse(&ctx.server_url).context("Invalid server URL")?;
-    url.set_path("/logs/explore");
-    {
-        let mut qp = url.query_pairs_mut();
-        for (key, value) in &pairs {
-            qp.append_pair(key, value);
-        }
-    }
-    let url = url.to_string();
+    let url = explorer_url(&ctx.server_url, &pairs)?.to_string();
 
     if args.print {
         println!("{}", url);
@@ -146,4 +138,47 @@ pub async fn run(args: OpenArgs, global: GlobalArgs) -> Result<()> {
     }
 
     Ok(())
+}
+
+fn explorer_url(server_url: &str, pairs: &[(&str, String)]) -> Result<Url> {
+    let mut url = Url::parse(server_url).context("Invalid server URL")?;
+    let path = url.path().trim_end_matches('/');
+    url.set_path(&format!("{path}/logs/explore"));
+    {
+        let mut qp = url.query_pairs_mut();
+        for (key, value) in pairs {
+            qp.append_pair(key, value);
+        }
+    }
+    Ok(url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::explorer_url;
+
+    #[test]
+    fn explorer_url_preserves_server_path() {
+        for (server, expected) in [
+            (
+                "https://logs.example.com",
+                "https://logs.example.com/logs/explore?team=1&source=2",
+            ),
+            (
+                "https://logs.example.com/",
+                "https://logs.example.com/logs/explore?team=1&source=2",
+            ),
+            (
+                "https://example.com/logchef",
+                "https://example.com/logchef/logs/explore?team=1&source=2",
+            ),
+            (
+                "https://example.com/logchef/",
+                "https://example.com/logchef/logs/explore?team=1&source=2",
+            ),
+        ] {
+            let pairs = [("team", "1".to_string()), ("source", "2".to_string())];
+            assert_eq!(explorer_url(server, &pairs).unwrap().as_str(), expected);
+        }
+    }
 }

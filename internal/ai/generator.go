@@ -426,7 +426,7 @@ func validateAndFormatSQL(sqlInput string) (string, error) {
 
 	if err != nil {
 		// Parsing failed
-		return "", fmt.Errorf("%w: %v", ErrInvalidSQLGeneratedByAI, err)
+		return "", fmt.Errorf("%w: %w", ErrInvalidSQLGeneratedByAI, err)
 	}
 
 	if len(stmts) == 0 {

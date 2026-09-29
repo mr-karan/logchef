@@ -27,7 +27,7 @@ import (
 	"github.com/golang-migrate/migrate/v4"
 	migratesqlite "github.com/golang-migrate/migrate/v4/database/sqlite"
 	"github.com/golang-migrate/migrate/v4/source/iofs"
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Registers the "sqlite" database/sql driver.
 )
 
 // Compile-time guarantee that *DB satisfies the full store.Store contract: all
@@ -62,7 +62,7 @@ func New(ctx context.Context, opts Options) (*DB, error) {
 	log := opts.Logger.With("component", "sqlite")
 
 	// Run migrations first using a temporary connection.
-	if err := setupAndRunMigrations(opts.Config.Path, log); err != nil {
+	if err := setupAndRunMigrations(ctx, opts.Config.Path, log); err != nil {
 		return nil, err
 	}
 
@@ -124,7 +124,7 @@ func New(ctx context.Context, opts Options) (*DB, error) {
 }
 
 // setupAndRunMigrations handles the setup and execution of database migrations.
-func setupAndRunMigrations(dsn string, log *slog.Logger) error {
+func setupAndRunMigrations(ctx context.Context, dsn string, log *slog.Logger) error {
 	// Open a separate connection specifically for migrations.
 	migrationDB, err := sql.Open("sqlite", dsn)
 	if err != nil {
@@ -137,7 +137,7 @@ func setupAndRunMigrations(dsn string, log *slog.Logger) error {
 	}()
 
 	// Set a busy timeout for the migration connection.
-	if _, err := migrationDB.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+	if _, err := migrationDB.ExecContext(ctx, "PRAGMA busy_timeout = 5000"); err != nil {
 		log.Error("failed to set busy_timeout on migration database", "error", err)
 		return fmt.Errorf("error setting busy_timeout on migration database: %w", err)
 	}

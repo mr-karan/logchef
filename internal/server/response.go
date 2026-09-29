@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -12,7 +12,7 @@ import (
 // parsePositiveIntParam extracts a named URL parameter as a positive int64.
 // Returns an error suitable for direct return to the client if the param is
 // missing, empty, non-numeric, or <= 0.
-func parsePositiveIntParam(c *fiber.Ctx, paramName string) (int64, error) {
+func parsePositiveIntParam(c fiber.Ctx, paramName string) (int64, error) {
 	raw := c.Params(paramName)
 	if raw == "" {
 		return 0, fmt.Errorf("missing %s", paramName)
@@ -74,20 +74,20 @@ func NewErrorResponse(err any, errorType models.ErrorType) Response {
 
 // SendSuccess is a helper function to easily send a successful JSON response
 // with the given HTTP status code and data payload.
-func SendSuccess(c *fiber.Ctx, status int, data any) error {
+func SendSuccess(c fiber.Ctx, status int, data any) error {
 	return c.Status(status).JSON(NewSuccessResponse(data))
 }
 
 // SendError is a helper function to easily send a JSON error response
 // with the given HTTP status code and error message.
 // It uses the GeneralErrorType by default.
-func SendError(c *fiber.Ctx, status int, err any) error {
+func SendError(c fiber.Ctx, status int, err any) error {
 	// Use default error type if none is specified.
 	return c.Status(status).JSON(NewErrorResponse(err, ""))
 }
 
 // SendErrorWithType is a helper function to easily send a JSON error response
 // with the given HTTP status code, error message, and a specific application error type.
-func SendErrorWithType(c *fiber.Ctx, status int, err any, errorType models.ErrorType) error {
+func SendErrorWithType(c fiber.Ctx, status int, err any, errorType models.ErrorType) error {
 	return c.Status(status).JSON(NewErrorResponse(err, errorType))
 }
