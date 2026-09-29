@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'vue-router'
 import { ShieldAlert } from 'lucide-vue-next'
 
 const router = useRouter()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -11,21 +13,21 @@ const router = useRouter()
         <div class="space-y-2 text-center">
             <ShieldAlert class="mx-auto h-12 w-12 text-destructive" />
             <h1 class="text-4xl font-bold">403</h1>
-            <h2 class="text-xl font-semibold">Access Denied</h2>
+            <h2 class="text-xl font-semibold">{{ t('pages.accessDenied') }}</h2>
             <p class="text-muted-foreground">
-                You don't have permission to access this page.<br />
-                Please contact your administrator for access.
+                {{ t('pages.noPagePermission') }}<br />
+                {{ t('pages.contactAdministrator') }}
             </p>
         </div>
         <div class="flex space-x-4">
             <Button variant="outline" @click="router.back()">
-                Go Back
+                {{ t('pages.goBack') }}
             </Button>
             <Button @click="router.push('/logs/explore')">
-                Go to Explore
+                {{ t('pages.goToExplore') }}
             </Button>
             <Button variant="destructive" @click="router.push('/auth/logout')">
-                Logout
+                {{ t('pages.logout') }}
             </Button>
         </div>
     </div>

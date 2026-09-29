@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { computed, onMounted, shallowRef } from "vue";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,7 @@ interface CreatedTokenData {
 
 const serviceAccountsStore = useServiceAccountsStore();
 const teamsStore = useTeamsStore();
+const { t } = useI18n();
 const { toast } = useToast();
 
 const showCreateAccountDialog = shallowRef(false);
@@ -50,11 +52,33 @@ const teamsDialogAccount = shallowRef<User | null>(null);
 const newTeamId = shallowRef("");
 const newTeamRole = shallowRef<'admin' | 'member' | 'editor'>('member');
 
+const formatScopeSummary = (scopes: TokenScope[] | undefined) =>
+  formatScopes(scopes, (key, count) => count === undefined ? t(key) : t(key, { count }, count));
+
+function expiryText(expiresAt: string | null | undefined) {
+  const status = getExpiryStatus(expiresAt);
+  switch (status.kind) {
+    case "never": return t("access.tokenNeverExpires");
+    case "expired": return t("access.tokenExpired", { date: status.date });
+    case "expiringSoon": return t("access.tokenExpiresSoon", { days: status.days }, status.days);
+    case "expires": return t("access.tokenExpiresOn", { date: status.date });
+  }
+}
+
+function translateTeamRole(role: string) {
+  switch (role) {
+    case 'admin': return t('access.roleAdmin')
+    case 'editor': return t('access.roleEditor')
+    case 'member': return t('access.roleMember')
+    default: return role
+  }
+}
+
 const expiryOptions = [
-  { value: "7d", label: "7 days", hours: 7 * 24 },
-  { value: "30d", label: "30 days", hours: 30 * 24 },
-  { value: "90d", label: "90 days", hours: 90 * 24 },
-  { value: "never", label: "Never expires", hours: null },
+  { value: "7d", labelKey: "access.tokenExpiry7Days", hours: 7 * 24 },
+  { value: "30d", labelKey: "access.tokenExpiry30Days", hours: 30 * 24 },
+  { value: "90d", labelKey: "access.tokenExpiry90Days", hours: 90 * 24 },
+  { value: "never", labelKey: "access.tokenNeverExpires", hours: null },
 ];
 
 const accounts = computed(() => serviceAccountsStore.accounts);
@@ -135,7 +159,7 @@ function openTokenDialog(account: User) {
 async function createAccount() {
   const name = newAccountName.value.trim();
   if (!name) {
-    toast({ title: "Error", description: "Enter a service account name", variant: "destructive" });
+    toast({ title: t('ui.error'), description: t('access.enterServiceAccountName'), variant: "destructive" });
     return;
   }
   const result = await serviceAccountsStore.createAccount({ name });
@@ -149,11 +173,11 @@ async function createAccount() {
 async function createToken() {
   if (!selectedAccount.value) return;
   if (!newTokenName.value.trim()) {
-    toast({ title: "Error", description: "Enter a token name", variant: "destructive" });
+    toast({ title: t('ui.error'), description: t('access.enterTokenName'), variant: "destructive" });
     return;
   }
   if (selectedScopes.value.length === 0) {
-    toast({ title: "Error", description: "Select at least one scope", variant: "destructive" });
+    toast({ title: t('ui.error'), description: t('access.selectTokenScope'), variant: "destructive" });
     return;
   }
 
@@ -192,7 +216,7 @@ async function copyToClipboard(text: string) {
   try {
     await navigator.clipboard.writeText(text);
   } catch {
-    toast({ title: "Error", description: "Failed to copy to clipboard", variant: "destructive" });
+    toast({ title: t('ui.error'), description: t('pages.copyFailed'), variant: "destructive" });
   }
 }
 
@@ -204,41 +228,41 @@ function closeTokenDisplay() {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="Service tokens" description="Create non-login service principals and issue scoped tokens for automation." />
+    <PageHeader :title="t('routes.serviceTokens')" :description="t('access.serviceTokensDescription')" />
 
-    <PageSection title="Service accounts" description="Add these principals to teams, then issue tokens with explicit scopes.">
+    <PageSection :title="t('access.serviceAccounts')" :description="t('access.serviceAccountsDescription')">
       <template #actions>
         <Dialog v-model:open="showCreateAccountDialog">
           <DialogTrigger asChild>
             <Button class="gap-2">
               <Plus class="h-4 w-4" />
-              Create service account
+              {{ t('access.createServiceAccount') }}
             </Button>
           </DialogTrigger>
           <DialogContent class="sm:max-w-[425px]">
             <DialogHeader>
-              <DialogTitle>Create service account</DialogTitle>
+              <DialogTitle>{{ t('access.createServiceAccount') }}</DialogTitle>
               <DialogDescription>
-                Service accounts cannot log in. They authenticate only through service tokens.
+                {{ t('access.serviceAccountLoginDescription') }}
               </DialogDescription>
             </DialogHeader>
             <div class="grid gap-2 py-4">
-              <Label for="service-account-name">Name</Label>
-              <Input id="service-account-name" v-model="newAccountName" placeholder="e.g. CI log reader" @keydown.enter="createAccount" />
+              <Label for="service-account-name">{{ t('ui.name') }}</Label>
+              <Input id="service-account-name" v-model="newAccountName" :placeholder="t('access.serviceAccountNameExample')" @keydown.enter="createAccount" />
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" @click="showCreateAccountDialog = false">Cancel</Button>
+              <Button type="button" variant="outline" @click="showCreateAccountDialog = false">{{ t('ui.cancel') }}</Button>
               <Button type="button" @click="createAccount" :disabled="serviceAccountsStore.isLoadingOperation('createServiceAccount') || !newAccountName.trim()">
                 <Loader2 v-if="serviceAccountsStore.isLoadingOperation('createServiceAccount')" class="mr-2 h-4 w-4 animate-spin" />
-                Create
+                {{ t('ui.create') }}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </template>
 
-      <LoadingState v-if="serviceAccountsStore.isLoading && accounts.length === 0" label="Loading service accounts…" />
-      <EmptyState v-else-if="accounts.length === 0" :icon="Bot" title="No service accounts" description="Create a service account for automation, then add it to teams for source access." />
+      <LoadingState v-if="serviceAccountsStore.isLoading && accounts.length === 0" :label="t('access.loadingServiceAccounts')" />
+      <EmptyState v-else-if="accounts.length === 0" :icon="Bot" :title="t('access.noServiceAccounts')" :description="t('access.noServiceAccountsDescription')" />
 
       <div v-else class="space-y-4">
         <article v-for="account in accounts" :key="account.id" class="rounded-md border p-4 space-y-4">
@@ -247,19 +271,19 @@ function closeTokenDisplay() {
               <div class="flex items-center gap-2">
                 <Bot class="h-4 w-4 text-muted-foreground" />
                 <h3 class="font-medium">{{ account.full_name }}</h3>
-                <Badge variant="secondary">Service account</Badge>
+                <Badge variant="secondary">{{ t('access.serviceAccount') }}</Badge>
               </div>
               <p class="text-sm text-muted-foreground font-mono">{{ account.email }}</p>
-              <p class="text-xs text-muted-foreground">Created {{ formatDate(account.created_at) }}</p>
+              <p class="text-xs text-muted-foreground">{{ t('access.createdOn', { date: formatDate(account.created_at) }) }}</p>
             </div>
             <div class="flex gap-2">
               <Button size="sm" variant="outline" class="gap-2" @click="openTeamsDialog(account)">
                 <Users class="h-4 w-4" />
-                Manage teams
+                {{ t('access.manageTeams') }}
               </Button>
               <Button size="sm" variant="outline" class="gap-2" @click="openTokenDialog(account)">
                 <KeyRound class="h-4 w-4" />
-                Create token
+                {{ t('access.createToken') }}
               </Button>
               <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="accountToDelete = account">
                 <Trash2 class="h-4 w-4" />
@@ -268,27 +292,27 @@ function closeTokenDisplay() {
           </div>
 
           <div class="space-y-2">
-            <h4 class="text-sm font-medium">Teams</h4>
+            <h4 class="text-sm font-medium">{{ t('routes.teams') }}</h4>
             <Alert v-if="teamsFor(account).length === 0" variant="destructive" class="py-2">
               <AlertTriangle class="h-4 w-4" />
               <AlertDescription>
-                Not in any team — tokens for this account can authenticate but won't reach any source.
-                <button type="button" class="ml-1 underline" @click="openTeamsDialog(account)">Manage teams</button>
+                {{ t('access.notInTeamDescription') }}
+                <button type="button" class="ml-1 underline" @click="openTeamsDialog(account)">{{ t('access.manageTeams') }}</button>
               </AlertDescription>
             </Alert>
             <div v-else class="flex flex-wrap gap-2">
               <Badge v-for="team in teamsFor(account)" :key="team.id" variant="outline" class="gap-1.5">
                 <span>{{ team.name }}</span>
                 <span class="text-muted-foreground">·</span>
-                <span class="capitalize text-muted-foreground">{{ team.role }}</span>
+                <span class="text-muted-foreground">{{ translateTeamRole(team.role) }}</span>
               </Badge>
             </div>
           </div>
 
           <div class="space-y-2">
-            <h4 class="text-sm font-medium">Tokens</h4>
+            <h4 class="text-sm font-medium">{{ t('access.tokens') }}</h4>
             <div v-if="tokensFor(account).length === 0" class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-              No tokens yet.
+              {{ t('access.noTokensYet') }}
             </div>
             <div v-else class="space-y-2">
               <div v-for="token in tokensFor(account)" :key="token.id" class="flex items-center justify-between rounded-md border p-3">
@@ -304,13 +328,13 @@ function closeTokenDisplay() {
                       }"
                     >
                       <AlertTriangle v-if="getExpiryStatus(token.expires_at).isExpired" class="h-3 w-3 mr-1" />
-                      {{ getExpiryStatus(token.expires_at).text }}
+                      {{ expiryText(token.expires_at) }}
                     </Badge>
-                    <Badge variant="secondary">{{ formatScopes(token.scopes) }}</Badge>
+                    <Badge variant="secondary">{{ formatScopeSummary(token.scopes) }}</Badge>
                   </div>
                   <div class="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                    <span class="inline-flex items-center gap-1"><Calendar class="h-3 w-3" />Created {{ formatDate(token.created_at) }}</span>
-                    <span class="inline-flex items-center gap-1"><Clock class="h-3 w-3" />{{ token.last_used_at ? `Last used ${formatDate(token.last_used_at)}` : 'Never used' }}</span>
+                    <span class="inline-flex items-center gap-1"><Calendar class="h-3 w-3" />{{ t('access.createdOn', { date: formatDate(token.created_at) }) }}</span>
+                    <span class="inline-flex items-center gap-1"><Clock class="h-3 w-3" />{{ token.last_used_at ? t('access.lastUsedOn', { date: formatDate(token.last_used_at) }) : t('access.neverUsed') }}</span>
                   </div>
                 </div>
                 <Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" @click="tokenToDelete = { account, tokenId: token.id, tokenName: token.name }">
@@ -326,35 +350,35 @@ function closeTokenDisplay() {
     <Dialog v-model:open="showCreateTokenDialog">
       <DialogContent class="sm:max-w-[760px] max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create service token</DialogTitle>
+          <DialogTitle>{{ t('access.createServiceToken') }}</DialogTitle>
           <DialogDescription>
-            Select a preset or choose exact scopes. The token still only reaches sources available to {{ selectedAccount?.full_name }} through team membership.
+            {{ t('access.createServiceTokenDescription', { name: selectedAccount?.full_name ?? '' }) }}
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-4 py-4">
           <div class="grid gap-2">
-            <Label for="service-token-name">Token name</Label>
+            <Label for="service-token-name">{{ t('access.tokenName') }}</Label>
             <Input id="service-token-name" v-model="newTokenName" />
           </div>
           <div class="grid gap-2">
-            <Label for="service-token-expiry">Expiration</Label>
+            <Label for="service-token-expiry">{{ t('access.expiration') }}</Label>
             <Select v-model="newTokenExpiry">
-              <SelectTrigger id="service-token-expiry"><SelectValue placeholder="Select expiration" /></SelectTrigger>
+              <SelectTrigger id="service-token-expiry"><SelectValue :placeholder="t('access.selectExpiration')" /></SelectTrigger>
               <SelectContent>
-                <SelectItem v-for="option in expiryOptions" :key="option.value" :value="option.value">{{ option.label }}</SelectItem>
+                <SelectItem v-for="option in expiryOptions" :key="option.value" :value="option.value">{{ t(option.labelKey) }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <TokenScopePicker v-model="selectedScopes" />
           <Alert>
             <Shield class="h-4 w-4" />
-            <AlertDescription>The token is shown once. Store it securely before closing the next dialog.</AlertDescription>
+            <AlertDescription>{{ t('access.tokenShownOnce') }}</AlertDescription>
           </Alert>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" @click="showCreateTokenDialog = false">Cancel</Button>
+          <Button type="button" variant="outline" @click="showCreateTokenDialog = false">{{ t('ui.cancel') }}</Button>
           <Button type="button" @click="createToken" :disabled="!newTokenName.trim() || selectedScopes.length === 0">
-            Create token
+            {{ t('access.createToken') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -363,12 +387,12 @@ function closeTokenDisplay() {
     <Dialog v-model:open="showTokenDisplay">
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Service token created</DialogTitle>
-          <DialogDescription>Copy this token now. It will not be shown again.</DialogDescription>
+          <DialogTitle>{{ t('access.serviceTokenCreated') }}</DialogTitle>
+          <DialogDescription>{{ t('access.copyTokenNow') }}</DialogDescription>
         </DialogHeader>
         <div class="space-y-4">
           <div>
-            <Label>Token</Label>
+            <Label>{{ t('access.token') }}</Label>
             <div class="mt-2 flex items-center gap-2 rounded-md bg-muted p-3">
               <code class="min-w-0 flex-1 break-all text-sm">{{ createdTokenData?.token }}</code>
               <Button size="sm" variant="outline" @click="copyToClipboard(createdTokenData?.token || '')">
@@ -378,11 +402,11 @@ function closeTokenDisplay() {
           </div>
           <Alert>
             <Shield class="h-4 w-4" />
-            <AlertDescription>Treat this value like a password. Delete and recreate the token if it is lost.</AlertDescription>
+            <AlertDescription>{{ t('access.tokenSecretWarning') }}</AlertDescription>
           </Alert>
         </div>
         <DialogFooter>
-          <Button class="w-full" @click="closeTokenDisplay">I've copied my token</Button>
+          <Button class="w-full" @click="closeTokenDisplay">{{ t('access.copiedToken') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -390,24 +414,24 @@ function closeTokenDisplay() {
     <Dialog :open="teamsDialogAccount !== null" @update:open="(open) => { if (!open) closeTeamsDialog() }">
       <DialogContent class="sm:max-w-[560px]">
         <DialogHeader>
-          <DialogTitle>Manage team membership</DialogTitle>
+          <DialogTitle>{{ t('access.manageTeamMembership') }}</DialogTitle>
           <DialogDescription>
-            {{ teamsDialogAccount?.full_name }} can only reach sources owned by teams it belongs to.
+            {{ t('access.serviceAccountTeamAccessDescription', { name: teamsDialogAccount?.full_name ?? '' }) }}
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-4 py-2">
           <div class="space-y-2">
-            <Label class="text-sm">Current teams</Label>
+            <Label class="text-sm">{{ t('access.currentTeams') }}</Label>
             <div v-if="teamsDialogAccount && teamsFor(teamsDialogAccount).length === 0"
               class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-              Not in any team yet.
+              {{ t('access.notInAnyTeam') }}
             </div>
             <div v-else-if="teamsDialogAccount" class="space-y-2">
               <div v-for="team in teamsFor(teamsDialogAccount)" :key="team.id"
                 class="flex items-center justify-between rounded-md border p-2.5">
                 <div class="flex flex-col">
                   <span class="font-medium">{{ team.name }}</span>
-                  <span class="text-xs text-muted-foreground capitalize">{{ team.role }}</span>
+                  <span class="text-xs text-muted-foreground">{{ translateTeamRole(team.role) }}</span>
                 </div>
                 <Button variant="ghost" size="icon" class="text-destructive hover:text-destructive"
                   @click="removeAccountFromTeam(teamsDialogAccount, team.id)">
@@ -418,43 +442,43 @@ function closeTokenDisplay() {
           </div>
 
           <div class="space-y-2 border-t pt-4">
-            <Label class="text-sm">Add to team</Label>
+            <Label class="text-sm">{{ t('access.addToTeam') }}</Label>
             <div class="grid grid-cols-[1fr_auto] gap-2">
               <SearchableSelect
                 v-model="newTeamId"
                 :items="availableTeamItemsForAccount"
-                placeholder="Select a team"
-                search-placeholder="Search teams…"
-                empty-text="No teams available." />
+                :placeholder="t('access.selectTeam')"
+                :search-placeholder="t('access.searchTeams')"
+                :empty-text="t('access.noTeamsAvailable')" />
               <Select v-model="newTeamRole">
                 <SelectTrigger class="w-[140px]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="member">Member</SelectItem>
-                  <SelectItem value="editor">Editor</SelectItem>
-                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
+                  <SelectItem value="editor">{{ t('access.roleEditor') }}</SelectItem>
+                  <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <Button type="button" class="w-full gap-2" :disabled="!newTeamId"
               @click="addAccountToTeam">
               <Plus class="h-4 w-4" />
-              Add to team
+              {{ t('access.addToTeam') }}
             </Button>
           </div>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" @click="closeTeamsDialog">Done</Button>
+          <Button type="button" variant="outline" @click="closeTeamsDialog">{{ t('access.done') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
 
     <ConfirmDialog
       :open="accountToDelete !== null"
-      title="Delete service account?"
-      :description="accountToDelete ? `Delete &quot;${accountToDelete.full_name}&quot; and revoke all of its tokens? This cannot be undone.` : undefined"
-      confirm-text="Delete"
+      :title="t('access.deleteServiceAccountTitle')"
+      :description="accountToDelete ? t('access.deleteServiceAccountConfirmation', { name: accountToDelete.full_name }) : undefined"
+      :confirm-text="t('ui.delete')"
       destructive
       @update:open="(open) => { if (!open) accountToDelete = null }"
       @confirm="confirmDeleteAccount"
@@ -462,9 +486,9 @@ function closeTokenDisplay() {
 
     <ConfirmDialog
       :open="tokenToDelete !== null"
-      title="Delete service token?"
-      :description="tokenToDelete ? `Delete &quot;${tokenToDelete.tokenName}&quot;? Any automation using it will lose access.` : undefined"
-      confirm-text="Delete"
+      :title="t('access.deleteServiceTokenTitle')"
+      :description="tokenToDelete ? t('access.deleteServiceTokenConfirmation', { name: tokenToDelete.tokenName }) : undefined"
+      :confirm-text="t('ui.delete')"
       destructive
       @update:open="(open) => { if (!open) tokenToDelete = null }"
       @confirm="confirmDeleteToken"

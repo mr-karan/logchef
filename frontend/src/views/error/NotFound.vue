@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'vue-router'
 import { FileQuestion } from 'lucide-vue-next'
 
 const router = useRouter()
+const { t } = useI18n()
 </script>
 
 <template>
@@ -11,18 +13,18 @@ const router = useRouter()
         <div class="space-y-2 text-center">
             <FileQuestion class="mx-auto h-12 w-12 text-muted-foreground" />
             <h1 class="text-4xl font-bold">404</h1>
-            <h2 class="text-xl font-semibold">Page Not Found</h2>
+            <h2 class="text-xl font-semibold">{{ t('pages.notFoundTitle') }}</h2>
             <p class="text-muted-foreground">
-                The page you're looking for doesn't exist.<br />
-                Please check the URL and try again.
+                {{ t('pages.notFoundDescription') }}<br />
+                {{ t('pages.checkURL') }}
             </p>
         </div>
         <div class="flex space-x-4">
             <Button variant="outline" @click="router.back()">
-                Go Back
+                {{ t('pages.goBack') }}
             </Button>
             <Button @click="router.push('/logs/explore')">
-                Go to Explore
+                {{ t('pages.goToExplore') }}
             </Button>
         </div>
     </div>

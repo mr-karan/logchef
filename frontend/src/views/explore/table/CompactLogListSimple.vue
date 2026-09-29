@@ -19,7 +19,7 @@ import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import { isPrimaryMessageField } from './fieldSemantics'
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
 
 interface Props {
   columns?: ColumnDef<Record<string, any>>[]
@@ -444,7 +444,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
             expandedRowId === row.id ? 'py-1 items-start' : 'py-0.5 min-h-[22px] items-center'
           ]"
           @click="handleClick($event, row.id)"
-          :title="`${new Date(row.raw[props.timestampField]).toLocaleString()} - Click to expand, select text to copy`"
+          :title="t('pages.logRowTooltip', { timestamp: new Date(row.raw[props.timestampField]).toLocaleString(locale) })"
         >
           <!-- Timestamp (fixed width grid column) -->
           <span 

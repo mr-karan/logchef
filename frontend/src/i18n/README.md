@@ -44,7 +44,10 @@ respond to language changes.
 The catalog tests check language registration, key parity, nonempty messages,
 interpolation parameters, message compilation, and literal keys used by the UI.
 They run in the existing frontend CI workflow. English fallback still handles
-missing messages at runtime, but incomplete catalogs fail CI.
+missing messages at runtime. The new source-management, Access, Admin, Library,
+login, error-page, shared-widget, route-title, and token-scope messages are
+currently translated in Simplified Chinese and English. Other catalogs use the
+English fallback for these namespaces until translations are available.
 
 The initial non-English catalogs are translation drafts. Native speakers should
 review terminology and phrasing before they are described as reviewed translations.

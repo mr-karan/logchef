@@ -47,14 +47,20 @@ describe("formatHistoryTimeAgo", () => {
   const base = new Date("2026-07-14T10:00:00Z").getTime();
 
   it("renders minutes, hours and days relative to now", () => {
-    expect(formatHistoryTimeAgo("2026-07-14 09:59:40", base)).toBe("just now");
-    expect(formatHistoryTimeAgo("2026-07-14 09:55:00", base)).toBe("5m ago");
-    expect(formatHistoryTimeAgo("2026-07-14 07:00:00", base)).toBe("3h ago");
-    expect(formatHistoryTimeAgo("2026-07-12 10:00:00", base)).toBe("2d ago");
+    const relativeTime = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
+    expect(formatHistoryTimeAgo("2026-07-14 09:59:40", base)).toBe(relativeTime.format(0, "second"));
+    expect(formatHistoryTimeAgo("2026-07-14 09:55:00", base)).toBe(relativeTime.format(-5, "minute"));
+    expect(formatHistoryTimeAgo("2026-07-14 07:00:00", base)).toBe(relativeTime.format(-3, "hour"));
+    expect(formatHistoryTimeAgo("2026-07-12 10:00:00", base)).toBe(relativeTime.format(-2, "day"));
   });
 
   it("handles already-ISO timestamps", () => {
-    expect(formatHistoryTimeAgo("2026-07-14T09:55:00Z", base)).toBe("5m ago");
+    const relativeTime = new Intl.RelativeTimeFormat("en", { numeric: "auto", style: "short" });
+    expect(formatHistoryTimeAgo("2026-07-14T09:55:00Z", base)).toBe(relativeTime.format(-5, "minute"));
+  });
+
+  it("formats relative time using the selected locale", () => {
+    expect(formatHistoryTimeAgo("2026-07-14 09:55:00", base, "zh-CN")).toBe("5分钟前");
   });
 });
 

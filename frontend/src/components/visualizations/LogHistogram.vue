@@ -255,7 +255,7 @@ function formatXAxisTick(value: number | Date) {
 
     <div v-if="isChartLoading" class="histogram-loading-overlay">
       <div class="loading-spinner"></div>
-      <span>Loading histogram data...</span>
+      <span>{{ t('pages.loadingHistogramData') }}</span>
     </div>
 
     <div
@@ -279,7 +279,7 @@ function formatXAxisTick(value: number | Date) {
         <line x1="15" y1="9" x2="15" y2="15"></line>
       </svg>
       <span v-if="histogramError">{{ histogramError }}</span>
-      <span v-else>No histogram data available</span>
+      <span v-else>{{ t('pages.noHistogramData') }}</span>
     </div>
 
     <ChartContainer

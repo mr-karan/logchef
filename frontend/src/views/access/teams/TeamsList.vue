@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { onMounted, ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
@@ -24,6 +25,7 @@ import { formatDate } from '@/utils/format'
 
 const router = useRouter()
 const { toast } = useToast()
+const { t } = useI18n()
 const teamsStore = useTeamsStore()
 const authStore = useAuthStore()
 
@@ -51,7 +53,7 @@ const filteredTeams = computed(() => {
 const teamsWithDefaults = computed(() => {
     return teamsStore.managedTeams.map(team => ({
         ...team,
-        name: team.name || `Team ${team.id}`,
+        name: team.name || t('access.teamNumber', { id: team.id }),
         description: team.description || '',
         memberCount: team.member_count || 0
     }));
@@ -73,8 +75,8 @@ const confirmDelete = async () => {
     } catch (error) {
         console.error('Error deleting team:', error)
         toast({
-            title: 'Error',
-            description: 'Failed to delete team. Please try again.',
+            title: t('ui.error'),
+            description: t('access.deleteTeamFailed'),
             variant: 'destructive'
         })
     }
@@ -97,8 +99,8 @@ const loadTeams = async () => {
     } catch (error) {
         console.error('Error loading teams:', error)
         toast({
-            title: 'Error',
-            description: 'Failed to load teams. Please try refreshing the page.',
+            title: t('ui.error'),
+            description: t('access.loadTeamsFailed'),
             variant: 'destructive'
         })
     } finally {
@@ -114,27 +116,27 @@ onMounted(() => {
 <template>
     <div class="space-y-6">
         <PageHeader
-            title="Teams"
-            :description="isGlobalAdmin ? 'Groups of users that have common dashboard and permission needs.' : 'Teams you administer.'"
+            :title="t('routes.teams')"
+            :description="isGlobalAdmin ? t('access.teamsDescription') : t('access.teamsYouAdminister')"
         >
             <template v-if="isGlobalAdmin" #actions>
                 <AddTeam @team-created="handleTeamCreated" />
             </template>
         </PageHeader>
 
-        <LoadingState v-if="isLoading" label="Loading teams…" />
+        <LoadingState v-if="isLoading" :label="t('access.loadingTeams')" />
 
         <EmptyState
             v-else-if="filteredTeams.length === 0 && !searchQuery"
             :icon="Users"
-            title="No teams yet"
-            :description="isGlobalAdmin ? 'Create your first team to get started.' : 'You are not an admin of any teams.'"
+            :title="t('access.noTeamsYet')"
+            :description="isGlobalAdmin ? t('access.createFirstTeam') : t('access.noAdminTeams')"
         >
             <template v-if="isGlobalAdmin" #action>
                 <AddTeam @team-created="handleTeamCreated">
                     <Button size="sm">
                         <Plus class="mr-2 h-4 w-4" />
-                        Create team
+                        {{ t('access.createTeam') }}
                     </Button>
                 </AddTeam>
             </template>
@@ -143,15 +145,15 @@ onMounted(() => {
         <div v-else class="space-y-4">
             <div class="relative w-full max-w-sm">
                 <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input v-model="searchQuery" type="text" placeholder="Search teams by name or description…"
+                <Input v-model="searchQuery" type="text" :placeholder="t('access.searchTeams')"
                     class="pl-8 h-9" />
             </div>
 
             <EmptyState
                 v-if="filteredTeams.length === 0 && searchQuery.trim()"
                 :icon="Search"
-                title="No results"
-                description="No teams match your search."
+                :title="t('access.noResults')"
+                :description="t('access.noTeamsMatch')"
                 class="rounded-md border"
             />
 
@@ -159,11 +161,11 @@ onMounted(() => {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead class="w-[200px]">Name</TableHead>
-                            <TableHead class="w-[300px]">Description</TableHead>
-                            <TableHead class="w-[100px]">Members</TableHead>
-                            <TableHead class="w-[150px]">Created At</TableHead>
-                            <TableHead class="w-[100px] text-right">Actions</TableHead>
+                            <TableHead class="w-[200px]">{{ t('ui.name') }}</TableHead>
+                            <TableHead class="w-[300px]">{{ t('ui.description') }}</TableHead>
+                            <TableHead class="w-[100px]">{{ t('access.members') }}</TableHead>
+                            <TableHead class="w-[150px]">{{ t('access.createdAt') }}</TableHead>
+                            <TableHead class="w-[100px] text-right">{{ t('ui.actions') }}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -175,7 +177,7 @@ onMounted(() => {
                                 </router-link>
                             </TableCell>
                             <TableCell>
-                                <span class="line-clamp-1">{{ team.description || 'No description' }}</span>
+                                <span class="line-clamp-1">{{ team.description || t('access.noDescription') }}</span>
                             </TableCell>
                             <TableCell>{{ team.memberCount }}</TableCell>
                             <TableCell>{{ formatDate(team.created_at) }}</TableCell>
@@ -189,7 +191,7 @@ onMounted(() => {
                                             </Button>
                                         </TooltipTrigger>
                                         <TooltipContent>
-                                            <p>Edit team settings</p>
+                                            <p>{{ t('access.editTeamSettings') }}</p>
                                         </TooltipContent>
                                     </Tooltip>
                                     <Tooltip v-if="isGlobalAdmin">
@@ -200,7 +202,7 @@ onMounted(() => {
                                             </Button>
                                         </TooltipTrigger>
                                         <TooltipContent>
-                                            <p>Delete team</p>
+                                            <p>{{ t('access.deleteTeam') }}</p>
                                         </TooltipContent>
                                     </Tooltip>
                                 </div>
@@ -213,9 +215,9 @@ onMounted(() => {
 
         <ConfirmDialog
             :open="showDeleteDialog"
-            title="Delete team?"
-            :description="teamToDelete ? `Delete team &quot;${teamToDelete.name}&quot;? This action cannot be undone.` : undefined"
-            confirm-text="Delete"
+            :title="t('access.deleteTeamTitle')"
+            :description="teamToDelete ? t('access.deleteTeamConfirmation', { name: teamToDelete.name }) : undefined"
+            :confirm-text="t('ui.delete')"
             destructive
             @update:open="(v) => { if (!v) { showDeleteDialog = false; teamToDelete = null } }"
             @confirm="confirmDelete"

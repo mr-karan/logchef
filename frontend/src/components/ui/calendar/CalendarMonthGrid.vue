@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+import { useI18n } from "vue-i18n"
 import type { DateRange, DateValue } from "reka-ui"
 import type { HTMLAttributes } from "vue"
 import { computed, watch } from "vue"
@@ -26,6 +27,7 @@ const props = withDefaults(defineProps<Props>(), {
   locale: "en",
   class: undefined,
 })
+const { t } = useI18n()
 
 const emit = defineEmits<{
   prev: []
@@ -98,7 +100,7 @@ function isDisabled(month: CalendarDate) {
       <nav class="flex items-center gap-1 absolute top-0 inset-x-0 justify-between pointer-events-none">
         <button
           type="button"
-          aria-label="Previous year"
+          :aria-label="t('pages.calendarPreviousYear')"
           :class="cn(
             buttonVariants({ variant: 'outline' }),
             'size-7 bg-transparent p-0 opacity-50 hover:opacity-100 pointer-events-auto',
@@ -109,7 +111,7 @@ function isDisabled(month: CalendarDate) {
         </button>
         <button
           type="button"
-          aria-label="Next year"
+          :aria-label="t('pages.calendarNextYear')"
           :class="cn(
             buttonVariants({ variant: 'outline' }),
             'size-7 bg-transparent p-0 opacity-50 hover:opacity-100 pointer-events-auto',
@@ -121,7 +123,7 @@ function isDisabled(month: CalendarDate) {
       </nav>
       <button
         type="button"
-        aria-label="Switch to year view"
+        :aria-label="t('pages.calendarSwitchToYearView')"
         class="absolute inset-x-0 mx-auto h-7 px-2 text-sm font-medium rounded-md hover:bg-accent w-fit"
         @click="emit('drillUp')"
       >

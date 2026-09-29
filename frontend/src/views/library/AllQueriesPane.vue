@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { Lock, Search, Database, FileSearch, Shield } from "lucide-vue-next";
@@ -10,6 +11,7 @@ import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useAuthStore } from "@/stores/auth";
 
 const router = useRouter();
+const { t } = useI18n();
 const store = useSavedQueriesStore();
 const authStore = useAuthStore();
 
@@ -52,37 +54,37 @@ onMounted(() => {
   <div class="space-y-5">
     <div class="flex items-start gap-3">
       <div>
-        <h2 class="text-lg font-semibold tracking-tight">All queries</h2>
+        <h2 class="text-lg font-semibold tracking-tight">{{ t('library.allQueries') }}</h2>
         <p class="text-sm text-muted-foreground">
-          Every saved query you can {{ isAdmin ? "see" : "access" }}, whether or not it's in a collection.
+          {{ isAdmin ? t('library.allQueriesAdminDescription') : t('library.allQueriesUserDescription') }}
         </p>
       </div>
       <Badge v-if="isAdmin" variant="outline" class="ml-auto inline-flex items-center gap-1 font-medium">
-        <Shield class="h-3 w-3" /> Admin · all sources
+        <Shield class="h-3 w-3" /> {{ t('library.adminAllSources') }}
       </Badge>
     </div>
 
     <div class="relative max-w-sm">
       <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-      <Input v-model="search" placeholder="Search queries by name or source…" class="pl-8 h-9" />
+      <Input v-model="search" :placeholder="t('library.searchQueries')" class="pl-8 h-9" />
     </div>
 
     <PageSection flush>
-      <LoadingState v-if="isLoading" label="Loading queries…" />
+      <LoadingState v-if="isLoading" :label="t('library.loadingQueries')" />
       <EmptyState
         v-else-if="filtered.length === 0"
         :icon="FileSearch"
-        :title="search ? 'No matches' : 'No saved queries'"
-        :description="search ? `Nothing matches “${search}”.` : 'Save a query from the explorer to see it here.'"
+        :title="search ? t('library.noMatches') : t('library.noSavedQueries')"
+        :description="search ? t('library.nothingMatches', { query: search }) : t('library.saveQueryToSeeIt')"
       />
       <div v-else class="overflow-x-auto">
         <table class="w-full text-sm min-w-[640px]">
           <thead>
             <tr class="border-b bg-muted/30">
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">Type</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5">Name</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[160px]">Source</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">Updated</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">{{ t('library.type') }}</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5">{{ t('ui.name') }}</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[160px]">{{ t('ui.source') }}</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">{{ t('ui.updated2') }}</th>
             </tr>
           </thead>
           <tbody>
@@ -96,7 +98,7 @@ onMounted(() => {
                 <Lock
                   v-if="!runnable(q)"
                   class="h-4 w-4 text-muted-foreground"
-                  title="You don't have access to this query's source — can't run it."
+                  :title="t('library.noQuerySourceAccess')"
                 />
                 <Search v-else-if="q.query_language === 'logchefql'" class="h-4 w-4 text-muted-foreground" title="LogchefQL" />
                 <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
@@ -107,7 +109,7 @@ onMounted(() => {
                   class="font-medium text-foreground text-left hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
                   :class="!runnable(q) && 'text-muted-foreground'"
                   :disabled="!runnable(q)"
-                  :title="runnable(q) ? 'Open in explorer' : 'No source access'"
+                  :title="runnable(q) ? t('library.openInExplorer') : t('library.noSourceAccess')"
                   @click="openQuery(q.id)"
                 >
                   {{ q.name }}
@@ -118,7 +120,7 @@ onMounted(() => {
               </td>
               <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
                 <span class="inline-block max-w-[140px] truncate align-bottom">
-                  {{ q.source_name || `source ${q.source_id}` }}
+                  {{ q.source_name || t('library.sourceNumber', { id: q.source_id }) }}
                 </span>
               </td>
               <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">

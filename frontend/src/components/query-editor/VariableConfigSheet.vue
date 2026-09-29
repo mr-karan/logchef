@@ -342,7 +342,7 @@ watch(
                   :model-value="String(variable.defaultValue ?? '')"
                   @update:model-value="(val: string | number) => { variable.defaultValue = String(val); variableStore.upsertVariable(variable); }"
                   :type="inputTypeFor(variable.type)"
-                  :placeholder="'Default ' + variable.type + ' value'"
+                  :placeholder="t('pages.defaultVariableValue', { type: variable.type })"
                   class="h-9" />
                 <p v-if="variable.inputType !== 'multiselect'" class="text-xs text-muted-foreground">
                   {{ t('ui.preFilledWhenLoadingTheQueryLeaveEmptyForNoDefault') }}

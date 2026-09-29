@@ -38,7 +38,7 @@ const donutHeight = computed(() => Math.max(90, props.height - (props.notice ? 2
           :color="(category: BreakdownCategory) => category.color"
           :arc-width="18"
           :central-label="formatCount(donut.total)"
-          central-sub-label="Total"
+          :central-sub-label="t('common.total')"
         />
       </VisSingleContainer>
       <div class="panel-breakdown__legend" :aria-label="t('ui.breakdownLegend')">

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
@@ -38,6 +39,7 @@ import { Label } from '@/components/ui/label'
 import AddUser from './AddUser.vue'
 
 const usersStore = useUsersStore()
+const { t } = useI18n()
 const { isLoading, error: _userError } = storeToRefs(usersStore)
 const showDeleteDialog = ref(false)
 const userToDelete = ref<User | null>(null)
@@ -113,25 +115,25 @@ onMounted(() => {
 
 <template>
     <div class="space-y-6">
-        <PageHeader title="Users" description="View and manage your users">
+        <PageHeader :title="t('routes.users')" :description="t('access.usersDescription')">
             <template #actions>
                 <AddUser />
             </template>
         </PageHeader>
 
-        <LoadingState v-if="isLoading" label="Loading users…" />
+        <LoadingState v-if="isLoading" :label="t('access.loadingUsers')" />
 
         <EmptyState
             v-else-if="humanUsers.length === 0"
             :icon="Users"
-            title="No users yet"
-            description="Add your first user to get started."
+            :title="t('access.noUsersYet')"
+            :description="t('access.addFirstUser')"
         >
             <template #action>
                 <AddUser>
                     <Button size="sm">
                         <Plus class="mr-2 h-4 w-4" />
-                        Add user
+                        {{ t('access.addUser') }}
                     </Button>
                 </AddUser>
             </template>
@@ -140,14 +142,14 @@ onMounted(() => {
         <div v-else class="space-y-4">
             <div class="relative w-full max-w-sm">
                 <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input placeholder="Search users by name or email…" class="pl-8 h-9" v-model="searchQuery" />
+                <Input :placeholder="t('access.searchUsers')" class="pl-8 h-9" v-model="searchQuery" />
             </div>
 
             <EmptyState
                 v-if="filteredUsers.length === 0"
                 :icon="Search"
-                title="No results"
-                :description="`No users match &quot;${searchQuery}&quot;.`"
+                :title="t('access.noResults')"
+                :description="t('access.noUsersMatch', { query: searchQuery })"
                 class="rounded-md border"
             />
 
@@ -155,12 +157,12 @@ onMounted(() => {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Email</TableHead>
-                            <TableHead>Role</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Created At</TableHead>
-                            <TableHead>Last Login</TableHead>
+                            <TableHead>{{ t('ui.name') }}</TableHead>
+                            <TableHead>{{ t('ui.email') }}</TableHead>
+                            <TableHead>{{ t('ui.role') }}</TableHead>
+                            <TableHead>{{ t('ui.status') }}</TableHead>
+                            <TableHead>{{ t('access.createdAt') }}</TableHead>
+                            <TableHead>{{ t('access.lastLogin') }}</TableHead>
                             <TableHead></TableHead>
                         </TableRow>
                     </TableHeader>
@@ -173,14 +175,14 @@ onMounted(() => {
                                     class="capitalize inline-flex items-center gap-1 font-medium">
                                     <Shield v-if="user.role === 'admin'" class="h-3 w-3" />
                                     <User2 v-else class="h-3 w-3" />
-                                    {{ user.role }}
+                                    {{ user.role === 'admin' ? t('access.roleAdmin') : t('access.roleMember') }}
                                 </Badge>
                             </TableCell>
                             <TableCell>
                                 <div class="flex items-center space-x-2">
                                     <Switch :model-value="user.status === 'active'"
                                         @update:model-value="toggleUserStatus(user)" />
-                                    <span class="capitalize">{{ user.status }}</span>
+                                    <span>{{ user.status === 'active' ? t('access.statusActive') : t('access.statusInactive') }}</span>
                                 </div>
                             </TableCell>
                             <TableCell>{{ formatDate(user.created_at) }}</TableCell>
@@ -203,9 +205,9 @@ onMounted(() => {
 
         <ConfirmDialog
             :open="showDeleteDialog"
-            title="Delete user?"
-            :description="userToDelete ? `Delete user &quot;${userToDelete.full_name}&quot;? This action cannot be undone.` : undefined"
-            confirm-text="Delete"
+            :title="t('access.deleteUserTitle')"
+            :description="userToDelete ? t('access.deleteUserConfirmation', { name: userToDelete.full_name }) : undefined"
+            :confirm-text="t('ui.delete')"
             destructive
             @update:open="(v) => { if (!v) { showDeleteDialog = false; userToDelete = null } }"
             @confirm="confirmDelete"
@@ -215,30 +217,30 @@ onMounted(() => {
         <Dialog :open="showEditDialog" @update:open="showEditDialog = false">
             <DialogContent class="sm:max-w-[425px]">
                 <DialogHeader>
-                    <DialogTitle>Edit User</DialogTitle>
+                    <DialogTitle>{{ t('access.editUser') }}</DialogTitle>
                     <DialogDescription>
-                        Make changes to the user's profile here.
+                        {{ t('access.editUserDescription') }}
                     </DialogDescription>
                 </DialogHeader>
                 <div class="grid gap-4 py-4">
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="name" class="text-right">Name</Label>
+                        <Label for="name" class="text-right">{{ t('ui.name') }}</Label>
                         <Input id="name" v-model="editForm.full_name" class="col-span-3" />
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="email" class="text-right">Email</Label>
+                        <Label for="email" class="text-right">{{ t('ui.email') }}</Label>
                         <Input id="email" type="email" v-model="editForm.email" class="col-span-3" />
                     </div>
                     <div class="grid grid-cols-4 items-center gap-4">
-                        <Label for="role" class="text-right">Role</Label>
+                        <Label for="role" class="text-right">{{ t('ui.role') }}</Label>
                         <div class="col-span-3 w-full">
                             <Select v-model="editForm.role">
                                 <SelectTrigger class="w-full">
-                                    <SelectValue placeholder="Select a role" />
+                                    <SelectValue :placeholder="t('access.selectRole')" />
                                 </SelectTrigger>
                                 <SelectContent>
-                                    <SelectItem value="admin">Admin</SelectItem>
-                                    <SelectItem value="member">Member</SelectItem>
+                                    <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
+                                    <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -246,10 +248,10 @@ onMounted(() => {
                 </div>
                 <DialogFooter>
                     <Button variant="outline" @click="showEditDialog = false">
-                        Cancel
+                        {{ t('ui.cancel') }}
                     </Button>
                     <Button @click="confirmEdit">
-                        Save changes
+                        {{ t('ui.saveChanges2') }}
                     </Button>
                 </DialogFooter>
             </DialogContent>

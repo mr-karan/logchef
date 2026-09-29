@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '@/components/ui/button'
@@ -46,6 +47,7 @@ import { formatDate, formatSourceName } from '@/utils/format'
 const route = useRoute()
 const router = useRouter()
 const { toast } = useToast()
+const { t } = useI18n()
 
 // Initialize stores with proper Pinia pattern
 const usersStore = useUsersStore()
@@ -55,6 +57,15 @@ const authStore = useAuthStore()
 
 // Get the teamId from route params
 const teamId = computed(() => Number(route.params.id))
+
+function translateRole(role: string) {
+    switch (role) {
+        case 'admin': return t('access.roleAdmin')
+        case 'editor': return t('access.roleEditor')
+        case 'member': return t('access.roleMember')
+        default: return role
+    }
+}
 
 // Check if user is a global admin
 const isGlobalAdmin = computed(() => authStore.user?.role === 'admin')
@@ -171,8 +182,8 @@ const handleSubmit = async () => {
     // Basic validation
     if (!name.value) {
         toast({
-            title: 'Error',
-            description: 'Team name is required',
+            title: t('ui.error'),
+            description: t('access.teamNameRequired'),
             variant: 'destructive',
         })
         return
@@ -212,8 +223,8 @@ const handleRemoveMember = async (userId: string | number) => {
             // API call failed, show an error toast.
             // The success toast ("Member removed successfully") is handled by the store's callApi utility.
             toast({
-                title: 'Error',
-                description: result.error?.message || 'Failed to remove team member.',
+                title: t('ui.error'),
+                description: result.error?.message || t('access.removeTeamMemberFailed'),
                 variant: 'destructive',
             });
         }
@@ -222,8 +233,8 @@ const handleRemoveMember = async (userId: string | number) => {
         // This catch is for unexpected errors during the teamsStore.removeTeamMember call itself
         console.error('Error removing team member:', error);
         toast({
-            title: 'Error',
-            description: 'An unexpected error occurred while trying to remove the team member.',
+            title: t('ui.error'),
+            description: t('access.removeTeamMemberUnexpected'),
             variant: 'destructive',
         });
     }
@@ -259,8 +270,8 @@ onMounted(async () => {
 
     if (isNaN(id) || id <= 0) {
         toast({
-            title: 'Error',
-            description: `Invalid team ID: ${route.params.id}`,
+            title: t('ui.error'),
+            description: t('access.invalidTeamID', { id: route.params.id }),
             variant: 'destructive',
         })
         isLoading.value = false
@@ -295,8 +306,8 @@ onMounted(async () => {
     } catch (error) {
         console.error("Error loading team settings:", error)
         toast({
-            title: 'Error',
-            description: 'An error occurred while loading team data. Please try again.',
+            title: t('ui.error'),
+            description: t('access.loadTeamFailed'),
             variant: 'destructive',
         })
     } finally {
@@ -311,15 +322,15 @@ onMounted(async () => {
             <div class="flex flex-col items-center">
                 <div class="animate-spin w-10 h-10 rounded-full border-4 border-primary border-t-transparent mb-4">
                 </div>
-                <p class="text-muted-foreground">Loading team settings...</p>
+                <p class="text-muted-foreground">{{ t('access.loadingTeamSettings') }}</p>
             </div>
         </div>
         <div v-else-if="!team" class="text-center py-12">
-            <h3 class="text-lg font-medium mb-2">Team not found</h3>
-            <p class="text-muted-foreground mb-4">The team you're looking for doesn't exist or you don't have access.
+            <h3 class="text-lg font-medium mb-2">{{ t('access.teamNotFound') }}</h3>
+            <p class="text-muted-foreground mb-4">{{ t('access.teamNotFoundDescription') }}
             </p>
             <Button variant="outline" @click="router.push('/access/teams')">
-                Back to Teams
+                {{ t('access.backToTeams') }}
             </Button>
         </div>
         <template v-else>
@@ -327,16 +338,16 @@ onMounted(async () => {
             <div>
                 <h1 class="text-2xl font-bold tracking-tight">{{ team.name }}</h1>
                 <p class="text-muted-foreground mt-2">
-                    Manage team settings and members
+                    {{ t('access.manageTeamDescription') }}
                 </p>
             </div>
 
             <!-- Tabs -->
             <Tabs v-model="activeTab" class="space-y-6">
                 <TabsList>
-                    <TabsTrigger value="members">Members</TabsTrigger>
-                    <TabsTrigger value="sources">Sources</TabsTrigger>
-                    <TabsTrigger value="settings">Settings</TabsTrigger>
+                    <TabsTrigger value="members">{{ t('access.members') }}</TabsTrigger>
+                    <TabsTrigger value="sources">{{ t('ui.sources') }}</TabsTrigger>
+                    <TabsTrigger value="settings">{{ t('access.settings') }}</TabsTrigger>
                 </TabsList>
 
                 <!-- Members Tab -->
@@ -345,76 +356,76 @@ onMounted(async () => {
                         <CardHeader>
                             <div class="flex items-center justify-between">
                                 <div>
-                                    <CardTitle>Team Members</CardTitle>
+                                    <CardTitle>{{ t('access.teamMembers') }}</CardTitle>
                                     <CardDescription>
-                                        Manage team members and their roles
+                                        {{ t('access.manageTeamMembersDescription') }}
                                     </CardDescription>
                                 </div>
                                 <Dialog v-model:open="showAddMemberDialog">
                                     <DialogTrigger asChild>
                                         <Button>
                                             <UserPlus class="mr-2 h-4 w-4" />
-                                            Add Member
+                                            {{ t('access.addMember') }}
                                         </Button>
                                     </DialogTrigger>
                                     <DialogContent>
                                         <DialogHeader>
-                                            <DialogTitle>Add Team Member</DialogTitle>
+                                            <DialogTitle>{{ t('access.addTeamMember') }}</DialogTitle>
                                             <DialogDescription>
-                                                Add a human user or service account to the team
+                                                {{ t('access.addTeamMemberDescription') }}
                                             </DialogDescription>
                                         </DialogHeader>
                                         <div class="space-y-4 py-4">
                                             <div class="space-y-2">
-                                                <Label>Account type</Label>
+                                                <Label>{{ t('access.accountType') }}</Label>
                                                 <div class="grid grid-cols-2 gap-2">
                                                     <Button type="button" size="sm"
                                                         :variant="newMemberType === 'human' ? 'default' : 'outline'"
                                                         class="gap-2 justify-start"
                                                         @click="newMemberType = 'human'">
                                                         <User class="h-4 w-4" />
-                                                        Human user
+                                                        {{ t('access.humanUser') }}
                                                     </Button>
                                                     <Button type="button" size="sm"
                                                         :variant="newMemberType === 'service' ? 'default' : 'outline'"
                                                         class="gap-2 justify-start"
                                                         @click="newMemberType = 'service'">
                                                         <Bot class="h-4 w-4" />
-                                                        Service account
+                                                        {{ t('access.serviceAccount') }}
                                                     </Button>
                                                 </div>
                                             </div>
                                             <div class="space-y-2">
-                                                <Label>{{ newMemberType === 'service' ? 'Service account' : 'User' }}</Label>
+                                                <Label>{{ newMemberType === 'service' ? t('access.serviceAccount') : t('access.user') }}</Label>
                                                 <SearchableSelect
                                                     v-model="selectedUserId"
                                                     :items="userItems"
-                                                    :placeholder="newMemberType === 'service' ? 'Select a service account' : 'Select a user'"
-                                                    :search-placeholder="newMemberType === 'service' ? 'Search service accounts…' : 'Search users…'"
-                                                    :empty-text="newMemberType === 'service' ? 'No service accounts available.' : 'No users available.'" />
+                                                    :placeholder="newMemberType === 'service' ? t('access.selectServiceAccount') : t('access.selectUser')"
+                                                    :search-placeholder="newMemberType === 'service' ? t('access.searchServiceAccounts') : t('access.searchUsers')"
+                                                    :empty-text="newMemberType === 'service' ? t('access.noServiceAccountsAvailable') : t('access.noUsersAvailable')" />
                                             </div>
                                             <div class="space-y-2">
-                                                <Label>Role</Label>
+                                                <Label>{{ t('ui.role') }}</Label>
                                                 <Select v-model="newMemberRole">
                                                     <SelectTrigger>
-                                                        <SelectValue placeholder="Select a role" />
+                                                        <SelectValue :placeholder="t('access.selectRole')" />
                                                     </SelectTrigger>
                                                     <SelectContent>
-                                                        <SelectItem value="member">Member</SelectItem>
-                                                        <SelectItem value="editor">Editor</SelectItem>
-                                                        <SelectItem value="admin">Admin</SelectItem>
+                                                        <SelectItem value="member">{{ t('access.roleMember') }}</SelectItem>
+                                                        <SelectItem value="editor">{{ t('access.roleEditor') }}</SelectItem>
+                                                        <SelectItem value="admin">{{ t('access.roleAdmin') }}</SelectItem>
                                                     </SelectContent>
                                                 </Select>
                                             </div>
                                         </div>
                                         <DialogFooter>
                                             <Button variant="outline" @click="showAddMemberDialog = false">
-                                                Cancel
+                                                {{ t('ui.cancel') }}
                                             </Button>
                                             <Button :disabled="isSaving" @click="handleAddMember">
                                                 <Loader2 v-if="isSaving" class="mr-2 h-4 w-4 animate-spin" />
                                                 <Plus v-else class="mr-2 h-4 w-4" />
-                                                Add Member
+                                                {{ t('access.addMember') }}
                                             </Button>
                                         </DialogFooter>
                                     </DialogContent>
@@ -424,41 +435,41 @@ onMounted(async () => {
                         <CardContent>
                             <div v-if="teamsStore.isLoadingTeamMembers(teamId)" class="text-center py-4">
                                 <Loader2 class="h-6 w-6 animate-spin mx-auto mb-2" />
-                                <p class="text-sm text-muted-foreground">Loading members...</p>
+                                <p class="text-sm text-muted-foreground">{{ t('access.loadingMembers') }}</p>
                             </div>
                             <template v-else>
                                 <div v-if="members.length > 0" class="relative mb-3 max-w-sm">
                                     <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                    <Input v-model="memberSearch" placeholder="Search members…" class="pl-8" />
+                                    <Input v-model="memberSearch" :placeholder="t('access.searchMembers')" class="pl-8" />
                                 </div>
                             <Table>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>
                                             <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('name')">
-                                                Email
+                                                {{ t('ui.email') }}
                                                 <component :is="memberSortKey === 'name' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
                                             </button>
                                         </TableHead>
                                         <TableHead>
                                             <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('role')">
-                                                Role
+                                                {{ t('ui.role') }}
                                                 <component :is="memberSortKey === 'role' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
                                             </button>
                                         </TableHead>
                                         <TableHead>
                                             <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('added')">
-                                                Added
+                                                {{ t('access.added') }}
                                                 <component :is="memberSortKey === 'added' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
                                             </button>
                                         </TableHead>
-                                        <TableHead class="text-right">Actions</TableHead>
+                                        <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     <TableRow v-if="sortedMembers.length === 0">
                                         <TableCell colspan="4" class="text-center py-4 text-muted-foreground">
-                                            {{ memberSearch ? 'No members match your search' : 'No members found' }}
+                                            {{ memberSearch ? t('access.noMembersMatch') : t('access.noMembersFound') }}
                                         </TableCell>
                                     </TableRow>
                                     <TableRow v-for="member in sortedMembers" :key="member.user_id">
@@ -468,14 +479,14 @@ onMounted(async () => {
                                                     <Bot v-if="member.account_type === 'service'" class="h-4 w-4 text-muted-foreground" />
                                                     <span class="font-medium">{{ member.full_name || member.email }}</span>
                                                     <Badge v-if="member.account_type === 'service'" variant="secondary" class="text-xs">
-                                                        Service account
+                                                         {{ t('access.serviceAccount') }}
                                                     </Badge>
                                                 </div>
                                                 <span v-if="member.account_type !== 'service' && member.full_name"
                                                     class="text-sm text-muted-foreground">{{ member.email }}</span>
                                             </div>
                                         </TableCell>
-                                        <TableCell class="capitalize">{{ member.role }}</TableCell>
+                                        <TableCell>{{ translateRole(member.role) }}</TableCell>
                                         <TableCell>{{ formatDate(member.created_at) }}</TableCell>
                                         <TableCell class="text-right">
                                             <Button variant="destructive" size="icon" :disabled="isSaving"
@@ -498,44 +509,44 @@ onMounted(async () => {
                         <CardHeader>
                             <div class="flex items-center justify-between">
                                 <div>
-                                    <CardTitle>Team Sources</CardTitle>
+                                    <CardTitle>{{ t('access.teamSources') }}</CardTitle>
                                     <CardDescription>
-                                        Manage data sources for this team
+                                        {{ t('access.manageTeamSourcesDescription') }}
                                     </CardDescription>
                                 </div>
                                 <Dialog v-model:open="showAddSourceDialog">
                                     <DialogTrigger asChild>
                                         <Button @click="activeTab = 'sources'">
                                             <Database class="mr-2 h-4 w-4" />
-                                            Add Source
+                                            {{ t('sources.addSource') }}
                                         </Button>
                                     </DialogTrigger>
                                     <DialogContent>
                                         <DialogHeader>
-                                            <DialogTitle>Add Data Source</DialogTitle>
+                                            <DialogTitle>{{ t('access.addDataSource') }}</DialogTitle>
                                             <DialogDescription>
-                                                Add a data source to the team
+                                                {{ t('access.addDataSourceDescription') }}
                                             </DialogDescription>
                                         </DialogHeader>
                                         <div class="space-y-4 py-4">
                                             <div class="space-y-2">
-                                                <Label>Source</Label>
+                                                <Label>{{ t('ui.source') }}</Label>
                                                 <SearchableSelect
                                                     v-model="selectedSourceId"
                                                     :items="sourceItems"
-                                                    placeholder="Select a source"
-                                                    search-placeholder="Search sources…"
-                                                    empty-text="No sources available." />
+                                                    :placeholder="t('sources.selectSource')"
+                                                    :search-placeholder="t('access.searchSources')"
+                                                    :empty-text="t('access.noSourcesAvailable')" />
                                             </div>
                                         </div>
                                         <DialogFooter>
                                             <Button variant="outline" @click="showAddSourceDialog = false">
-                                                Cancel
+                                                {{ t('ui.cancel') }}
                                             </Button>
                                             <Button :disabled="isSaving" @click="handleAddSource">
                                                 <Loader2 v-if="isSaving" class="mr-2 h-4 w-4 animate-spin" />
                                                 <Plus v-else class="mr-2 h-4 w-4" />
-                                                Add Source
+                                                {{ t('sources.addSource') }}
                                             </Button>
                                         </DialogFooter>
                                     </DialogContent>
@@ -545,21 +556,21 @@ onMounted(async () => {
                         <CardContent>
                             <div v-if="teamsStore.isLoadingTeamSources(teamId)" class="text-center py-4">
                                 <Loader2 class="h-6 w-6 animate-spin mx-auto mb-2" />
-                                <p class="text-sm text-muted-foreground">Loading sources...</p>
+                                <p class="text-sm text-muted-foreground">{{ t('access.loadingSources') }}</p>
                             </div>
                             <Table v-else>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>Source</TableHead>
-                                        <TableHead>Description</TableHead>
-                                        <TableHead>Added</TableHead>
-                                        <TableHead class="text-right">Actions</TableHead>
+                                        <TableHead>{{ t('ui.source') }}</TableHead>
+                                        <TableHead>{{ t('ui.description') }}</TableHead>
+                                        <TableHead>{{ t('access.added') }}</TableHead>
+                                        <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     <TableRow v-if="teamSources.length === 0">
                                         <TableCell colspan="4" class="text-center py-4 text-muted-foreground">
-                                            No sources found
+                                            {{ t('access.noSourcesFound') }}
                                         </TableCell>
                                     </TableRow>
                                     <TableRow v-for="source in teamSources" :key="source.id">
@@ -584,22 +595,22 @@ onMounted(async () => {
                 <TabsContent value="settings">
                     <Card>
                         <CardHeader>
-                            <CardTitle>Team Settings</CardTitle>
+                                    <CardTitle>{{ t('access.settings') }}</CardTitle>
                             <CardDescription>
-                                Update team information
+                                        {{ t('access.updateTeamDescription') }}
                             </CardDescription>
                         </CardHeader>
                         <CardContent>
                             <form @submit.prevent="handleSubmit" class="space-y-6">
                                 <div class="space-y-4">
                                     <div class="grid gap-2">
-                                        <Label for="name">Team Name</Label>
+                                        <Label for="name">{{ t('access.teamName') }}</Label>
                                         <Input id="name" v-model="name" required />
                                     </div>
 
                                     <div class="grid gap-2">
-                                        <Label for="description">Description</Label>
-                                        <Textarea id="description" v-model="description" placeholder="Team description"
+                                        <Label for="description">{{ t('ui.description') }}</Label>
+                                        <Textarea id="description" v-model="description" :placeholder="t('access.teamDescription')"
                                             rows="3" />
                                     </div>
                                 </div>
@@ -607,7 +618,7 @@ onMounted(async () => {
                                 <div class="flex justify-end">
                                     <Button type="submit" :disabled="isSaving">
                                         <Loader2 v-if="isSaving" class="mr-2 h-4 w-4 animate-spin" />
-                                        Save Changes
+                                        {{ t('ui.saveChanges2') }}
                                     </Button>
                                 </div>
                             </form>

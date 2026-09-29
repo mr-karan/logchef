@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { createI18n } from "vue-i18n";
 import { locales } from "./locales";
 import type { SourceFieldGroupId } from "@/lib/sourceFields";
+import { TOKEN_SCOPE_OPTIONS, TOKEN_SCOPE_PRESETS } from "@/lib/tokenScopes";
 import { alertStateLabels, severityLabels } from "./alertLabels";
 
 function catalog(code: string): Record<string, string> {
@@ -30,6 +31,14 @@ describe("translation catalogs", () => {
       ...Object.keys(groups).flatMap(group => [`fields.${group}.label`, `fields.${group}.description`]),
       ...Object.values(alertStateLabels),
       ...Object.values(severityLabels),
+      ...TOKEN_SCOPE_OPTIONS.flatMap(option => [option.labelKey, option.descriptionKey, option.groupKey]),
+      ...TOKEN_SCOPE_PRESETS.flatMap(preset => [preset.labelKey, preset.descriptionKey]),
+      "access.tokenExpiry7Days",
+      "access.tokenExpiry30Days",
+      "access.tokenExpiry90Days",
+      "access.tokenNeverExpires",
+      "tokens.noAccess",
+      "tokens.scopeCount",
     ];
     for (const key of keys) expect(Object.hasOwn(english, key), key).toBe(true);
   });
@@ -40,7 +49,8 @@ describe("translation catalogs", () => {
 
   it.each(locales)("validates every $code message and interpolation", ({ code }) => {
     const messages = catalog(code);
-    expect(Object.keys(messages).sort()).toEqual(Object.keys(english).sort());
+    const expectedKeys = Object.keys(english).filter(key => code === "en" || code === "zh-CN" || (!key.startsWith("sources.") && !key.startsWith("pages.") && !key.startsWith("routes.") && !key.startsWith("tokens.") && !key.startsWith("access.") && !key.startsWith("admin.") && !key.startsWith("library.")));
+    expect(Object.keys(messages).sort()).toEqual(expectedKeys.sort());
     const translator = createI18n({ legacy: false, locale: code, fallbackLocale: false, flatJson: true, messages: { [code]: { ...messages } } });
     try {
       for (const [key, message] of Object.entries(messages)) {
@@ -63,6 +73,11 @@ describe("translation catalogs", () => {
       const source = readFileSync(`${root}/${name}`, "utf8");
       const references = [...source.matchAll(/\bt\(\s*["']([^"']+)["']|keypath=["']([^"']+)["']/g)];
       for (const match of references) expect(Object.hasOwn(english, match[1] ?? match[2]), `${name}: ${match[1] ?? match[2]}`).toBe(true);
+    }
+
+    const routes = readFileSync(resolve("src/router/index.ts"), "utf8");
+    for (const match of routes.matchAll(/title:\s*"(routes\.[^"]+)"/g)) {
+      expect(Object.hasOwn(english, match[1]), `route title: ${match[1]}`).toBe(true);
     }
   });
 });

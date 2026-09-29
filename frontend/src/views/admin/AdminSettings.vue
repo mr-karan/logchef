@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
@@ -38,6 +39,7 @@ import type { SystemSetting, UpdateSettingRequest } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 
 const { toast } = useToast()
+const { t } = useI18n()
 
 const authStore = useAuthStore()
 const metaStore = useMetaStore()
@@ -127,13 +129,13 @@ const getDisplayValue = (setting: SystemSetting) => {
 const getCategoryDescription = (category: string) => {
   switch (category) {
     case 'alerts':
-      return 'Configure alerting and notification settings'
+      return t('admin.categoryAlerts')
     case 'ai':
-      return 'Configure AI-assisted SQL generation settings'
+      return t('admin.categoryAI')
     case 'auth':
-      return 'Configure authentication and session settings'
+      return t('admin.categoryAuth')
     case 'server':
-      return 'Configure server and application settings'
+      return t('admin.categoryServer')
     default:
       return ''
   }
@@ -175,7 +177,7 @@ const handleTestEmail = async () => {
 
 const handleTestWebhook = async () => {
   if (!testWebhookUrl.value.trim()) {
-    toast({ title: 'Webhook URL is required', variant: 'destructive' })
+    toast({ title: t('admin.webhookURLRequired'), variant: 'destructive' })
     return
   }
   isTestingWebhook.value = true
@@ -196,15 +198,15 @@ onMounted(() => {
 
 <template>
   <div class="space-y-6">
-    <PageHeader title="System Settings" description="Manage runtime configuration settings for LogChef." />
+    <PageHeader :title="t('routes.systemSettings')" :description="t('admin.settingsDescription')" />
 
-    <LoadingState v-if="isLoading" label="Loading settings…" />
+    <LoadingState v-if="isLoading" :label="t('admin.loadingSettings')" />
     <Tabs v-else v-model="currentTab" class="w-full">
           <TabsList>
-            <TabsTrigger v-if="metaStore.alertsEnabled" value="alerts">Alerts</TabsTrigger>
-            <TabsTrigger value="ai">AI</TabsTrigger>
-            <TabsTrigger value="auth">Authentication</TabsTrigger>
-            <TabsTrigger value="server">Server</TabsTrigger>
+            <TabsTrigger v-if="metaStore.alertsEnabled" value="alerts">{{ t('ui.alerts') }}</TabsTrigger>
+            <TabsTrigger value="ai">{{ t('admin.ai') }}</TabsTrigger>
+            <TabsTrigger value="auth">{{ t('sources.authentication') }}</TabsTrigger>
+            <TabsTrigger value="server">{{ t('admin.server') }}</TabsTrigger>
           </TabsList>
 
           <!-- Alerts Tab -->
@@ -216,11 +218,11 @@ onMounted(() => {
               <div class="flex gap-2">
                 <Button variant="outline" size="sm" @click="openTestEmailDialog">
                   <Mail class="mr-2 h-4 w-4" />
-                  Test Email
+                  {{ t('admin.testEmail') }}
                 </Button>
                 <Button variant="outline" size="sm" @click="openTestWebhookDialog">
                   <Webhook class="mr-2 h-4 w-4" />
-                  Test Webhook
+                  {{ t('admin.testWebhook') }}
                 </Button>
               </div>
             </div>
@@ -228,10 +230,10 @@ onMounted(() => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Setting</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead>{{ t('admin.setting') }}</TableHead>
+                    <TableHead>{{ t('ui.value2') }}</TableHead>
+                    <TableHead>{{ t('admin.type') }}</TableHead>
+                    <TableHead>{{ t('ui.description') }}</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -279,10 +281,10 @@ onMounted(() => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Setting</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead>{{ t('admin.setting') }}</TableHead>
+                    <TableHead>{{ t('ui.value2') }}</TableHead>
+                    <TableHead>{{ t('admin.type') }}</TableHead>
+                    <TableHead>{{ t('ui.description') }}</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -330,10 +332,10 @@ onMounted(() => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Setting</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead>{{ t('admin.setting') }}</TableHead>
+                    <TableHead>{{ t('ui.value2') }}</TableHead>
+                    <TableHead>{{ t('admin.type') }}</TableHead>
+                    <TableHead>{{ t('ui.description') }}</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -381,10 +383,10 @@ onMounted(() => {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Setting</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Description</TableHead>
+                    <TableHead>{{ t('admin.setting') }}</TableHead>
+                    <TableHead>{{ t('ui.value2') }}</TableHead>
+                    <TableHead>{{ t('admin.type') }}</TableHead>
+                    <TableHead>{{ t('ui.description') }}</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -428,20 +430,20 @@ onMounted(() => {
     <Dialog :open="showEditDialog" @update:open="showEditDialog = false">
       <DialogContent class="sm:max-w-[500px]">
         <DialogHeader>
-          <DialogTitle>Edit Setting</DialogTitle>
+          <DialogTitle>{{ t('admin.editSetting') }}</DialogTitle>
           <DialogDescription>
-            Update the value for {{ settingToEdit?.key }}
+            {{ t('admin.updateSettingValue', { key: settingToEdit?.key ?? '' }) }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
-            <Label for="value">Value</Label>
+            <Label for="value">{{ t('ui.value2') }}</Label>
             <Input
               v-if="editForm.value_type === 'boolean'"
               id="value"
               v-model="editForm.value"
               type="text"
-              placeholder="true or false"
+              :placeholder="t('admin.booleanExample')"
             />
             <Input
               v-else-if="editForm.value_type === 'number'"
@@ -456,16 +458,16 @@ onMounted(() => {
               rows="3"
             />
             <p class="text-xs text-muted-foreground">
-              Type: <code class="bg-muted px-1 py-0.5 rounded">{{ editForm.value_type }}</code>
+              {{ t('admin.settingType') }} <code class="bg-muted px-1 py-0.5 rounded">{{ editForm.value_type }}</code>
             </p>
           </div>
           <div class="grid gap-2">
-            <Label for="description">Description (optional)</Label>
+            <Label for="description">{{ t('admin.optionalDescription') }}</Label>
             <Textarea
               id="description"
               v-model="editForm.description"
               rows="2"
-              placeholder="Enter a description for this setting"
+              :placeholder="t('admin.enterSettingDescription')"
             />
           </div>
           <div class="flex items-center space-x-2">
@@ -475,18 +477,18 @@ onMounted(() => {
               @update:model-value="editForm.is_sensitive = $event"
             />
             <Label for="sensitive" class="text-sm font-normal">
-              Mark as sensitive (will be masked in responses)
+              {{ t('admin.markSensitive') }}
             </Label>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="showEditDialog = false">
             <X class="mr-2 h-4 w-4" />
-            Cancel
+            {{ t('ui.cancel') }}
           </Button>
           <Button @click="confirmEdit">
             <Save class="mr-2 h-4 w-4" />
-            Save changes
+            {{ t('ui.saveChanges2') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -494,9 +496,9 @@ onMounted(() => {
 
     <ConfirmDialog
       :open="showDeleteDialog"
-      title="Delete setting?"
-      :description="settingToDelete ? `Delete &quot;${settingToDelete.key}&quot;? The system will fall back to the default value from config.toml.` : undefined"
-      confirm-text="Delete"
+      :title="t('admin.deleteSettingTitle')"
+      :description="settingToDelete ? t('admin.deleteSettingConfirmation', { key: settingToDelete.key }) : undefined"
+      :confirm-text="t('ui.delete')"
       destructive
       @update:open="(v) => { if (!v) { showDeleteDialog = false; settingToDelete = null } }"
       @confirm="confirmDelete"
@@ -506,33 +508,33 @@ onMounted(() => {
     <Dialog :open="showTestEmailDialog" @update:open="showTestEmailDialog = false">
       <DialogContent class="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Test Email Configuration</DialogTitle>
+          <DialogTitle>{{ t('admin.testEmailConfiguration') }}</DialogTitle>
           <DialogDescription>
-            Send a test email to verify your SMTP configuration is working correctly.
+            {{ t('admin.testEmailDescription') }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
-            <Label for="test-email">Recipient Email</Label>
+            <Label for="test-email">{{ t('admin.recipientEmail') }}</Label>
             <Input
               id="test-email"
               v-model="testEmailRecipient"
               type="email"
-              placeholder="Enter email address"
+              :placeholder="t('admin.enterEmailAddress')"
             />
             <p class="text-xs text-muted-foreground">
-              Leave empty to send to your own email address.
+              {{ t('admin.emailRecipientHint') }}
             </p>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="showTestEmailDialog = false" :disabled="isTestingEmail">
-            Cancel
+            {{ t('ui.cancel') }}
           </Button>
           <Button @click="handleTestEmail" :disabled="isTestingEmail">
             <Loader2 v-if="isTestingEmail" class="mr-2 h-4 w-4 animate-spin" />
             <Mail v-else class="mr-2 h-4 w-4" />
-            Send Test Email
+            {{ t('admin.sendTestEmail') }}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -542,14 +544,14 @@ onMounted(() => {
     <Dialog :open="showTestWebhookDialog" @update:open="showTestWebhookDialog = false">
       <DialogContent class="sm:max-w-[425px]">
         <DialogHeader>
-          <DialogTitle>Test Webhook Configuration</DialogTitle>
+          <DialogTitle>{{ t('admin.testWebhookConfiguration') }}</DialogTitle>
           <DialogDescription>
-            Send a test webhook to verify your webhook endpoint is receiving notifications correctly.
+            {{ t('admin.testWebhookDescription') }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
-            <Label for="test-webhook">Webhook URL</Label>
+            <Label for="test-webhook">{{ t('admin.webhookURL') }}</Label>
             <Input
               id="test-webhook"
               v-model="testWebhookUrl"
@@ -557,18 +559,18 @@ onMounted(() => {
               placeholder="https://example.com/webhook"
             />
             <p class="text-xs text-muted-foreground">
-              Enter the full URL of your webhook endpoint (must use http or https).
+              {{ t('admin.webhookURLHint') }}
             </p>
           </div>
         </div>
         <DialogFooter>
           <Button variant="outline" @click="showTestWebhookDialog = false" :disabled="isTestingWebhook">
-            Cancel
+            {{ t('ui.cancel') }}
           </Button>
           <Button @click="handleTestWebhook" :disabled="isTestingWebhook || !testWebhookUrl.trim()">
             <Loader2 v-if="isTestingWebhook" class="mr-2 h-4 w-4 animate-spin" />
             <Webhook v-else class="mr-2 h-4 w-4" />
-            Send Test Webhook
+            {{ t('admin.sendTestWebhook') }}
           </Button>
         </DialogFooter>
       </DialogContent>

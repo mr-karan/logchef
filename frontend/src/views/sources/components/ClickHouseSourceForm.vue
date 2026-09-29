@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -45,6 +46,8 @@ const props = defineProps<{
   isValidating?: boolean;
 }>();
 
+const { t } = useI18n();
+
 const emit = defineEmits<{
   "update:modelValue": [value: ClickHouseSourceFormState];
   validate: [];
@@ -87,11 +90,11 @@ const editableSchema = computed({
 
 const validateButtonText = computed(() => {
   if (props.isValidating) {
-    return "Validating...";
+    return t("sources.validating");
   }
   return props.modelValue.tableMode === "connect"
-    ? "Validate Connection & Columns"
-    : "Validate Connection";
+    ? t("sources.validateConnectionColumns")
+    : t("sources.validateConnection");
 });
 
 function resetSchema() {
@@ -104,14 +107,14 @@ function resetSchema() {
   <div class="space-y-6">
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">ClickHouse Connection</h3>
+        <h3 class="text-lg font-medium">{{ t("sources.clickHouseConnection") }}</h3>
         <div class="text-sm text-muted-foreground">
-          Configure ClickHouse host, table, and auth
+          {{ t("sources.clickHouseConnectionDescription") }}
         </div>
       </div>
 
       <div class="grid gap-2">
-        <Label for="host" class="required">Host and Port</Label>
+        <Label for="host" class="required">{{ t("sources.hostAndPort") }}</Label>
         <Input
           id="host"
           :model-value="modelValue.host"
@@ -119,13 +122,13 @@ function resetSchema() {
           @update:model-value="(value) => updateForm({ host: String(value) })"
         />
         <p class="text-sm text-muted-foreground">
-          Enter the ClickHouse server host and port in `host:port` format.
+          {{ t("sources.hostAndPortDescription") }}
         </p>
       </div>
 
       <div class="grid grid-cols-2 gap-4">
         <div class="grid gap-2">
-          <Label for="database" class="required">Database</Label>
+          <Label for="database" class="required">{{ t("sources.database") }}</Label>
           <Input
             id="database"
             :model-value="modelValue.database"
@@ -135,7 +138,7 @@ function resetSchema() {
         </div>
 
         <div class="grid gap-2">
-          <Label for="table_name" class="required">Table Name</Label>
+          <Label for="table_name" class="required">{{ t("sources.tableName") }}</Label>
           <Input
             id="table_name"
             :model-value="modelValue.tableName"
@@ -145,15 +148,15 @@ function resetSchema() {
         </div>
       </div>
       <p class="text-sm text-muted-foreground">
-        The database and table where LogChef reads or writes log data in ClickHouse.
+        {{ t("sources.databaseTableDescription") }}
       </p>
 
       <div class="space-y-4">
         <div class="flex items-center justify-between rounded-md bg-muted/50 p-3">
           <div class="space-y-0.5">
-            <Label class="text-base">Authentication</Label>
+            <Label class="text-base">{{ t("sources.authentication") }}</Label>
             <p class="text-sm text-muted-foreground">
-              Enable if your ClickHouse server requires credentials.
+              {{ t("sources.clickHouseAuthenticationDescription") }}
             </p>
           </div>
           <Switch
@@ -167,7 +170,7 @@ function resetSchema() {
           class="grid gap-4 border-l-2 border-primary/20 pl-3 md:grid-cols-2"
         >
           <div class="grid gap-2">
-            <Label for="username" class="required">Username</Label>
+            <Label for="username" class="required">{{ t("sources.username") }}</Label>
             <Input
               id="username"
               :model-value="modelValue.username"
@@ -177,12 +180,12 @@ function resetSchema() {
           </div>
 
           <div class="grid gap-2">
-            <Label for="password" :class="{ required: !isEditMode }">Password</Label>
+            <Label for="password" :class="{ required: !isEditMode }">{{ t("sources.password") }}</Label>
             <Input
               id="password"
               :model-value="modelValue.password"
               type="password"
-              :placeholder="isEditMode ? 'Leave blank to keep current password' : ''"
+              :placeholder="isEditMode ? t('sources.keepCurrentPassword') : ''"
               @update:model-value="(value) => updateForm({ password: String(value) })"
             />
           </div>
@@ -193,72 +196,70 @@ function resetSchema() {
     <Accordion type="single" collapsible class="w-full">
       <AccordionItem value="advanced-query-settings" class="border rounded-md px-4">
         <AccordionTrigger class="text-base font-medium">
-          Advanced query settings
+          {{ t("sources.advancedQuerySettings") }}
         </AccordionTrigger>
         <AccordionContent class="space-y-4 pt-2">
           <p class="text-sm text-muted-foreground">
-            Optional per-source ClickHouse limits. Each value is a hard cap
-            applied to every query run against this source. Leave a field blank
-            to use the ClickHouse defaults.
+            {{ t("sources.advancedQuerySettingsDescription") }}
           </p>
 
           <div class="grid gap-4 md:grid-cols-2">
             <div class="grid gap-2">
-              <Label for="ch_max_execution_time">Max execution time (seconds)</Label>
+              <Label for="ch_max_execution_time">{{ t("sources.maxExecutionTime") }}</Label>
               <Input
                 id="ch_max_execution_time"
                 :model-value="modelValue.settings.maxExecutionTime"
                 type="number"
                 min="0"
-                placeholder="Unset"
+                :placeholder="t('sources.unset')"
                 @update:model-value="(value) => updateSettings({ maxExecutionTime: sanitizeNonNegative(value) })"
               />
             </div>
 
             <div class="grid gap-2">
-              <Label for="ch_max_result_rows">Max result rows</Label>
+              <Label for="ch_max_result_rows">{{ t("sources.maxResultRows") }}</Label>
               <Input
                 id="ch_max_result_rows"
                 :model-value="modelValue.settings.maxResultRows"
                 type="number"
                 min="0"
-                placeholder="Unset"
+                :placeholder="t('sources.unset')"
                 @update:model-value="(value) => updateSettings({ maxResultRows: sanitizeNonNegative(value) })"
               />
             </div>
 
             <div class="grid gap-2">
-              <Label for="ch_max_result_bytes">Max result bytes</Label>
+              <Label for="ch_max_result_bytes">{{ t("sources.maxResultBytes") }}</Label>
               <Input
                 id="ch_max_result_bytes"
                 :model-value="modelValue.settings.maxResultBytes"
                 type="number"
                 min="0"
-                placeholder="Unset"
+                :placeholder="t('sources.unset')"
                 @update:model-value="(value) => updateSettings({ maxResultBytes: sanitizeNonNegative(value) })"
               />
             </div>
 
             <div class="grid gap-2">
-              <Label for="ch_max_rows_to_read">Max rows to read</Label>
+              <Label for="ch_max_rows_to_read">{{ t("sources.maxRowsToRead") }}</Label>
               <Input
                 id="ch_max_rows_to_read"
                 :model-value="modelValue.settings.maxRowsToRead"
                 type="number"
                 min="0"
-                placeholder="Unset"
+                :placeholder="t('sources.unset')"
                 @update:model-value="(value) => updateSettings({ maxRowsToRead: sanitizeNonNegative(value) })"
               />
             </div>
 
             <div class="grid gap-2">
-              <Label for="ch_max_bytes_to_read">Max bytes to read</Label>
+              <Label for="ch_max_bytes_to_read">{{ t("sources.maxBytesToRead") }}</Label>
               <Input
                 id="ch_max_bytes_to_read"
                 :model-value="modelValue.settings.maxBytesToRead"
                 type="number"
                 min="0"
-                placeholder="Unset"
+                :placeholder="t('sources.unset')"
                 @update:model-value="(value) => updateSettings({ maxBytesToRead: sanitizeNonNegative(value) })"
               />
             </div>
@@ -266,43 +267,41 @@ function resetSchema() {
 
           <div class="grid gap-4 md:grid-cols-2">
             <div class="grid gap-2">
-              <Label for="ch_result_overflow_mode">Result overflow mode</Label>
+              <Label for="ch_result_overflow_mode">{{ t("sources.resultOverflowMode") }}</Label>
               <Select
                 :model-value="modelValue.settings.resultOverflowMode || 'default'"
                 @update:model-value="(value) => updateSettings({ resultOverflowMode: value === 'default' ? '' : String(value) })"
               >
                 <SelectTrigger id="ch_result_overflow_mode">
-                  <SelectValue placeholder="Default" />
+                  <SelectValue :placeholder="t('sources.default')" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="default">Default</SelectItem>
-                  <SelectItem value="throw">Throw error (throw)</SelectItem>
-                  <SelectItem value="break">Truncate (break)</SelectItem>
+                  <SelectItem value="default">{{ t("sources.default") }}</SelectItem>
+                  <SelectItem value="throw">{{ t("sources.throwError") }}</SelectItem>
+                  <SelectItem value="break">{{ t("sources.truncate") }}</SelectItem>
                 </SelectContent>
               </Select>
               <p class="text-sm text-muted-foreground">
-                What ClickHouse does when a result cap is exceeded.
+                {{ t("sources.resultOverflowDescription") }}
               </p>
             </div>
 
             <div class="grid gap-2">
-              <Label for="ch_readonly">Read-only mode</Label>
+              <Label for="ch_readonly">{{ t("sources.readOnlyMode") }}</Label>
               <Select
                 :model-value="modelValue.settings.readonly || 'default'"
                 @update:model-value="(value) => updateSettings({ readonly: value === 'default' ? '' : String(value) })"
               >
                 <SelectTrigger id="ch_readonly">
-                  <SelectValue placeholder="Default" />
+                  <SelectValue :placeholder="t('sources.default')" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="default">Default</SelectItem>
-                  <SelectItem value="2">Read-only (2)</SelectItem>
+                  <SelectItem value="default">{{ t("sources.default") }}</SelectItem>
+                  <SelectItem value="2">{{ t("sources.readOnly2") }}</SelectItem>
                 </SelectContent>
               </Select>
               <p class="text-sm text-muted-foreground">
-                Read-only (2) blocks writes while still allowing LogChef to apply
-                per-query settings. (readonly=1 is intentionally not offered — it
-                forbids per-query settings and breaks LogChef queries.)
+                {{ t("sources.readOnlyDescription") }}
               </p>
             </div>
           </div>
@@ -312,9 +311,9 @@ function resetSchema() {
 
     <div v-if="!isEditMode" class="space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">Table Configuration</h3>
+          <h3 class="text-lg font-medium">{{ t("sources.tableConfiguration") }}</h3>
         <div class="text-sm text-muted-foreground">
-          Choose whether LogChef should create the table
+          {{ t("sources.tableConfigurationDescription") }}
         </div>
       </div>
 
@@ -331,22 +330,22 @@ function resetSchema() {
           <CardHeader>
             <div class="flex items-center gap-2">
               <RadioGroupItem value="create" id="create" />
-              <Label for="create" class="cursor-pointer font-medium">Create New Table</Label>
+              <Label for="create" class="cursor-pointer font-medium">{{ t("sources.createNewTable") }}</Label>
             </div>
           </CardHeader>
           <CardContent class="space-y-4">
             <div class="flex items-start gap-4">
               <Plus class="mt-1 h-5 w-5 text-muted-foreground" />
               <div class="space-y-1">
-                <p class="text-sm font-medium">Let LogChef create the table</p>
+                <p class="text-sm font-medium">{{ t("sources.letLogChefCreateTable") }}</p>
                 <p class="text-sm text-muted-foreground">
-                  Uses the default OTLP-friendly schema and retention settings.
+                  {{ t("sources.defaultSchemaDescription") }}
                 </p>
               </div>
             </div>
 
             <div class="mt-4 grid gap-2 border-t pt-4">
-              <Label for="ttl_days">TTL Days</Label>
+              <Label for="ttl_days">{{ t("sources.ttlDays") }}</Label>
               <Input
                 id="ttl_days"
                 :model-value="modelValue.ttlDays"
@@ -355,7 +354,7 @@ function resetSchema() {
                 @update:model-value="(value) => updateForm({ ttlDays: String(value) })"
               />
               <p class="text-sm text-muted-foreground">
-                Number of days to keep logs before automatic deletion.
+                {{ t("sources.retentionDaysDescription") }}
               </p>
             </div>
 
@@ -364,33 +363,33 @@ function resetSchema() {
                 <Button variant="outline" class="flex w-full items-center justify-between">
                   <div class="flex items-center gap-2">
                     <Code class="h-4 w-4" />
-                    <span>View Auto-Generated Schema</span>
+                    <span>{{ t("sources.viewGeneratedSchema") }}</span>
                   </div>
                   <ChevronsUpDown class="h-4 w-4" />
                 </Button>
               </DialogTrigger>
               <DialogContent class="sm:max-w-[800px]">
                 <DialogHeader>
-                  <DialogTitle>Table Schema</DialogTitle>
+                  <DialogTitle>{{ t("sources.tableSchema") }}</DialogTitle>
                   <DialogDescription>
-                    Review or customize the CREATE TABLE statement before the source is created.
+                    {{ t("sources.reviewTableSchema") }}
                   </DialogDescription>
                 </DialogHeader>
 
                 <div class="space-y-4 py-4">
                   <div class="flex items-center justify-between">
                     <div class="space-y-1">
-                      <h4 class="text-sm font-medium leading-none">Schema Definition</h4>
+                      <h4 class="text-sm font-medium leading-none">{{ t("sources.schemaDefinition") }}</h4>
                       <p class="text-sm text-muted-foreground">
-                        This statement is only used when LogChef creates the table.
+                        {{ t("sources.schemaCreateOnly") }}
                       </p>
                     </div>
                     <div class="flex items-center gap-2">
                       <Button variant="outline" size="sm" :disabled="!modelValue.schema" @click="resetSchema">
-                        Reset to Default
+                        {{ t("sources.resetToDefault") }}
                       </Button>
                       <Button variant="outline" size="sm" @click="isEditingSchema = !isEditingSchema">
-                        {{ isEditingSchema ? "Preview" : "Edit" }}
+                        {{ isEditingSchema ? t("sources.preview") : t("sources.edit") }}
                       </Button>
                     </div>
                   </div>
@@ -413,7 +412,7 @@ function resetSchema() {
         <div class="flex h-full flex-col items-center justify-center">
           <div class="flex flex-col items-center gap-2">
             <Separator orientation="vertical" class="h-8" />
-            <span class="px-4 text-sm text-muted-foreground">or</span>
+            <span class="px-4 text-sm text-muted-foreground">{{ t("sources.or") }}</span>
             <Separator orientation="vertical" class="h-8" />
           </div>
         </div>
@@ -426,23 +425,23 @@ function resetSchema() {
           <CardHeader>
             <div class="flex items-center gap-2">
               <RadioGroupItem value="connect" id="connect" />
-              <Label for="connect" class="cursor-pointer font-medium">Connect Existing Table</Label>
+              <Label for="connect" class="cursor-pointer font-medium">{{ t("sources.connectExistingTable") }}</Label>
             </div>
           </CardHeader>
           <CardContent class="space-y-4">
             <div class="flex items-start gap-4">
               <Database class="mt-1 h-5 w-5 text-muted-foreground" />
               <div class="space-y-1">
-                <p class="text-sm font-medium">Use an existing table</p>
+                <p class="text-sm font-medium">{{ t("sources.useExistingTable") }}</p>
                 <p class="text-sm text-muted-foreground">
-                  Map timestamp and severity fields from a table where logs are already ingested.
+                  {{ t("sources.existingTableDescription") }}
                 </p>
               </div>
             </div>
 
             <div v-if="modelValue.tableMode === 'connect'" class="mt-4 space-y-4 border-t pt-4">
               <div class="grid gap-2">
-                <Label for="meta_ts_field" class="required">Timestamp Field Name</Label>
+                <Label for="meta_ts_field" class="required">{{ t("sources.timestampFieldName") }}</Label>
                 <Input
                   id="meta_ts_field"
                   :model-value="modelValue.metaTSField"
@@ -452,7 +451,7 @@ function resetSchema() {
               </div>
 
               <div class="grid gap-2">
-                <Label for="meta_severity_field">Severity Field Name</Label>
+                <Label for="meta_severity_field">{{ t("sources.severityFieldName") }}</Label>
                 <Input
                   id="meta_severity_field"
                   :model-value="modelValue.metaSeverityField"
@@ -468,13 +467,13 @@ function resetSchema() {
 
     <div v-if="isEditMode" class="space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">Data Retention</h3>
+          <h3 class="text-lg font-medium">{{ t("sources.dataRetention") }}</h3>
         <div class="text-sm text-muted-foreground">
-          Configure how long auto-created table data is retained
+          {{ t("sources.dataRetentionDescription") }}
         </div>
       </div>
       <div class="grid gap-2">
-        <Label for="ttl_days_edit">TTL Days</Label>
+        <Label for="ttl_days_edit">{{ t("sources.ttlDays") }}</Label>
         <Input
           id="ttl_days_edit"
           :model-value="modelValue.ttlDays"
@@ -488,7 +487,7 @@ function resetSchema() {
 
     <div v-if="!isEditMode && modelValue.tableMode === 'connect'" class="space-y-4 border-t pt-4">
       <div class="flex items-center justify-between">
-        <div class="text-sm font-medium">Validate Connection</div>
+        <div class="text-sm font-medium">{{ t("sources.validateConnection") }}</div>
         <Button
           type="button"
           variant="outline"
@@ -503,7 +502,7 @@ function resetSchema() {
             </svg>
           </span>
           <span v-else-if="isValidated" class="mr-2">✓</span>
-          {{ isValidated ? "Validated" : validateButtonText }}
+          {{ isValidated ? t("sources.validated") : validateButtonText }}
         </Button>
       </div>
 

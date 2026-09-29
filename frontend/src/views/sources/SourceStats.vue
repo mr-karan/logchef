@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
@@ -16,6 +17,7 @@ import SourceInspectionSchema from './components/SourceInspectionSchema.vue'
 
 const route = useRoute()
 const router = useRouter()
+const { t } = useI18n()
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
 const { error: storeError } = storeToRefs(sourcesStore)
@@ -47,7 +49,7 @@ const isLoadingActivity = computed(() => sourcesStore.isLoadingOperation(`getSou
 const inspectionError = computed(() => {
   const hasInspection = !!inspection.value
   if (!isLoadingInspection.value && storeError.value && selectedSourceId.value && !hasInspection) {
-    return 'Failed to load source inspection. Please try again.'
+    return t('sources.inspectionLoadFailed')
   }
   return null
 })
@@ -67,8 +69,8 @@ async function fetchSourceActivity() {
 async function fetchSourceInspection() {
   if (!selectedSourceId.value) {
     toast({
-      title: 'Error',
-      description: 'Please select a source first',
+      title: t('ui.error'),
+      description: t('sources.selectSourceFirst'),
       variant: 'destructive',
     })
     return
@@ -130,18 +132,18 @@ watch(
   <div class="space-y-6">
     <Card>
       <CardHeader>
-        <CardTitle>Source Inspection</CardTitle>
+        <CardTitle>{{ t('sources.sourceInspection') }}</CardTitle>
         <CardDescription>
-          Inspect datasource metadata, storage characteristics, and schema across backends.
+          {{ t('sources.inspectionDescription') }}
         </CardDescription>
       </CardHeader>
       <CardContent class="space-y-6">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-end">
           <div class="space-y-2 flex-1">
-            <label for="source" class="block text-sm font-medium">Select Source</label>
+            <label for="source" class="block text-sm font-medium">{{ t('sources.selectSource') }}</label>
             <Select v-model="selectedSourceId">
               <SelectTrigger class="w-full">
-                <SelectValue placeholder="Select a source" />
+                <SelectValue :placeholder="t('sources.selectSource')" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem
@@ -159,8 +161,8 @@ watch(
               {{ getSourceTypeLabel(selectedSource) }}
             </Badge>
             <Button @click="fetchSourceInspection" :disabled="isLoadingInspection">
-              <span v-if="isLoadingInspection">Refreshing...</span>
-              <span v-else>Refresh metadata</span>
+              <span v-if="isLoadingInspection">{{ t('sources.refreshing') }}</span>
+              <span v-else>{{ t('sources.refreshMetadata') }}</span>
             </Button>
           </div>
         </div>
@@ -168,7 +170,7 @@ watch(
         <ErrorAlert
           v-if="inspectionError"
           :error="inspectionError"
-          title="Failed to load inspection"
+          :title="t('sources.inspectionLoadFailedTitle')"
           @retry="fetchSourceInspection"
         />
 
@@ -176,7 +178,7 @@ watch(
           v-else-if="!inspection && !isLoadingInspection"
           class="rounded-lg border border-dashed p-8 text-center text-muted-foreground"
         >
-          Select a source to inspect its backend metadata and schema.
+          {{ t('sources.selectSourceForInspection') }}
         </div>
 
         <template v-else-if="inspection">

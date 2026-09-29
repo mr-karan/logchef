@@ -1,5 +1,6 @@
 import { createApp, nextTick } from "vue";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { i18n } from "@/i18n";
 
 vi.mock("@/components/visualizations/SourceSparkline.vue", () => ({
   default: { template: "<div class='sparkline-stub' />" },
@@ -18,7 +19,7 @@ async function render(props: Record<string, unknown>, onRetry = () => {}) {
   host = document.createElement("div");
   document.body.appendChild(host);
   const app = createApp(SourceInspectionActivity, { ...props, onRetry });
-  app.mount(host);
+  app.use(i18n).mount(host);
   unmount = () => app.unmount();
   await nextTick();
   return host;
@@ -39,7 +40,7 @@ describe("SourceInspectionActivity", () => {
   it("renders loading text", async () => {
     const root = await render({ loading: true });
 
-    expect(root.textContent).toContain("Loading recent activity...");
+    expect(root.textContent).toContain(i18n.global.t("sources.loadingRecentActivity"));
   });
 
   it("renders explicit timeout and unavailable errors", async () => {
@@ -83,7 +84,8 @@ describe("SourceInspectionActivity", () => {
     expect(root.textContent).toContain("Formatted timestamp");
     expect(root.querySelector(".sparkline-stub")).not.toBeNull();
 
-    root.querySelector<HTMLButtonElement>("button[title='Refresh recent activity']")?.click();
+    const title = i18n.global.t("sources.refreshRecentActivity");
+    root.querySelector<HTMLButtonElement>(`button[title='${title}']`)?.click();
     expect(retries).toBe(1);
   });
 });

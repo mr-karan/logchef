@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { storeToRefs } from "pinia";
@@ -66,6 +67,7 @@ const emit = defineEmits<{ deleted: [id: number] }>();
 
 const router = useRouter();
 const { toast } = useToast();
+const { t } = useI18n();
 const store = useCollectionsStore();
 const savedQueriesStore = useSavedQueriesStore();
 const authStore = useAuthStore();
@@ -109,6 +111,15 @@ const canCurate = computed(() => isGlobalAdmin.value || !!collection.value?.call
 // populated without it.
 const canListUsers = computed(() => isGlobalAdmin.value || isAnyTeamAdmin.value);
 const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !collection.value?.is_personal);
+
+function translateCollectionRole(role: string) {
+  switch (role) {
+    case "owner": return t("library.roleOwner");
+    case "editor": return t("library.roleEditor");
+    case "member": return t("library.roleMember");
+    default: return role;
+  }
+}
 
 const showAddMember = ref(false);
 const newMemberId = ref("");
@@ -168,7 +179,7 @@ watch(showAddMember, async (isOpen) => {
 async function handleAddMember() {
   const idNum = Number(newMemberId.value);
   if (!idNum) {
-    toast({ title: "Invalid user id", variant: "destructive", duration: TOAST_DURATION.WARNING });
+    toast({ title: t("library.invalidUserID"), variant: "destructive", duration: TOAST_DURATION.WARNING });
     return;
   }
   const result = await store.addMember(collectionID.value, { user_id: idNum, role: newMemberRole.value });
@@ -245,7 +256,7 @@ watch(showAddQuery, async (isOpen) => {
 async function handleAddQuery(queryId: number) {
   const result = await store.addItem(collectionID.value, { saved_query_id: queryId });
   if (result.success) {
-    toast({ title: "Query added to collection", duration: TOAST_DURATION.SUCCESS });
+    toast({ title: t("library.queryAdded"), duration: TOAST_DURATION.SUCCESS });
   }
 }
 
@@ -276,7 +287,7 @@ async function handleMove() {
   if (!added.success) return;
   await store.removeItem(collectionID.value, queryId);
   pendingMoveQueryId.value = null;
-  toast({ title: "Query moved", duration: TOAST_DURATION.SUCCESS });
+  toast({ title: t("library.queryMoved"), duration: TOAST_DURATION.SUCCESS });
 }
 
 async function handleDeleteCollection() {
@@ -292,8 +303,8 @@ async function handleDeleteCollection() {
   <div class="space-y-6">
     <EmptyState
       v-if="!collection && !store.isLoading"
-      title="Collection not found"
-      description="It may have been deleted or you may not be a member."
+      :title="t('library.collectionNotFound')"
+      :description="t('library.collectionNotFoundDescription')"
     />
 
     <template v-else-if="collection">
@@ -301,15 +312,15 @@ async function handleDeleteCollection() {
         <template #actions>
           <Button v-if="isOwner && !collection.is_personal" variant="outline" size="sm" @click="openRename">
             <Pencil class="mr-2 h-4 w-4" />
-            Rename
+            {{ t('library.rename') }}
           </Button>
           <Button v-if="canInviteMembers" variant="outline" size="sm" @click="showAddMember = true">
             <UserPlus class="mr-2 h-4 w-4" />
-            Invite member
+            {{ t('library.inviteMember') }}
           </Button>
           <Button v-if="isOwner && !collection.is_personal" variant="destructive" size="sm" @click="showDeleteDialog = true">
             <Trash2 class="mr-2 h-4 w-4" />
-            Delete
+            {{ t('ui.delete') }}
           </Button>
         </template>
       </PageHeader>
@@ -322,30 +333,30 @@ async function handleDeleteCollection() {
         >
           <Lock v-if="collection.is_personal" class="h-3 w-3" />
           <Users v-else class="h-3 w-3" />
-          {{ collection.is_personal ? "Personal" : "Shared" }}
+          {{ collection.is_personal ? t('library.personal') : t('library.shared') }}
         </Badge>
         <template v-if="collection.caller_role">
           <span class="text-muted-foreground/40">•</span>
           <span>
-            Your role
-            <span class="font-medium text-foreground capitalize">{{ collection.caller_role }}</span>
+            {{ t('library.yourRole') }}
+            <span class="font-medium text-foreground">{{ translateCollectionRole(collection.caller_role) }}</span>
           </span>
         </template>
         <span class="text-muted-foreground/40">•</span>
         <span>
           <span class="font-medium text-foreground tabular-nums">{{ itemCount }}</span>
-          {{ itemCount === 1 ? "query" : "queries" }}
+          {{ t('collections.items', { count: itemCount }, itemCount) }}
         </span>
         <template v-if="!collection.is_personal && isOwner">
           <span class="text-muted-foreground/40">•</span>
           <span>
             <span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span>
-            {{ memberCount === 1 ? "member" : "members" }}
+            {{ t('collections.members', { count: memberCount }, memberCount) }}
           </span>
         </template>
         <template v-if="collection.created_at">
           <span class="text-muted-foreground/40">•</span>
-          <span>Created {{ formatDate(collection.created_at) }}</span>
+          <span>{{ t('library.createdOn', { date: formatDate(collection.created_at) }) }}</span>
         </template>
       </div>
 
@@ -355,32 +366,32 @@ async function handleDeleteCollection() {
       </Alert>
 
       <PageSection
-        title="Queries"
-        description="Saved queries pinned to this collection. Items you can't run for this source show with a lock icon."
+        :title="t('library.queries')"
+        :description="t('library.pinnedQueriesDescription')"
         flush
       >
         <template v-if="canCurate" #actions>
           <Button variant="outline" size="sm" @click="showAddQuery = true">
             <Plus class="mr-2 h-4 w-4" />
-            Add query
+            {{ t('library.addQuery') }}
           </Button>
         </template>
         <LoadingState v-if="store.isLoadingOperation(`listItems-${collectionID}`)" />
         <EmptyState
           v-else-if="items.length === 0"
           :icon="FileSearch"
-          title="No queries pinned"
-          description="Open a query in the explorer and use Save to add it here."
+          :title="t('library.noQueriesPinned')"
+          :description="t('library.noQueriesPinnedDescription')"
         />
         <div v-else class="overflow-x-auto">
           <table class="w-full text-sm min-w-[640px]">
             <thead>
               <tr class="border-b bg-muted/30">
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">Type</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5">Name</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">Source</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[170px]">Created by</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">Updated</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">{{ t('library.type') }}</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5">{{ t('ui.name') }}</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">{{ t('ui.source') }}</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[170px]">{{ t('library.createdBy') }}</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">{{ t('ui.updated2') }}</th>
                 <th class="w-[90px]"></th>
               </tr>
             </thead>
@@ -395,7 +406,7 @@ async function handleDeleteCollection() {
                   <Lock
                     v-if="!item.runnable"
                     class="h-4 w-4 text-muted-foreground"
-                    title="You cannot run this query (no source access)."
+                    :title="t('library.noQuerySourceAccess')"
                   />
                   <Search
                     v-else-if="item.query.query_language === 'logchefql'"
@@ -431,7 +442,7 @@ async function handleDeleteCollection() {
                   >
                     {{ item.query.created_by_name || item.query.created_by_email }}
                   </span>
-                  <span v-else class="text-muted-foreground/50">Unknown</span>
+                  <span v-else class="text-muted-foreground/50">{{ t('common.unknown') }}</span>
                 </td>
                 <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">
                   {{ formatDate(item.query.updated_at) }}
@@ -447,7 +458,7 @@ async function handleDeleteCollection() {
                       size="icon"
                       class="h-7 w-7"
                       @click="openMove(item.query.id)"
-                      title="Move to another collection"
+                      :title="t('library.moveToCollection')"
                     >
                       <FolderInput class="h-4 w-4 text-muted-foreground" />
                     </Button>
@@ -456,7 +467,7 @@ async function handleDeleteCollection() {
                       size="icon"
                       class="h-7 w-7"
                       @click="handleRemoveItem(item.query.id)"
-                      title="Remove from collection"
+                      :title="t('library.removeFromCollection')"
                     >
                       <Trash2 class="h-4 w-4 text-destructive" />
                     </Button>
@@ -470,8 +481,8 @@ async function handleDeleteCollection() {
 
       <PageSection
         v-if="!collection.is_personal && isOwner"
-        title="Members"
-        description="Owners manage members and roles; editors can edit the queries inside; members read and run items they have source access to."
+        :title="t('library.members')"
+        :description="t('library.collectionMembersDescription')"
         flush
       >
         <LoadingState v-if="store.isLoadingOperation(`listMembers-${collectionID}`)" />
@@ -485,8 +496,8 @@ async function handleDeleteCollection() {
             </div>
             <div class="min-w-0 flex-1">
               <p class="truncate text-sm font-medium">
-                {{ m.full_name || m.email || `User ${m.user_id}` }}
-                <span v-if="isCurrentUser(m.user_id)" class="ml-1 text-xs font-normal text-muted-foreground">(you)</span>
+                {{ m.full_name || m.email || t('pages.userNumber', { id: m.user_id }) }}
+                <span v-if="isCurrentUser(m.user_id)" class="ml-1 text-xs font-normal text-muted-foreground">({{ t('library.you') }})</span>
               </p>
               <p class="truncate text-xs text-muted-foreground">{{ m.email }}</p>
             </div>
@@ -494,7 +505,7 @@ async function handleDeleteCollection() {
               :variant="m.role === 'owner' ? 'secondary' : 'outline'"
               class="w-16 shrink-0 justify-center capitalize"
             >
-              {{ m.role }}
+              {{ translateCollectionRole(m.role) }}
             </Badge>
             <div class="flex w-8 shrink-0 justify-center">
               <Button
@@ -502,7 +513,7 @@ async function handleDeleteCollection() {
                 variant="ghost"
                 size="icon"
                 class="h-7 w-7"
-                title="Remove member"
+                :title="t('library.removeMember')"
                 @click="handleRemoveMember(m.user_id)"
               >
                 <X class="h-4 w-4 text-destructive" />
@@ -516,38 +527,37 @@ async function handleDeleteCollection() {
     <Dialog :open="showAddMember" @update:open="(val) => !val && (showAddMember = false)">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Invite member</DialogTitle>
+          <DialogTitle>{{ t('library.inviteMember') }}</DialogTitle>
           <DialogDescription>
-            Owners manage the collection; editors can edit its queries; members read and run items
-            they have source access to. Inviting someone never grants them source access.
+            {{ t('library.inviteMemberDescription') }}
           </DialogDescription>
         </DialogHeader>
         <form @submit.prevent="handleAddMember" class="space-y-4">
           <div class="grid gap-2">
-            <Label>User</Label>
+            <Label>{{ t('access.user') }}</Label>
             <SearchableSelect
               v-model="newMemberId"
               :items="availableUserItems"
-              placeholder="Select a user to invite"
-              search-placeholder="Search users…"
-              empty-text="No users available." />
+              :placeholder="t('library.selectUserToInvite')"
+              :search-placeholder="t('access.searchUsers')"
+              :empty-text="t('access.noUsersAvailable')" />
           </div>
           <div class="grid gap-2">
-            <Label>Role</Label>
+            <Label>{{ t('ui.role') }}</Label>
             <Select v-model="newMemberRole">
               <SelectTrigger>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="member">Member — read &amp; run</SelectItem>
-                <SelectItem value="editor">Editor — edit the queries</SelectItem>
-                <SelectItem value="owner">Owner — manage the collection</SelectItem>
+                <SelectItem value="member">{{ t('library.memberRoleDescription') }}</SelectItem>
+                <SelectItem value="editor">{{ t('library.editorRoleDescription') }}</SelectItem>
+                <SelectItem value="owner">{{ t('library.ownerRoleDescription') }}</SelectItem>
               </SelectContent>
             </Select>
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" @click="showAddMember = false">Cancel</Button>
-            <Button type="submit" :disabled="!newMemberId">Invite</Button>
+            <Button type="button" variant="outline" @click="showAddMember = false">{{ t('ui.cancel') }}</Button>
+            <Button type="submit" :disabled="!newMemberId">{{ t('library.invite') }}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -556,20 +566,20 @@ async function handleDeleteCollection() {
     <Dialog :open="showRename" @update:open="(val) => !val && (showRename = false)">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Rename collection</DialogTitle>
+          <DialogTitle>{{ t('library.renameCollection') }}</DialogTitle>
         </DialogHeader>
         <form @submit.prevent="handleRename" class="space-y-4">
           <div class="grid gap-2">
-            <Label for="rename-name">Name</Label>
+            <Label for="rename-name">{{ t('ui.name') }}</Label>
             <Input id="rename-name" v-model="renameName" required />
           </div>
           <div class="grid gap-2">
-            <Label for="rename-description">Description (optional)</Label>
+            <Label for="rename-description">{{ t('library.optionalDescription') }}</Label>
             <Textarea id="rename-description" v-model="renameDescription" rows="3" />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" @click="showRename = false">Cancel</Button>
-            <Button type="submit" :disabled="!renameName.trim()">Save</Button>
+            <Button type="button" variant="outline" @click="showRename = false">{{ t('ui.cancel') }}</Button>
+            <Button type="submit" :disabled="!renameName.trim()">{{ t('ui.save') }}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
@@ -579,19 +589,19 @@ async function handleDeleteCollection() {
     <Dialog :open="showAddQuery" @update:open="(val) => !val && (showAddQuery = false)">
       <DialogContent class="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Add a query</DialogTitle>
+          <DialogTitle>{{ t('library.addQuery') }}</DialogTitle>
           <DialogDescription>
-            Pin an existing saved query to this collection. Only queries you can see are listed.
+            {{ t('library.addQueryDescription') }}
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-3 min-w-0">
           <div class="relative">
             <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-            <Input v-model="addQuerySearch" placeholder="Search queries…" class="pl-8 h-9" />
+            <Input v-model="addQuerySearch" :placeholder="t('library.searchQueries')" class="pl-8 h-9" />
           </div>
           <LoadingState v-if="savedQueriesStore.isLoading" />
           <p v-else-if="addableQueries.length === 0" class="px-1 py-6 text-center text-sm text-muted-foreground">
-            {{ addQuerySearch ? "No queries match." : "No saved queries available to add." }}
+            {{ addQuerySearch ? t('library.noQueriesMatch') : t('library.noQueriesAvailable') }}
           </p>
           <ul v-else class="max-h-72 overflow-y-auto divide-y rounded-md border">
             <li v-for="sq in addableQueries" :key="sq.id" class="flex items-center gap-3 px-3 py-2">
@@ -601,12 +611,12 @@ async function handleDeleteCollection() {
                   {{ sq.source_name || `source ${sq.source_id}` }}
                 </p>
               </div>
-              <Button size="sm" variant="outline" @click="handleAddQuery(sq.id)">Add</Button>
+              <Button size="sm" variant="outline" @click="handleAddQuery(sq.id)">{{ t('ui.add') }}</Button>
             </li>
           </ul>
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" @click="showAddQuery = false">Done</Button>
+          <Button type="button" variant="outline" @click="showAddQuery = false">{{ t('library.done') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -615,41 +625,41 @@ async function handleDeleteCollection() {
     <Dialog :open="pendingMoveQueryId !== null" @update:open="(val) => !val && (pendingMoveQueryId = null)">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Move to another collection</DialogTitle>
+          <DialogTitle>{{ t('library.moveToCollection') }}</DialogTitle>
           <DialogDescription>
-            The query is pinned to the selected collection and removed from this one.
+            {{ t('library.moveQueryDescription') }}
           </DialogDescription>
         </DialogHeader>
         <div class="grid gap-2">
-          <Label>Destination collection</Label>
+          <Label>{{ t('library.destinationCollection') }}</Label>
           <SearchableSelect
             v-model="moveTargetId"
             :items="moveTargetItems"
-            placeholder="Select a collection"
-            search-placeholder="Search collections…"
-            empty-text="No collections available." />
+            :placeholder="t('library.selectCollection')"
+            :search-placeholder="t('library.searchCollections')"
+            :empty-text="t('library.noCollectionsAvailable')" />
         </div>
         <DialogFooter>
-          <Button type="button" variant="outline" @click="pendingMoveQueryId = null">Cancel</Button>
-          <Button type="button" :disabled="!moveTargetId" @click="handleMove">Move</Button>
+          <Button type="button" variant="outline" @click="pendingMoveQueryId = null">{{ t('ui.cancel') }}</Button>
+          <Button type="button" :disabled="!moveTargetId" @click="handleMove">{{ t('library.move') }}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
 
     <ConfirmDialog
       :open="pendingMemberRemoval !== null"
-      title="Remove member?"
-      description="They will no longer see this collection."
-      confirm-text="Remove"
+      :title="t('library.removeMemberTitle')"
+      :description="t('library.removeMemberDescription')"
+      :confirm-text="t('library.remove')"
       destructive
       @update:open="(v) => { if (!v) pendingMemberRemoval = null }"
       @confirm="confirmMemberRemoval"
     />
     <ConfirmDialog
       :open="pendingItemRemoval !== null"
-      title="Remove query from collection?"
-      description="The saved query itself is not deleted."
-      confirm-text="Remove"
+      :title="t('library.removeQueryTitle')"
+      :description="t('library.removeQueryDescription')"
+      :confirm-text="t('library.remove')"
       destructive
       @update:open="(v) => { if (!v) pendingItemRemoval = null }"
       @confirm="confirmItemRemoval"
@@ -658,12 +668,12 @@ async function handleDeleteCollection() {
     <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete "{{ collection?.name }}"?</AlertDialogTitle>
-          <AlertDialogDescription>This will remove the collection and all membership data. Saved queries inside are not deleted.</AlertDialogDescription>
+          <AlertDialogTitle>{{ t('library.deleteCollectionTitle', { name: collection?.name ?? '' }) }}</AlertDialogTitle>
+          <AlertDialogDescription>{{ t('library.deleteCollectionDescription') }}</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel @click="showDeleteDialog = false">Cancel</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="handleDeleteCollection">Delete</AlertDialogAction>
+          <AlertDialogCancel @click="showDeleteDialog = false">{{ t('ui.cancel') }}</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" @click="handleDeleteCollection">{{ t('ui.delete') }}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>

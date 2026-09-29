@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { Plus, Search, User, Users, Loader2, LayoutList } from "lucide-vue-next";
@@ -22,6 +23,7 @@ import AllQueriesPane from "./AllQueriesPane.vue";
 const route = useRoute();
 const router = useRouter();
 const store = useCollectionsStore();
+const { t } = useI18n();
 
 const personal = computed(() => store.personalCollection);
 const shared = computed(() => store.sharedCollections);
@@ -58,6 +60,14 @@ function roleClass(role?: CollectionRole): string {
   if (role === "owner") return "text-amber-500";
   if (role === "editor") return "text-teal-400";
   return "text-muted-foreground";
+}
+
+function translateRole(role: CollectionRole): string {
+  switch (role) {
+    case "owner": return t("library.roleOwner");
+    case "editor": return t("library.roleEditor");
+    case "member": return t("library.roleMember");
+  }
 }
 
 onMounted(async () => {
@@ -105,16 +115,16 @@ function onDeleted() {
     <!-- Collections rail -->
     <aside class="lg:border-r lg:pr-5">
       <div class="flex items-center justify-between mb-3">
-        <h1 class="text-lg font-semibold tracking-tight">Library</h1>
+        <h1 class="text-lg font-semibold tracking-tight">{{ t('ui.library') }}</h1>
         <Button size="sm" variant="outline" @click="showCreate = true">
           <Plus class="mr-1.5 h-3.5 w-3.5" />
-          New
+          {{ t('library.new') }}
         </Button>
       </div>
 
       <div class="relative mb-3">
         <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-        <Input v-model="search" placeholder="Search collections…" class="pl-8 h-9" />
+        <Input v-model="search" :placeholder="t('library.searchCollections')" class="pl-8 h-9" />
       </div>
 
       <div v-if="isLoading" class="flex justify-center py-8">
@@ -130,12 +140,12 @@ function onDeleted() {
           @click="selectAll"
         >
           <LayoutList class="h-4 w-4 text-muted-foreground shrink-0" />
-          <span class="flex-1 truncate text-sm font-medium">All queries</span>
+          <span class="flex-1 truncate text-sm font-medium">{{ t('library.allQueries') }}</span>
         </button>
 
         <!-- Personal -->
         <div v-if="personal">
-          <p class="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Yours</p>
+          <p class="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">{{ t('library.yours') }}</p>
           <button
             type="button"
             class="flex w-full items-center gap-2.5 rounded-md border px-2.5 py-2 text-left transition-colors"
@@ -150,7 +160,7 @@ function onDeleted() {
 
         <!-- Shared -->
         <div>
-          <p class="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">Shared</p>
+          <p class="px-2 mb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">{{ t('library.shared') }}</p>
           <div class="space-y-1">
             <button
               v-for="c in filteredShared"
@@ -166,13 +176,13 @@ function onDeleted() {
                 v-if="c.caller_role"
                 class="text-[10px] font-semibold uppercase tracking-wider"
                 :class="roleClass(c.caller_role)"
-              >{{ c.caller_role }}</span>
+              >{{ translateRole(c.caller_role) }}</span>
             </button>
             <p
               v-if="filteredShared.length === 0"
               class="px-2.5 py-3 text-xs text-muted-foreground"
             >
-              {{ search ? "No collections match." : "No shared collections yet. Create one and invite teammates." }}
+              {{ search ? t('library.noCollectionsMatch') : t('library.noSharedCollections') }}
             </p>
           </div>
         </div>
@@ -193,26 +203,25 @@ function onDeleted() {
     <Dialog :open="showCreate" @update:open="(val) => !val && (showCreate = false)">
       <DialogContent class="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>New collection</DialogTitle>
+          <DialogTitle>{{ t('library.newCollection') }}</DialogTitle>
           <DialogDescription>
-            Shared collections live alongside your personal one. You'll be the owner and can invite
-            members and editors afterwards.
+            {{ t('library.createCollectionDescription') }}
           </DialogDescription>
         </DialogHeader>
         <form @submit.prevent="handleCreate" class="space-y-4">
           <div class="grid gap-2">
-            <Label for="collection-name">Name</Label>
-            <Input id="collection-name" v-model="createName" placeholder="Incident on-call dashboard" required />
+            <Label for="collection-name">{{ t('ui.name') }}</Label>
+            <Input id="collection-name" v-model="createName" :placeholder="t('library.collectionNameExample')" required />
           </div>
           <div class="grid gap-2">
-            <Label for="collection-description">Description (optional)</Label>
+            <Label for="collection-description">{{ t('library.optionalDescription') }}</Label>
             <Textarea id="collection-description" v-model="createDescription" rows="3" />
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" @click="showCreate = false">Cancel</Button>
+            <Button type="button" variant="outline" @click="showCreate = false">{{ t('ui.cancel') }}</Button>
             <Button type="submit" :disabled="isCreating || !createName.trim()">
               <Loader2 v-if="isCreating" class="mr-2 h-4 w-4 animate-spin" />
-              Create
+              {{ t('ui.create') }}
             </Button>
           </DialogFooter>
         </form>

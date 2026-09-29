@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { useI18n } from "vue-i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +12,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { VictoriaLogsSourceFormState } from "./sourceFormModels";
+
+const { t } = useI18n();
 
 const props = defineProps<{
   modelValue: VictoriaLogsSourceFormState;
@@ -40,14 +43,14 @@ function updateAuthMode(value: unknown) {
   <div class="space-y-6">
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">VictoriaLogs Connection</h3>
+        <h3 class="text-lg font-medium">{{ t("sources.victoriaLogsConnection") }}</h3>
         <div class="text-sm text-muted-foreground">
-          Configure the VictoriaLogs API endpoint and tenant scope
+          {{ t("sources.victoriaLogsConnectionDescription") }}
         </div>
       </div>
 
       <div class="grid gap-2">
-        <Label for="victorialogs_base_url" class="required">Base URL</Label>
+        <Label for="victorialogs_base_url" class="required">{{ t("sources.baseURL") }}</Label>
         <Input
           id="victorialogs_base_url"
           :model-value="modelValue.baseURL"
@@ -55,30 +58,30 @@ function updateAuthMode(value: unknown) {
           @update:model-value="(value) => updateForm({ baseURL: String(value) })"
         />
         <p class="text-sm text-muted-foreground">
-          Base VictoriaLogs endpoint, including scheme and optional path prefix.
+          {{ t("sources.baseURLDescription") }}
         </p>
       </div>
 
       <div class="grid gap-2 md:max-w-sm">
-        <Label for="victorialogs_auth_mode">Authentication</Label>
+        <Label for="victorialogs_auth_mode">{{ t("sources.authentication") }}</Label>
         <Select
           :model-value="modelValue.authMode"
           @update:model-value="updateAuthMode"
         >
           <SelectTrigger id="victorialogs_auth_mode">
-            <SelectValue placeholder="Select auth mode" />
+            <SelectValue :placeholder="t('sources.selectAuthMode')" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="none">No Auth</SelectItem>
-            <SelectItem value="basic">Basic Auth</SelectItem>
-            <SelectItem value="bearer">Bearer Token</SelectItem>
+            <SelectItem value="none">{{ t("sources.noAuth") }}</SelectItem>
+            <SelectItem value="basic">{{ t("sources.basicAuth") }}</SelectItem>
+            <SelectItem value="bearer">{{ t("sources.bearerToken") }}</SelectItem>
           </SelectContent>
         </Select>
       </div>
 
       <div v-if="modelValue.authMode === 'basic'" class="grid gap-4 rounded-md border border-border/60 p-4 md:grid-cols-2">
         <div class="grid gap-2">
-          <Label for="victorialogs_username" class="required">Username</Label>
+          <Label for="victorialogs_username" class="required">{{ t("sources.username") }}</Label>
           <Input
             id="victorialogs_username"
             :model-value="modelValue.username"
@@ -88,46 +91,46 @@ function updateAuthMode(value: unknown) {
         </div>
 
         <div class="grid gap-2">
-          <Label for="victorialogs_password" :class="{ required: !isEditMode }">Password</Label>
+          <Label for="victorialogs_password" :class="{ required: !isEditMode }">{{ t("sources.password") }}</Label>
           <Input
             id="victorialogs_password"
             :model-value="modelValue.password"
             type="password"
-            placeholder="Enter password"
+            :placeholder="t('sources.enterPassword')"
             @update:model-value="(value) => updateForm({ password: String(value) })"
           />
           <p v-if="isEditMode" class="text-xs text-muted-foreground">
-            Leave blank to keep the existing password unchanged.
+            {{ t("sources.keepPassword") }}
           </p>
         </div>
       </div>
 
       <div v-if="modelValue.authMode === 'bearer'" class="grid gap-2 rounded-md border border-border/60 p-4">
-        <Label for="victorialogs_token" :class="{ required: !isEditMode }">Bearer Token</Label>
+        <Label for="victorialogs_token" :class="{ required: !isEditMode }">{{ t("sources.bearerToken") }}</Label>
         <Input
           id="victorialogs_token"
           :model-value="modelValue.token"
           type="password"
-          placeholder="Enter bearer token"
+          :placeholder="t('sources.enterBearerToken')"
           @update:model-value="(value) => updateForm({ token: String(value) })"
         />
         <p v-if="isEditMode" class="text-xs text-muted-foreground">
-          Leave blank to keep the existing token unchanged.
+          {{ t("sources.keepToken") }}
         </p>
       </div>
     </div>
 
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">Tenant Scope</h3>
+        <h3 class="text-lg font-medium">{{ t("sources.tenantScope") }}</h3>
         <div class="text-sm text-muted-foreground">
-          Optional multi-tenant and source-scoped filters
+          {{ t("sources.tenantScopeDescription") }}
         </div>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2">
         <div class="grid gap-2">
-          <Label for="victorialogs_account_id">Account ID</Label>
+          <Label for="victorialogs_account_id">{{ t("sources.accountID") }}</Label>
           <Input
             id="victorialogs_account_id"
             :model-value="modelValue.accountID"
@@ -137,7 +140,7 @@ function updateAuthMode(value: unknown) {
         </div>
 
         <div class="grid gap-2">
-          <Label for="victorialogs_project_id">Project ID</Label>
+          <Label for="victorialogs_project_id">{{ t("sources.projectID") }}</Label>
           <Input
             id="victorialogs_project_id"
             :model-value="modelValue.projectID"
@@ -147,11 +150,11 @@ function updateAuthMode(value: unknown) {
         </div>
       </div>
       <p class="text-sm text-muted-foreground">
-        Set both Account ID and Project ID together when validating a multi-tenant VictoriaLogs cluster.
+        {{ t("sources.accountProjectValidation") }}
       </p>
 
       <div class="grid gap-2">
-        <Label for="victorialogs_scope_query">Immutable Scope Query</Label>
+        <Label for="victorialogs_scope_query">{{ t("sources.immutableScopeQuery") }}</Label>
         <Textarea
           id="victorialogs_scope_query"
           :model-value="modelValue.scopeQuery"
@@ -160,22 +163,22 @@ function updateAuthMode(value: unknown) {
           @update:model-value="(value) => updateForm({ scopeQuery: String(value) })"
         />
         <p class="text-sm text-muted-foreground">
-          This scope is applied server-side to every query for the datasource. Examples: <code>{app="payments"}</code> or <code>kubernetes.namespace:="prod"</code>.
+          {{ t("sources.scopeAppliedToQueries") }} <code>{app="payments"}</code> {{ t("sources.or") }} <code>kubernetes.namespace:="prod"</code>.
         </p>
       </div>
     </div>
 
     <div class="space-y-4">
       <div class="flex items-center justify-between">
-        <h3 class="text-lg font-medium">Field Mapping</h3>
+        <h3 class="text-lg font-medium">{{ t("sources.fieldMapping") }}</h3>
         <div class="text-sm text-muted-foreground">
-          Tell LogChef which fields represent time and severity
+          {{ t("sources.fieldMappingDescription") }}
         </div>
       </div>
 
       <div class="grid gap-4 md:grid-cols-2">
         <div class="grid gap-2">
-          <Label for="victorialogs_meta_ts_field" class="required">Timestamp Field</Label>
+          <Label for="victorialogs_meta_ts_field" class="required">{{ t("sources.timestampField") }}</Label>
           <Input
             id="victorialogs_meta_ts_field"
             :model-value="modelValue.metaTSField"
@@ -185,7 +188,7 @@ function updateAuthMode(value: unknown) {
         </div>
 
         <div class="grid gap-2">
-          <Label for="victorialogs_meta_severity_field">Severity Field</Label>
+          <Label for="victorialogs_meta_severity_field">{{ t("sources.severityField") }}</Label>
           <Input
             id="victorialogs_meta_severity_field"
             :model-value="modelValue.metaSeverityField"
@@ -198,7 +201,7 @@ function updateAuthMode(value: unknown) {
 
     <div v-if="!isEditMode" class="space-y-4 border-t pt-4">
       <div class="flex items-center justify-between">
-        <div class="text-sm font-medium">Validate Connection</div>
+        <div class="text-sm font-medium">{{ t("sources.validateConnection") }}</div>
         <Button
           type="button"
           variant="outline"
@@ -213,7 +216,7 @@ function updateAuthMode(value: unknown) {
             </svg>
           </span>
           <span v-else-if="isValidated" class="mr-2">✓</span>
-          {{ isValidated ? "Validated" : "Validate Connection" }}
+          {{ isValidated ? t("sources.validated") : t("sources.validateConnection") }}
         </Button>
       </div>
 

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import { useI18n } from "vue-i18n";
 import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +34,7 @@ import {
 
 const router = useRouter();
 const route = useRoute();
+const { t } = useI18n();
 const { toast } = useToast();
 const sourcesStore = useSourcesStore();
 
@@ -77,38 +79,38 @@ const hasConnectionChanges = computed(() => currentConnectionSnapshot.value !== 
 
 const pageTitle = computed(() => {
   if (isEditMode.value) {
-    return "Edit Source";
+    return t("sources.editTitle");
   }
   if (duplicateFromId.value) {
-    return "Duplicate Source";
+    return t("sources.duplicateTitle");
   }
-  return "Add Source";
+  return t("sources.addTitle");
 });
 
 const pageDescription = computed(() => {
   if (isEditMode.value) {
-    return "Update datasource configuration and connection settings.";
+    return t("sources.editDescription");
   }
   if (duplicateFromId.value) {
-    return "Create a new datasource using an existing configuration as the starting point.";
+    return t("sources.duplicateDescription");
   }
-  return "Create a datasource and choose the backend LogChef should query.";
+  return t("sources.addDescription");
 });
 
 const submitButtonText = computed(() => {
   if (isSubmitting.value) {
-    return isEditMode.value ? "Updating..." : "Creating...";
+    return isEditMode.value ? t("sources.updating") : t("sources.creating");
   }
   if (isEditMode.value) {
-    return "Update Source";
+    return t("sources.updateSource");
   }
   if (sourceType.value === "clickhouse" && clickHouseForm.value.tableMode === "connect" && !isValidated.value) {
-    return "Validate & Import";
+    return t("sources.validateAndImport");
   }
   if (sourceType.value === "clickhouse" && clickHouseForm.value.tableMode === "connect") {
-    return "Import Source";
+    return t("sources.importSource");
   }
-  return "Create Source";
+  return t("sources.createSource");
 });
 
 const isValid = computed(() => {
@@ -232,8 +234,8 @@ async function handleValidateConnection() {
 async function submitForm() {
   if (!isValid.value) {
     toast({
-      title: "Error",
-      description: "Please fill in all required fields",
+      title: t("ui.error"),
+      description: t("sources.requiredFieldsError"),
       variant: "destructive",
       duration: TOAST_DURATION.ERROR,
     });
@@ -277,13 +279,13 @@ async function submitForm() {
       const result = await sourcesStore.updateSource(editingSourceId.value, updatePayload);
       if (result.success) {
         toast({
-          title: "Success",
-          description: "Source updated successfully",
+          title: t("sources.success"),
+          description: t("sources.sourceUpdated"),
           duration: TOAST_DURATION.SUCCESS,
         });
         router.push({ name: "Sources" });
       } else {
-        formError.value = result.error?.message || "Failed to update source";
+        formError.value = result.error?.message || t("sources.updateFailed");
       }
       return;
     }
@@ -318,11 +320,11 @@ async function submitForm() {
     if (result.success) {
       router.push({ name: "Sources" });
     } else {
-      formError.value = result.error?.message || "Failed to create source";
+        formError.value = result.error?.message || t("sources.createFailed");
     }
   } catch (error) {
     console.error("Error saving source:", error);
-    formError.value = error instanceof Error ? error.message : "Unknown error";
+    formError.value = error instanceof Error ? error.message : t("sources.unknownError");
   } finally {
     isSubmitting.value = false;
   }
@@ -335,8 +337,8 @@ onMounted(async () => {
       const source = await loadSourceForPrefill(editingSourceId.value);
       if (!source) {
         toast({
-          title: "Error",
-          description: "Source not found",
+          title: t("ui.error"),
+          description: t("sources.sourceNotFound"),
           variant: "destructive",
           duration: TOAST_DURATION.ERROR,
         });
@@ -347,8 +349,8 @@ onMounted(async () => {
     } catch (error) {
       console.error("Error loading source for editing:", error);
       toast({
-        title: "Error",
-        description: "Failed to load source data",
+        title: t("ui.error"),
+        description: t("sources.loadSourceFailed"),
         variant: "destructive",
         duration: TOAST_DURATION.ERROR,
       });
@@ -366,8 +368,8 @@ onMounted(async () => {
         prefillFormFromSource(source, true);
       } else {
         toast({
-          title: "Warning",
-          description: "Could not find source to duplicate",
+          title: t("ui.warning"),
+          description: t("sources.duplicateSourceNotFound"),
           variant: "destructive",
           duration: TOAST_DURATION.ERROR,
         });
@@ -375,8 +377,8 @@ onMounted(async () => {
     } catch (error) {
       console.error("Error loading source for duplication:", error);
       toast({
-        title: "Error",
-        description: "Failed to load source data for duplication",
+        title: t("ui.error"),
+        description: t("sources.loadDuplicateFailed"),
         variant: "destructive",
         duration: TOAST_DURATION.ERROR,
       });
@@ -405,7 +407,7 @@ onMounted(async () => {
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <span class="text-muted-foreground">Loading source data...</span>
+            <span class="text-muted-foreground">{{ t("sources.loadingSource") }}</span>
           </div>
         </div>
 
@@ -413,14 +415,14 @@ onMounted(async () => {
           <div class="space-y-6">
             <div class="space-y-4">
               <div class="flex items-center justify-between">
-                <h3 class="text-lg font-medium">Basic Information</h3>
+                <h3 class="text-lg font-medium">{{ t("sources.basicInformation") }}</h3>
                 <div class="text-sm text-muted-foreground">
-                  Define source identity and provider
+                  {{ t("sources.identityDescription") }}
                 </div>
               </div>
 
               <div v-if="!isEditMode" class="space-y-3">
-                <Label class="required">Datasource Type</Label>
+                <Label class="required">{{ t("sources.datasourceType") }}</Label>
                 <RadioGroup
                   :model-value="sourceType"
                   class="grid gap-3 md:grid-cols-2"
@@ -436,7 +438,7 @@ onMounted(async () => {
                       <div class="space-y-1">
                         <Label for="source_type_clickhouse" class="cursor-pointer font-medium">ClickHouse</Label>
                         <p class="text-sm text-muted-foreground">
-                          Native LogChefQL and SQL with optional auto-created tables.
+                          {{ t("sources.clickHouseDescription") }}
                         </p>
                       </div>
                     </CardContent>
@@ -452,7 +454,7 @@ onMounted(async () => {
                       <div class="space-y-1">
                         <Label for="source_type_victorialogs" class="cursor-pointer font-medium">VictoriaLogs</Label>
                         <p class="text-sm text-muted-foreground">
-                          Native LogsQL against VictoriaLogs with tenant and scope controls.
+                          {{ t("sources.victoriaLogsDescription") }}
                         </p>
                       </div>
                     </CardContent>
@@ -461,28 +463,28 @@ onMounted(async () => {
               </div>
 
               <div v-else class="grid gap-2 md:max-w-sm">
-                <Label>Datasource Type</Label>
+                <Label>{{ t("sources.datasourceType") }}</Label>
                 <Input :model-value="sourceType === 'clickhouse' ? 'ClickHouse' : 'VictoriaLogs'" disabled />
               </div>
 
               <div class="grid gap-2">
-                <Label for="source_name" class="required">Source Name</Label>
+                <Label for="source_name" class="required">{{ t("sources.sourceName") }}</Label>
                 <Input
                   id="source_name"
                   v-model="sourceName"
-                  placeholder="My Application Logs"
+                  :placeholder="t('sources.sourceNamePlaceholder')"
                   maxlength="50"
                 />
               </div>
 
               <div class="grid gap-2">
-                <Label for="description">Description</Label>
+                <Label for="description">{{ t("ui.description") }}</Label>
                 <Textarea
                   id="description"
                   v-model="description"
                   rows="2"
                   maxlength="500"
-                  placeholder="Optional description of what this source contains"
+                  :placeholder="t('sources.descriptionPlaceholder')"
                 />
               </div>
             </div>
@@ -519,7 +521,7 @@ onMounted(async () => {
 
           <div class="mt-6 flex justify-end space-x-4 border-t pt-6">
             <Button type="button" variant="outline" @click="router.push({ name: 'Sources' })">
-              Cancel
+              {{ t("ui.cancel") }}
             </Button>
             <Button
               type="submit"

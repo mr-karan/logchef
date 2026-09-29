@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 import hljs from 'highlight.js/lib/core'
 import json from 'highlight.js/lib/languages/json'
 import 'highlight.js/styles/stackoverflow-light.css'
@@ -14,6 +15,7 @@ const props = defineProps<{
 }>()
 
 const { toast } = useToast()
+const { t } = useI18n()
 const isExpanded = ref(props.expanded ?? false)
 const isCopied = ref(false)
 
@@ -86,8 +88,8 @@ async function copyToClipboard() {
         }, 2000)
     } catch (error) {
         toast({
-            title: 'Error',
-            description: 'Failed to copy to clipboard',
+            title: t('ui.error'),
+            description: t('pages.copyFailed'),
             variant: 'destructive',
             duration: TOAST_DURATION.ERROR,
         })
@@ -108,7 +110,7 @@ async function copyToClipboard() {
                 }">
                 <Check v-if="isCopied" class="h-3 w-3 mr-1 transition-transform duration-200 animate-in zoom-in" />
                 <Copy v-else class="h-3 w-3 mr-1" />
-                {{ isCopied ? 'Copied!' : 'Copy' }}
+                {{ isCopied ? t('pages.copied') : t('pages.copy') }}
             </Button>
         </div>
 
@@ -127,7 +129,7 @@ async function copyToClipboard() {
                 class="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-background to-transparent flex items-end justify-center pb-1">
                 <Button variant="ghost" size="sm" @click.stop.prevent="isExpanded = true"
                     class="transition-transform hover:scale-105 active:scale-95 cursor-pointer text-xs h-5 px-1.5">
-                    Show More
+                    {{ t('pages.showMore') }}
                 </Button>
             </div>
         </div>
