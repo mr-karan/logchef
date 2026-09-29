@@ -141,12 +141,49 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- v2.2.0 -->
+    <article class="version" id="v2.2.0">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.2.0">v2.2.0</a>
+        <span class="version-date">Sep 29, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.2.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <p class="release-intro">
+        Logchef 2.2 can run under a subpath behind a reverse proxy and completes the Simplified Chinese interface for sources, access, admin, and library views. The server moved to Fiber v3. There are no database migrations.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Serve under a subpath</strong>: Run Logchef at a URL such as <code>https://example.com/logchef/</code>. Set <code>server.frontend_url</code> to the public URL, including the subpath, and have the proxy remove the prefix. Operations &rarr; Reverse Proxy has nginx, Caddy, and Traefik examples (<a href="https://github.com/mr-karan/logchef/issues/108" target="_blank">#108</a>).</li>
+          <li><strong>More translated views</strong>: Add Source, source management and inspection, Access, Admin settings, query activity, Library views, route titles, and shared widgets use translation keys, with Simplified Chinese translations. Other languages show English for these messages until they are translated (<a href="https://github.com/mr-karan/logchef/issues/103" target="_blank">#103</a>).</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Auth cookies</strong> use the path of <code>server.frontend_url</code>. Deployments at <code>/</code> are unchanged.</li>
+          <li><strong>CLI</strong>: <code>logchef open</code> keeps the path of the server URL, so it works with a subpath.</li>
+          <li><strong>Fiber v3</strong>: The HTTP server moved from Fiber v2 to Fiber v3, and all Go, frontend, docs, and CLI dependencies are on their latest releases. Building from source requires Go 1.27.</li>
+          <li><strong>Docker images</strong> use Alpine 3.24.2.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v2.1.0 -->
     <article class="version milestone" id="v2.1.0">
       <div class="version-header">
         <a class="version-tag" href="#v2.1.0">v2.1.0</a>
         <span class="version-date">Sep 24, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.1.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

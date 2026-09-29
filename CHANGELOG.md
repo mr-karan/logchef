@@ -7,12 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-09-29
+
+Logchef 2.2 can run under a subpath behind a reverse proxy and completes the
+Simplified Chinese interface for sources, access, admin, and library views. The
+server moved to Fiber v3. There are no database migrations.
+
 ### Added
 - **Serve Logchef under a subpath** behind a reverse proxy, such as
   `https://example.com/logchef/`. Set `server.frontend_url` to the public URL,
   including the subpath, and have the proxy remove the prefix. The new
   Operations → Reverse Proxy page has nginx, Caddy, and Traefik examples
   ([#108](https://github.com/mr-karan/logchef/issues/108)).
+- **More of the interface is translated.** Add Source, source management and
+  inspection, Access, Admin settings, query activity, Library views, route
+  titles, and shared widgets such as the date picker and token-scope picker
+  now use translation keys, with Simplified Chinese translations. Other
+  languages show English for these new messages until they are translated
+  ([#103](https://github.com/mr-karan/logchef/issues/103)).
 
 ### Changed
 - Auth cookies use the path of `server.frontend_url`. Deployments at `/` are
@@ -1335,6 +1347,9 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.2.0...HEAD
+[2.2.0]: https://github.com/mr-karan/logchef/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/mr-karan/logchef/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/mr-karan/logchef/compare/v2.0.1...v2.0.2
 [2.0.1]: https://github.com/mr-karan/logchef/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/mr-karan/logchef/compare/v1.7.0...v2.0.0
