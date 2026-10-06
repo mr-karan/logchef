@@ -34,7 +34,8 @@ onMounted(initialize)
     </header>
 
     <!-- Hosts may sandbox the panel without allow-forms, which suppresses
-         submit events, so the query runs from click and Enter handlers. -->
+         submit events, so the query runs from the button's click handler and
+         from Enter in every text input. -->
     <form class="query-form" @submit.prevent>
       <label>Log source
         <select v-model="selectedSource" :disabled="pending || !ready" @change="reset">
@@ -44,7 +45,7 @@ onMounted(initialize)
       </label>
       <label>LogchefQL filter<input v-model="query" :disabled="pending" placeholder="Leave empty to inspect all logs" spellcheck="false" @keydown.enter.prevent="runQuery()"></label>
       <div class="range-heading"><span>Time range <span class="muted">· UTC</span></span><div class="presets" aria-label="Recent time ranges"><button v-for="minutes in [15, 60, 360]" :key="minutes" type="button" :disabled="pending" @click="setRecentRange(minutes)">{{ minutes < 60 ? `${minutes}m` : `${minutes / 60}h` }}</button></div></div>
-      <details class="range-editor" :open="!compact"><summary>Edit exact UTC range</summary><div class="time-range"><label>Start<input v-model="start" :disabled="pending" aria-label="Start time UTC" placeholder="RFC3339 timestamp"></label><label>End<input v-model="end" :disabled="pending" aria-label="End time UTC" placeholder="RFC3339 timestamp"></label></div></details>
+      <details class="range-editor" :open="!compact"><summary>Edit exact UTC range</summary><div class="time-range"><label>Start<input v-model="start" :disabled="pending" aria-label="Start time UTC" placeholder="RFC3339 timestamp" @keydown.enter.prevent="runQuery()"></label><label>End<input v-model="end" :disabled="pending" aria-label="End time UTC" placeholder="RFC3339 timestamp" @keydown.enter.prevent="runQuery()"></label></div></details>
       <div class="toolbar"><span class="muted">{{ source?.teams.map((team) => team.name).join(', ') || 'Your accessible sources' }} · 100 row limit</span><button type="button" class="primary" :disabled="pending || !ready || !source" @click="runQuery()">{{ pending ? 'Working…' : 'Run query' }}</button></div>
     </form>
     <p v-if="error" role="alert" class="error">{{ error }}</p>

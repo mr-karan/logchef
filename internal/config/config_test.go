@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -441,5 +442,60 @@ redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
 	clients := cfg.Auth.OAuth.Clients
 	if len(clients) != 1 || clients[0].ID != "chatgpt" || clients[0].Name != "ChatGPT" || len(clients[0].RedirectURIs) != 1 {
 		t.Fatalf("clients = %+v", clients)
+	}
+}
+
+// Production configs still set oidc.cli_client_id, which the server no longer
+// reads. Unknown keys, from the file or the environment, must not stop
+// startup: koanf decodes without mapstructure's ErrorUnused.
+func TestLoad_IgnoresRemovedCLIClientID(t *testing.T) {
+	t.Setenv("LOGCHEF_OIDC__CLI_CLIENT_ID", "logchef-cli")
+	path := filepath.Join(t.TempDir(), "config.toml")
+	config := strings.Replace(baseConfig, "[oidc]\n", "[oidc]\ncli_client_id = \"logchef-cli\"\n", 1) + "\n[legacy_section]\nunknown_key = true\n"
+	if !strings.Contains(config, "cli_client_id") {
+		t.Fatal("test config does not contain cli_client_id")
+	}
+	if err := os.WriteFile(path, []byte(config), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load with cli_client_id: %v", err)
+	}
+	if cfg.OIDC.ClientID != "logchef" || cfg.OIDC.ProviderURL != "http://localhost/dex" {
+		t.Fatalf("OIDC config not loaded: %+v", cfg.OIDC)
+	}
+}
+
+// F6-2: query.mcp_call_timeout_seconds bounds one MCP tool call. It defaults
+// to 60, falls back to the default when not positive, is clamped to
+// query.max_timeout_seconds, and is overridable from the environment.
+func TestLoad_MCPCallTimeoutSeconds(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		extra string
+		env   string
+		want  int
+	}{
+		{"default", "", "", 60},
+		{"file value", "[query]\nmcp_call_timeout_seconds = 90\n", "", 90},
+		{"env override", "[query]\nmcp_call_timeout_seconds = 90\n", "45", 45},
+		{"zero falls back to default", "[query]\nmcp_call_timeout_seconds = 0\n", "", 60},
+		{"negative falls back to default", "[query]\nmcp_call_timeout_seconds = -5\n", "", 60},
+		{"clamped to query maximum", "[query]\nmax_timeout_seconds = 30\nmcp_call_timeout_seconds = 120\n", "", 30},
+		{"default clamped to query maximum", "[query]\nmax_timeout_seconds = 20\n", "", 20},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.env != "" {
+				t.Setenv("LOGCHEF_QUERY__MCP_CALL_TIMEOUT_SECONDS", tc.env)
+			}
+			cfg, err := Load(writeConfig(t, tc.extra))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if cfg.Query.MCPCallTimeoutSeconds != tc.want {
+				t.Fatalf("mcp_call_timeout_seconds = %d, want %d", cfg.Query.MCPCallTimeoutSeconds, tc.want)
+			}
+		})
 	}
 }

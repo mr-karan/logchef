@@ -68,7 +68,10 @@ type Server struct {
 	dashCache     *dashcache.Cache // per-dashboard TTL result cache
 
 	stop chan struct{} // closed by Shutdown to stop background maintenance loops
-	wg   sync.WaitGroup
+	// cancelMCP cancels the context MCP requests run on (see
+	// registerMCPRoutes). Nil when OAuth, and so /mcp, is disabled.
+	cancelMCP context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // @title Logchef API
@@ -239,9 +242,6 @@ func (s *Server) setupRoutes() {
 	registerLimited(api, fiber.MethodPost, "/auth/local/login", authLimiter, s.handleLocalLogin)
 	registerLimited(api, fiber.MethodGet, "/auth/callback", authLimiter, s.handleCallback)
 	api.Post("/auth/logout", s.handleLogout)
-
-	// --- CLI Authentication ---
-	registerLimited(api, fiber.MethodPost, "/cli/token", authLimiter, s.handleCLITokenExchange)
 
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetCurrentUser)
@@ -458,6 +458,12 @@ func (s *Server) setupRoutes() {
 
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
+	// Machine endpoints never fall through to the SPA's index.html. Anything
+	// not registered above is a 404: unknown well-known URIs (RFC 8615), and
+	// /mcp for every method when OAuth is disabled.
+	notFound := func(c fiber.Ctx) error { return c.SendStatus(fiber.StatusNotFound) }
+	s.app.Use("/.well-known", notFound)
+	s.app.Use(MCPPath, notFound)
 	// Embedded files have no modification time. Drop the zero Last-Modified
 	// header so browsers do not revalidate against year 1 and get 304 forever.
 	dropLastModified := func(c fiber.Ctx) error {
@@ -497,6 +503,9 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
 	close(s.stop)
+	if s.cancelMCP != nil {
+		s.cancelMCP()
+	}
 	if s.dashCache != nil {
 		s.dashCache.Close()
 	}

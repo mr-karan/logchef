@@ -97,7 +97,7 @@ func newWorld(t *testing.T) *world {
 
 	w := &world{db: db, admits: &admissions{}}
 	w.cfg = &config.Config{
-		Query:  config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 500, DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 60},
+		Query:  config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 500, DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 60, MCPCallTimeoutSeconds: 60},
 		Alerts: config.AlertsConfig{Enabled: true},
 	}
 	w.member = w.user(t, "member@example.com", models.UserRoleMember)

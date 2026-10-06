@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -60,11 +61,10 @@ func parseTimeRange(startRaw, endRaw string) (start, end time.Time, err error) {
 	return start, end, nil
 }
 
-func (t *tools) fieldValues(ctx context.Context, teamID, sourceID int, fieldName, fieldType, start, end string, limit int) (*core.FieldValuesResult, error) {
-	src, err := t.authorizeSource(ctx, teamID, sourceID, models.TokenScopeLogsRead)
-	if err != nil {
-		return nil, t.storeError("get field values failed", err)
-	}
+// fieldValues reads one field's values for an already authorized source. The
+// caller must hold an admission slot: get_field_values admits each call, and
+// top_values runs every field under its one slot.
+func (t *tools) fieldValues(ctx context.Context, src access.AuthorizedSource, fieldName, fieldType, start, end string, limit int) (*core.FieldValuesResult, error) {
 	if fieldName == "" || fieldType == "" {
 		return nil, t.storeError("get field values failed", fmt.Errorf("%w: field_name and field_type are required", errInvalidArgument))
 	}
@@ -98,8 +98,20 @@ func (t *tools) handleGetFieldValues(ctx context.Context, _ mcp.CallToolRequest,
 		limit = 100
 	}
 
-	result, err := t.fieldValues(ctx, params.TeamID, params.SourceID, params.FieldName, params.FieldType, params.StartTime, params.EndTime, limit)
+	src, err := t.authorizeSource(ctx, params.TeamID, params.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
+		return t.errorResult(t.storeError("get field values failed", err)), nil
+	}
+	var result *core.FieldValuesResult
+	err = t.admit(ctx, QueryClassPreview, src, "get_field_values: "+params.FieldName, func(ctx context.Context, _ string) error {
+		var err error
+		result, err = t.fieldValues(ctx, src, params.FieldName, params.FieldType, params.StartTime, params.EndTime, limit)
+		return err
+	})
+	if err != nil {
+		if _, ok := errors.AsType[*admissionError](err); ok {
+			return t.errorResult(t.queryError("get field values failed", err)), nil
+		}
 		return t.errorResult(err), nil
 	}
 	return jsonTextResult(result)
@@ -130,11 +142,16 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 		return mcp.NewToolResultError("get log context failed: timestamp is required and must be positive"), nil
 	}
 	targetTime := time.UnixMilli(params.Timestamp)
-	resp, err := core.GetLogContext(ctx, t.deps.Datasources, src, core.LogContextParams{
-		TargetTimestamp: params.Timestamp,
-		TargetTime:      &targetTime,
-		BeforeLimit:     beforeLimit,
-		AfterLimit:      afterLimit,
+	var resp *models.LogContextResponse
+	err = t.admit(ctx, QueryClassPreview, src, "get_log_context", func(ctx context.Context, _ string) error {
+		var err error
+		resp, err = core.GetLogContext(ctx, t.deps.Datasources, src, core.LogContextParams{
+			TargetTimestamp: params.Timestamp,
+			TargetTime:      &targetTime,
+			BeforeLimit:     beforeLimit,
+			AfterLimit:      afterLimit,
+		})
+		return err
 	})
 	if err != nil {
 		return t.errorResult(t.queryError("get log context failed", err)), nil

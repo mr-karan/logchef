@@ -188,8 +188,7 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 			wg.Go(func() {
 				workers <- struct{}{}
 				defer func() { <-workers }()
-				resp, err := t.fieldValues(ctx, params.TeamID, params.SourceID,
-					fieldName, fieldType, params.StartTime, params.EndTime, limit)
+				resp, err := t.fieldValues(ctx, src, fieldName, fieldType, params.StartTime, params.EndTime, limit)
 				if err != nil {
 					// Non-fatal: skip this field rather than fail the whole request.
 					return

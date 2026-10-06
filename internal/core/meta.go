@@ -30,7 +30,6 @@ type MetaResponse struct {
 	Version              string                `json:"version"`
 	HTTPServerTimeout    string                `json:"http_server_timeout"`
 	OIDCIssuer           string                `json:"oidc_issuer,omitempty"`
-	CLIClientID          string                `json:"cli_client_id,omitempty"`
 	MaxQueryLimit        int                   `json:"max_query_limit"`
 	MaxQueryTimeoutSecs  int                   `json:"max_query_timeout_seconds"`
 	DefaultPreviewLimit  int                   `json:"default_preview_limit"`
@@ -68,7 +67,6 @@ func BuildMeta(cfg *config.Config, version, oidcIssuer string, oidcEnabled bool)
 
 	if oidcEnabled {
 		meta.OIDCIssuer = oidcIssuer
-		meta.CLIClientID = cfg.OIDC.CLIClientID
 	}
 
 	localAuth := cfg.Auth.Local

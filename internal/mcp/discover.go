@@ -48,13 +48,18 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 	if err != nil {
 		return t.errorResult(t.storeError("get all field dimensions failed", err)), nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, core.FieldValuesTimeout)
-	defer cancel()
-	result, err := core.GetAllFieldValues(ctx, t.deps.Datasources, src, core.AllFieldValuesParams{
-		StartTime: startTime,
-		EndTime:   endTime,
-		Timezone:  timezone,
-		Limit:     limit,
+	var result map[string]*core.FieldValuesResult
+	err = t.admit(ctx, QueryClassPreview, src, "get_all_field_dimensions", func(ctx context.Context, _ string) error {
+		ctx, cancel := context.WithTimeout(ctx, core.FieldValuesTimeout)
+		defer cancel()
+		var err error
+		result, err = core.GetAllFieldValues(ctx, t.deps.Datasources, src, core.AllFieldValuesParams{
+			StartTime: startTime,
+			EndTime:   endTime,
+			Timezone:  timezone,
+			Limit:     limit,
+		})
+		return err
 	})
 	if err != nil {
 		return t.errorResult(t.queryError("get all field dimensions failed", err)), nil

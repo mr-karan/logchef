@@ -69,14 +69,11 @@ func CheckEmailVerified(claims OIDCClaims, skipCheck bool, log *slog.Logger, log
 
 // OIDCProvider handles OIDC authentication interactions.
 type OIDCProvider struct {
-	provider *oidc.Provider
-	verifier *oidc.IDTokenVerifier
-	// cliVerifier checks tokens issued to cli_client_id. It is nil when
-	// cli_client_id is not configured.
-	cliVerifier *oidc.IDTokenVerifier
-	oauthConf   *oauth2.Config
-	log         *slog.Logger
-	oidcCfg     *config.OIDCConfig
+	provider  *oidc.Provider
+	verifier  *oidc.IDTokenVerifier
+	oauthConf *oauth2.Config
+	log       *slog.Logger
+	oidcCfg   *config.OIDCConfig
 	// allowedIssuers, when non-empty, is the explicit set of acceptable `iss`
 	// claim values. It is populated only when the operator overrides issuer
 	// validation via config; otherwise it is nil and the go-oidc verifier
@@ -135,15 +132,6 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 		SkipExpiryCheck: false,
 		SkipIssuerCheck: len(allowedIssuers) > 0,
 	})
-	// The CLI gets its ID token as cli_client_id, so it needs its own
-	// audience. Issuer validation follows the same rule as the browser.
-	var cliVerifier *oidc.IDTokenVerifier
-	if oidcCfg.CLIClientID != "" {
-		cliVerifier = provider.Verifier(&oidc.Config{
-			ClientID:        oidcCfg.CLIClientID,
-			SkipIssuerCheck: len(allowedIssuers) > 0,
-		})
-	}
 	if len(allowedIssuers) > 0 {
 		log.Info("OIDC issuer validation using explicit allow-list", "allowed_issuers", allowedIssuers)
 	}
@@ -155,7 +143,6 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 	return &OIDCProvider{
 		provider:       provider,
 		verifier:       verifier,
-		cliVerifier:    cliVerifier,
 		oauthConf:      oauthConf,
 		log:            log,
 		oidcCfg:        oidcCfg,
@@ -175,12 +162,12 @@ func normalizeIssuers(issuers []string) []string {
 	return out
 }
 
-// verify verifies a raw ID token's signature/audience/expiry with verifier and
-// then, when an issuer allow-list is configured, rejects any token whose `iss`
-// claim is not in the list. With no allow-list, the go-oidc verifier has
-// already enforced the single discovered issuer.
-func (p *OIDCProvider) verify(ctx context.Context, verifier *oidc.IDTokenVerifier, rawIDToken string) (*oidc.IDToken, error) {
-	idToken, err := verifier.Verify(ctx, rawIDToken)
+// verify verifies a raw ID token's signature/audience/expiry and then, when an
+// issuer allow-list is configured, rejects any token whose `iss` claim is not
+// in the list. With no allow-list, the go-oidc verifier has already enforced
+// the single discovered issuer.
+func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
+	idToken, err := p.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return nil, err
 	}
@@ -197,22 +184,6 @@ func (p *OIDCProvider) verify(ctx context.Context, verifier *oidc.IDTokenVerifie
 // GetAuthURL returns the URL for the OIDC authorization endpoint with the given state.
 func (p *OIDCProvider) GetAuthURL(state string) string {
 	return p.oauthConf.AuthCodeURL(state)
-}
-
-// VerifyIDToken verifies an ID token string and returns the parsed token.
-// Issuer validation follows the configured allow-list (see verify).
-func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
-	return p.verify(ctx, p.verifier, rawIDToken)
-}
-
-// VerifyCLIIDToken verifies an ID token issued to cli_client_id. Issuer
-// validation follows the configured allow-list (see verify). It returns
-// ErrOIDCProviderNotConfigured when cli_client_id is not set.
-func (p *OIDCProvider) VerifyCLIIDToken(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
-	if p.cliVerifier == nil {
-		return nil, fmt.Errorf("%w: cli_client_id is not set", ErrOIDCProviderNotConfigured)
-	}
-	return p.verify(ctx, p.cliVerifier, rawIDToken)
 }
 
 // GetIssuer returns the OIDC issuer URL.
@@ -237,7 +208,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		p.log.Error("no id_token field in oauth2 token")
 		return nil, nil, ErrOIDCInvalidToken
 	}
-	idToken, err := p.verify(ctx, p.verifier, rawIDToken)
+	idToken, err := p.verify(ctx, rawIDToken)
 	if err != nil {
 		p.log.Error("failed to verify ID token", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)

@@ -10,7 +10,9 @@ import (
 	"net/http/httptest"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -241,7 +243,8 @@ func TestMCPProtocolVersions(t *testing.T) {
 // Narrow scopes narrow the tool list, and the per-user admission cap applies
 // to MCP queries.
 func TestMCPScopesAndAdmission(t *testing.T) {
-	t.Parallel()
+	// Not parallel: the query tracker is process-global and every test DB
+	// starts user IDs at 1, so admission tests must not overlap.
 	cfg := testOAuthConfig()
 	cfg.Query.MaxConcurrentPerUser = 1
 	e := newOAuthEnvWithConfig(t, cfg, models.UserRoleMember)
@@ -317,5 +320,277 @@ func TestMCPAdminIsMembershipOnly(t *testing.T) {
 	}
 	if denied := call("get_alert_history", map[string]any{"alert_id": w.alertB.ID}); denied["isError"] != true {
 		t.Errorf("get_alert_history B: %v, want an error", denied)
+	}
+}
+
+// vlSourceFor links a VictoriaLogs source at baseURL to a new team of the
+// env's user.
+func (e *oauthEnv) vlSourceFor(baseURL string) (*models.Team, *models.Source) {
+	e.t.Helper()
+	ctx := context.Background()
+	team := &models.Team{Name: "vl-team"}
+	if err := e.db.CreateTeam(ctx, team); err != nil {
+		e.t.Fatal(err)
+	}
+	conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: baseURL})
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	src := &models.Source{Name: "vl", SourceType: models.SourceTypeVictoriaLogs, MetaTSField: "_time", ConnectionConfig: conn}
+	if err := e.db.CreateSource(ctx, src); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.db.AddTeamSource(ctx, team.ID, src.ID); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := e.db.AddTeamMember(ctx, team.ID, e.user.ID, models.TeamRoleMember); err != nil {
+		e.t.Fatal(err)
+	}
+	return team, src
+}
+
+func trackedQueries(userID models.UserID) int {
+	queryTracker.mu.RLock()
+	defer queryTracker.mu.RUnlock()
+	n := 0
+	for _, q := range queryTracker.queries {
+		if q.UserID == userID {
+			n++
+		}
+	}
+	return n
+}
+
+// Review 6, F6-1: every standalone log-reading tool is admitted through the
+// shared tracker before it reaches the datasource, under both the per-user
+// and the global preview cap, and releases its slot afterwards.
+func TestMCPDiscoveryToolsAreAdmitted(t *testing.T) {
+	// Not parallel: the query tracker is process-global and every test DB
+	// starts user IDs at 1, so admission tests must not overlap.
+	var backendCalls atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		backendCalls.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{}`)
+	}))
+	defer backend.Close()
+
+	cfg := testOAuthConfig()
+	cfg.Query.MaxConcurrentPerUser = 1
+	cfg.Query.MaxConcurrentGlobal = 1
+	e := newOAuthEnvWithConfig(t, cfg, models.UserRoleMember)
+	team, src := e.vlSourceFor(backend.URL)
+	token := e.mcpToken()
+	tools := map[string]map[string]any{
+		"get_field_values":         {"team_id": team.ID, "source_id": src.ID, "field_name": "_msg", "field_type": "String", "start_time": "2026-10-01T09:00:00Z", "end_time": "2026-10-01T12:00:00Z"},
+		"get_all_field_dimensions": {"team_id": team.ID, "source_id": src.ID, "start_time": "2026-10-01T09:00:00Z", "end_time": "2026-10-01T12:00:00Z"},
+		"get_log_context":          {"team_id": team.ID, "source_id": src.ID, "timestamp": 1790850000000},
+	}
+	call := func(name string) map[string]any {
+		return e.mcpCall(token, protocolLegacy, "tools/call", "", map[string]any{"name": name, "arguments": tools[name]})
+	}
+
+	for budget, holder := range map[string]models.UserID{"per-user": e.user.ID, "global": e.user.ID + 100000} {
+		held, err := queryTracker.StartQuery(QueryClassPreview, holder, src.ID, team.ID, "held", func() {}, 1, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for name := range tools {
+			before := backendCalls.Load()
+			result := call(name)
+			text, err := json.Marshal(result["content"])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result["isError"] != true || !strings.Contains(string(text), "Too many active preview queries") || backendCalls.Load() != before {
+				t.Errorf("%s with the %s budget full: result %s, backend calls %d", name, budget, text, backendCalls.Load()-before)
+			}
+		}
+		queryTracker.RemoveQuery(held)
+	}
+
+	for name := range tools {
+		before := backendCalls.Load()
+		result := call(name)
+		text, err := json.Marshal(result["content"])
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch {
+		case strings.Contains(string(text), "Too many active"):
+			t.Errorf("%s refused with free budget: %s", name, text)
+		case name == "get_log_context":
+			// VictoriaLogs has no log-context support, so an admitted call
+			// ends at the provider without a backend request.
+			if !strings.Contains(string(text), "not supported") {
+				t.Errorf("get_log_context result %s, want not supported after admission", text)
+			}
+		case backendCalls.Load() == before:
+			t.Errorf("%s did not reach the backend with free budget", name)
+		}
+		if n := trackedQueries(e.user.ID); n != 0 {
+			t.Errorf("%s left %d admission slots held", name, n)
+		}
+	}
+}
+
+// F6-2 decision: fasthttp gives no disconnect signal, so an MCP tool call,
+// abandoned or not, ends at query.mcp_call_timeout_seconds. With a 2 s MCP
+// bound and a 30 s query maximum, a call blocked in the backend is still
+// running shortly after it starts, then ends at the MCP bound with its backend
+// request cancelled and its admission slot released. (A real-socket variant
+// trips a pre-existing fasthttp race between Serve/Shutdown and
+// RequestCtx.Done readers in the OAuth token path, so this uses app.Test.)
+func TestMCPCallEndsAtBound(t *testing.T) {
+	// Not parallel: the query tracker is process-global and every test DB
+	// starts user IDs at 1, so admission tests must not overlap.
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var cancelled atomic.Bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/select/logsql/query" {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+			cancelled.Store(true)
+		case <-release:
+		}
+	}))
+	defer backend.Close()
+	defer close(release)
+
+	cfg := testOAuthConfig()
+	cfg.Query.MCPCallTimeoutSeconds = 2 // the HTTP API keeps max_timeout_seconds (30 s)
+	e := newOAuthEnvWithConfig(t, cfg, models.UserRoleMember)
+	team, src := e.vlSourceFor(backend.URL)
+	token := e.mcpToken()
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
+		"name": "query_logs", "arguments": map[string]any{"team_id": team.ID, "source_id": src.ID, "raw_sql": "*", "start_time": "2026-10-01T09:00:00Z", "end_time": "2026-10-01T12:00:00Z"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	start := time.Now()
+	done := make(chan string, 1)
+	go func() {
+		resp := e.mcpPost(token, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
+		text, _ := io.ReadAll(resp.Body)
+		done <- string(text)
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the tool call never reached the backend")
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := trackedQueries(e.user.ID); n != 1 || cancelled.Load() {
+		t.Fatalf("300 ms in: %d slots held, backend cancelled %v; want the call still running", n, cancelled.Load())
+	}
+	var response string
+	select {
+	case response = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the call did not end at the MCP bound")
+	}
+	elapsed := time.Since(start)
+	if elapsed < 1800*time.Millisecond || elapsed > 3500*time.Millisecond {
+		t.Fatalf("the call ended after %v, want about the 2 s MCP bound", elapsed)
+	}
+	if !strings.Contains(response, "timed out") {
+		t.Fatalf("response %s, want a timed-out tool error", response)
+	}
+	if n := trackedQueries(e.user.ID); n != 0 {
+		t.Fatalf("%d admission slots held after the call ended", n)
+	}
+	deadline := time.Now().Add(time.Second)
+	for !cancelled.Load() && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !cancelled.Load() {
+		t.Fatal("the backend request was not cancelled at the bound")
+	}
+}
+
+// MCP requests run on the server's base context instead of the fasthttp
+// RequestCtx. Shutdown cancels that context (cancelMCP) before stopping
+// fasthttp, so an in-flight tool call stops at once rather than running to
+// the MCP bound. The test calls cancelMCP directly: a full fasthttp Shutdown
+// right after DB-backed requests trips a pre-existing fasthttp data race on
+// RequestCtx.Done that is unrelated to MCP.
+func TestMCPCallCancelledByBaseContext(t *testing.T) {
+	// Not parallel: the query tracker is process-global and every test DB
+	// starts user IDs at 1, so admission tests must not overlap.
+	entered := make(chan struct{}, 1)
+	release := make(chan struct{})
+	var cancelled atomic.Bool
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/select/logsql/query" {
+			_, _ = io.WriteString(w, `{}`)
+			return
+		}
+		_, _ = io.Copy(io.Discard, r.Body)
+		select {
+		case entered <- struct{}{}:
+		default:
+		}
+		select {
+		case <-r.Context().Done():
+			cancelled.Store(true)
+		case <-release:
+		}
+	}))
+	defer backend.Close()
+	defer close(release)
+
+	e := newOAuthEnv(t) // MCP bound 30 s
+	team, src := e.vlSourceFor(backend.URL)
+	token := e.mcpToken()
+	done := make(chan map[string]any, 1)
+	go func() {
+		body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
+			"name": "query_logs", "arguments": map[string]any{"team_id": team.ID, "source_id": src.ID, "raw_sql": "*", "start_time": "2026-10-01T09:00:00Z", "end_time": "2026-10-01T12:00:00Z"},
+		}})
+		if err != nil {
+			done <- nil
+			return
+		}
+		resp := e.mcpPost(token, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
+		var env mcpEnvelope
+		_ = json.NewDecoder(resp.Body).Decode(&env)
+		done <- env.Result
+	}()
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the tool call never reached the backend")
+	}
+
+	start := time.Now()
+	e.srv.cancelMCP()
+	var result map[string]any
+	select {
+	case result = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the tool call did not end after the base context was cancelled")
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("the call ended %v after cancellation, want well under the 30 s bound", elapsed)
+	}
+	if result["isError"] == false {
+		t.Fatalf("result %v: the cancelled call reported success", result)
+	}
+	if !cancelled.Load() {
+		t.Fatal("the backend request was not cancelled")
+	}
+	if n := trackedQueries(e.user.ID); n != 0 {
+		t.Fatalf("%d admission slots held after cancellation", n)
 	}
 }

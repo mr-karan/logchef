@@ -175,12 +175,20 @@ func principalHolds(p access.Principal, toolName string) bool {
 	return true
 }
 
-// callDeadline bounds every tool call by the configured maximum query
-// timeout. fasthttp does not cancel the request context when the client
-// disconnects, so without it a tool call could run without end.
+// toolCallTimeout is the whole-call deadline of one tool call:
+// query.mcp_call_timeout_seconds, never above query.max_timeout_seconds.
+// Config loading already applies that bound; it is repeated here so a
+// hand-built config cannot exceed the query maximum.
+func toolCallTimeout(cfg config.QueryConfig) time.Duration {
+	return time.Duration(min(cfg.MCPCallTimeoutSeconds, cfg.MaxTimeoutSeconds)) * time.Second
+}
+
+// callDeadline bounds every tool call by toolCallTimeout. The request
+// context is not cancelled when the client disconnects, so the deadline is
+// what ends abandoned work and releases its admission slot.
 func (t *tools) callDeadline(next server.ToolHandlerFunc) server.ToolHandlerFunc {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-		ctx, cancel := context.WithTimeout(ctx, time.Duration(t.deps.Config.Query.MaxTimeoutSeconds)*time.Second)
+		ctx, cancel := context.WithTimeout(ctx, toolCallTimeout(t.deps.Config.Query))
 		defer cancel()
 		return next(ctx, request)
 	}

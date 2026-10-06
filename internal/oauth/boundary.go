@@ -26,10 +26,17 @@ var refreshTokenFormat = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 // attacker-supplied JWT, whose claim decoder can panic (audit F1).
 var unsupportedAuthorizeParams = []string{"id_token_hint", "claims", "registration"}
 
-// singleValued are the parameters that must not repeat (RFC 6749 section 3.1).
-// The boundary validates the first value and ZITADEL's decoder uses the last,
-// so a repeated parameter would let the two see different requests.
-var singleValued = []string{"client_id", "redirect_uri", "response_type", "response_mode", "scope", "state", "code_challenge", "code_challenge_method", "resource", "grant_type", "code", "code_verifier", "refresh_token", "token", "token_type_hint"}
+// singleValued are the parameters that must not repeat (RFC 6749 section 3.1):
+// every scalar that the boundary checks or that ZITADEL decodes on authorize,
+// token and revoke. The boundary validates the first value and ZITADEL's
+// decoder uses the last, so a repeated parameter would let the two see
+// different requests.
+var singleValued = []string{
+	"client_id", "redirect_uri", "response_type", "response_mode", "scope", "state", "code_challenge", "code_challenge_method", "resource",
+	"grant_type", "code", "code_verifier", "refresh_token", "token", "token_type_hint",
+	"client_secret", "client_assertion", "client_assertion_type",
+	"requested_token_type", "subject_token", "subject_token_type", "actor_token", "actor_token_type",
+}
 
 // Handler serves the OAuth endpoints: authorize, token and revoke. Every
 // request passes Logchef's policy before it reaches the ZITADEL provider. No
@@ -115,11 +122,11 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 	}
 	form := r.PostForm
 	switch {
-	case r.Header.Get("Authorization") != "" || form.Has("client_secret") || form.Has("client_assertion"):
-		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "only public clients are supported")
-		return
 	case repeated(form, singleValued...):
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "parameters must not be repeated")
+		return
+	case hasClientCredential(r, form):
+		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "only public clients are supported")
 		return
 	}
 	switch form.Get("grant_type") {
@@ -163,6 +170,10 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "parameters must not be repeated")
 		return
 	}
+	if hasClientCredential(r, r.PostForm) {
+		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "only public clients are supported")
+		return
+	}
 	if _, ok := s.clients[models.OAuthClientID(r.PostForm.Get("client_id"))]; !ok {
 		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
 		return
@@ -175,6 +186,14 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.provider.ServeHTTP(w, r)
+}
+
+// hasClientCredential reports any form of client authentication. Every client
+// is public, so a credential or assertion, even an empty one, is refused
+// instead of being passed to ZITADEL's authentication paths.
+func hasClientCredential(r *http.Request, form url.Values) bool {
+	_, header := r.Header["Authorization"]
+	return header || hasAny(form, "client_secret", "client_assertion", "client_assertion_type")
 }
 
 func hasAny(form url.Values, keys ...string) bool {

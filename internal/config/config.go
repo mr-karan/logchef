@@ -103,6 +103,11 @@ type QueryConfig struct {
 	DefaultTimeoutSeconds int `koanf:"default_timeout_seconds"`
 	// MaxTimeoutSeconds caps preview query timeout requests.
 	MaxTimeoutSeconds int `koanf:"max_timeout_seconds"`
+	// MCPCallTimeoutSeconds bounds one whole MCP tool call. fasthttp gives no
+	// per-request disconnect signal, so this is what ends abandoned calls and
+	// frees their admission slots. The effective value is at most
+	// MaxTimeoutSeconds. The HTTP API is not affected.
+	MCPCallTimeoutSeconds int `koanf:"mcp_call_timeout_seconds"`
 	// MaxConcurrentPerUser limits active queries per user, counted separately
 	// for each interactive class (preview, histogram).
 	MaxConcurrentPerUser int `koanf:"max_concurrent_per_user"`
@@ -255,8 +260,6 @@ type OIDCConfig struct {
 	ClientSecret string   `koanf:"client_secret"`
 	RedirectURL  string   `koanf:"redirect_url"`
 	Scopes       []string `koanf:"scopes"`
-
-	CLIClientID string `koanf:"cli_client_id"`
 
 	// SkipEmailVerifiedCheck disables the email_verified claim check during
 	// OIDC authentication. Set to true only if your OIDC provider does not
@@ -436,6 +439,7 @@ const (
 	defaultQueryMaxResponseBytes     = 64 * 1024 * 1024
 	defaultQueryDefaultTimeoutSecs   = 30
 	defaultQueryMaxTimeoutSecs       = 300
+	defaultQueryMCPCallTimeoutSecs   = 60
 	defaultQueryMaxConcurrentPerUser = 3
 	defaultQueryMaxConcurrentGlobal  = 30
 
@@ -865,6 +869,9 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	if !k.Exists("query.max_timeout_seconds") {
 		cfg.Query.MaxTimeoutSeconds = defaultQueryMaxTimeoutSecs
 	}
+	if !k.Exists("query.mcp_call_timeout_seconds") {
+		cfg.Query.MCPCallTimeoutSeconds = defaultQueryMCPCallTimeoutSecs
+	}
 	if !k.Exists("query.max_concurrent_per_user") {
 		cfg.Query.MaxConcurrentPerUser = defaultQueryMaxConcurrentPerUser
 	}
@@ -891,6 +898,12 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.Query.DefaultTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
 		cfg.Query.DefaultTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
+	}
+	if cfg.Query.MCPCallTimeoutSeconds <= 0 {
+		cfg.Query.MCPCallTimeoutSeconds = defaultQueryMCPCallTimeoutSecs
+	}
+	if cfg.Query.MCPCallTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
+		cfg.Query.MCPCallTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
 	}
 
 	if !k.Exists("export.max_rows") {

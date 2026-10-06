@@ -29,6 +29,11 @@ type mcpPrincipalKey struct{}
 // registerMCPRoutes mounts /mcp. Only POST is served; the endpoint is
 // stateless and does not stream, so GET and DELETE get 405.
 func (s *Server) registerMCPRoutes() {
+	// MCP requests run on this context, never on the fasthttp RequestCtx,
+	// which fasthttp recycles after the handler returns while mcp-go and the
+	// database drivers still hold goroutines that read it. Shutdown cancels it.
+	baseCtx, cancel := context.WithCancel(context.Background())
+	s.cancelMCP = cancel
 	handler := mcp.NewServer(mcp.Deps{
 		DB:                  s.sqlite,
 		Datasources:         s.datasources,
@@ -38,18 +43,23 @@ func (s *Server) registerMCPRoutes() {
 		Admit:               s.admitMCPQuery,
 		ResourceMetadataURL: s.oauth.MCPResourceMetadataURL(),
 	})
-	// mcp-go builds each tool context from the request context, so copy the
-	// Principal that requireMCPToken stored in the Fiber context onto it.
+	// mcp-go builds each tool context from the request context. The adaptor
+	// would make that the fasthttp RequestCtx, which fasthttp recycles after
+	// the handler returns while mcp-go goroutines may still read it. So the
+	// request runs on the server's base context (cancelled on shutdown)
+	// carrying the Principal that requireMCPToken stored.
 	withPrincipal := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		local, _ := adaptor.LocalContextFromHTTPRequest(r)
-		if local != nil {
-			if p, ok := local.Value(mcpPrincipalKey{}).(access.Principal); ok {
-				r = r.WithContext(mcp.WithPrincipal(r.Context(), p))
-			}
+		local, ok := adaptor.LocalContextFromHTTPRequest(r)
+		if !ok {
+			http.Error(w, "missing request context", http.StatusInternalServerError)
+			return
 		}
-		handler.ServeHTTP(w, r)
+		if p, ok := local.Value(mcpPrincipalKey{}).(access.Principal); ok {
+			local = mcp.WithPrincipal(local, p)
+		}
+		handler.ServeHTTP(w, r.WithContext(local)) //nolint:contextcheck // deliberately not the fasthttp RequestCtx; local derives from the server base context
 	})
-	s.app.Post(MCPPath, s.requireMCPOrigin, s.limitMCPBody, s.requireMCPToken, adaptor.HTTPHandlerWithContext(withPrincipal))
+	s.app.Post(MCPPath, s.requireMCPOrigin, s.limitMCPBody, s.requireMCPToken(baseCtx), adaptor.HTTPHandlerWithContext(withPrincipal))
 	methodNotAllowed := func(c fiber.Ctx) error {
 		c.Set(fiber.HeaderAllow, fiber.MethodPost)
 		return c.SendStatus(fiber.StatusMethodNotAllowed)
@@ -77,25 +87,31 @@ func (s *Server) limitMCPBody(c fiber.Ctx) error {
 }
 
 // requireMCPToken accepts only OAuth access tokens issued for the MCP
-// resource. PATs, sessions and API-audience tokens get 401 with the
-// challenge that points the host at the protected resource metadata.
-func (s *Server) requireMCPToken(c fiber.Ctx) error {
-	bearer, ok := strings.CutPrefix(c.Get(fiber.HeaderAuthorization), "Bearer ")
-	if !ok || bearer == "" {
-		return s.mcpUnauthorized(c, "")
-	}
-	token, err := s.oauth.AuthenticateAccessToken(c.RequestCtx(), bearer, oauth.ResourceMCP)
-	if err != nil {
-		metrics.RecordAuthAttempt("oauth_mcp", false, nil)
-		if errors.Is(err, oauth.ErrInvalidAccessToken) {
-			return s.mcpUnauthorized(c, "invalid_token")
+// resource and stores the Principal on a context derived from baseCtx. PATs,
+// sessions and API-audience tokens get 401 with the challenge that points the
+// host at the protected resource metadata.
+func (s *Server) requireMCPToken(baseCtx context.Context) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		bearer, ok := strings.CutPrefix(c.Get(fiber.HeaderAuthorization), "Bearer ")
+		if !ok || bearer == "" {
+			return s.mcpUnauthorized(c, "")
 		}
-		s.log.Error("error authenticating MCP access token", "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
+		// The lookup runs on baseCtx, not the RequestCtx: database drivers keep
+		// goroutines that read the context's Done channel, and fasthttp
+		// recycles the RequestCtx.
+		token, err := s.oauth.AuthenticateAccessToken(baseCtx, bearer, oauth.ResourceMCP)
+		if err != nil {
+			metrics.RecordAuthAttempt("oauth_mcp", false, nil)
+			if errors.Is(err, oauth.ErrInvalidAccessToken) {
+				return s.mcpUnauthorized(c, "invalid_token")
+			}
+			s.log.Error("error authenticating MCP access token", "error", err)
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
+		}
+		metrics.RecordAuthAttempt("oauth_mcp", true, token.Principal.User)
+		c.SetContext(context.WithValue(baseCtx, mcpPrincipalKey{}, token.Principal))
+		return c.Next()
 	}
-	metrics.RecordAuthAttempt("oauth_mcp", true, token.Principal.User)
-	c.SetContext(context.WithValue(c.Context(), mcpPrincipalKey{}, token.Principal))
-	return c.Next()
 }
 
 func (s *Server) mcpUnauthorized(c fiber.Ctx, oauthError string) error {

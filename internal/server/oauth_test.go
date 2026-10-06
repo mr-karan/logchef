@@ -58,7 +58,7 @@ func testOAuthConfig() *config.Config {
 		Server: config.ServerConfig{PublicURL: testIssuer},
 		Query: config.QueryConfig{
 			DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 30, DefaultPreviewLimit: 100, MaxPreviewLimit: 1000,
-			MaxResponseBytes: 1 << 20, MaxConcurrentPerUser: 3, MaxConcurrentGlobal: 30,
+			MaxResponseBytes: 1 << 20, MaxConcurrentPerUser: 3, MaxConcurrentGlobal: 30, MCPCallTimeoutSeconds: 30,
 		},
 		Auth: config.AuthConfig{
 			APITokenSecret:     "0123456789abcdef0123456789abcdef",
@@ -1432,5 +1432,143 @@ func TestOAuthRepeatedParametersRefused(t *testing.T) {
 	}
 	if status, _ := post(oauth.TokenPath, exchange); status != http.StatusOK {
 		t.Fatalf("refused duplicates burned the code: exchange status %d", status)
+	}
+}
+
+// The legacy CLI login (ID token for PAT exchange) is retired: its route is
+// gone and /meta no longer advertises cli_client_id.
+func TestLegacyCLILoginRemoved(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	req := httptest.NewRequest(http.MethodPost, testIssuer+"/api/v1/cli/token", http.NoBody)
+	req.Header.Set("Authorization", "Bearer some.id.token")
+	if resp := e.do(req); resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("POST /api/v1/cli/token status %d, want 404", resp.StatusCode)
+	}
+	resp := e.do(httptest.NewRequest(http.MethodGet, testIssuer+"/api/v1/meta", http.NoBody))
+	body, _ := io.ReadAll(resp.Body)
+	if strings.Contains(string(body), "cli_client_id") {
+		t.Fatalf("meta still advertises cli_client_id: %s", body)
+	}
+}
+
+// Unknown /.well-known/* paths are 404, not the SPA. When OAuth is enabled the
+// metadata and PRM still answer; when it is disabled every well-known path is
+// 404.
+func TestWellKnownPaths(t *testing.T) {
+	t.Parallel()
+	unknown := []string{"/.well-known/openid-configuration", "/.well-known/foo", "/.well-known/oauth-authorization-server/extra", "/.well-known", "/.well-known/"}
+	oauthPaths := []string{oauth.AuthorizationServerMetadataPath, oauth.ProtectedResourceMetadataPath, "/.well-known/oauth-protected-resource"}
+	get := func(t *testing.T, app *fiber.App, path string) *testResponse {
+		t.Helper()
+		return testRequest(t, app, httptest.NewRequest(http.MethodGet, testIssuer+path, http.NoBody))
+	}
+
+	enabled := newOAuthEnv(t)
+	for _, path := range unknown {
+		resp := get(t, enabled.srv.app, path)
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusNotFound || strings.Contains(string(body), "<html") {
+			t.Errorf("enabled GET %s: status %d body %.60q, want 404 without HTML", path, resp.StatusCode, body)
+		}
+	}
+	for _, path := range oauthPaths {
+		resp := get(t, enabled.srv.app, path)
+		var doc map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil || resp.StatusCode != http.StatusOK {
+			t.Errorf("enabled GET %s: status %d err %v, want JSON 200", path, resp.StatusCode, err)
+		}
+	}
+	if resp := get(t, enabled.srv.app, "/settings/profile"); resp.StatusCode != http.StatusOK {
+		t.Errorf("SPA route status %d, want 200", resp.StatusCode)
+	}
+
+	cfg := testOAuthConfig()
+	cfg.Auth.OAuth.Enabled = false
+	disabled := newServerForTest(t, cfg, newServerTestDB(t), nil)
+	for _, path := range append(unknown, oauthPaths...) {
+		resp := get(t, disabled.app, path)
+		body, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusNotFound || strings.Contains(string(body), "<html") {
+			t.Errorf("disabled GET %s: status %d body %.60q, want 404 without HTML", path, resp.StatusCode, body)
+		}
+	}
+
+	// Review 6, F6-5: with OAuth disabled /mcp is 404 for every method,
+	// never the SPA and never 405. Enabled, the mount keeps its statuses.
+	for _, method := range []string{http.MethodGet, http.MethodPost, http.MethodDelete, http.MethodPut, http.MethodOptions, http.MethodHead} {
+		for _, path := range []string{MCPPath, MCPPath + "/"} {
+			resp := testRequest(t, disabled.app, httptest.NewRequest(method, testIssuer+path, strings.NewReader(`{}`)))
+			body, _ := io.ReadAll(resp.Body)
+			if resp.StatusCode != http.StatusNotFound || strings.Contains(string(body), "<html") {
+				t.Errorf("disabled %s %s: status %d body %.60q, want 404", method, path, resp.StatusCode, body)
+			}
+		}
+	}
+	for method, want := range map[string]int{http.MethodGet: http.StatusMethodNotAllowed, http.MethodDelete: http.StatusMethodNotAllowed, http.MethodPost: http.StatusUnauthorized} {
+		if resp := testRequest(t, enabled.srv.app, httptest.NewRequest(method, testIssuer+MCPPath, strings.NewReader(`{}`))); resp.StatusCode != want {
+			t.Errorf("enabled %s /mcp: status %d, want %d", method, resp.StatusCode, want)
+		}
+	}
+}
+
+// Review 6, F6-3: every client-authentication field is refused on token and
+// revoke, alone (401 invalid_client, public clients only) or repeated (400
+// invalid_request), and nothing reaches ZITADEL or revokes the grant.
+func TestOAuthClientCredentialFieldsRefused(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	p := newPKCE()
+	params := cliAuthorizeParams(p)
+	tokens := e.tokens(params, p)
+	post := func(path string, form url.Values, authorization *string) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, testIssuer+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		if authorization != nil {
+			req.Header["Authorization"] = []string{*authorization}
+		}
+		resp := e.do(req)
+		var out tokenResponse
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out.Error
+	}
+	revokeForm := func() url.Values {
+		return url.Values{"client_id": {config.OAuthCLIClientID}, "token": {tokens.RefreshToken}, "token_type_hint": {"refresh_token"}}
+	}
+	for _, field := range []string{"client_secret", "client_assertion", "client_assertion_type"} {
+		for path, base := range map[string]func() url.Values{
+			oauth.RevokePath: revokeForm,
+			oauth.TokenPath:  func() url.Values { return refreshForm(params, tokens.RefreshToken) },
+		} {
+			once := base()
+			once.Set(field, "")
+			if status, code := post(path, once, nil); status != http.StatusUnauthorized || code != "invalid_client" {
+				t.Errorf("%s with %s: status %d error %q, want 401 invalid_client", path, field, status, code)
+			}
+			twice := base()
+			twice[field] = []string{"", ""}
+			if status, code := post(path, twice, nil); status != http.StatusBadRequest || code != "invalid_request" {
+				t.Errorf("%s with repeated %s: status %d error %q, want 400 invalid_request", path, field, status, code)
+			}
+		}
+	}
+	empty := ""
+	for _, path := range []string{oauth.RevokePath, oauth.TokenPath} {
+		form := revokeForm()
+		if path == oauth.TokenPath {
+			form = refreshForm(params, tokens.RefreshToken)
+		}
+		if status, code := post(path, form, &empty); status != http.StatusUnauthorized || code != "invalid_client" {
+			t.Errorf("%s with an empty Authorization header: status %d error %q, want 401 invalid_client", path, status, code)
+		}
+	}
+	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusOK {
+		t.Fatalf("a refused request revoked the grant: /me status %d", resp.StatusCode)
+	}
+	if status, _ := post(oauth.RevokePath, revokeForm(), nil); status != http.StatusOK {
+		t.Fatalf("plain public-client revocation status %d", status)
+	}
+	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("revocation did not take effect: /me status %d", resp.StatusCode)
 	}
 }
