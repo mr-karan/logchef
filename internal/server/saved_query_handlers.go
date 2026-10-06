@@ -29,25 +29,17 @@ func (s *Server) loadSavedQueryWithVisibility(c fiber.Ctx) (*models.SavedQuery, 
 		return nil, nil, SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	query, err := core.GetSavedQuery(c.RequestCtx(), s.sqlite, s.log, queryID)
+	query, err := core.GetSavedQueryForPrincipal(c.RequestCtx(), s.sqlite, s.log, principalFromLocals(c), queryID)
 	if err != nil {
 		if errors.Is(err, core.ErrQueryNotFound) {
 			return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 		}
+		if errors.Is(err, core.ErrAccessCheck) {
+			s.log.Error("failed to check source access for saved query", "error", err, "user_id", user.ID, "query_id", queryID)
+			return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+		}
 		s.log.Error("failed to load saved query", "error", err, "query_id", queryID)
 		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load saved query", models.GeneralErrorType)
-	}
-
-	// Admins do not get a free pass on visibility — they must be a member of a
-	// team that has the source. Edit gates (UserCanEditSavedQuery) still let
-	// an admin who can SEE a query also edit it.
-	hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, query.SourceID)
-	if accessErr != nil {
-		s.log.Error("failed to check source access for saved query", "error", accessErr, "user_id", user.ID, "source_id", query.SourceID)
-		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-	}
-	if !hasAccess {
-		return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 	}
 
 	return query, user, nil

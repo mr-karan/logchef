@@ -373,36 +373,36 @@ func (s *Server) setupRoutes() {
 
 	// --- Team Source Operations (requires team membership) ---
 	// These endpoints allow team members to interact with a specific source linked to their team
-	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamHasSource)
+	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember)
 	// Get detailed source info including connection status and schema
-	teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
-	teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
-	teamSourceOps.Get("/activity", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
+	teamSourceOps.Get("/", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSource)
+	teamSourceOps.Get("/stats", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
+	teamSourceOps.Get("/activity", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
 
 	// Query and explore logs. The heavy query/exploration endpoints are
 	// rate-limited per authenticated user (queryLimiter runs after the group's
 	// requireAuth, so the user context is available).
-	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/query", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
-	teamSourceOps.Get("/logs/tail", s.requireTokenScope(models.TokenScopeLogsRead), s.handleTailLogs)
-	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
-	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
-	teamSourceOps.Post("/exports", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCreateExportJob)
-	teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
-	teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
-	teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
-	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/histogram", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
-	teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
-	teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
-	teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/query", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleQueryLogs)
+	teamSourceOps.Get("/logs/tail", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleTailLogs)
+	teamSourceOps.Post("/logs/export", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleExportLogs)
+	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCancelQuery)
+	teamSourceOps.Post("/exports", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCreateExportJob)
+	teamSourceOps.Get("/exports/:exportID", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetExportJob)
+	teamSourceOps.Get("/exports/:exportID/download", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleDownloadExportJob)
+	teamSourceOps.Get("/schema", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/histogram", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetHistogram)
+	teamSourceOps.Post("/logs/context", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetLogContext)
+	teamSourceOps.Post("/generate-sql", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGenerateAISQL)
+	teamSourceOps.Post("/query-shares", s.requireTeamHasSource(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
 
 	// LogchefQL endpoints - query language parsing and translation
-	teamSourceOps.Post("/logchefql/translate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
-	teamSourceOps.Post("/logchefql/validate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax
-	teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
+	teamSourceOps.Post("/logchefql/translate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
+	teamSourceOps.Post("/logchefql/validate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax
+	teamSourceOps.Post("/logchefql/query", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 	// Field value exploration for sidebar
-	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
-	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
+	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
+	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin

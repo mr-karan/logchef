@@ -22,7 +22,8 @@ import (
 // start/end pair against a ClickHouse source silently omitted full_sql from an
 // otherwise-200 response instead of erroring like /logchefql/query does.
 //
-// fakeTranslateStore is a store.Store stub implementing only GetSource; every
+// fakeTranslateStore is a store.Store stub implementing only GetSource and
+// TeamHasSource (for the global admin that requireTeamHasSource sees); every
 // other method panics via the nil-embedded interface, which is fine because
 // the translate path under test never reaches them.
 type fakeTranslateStore struct {
@@ -32,6 +33,10 @@ type fakeTranslateStore struct {
 
 func (f *fakeTranslateStore) GetSource(ctx context.Context, id models.SourceID) (*models.Source, error) {
 	return f.source, nil
+}
+
+func (f *fakeTranslateStore) TeamHasSource(context.Context, models.TeamID, models.SourceID) (bool, error) {
+	return true, nil
 }
 
 // fakeClickHouseCompiler is a minimal datasource.Provider stub that simulates
@@ -94,13 +99,15 @@ func (f *fakeClickHouseCompiler) CompileLogchefQL(ctx context.Context, source *m
 func newTranslateTestApp() *fiber.App {
 	source := &models.Source{ID: 1, SourceType: models.SourceTypeClickHouse}
 
-	svc := datasource.NewService(&fakeTranslateStore{source: source}, slog.Default())
+	db := &fakeTranslateStore{source: source}
+	svc := datasource.NewService(db, slog.Default())
 	svc.Register(&fakeClickHouseCompiler{})
 
-	s := &Server{datasources: svc, log: slog.Default()}
+	s := &Server{datasources: svc, sqlite: db, log: slog.Default()}
 
 	app := fiber.New()
-	app.Post("/teams/:teamID/sources/:sourceID/logchefql/translate", s.handleLogchefQLTranslate)
+	admin := &models.User{ID: 1, Role: models.UserRoleAdmin}
+	withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/logchefql/translate", admin, s.handleLogchefQLTranslate)
 	return app
 }
 

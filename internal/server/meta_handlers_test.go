@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 )
 
 func TestHandleGetMetaAlertsEnabled(t *testing.T) {
@@ -103,7 +104,7 @@ func TestHandleGetMetaAdvertisesDemoReadOnly(t *testing.T) {
 	defer resp.Body.Close()
 
 	var envelope struct {
-		Data MetaResponse `json:"data"`
+		Data core.MetaResponse `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -188,7 +189,7 @@ func TestHandleGetMetaDemoLoginCredentials(t *testing.T) {
 				return
 			}
 
-			var got DemoLoginCredentials
+			var got core.DemoLoginCredentials
 			if err := json.Unmarshal(raw, &got); err != nil {
 				t.Fatalf("decode demo_login_credentials: %v", err)
 			}

@@ -20,6 +20,7 @@ type fakeProvider struct {
 	savedQueryModes []models.SavedQueryEditorMode
 	alertModes      []models.AlertEditorMode
 	evaluateAlertFn func(ctx context.Context, source *models.Source, req datasource.AlertQueryRequest) (*models.QueryResult, error)
+	queryLogsFn     func(ctx context.Context, source *models.Source, req datasource.QueryRequest) (*models.QueryResult, error)
 }
 
 func (f *fakeProvider) Type() models.SourceType { return models.SourceTypeClickHouse }
@@ -48,7 +49,10 @@ func (f *fakeProvider) UpdateSource(context.Context, *models.Source, *models.Upd
 
 func (f *fakeProvider) PopulateSourceDetails(context.Context, *models.Source) error { return nil }
 
-func (f *fakeProvider) QueryLogs(context.Context, *models.Source, datasource.QueryRequest) (*models.QueryResult, error) {
+func (f *fakeProvider) QueryLogs(ctx context.Context, source *models.Source, req datasource.QueryRequest) (*models.QueryResult, error) {
+	if f.queryLogsFn != nil {
+		return f.queryLogsFn(ctx, source, req)
+	}
 	return nil, nil
 }
 

@@ -451,8 +451,10 @@ func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, aler
 	return nil
 }
 
-// TestAlertQuery executes a test query to validate alert configuration and show performance metrics.
-func TestAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
+// testAlertQuery executes a test query to validate alert configuration and
+// show performance metrics. It does not authorize; callers use
+// TestAlertQueryForPrincipal.
+func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Service, sourceID models.SourceID, req *models.TestAlertQueryRequest) (*models.TestAlertQueryResponse, error) {
 	if req == nil {
 		return nil, fmt.Errorf("test query request is required")
 	}

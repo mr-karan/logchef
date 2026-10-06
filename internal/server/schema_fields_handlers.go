@@ -23,20 +23,20 @@ import (
 const SchemaTimeout = 20 * time.Second
 
 // handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
+// Access is controlled by the requireTeamHasSource middleware.
 func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
+	sourceID := src.SourceID()
 
 	// Get schema via core function, bounded by SchemaTimeout so a
 	// slow/misbehaving datasource can't hang the request indefinitely.
 	ctx, cancel := context.WithTimeout(c.RequestCtx(), SchemaTimeout)
 	defer cancel()
 
-	schema, err := core.GetSourceSchema(ctx, s.datasources, sourceID)
+	schema, err := core.GetSourceSchema(ctx, s.datasources, src)
 	if err != nil {
 		if ctx.Err() == context.Canceled {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
@@ -60,7 +60,7 @@ func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
 
 // handleGetFieldValues retrieves distinct values for a specific field within a time range.
 // This is optimized for LowCardinality fields but works for any field.
-// Access is controlled by the requireSourceAccess middleware.
+// Access is controlled by the requireTeamHasSource middleware.
 // Query params:
 //   - limit: max number of values to return (default 10, max 100)
 //   - type: the field type from source schema (required)
@@ -70,11 +70,11 @@ func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
 //   - query: datasource-native query string (optional, filters field values by the current query)
 //   - logchefql: deprecated alias for query
 func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
+	sourceID := src.SourceID()
 
 	fieldName := c.Params("fieldName")
 	if fieldName == "" {
@@ -130,7 +130,7 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.RequestCtx(), FieldValuesTimeout)
 	defer cancel()
 
-	result, err := core.GetFieldValues(ctx, s.datasources, sourceID, core.FieldValuesParams{
+	result, err := core.GetFieldValues(ctx, s.datasources, src, core.FieldValuesParams{
 		FieldName: fieldName,
 		FieldType: fieldType,
 		Language:  queryLanguage,
@@ -168,7 +168,7 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 
 // handleGetAllFieldValues retrieves distinct values for all filterable fields within a time range.
 // This is useful for populating the field sidebar with filterable values.
-// Access is controlled by the requireSourceAccess middleware.
+// Access is controlled by the requireTeamHasSource middleware.
 // Query params:
 //   - limit: max number of values per field (default 10, max 100)
 //   - start_time: ISO8601 start time (required for performance)
@@ -177,11 +177,11 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 //   - query: datasource-native query string (optional, filters field values by the current query)
 //   - logchefql: deprecated alias for query
 func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
+	sourceID := src.SourceID()
 
 	// Parse time range parameters (required for performance)
 	startTimeStr := c.Query("start_time", "")
@@ -232,7 +232,7 @@ func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.RequestCtx(), FieldValuesTimeout)
 	defer cancel()
 
-	result, err := core.GetAllFieldValues(ctx, s.datasources, sourceID, core.AllFieldValuesParams{
+	result, err := core.GetAllFieldValues(ctx, s.datasources, src, core.AllFieldValuesParams{
 		Language:  queryLanguage,
 		StartTime: startTime,
 		EndTime:   endTime,

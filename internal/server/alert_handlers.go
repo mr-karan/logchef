@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -55,25 +56,17 @@ func (s *Server) loadAlertWithVisibility(c fiber.Ctx) (*models.Alert, *models.Us
 		return nil, nil, SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
-	alert, err := core.GetAlert(c.RequestCtx(), s.sqlite, s.log, alertID)
+	alert, err := core.GetAlertForPrincipal(c.RequestCtx(), s.sqlite, s.log, principalFromLocals(c), alertID)
 	if err != nil {
 		if errors.Is(err, core.ErrAlertNotFound) || models.IsNotFound(err) {
 			return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		}
+		if errors.Is(err, core.ErrAccessCheck) {
+			s.log.Error("failed to check source access for alert", "error", err, "user_id", user.ID, "alert_id", alertID)
+			return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+		}
 		s.log.Error("failed to load alert", "error", err, "alert_id", alertID)
 		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load alert", models.GeneralErrorType)
-	}
-
-	// Admins do not get a free pass on visibility — they must be a member of a
-	// team that has the source. Edit gates (UserCanEditAlert) still let an
-	// admin who can SEE an alert also edit it.
-	hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, alert.SourceID)
-	if accessErr != nil {
-		s.log.Error("failed to check source access for alert", "error", accessErr, "user_id", user.ID, "source_id", alert.SourceID)
-		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-	}
-	if !hasAccess {
-		return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 	}
 
 	return alert, user, nil
@@ -88,15 +81,14 @@ func (s *Server) handleListAlerts(c fiber.Ctx) error {
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 		}
-		hasAccess, err := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, sourceID)
+		alerts, err := core.ListAlertsBySourceForPrincipal(c.RequestCtx(), s.sqlite, principalFromLocals(c), sourceID)
 		if err != nil {
-			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-		}
-		if !hasAccess {
-			return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
-		}
-		alerts, err := core.ListAlertsBySource(c.RequestCtx(), s.sqlite, sourceID)
-		if err != nil {
+			if errors.Is(err, core.ErrSourceAccessDenied) {
+				return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
+			}
+			if errors.Is(err, core.ErrAccessCheck) {
+				return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+			}
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alerts", models.GeneralErrorType)
 		}
 		return SendSuccess(c, fiber.StatusOK, alerts)
@@ -266,8 +258,6 @@ func (s *Server) handleListAlertHistory(c fiber.Ctx) error {
 
 // handleTestAlertQuery executes a test query against the source in the request body.
 func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
-
 	var req struct {
 		SourceID models.SourceID `json:"source_id"`
 		models.TestAlertQueryRequest
@@ -278,14 +268,6 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 	if req.SourceID == 0 {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "source_id is required", models.ValidationErrorType)
 	}
-	hasAccess, err := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, req.SourceID)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-	}
-	if !hasAccess {
-		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
-	}
-
 	if req.LookbackSeconds <= 0 {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
@@ -295,8 +277,20 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 	ctx, cancel := context.WithTimeout(c.RequestCtx(), TestAlertTimeout)
 	defer cancel()
 
-	result, err := core.TestAlertQuery(ctx, s.sqlite, s.datasources, req.SourceID, &req.TestAlertQueryRequest)
+	p := principalFromLocals(c)
+	result, err := core.TestAlertQueryForPrincipal(ctx, s.sqlite, s.datasources, p, req.SourceID, &req.TestAlertQueryRequest)
 	if err != nil {
+		// The source check runs before the query, so its errors are mapped
+		// before the timeout checks, exactly as when the handler did it.
+		if errors.Is(err, core.ErrSourceAccessDenied) {
+			return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
+		}
+		if errors.Is(err, core.ErrAccessCheck) {
+			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+		}
+		if errors.Is(err, access.ErrInsufficientScope) {
+			return sendInsufficientScope(c, p.User)
+		}
 		if ctx.Err() == context.Canceled {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}

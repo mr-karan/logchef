@@ -100,8 +100,9 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					if endpoint == "logchefql" {
 						handler = s.handleLogchefQLQuery
 					}
-					withUser(app, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", &models.User{ID: 92001}, handler)
-					path := fmt.Sprintf("/teams/1/sources/%d/query", source.ID)
+					user, src := authorizeTestSource(t, s.sqlite, source.ID)
+					withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, handler)
+					path := fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID)
 					body := `{"query_text":"SELECT * FROM logs","query":"level=\"error\"","start_time":"2026-09-01 00:00:00","end_time":"2026-09-01 01:00:00"`
 					if endpoint == "logs" {
 						body = `{"query_text":"SELECT * FROM logs"`
@@ -140,7 +141,7 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					// A fill is admitted under the dashboard class, capped per
 					// user; the cache's fill semaphore is the global bound.
 					s.config.DashboardCache.MaxConcurrentFills = 1
-					queryID, err := queryTracker.StartQuery(QueryClassDashboard, 92001, source.ID, 1, "occupied", func() {}, 0, 0)
+					queryID, err := queryTracker.StartQuery(QueryClassDashboard, user.ID, source.ID, src.TeamID(), "occupied", func() {}, 0, 0)
 					if err != nil {
 						t.Fatal(err)
 					}

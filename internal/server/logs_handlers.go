@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -16,18 +15,9 @@ import (
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
-	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// TimeSeriesRequest - consider if this is still needed or replaced by core/handler specific structs
-// type TimeSeriesRequest struct {
-// 	StartTimestamp int64                 `query:"start_timestamp"`
-// 	EndTimestamp   int64                 `query:"end_timestamp"`
-// 	Window         clickhouse.TimeWindow `query:"window"`
-// }
-
-// Added constant
 const (
 	// AIRequestTimeout is the maximum time to wait for the AI provider to respond.
 	// Reasoning models spend several seconds thinking before emitting any text, and
@@ -289,6 +279,11 @@ func (qt *QueryTracker) Cleanup() {
 	}
 }
 
+// sendQueryRequestError writes a 400 for a core.QueryRequestError.
+func sendQueryRequestError(c fiber.Ctx, err error) error {
+	return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+}
+
 func (s *Server) handleLogsQueryError(c fiber.Ctx, sourceID models.SourceID, err error) error {
 	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
@@ -315,31 +310,17 @@ func (s *Server) handleLogsQueryError(c fiber.Ctx, sourceID models.SourceID, err
 }
 
 // handleQueryLogs handles requests to query logs for a specific source.
-// Access is controlled by the requireSourceAccess middleware.
+// Access is controlled by the requireTeamHasSource middleware.
 func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
+	sourceID, teamID := src.SourceID(), src.TeamID()
 
 	var req models.APIQueryRequest
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-
-	// Apply preview timeout policy.
-	if req.QueryTimeout == nil {
-		defaultTimeout := s.config.Query.DefaultTimeoutSeconds
-		req.QueryTimeout = &defaultTimeout
-	}
-	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	}
-	if s.config.Query.MaxTimeoutSeconds > 0 && *req.QueryTimeout > s.config.Query.MaxTimeoutSeconds {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Query timeout cannot exceed %d seconds for Run", s.config.Query.MaxTimeoutSeconds),
-			models.ValidationErrorType)
 	}
 
 	// Get user information for query tracking
@@ -348,61 +329,11 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	// Get team ID from params
-	teamIDStr := c.Params("teamID")
-	teamID, err := core.ParseTeamID(teamIDStr)
+	params, err := core.PrepareSQLQuery(s.config.Query, req)
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+		return sendQueryRequestError(c, err)
 	}
-
-	// Check if the query contains variable placeholders.
-	requiredVars := template.ExtractVariableNames(req.QueryText)
-
-	// Validate that all required variables are provided.
-	if len(requiredVars) > 0 && len(req.Variables) == 0 {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Query contains template variables (%s) but no variables were provided. Please define variable values before executing.", strings.Join(requiredVars, ", ")),
-			models.ValidationErrorType)
-	}
-
-	// Perform template variable substitution if variables are provided.
-	processedQuery := req.QueryText
-	if len(req.Variables) > 0 {
-		vars := make([]template.Variable, len(req.Variables))
-		for i, v := range req.Variables {
-			vars[i] = template.Variable{
-				Name:  v.Name,
-				Type:  template.VariableType(v.Type),
-				Value: v.Value,
-			}
-		}
-
-		substituted, err := template.SubstituteVariables(req.QueryText, vars)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest,
-				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
-		}
-		processedQuery = substituted
-	}
-
-	// Prepare parameters for the core query function.
-	params := datasource.QueryRequest{
-		RawQuery:         processedQuery,
-		Timezone:         req.Timezone,
-		Limit:            req.Limit,
-		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
-		MaxLimit:         s.config.Query.MaxPreviewLimit,
-		MaxResponseBytes: s.config.Query.MaxResponseBytes,
-		QueryTimeout:     req.QueryTimeout,
-	}
-	if req.StartTime != "" || req.EndTime != "" {
-		startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		}
-		params.StartTime = startTime
-		params.EndTime = endTime
-	}
+	processedQuery := params.RawQuery
 
 	// ClickHouse-backed sources stream the response body row-by-row so server
 	// memory stays bounded regardless of result size (the OOM this endpoint used
@@ -443,7 +374,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 			CanonicalEnd:     canonCacheTime(params.EndTime),
 			Timezone:         req.Timezone,
 			EffectiveLimit:   int64(effLimit),
-			QueryTimeoutSecs: int64(*req.QueryTimeout),
+			QueryTimeoutSecs: int64(*params.QueryTimeout),
 		})
 	}
 
@@ -453,7 +384,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		// max_entry_bytes); on overflow the fill errors and we fall through to the
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
 		if cacheable {
-			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+			fillTimeout := time.Duration(*params.QueryTimeout) * time.Second
 			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, params, cfg)); handled {
 				return err
 			} else if err != nil {
@@ -469,9 +400,9 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
 	// panels from the cache when eligible.
 	if cacheable {
-		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+		fillTimeout := time.Duration(*params.QueryTimeout) * time.Second
 		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
-			result, err := core.QueryLogs(ctx, s.datasources, sourceID, params)
+			result, err := core.QueryLogs(ctx, s.datasources, src, params)
 			if err != nil {
 				return nil, err
 			}
@@ -516,14 +447,13 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
 
 	// Execute query via core function with cancellable context.
-	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, params)
+	result, err := core.QueryLogs(queryCtx, s.datasources, src, params)
 	if err != nil {
 		return s.handleLogsQueryError(c, sourceID, err)
 	}
 
 	// Log successful query execution
 	if result != nil {
-		user := c.Locals("user").(*models.User)
 		s.log.Info("query.execute",
 			"user", user.Email,
 			"team_id", teamID,

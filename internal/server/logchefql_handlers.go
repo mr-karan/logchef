@@ -50,55 +50,6 @@ type ValidateResponse struct {
 	Error *logchefql.ParseError `json:"error,omitempty"`
 }
 
-func parseLogchefQLTimeRange(startTime, endTime, timezone string) (startPtr, endPtr *time.Time, err error) {
-	locationName := timezone
-	if locationName == "" {
-		locationName = "UTC"
-	}
-
-	loc, err := time.LoadLocation(locationName)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	start, err := parseLogchefQLTimeValue(startTime, loc)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid start_time: %w", err)
-	}
-	end, err := parseLogchefQLTimeValue(endTime, loc)
-	if err != nil {
-		return nil, nil, fmt.Errorf("invalid end_time: %w", err)
-	}
-
-	return &start, &end, nil
-}
-
-func parseLogchefQLTimeValue(value string, loc *time.Location) (time.Time, error) {
-	for _, layout := range []string{
-		time.RFC3339Nano,
-		time.RFC3339,
-		"2006-01-02 15:04:05",
-		"2006-01-02T15:04:05",
-	} {
-		var (
-			parsed time.Time
-			err    error
-		)
-
-		switch layout {
-		case time.RFC3339Nano, time.RFC3339:
-			parsed, err = time.Parse(layout, value)
-		default:
-			parsed, err = time.ParseInLocation(layout, value, loc)
-		}
-		if err == nil {
-			return parsed, nil
-		}
-	}
-
-	return time.Time{}, fmt.Errorf("unsupported time format %q", value)
-}
-
 // handleLogchefQLTranslate translates a LogchefQL query to SQL.
 // This endpoint is useful for:
 // 1. Getting the SQL preview in the frontend
@@ -107,18 +58,24 @@ func parseLogchefQLTimeValue(value string, loc *time.Location) (time.Time, error
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/translate
 func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
-	sourceID, req, hasTimeParams, ok := parseTranslateRequest(c)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
+	}
+	req, ok := parseTranslateRequest(c)
 	if !ok {
 		return nil
 	}
 
-	if ok := s.validateTranslateSource(c, sourceID); !ok {
-		return nil
-	}
-
-	compiled, includeFullSQL, ok := s.compileTranslateQuery(c, sourceID, req, hasTimeParams)
-	if !ok {
-		return nil
+	compiled, includeFullSQL, err := core.TranslateLogchefQL(c.RequestCtx(), s.datasources, src, datasource.LogchefQLCompileRequest{
+		Query:     req.Query,
+		StartTime: req.StartTime,
+		EndTime:   req.EndTime,
+		Timezone:  req.Timezone,
+		Limit:     req.Limit,
+	})
+	if err != nil {
+		return s.sendLogchefQLPrepareError(c, src.SourceID(), err, "Failed to translate query")
 	}
 
 	response := TranslateResponse{
@@ -149,37 +106,26 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, response)
 }
 
-// parseTranslateRequest parses and defaults the translate request body and
-// path params, writing the error response and returning ok=false on failure
-// (the Send* helpers return nil, so their return value is not a safe error
-// sentinel — see the tail_handlers regression test for why this codebase
-// uses an explicit ok bool instead).
-func parseTranslateRequest(c fiber.Ctx) (sourceID models.SourceID, req TranslateRequest, hasTimeParams, ok bool) {
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-		return 0, TranslateRequest{}, false, false
-	}
-
+// parseTranslateRequest parses and defaults the translate request body,
+// writing the error response and returning ok=false on failure (the Send*
+// helpers return nil, so their return value is not a safe error sentinel. See
+// the tail_handlers regression test for why this codebase uses an explicit ok
+// bool instead).
+func parseTranslateRequest(c fiber.Ctx) (req TranslateRequest, ok bool) {
 	if err := c.Bind().Body(&req); err != nil {
 		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-		return 0, TranslateRequest{}, false, false
+		return TranslateRequest{}, false
 	}
 	if err := substituteTranslateVariables(&req); err != nil {
 		_ = SendErrorWithType(c, fiber.StatusBadRequest, "Variable substitution failed: "+err.Error(), models.ValidationErrorType)
-		return 0, TranslateRequest{}, false, false
+		return TranslateRequest{}, false
 	}
 
 	// Apply defaults
 	if req.Limit <= 0 {
 		req.Limit = 100 // Default limit
 	}
-
-	// Time params are optional - only needed for full_sql generation
-	// Check if all time params are provided for full SQL generation
-	hasTimeParams = req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
-
-	return sourceID, req, hasTimeParams, true
+	return req, true
 }
 
 func substituteTranslateVariables(req *TranslateRequest) error {
@@ -203,71 +149,25 @@ func substituteTranslateVariables(req *TranslateRequest) error {
 	return nil
 }
 
-// validateTranslateSource fetches the source and confirms it supports
-// LogchefQL, writing the error response and returning false on failure.
-func (s *Server) validateTranslateSource(c fiber.Ctx, sourceID models.SourceID) bool {
-	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			_ = SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-			return false
-		}
-		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
-		return false
+// sendLogchefQLPrepareError writes the response for an error from
+// core.PrepareLogchefQLQuery or core.TranslateLogchefQL. compileFailure is the
+// message for a datasource compile failure.
+func (s *Server) sendLogchefQLPrepareError(c fiber.Ctx, sourceID models.SourceID, err error, compileFailure string) error {
+	if reqErr, ok := errors.AsType[*core.QueryRequestError](err); ok {
+		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
 	}
-	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
-		_ = SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
-		return false
+	if errors.Is(err, core.ErrSourceNotFound) {
+		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 	}
-	return true
-}
-
-// compileTranslateQuery compiles the LogchefQL query into the source's native
-// language and validates the resulting full_sql against the request's time
-// range, writing the error response and returning ok=false on failure.
-//
-// A query parse failure still returns a non-nil compiled result (with
-// Valid/Error populated), which the translate endpoint renders as a 200 with
-// valid=false rather than an error response. A failure to build full_sql from
-// an otherwise-valid query (e.g. a bad time range) is handled separately here
-// and returns a 400.
-func (s *Server) compileTranslateQuery(c fiber.Ctx, sourceID models.SourceID, req TranslateRequest, hasTimeParams bool) (compiled *datasource.CompiledLogchefQL, includeFullSQL, ok bool) {
-	compiled, compileErr := s.datasources.CompileLogchefQL(c.RequestCtx(), sourceID, datasource.LogchefQLCompileRequest{
-		Query:     req.Query,
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
-		Timezone:  req.Timezone,
-		Limit:     req.Limit,
-	})
-	if compiled == nil {
-		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
-			_ = SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
-			return nil, false, false
-		}
-		s.log.Error("failed to compile logchefql query", "error", compileErr, "source_id", sourceID)
-		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to translate query", models.GeneralErrorType)
-		return nil, false, false
+	if errors.Is(err, core.ErrLogchefQLNotSupported) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
 	}
-
-	// A query that parses fine (compiled.Valid) but still fails to compile once
-	// the time range is baked in (compileErr != nil) means the supplied
-	// start/end/timezone were rejected while building full_sql — e.g. RFC3339
-	// timestamps against a ClickHouse source, which requires "YYYY-MM-DD
-	// HH:MM:SS". Surface this as a 400 exactly like /logchefql/query does,
-	// instead of silently omitting full_sql from an otherwise 200 response.
-	// Query parse failures (compiled.Valid == false) are intentionally left to
-	// the 200/valid=false path below for real-time editor validation.
-	if compiled.Valid && hasTimeParams && compileErr != nil {
-		message := compileErr.Error()
-		if compiled.Error != nil {
-			message = compiled.Error.Error()
-		}
-		_ = SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
-		return nil, false, false
+	if _, ok := errors.AsType[*core.LogchefQLCompileError](err); ok {
+		s.log.Error("failed to compile logchefql query", "error", err, "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, compileFailure, models.GeneralErrorType)
 	}
-
-	return compiled, compiled.Valid && hasTimeParams && compileErr == nil, true
+	s.log.Error("failed to get source", "error", err, "source_id", sourceID)
+	return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 }
 
 // handleLogchefQLValidate validates a LogchefQL query without translating to SQL.
@@ -315,22 +215,15 @@ func (s *Server) handleLogchefQLQueryError(c fiber.Ctx, sourceID models.SourceID
 // The backend handles the full translation and execution.
 //
 // POST /api/v1/teams/:teamID/sources/:sourceID/logchefql/query
-func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
+	sourceID, teamID := src.SourceID(), src.TeamID()
 
-	// Parse request
 	var req struct {
-		Query        string                    `json:"query"`
-		StartTime    string                    `json:"start_time"`    // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
-		EndTime      string                    `json:"end_time"`      // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
-		Timezone     string                    `json:"timezone"`      // Timezone for time conversion
-		Limit        int                       `json:"limit"`         // Result limit
-		QueryTimeout *int                      `json:"query_timeout"` // Optional timeout in seconds
-		Variables    []models.TemplateVariable `json:"variables,omitempty"`
+		core.LogchefQLQueryRequest
 		// Cache opts this request into the dashboard result cache. Omitted for
 		// explorer/ad-hoc queries so they are never cached.
 		Cache *models.CacheDirective `json:"cache,omitempty"`
@@ -339,138 +232,18 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // r
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	// Validate required fields
-	if req.StartTime == "" || req.EndTime == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "start_time and end_time are required", models.ValidationErrorType)
-	}
-
-	// Apply defaults
-	if req.Limit <= 0 {
-		req.Limit = s.config.Query.DefaultPreviewLimit
-	}
-	if req.Limit > s.config.Query.MaxPreviewLimit {
-		req.Limit = s.config.Query.MaxPreviewLimit
-	}
-	if req.Timezone == "" {
-		req.Timezone = "UTC"
-	}
-	if req.QueryTimeout == nil {
-		defaultTimeout := s.config.Query.DefaultTimeoutSeconds
-		req.QueryTimeout = &defaultTimeout
-	}
-
-	// Validate timeout
-	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	}
-	if s.config.Query.MaxTimeoutSeconds > 0 && *req.QueryTimeout > s.config.Query.MaxTimeoutSeconds {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Query timeout cannot exceed %d seconds for Run", s.config.Query.MaxTimeoutSeconds),
-			models.ValidationErrorType)
-	}
-
-	// Get source information
-	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
+	prepared, err := core.PrepareLogchefQLQuery(c.RequestCtx(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return s.sendLogchefQLPrepareError(c, sourceID, err, "Failed to compile query")
 	}
-	if !source.SupportsQueryLanguage(models.QueryLanguageLogchefQL) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
-	}
-
-	vars := make([]template.Variable, len(req.Variables))
-	for i, v := range req.Variables {
-		vars[i] = template.Variable{
-			Name:  v.Name,
-			Type:  template.VariableType(v.Type),
-			Value: v.Value,
-		}
-	}
-	query, err := template.SubstituteLogchefQLVariables(req.Query, vars)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Variable substitution failed: "+err.Error(), models.ValidationErrorType)
-	}
-
-	// Compile the query into the source's native language behind the
-	// datasource layer. ClickHouse bakes the time range into the SQL; for
-	// VictoriaLogs the LogsQL query carries no time range and the parsed window
-	// is passed to QueryLogs separately (via queryStartTime/queryEndTime).
-	var (
-		executableQuery         string
-		executableQueryLanguage models.QueryLanguage
-		queryStartTime          *time.Time
-		queryEndTime            *time.Time
-	)
-
-	compiled, compileErr := s.datasources.CompileLogchefQL(c.RequestCtx(), sourceID, datasource.LogchefQLCompileRequest{
-		Query:     query,
-		StartTime: req.StartTime,
-		EndTime:   req.EndTime,
-		Timezone:  req.Timezone,
-		Limit:     req.Limit,
-	})
-	if compiled == nil {
-		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
-		}
-		s.log.Error("failed to compile logchefql query", "error", compileErr, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to compile query", models.GeneralErrorType)
-	}
-	if compileErr != nil {
-		message := compileErr.Error()
-		if compiled.Error != nil {
-			message = compiled.Error.Error()
-		}
-		return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
-	}
-	if !compiled.Valid {
-		message := "invalid LogchefQL query"
-		if compiled.Error != nil {
-			message = compiled.Error.Error()
-		}
-		return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
-	}
-
-	executableQuery = compiled.Query
-	executableQueryLanguage = compiled.Language
-
-	if compiled.Language == models.QueryLanguageLogsQL {
-		startTime, endTime, err := parseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-		}
-		queryStartTime = startTime
-		queryEndTime = endTime
-	}
+	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
+	executableQuery := compiled.Query
+	executableQueryLanguage := compiled.Language
 
 	// Get user information for query tracking
 	user := c.Locals("user").(*models.User)
 	if user == nil {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
-	}
-
-	// Get team ID from params
-	teamIDStr := c.Params("teamID")
-	teamID, err := core.ParseTeamID(teamIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-	}
-
-	// Build query parameters for execution.
-	queryParams := datasource.QueryRequest{
-		RawQuery:         executableQuery,
-		StartTime:        queryStartTime,
-		EndTime:          queryEndTime,
-		Timezone:         req.Timezone,
-		Limit:            req.Limit,
-		DefaultLimit:     s.config.Query.DefaultPreviewLimit,
-		MaxLimit:         s.config.Query.MaxPreviewLimit,
-		MaxResponseBytes: s.config.Query.MaxResponseBytes,
-		QueryTimeout:     req.QueryTimeout,
 	}
 
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
@@ -488,11 +261,11 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // r
 			EffTTLSeconds:    int64(effTTL / time.Second),
 			Language:         string(executableQueryLanguage),
 			FinalizedQuery:   executableQuery,
-			CanonicalStart:   canonCacheTime(queryStartTime),
-			CanonicalEnd:     canonCacheTime(queryEndTime),
-			Timezone:         req.Timezone,
-			EffectiveLimit:   int64(req.Limit),
-			QueryTimeoutSecs: int64(*req.QueryTimeout),
+			CanonicalStart:   canonCacheTime(queryParams.StartTime),
+			CanonicalEnd:     canonCacheTime(queryParams.EndTime),
+			Timezone:         queryParams.Timezone,
+			EffectiveLimit:   int64(queryParams.Limit),
+			QueryTimeoutSecs: int64(*queryParams.QueryTimeout),
 		})
 	}
 
@@ -513,7 +286,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // r
 		// max_entry_bytes); on overflow the fill errors and we fall through to the
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
 		if cacheable {
-			fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+			fillTimeout := time.Duration(*queryParams.QueryTimeout) * time.Second
 			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, queryParams, cfg)); handled {
 				return err
 			} else if err != nil {
@@ -522,16 +295,16 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // r
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, queryParams,
-			cfg, executableQuery, "logchefql", req.Limit,
+			cfg, executableQuery, "logchefql", queryParams.Limit,
 			req.Query, models.QueryLanguageLogchefQL)
 	}
 
 	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
 	// panels from the cache when eligible.
 	if cacheable {
-		fillTimeout := time.Duration(*req.QueryTimeout) * time.Second
+		fillTimeout := time.Duration(*queryParams.QueryTimeout) * time.Second
 		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, queryParams.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
-			result, err := core.QueryLogs(ctx, s.datasources, sourceID, queryParams)
+			result, err := core.QueryLogs(ctx, s.datasources, src, queryParams)
 			if err != nil {
 				return nil, err
 			}
@@ -581,14 +354,13 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // r
 	defer queryTracker.RemoveQuery(queryID)
 
 	// Execute via core function
-	result, err := core.QueryLogs(queryCtx, s.datasources, sourceID, queryParams)
+	result, err := core.QueryLogs(queryCtx, s.datasources, src, queryParams)
 	if err != nil {
 		return s.handleLogchefQLQueryError(c, sourceID, err)
 	}
 
 	// Log successful query execution
 	if result != nil {
-		user := c.Locals("user").(*models.User)
 		s.log.Info("query.execute",
 			"user", user.Email,
 			"team_id", teamID,
@@ -597,7 +369,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error { //nolint:gocyclo // r
 			"query_id", queryID,
 			"rows", len(result.Logs),
 			"duration_ms", result.Stats.ExecutionTimeMs,
-			"limit_requested", req.Limit,
+			"limit_requested", queryParams.Limit,
 			"limit_applied", result.Stats.LimitApplied,
 			"truncated", result.Stats.Truncated,
 		)

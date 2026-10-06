@@ -16,42 +16,30 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func TestHistogramTimeRangeValidation(t *testing.T) {
-	for _, tc := range []struct {
-		name    string
-		req     models.APIHistogramRequest
-		invalid bool
-	}{
-		{name: "SQL embedded range", req: models.APIHistogramRequest{}},
-		{name: "equal endpoints", req: models.APIHistogramRequest{StartTime: "2026-09-01T00:00:00Z", EndTime: "2026-09-01T00:00:00Z"}},
-		{name: "reversed RFC3339", req: models.APIHistogramRequest{StartTime: "2026-09-02T00:00:00Z", EndTime: "2026-09-01T00:00:00Z"}, invalid: true},
-		{name: "reversed milliseconds", req: models.APIHistogramRequest{StartTimestamp: 2000, EndTimestamp: 1000}, invalid: true},
-		{name: "timezone boundary", req: models.APIHistogramRequest{StartTime: "2026-09-02T00:00:00+05:30", EndTime: "2026-09-01T19:00:00Z"}},
-		{name: "missing endpoint", req: models.APIHistogramRequest{StartTime: "2026-09-02T00:00:00Z"}, invalid: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, message := buildHistogramParams(tc.req, "SELECT * FROM logs")
-			if (message != "") != tc.invalid {
-				t.Fatalf("validation message = %q, invalid = %v", message, tc.invalid)
-			}
-		})
-	}
-}
-
 func TestHistogramAdmissionLifecycle(t *testing.T) {
 	s := newDashboardTestServer(t)
 	s.config = &config.Config{}
 	s.datasources = datasource.NewService(s.sqlite, s.log)
 	s.config.Query.MaxConcurrentPerUser = 1
 	s.config.DashboardCache.MaxConcurrentFills = 1
-	const userID models.UserID = 91001
-	const sourceID models.SourceID = 91001
-	const teamID models.TeamID = 91001
+	source := &models.Source{Name: "histogram-admission", Connection: models.ConnectionInfo{
+		Host: "ch:9000", Username: "default", Database: "default", TableName: "histogram_admission",
+	}}
+	if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	_, src := authorizeTestSource(t, s.sqlite, source.ID)
+	// The source disappears after authorization, so execution reaches the
+	// datasource lookup and fails there.
+	if err := s.sqlite.DeleteSource(t.Context(), source.ID); err != nil {
+		t.Fatal(err)
+	}
+	userID, sourceID, teamID := src.UserID(), src.SourceID(), src.TeamID()
 	params := core.HistogramParams{Query: "SELECT * FROM logs", Window: "1m"}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := s.executeHistogram(ctx, QueryClassHistogram, userID, teamID, sourceID, params); !errors.Is(err, context.Canceled) {
+	if _, err := s.executeHistogram(ctx, QueryClassHistogram, src, params); !errors.Is(err, context.Canceled) {
 		t.Fatalf("canceled execution: %v", err)
 	}
 
@@ -61,7 +49,7 @@ func TestHistogramAdmissionLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.executeHistogram(context.Background(), QueryClassHistogram, userID, teamID, sourceID, params); !errors.Is(err, core.ErrSourceNotFound) {
+	if _, err := s.executeHistogram(context.Background(), QueryClassHistogram, src, params); !errors.Is(err, core.ErrSourceNotFound) {
 		t.Fatalf("preview query blocked the histogram beside it: %v", err)
 	}
 	queryTracker.RemoveQuery(previewID)
@@ -79,7 +67,7 @@ func TestHistogramAdmissionLifecycle(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { queryTracker.RemoveQuery(queryID) })
-			_, err = s.executeHistogram(context.Background(), tc.class, userID, teamID, sourceID, params)
+			_, err = s.executeHistogram(context.Background(), tc.class, src, params)
 			if _, ok := errors.AsType[*QueryAdmissionError](err); !ok {
 				t.Fatalf("%s class did not bound itself: %v", tc.class, err)
 			}
@@ -88,7 +76,7 @@ func TestHistogramAdmissionLifecycle(t *testing.T) {
 
 	// A failed datasource lookup must release admission for the next attempt.
 	for range 2 {
-		_, err := s.executeHistogram(context.Background(), QueryClassHistogram, userID, teamID, sourceID, params)
+		_, err := s.executeHistogram(context.Background(), QueryClassHistogram, src, params)
 		if !errors.Is(err, core.ErrSourceNotFound) {
 			t.Fatalf("datasource failure did not release admission: %v", err)
 		}

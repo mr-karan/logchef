@@ -2,6 +2,7 @@ package server
 
 import (
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -156,21 +157,34 @@ func (s *Server) requireAdmin(c fiber.Ctx) error {
 	return c.Next()
 }
 
+// principalFromLocals builds the access principal from what requireAuth stored.
+// A request without a known auth method gets the zero Principal, which every
+// scope check denies.
+func principalFromLocals(c fiber.Ctx) access.Principal {
+	user, _ := c.Locals("user").(*models.User)
+	switch c.Locals("auth_method") {
+	case "session":
+		return access.SessionPrincipal(user)
+	case "token":
+		apiToken, _ := c.Locals("api_token").(*models.APIToken)
+		return access.APITokenPrincipal(user, apiToken)
+	}
+	return access.Principal{User: user}
+}
+
 func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		authMethod, _ := c.Locals("auth_method").(string)
-		if authMethod != "token" {
-			return c.Next()
-		}
-
-		apiToken, ok := c.Locals("api_token").(*models.APIToken)
-		if !ok || !core.TokenHasScope(apiToken, scope) {
-			user, _ := c.Locals("user").(*models.User)
-			metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
-			return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
+		p := principalFromLocals(c)
+		if err := p.Require(scope); err != nil {
+			return sendInsufficientScope(c, p.User)
 		}
 		return c.Next()
 	}
+}
+
+func sendInsufficientScope(c fiber.Ctx, user *models.User) error {
+	metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
+	return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
 }
 
 // requireSourceNotManaged rejects mutations on config-managed sources.
@@ -255,8 +269,6 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 
 	// Global admins bypass specific team membership checks.
 	if user.Role == models.UserRoleAdmin {
-		c.Locals("isGlobalAdmin", true)
-		c.Locals("isTeamMember", true)
 		return c.Next()
 	}
 
@@ -271,10 +283,6 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 		s.log.Error("failed to verify team membership", "error", err, "team_id", teamID, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team membership")
 	}
-
-	// Store status for potential use in handlers (though check ensures access).
-	c.Locals("isGlobalAdmin", false)
-	c.Locals("isTeamMember", isMember)
 
 	if !isMember {
 		s.log.Warn("Team membership denied", "user_id", user.ID, "team_id", teamID)
@@ -319,38 +327,53 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 	return c.Next()
 }
 
-// requireTeamHasSource is a middleware that verifies if the requested team has access to the specified source.
-// This must be used after requireTeamMember to ensure team membership is already verified.
-func (s *Server) requireTeamHasSource(c fiber.Ctx) error {
-	// Extract path parameters
-	teamIDStr := c.Params("teamID")
-	sourceIDStr := c.Params("sourceID")
+const authorizedSourceKey = "authorized_source"
 
-	// Parse IDs
-	teamID, err := core.ParseTeamID(teamIDStr)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+// requireTeamHasSource authorizes the caller for the team and source in the
+// path and the route's scope, then stores the access.AuthorizedSource for the
+// handler. It runs after requireTeamMember, which answers non-members first.
+func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		teamID, err := core.ParseTeamID(c.Params("teamID"))
+		if err != nil {
+			return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+		}
+		sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+		if err != nil {
+			return SendError(c, fiber.StatusBadRequest, "Invalid source ID: "+err.Error())
+		}
+
+		p := principalFromLocals(c)
+		src, err := access.AuthorizeTeamSource(c.RequestCtx(), s.sqlite, p, teamID, sourceID, scope)
+		switch {
+		case err == nil:
+		case errors.Is(err, access.ErrNotTeamMember):
+			return SendErrorWithType(c, fiber.StatusForbidden, "Team membership required", models.AuthorizationErrorType)
+		case errors.Is(err, access.ErrSourceNotInTeam):
+			s.log.Warn("Team does not have access to source", "team_id", teamID, "source_id", sourceID)
+			return SendError(c, fiber.StatusForbidden, "Team does not have access to this source")
+		case errors.Is(err, access.ErrInsufficientScope):
+			return sendInsufficientScope(c, p.User)
+		default:
+			s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
+			return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")
+		}
+
+		c.Locals(authorizedSourceKey, src)
+		return c.Next()
 	}
+}
 
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid source ID: "+err.Error())
+// authorizedSource returns the source that requireTeamHasSource authorized.
+// When it is missing, it writes a 500 and returns ok=false: the route is
+// registered without the middleware, which is a server bug.
+func (s *Server) authorizedSource(c fiber.Ctx) (src access.AuthorizedSource, ok bool) {
+	src, ok = c.Locals(authorizedSourceKey).(access.AuthorizedSource)
+	if !ok {
+		s.log.Error("route reached handler without source authorization", "path", c.Route().Path)
+		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Authorization context missing", models.GeneralErrorType)
 	}
-
-	// Check if the team has access to the source
-	hasAccess, err := core.TeamHasSourceAccess(c.RequestCtx(), s.sqlite, teamID, sourceID)
-	if err != nil {
-		s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")
-	}
-
-	if !hasAccess {
-		s.log.Warn("Team does not have access to source", "team_id", teamID, "source_id", sourceID)
-		return SendError(c, fiber.StatusForbidden, "Team does not have access to this source")
-	}
-
-	// Team has access to the source, continue with the request
-	return c.Next()
+	return src, ok
 }
 
 // notFoundHandler returns a standardized 404 Not Found error for API routes.

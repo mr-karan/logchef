@@ -296,16 +296,3 @@ func hasTokenPrefix(token string) bool {
 	}
 	return subtle.ConstantTimeCompare([]byte(token[:len(TokenPrefix)]), []byte(TokenPrefix)) == 1
 }
-
-// TokenHasScope reports whether token grants the requested semantic scope.
-func TokenHasScope(token *models.APIToken, required models.TokenScope) bool {
-	if token == nil {
-		return false
-	}
-	for _, scope := range token.Scopes {
-		if scope == models.TokenScopeAll || scope == required {
-			return true
-		}
-	}
-	return false
-}
