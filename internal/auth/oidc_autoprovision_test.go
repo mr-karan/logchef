@@ -114,15 +114,20 @@ func (f *fakeOIDCServer) registerCode(code string, claims OIDCClaims) {
 }
 
 func (f *fakeOIDCServer) signIDToken(claims OIDCClaims) (string, error) {
+	return f.signIDTokenFor(f.srv.URL, "test-client", claims)
+}
+
+// signIDTokenFor signs an ID token with the given iss and aud claims.
+func (f *fakeOIDCServer) signIDTokenFor(issuer, audience string, claims OIDCClaims) (string, error) {
 	signer, err := jose.NewSigner(jose.SigningKey{Algorithm: jose.RS256, Key: f.key}, (&jose.SignerOptions{}).WithHeader("kid", "test-key"))
 	if err != nil {
 		return "", err
 	}
 
 	std := jwt.Claims{
-		Issuer:   f.srv.URL,
+		Issuer:   issuer,
 		Subject:  claims.Email,
-		Audience: jwt.Audience{"test-client"},
+		Audience: jwt.Audience{audience},
 		Expiry:   jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		IssuedAt: jwt.NewNumericDate(time.Now()),
 	}

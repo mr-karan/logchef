@@ -343,8 +343,12 @@ func (s *Server) handleCLITokenExchange(c fiber.Ctx) error {
 	}
 	idTokenString := authHeader[len(bearerPrefix):]
 
-	// Verify the ID token using the OIDC provider's verifier
-	idToken, err := s.oidcProvider.VerifyIDToken(c.RequestCtx(), idTokenString)
+	// Verify the ID token with the CLI verifier (audience cli_client_id).
+	idToken, err := s.oidcProvider.VerifyCLIIDToken(c.RequestCtx(), idTokenString)
+	if errors.Is(err, auth.ErrOIDCProviderNotConfigured) {
+		s.log.Error("OIDC cli_client_id not configured, cannot exchange CLI token")
+		return SendError(c, fiber.StatusInternalServerError, "Authentication provider not configured")
+	}
 	if err != nil {
 		s.log.Warn("CLI token exchange: invalid ID token", "error", err)
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired ID token", models.AuthenticationErrorType)
