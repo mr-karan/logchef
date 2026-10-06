@@ -67,7 +67,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		return nil
 	}
 
-	compiled, includeFullSQL, err := core.TranslateLogchefQL(c.RequestCtx(), s.datasources, src, datasource.LogchefQLCompileRequest{
+	translation, err := core.TranslateLogchefQL(c.RequestCtx(), s.datasources, src, datasource.LogchefQLCompileRequest{
 		Query:     req.Query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
@@ -79,20 +79,14 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 	}
 
 	response := TranslateResponse{
-		GeneratedQuery:         compiled.Query,
-		GeneratedQueryLanguage: compiled.Language,
-		Valid:                  compiled.Valid,
-		Error:                  compiled.Error,
-		Conditions:             compiled.Conditions,
-		FieldsUsed:             compiled.FieldsUsed,
-	}
-	if compiled.Language == models.QueryLanguageClickHouseSQL {
-		response.SQL = compiled.FilterOnly
-		response.GeneratedQuery = compiled.FilterOnly
-		if includeFullSQL {
-			response.FullSQL = compiled.Query
-			response.GeneratedQuery = compiled.Query
-		}
+		SQL:                    translation.SQL,
+		FullSQL:                translation.FullSQL,
+		GeneratedQuery:         translation.GeneratedQuery,
+		GeneratedQueryLanguage: translation.Language,
+		Valid:                  translation.Valid,
+		Error:                  translation.Error,
+		Conditions:             translation.Conditions,
+		FieldsUsed:             translation.FieldsUsed,
 	}
 
 	// Ensure conditions is never nil
@@ -310,7 +304,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 			}
 			resp := map[string]any{
 				"logs":                     result.Logs,
-				"columns":                  normalizeResultColumns(source, result),
+				"columns":                  core.ResultColumns(source, result),
 				"stats":                    result.Stats,
 				"query_id":                 queryID,
 				"generated_sql":            executableQuery,
@@ -378,7 +372,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	}
 
 	// Add query_id and generated SQL to response
-	columns := normalizeResultColumns(source, result)
+	columns := core.ResultColumns(source, result)
 	responseData := map[string]any{
 		"logs":                     result.Logs,
 		"columns":                  columns,

@@ -1,0 +1,45 @@
+name: MCP UI
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'internal/mcp/ui/**'
+      - '.github/workflows/mcp-ui.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'internal/mcp/ui/**'
+      - '.github/workflows/mcp-ui.yml'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      - name: Install dependencies
+        working-directory: internal/mcp/ui
+        run: bun install --frozen-lockfile
+
+      - name: Run TypeScript checks
+        working-directory: internal/mcp/ui
+        run: bun run typecheck
+
+      - name: Run tests
+        working-directory: internal/mcp/ui
+        run: bun test
+
+      - name: Build panel
+        working-directory: internal/mcp/ui
+        run: bun run build
+
+      - name: Fail if the committed panel is stale
+        run: git diff --exit-code -- internal/mcp/ui/investigation.html

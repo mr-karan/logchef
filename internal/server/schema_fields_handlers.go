@@ -18,10 +18,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// SchemaTimeout is the maximum time to wait for a source schema inspection
-// query against the configured datasource before aborting.
-const SchemaTimeout = 20 * time.Second
-
 // handleGetSourceSchema retrieves the schema (column names and types) for a specific source.
 // Access is controlled by the requireTeamHasSource middleware.
 func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
@@ -31,9 +27,9 @@ func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
 	}
 	sourceID := src.SourceID()
 
-	// Get schema via core function, bounded by SchemaTimeout so a
+	// Get schema via core function, bounded by core.SchemaTimeout so a
 	// slow/misbehaving datasource can't hang the request indefinitely.
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), SchemaTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.SchemaTimeout)
 	defer cancel()
 
 	schema, err := core.GetSourceSchema(ctx, s.datasources, src)
@@ -42,7 +38,7 @@ func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("schema request timed out", "source_id", sourceID, "timeout", SchemaTimeout)
+			s.log.Warn("schema request timed out", "source_id", sourceID, "timeout", core.SchemaTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
 		if errors.Is(err, core.ErrSourceNotFound) {
@@ -127,7 +123,7 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), FieldValuesTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.FieldValuesTimeout)
 	defer cancel()
 
 	result, err := core.GetFieldValues(ctx, s.datasources, src, core.FieldValuesParams{
@@ -147,7 +143,7 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", FieldValuesTimeout)
+			s.log.Warn("field values request timed out", "source_id", sourceID, "field", fieldName, "timeout", core.FieldValuesTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
 		if errors.Is(err, core.ErrSourceNotFound) {
@@ -229,7 +225,7 @@ func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), FieldValuesTimeout)
+	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.FieldValuesTimeout)
 	defer cancel()
 
 	result, err := core.GetAllFieldValues(ctx, s.datasources, src, core.AllFieldValuesParams{
@@ -247,7 +243,7 @@ func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 		}
 		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", FieldValuesTimeout)
+			s.log.Warn("field values request timed out", "source_id", sourceID, "timeout", core.FieldValuesTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
 		if errors.Is(err, core.ErrSourceNotFound) {

@@ -44,6 +44,10 @@ build-ui:
     [ -d "node_modules" ] || bun install --frozen-lockfile && \
     bun run build
 
+# Build the MCP investigation panel (internal/mcp/ui/investigation.html, embedded by the backend)
+build-mcp-ui:
+    cd internal/mcp/ui && bun install --frozen-lockfile && bun run build
+
 # Build frontend with bundle analysis
 build-ui-analyze:
     @echo "Building frontend with bundle analysis..."

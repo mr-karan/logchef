@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"sort"
 	"sync"
 	"time"
 
@@ -23,9 +22,6 @@ const (
 	// Reasoning models spend several seconds thinking before emitting any text, and
 	// the generator may follow up with a repair attempt, so this is generous.
 	AIRequestTimeout = 90 * time.Second
-	// FieldValuesTimeout is the maximum time to wait for field values queries
-	// This propagates to ClickHouse as max_execution_time via the context deadline
-	FieldValuesTimeout = 15 * time.Second
 )
 
 // QueryTracker manages active queries for cancellation support
@@ -94,98 +90,6 @@ func init() {
 			queryTracker.Cleanup()
 		}
 	}()
-}
-
-func inferResponseColumnType(value any) string {
-	switch v := value.(type) {
-	case nil:
-		return "String"
-	case bool:
-		return "Bool"
-	case int, int8, int16, int32, int64:
-		return "Int64"
-	case uint, uint8, uint16, uint32, uint64:
-		return "UInt64"
-	case float32, float64:
-		return "Float64"
-	case string:
-		if _, err := time.Parse(time.RFC3339Nano, v); err == nil {
-			return "DateTime64"
-		}
-		return "String"
-	case []any:
-		return "Array"
-	default:
-		return "JSON"
-	}
-}
-
-func normalizeResultColumns(source *models.Source, result *models.QueryResult) []models.ColumnInfo {
-	if result != nil && len(result.Columns) > 0 {
-		return result.Columns
-	}
-
-	if result == nil || len(result.Logs) == 0 {
-		return []models.ColumnInfo{}
-	}
-
-	sampledRows := result.Logs
-	if len(sampledRows) > 25 {
-		sampledRows = sampledRows[:25]
-	}
-
-	present := make(map[string]struct{}, len(result.Logs[0]))
-	inferredTypes := make(map[string]string, len(result.Logs[0]))
-	for _, row := range sampledRows {
-		for key, value := range row {
-			present[key] = struct{}{}
-			if _, ok := inferredTypes[key]; !ok && value != nil {
-				inferredTypes[key] = inferResponseColumnType(value)
-			}
-		}
-	}
-
-	columns := make([]models.ColumnInfo, 0, len(present))
-	if source != nil {
-		for _, col := range source.Columns {
-			if _, ok := present[col.Name]; !ok {
-				continue
-			}
-
-			colType := col.Type
-			if colType == "" {
-				colType = inferredTypes[col.Name]
-			}
-			if colType == "" {
-				colType = "String"
-			}
-
-			columns = append(columns, models.ColumnInfo{
-				Name: col.Name,
-				Type: colType,
-			})
-			delete(present, col.Name)
-		}
-	}
-
-	extraNames := make([]string, 0, len(present))
-	for name := range present {
-		extraNames = append(extraNames, name)
-	}
-	sort.Strings(extraNames)
-
-	for _, name := range extraNames {
-		colType := inferredTypes[name]
-		if colType == "" {
-			colType = "String"
-		}
-		columns = append(columns, models.ColumnInfo{
-			Name: name,
-			Type: colType,
-		})
-	}
-
-	return columns
 }
 
 // StartQuery registers a new active query atomically with admission control.
@@ -410,7 +314,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 				"query_id": queryID,
 				"data":     result.Logs,
 				"stats":    result.Stats,
-				"columns":  normalizeResultColumns(nil, result),
+				"columns":  core.ResultColumns(nil, result),
 				"warnings": result.Warnings,
 			}
 			return json.Marshal(NewSuccessResponse(resp))
@@ -472,7 +376,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 
 	// Add query ID to the response for frontend tracking
 	if result != nil {
-		columns := normalizeResultColumns(nil, result)
+		columns := core.ResultColumns(nil, result)
 		// Create a map to include the query ID with the result
 		responseWithQueryID := map[string]any{
 			"query_id": queryID,

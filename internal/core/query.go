@@ -14,6 +14,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -23,6 +24,14 @@ import (
 // Bounds both slow ClickHouse queries and VictoriaLogs response bodies that
 // may otherwise be read without a deadline.
 const HistogramTimeout = 30 * time.Second
+
+// SchemaTimeout is the maximum time to wait for a source schema inspection
+// query against the configured datasource before aborting.
+const SchemaTimeout = 20 * time.Second
+
+// FieldValuesTimeout is the maximum time to wait for field values queries.
+// It propagates to ClickHouse as max_execution_time via the context deadline.
+const FieldValuesTimeout = 15 * time.Second
 
 // ErrLogchefQLNotSupported means the source cannot run LogchefQL.
 var ErrLogchefQLNotSupported = errors.New("LogchefQL is not supported for this source")
@@ -225,36 +234,68 @@ func RunLogchefQL(ctx context.Context, ds *datasource.Service, cfg config.QueryC
 	return prepared, result, nil
 }
 
+// LogchefQLTranslation is a LogchefQL query compiled for display, in the
+// shape the translate endpoints return.
+type LogchefQLTranslation struct {
+	// SQL is the ClickHouse WHERE-clause-only SQL. Empty for other languages.
+	SQL string
+	// FullSQL is the complete ClickHouse query with the time range. It is set
+	// only when the request had a start, end and timezone.
+	FullSQL string
+	// GeneratedQuery is FullSQL when set, else SQL for ClickHouse, and the
+	// native query for other languages.
+	GeneratedQuery string
+	Language       models.QueryLanguage
+	Valid          bool
+	Error          *logchefql.ParseError
+	Conditions     []logchefql.FilterCondition
+	FieldsUsed     []string
+}
+
 // TranslateLogchefQL compiles a LogchefQL query without running it. A query
 // that does not parse is not an error: the result has Valid=false and Error
-// set, so editors can show it. includeFullSQL reports whether compiled.Query
-// is the complete query with the time range, which needs start, end and
-// timezone in req.
-func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (compiled *datasource.CompiledLogchefQL, includeFullSQL bool, err error) {
+// set, so editors can show it.
+func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (*LogchefQLTranslation, error) {
 	if _, err := logchefQLSource(ctx, ds, src); err != nil {
-		return nil, false, err
+		return nil, err
 	}
 
 	compiled, compileErr := ds.CompileLogchefQL(ctx, src.SourceID(), req)
 	if compiled == nil {
 		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
-			return nil, false, ErrLogchefQLNotSupported
+			return nil, ErrLogchefQLNotSupported
 		}
-		return nil, false, &LogchefQLCompileError{Err: compileErr}
+		return nil, &LogchefQLCompileError{Err: compileErr}
 	}
 
 	// A query that parses (compiled.Valid) but fails once the time range is
-	// added means the start, end or timezone was rejected. For example,
-	// ClickHouse needs "YYYY-MM-DD HH:MM:SS", not RFC3339.
+	// added means the start, end or timezone was rejected.
 	hasTimeParams := req.StartTime != "" && req.EndTime != "" && req.Timezone != ""
 	if compiled.Valid && hasTimeParams && compileErr != nil {
 		message := compileErr.Error()
 		if compiled.Error != nil {
 			message = compiled.Error.Error()
 		}
-		return nil, false, &QueryRequestError{Message: message}
+		return nil, &QueryRequestError{Message: message}
 	}
-	return compiled, compiled.Valid && hasTimeParams && compileErr == nil, nil
+
+	translation := &LogchefQLTranslation{
+		GeneratedQuery: compiled.Query,
+		Language:       compiled.Language,
+		Valid:          compiled.Valid,
+		Error:          compiled.Error,
+		Conditions:     compiled.Conditions,
+		FieldsUsed:     compiled.FieldsUsed,
+	}
+	if compiled.Language == models.QueryLanguageClickHouseSQL {
+		translation.SQL = compiled.FilterOnly
+		translation.GeneratedQuery = compiled.FilterOnly
+		if compiled.Valid && hasTimeParams && compileErr == nil {
+			translation.FullSQL = compiled.Query
+			translation.GeneratedQuery = compiled.Query
+		}
+	}
+	return translation, nil
 }
 
 // PrepareHistogram validates a histogram request, substitutes template
