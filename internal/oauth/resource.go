@@ -68,3 +68,15 @@ func (s *Server) AuthenticateAccessToken(ctx context.Context, token string, reso
 		ExpiresAt: expires,
 	}, nil
 }
+
+// MCPResourceMetadataURL is the PRM location that /mcp names in its
+// WWW-Authenticate challenges.
+func (s *Server) MCPResourceMetadataURL() string {
+	return s.issuer + ProtectedResourceMetadataPath
+}
+
+// MCPChallengeScopes is the scope list /mcp advertises in its challenges:
+// the seven read scopes.
+func (s *Server) MCPChallengeScopes() string {
+	return strings.Join(scopeStrings(ReadScopes, false), " ")
+}

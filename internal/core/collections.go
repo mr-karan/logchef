@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -247,21 +248,19 @@ func RemoveCollectionMember(ctx context.Context, db store.StoreOps, log *slog.Lo
 	return db.RemoveCollectionMember(ctx, collectionID, targetUserID)
 }
 
-func ListCollectionMembers(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, callerID models.UserID) ([]*models.CollectionMember, error) {
-	_, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
+func ListCollectionMembers(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, p access.Principal) ([]*models.CollectionMember, error) {
+	if p.User == nil {
+		return nil, ErrCollectionForbidden
+	}
+	_, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, p.User.ID)
 	if err != nil {
 		return nil, err
 	}
 	// The member roster (with emails) is visible only to the collection owner or
-	// a global admin — not to editors/members who merely participate.
-	if callerRole != models.CollectionRoleOwner {
-		caller, err := GetUser(ctx, db, callerID)
-		if err != nil {
-			return nil, err
-		}
-		if caller.Role != models.UserRoleAdmin {
-			return nil, ErrCollectionForbidden
-		}
+	// a global admin (not through OAuth), not to editors/members who merely
+	// participate.
+	if callerRole != models.CollectionRoleOwner && p.RequireGlobalAdmin() != nil {
+		return nil, ErrCollectionForbidden
 	}
 	return db.ListCollectionMembers(ctx, collectionID)
 }
@@ -313,17 +312,17 @@ func ListCollectionItems(ctx context.Context, db store.StoreOps, log *slog.Logge
 		return nil, err
 	}
 	// Compute runnable per source by caching the access check.
-	access := make(map[models.SourceID]bool)
+	runnableBySource := make(map[models.SourceID]bool)
 	for i := range items {
 		sid := items[i].Query.SourceID
-		runnable, ok := access[sid]
+		runnable, ok := runnableBySource[sid]
 		if !ok {
 			has, err := db.UserHasSourceAccess(ctx, callerID, sid)
 			if err != nil {
 				return nil, err
 			}
 			runnable = has
-			access[sid] = has
+			runnableBySource[sid] = has
 		}
 		items[i].Runnable = runnable
 	}

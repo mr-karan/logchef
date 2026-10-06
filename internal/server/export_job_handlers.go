@@ -148,7 +148,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 
 func (s *Server) handleGetExportJob(c fiber.Ctx) error {
 	job, err := s.authorizeExportJob(c)
-	if err != nil {
+	if job == nil {
 		return err
 	}
 	if time.Now().UTC().After(job.ExpiresAt) {
@@ -160,7 +160,7 @@ func (s *Server) handleGetExportJob(c fiber.Ctx) error {
 
 func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	job, err := s.authorizeExportJob(c)
-	if err != nil {
+	if job == nil {
 		return err
 	}
 	if time.Now().UTC().After(job.ExpiresAt) {
@@ -201,6 +201,8 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	return c.SendFile(job.FilePath, fiber.SendFile{ByteRange: true})
 }
 
+// authorizeExportJob returns the job the caller may read. When it returns a
+// nil job it has already sent the error response; the caller returns err.
 func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, error) {
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
@@ -231,7 +233,7 @@ func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, error) {
 		return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
 	}
 	_ = teamID // teamID in the URL is an auth gate via middleware; no need to compare on the row
-	if user.Role != models.UserRoleAdmin && job.CreatedBy != user.ID {
+	if !hasGlobalAdminBypass(c) && job.CreatedBy != user.ID {
 		return nil, SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this export", models.AuthorizationErrorType)
 	}
 	return job, nil

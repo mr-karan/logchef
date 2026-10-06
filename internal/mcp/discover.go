@@ -42,11 +42,11 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 
 	src, err := t.authorizeSource(ctx, params.TeamID, params.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("get all field dimensions failed", err).Error()), nil
+		return t.errorResult(t.storeError("get all field dimensions failed", err)), nil
 	}
 	startTime, endTime, err := parseTimeRange(params.StartTime, params.EndTime)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("get all field dimensions failed", err).Error()), nil
+		return t.errorResult(t.storeError("get all field dimensions failed", err)), nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, core.FieldValuesTimeout)
 	defer cancel()
@@ -57,7 +57,7 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 		Limit:     limit,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(t.queryError("get all field dimensions failed", err).Error()), nil
+		return t.errorResult(t.queryError("get all field dimensions failed", err)), nil
 	}
 	return jsonTextResult(result)
 }

@@ -22,13 +22,12 @@ func getUserIDFromContext(c fiber.Ctx) models.UserID {
 	return user.ID
 }
 
-// isUserAdmin checks if the user in context has admin role
-func isUserAdmin(c fiber.Ctx) bool {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
-		return false
-	}
-	return user.Role == models.UserRoleAdmin
+// hasGlobalAdminBypass reports whether the caller may skip a team or
+// ownership check as a global admin. Sessions and API tokens of admin users
+// may; OAuth access tokens never may, so delegated access stays limited to
+// the user's own memberships and objects.
+func hasGlobalAdminBypass(c fiber.Ctx) bool {
+	return principalFromLocals(c).RequireGlobalAdmin() == nil
 }
 
 // requireAuth is middleware that ensures the request includes valid authentication.
@@ -303,8 +302,8 @@ func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
 
-	// Global admins bypass specific team admin checks.
-	if user.Role == models.UserRoleAdmin {
+	// Global admins bypass specific team admin checks (not through OAuth).
+	if hasGlobalAdminBypass(c) {
 		return c.Next()
 	}
 
@@ -334,8 +333,8 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 	}
 	teamIDStr := c.Params("teamID")
 
-	// Global admins bypass specific team membership checks.
-	if user.Role == models.UserRoleAdmin {
+	// Global admins bypass specific team membership checks (not through OAuth).
+	if hasGlobalAdminBypass(c) {
 		return c.Next()
 	}
 
@@ -373,9 +372,9 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
 	}
 
-	// Check if the user is a global admin
-	if isUserAdmin(c) {
-		return c.Next() // Allow global admins unconditionally
+	// Global admins pass, except through OAuth.
+	if hasGlobalAdminBypass(c) {
+		return c.Next()
 	}
 
 	// Check if the user is a team admin

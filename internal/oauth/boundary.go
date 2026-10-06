@@ -27,7 +27,9 @@ var refreshTokenFormat = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 var unsupportedAuthorizeParams = []string{"id_token_hint", "claims", "registration"}
 
 // singleValued are the parameters that must not repeat (RFC 6749 section 3.1).
-var singleValued = []string{"client_id", "redirect_uri", "response_type", "response_mode", "scope", "state", "code_challenge", "code_challenge_method", "resource", "grant_type", "code", "code_verifier", "refresh_token"}
+// The boundary validates the first value and ZITADEL's decoder uses the last,
+// so a repeated parameter would let the two see different requests.
+var singleValued = []string{"client_id", "redirect_uri", "response_type", "response_mode", "scope", "state", "code_challenge", "code_challenge_method", "resource", "grant_type", "code", "code_verifier", "refresh_token", "token", "token_type_hint"}
 
 // Handler serves the OAuth endpoints: authorize, token and revoke. Every
 // request passes Logchef's policy before it reaches the ZITADEL provider. No
@@ -155,6 +157,10 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := r.ParseForm(); err != nil {
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "the request body could not be read")
+		return
+	}
+	if repeated(r.PostForm, singleValued...) {
+		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "parameters must not be repeated")
 		return
 	}
 	if _, ok := s.clients[models.OAuthClientID(r.PostForm.Get("client_id"))]; !ok {

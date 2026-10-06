@@ -33,17 +33,19 @@ onMounted(initialize)
       <button v-if="canExpand" :disabled="pending" @click="toggleDisplayMode">{{ displayMode === 'fullscreen' ? 'Back to chat' : 'Expand' }}</button>
     </header>
 
-    <form class="query-form" @submit.prevent="runQuery()">
+    <!-- Hosts may sandbox the panel without allow-forms, which suppresses
+         submit events, so the query runs from click and Enter handlers. -->
+    <form class="query-form" @submit.prevent>
       <label>Log source
         <select v-model="selectedSource" :disabled="pending || !ready" @change="reset">
           <option value="" disabled>{{ ready ? 'Select a source' : 'Loading sources…' }}</option>
           <option v-for="item in sources" :key="item.id" :value="String(item.id)">{{ item.name }} · {{ item.sourceType || 'unknown backend' }}</option>
         </select>
       </label>
-      <label>LogchefQL filter<input v-model="query" :disabled="pending" placeholder="Leave empty to inspect all logs" spellcheck="false"></label>
+      <label>LogchefQL filter<input v-model="query" :disabled="pending" placeholder="Leave empty to inspect all logs" spellcheck="false" @keydown.enter.prevent="runQuery()"></label>
       <div class="range-heading"><span>Time range <span class="muted">· UTC</span></span><div class="presets" aria-label="Recent time ranges"><button v-for="minutes in [15, 60, 360]" :key="minutes" type="button" :disabled="pending" @click="setRecentRange(minutes)">{{ minutes < 60 ? `${minutes}m` : `${minutes / 60}h` }}</button></div></div>
       <details class="range-editor" :open="!compact"><summary>Edit exact UTC range</summary><div class="time-range"><label>Start<input v-model="start" :disabled="pending" aria-label="Start time UTC" placeholder="RFC3339 timestamp"></label><label>End<input v-model="end" :disabled="pending" aria-label="End time UTC" placeholder="RFC3339 timestamp"></label></div></details>
-      <div class="toolbar"><span class="muted">{{ source?.teams.map((team) => team.name).join(', ') || 'Your accessible sources' }} · 100 row limit</span><button type="submit" class="primary" :disabled="pending || !ready || !source">{{ pending ? 'Working…' : 'Run query' }}</button></div>
+      <div class="toolbar"><span class="muted">{{ source?.teams.map((team) => team.name).join(', ') || 'Your accessible sources' }} · 100 row limit</span><button type="button" class="primary" :disabled="pending || !ready || !source" @click="runQuery()">{{ pending ? 'Working…' : 'Run query' }}</button></div>
     </form>
     <p v-if="error" role="alert" class="error">{{ error }}</p>
     <p v-if="notice" role="status" class="notice">{{ notice }}</p>

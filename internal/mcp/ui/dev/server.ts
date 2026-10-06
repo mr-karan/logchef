@@ -18,7 +18,10 @@ const server = Bun.serve({ hostname: '127.0.0.1', port, async fetch(request) {
     const value: unknown = await request.json()
     if (typeof value !== 'object' || value === null || !('method' in value) || value.method !== 'tools/call' || !('params' in value) || typeof value.params !== 'object' || value.params === null || !('name' in value.params) || typeof value.params.name !== 'string' || !readTools.has(value.params.name)) return new Response('Tool denied', { status: 403 })
     const body = { ...value, params: { ...value.params, _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientInfo': { name: 'local-test', version: '1' }, 'io.modelcontextprotocol/clientCapabilities': {} } } }
-    return fetch(connection.mcpUrl, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Mcp-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': value.params.name, Authorization: `Bearer ${connection.token}` }, body: JSON.stringify(body) })
+    const upstream = await fetch(connection.mcpUrl, { method: 'POST', redirect: 'error', headers: { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', 'Mcp-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': value.params.name, Authorization: `Bearer ${connection.token}` }, body: JSON.stringify(body) })
+    // fetch has already decoded the body, so forwarding Logchef's
+    // Content-Encoding header would make the browser decode it twice.
+    return new Response(await upstream.text(), { status: upstream.status, headers: { 'Content-Type': upstream.headers.get('Content-Type') ?? 'application/json' } })
   }
   if (url.pathname === '/host.js') return new Response(bundle, { headers: { 'Content-Type': 'application/javascript' } })
   if (url.pathname === '/panel') return new Response(Bun.file(resolve(directory, 'investigation.html')), { headers: { 'Content-Type': 'text/html' } })

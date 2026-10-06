@@ -47,6 +47,9 @@ type Deps struct {
 	Version     string
 	Log         *slog.Logger
 	Admit       AdmitQuery
+	// ResourceMetadataURL is the protected resource metadata URL that auth
+	// challenges in tool results name. Empty omits it.
+	ResourceMetadataURL string
 }
 
 type principalKey struct{}
@@ -96,6 +99,7 @@ func newMCPServer(deps Deps) *server.MCPServer {
 		server.WithExtensions(map[string]any{"io.modelcontextprotocol/ui": map[string]any{"mimeTypes": []string{appMIMEType}}}),
 		server.WithToolFilter(filterToolsByScope),
 		server.WithToolHandlerMiddleware(t.callDeadline),
+		server.WithToolHandlerMiddleware(t.authErrors),
 	)
 	addInvestigationApp(s)
 	t.addProfileTools(s)

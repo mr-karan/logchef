@@ -89,7 +89,7 @@ func (t *tools) handleQueryLogchefQL(ctx context.Context, _ mcp.CallToolRequest,
 		QueryTimeout: params.QueryTimeout,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return t.errorResult(err), nil
 	}
 
 	compiled := run.prepared.Compiled

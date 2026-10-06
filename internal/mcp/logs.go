@@ -81,7 +81,7 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 
 	src, err := t.authorizeSource(ctx, args.TeamID, args.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("query logs", err).Error()), nil
+		return t.errorResult(t.storeError("query logs", err)), nil
 	}
 	var result *models.QueryResult
 	var queryID string
@@ -97,7 +97,7 @@ func (t *tools) handleQueryLogs(ctx context.Context, _ mcp.CallToolRequest, args
 		return runErr
 	})
 	if err != nil {
-		return mcp.NewToolResultError(t.queryError("query logs", err).Error()), nil
+		return t.errorResult(t.queryError("query logs", err)), nil
 	}
 
 	return mcp.NewToolResultStructuredOnly(QueryResult{
@@ -138,7 +138,7 @@ func (t *tools) sourceSchema(ctx context.Context, teamID, sourceID int) ([]model
 func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest, args GetLogHistogramParams) (*mcp.CallToolResult, error) {
 	src, err := t.authorizeSource(ctx, args.TeamID, args.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("get log histogram", err).Error()), nil
+		return t.errorResult(t.storeError("get log histogram", err)), nil
 	}
 	var histogram *core.HistogramResponse
 	err = t.admit(ctx, QueryClassHistogram, src, args.RawSQL, func(ctx context.Context, _ string) error {
@@ -154,7 +154,7 @@ func (t *tools) handleGetLogHistogram(ctx context.Context, _ mcp.CallToolRequest
 		return runErr
 	})
 	if err != nil {
-		return mcp.NewToolResultError(t.queryError("get log histogram", err).Error()), nil
+		return t.errorResult(t.queryError("get log histogram", err)), nil
 	}
 
 	return mcp.NewToolResultStructuredOnly(HistogramResult{Granularity: histogram.Granularity, Data: histogram.Data, Notice: histogram.Notice}), nil

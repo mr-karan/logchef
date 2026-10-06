@@ -124,7 +124,7 @@ func (a AuthorizedSource) SourceID() models.SourceID { return a.sourceID }
 func (a AuthorizedSource) UserID() models.UserID     { return a.userID }
 
 // AuthorizeTeam checks team membership, then scope. Global admins pass the
-// membership check. Every call reads the database; nothing is cached.
+// membership check, except through OAuth. Every call reads the database; nothing is cached.
 func AuthorizeTeam(ctx context.Context, db store.StoreOps, p Principal, teamID models.TeamID, scope models.TokenScope) error {
 	if err := requireTeamMember(ctx, db, p, teamID); err != nil {
 		return err
@@ -135,7 +135,8 @@ func AuthorizeTeam(ctx context.Context, db store.StoreOps, p Principal, teamID m
 // AuthorizeTeamSource checks team membership, then the team-source link, then
 // scope. This is the order the HTTP middleware has always applied, so the
 // error a caller sees for a request with several faults does not change.
-// Global admins pass the membership check but still need the link.
+// Global admins pass the membership check, except through OAuth, but still
+// need the link.
 func AuthorizeTeamSource(ctx context.Context, db store.StoreOps, p Principal, teamID models.TeamID, sourceID models.SourceID, scope models.TokenScope) (AuthorizedSource, error) {
 	if err := requireTeamMember(ctx, db, p, teamID); err != nil {
 		return AuthorizedSource{}, err
@@ -157,7 +158,9 @@ func requireTeamMember(ctx context.Context, db store.StoreOps, p Principal, team
 	if p.User == nil {
 		return ErrNotTeamMember
 	}
-	if p.User.Role == models.UserRoleAdmin {
+	// Global admins skip membership, except through OAuth: delegated access is
+	// limited to the user's own memberships.
+	if p.RequireGlobalAdmin() == nil {
 		return nil
 	}
 	member, err := db.GetTeamMember(ctx, teamID, p.User.ID)

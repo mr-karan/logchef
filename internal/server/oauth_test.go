@@ -23,10 +23,13 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
+	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -53,6 +56,10 @@ type oauthEnv struct {
 func testOAuthConfig() *config.Config {
 	return &config.Config{
 		Server: config.ServerConfig{PublicURL: testIssuer},
+		Query: config.QueryConfig{
+			DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 30, DefaultPreviewLimit: 100, MaxPreviewLimit: 1000,
+			MaxResponseBytes: 1 << 20, MaxConcurrentPerUser: 3, MaxConcurrentGlobal: 30,
+		},
 		Auth: config.AuthConfig{
 			APITokenSecret:     "0123456789abcdef0123456789abcdef",
 			DefaultTokenExpiry: time.Hour,
@@ -67,12 +74,16 @@ func testOAuthConfig() *config.Config {
 func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServer *oauth.Server) *Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	datasources := datasource.NewService(db, log)
+	datasources.Register(datasource.NewClickHouseProvider(clickhouse.NewManager(log), log))
+	datasources.Register(victorialogs.NewProvider(log))
 	srv := New(ServerOptions{
-		Config: cfg,
-		SQLite: db,
-		OAuth:  oauthServer,
-		FS:     http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}}),
-		Logger: log,
+		Config:      cfg,
+		SQLite:      db,
+		Datasources: datasources,
+		OAuth:       oauthServer,
+		FS:          http.FS(fstest.MapFS{"index.html": {Data: []byte(`<!doctype html><html><head><base href="/" /></head><body>spa</body></html>`)}}),
+		Logger:      log,
 	})
 	t.Cleanup(func() {
 		if err := srv.Shutdown(context.Background()); err != nil {
@@ -1346,4 +1357,80 @@ func TestOAuthMCPNativeClient(t *testing.T) {
 			t.Fatal("logchef-mcp refreshed into an API token")
 		}
 	})
+}
+
+// Re-review 3, N1: the boundary validates the first value of a parameter and
+// ZITADEL decodes the last, so repeated parameters are refused before the
+// provider runs. A safe first token followed by a malformed JWT must not
+// reach ZITADEL's claim decoder.
+func TestOAuthRepeatedParametersRefused(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	post := func(path string, form url.Values) (int, string) {
+		req := httptest.NewRequest(http.MethodPost, testIssuer+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		resp := e.do(req)
+		var out tokenResponse
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out.Error
+	}
+	p := newPKCE()
+	tokens := e.tokens(cliAuthorizeParams(p), p)
+	for _, hint := range []string{"", "access_token", "refresh_token"} {
+		for name, values := range map[string][]string{
+			"safe then malformed": {strings.Repeat("a", 43), malformedAudienceJWT()},
+			"real then malformed": {tokens.RefreshToken, malformedAudienceJWT()},
+			"malformed then safe": {malformedAudienceJWT(), strings.Repeat("a", 43)},
+		} {
+			form := url.Values{"client_id": {config.OAuthMCPClientID}, "token": values}
+			if hint != "" {
+				form.Set("token_type_hint", hint)
+			}
+			if status, code := post(oauth.RevokePath, form); status != http.StatusBadRequest || code != "invalid_request" {
+				t.Errorf("revoke %s hint %q: status %d error %q, want 400 invalid_request", name, hint, status, code)
+			}
+		}
+	}
+	for _, key := range []string{"client_id", "token_type_hint"} {
+		form := url.Values{"client_id": {config.OAuthCLIClientID}, "token": {tokens.RefreshToken}, "token_type_hint": {"refresh_token"}}
+		form.Add(key, form.Get(key))
+		if status, code := post(oauth.RevokePath, form); status != http.StatusBadRequest || code != "invalid_request" {
+			t.Errorf("revoke repeated %s: status %d error %q", key, status, code)
+		}
+	}
+	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusOK {
+		t.Fatalf("a refused revocation revoked the grant: /me status %d", resp.StatusCode)
+	}
+
+	params := cliAuthorizeParams(p)
+	refresh := refreshForm(params, tokens.RefreshToken)
+	for _, key := range []string{"grant_type", "client_id", "refresh_token", "resource", "scope"} {
+		form := url.Values{}
+		for k, v := range refresh {
+			form[k] = slices.Clone(v)
+		}
+		if key == "scope" {
+			form.Set("scope", "logs:read")
+		}
+		form.Add(key, form.Get(key))
+		if status, code := post(oauth.TokenPath, form); status != http.StatusBadRequest || code != "invalid_request" {
+			t.Errorf("token repeated %s: status %d error %q, want 400 invalid_request", key, status, code)
+		}
+	}
+	p2 := newPKCE()
+	params2 := cliAuthorizeParams(p2)
+	exchange := codeExchangeForm(params2, e.code(params2), p2.verifier)
+	for _, key := range []string{"code", "code_verifier", "redirect_uri"} {
+		form := url.Values{}
+		for k, v := range exchange {
+			form[k] = slices.Clone(v)
+		}
+		form.Add(key, form.Get(key))
+		if status, code := post(oauth.TokenPath, form); status != http.StatusBadRequest || code != "invalid_request" {
+			t.Errorf("token repeated %s: status %d error %q, want 400 invalid_request", key, status, code)
+		}
+	}
+	if status, _ := post(oauth.TokenPath, exchange); status != http.StatusOK {
+		t.Fatalf("refused duplicates burned the code: exchange status %d", status)
+	}
 }

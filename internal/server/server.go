@@ -452,6 +452,8 @@ func (s *Server) setupRoutes() {
 		api.Post("/oauth/requests/:requestID/decision", s.requireSession, s.requireSameOrigin, s.handleOAuthDecision)
 		api.Get("/me/connected-apps", s.requireSession, s.handleListConnectedApps)
 		api.Delete("/me/connected-apps/:grantID", s.requireSession, s.requireSameOrigin, s.handleRevokeConnectedApp)
+
+		s.registerMCPRoutes()
 	}
 
 	// --- Static Asset and SPA Handling ---

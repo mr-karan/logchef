@@ -301,6 +301,10 @@ type OAuthConfig struct {
 	// Clients are the pre-registered public web clients (for example an MCP
 	// host). The native "logchef-cli" client is built in and is not listed here.
 	Clients []OAuthClientConfig `koanf:"clients"`
+	// MCPAllowedOrigins are browser origins, besides server.public_url, that
+	// may call /mcp (for example a browser-based MCP inspector). A request
+	// without an Origin header is always allowed.
+	MCPAllowedOrigins []string `koanf:"mcp_allowed_origins"`
 }
 
 // OAuthClientConfig is one pre-registered hosted (web) OAuth client. It may
@@ -585,6 +589,9 @@ func validateOAuth(cfg *OAuthConfig, publicURL string) error {
 	if err := validatePublicURL(publicURL); err != nil {
 		return err
 	}
+	if err := validateMCPAllowedOrigins(cfg.MCPAllowedOrigins); err != nil {
+		return err
+	}
 	seen := make(map[string]struct{}, len(cfg.Clients))
 	for i, client := range cfg.Clients {
 		if client.ID == "" {
@@ -608,6 +615,17 @@ func validateOAuth(cfg *OAuthConfig, publicURL string) error {
 			if err != nil || u.Scheme != "https" || u.Host == "" || u.Fragment != "" || strings.Contains(raw, "#") {
 				return fmt.Errorf("auth.oauth.clients[%d].redirect_uris entry %q must be an absolute https URL without a fragment", i, raw)
 			}
+		}
+	}
+	return nil
+}
+
+// validateMCPAllowedOrigins requires each entry to be an exact browser origin.
+func validateMCPAllowedOrigins(origins []string) error {
+	for i, origin := range origins {
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Scheme+"://"+u.Host != origin {
+			return fmt.Errorf("auth.oauth.mcp_allowed_origins[%d] %q must be an origin: scheme://host[:port] with no path", i, origin)
 		}
 	}
 	return nil

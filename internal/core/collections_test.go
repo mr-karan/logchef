@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -273,10 +274,10 @@ func TestCollectionItemParticipationAndRosterVisibility(t *testing.T) {
 	}
 
 	// The member roster is forbidden to a non-owner member, allowed to the owner.
-	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, member.ID); !errors.Is(err, ErrCollectionForbidden) {
+	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, access.SessionPrincipal(member)); !errors.Is(err, ErrCollectionForbidden) {
 		t.Errorf("member listing roster should be forbidden, got %v", err)
 	}
-	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, owner.ID); err != nil {
+	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, access.SessionPrincipal(owner)); err != nil {
 		t.Errorf("owner should be able to list members, got %v", err)
 	}
 }

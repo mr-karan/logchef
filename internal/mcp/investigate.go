@@ -100,7 +100,7 @@ func (t *tools) handleGetFieldValues(ctx context.Context, _ mcp.CallToolRequest,
 
 	result, err := t.fieldValues(ctx, params.TeamID, params.SourceID, params.FieldName, params.FieldType, params.StartTime, params.EndTime, limit)
 	if err != nil {
-		return mcp.NewToolResultError(err.Error()), nil
+		return t.errorResult(err), nil
 	}
 	return jsonTextResult(result)
 }
@@ -124,7 +124,7 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 
 	src, err := t.authorizeSource(ctx, params.TeamID, params.SourceID, models.TokenScopeLogsRead)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("get log context failed", err).Error()), nil
+		return t.errorResult(t.storeError("get log context failed", err)), nil
 	}
 	if params.Timestamp <= 0 {
 		return mcp.NewToolResultError("get log context failed: timestamp is required and must be positive"), nil
@@ -137,7 +137,7 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 		AfterLimit:      afterLimit,
 	})
 	if err != nil {
-		return mcp.NewToolResultError(t.queryError("get log context failed", err).Error()), nil
+		return t.errorResult(t.queryError("get log context failed", err)), nil
 	}
 
 	result := map[string]any{
@@ -154,7 +154,7 @@ func (t *tools) handleGetLogContext(ctx context.Context, _ mcp.CallToolRequest, 
 func (t *tools) handleListAlerts(ctx context.Context, _ mcp.CallToolRequest, params ListAlertsParams) (*mcp.CallToolResult, error) {
 	alerts, err := t.listAlerts(ctx, params.SourceID)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("list alerts failed", err).Error()), nil
+		return t.errorResult(t.storeError("list alerts failed", err)), nil
 	}
 	return jsonTextResult(alerts)
 }
@@ -173,7 +173,7 @@ func (t *tools) listAlerts(ctx context.Context, sourceID int) ([]*models.Alert, 
 func (t *tools) handleGetAlertHistory(ctx context.Context, _ mcp.CallToolRequest, params GetAlertHistoryParams) (*mcp.CallToolResult, error) {
 	p, err := t.alertsPrincipal(ctx)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("get alert history failed", err).Error()), nil
+		return t.errorResult(t.storeError("get alert history failed", err)), nil
 	}
 	limit := t.deps.Config.Alerts.HistoryLimit
 	if limit <= 0 {
@@ -181,7 +181,7 @@ func (t *tools) handleGetAlertHistory(ctx context.Context, _ mcp.CallToolRequest
 	}
 	history, err := core.ListAlertHistoryForPrincipal(ctx, t.deps.DB, t.deps.Log, p, models.AlertID(params.AlertID), limit)
 	if err != nil {
-		return mcp.NewToolResultError(t.storeError("get alert history failed", err).Error()), nil
+		return t.errorResult(t.storeError("get alert history failed", err)), nil
 	}
 	return jsonTextResult(history)
 }
