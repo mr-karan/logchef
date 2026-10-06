@@ -37,14 +37,14 @@ pub struct DoctorArgs {
 
 #[derive(Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
-enum Status {
+pub(crate) enum Status {
     Ok,
     Warn,
     Fail,
 }
 
 impl Status {
-    fn glyph(self) -> &'static str {
+    pub(crate) fn glyph(self) -> &'static str {
         match self {
             Status::Ok => "✓",
             Status::Warn => "⚠",
@@ -63,12 +63,12 @@ impl Status {
 }
 
 #[derive(Serialize)]
-struct Check {
-    check: String,
-    status: Status,
-    detail: String,
+pub(crate) struct Check {
+    pub(crate) check: String,
+    pub(crate) status: Status,
+    pub(crate) detail: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    hint: Option<String>,
+    pub(crate) hint: Option<String>,
 }
 
 impl Check {
@@ -101,7 +101,21 @@ impl Check {
 }
 
 pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
+    finish(collect_checks(&global).await.checks, args.json)
+}
+
+/// Results of a doctor run, without any printing.
+pub(crate) struct Diagnosis {
+    pub(crate) checks: Vec<Check>,
+    /// Whether the server offers CLI OIDC login. `None` when the server's
+    /// metadata could not be read.
+    pub(crate) oidc_enabled: Option<bool>,
+}
+
+/// Runs every doctor check and returns the results without printing.
+pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     let mut checks = Vec::new();
+    let mut oidc_enabled = None;
 
     let config = Config::load();
 
@@ -129,12 +143,15 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
                 format!("failed to load: {}", err),
                 "check the file is valid JSON, or remove it to start fresh",
             ));
-            return finish(checks, args.json);
+            return Diagnosis {
+                checks,
+                oidc_enabled,
+            };
         }
     };
 
     // Resolve the context to inspect: --context, then --server, then current.
-    let resolved = resolve_context(&config, &global);
+    let resolved = resolve_context(&config, global);
 
     match &resolved {
         Some((name, _)) => checks.push(Check::ok("Context", name.clone())),
@@ -194,7 +211,10 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
             "skipped (no server configured)",
             "configure a server, then run `logchef auth`",
         ));
-        return finish(checks, args.json);
+        return Diagnosis {
+            checks,
+            oidc_enabled,
+        };
     };
     checks.push(Check::ok("Server URL", server_url.clone()));
 
@@ -209,7 +229,10 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
                 format!("could not build HTTP client: {}", err),
                 "check the server URL is a valid http(s) URL",
             ));
-            return finish(checks, args.json);
+            return Diagnosis {
+                checks,
+                oidc_enabled,
+            };
         }
     };
 
@@ -221,6 +244,7 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
                 "Server reachable",
                 format!("Logchef {}", meta.data.version),
             ));
+            oidc_enabled = Some(meta.data.oidc_enabled());
             if meta.data.oidc_enabled() {
                 checks.push(Check::ok("CLI auth", "OIDC configured on server"));
             } else {
@@ -249,7 +273,10 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
 
     // ---- Auth ------------------------------------------------------------
     let token_present = token.is_some();
-    let expiry = resolved.as_ref().and_then(|(_, c)| c.token_expires_at);
+    let expiry = applicable_expiry(
+        global.token.is_some(),
+        resolved.as_ref().and_then(|(_, c)| c.token_expires_at),
+    );
     if !token_present {
         checks.push(Check::fail(
             "Auth token",
@@ -306,12 +333,24 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
     )
     .await;
 
-    finish(checks, args.json)
+    Diagnosis {
+        checks,
+        oidc_enabled,
+    }
 }
 
 /// Resolves which context doctor should inspect, honoring --context and
 /// --server overrides, then the current context. Returns None when nothing is
 /// configured (so the network checks degrade gracefully).
+/// A `--token` override replaces the saved token, so the saved expiry must
+/// not apply to it.
+fn applicable_expiry(
+    token_overridden: bool,
+    saved_expiry: Option<chrono::DateTime<chrono::Utc>>,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    if token_overridden { None } else { saved_expiry }
+}
+
 fn resolve_context(config: &Config, global: &GlobalArgs) -> Option<(String, CtxConfig)> {
     if let Some(name) = &global.context {
         return config.get_context(name).map(|c| (name.clone(), c.clone()));
@@ -492,4 +531,22 @@ fn finish(checks: Vec<Check>, json: bool) -> Result<()> {
         std::process::exit(1);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn token_override_ignores_expired_saved_expiry() {
+        let expired = chrono::Utc::now() - chrono::Duration::days(1);
+        assert_eq!(applicable_expiry(true, Some(expired)), None);
+    }
+
+    #[test]
+    fn saved_token_keeps_its_expiry() {
+        let expired = chrono::Utc::now() - chrono::Duration::days(1);
+        assert_eq!(applicable_expiry(false, Some(expired)), Some(expired));
+        assert_eq!(applicable_expiry(false, None), None);
+    }
 }
