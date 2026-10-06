@@ -91,3 +91,11 @@ func SendError(c fiber.Ctx, status int, err any) error {
 func SendErrorWithType(c fiber.Ctx, status int, err any, errorType models.ErrorType) error {
 	return c.Status(status).JSON(NewErrorResponse(err, errorType))
 }
+
+// sendLoadFailure writes an error response for a loader that reports failure
+// with a bool, so the caller can stop without passing a nil error onward.
+func (s *Server) sendLoadFailure(c fiber.Ctx, status int, msg string, errorType models.ErrorType) {
+	if err := SendErrorWithType(c, status, msg, errorType); err != nil {
+		s.log.Warn("failed to write error response", "path", c.Path(), "error", err)
+	}
+}
