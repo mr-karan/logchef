@@ -115,6 +115,73 @@ type ExportJob struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type OauthAccessToken struct {
+	IDHash    string             `json:"id_hash"`
+	GrantID   int64              `json:"grant_id"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type OauthAuthRequest struct {
+	ID             string             `json:"id"`
+	ClientID       string             `json:"client_id"`
+	RedirectUri    string             `json:"redirect_uri"`
+	Resource       string             `json:"resource"`
+	Scopes         string             `json:"scopes"`
+	OfflineAccess  bool               `json:"offline_access"`
+	CodeChallenge  string             `json:"code_challenge"`
+	State          string             `json:"state"`
+	UserID         pgtype.Int8        `json:"user_id"`
+	GrantID        pgtype.Int8        `json:"grant_id"`
+	CodeHash       pgtype.Text        `json:"code_hash"`
+	CodeExpiresAt  pgtype.Timestamptz `json:"code_expires_at"`
+	CodeConsumedAt pgtype.Timestamptz `json:"code_consumed_at"`
+	DecidedAt      pgtype.Timestamptz `json:"decided_at"`
+	Denied         bool               `json:"denied"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type OauthDeviceAuthorization struct {
+	DeviceCodeHash string             `json:"device_code_hash"`
+	UserCodeHash   string             `json:"user_code_hash"`
+	ClientID       string             `json:"client_id"`
+	Resource       string             `json:"resource"`
+	Scopes         string             `json:"scopes"`
+	OfflineAccess  bool               `json:"offline_access"`
+	IntervalSecs   int32              `json:"interval_secs"`
+	LastPolledAt   pgtype.Timestamptz `json:"last_polled_at"`
+	UserID         pgtype.Int8        `json:"user_id"`
+	GrantID        pgtype.Int8        `json:"grant_id"`
+	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
+	DeniedAt       pgtype.Timestamptz `json:"denied_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type OauthGrant struct {
+	ID            int64              `json:"id"`
+	UserID        int64              `json:"user_id"`
+	ClientID      string             `json:"client_id"`
+	Resource      string             `json:"resource"`
+	Scopes        string             `json:"scopes"`
+	OfflineAccess bool               `json:"offline_access"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	LastUsedAt    pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt     pgtype.Timestamptz `json:"revoked_at"`
+	RevokeReason  pgtype.Text        `json:"revoke_reason"`
+}
+
+type OauthRefreshToken struct {
+	TokenHash      string             `json:"token_hash"`
+	GrantID        int64              `json:"grant_id"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
+	ReplacedByHash pgtype.Text        `json:"replaced_by_hash"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type QueryHistory struct {
 	ID            int64              `json:"id"`
 	UserID        int64              `json:"user_id"`

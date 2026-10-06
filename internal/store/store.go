@@ -1,7 +1,7 @@
 // Package store defines the backend-agnostic contract for logchef's application
 // metadata — users, teams, sources, sessions, saved queries, collections,
-// alerts, API tokens, system settings, export jobs, user preferences and query
-// shares. (Log data lives in ClickHouse and is not part of this contract.)
+// alerts, API tokens, system settings, export jobs, user preferences, query
+// shares and OAuth authorization state. (Log data lives in ClickHouse and is not part of this contract.)
 //
 // Concrete implementations live in sub-packages — store/sqlite (the default,
 // single-binary backend) and store/postgres (for multi-replica deployments) —
@@ -268,12 +268,89 @@ type TokenStore interface {
 	DeleteAPIToken(ctx context.Context, id int, userID models.UserID) error
 }
 
+// OAuthStore persists Logchef's OAuth authorization server state: pending
+// authorization requests, device authorizations, grants and token hashes.
+// Every code and token argument is a models.OAuthSecretHash; plaintext never
+// reaches storage. now is passed in so every expiry check uses the caller's
+// clock.
+//
+// ConsumeAuthCode, CheckRefreshToken and RotateRefreshToken must be called on
+// the root store, not inside WithTx: a replay revokes the grant, and that
+// revocation must commit even though the caller then fails the request.
+type OAuthStore interface {
+	CreateOAuthAuthRequest(ctx context.Context, req *models.OAuthAuthRequest) error
+	GetOAuthAuthRequest(ctx context.Context, id models.OAuthAuthRequestID) (*models.OAuthAuthRequest, error)
+	// ApproveOAuthAuthRequest records the first decision as an approval by
+	// userID and creates the grant. It returns models.ErrNotFound when the
+	// request is unknown, expired or already decided.
+	ApproveOAuthAuthRequest(ctx context.Context, id models.OAuthAuthRequestID, userID models.UserID, now time.Time) (*models.OAuthGrant, error)
+	// DenyOAuthAuthRequest records the first decision as a denial by userID.
+	// It returns models.ErrNotFound like ApproveOAuthAuthRequest.
+	DenyOAuthAuthRequest(ctx context.Context, id models.OAuthAuthRequestID, userID models.UserID, now time.Time) error
+	// SaveOAuthAuthCode attaches the code to an approved request that has no
+	// code yet. It returns models.ErrNotFound otherwise.
+	SaveOAuthAuthCode(ctx context.Context, id models.OAuthAuthRequestID, codeHash models.OAuthSecretHash, expiresAt time.Time) error
+	// ConsumeAuthCode marks the code used, once. A second use of a consumed
+	// code revokes its grant and returns models.ErrOAuthCodeReplay. Unknown,
+	// expired or revoked codes return models.ErrOAuthInvalidGrant.
+	ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, error)
+
+	// CreateOAuthDeviceAuthorization returns models.ErrConflict when the user
+	// code hash is already in use.
+	CreateOAuthDeviceAuthorization(ctx context.Context, d models.NewOAuthDeviceAuthorization) error
+	// GetPendingOAuthDeviceAuthorization returns an undecided, unexpired
+	// request by user code, or models.ErrNotFound.
+	GetPendingOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, now time.Time) (*models.OAuthDeviceAuthorization, error)
+	ApproveOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) (*models.OAuthGrant, error)
+	DenyOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) error
+	// RecordDevicePoll records one token-endpoint poll and reports its status
+	// in one conditional update. The poll interval applies only to requests
+	// that are not expired or denied. Unknown, consumed or other-client
+	// device codes return models.ErrNotFound.
+	RecordDevicePoll(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (models.OAuthDevicePoll, error)
+	// ConsumeDeviceCode marks an approved, unexpired code used, once, and
+	// returns its grant. Anything else returns models.ErrOAuthInvalidGrant.
+	ConsumeDeviceCode(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (*models.OAuthGrant, error)
+
+	// IssueOAuthTokens stores a new access token, and a refresh token when
+	// issue.RefreshHash is set, for an active grant. A revoked grant returns
+	// models.ErrOAuthInvalidGrant.
+	IssueOAuthTokens(ctx context.Context, grantID models.OAuthGrantID, issue models.OAuthTokenIssue, now time.Time) error
+	// CheckRefreshToken reports whether a refresh token can be used, without
+	// consuming it. A consumed token revokes its grant (RefreshReplay).
+	CheckRefreshToken(ctx context.Context, tokenHash models.OAuthSecretHash, now time.Time) (models.RefreshOutcome, error)
+	// RotateRefreshToken consumes oldHash and stores the new access and
+	// refresh tokens in one transaction. issue.RefreshHash is required. A
+	// consumed oldHash revokes the grant and commits (RefreshReplay).
+	RotateRefreshToken(ctx context.Context, oldHash models.OAuthSecretHash, issue models.OAuthTokenIssue, now time.Time) (models.RefreshOutcome, error)
+	// AuthenticateOAuthAccessToken returns the grant and user for an
+	// unexpired access token whose grant is active, whose resource equals
+	// resource, and whose user is active and human. Anything else returns
+	// models.ErrNotFound.
+	AuthenticateOAuthAccessToken(ctx context.Context, idHash models.OAuthSecretHash, resource string, now time.Time) (*models.OAuthGrant, *models.User, error)
+	TouchOAuthGrant(ctx context.Context, id models.OAuthGrantID, now time.Time) error
+
+	// RevokeGrant revokes one of userID's active grants, or returns
+	// models.ErrNotFound.
+	RevokeGrant(ctx context.Context, id models.OAuthGrantID, userID models.UserID, now time.Time) error
+	// RevokeGrantByToken revokes the client's grant that owns the access-token
+	// ID hash or refresh-token hash. An unknown token is not an error
+	// (RFC 7009 section 2.2).
+	RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) error
+	// ListGrantsForUser returns userID's active grants, newest first.
+	ListGrantsForUser(ctx context.Context, userID models.UserID) ([]*models.OAuthGrant, error)
+	// DeleteExpiredOAuthRows removes expired requests, device authorizations
+	// and access tokens. Refresh rows, consumed ones included, stay until no
+	// token of their grant is live, so replays are still detected.
+	DeleteExpiredOAuthRows(ctx context.Context, now time.Time) error
+}
+
 // StoreOps is the full set of data operations across every domain, with no
 // lifecycle (Close) or transaction control (WithTx). It is what a WithTx
 // callback receives, and what consumers should accept when they don't manage
 // the connection lifecycle themselves.
 //
-// It composes one interface per domain; together they cover all 14 metadata
+// It composes one interface per domain; together they cover all 15 metadata
 // domains. Every method speaks pkg/models types — no sqlc or driver types leak
 // through.
 type StoreOps interface {
@@ -292,6 +369,7 @@ type StoreOps interface {
 	TeamStore
 	SettingsStore
 	TokenStore
+	OAuthStore
 }
 
 // Store is the complete metadata contract a backend (store/sqlite,

@@ -53,7 +53,7 @@ type Store struct {
 }
 
 // Compile-time guarantee that the Postgres backend satisfies the full contract:
-// all 13 data domains (StoreOps), io.Closer, and TxRunner (WithTx).
+// all data domains (StoreOps), io.Closer, and TxRunner (WithTx).
 var _ store.Store = (*Store)(nil)
 
 // New connects to Postgres, tunes the pool, applies migrations under an advisory

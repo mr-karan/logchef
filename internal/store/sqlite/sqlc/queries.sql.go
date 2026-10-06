@@ -96,6 +96,144 @@ func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) er
 	return err
 }
 
+const approveOAuthDeviceAuthorization = `-- name: ApproveOAuthDeviceAuthorization :one
+UPDATE oauth_device_authorizations
+SET approved_at = ?1, user_id = ?2
+WHERE user_code_hash = ?3
+  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
+  AND expires_at > ?1
+RETURNING device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at
+`
+
+type ApproveOAuthDeviceAuthorizationParams struct {
+	Now          sql.NullInt64 `json:"now"`
+	UserID       sql.NullInt64 `json:"user_id"`
+	UserCodeHash string        `json:"user_code_hash"`
+}
+
+func (q *Queries) ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
+	row := q.queryRow(ctx, q.approveOAuthDeviceAuthorizationStmt, approveOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
+	var i OauthDeviceAuthorization
+	err := row.Scan(
+		&i.DeviceCodeHash,
+		&i.UserCodeHash,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.IntervalSecs,
+		&i.LastPolledAt,
+		&i.UserID,
+		&i.GrantID,
+		&i.ApprovedAt,
+		&i.DeniedAt,
+		&i.ConsumedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const authenticateOAuthAccessToken = `-- name: AuthenticateOAuthAccessToken :one
+SELECT g.id, g.user_id, g.client_id, g.resource, g.scopes, g.offline_access, g.created_at, g.last_used_at, g.revoked_at, g.revoke_reason, u.id, u.email, u.full_name, u.role, u.status, u.last_login_at, u.last_active_at, u.created_at, u.updated_at, u.managed, u.account_type, u.password_hash
+FROM oauth_access_tokens a
+JOIN oauth_grants g ON g.id = a.grant_id
+JOIN users u ON u.id = g.user_id
+WHERE a.id_hash = ?1
+  AND a.expires_at > ?2
+  AND g.revoked_at IS NULL
+  AND g.resource = ?3
+  AND u.status = 'active'
+  AND u.account_type = 'human'
+`
+
+type AuthenticateOAuthAccessTokenParams struct {
+	IDHash   string `json:"id_hash"`
+	Now      int64  `json:"now"`
+	Resource string `json:"resource"`
+}
+
+type AuthenticateOAuthAccessTokenRow struct {
+	OauthGrant OauthGrant `json:"oauth_grant"`
+	User       User       `json:"user"`
+}
+
+func (q *Queries) AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error) {
+	row := q.queryRow(ctx, q.authenticateOAuthAccessTokenStmt, authenticateOAuthAccessToken, arg.IDHash, arg.Now, arg.Resource)
+	var i AuthenticateOAuthAccessTokenRow
+	err := row.Scan(
+		&i.OauthGrant.ID,
+		&i.OauthGrant.UserID,
+		&i.OauthGrant.ClientID,
+		&i.OauthGrant.Resource,
+		&i.OauthGrant.Scopes,
+		&i.OauthGrant.OfflineAccess,
+		&i.OauthGrant.CreatedAt,
+		&i.OauthGrant.LastUsedAt,
+		&i.OauthGrant.RevokedAt,
+		&i.OauthGrant.RevokeReason,
+		&i.User.ID,
+		&i.User.Email,
+		&i.User.FullName,
+		&i.User.Role,
+		&i.User.Status,
+		&i.User.LastLoginAt,
+		&i.User.LastActiveAt,
+		&i.User.CreatedAt,
+		&i.User.UpdatedAt,
+		&i.User.Managed,
+		&i.User.AccountType,
+		&i.User.PasswordHash,
+	)
+	return i, err
+}
+
+const claimOAuthAuthRequestDecision = `-- name: ClaimOAuthAuthRequestDecision :one
+UPDATE oauth_auth_requests
+SET decided_at = ?1, user_id = ?2, denied = ?3
+WHERE id = ?4 AND decided_at IS NULL AND expires_at > ?1
+RETURNING id, client_id, redirect_uri, resource, scopes, offline_access, code_challenge, state, user_id, grant_id, code_hash, code_expires_at, code_consumed_at, decided_at, denied, expires_at, created_at
+`
+
+type ClaimOAuthAuthRequestDecisionParams struct {
+	Now    sql.NullInt64 `json:"now"`
+	UserID sql.NullInt64 `json:"user_id"`
+	Denied int64         `json:"denied"`
+	ID     string        `json:"id"`
+}
+
+// Record the first decision on a pending, unexpired request. Zero rows means
+// the request is unknown, expired or already decided.
+func (q *Queries) ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOAuthAuthRequestDecisionParams) (OauthAuthRequest, error) {
+	row := q.queryRow(ctx, q.claimOAuthAuthRequestDecisionStmt, claimOAuthAuthRequestDecision,
+		arg.Now,
+		arg.UserID,
+		arg.Denied,
+		arg.ID,
+	)
+	var i OauthAuthRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.RedirectUri,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CodeChallenge,
+		&i.State,
+		&i.UserID,
+		&i.GrantID,
+		&i.CodeHash,
+		&i.CodeExpiresAt,
+		&i.CodeConsumedAt,
+		&i.DecidedAt,
+		&i.Denied,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const completeExportJob = `-- name: CompleteExportJob :one
 UPDATE export_jobs
 SET
@@ -137,6 +275,98 @@ func (q *Queries) CompleteExportJob(ctx context.Context, arg CompleteExportJobPa
 	var id string
 	err := row.Scan(&id)
 	return id, err
+}
+
+const consumeOAuthAuthCode = `-- name: ConsumeOAuthAuthCode :one
+UPDATE oauth_auth_requests
+SET code_consumed_at = ?1
+WHERE code_hash = ?2
+  AND code_consumed_at IS NULL
+  AND code_expires_at > ?1
+  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
+RETURNING id, client_id, redirect_uri, resource, scopes, offline_access, code_challenge, state, user_id, grant_id, code_hash, code_expires_at, code_consumed_at, decided_at, denied, expires_at, created_at
+`
+
+type ConsumeOAuthAuthCodeParams struct {
+	Now      sql.NullInt64  `json:"now"`
+	CodeHash sql.NullString `json:"code_hash"`
+}
+
+// Single-use consumption. Exactly one concurrent caller gets the row.
+func (q *Queries) ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (OauthAuthRequest, error) {
+	row := q.queryRow(ctx, q.consumeOAuthAuthCodeStmt, consumeOAuthAuthCode, arg.Now, arg.CodeHash)
+	var i OauthAuthRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.RedirectUri,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CodeChallenge,
+		&i.State,
+		&i.UserID,
+		&i.GrantID,
+		&i.CodeHash,
+		&i.CodeExpiresAt,
+		&i.CodeConsumedAt,
+		&i.DecidedAt,
+		&i.Denied,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const consumeOAuthDeviceCode = `-- name: ConsumeOAuthDeviceCode :one
+UPDATE oauth_device_authorizations
+SET consumed_at = ?1
+WHERE device_code_hash = ?2
+  AND oauth_device_authorizations.client_id = ?3
+  AND approved_at IS NOT NULL
+  AND consumed_at IS NULL
+  AND expires_at > ?1
+  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
+RETURNING grant_id
+`
+
+type ConsumeOAuthDeviceCodeParams struct {
+	Now            sql.NullInt64 `json:"now"`
+	DeviceCodeHash string        `json:"device_code_hash"`
+	ClientID       string        `json:"client_id"`
+}
+
+// Single-use consumption of an approved code. Expiry is checked here, before
+// consumption, so an approved but expired code never issues tokens.
+func (q *Queries) ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (sql.NullInt64, error) {
+	row := q.queryRow(ctx, q.consumeOAuthDeviceCodeStmt, consumeOAuthDeviceCode, arg.Now, arg.DeviceCodeHash, arg.ClientID)
+	var grant_id sql.NullInt64
+	err := row.Scan(&grant_id)
+	return grant_id, err
+}
+
+const consumeOAuthRefreshToken = `-- name: ConsumeOAuthRefreshToken :one
+UPDATE oauth_refresh_tokens
+SET consumed_at = ?1, replaced_by_hash = ?2
+WHERE token_hash = ?3
+  AND consumed_at IS NULL
+  AND expires_at > ?1
+  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
+RETURNING grant_id
+`
+
+type ConsumeOAuthRefreshTokenParams struct {
+	Now            sql.NullInt64  `json:"now"`
+	ReplacedByHash sql.NullString `json:"replaced_by_hash"`
+	TokenHash      string         `json:"token_hash"`
+}
+
+// Rotation claim. Exactly one concurrent caller gets the row.
+func (q *Queries) ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error) {
+	row := q.queryRow(ctx, q.consumeOAuthRefreshTokenStmt, consumeOAuthRefreshToken, arg.Now, arg.ReplacedByHash, arg.TokenHash)
+	var grant_id int64
+	err := row.Scan(&grant_id)
+	return grant_id, err
 }
 
 const countAdminUsers = `-- name: CountAdminUsers :one
@@ -440,6 +670,120 @@ func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams
 	return err
 }
 
+const createOAuthAuthRequest = `-- name: CreateOAuthAuthRequest :exec
+
+INSERT INTO oauth_auth_requests (
+    id, client_id, redirect_uri, resource, scopes, offline_access,
+    code_challenge, state, expires_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateOAuthAuthRequestParams struct {
+	ID            string `json:"id"`
+	ClientID      string `json:"client_id"`
+	RedirectUri   string `json:"redirect_uri"`
+	Resource      string `json:"resource"`
+	Scopes        string `json:"scopes"`
+	OfflineAccess int64  `json:"offline_access"`
+	CodeChallenge string `json:"code_challenge"`
+	State         string `json:"state"`
+	ExpiresAt     int64  `json:"expires_at"`
+	CreatedAt     int64  `json:"created_at"`
+}
+
+// OAuth authorization server ------------------------------------------------
+// Times are Unix milliseconds (see 000033_oauth.up.sql). Every *_hash
+// argument is an HMAC hex digest, never a plaintext code or token.
+func (q *Queries) CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAuthRequestParams) error {
+	_, err := q.exec(ctx, q.createOAuthAuthRequestStmt, createOAuthAuthRequest,
+		arg.ID,
+		arg.ClientID,
+		arg.RedirectUri,
+		arg.Resource,
+		arg.Scopes,
+		arg.OfflineAccess,
+		arg.CodeChallenge,
+		arg.State,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const createOAuthDeviceAuthorization = `-- name: CreateOAuthDeviceAuthorization :exec
+INSERT INTO oauth_device_authorizations (
+    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
+    interval_secs, expires_at, created_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+`
+
+type CreateOAuthDeviceAuthorizationParams struct {
+	DeviceCodeHash string `json:"device_code_hash"`
+	UserCodeHash   string `json:"user_code_hash"`
+	ClientID       string `json:"client_id"`
+	Resource       string `json:"resource"`
+	Scopes         string `json:"scopes"`
+	OfflineAccess  int64  `json:"offline_access"`
+	IntervalSecs   int64  `json:"interval_secs"`
+	ExpiresAt      int64  `json:"expires_at"`
+	CreatedAt      int64  `json:"created_at"`
+}
+
+func (q *Queries) CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error {
+	_, err := q.exec(ctx, q.createOAuthDeviceAuthorizationStmt, createOAuthDeviceAuthorization,
+		arg.DeviceCodeHash,
+		arg.UserCodeHash,
+		arg.ClientID,
+		arg.Resource,
+		arg.Scopes,
+		arg.OfflineAccess,
+		arg.IntervalSecs,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const createOAuthGrant = `-- name: CreateOAuthGrant :one
+INSERT INTO oauth_grants (user_id, client_id, resource, scopes, offline_access, created_at)
+VALUES (?, ?, ?, ?, ?, ?)
+RETURNING id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason
+`
+
+type CreateOAuthGrantParams struct {
+	UserID        int64  `json:"user_id"`
+	ClientID      string `json:"client_id"`
+	Resource      string `json:"resource"`
+	Scopes        string `json:"scopes"`
+	OfflineAccess int64  `json:"offline_access"`
+	CreatedAt     int64  `json:"created_at"`
+}
+
+func (q *Queries) CreateOAuthGrant(ctx context.Context, arg CreateOAuthGrantParams) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.createOAuthGrantStmt, createOAuthGrant,
+		arg.UserID,
+		arg.ClientID,
+		arg.Resource,
+		arg.Scopes,
+		arg.OfflineAccess,
+		arg.CreatedAt,
+	)
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
 const createQueryShare = `-- name: CreateQueryShare :exec
 
 INSERT INTO query_shares (
@@ -693,6 +1037,52 @@ func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Ti
 	return err
 }
 
+const deleteExpiredOAuthAccessTokens = `-- name: DeleteExpiredOAuthAccessTokens :exec
+DELETE FROM oauth_access_tokens WHERE expires_at <= ?
+`
+
+func (q *Queries) DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt int64) error {
+	_, err := q.exec(ctx, q.deleteExpiredOAuthAccessTokensStmt, deleteExpiredOAuthAccessTokens, expiresAt)
+	return err
+}
+
+const deleteExpiredOAuthAuthRequests = `-- name: DeleteExpiredOAuthAuthRequests :exec
+DELETE FROM oauth_auth_requests
+WHERE expires_at <= ?1
+  AND (code_expires_at IS NULL OR code_expires_at <= ?1)
+`
+
+func (q *Queries) DeleteExpiredOAuthAuthRequests(ctx context.Context, now int64) error {
+	_, err := q.exec(ctx, q.deleteExpiredOAuthAuthRequestsStmt, deleteExpiredOAuthAuthRequests, now)
+	return err
+}
+
+const deleteExpiredOAuthDeviceAuthorizations = `-- name: DeleteExpiredOAuthDeviceAuthorizations :exec
+DELETE FROM oauth_device_authorizations WHERE expires_at <= ?
+`
+
+func (q *Queries) DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt int64) error {
+	_, err := q.exec(ctx, q.deleteExpiredOAuthDeviceAuthorizationsStmt, deleteExpiredOAuthDeviceAuthorizations, expiresAt)
+	return err
+}
+
+const deleteExpiredOAuthRefreshFamilies = `-- name: DeleteExpiredOAuthRefreshFamilies :exec
+DELETE FROM oauth_refresh_tokens
+WHERE NOT EXISTS (
+    SELECT 1 FROM oauth_refresh_tokens live
+    WHERE live.grant_id = oauth_refresh_tokens.grant_id
+      AND live.expires_at > ?1
+)
+`
+
+// Delete refresh rows only when no row of the same grant is still live. A
+// consumed row therefore stays while its family can still be refreshed, so a
+// replay of it is still detected.
+func (q *Queries) DeleteExpiredOAuthRefreshFamilies(ctx context.Context, now int64) error {
+	_, err := q.exec(ctx, q.deleteExpiredOAuthRefreshFamiliesStmt, deleteExpiredOAuthRefreshFamilies, now)
+	return err
+}
+
 const deleteExpiredSessions = `-- name: DeleteExpiredSessions :exec
 DELETE FROM sessions WHERE expires_at <= ?
 `
@@ -785,6 +1175,28 @@ DELETE FROM sessions WHERE user_id = ?
 func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := q.exec(ctx, q.deleteUserSessionsStmt, deleteUserSessions, userID)
 	return err
+}
+
+const denyOAuthDeviceAuthorization = `-- name: DenyOAuthDeviceAuthorization :execrows
+UPDATE oauth_device_authorizations
+SET denied_at = ?1, user_id = ?2
+WHERE user_code_hash = ?3
+  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
+  AND expires_at > ?1
+`
+
+type DenyOAuthDeviceAuthorizationParams struct {
+	Now          sql.NullInt64 `json:"now"`
+	UserID       sql.NullInt64 `json:"user_id"`
+	UserCodeHash string        `json:"user_code_hash"`
+}
+
+func (q *Queries) DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error) {
+	result, err := q.exec(ctx, q.denyOAuthDeviceAuthorizationStmt, denyOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const failExportJob = `-- name: FailExportJob :one
@@ -1058,6 +1470,141 @@ func (q *Queries) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID i
 		&i.Value,
 		&i.Message,
 		&i.PayloadJson,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOAuthAuthCodeState = `-- name: GetOAuthAuthCodeState :one
+SELECT grant_id, code_consumed_at FROM oauth_auth_requests WHERE code_hash = ?
+`
+
+type GetOAuthAuthCodeStateRow struct {
+	GrantID        sql.NullInt64 `json:"grant_id"`
+	CodeConsumedAt sql.NullInt64 `json:"code_consumed_at"`
+}
+
+func (q *Queries) GetOAuthAuthCodeState(ctx context.Context, codeHash sql.NullString) (GetOAuthAuthCodeStateRow, error) {
+	row := q.queryRow(ctx, q.getOAuthAuthCodeStateStmt, getOAuthAuthCodeState, codeHash)
+	var i GetOAuthAuthCodeStateRow
+	err := row.Scan(&i.GrantID, &i.CodeConsumedAt)
+	return i, err
+}
+
+const getOAuthAuthRequest = `-- name: GetOAuthAuthRequest :one
+SELECT id, client_id, redirect_uri, resource, scopes, offline_access, code_challenge, state, user_id, grant_id, code_hash, code_expires_at, code_consumed_at, decided_at, denied, expires_at, created_at FROM oauth_auth_requests WHERE id = ?
+`
+
+func (q *Queries) GetOAuthAuthRequest(ctx context.Context, id string) (OauthAuthRequest, error) {
+	row := q.queryRow(ctx, q.getOAuthAuthRequestStmt, getOAuthAuthRequest, id)
+	var i OauthAuthRequest
+	err := row.Scan(
+		&i.ID,
+		&i.ClientID,
+		&i.RedirectUri,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CodeChallenge,
+		&i.State,
+		&i.UserID,
+		&i.GrantID,
+		&i.CodeHash,
+		&i.CodeExpiresAt,
+		&i.CodeConsumedAt,
+		&i.DecidedAt,
+		&i.Denied,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOAuthGrant = `-- name: GetOAuthGrant :one
+SELECT id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason FROM oauth_grants WHERE id = ?
+`
+
+func (q *Queries) GetOAuthGrant(ctx context.Context, id int64) (OauthGrant, error) {
+	row := q.queryRow(ctx, q.getOAuthGrantStmt, getOAuthGrant, id)
+	var i OauthGrant
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.CreatedAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+		&i.RevokeReason,
+	)
+	return i, err
+}
+
+const getOAuthRefreshTokenState = `-- name: GetOAuthRefreshTokenState :one
+SELECT r.consumed_at, r.expires_at, g.id, g.user_id, g.client_id, g.resource, g.scopes, g.offline_access, g.created_at, g.last_used_at, g.revoked_at, g.revoke_reason
+FROM oauth_refresh_tokens r
+JOIN oauth_grants g ON g.id = r.grant_id
+WHERE r.token_hash = ?
+`
+
+type GetOAuthRefreshTokenStateRow struct {
+	ConsumedAt sql.NullInt64 `json:"consumed_at"`
+	ExpiresAt  int64         `json:"expires_at"`
+	OauthGrant OauthGrant    `json:"oauth_grant"`
+}
+
+func (q *Queries) GetOAuthRefreshTokenState(ctx context.Context, tokenHash string) (GetOAuthRefreshTokenStateRow, error) {
+	row := q.queryRow(ctx, q.getOAuthRefreshTokenStateStmt, getOAuthRefreshTokenState, tokenHash)
+	var i GetOAuthRefreshTokenStateRow
+	err := row.Scan(
+		&i.ConsumedAt,
+		&i.ExpiresAt,
+		&i.OauthGrant.ID,
+		&i.OauthGrant.UserID,
+		&i.OauthGrant.ClientID,
+		&i.OauthGrant.Resource,
+		&i.OauthGrant.Scopes,
+		&i.OauthGrant.OfflineAccess,
+		&i.OauthGrant.CreatedAt,
+		&i.OauthGrant.LastUsedAt,
+		&i.OauthGrant.RevokedAt,
+		&i.OauthGrant.RevokeReason,
+	)
+	return i, err
+}
+
+const getPendingOAuthDeviceAuthorization = `-- name: GetPendingOAuthDeviceAuthorization :one
+SELECT device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at FROM oauth_device_authorizations
+WHERE user_code_hash = ?1
+  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
+  AND expires_at > ?2
+`
+
+type GetPendingOAuthDeviceAuthorizationParams struct {
+	UserCodeHash string `json:"user_code_hash"`
+	Now          int64  `json:"now"`
+}
+
+func (q *Queries) GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
+	row := q.queryRow(ctx, q.getPendingOAuthDeviceAuthorizationStmt, getPendingOAuthDeviceAuthorization, arg.UserCodeHash, arg.Now)
+	var i OauthDeviceAuthorization
+	err := row.Scan(
+		&i.DeviceCodeHash,
+		&i.UserCodeHash,
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.IntervalSecs,
+		&i.LastPolledAt,
+		&i.UserID,
+		&i.GrantID,
+		&i.ApprovedAt,
+		&i.DeniedAt,
+		&i.ConsumedAt,
+		&i.ExpiresAt,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -1503,6 +2050,62 @@ func (q *Queries) InsertAlertHistory(ctx context.Context, arg InsertAlertHistory
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const insertOAuthAccessToken = `-- name: InsertOAuthAccessToken :execrows
+INSERT INTO oauth_access_tokens (id_hash, grant_id, expires_at, created_at)
+SELECT ?1, g.id, ?2, ?3
+FROM oauth_grants g
+WHERE g.id = ?4 AND g.revoked_at IS NULL
+`
+
+type InsertOAuthAccessTokenParams struct {
+	IDHash    string `json:"id_hash"`
+	ExpiresAt int64  `json:"expires_at"`
+	CreatedAt int64  `json:"created_at"`
+	GrantID   int64  `json:"grant_id"`
+}
+
+// Insert only while the grant is active, so a token is never issued under a
+// grant revoked a moment earlier.
+func (q *Queries) InsertOAuthAccessToken(ctx context.Context, arg InsertOAuthAccessTokenParams) (int64, error) {
+	result, err := q.exec(ctx, q.insertOAuthAccessTokenStmt, insertOAuthAccessToken,
+		arg.IDHash,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+		arg.GrantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const insertOAuthRefreshToken = `-- name: InsertOAuthRefreshToken :execrows
+INSERT INTO oauth_refresh_tokens (token_hash, grant_id, expires_at, created_at)
+SELECT ?1, g.id, ?2, ?3
+FROM oauth_grants g
+WHERE g.id = ?4 AND g.revoked_at IS NULL
+`
+
+type InsertOAuthRefreshTokenParams struct {
+	TokenHash string `json:"token_hash"`
+	ExpiresAt int64  `json:"expires_at"`
+	CreatedAt int64  `json:"created_at"`
+	GrantID   int64  `json:"grant_id"`
+}
+
+func (q *Queries) InsertOAuthRefreshToken(ctx context.Context, arg InsertOAuthRefreshTokenParams) (int64, error) {
+	result, err := q.exec(ctx, q.insertOAuthRefreshTokenStmt, insertOAuthRefreshToken,
+		arg.TokenHash,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+		arg.GrantID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
 }
 
 const insertQueryHistory = `-- name: InsertQueryHistory :one
@@ -2349,6 +2952,46 @@ func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
 			&i.Managed,
 			&i.AccountType,
 			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOAuthGrantsForUser = `-- name: ListOAuthGrantsForUser :many
+SELECT id, user_id, client_id, resource, scopes, offline_access, created_at, last_used_at, revoked_at, revoke_reason FROM oauth_grants
+WHERE user_id = ? AND revoked_at IS NULL
+ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]OauthGrant, error) {
+	rows, err := q.query(ctx, q.listOAuthGrantsForUserStmt, listOAuthGrantsForUser, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []OauthGrant{}
+	for rows.Next() {
+		var i OauthGrant
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.ClientID,
+			&i.Resource,
+			&i.Scopes,
+			&i.OfflineAccess,
+			&i.CreatedAt,
+			&i.LastUsedAt,
+			&i.RevokedAt,
+			&i.RevokeReason,
 		); err != nil {
 			return nil, err
 		}
@@ -3335,6 +3978,64 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate string) ([]Qu
 	return items, nil
 }
 
+const recordOAuthDevicePoll = `-- name: RecordOAuthDevicePoll :one
+UPDATE oauth_device_authorizations
+SET interval_secs = CASE WHEN (expires_at > ?1 AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > ?1 - interval_secs * 1000) THEN interval_secs + 5 ELSE interval_secs END,
+    last_polled_at = CASE WHEN (expires_at > ?1 AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > ?1 - interval_secs * 1000) THEN last_polled_at ELSE ?1 END
+WHERE device_code_hash = ?2
+  AND client_id = ?3
+  AND consumed_at IS NULL
+RETURNING client_id, resource, scopes, offline_access, interval_secs, user_id,
+    grant_id, approved_at, denied_at, expires_at, created_at,
+    CASE WHEN last_polled_at = ?1 THEN 1 ELSE 0 END AS on_time
+`
+
+type RecordOAuthDevicePollParams struct {
+	Now            int64  `json:"now"`
+	DeviceCodeHash string `json:"device_code_hash"`
+	ClientID       string `json:"client_id"`
+}
+
+type RecordOAuthDevicePollRow struct {
+	ClientID      string        `json:"client_id"`
+	Resource      string        `json:"resource"`
+	Scopes        string        `json:"scopes"`
+	OfflineAccess int64         `json:"offline_access"`
+	IntervalSecs  int64         `json:"interval_secs"`
+	UserID        sql.NullInt64 `json:"user_id"`
+	GrantID       sql.NullInt64 `json:"grant_id"`
+	ApprovedAt    sql.NullInt64 `json:"approved_at"`
+	DeniedAt      sql.NullInt64 `json:"denied_at"`
+	ExpiresAt     int64         `json:"expires_at"`
+	CreatedAt     int64         `json:"created_at"`
+	Column12      int64         `json:"column_12"`
+}
+
+// Record one poll. An early poll on a nonterminal request (not expired, not
+// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
+// last_polled_at, so on_time is false. Expired and denied requests are
+// never slowed down: they report their terminal state on every poll. Every
+// SET expression reads the pre-update row.
+func (q *Queries) RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error) {
+	row := q.queryRow(ctx, q.recordOAuthDevicePollStmt, recordOAuthDevicePoll, arg.Now, arg.DeviceCodeHash, arg.ClientID)
+	var i RecordOAuthDevicePollRow
+	err := row.Scan(
+		&i.ClientID,
+		&i.Resource,
+		&i.Scopes,
+		&i.OfflineAccess,
+		&i.IntervalSecs,
+		&i.UserID,
+		&i.GrantID,
+		&i.ApprovedAt,
+		&i.DeniedAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+		&i.Column12,
+	)
+	return i, err
+}
+
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
 DELETE FROM collection_items WHERE collection_id = ? AND saved_query_id = ?
 `
@@ -3415,6 +4116,132 @@ func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHisto
 	var id int64
 	err := row.Scan(&id)
 	return id, err
+}
+
+const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows
+UPDATE oauth_grants
+SET revoked_at = ?1, revoke_reason = ?2
+WHERE id = ?3 AND revoked_at IS NULL
+`
+
+type RevokeOAuthGrantParams struct {
+	Now    sql.NullInt64  `json:"now"`
+	Reason sql.NullString `json:"reason"`
+	ID     int64          `json:"id"`
+}
+
+func (q *Queries) RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error) {
+	result, err := q.exec(ctx, q.revokeOAuthGrantStmt, revokeOAuthGrant, arg.Now, arg.Reason, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const revokeOAuthGrantByToken = `-- name: RevokeOAuthGrantByToken :exec
+UPDATE oauth_grants
+SET revoked_at = ?1, revoke_reason = ?2
+WHERE oauth_grants.revoked_at IS NULL
+  AND oauth_grants.client_id = ?3
+  AND oauth_grants.id IN (
+      SELECT a.grant_id FROM oauth_access_tokens a WHERE a.id_hash = ?4
+      UNION
+      SELECT r.grant_id FROM oauth_refresh_tokens r WHERE r.token_hash = ?4
+  )
+`
+
+type RevokeOAuthGrantByTokenParams struct {
+	Now       sql.NullInt64  `json:"now"`
+	Reason    sql.NullString `json:"reason"`
+	ClientID  string         `json:"client_id"`
+	TokenHash string         `json:"token_hash"`
+}
+
+// Revoke the grant that owns an access-token ID hash or refresh-token hash,
+// only when the grant belongs to the given client.
+func (q *Queries) RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) error {
+	_, err := q.exec(ctx, q.revokeOAuthGrantByTokenStmt, revokeOAuthGrantByToken,
+		arg.Now,
+		arg.Reason,
+		arg.ClientID,
+		arg.TokenHash,
+	)
+	return err
+}
+
+const revokeOAuthGrantForUser = `-- name: RevokeOAuthGrantForUser :execrows
+UPDATE oauth_grants
+SET revoked_at = ?1, revoke_reason = ?2
+WHERE id = ?3 AND user_id = ?4 AND revoked_at IS NULL
+`
+
+type RevokeOAuthGrantForUserParams struct {
+	Now    sql.NullInt64  `json:"now"`
+	Reason sql.NullString `json:"reason"`
+	ID     int64          `json:"id"`
+	UserID int64          `json:"user_id"`
+}
+
+func (q *Queries) RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error) {
+	result, err := q.exec(ctx, q.revokeOAuthGrantForUserStmt, revokeOAuthGrantForUser,
+		arg.Now,
+		arg.Reason,
+		arg.ID,
+		arg.UserID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const saveOAuthAuthCode = `-- name: SaveOAuthAuthCode :execrows
+UPDATE oauth_auth_requests
+SET code_hash = ?1, code_expires_at = ?2
+WHERE id = ?3 AND grant_id IS NOT NULL AND denied = 0 AND code_hash IS NULL
+`
+
+type SaveOAuthAuthCodeParams struct {
+	CodeHash      sql.NullString `json:"code_hash"`
+	CodeExpiresAt sql.NullInt64  `json:"code_expires_at"`
+	ID            string         `json:"id"`
+}
+
+// Attach the code to an approved request. A request carries at most one code.
+func (q *Queries) SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error) {
+	result, err := q.exec(ctx, q.saveOAuthAuthCodeStmt, saveOAuthAuthCode, arg.CodeHash, arg.CodeExpiresAt, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const setOAuthAuthRequestGrant = `-- name: SetOAuthAuthRequestGrant :exec
+UPDATE oauth_auth_requests SET grant_id = ? WHERE id = ?
+`
+
+type SetOAuthAuthRequestGrantParams struct {
+	GrantID sql.NullInt64 `json:"grant_id"`
+	ID      string        `json:"id"`
+}
+
+func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error {
+	_, err := q.exec(ctx, q.setOAuthAuthRequestGrantStmt, setOAuthAuthRequestGrant, arg.GrantID, arg.ID)
+	return err
+}
+
+const setOAuthDeviceAuthorizationGrant = `-- name: SetOAuthDeviceAuthorizationGrant :exec
+UPDATE oauth_device_authorizations SET grant_id = ? WHERE device_code_hash = ?
+`
+
+type SetOAuthDeviceAuthorizationGrantParams struct {
+	GrantID        sql.NullInt64 `json:"grant_id"`
+	DeviceCodeHash string        `json:"device_code_hash"`
+}
+
+func (q *Queries) SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error {
+	_, err := q.exec(ctx, q.setOAuthDeviceAuthorizationGrantStmt, setOAuthDeviceAuthorizationGrant, arg.GrantID, arg.DeviceCodeHash)
+	return err
 }
 
 const setSourceManaged = `-- name: SetSourceManaged :exec
@@ -3606,6 +4433,20 @@ func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const touchOAuthGrant = `-- name: TouchOAuthGrant :exec
+UPDATE oauth_grants SET last_used_at = ? WHERE id = ?
+`
+
+type TouchOAuthGrantParams struct {
+	LastUsedAt sql.NullInt64 `json:"last_used_at"`
+	ID         int64         `json:"id"`
+}
+
+func (q *Queries) TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error {
+	_, err := q.exec(ctx, q.touchOAuthGrantStmt, touchOAuthGrant, arg.LastUsedAt, arg.ID)
+	return err
 }
 
 const touchQueryShare = `-- name: TouchQueryShare :exec

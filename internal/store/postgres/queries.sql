@@ -1049,3 +1049,207 @@ FROM query_stats_daily qsd
 WHERE qsd.bucket_date >= $1
 GROUP BY qsd.bucket_date
 ORDER BY qsd.bucket_date ASC;
+
+-- OAuth authorization server ------------------------------------------------
+-- Every *_hash argument is an HMAC hex digest, never a plaintext code or
+-- token. Postgres runs at READ COMMITTED: a conditional UPDATE waits on the
+-- row lock and re-checks its predicate, so exactly one writer wins.
+
+-- name: CreateOAuthAuthRequest :exec
+INSERT INTO oauth_auth_requests (
+    id, client_id, redirect_uri, resource, scopes, offline_access,
+    code_challenge, state, expires_at, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+
+-- name: GetOAuthAuthRequest :one
+SELECT * FROM oauth_auth_requests WHERE id = $1;
+
+-- name: ClaimOAuthAuthRequestDecision :one
+-- Record the first decision on a pending, unexpired request. Zero rows means
+-- the request is unknown, expired or already decided.
+UPDATE oauth_auth_requests
+SET decided_at = sqlc.arg(now)::timestamptz, user_id = sqlc.arg(user_id), denied = sqlc.arg(denied)
+WHERE id = sqlc.arg(id) AND decided_at IS NULL AND expires_at > sqlc.arg(now)::timestamptz
+RETURNING *;
+
+-- name: SetOAuthAuthRequestGrant :exec
+UPDATE oauth_auth_requests SET grant_id = $1 WHERE id = $2;
+
+-- name: SaveOAuthAuthCode :execrows
+-- Attach the code to an approved request. A request carries at most one code.
+UPDATE oauth_auth_requests
+SET code_hash = sqlc.arg(code_hash), code_expires_at = sqlc.arg(code_expires_at)
+WHERE id = sqlc.arg(id) AND grant_id IS NOT NULL AND NOT denied AND code_hash IS NULL;
+
+-- name: ConsumeOAuthAuthCode :one
+-- Single-use consumption. Exactly one concurrent caller gets the row.
+UPDATE oauth_auth_requests
+SET code_consumed_at = sqlc.arg(now)::timestamptz
+WHERE code_hash = sqlc.arg(code_hash)
+  AND code_consumed_at IS NULL
+  AND code_expires_at > sqlc.arg(now)::timestamptz
+  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
+RETURNING *;
+
+-- name: GetOAuthAuthCodeState :one
+SELECT grant_id, code_consumed_at FROM oauth_auth_requests WHERE code_hash = $1;
+
+-- name: CreateOAuthGrant :one
+INSERT INTO oauth_grants (user_id, client_id, resource, scopes, offline_access, created_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: GetOAuthGrant :one
+SELECT * FROM oauth_grants WHERE id = $1;
+
+-- name: RevokeOAuthGrant :execrows
+UPDATE oauth_grants
+SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
+WHERE id = sqlc.arg(id) AND revoked_at IS NULL;
+
+-- name: RevokeOAuthGrantForUser :execrows
+UPDATE oauth_grants
+SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
+WHERE id = sqlc.arg(id) AND user_id = sqlc.arg(user_id) AND revoked_at IS NULL;
+
+-- name: RevokeOAuthGrantByToken :exec
+-- Revoke the grant that owns an access-token ID hash or refresh-token hash,
+-- only when the grant belongs to the given client.
+UPDATE oauth_grants
+SET revoked_at = sqlc.arg(now), revoke_reason = sqlc.arg(reason)
+WHERE oauth_grants.revoked_at IS NULL
+  AND oauth_grants.client_id = sqlc.arg(client_id)
+  AND oauth_grants.id IN (
+      SELECT a.grant_id FROM oauth_access_tokens a WHERE a.id_hash = sqlc.arg(token_hash)
+      UNION
+      SELECT r.grant_id FROM oauth_refresh_tokens r WHERE r.token_hash = sqlc.arg(token_hash)
+  );
+
+-- name: TouchOAuthGrant :exec
+UPDATE oauth_grants SET last_used_at = $1 WHERE id = $2;
+
+-- name: ListOAuthGrantsForUser :many
+SELECT * FROM oauth_grants
+WHERE user_id = $1 AND revoked_at IS NULL
+ORDER BY created_at DESC, id DESC;
+
+-- name: InsertOAuthAccessToken :execrows
+-- Insert only while the grant is active, so a token is never issued under a
+-- grant revoked a moment earlier.
+INSERT INTO oauth_access_tokens (id_hash, grant_id, expires_at, created_at)
+SELECT sqlc.arg(id_hash), g.id, sqlc.arg(expires_at)::timestamptz, sqlc.arg(created_at)::timestamptz
+FROM oauth_grants g
+WHERE g.id = sqlc.arg(grant_id) AND g.revoked_at IS NULL;
+
+-- name: InsertOAuthRefreshToken :execrows
+INSERT INTO oauth_refresh_tokens (token_hash, grant_id, expires_at, created_at)
+SELECT sqlc.arg(token_hash), g.id, sqlc.arg(expires_at)::timestamptz, sqlc.arg(created_at)::timestamptz
+FROM oauth_grants g
+WHERE g.id = sqlc.arg(grant_id) AND g.revoked_at IS NULL;
+
+-- name: GetOAuthRefreshTokenState :one
+SELECT r.consumed_at, r.expires_at, sqlc.embed(g)
+FROM oauth_refresh_tokens r
+JOIN oauth_grants g ON g.id = r.grant_id
+WHERE r.token_hash = $1;
+
+-- name: ConsumeOAuthRefreshToken :one
+-- Rotation claim. Exactly one concurrent caller gets the row.
+UPDATE oauth_refresh_tokens
+SET consumed_at = sqlc.arg(now)::timestamptz, replaced_by_hash = sqlc.arg(replaced_by_hash)
+WHERE token_hash = sqlc.arg(token_hash)
+  AND consumed_at IS NULL
+  AND expires_at > sqlc.arg(now)::timestamptz
+  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
+RETURNING grant_id;
+
+-- name: AuthenticateOAuthAccessToken :one
+SELECT sqlc.embed(g), sqlc.embed(u)
+FROM oauth_access_tokens a
+JOIN oauth_grants g ON g.id = a.grant_id
+JOIN users u ON u.id = g.user_id
+WHERE a.id_hash = sqlc.arg(id_hash)
+  AND a.expires_at > sqlc.arg(now)::timestamptz
+  AND g.revoked_at IS NULL
+  AND g.resource = sqlc.arg(resource)
+  AND u.status = 'active'
+  AND u.account_type = 'human';
+
+-- name: CreateOAuthDeviceAuthorization :exec
+INSERT INTO oauth_device_authorizations (
+    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
+    interval_secs, expires_at, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+
+-- name: GetPendingOAuthDeviceAuthorization :one
+SELECT * FROM oauth_device_authorizations
+WHERE user_code_hash = sqlc.arg(user_code_hash)
+  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
+  AND expires_at > sqlc.arg(now)::timestamptz;
+
+-- name: ApproveOAuthDeviceAuthorization :one
+UPDATE oauth_device_authorizations
+SET approved_at = sqlc.arg(now)::timestamptz, user_id = sqlc.arg(user_id)
+WHERE user_code_hash = sqlc.arg(user_code_hash)
+  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
+  AND expires_at > sqlc.arg(now)::timestamptz
+RETURNING *;
+
+-- name: DenyOAuthDeviceAuthorization :execrows
+UPDATE oauth_device_authorizations
+SET denied_at = sqlc.arg(now)::timestamptz, user_id = sqlc.arg(user_id)
+WHERE user_code_hash = sqlc.arg(user_code_hash)
+  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
+  AND expires_at > sqlc.arg(now)::timestamptz;
+
+-- name: SetOAuthDeviceAuthorizationGrant :exec
+UPDATE oauth_device_authorizations SET grant_id = $1 WHERE device_code_hash = $2;
+
+-- name: RecordOAuthDevicePoll :one
+-- Record one poll. An early poll on a nonterminal request (not expired, not
+-- denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
+-- last_polled_at, so on_time is false. Expired and denied requests are
+-- never slowed down: they report their terminal state on every poll. Every
+-- SET expression reads the pre-update row.
+UPDATE oauth_device_authorizations
+SET interval_secs = CASE WHEN (expires_at > sqlc.arg(now)::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > sqlc.arg(now)::timestamptz - make_interval(secs => interval_secs)) THEN interval_secs + 5 ELSE interval_secs END,
+    last_polled_at = CASE WHEN (expires_at > sqlc.arg(now)::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > sqlc.arg(now)::timestamptz - make_interval(secs => interval_secs)) THEN last_polled_at ELSE sqlc.arg(now)::timestamptz END
+WHERE device_code_hash = sqlc.arg(device_code_hash)
+  AND client_id = sqlc.arg(client_id)
+  AND consumed_at IS NULL
+RETURNING *, CAST(last_polled_at = sqlc.arg(now)::timestamptz AS BOOLEAN) AS on_time;
+
+-- name: ConsumeOAuthDeviceCode :one
+-- Single-use consumption of an approved code. Expiry is checked here, before
+-- consumption, so an approved but expired code never issues tokens.
+UPDATE oauth_device_authorizations
+SET consumed_at = sqlc.arg(now)::timestamptz
+WHERE device_code_hash = sqlc.arg(device_code_hash)
+  AND oauth_device_authorizations.client_id = sqlc.arg(client_id)
+  AND approved_at IS NOT NULL
+  AND consumed_at IS NULL
+  AND expires_at > sqlc.arg(now)::timestamptz
+  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
+RETURNING grant_id;
+
+-- name: DeleteExpiredOAuthAuthRequests :exec
+DELETE FROM oauth_auth_requests
+WHERE expires_at <= sqlc.arg(now)::timestamptz
+  AND (code_expires_at IS NULL OR code_expires_at <= sqlc.arg(now)::timestamptz);
+
+-- name: DeleteExpiredOAuthDeviceAuthorizations :exec
+DELETE FROM oauth_device_authorizations WHERE expires_at <= $1;
+
+-- name: DeleteExpiredOAuthAccessTokens :exec
+DELETE FROM oauth_access_tokens WHERE expires_at <= $1;
+
+-- name: DeleteExpiredOAuthRefreshFamilies :exec
+-- Delete refresh rows only when no row of the same grant is still live. A
+-- consumed row therefore stays while its family can still be refreshed, so a
+-- replay of it is still detected.
+DELETE FROM oauth_refresh_tokens
+WHERE NOT EXISTS (
+    SELECT 1 FROM oauth_refresh_tokens live
+    WHERE live.grant_id = oauth_refresh_tokens.grant_id
+      AND live.expires_at > sqlc.arg(now)::timestamptz
+);
