@@ -336,10 +336,10 @@ func (s *storage) KeySet(context.Context) ([]op.Key, error) {
 }
 func (s *storage) Health(context.Context) error { return nil }
 
-func (s *storage) GetClientByClientID(_ context.Context, id string) (op.Client, error) {
-	c, ok := s.server.clients[models.OAuthClientID(id)]
-	if !ok {
-		return nil, oidc.ErrInvalidClient()
+func (s *storage) GetClientByClientID(ctx context.Context, id string) (op.Client, error) {
+	c, err := s.server.lookupClient(ctx, models.OAuthClientID(id))
+	if err != nil {
+		return nil, oidc.ErrInvalidClient().WithParent(err)
 	}
 	return c, nil
 }

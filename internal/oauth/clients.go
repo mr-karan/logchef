@@ -1,6 +1,8 @@
 package oauth
 
 import (
+	"context"
+	"errors"
 	"net/url"
 	"slices"
 	"strconv"
@@ -26,6 +28,10 @@ const (
 	// redirects to exact registered URIs and may only obtain tokens for the
 	// MCP resource.
 	ClientWeb ClientKind = "web"
+	// ClientCIMD is an MCP host identified by a Client ID Metadata Document
+	// URL. It redirects to the compliant URIs in its document and may only
+	// obtain tokens for the MCP resource.
+	ClientCIMD ClientKind = "cimd"
 	// ClientUnknown describes a grant whose client is no longer configured.
 	ClientUnknown ClientKind = "unknown"
 )
@@ -36,6 +42,9 @@ type ClientInfo struct {
 	ID   models.OAuthClientID `json:"id"`
 	Name string               `json:"name"`
 	Kind ClientKind           `json:"kind"`
+	// Host is the host of a CIMD client's metadata URL. The name is
+	// self-declared; the host is what proves who published it.
+	Host string `json:"host,omitempty"`
 }
 
 // client is a statically registered public client. It implements op.Client.
@@ -79,15 +88,54 @@ func newClients(cfg config.OAuthConfig, issuer string) map[models.OAuthClientID]
 	return clients
 }
 
+var errUnknownClient = errors.New("oauth: unknown client")
+
+// clientKey carries the client that the boundary resolved for this request,
+// so ZITADEL's lookups see the same client without another fetch.
+type clientKey struct{}
+
+func withClient(ctx context.Context, c *client) context.Context {
+	return context.WithValue(ctx, clientKey{}, c)
+}
+
+// lookupClient finds a client: built-in and configured clients first, then a
+// Client ID Metadata Document when CIMD is enabled.
+func (s *Server) lookupClient(ctx context.Context, id models.OAuthClientID) (*client, error) {
+	if c, ok := s.clients[id]; ok {
+		return c, nil
+	}
+	if c, ok := ctx.Value(clientKey{}).(*client); ok && c.info.ID == id {
+		return c, nil
+	}
+	if s.cimd == nil || !isCIMDClientID(string(id)) {
+		return nil, errUnknownClient
+	}
+	return s.cimd.resolve(ctx, string(id))
+}
+
 // redirectAllowed applies Logchef's redirect policy. Web clients need an
-// exact match. Native clients follow RFC 8252 section 7.3, more strictly than
+// exact match. CIMD clients need an exact match, except that a loopback URI
+// registered without a port matches any port (RFC 8252 section 7.3).
+func (c *client) redirectAllowed(raw string) bool {
+	switch c.info.Kind {
+	case ClientWeb:
+		return slices.Contains(c.redirectURIs, raw)
+	case ClientCIMD:
+		return slices.ContainsFunc(c.redirectURIs, func(registered string) bool {
+			return registered == raw || loopbackAnyPortMatch(registered, raw)
+		})
+	case ClientNative:
+		return nativeRedirectAllowed(raw)
+	case ClientUnknown:
+	}
+	return false
+}
+
+// nativeRedirectAllowed follows RFC 8252 section 7.3, more strictly than
 // ZITADEL: scheme http, host literally 127.0.0.1, [::1] or localhost, any
 // port, path exactly /callback, and no user info, query or fragment.
 // localhost is allowed because Claude Code and Cursor desktop redirect there.
-func (c *client) redirectAllowed(raw string) bool {
-	if c.info.Kind == ClientWeb {
-		return slices.Contains(c.redirectURIs, raw)
-	}
+func nativeRedirectAllowed(raw string) bool {
 	u, err := url.Parse(raw)
 	if err != nil || !strings.HasPrefix(raw, "http://") || strings.Contains(raw, "#") || u.User != nil ||
 		u.Path != "/callback" || u.RawPath != "" || u.RawQuery != "" || u.ForceQuery {
@@ -107,14 +155,41 @@ func (c *client) redirectAllowed(raw string) bool {
 	return true
 }
 
+// loopbackAnyPortMatch reports whether raw is registered with a port added:
+// registered is a loopback http URI without a port, and raw equals it once
+// raw's port is removed.
+func loopbackAnyPortMatch(registered, raw string) bool {
+	reg, err := url.Parse(registered)
+	if err != nil || reg.Scheme != "http" || reg.Port() != "" || !isLoopbackHostname(reg.Hostname()) {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Scheme != "http" || u.User != nil {
+		return false
+	}
+	port := u.Port()
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	prefix := "http://" + u.Host
+	if !strings.HasPrefix(raw, prefix) {
+		return false
+	}
+	return "http://"+strings.TrimSuffix(u.Host, ":"+port)+raw[len(prefix):] == registered
+}
+
 func (c *client) GetID() string                    { return string(c.info.ID) }
 func (c *client) RedirectURIs() []string           { return c.redirectURIs }
 func (c *client) PostLogoutRedirectURIs() []string { return nil }
+
+// ApplicationType is native for CIMD clients so that ZITADEL accepts their
+// loopback redirects on any port. redirectAllowed has already applied the
+// stricter policy.
 func (c *client) ApplicationType() op.ApplicationType {
-	if c.info.Kind == ClientNative {
-		return op.ApplicationTypeNative
+	if c.info.Kind == ClientWeb {
+		return op.ApplicationTypeUserAgent
 	}
-	return op.ApplicationTypeUserAgent
+	return op.ApplicationTypeNative
 }
 func (c *client) AuthMethod() oidc.AuthMethod { return oidc.AuthMethodNone }
 func (c *client) ResponseTypes() []oidc.ResponseType {

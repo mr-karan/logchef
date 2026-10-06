@@ -71,6 +71,7 @@ type Server struct {
 	mcpResource string
 	db          store.Store
 	clients     map[models.OAuthClientID]*client
+	cimd        *cimdResolver // nil when auth.oauth.cimd_enabled is false
 	hashKey     models.OAuthHashKey
 	crypto      op.Crypto
 	provider    *op.Provider
@@ -110,6 +111,9 @@ func New(cfg *config.Config, db store.Store, log *slog.Logger) (*Server, error) 
 		// unauthenticated AES-CFB format (dependency audit F3).
 		crypto: op.NewAES256GCMCrypto(cryptoKey, ""),
 		log:    log.With("component", "oauth"),
+	}
+	if cfg.Auth.OAuth.CIMDEnabled {
+		s.cimd = newCIMDResolver(s.mcpResource, issuer+ConsentPath+"?request=", s.log)
 	}
 
 	opts := []op.Option{
@@ -160,10 +164,14 @@ func (s *Server) ResourceKind(resource string) string {
 	return "unknown"
 }
 
-// ClientInfo describes a client, including one removed from config.
+// ClientInfo describes a client, including one removed from config, without
+// fetching anything.
 func (s *Server) ClientInfo(id models.OAuthClientID) ClientInfo {
 	if c, ok := s.clients[id]; ok {
 		return c.info
+	}
+	if s.cimd != nil && isCIMDClientID(string(id)) {
+		return s.cimd.cachedInfo(string(id))
 	}
 	return ClientInfo{ID: id, Name: string(id), Kind: ClientUnknown}
 }

@@ -1331,6 +1331,8 @@
   "pages.oauthPhishingWarning": "如果此链接是别人发给你的，或者你不认识该应用或它返回的地址，请选择拒绝。",
   "pages.oauthApplication": "应用",
   "pages.oauthReturnsTo": "返回地址",
+  "pages.oauthPublishedBy": "发布方",
+  "pages.oauthCimdNotice": "名称 {client} 由该应用自行声明。仅当 {host} 属于你正在连接的应用时才批准。",
   "pages.oauthAccessType": "访问用途",
   "pages.oauthInstance": "Logchef 实例",
   "pages.oauthSignedInAs": "当前登录",

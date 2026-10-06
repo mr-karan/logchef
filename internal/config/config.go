@@ -301,6 +301,11 @@ type AuthConfig struct {
 // Enabled is false, no OAuth route or metadata exists.
 type OAuthConfig struct {
 	Enabled bool `koanf:"enabled"`
+	// CIMDEnabled accepts Client ID Metadata Documents: an MCP host whose
+	// client_id is an https URL connects without registration, and Logchef
+	// fetches the client's name and redirect URIs from that URL. Defaults to
+	// true. Pre-registered clients always take precedence.
+	CIMDEnabled bool `koanf:"cimd_enabled"`
 	// Clients are the pre-registered public web clients (for example an MCP
 	// host). The native "logchef-cli" client is built in and is not listed here.
 	Clients []OAuthClientConfig `koanf:"clients"`
@@ -848,6 +853,9 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if !k.Exists("auth.default_token_expiry") {
 		cfg.Auth.DefaultTokenExpiry = defaultAuthDefaultTokenExpiry
+	}
+	if !k.Exists("auth.oauth.cimd_enabled") {
+		cfg.Auth.OAuth.CIMDEnabled = true
 	}
 
 	if !k.Exists("query.default_preview_limit") {
