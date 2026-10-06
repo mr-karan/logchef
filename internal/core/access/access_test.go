@@ -30,9 +30,10 @@ func TestPrincipalRequire(t *testing.T) {
 		{"api token without scope", APITokenPrincipal(nil, sourcesToken), false},
 		{"api token with wildcard", APITokenPrincipal(nil, allToken), true},
 		{"api token missing", APITokenPrincipal(nil, nil), false},
-		{"oauth with scope", Principal{Method: AuthOAuth, scopes: []models.TokenScope{models.TokenScopeLogsRead}}, true},
-		{"oauth without scope", Principal{Method: AuthOAuth, scopes: []models.TokenScope{models.TokenScopeSourcesRead}}, false},
-		{"oauth wildcard is not a grant", Principal{Method: AuthOAuth, scopes: []models.TokenScope{models.TokenScopeAll}}, false},
+		{"oauth with scope", OAuthPrincipal(nil, 1, "c", []models.TokenScope{models.TokenScopeLogsRead}), true},
+		{"oauth without scope", OAuthPrincipal(nil, 1, "c", []models.TokenScope{models.TokenScopeSourcesRead}), false},
+		{"oauth wildcard is not a grant", OAuthPrincipal(nil, 1, "c", []models.TokenScope{models.TokenScopeAll}), false},
+		{"oauth with no scopes", OAuthPrincipal(nil, 1, "c", nil), false},
 		{"zero method", Principal{User: &models.User{Role: models.UserRoleAdmin}}, false},
 		{"unknown method", Principal{Method: AuthMethod(99), scopes: []models.TokenScope{models.TokenScopeLogsRead}}, false},
 	} {
@@ -55,6 +56,40 @@ func TestAPITokenPrincipalCopiesScopes(t *testing.T) {
 	token.Scopes[0] = models.TokenScopeAll
 	if err := p.Require(models.TokenScopeSourcesRead); err == nil {
 		t.Fatal("changing the token after the principal was built widened the principal")
+	}
+}
+
+func TestOAuthPrincipalCopiesScopes(t *testing.T) {
+	t.Parallel()
+	scopes := []models.TokenScope{models.TokenScopeLogsRead}
+	p := OAuthPrincipal(nil, 3, "chatgpt", scopes)
+	scopes[0] = models.TokenScopeSourcesRead
+	if err := p.Require(models.TokenScopeLogsRead); err != nil {
+		t.Fatal("changing the input slice narrowed the principal")
+	}
+	got := p.Scopes()
+	got[0] = models.TokenScopeAll
+	if err := p.Require(models.TokenScopeSourcesRead); err == nil {
+		t.Fatal("changing Scopes() output widened the principal")
+	}
+	if p.GrantID != 3 || p.ClientID != "chatgpt" || p.Method != AuthOAuth {
+		t.Fatalf("principal = %+v", p)
+	}
+}
+
+// Review 3, R1: an OAuth principal never passes RequireGlobalAdmin.
+func TestRequireGlobalAdminRejectsOAuth(t *testing.T) {
+	t.Parallel()
+	admin := &models.User{Role: models.UserRoleAdmin}
+	allToken := &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAll}}
+	if err := OAuthPrincipal(admin, 1, "c", []models.TokenScope{models.TokenScopeLogsRead}).RequireGlobalAdmin(); !errors.Is(err, ErrGlobalAdminRequired) {
+		t.Fatalf("OAuth admin: err = %v, want ErrGlobalAdminRequired", err)
+	}
+	if err := SessionPrincipal(admin).RequireGlobalAdmin(); err != nil {
+		t.Fatalf("session admin: %v", err)
+	}
+	if err := APITokenPrincipal(admin, allToken).RequireGlobalAdmin(); err != nil {
+		t.Fatalf("PAT admin: %v", err)
 	}
 }
 

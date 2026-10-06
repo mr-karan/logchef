@@ -37,6 +37,8 @@ export interface MetaResponse {
   // Dashboard result-cache policy; ABSENT on an old server (→ null in the store,
   // which means "cache unavailable / fail closed").
   dashboard_cache?: DashboardCachePolicy;
+  // Present only when the server runs Logchef's OAuth authorization server.
+  oauth_issuer?: string;
 }
 
 export const metaApi = {

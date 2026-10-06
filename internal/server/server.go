@@ -18,11 +18,13 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/metrics"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/contrib/v3/swaggo"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/compress"
 	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/static"
@@ -40,6 +42,7 @@ type ServerOptions struct {
 	Datasources   *datasource.Service
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
+	OAuth         *oauth.Server      // OAuth authorization server; nil when auth.oauth is disabled.
 	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
 	Logger        *slog.Logger
 	BuildInfo     string
@@ -56,6 +59,7 @@ type Server struct {
 	datasources   *datasource.Service
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
+	oauth         *oauth.Server      // nil when auth.oauth is disabled
 	fs            http.FileSystem
 	indexHTML     []byte // index.html with <base href> set; nil when the UI is not embedded
 	log           *slog.Logger
@@ -147,6 +151,7 @@ func New(opts ServerOptions) *Server {
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
 		oidcProvider:  opts.OIDCProvider,
+		oauth:         opts.OAuth,
 		fs:            opts.FS,
 		log:           opts.Logger,
 		buildInfo:     opts.BuildInfo,
@@ -428,6 +433,26 @@ func (s *Server) setupRoutes() {
 	dashboardRoutes.Get("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsRead), s.handleGetDashboard)
 	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard)
 	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard)
+
+	// --- OAuth authorization server (only when auth.oauth.enabled) ---
+	if s.oauth != nil {
+		oauthEndpoints := adaptor.HTTPHandler(s.oauth.Handler())
+		registerLimited(s.app, fiber.MethodGet, oauth.AuthorizePath, authLimiter, oauthEndpoints)
+		registerLimited(s.app, fiber.MethodPost, oauth.AuthorizePath, authLimiter, oauthEndpoints)
+		registerLimited(s.app, fiber.MethodPost, oauth.TokenPath, authLimiter, oauthEndpoints)
+		registerLimited(s.app, fiber.MethodPost, oauth.RevokePath, authLimiter, oauthEndpoints)
+		s.app.Get(oauth.AuthorizationServerMetadataPath, s.handleOAuthMetadata)
+		s.app.Get(oauth.ProtectedResourceMetadataPath, s.handleMCPResourceMetadata)
+		// Clients written against older MCP drafts look for the PRM at the root.
+		s.app.Get("/.well-known/oauth-protected-resource", s.handleMCPResourceMetadata)
+
+		// Consent and Connected apps: browser session only. Changes also
+		// require the public_url Origin.
+		api.Get("/oauth/requests/:requestID", s.requireSession, s.handleGetOAuthRequest)
+		api.Post("/oauth/requests/:requestID/decision", s.requireSession, s.requireSameOrigin, s.handleOAuthDecision)
+		api.Get("/me/connected-apps", s.requireSession, s.handleListConnectedApps)
+		api.Delete("/me/connected-apps/:grantID", s.requireSession, s.requireSameOrigin, s.handleRevokeConnectedApp)
+	}
 
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s

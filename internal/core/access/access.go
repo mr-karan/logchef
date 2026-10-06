@@ -45,6 +45,9 @@ type Principal struct {
 	Method AuthMethod
 	// scopes is nil for sessions, which carry the user's full rights.
 	scopes []models.TokenScope
+	// GrantID and ClientID are set only for AuthOAuth.
+	GrantID  models.OAuthGrantID
+	ClientID models.OAuthClientID
 }
 
 // SessionPrincipal builds the principal for a browser session.
@@ -59,6 +62,23 @@ func APITokenPrincipal(user *models.User, token *models.APIToken) Principal {
 		p.scopes = append([]models.TokenScope(nil), token.Scopes...)
 	}
 	return p
+}
+
+// OAuthPrincipal builds the principal for an OAuth access token. scopes are
+// the scopes of that access token, which can be narrower than the grant's.
+func OAuthPrincipal(user *models.User, grantID models.OAuthGrantID, clientID models.OAuthClientID, scopes []models.TokenScope) Principal {
+	return Principal{
+		User:     user,
+		Method:   AuthOAuth,
+		scopes:   slices.Clone(scopes),
+		GrantID:  grantID,
+		ClientID: clientID,
+	}
+}
+
+// Scopes returns a copy of the credential's scopes. It is nil for sessions.
+func (p Principal) Scopes() []models.TokenScope {
+	return slices.Clone(p.scopes)
 }
 
 // Require returns ErrInsufficientScope unless the principal holds scope.
@@ -81,9 +101,10 @@ func (p Principal) Require(scope models.TokenScope) error {
 }
 
 // RequireGlobalAdmin returns ErrGlobalAdminRequired unless the user is a
-// global admin. It does not check scope.
+// global admin. It does not check scope. An OAuth principal is never a global
+// admin, whatever the user's role.
 func (p Principal) RequireGlobalAdmin() error {
-	if p.User == nil || p.User.Role != models.UserRoleAdmin {
+	if p.Method == AuthOAuth || p.User == nil || p.User.Role != models.UserRoleAdmin {
 		return ErrGlobalAdminRequired
 	}
 	return nil

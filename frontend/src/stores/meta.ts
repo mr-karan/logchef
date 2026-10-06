@@ -25,6 +25,8 @@ interface MetaState {
   // Server dashboard-cache policy. null = absent (old server) OR malformed →
   // "cache unavailable / fail closed" (resolveEffectiveCacheTtl returns 0).
   dashboardCachePolicy: DashboardCachePolicy | null;
+  // Logchef OAuth issuer; null when the server has OAuth disabled.
+  oauthIssuer: string | null;
   isInitialized: boolean;
 }
 
@@ -72,6 +74,7 @@ export const useMetaStore = defineStore("meta", () => {
     demoReadOnly: false,
     demoLoginCredentials: null,
     dashboardCachePolicy: null,
+    oauthIssuer: null,
     isInitialized: false,
   });
 
@@ -89,6 +92,7 @@ export const useMetaStore = defineStore("meta", () => {
   const demoReadOnly = computed(() => state.data.value.demoReadOnly);
   const demoLoginCredentials = computed(() => state.data.value.demoLoginCredentials);
   const dashboardCachePolicy = computed(() => state.data.value.dashboardCachePolicy);
+  const oauthIssuer = computed(() => state.data.value.oauthIssuer);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
@@ -119,6 +123,7 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.demoReadOnly = response.demo_read_only ?? false;
               state.data.value.demoLoginCredentials = parseDemoLoginCredentials(response.demo_login_credentials);
               state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
+              state.data.value.oauthIssuer = response.oauth_issuer || null;
               state.data.value.isInitialized = true;
             }
           },
@@ -149,6 +154,7 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.demoReadOnly = false;
     state.data.value.demoLoginCredentials = null;
     state.data.value.dashboardCachePolicy = null;
+    state.data.value.oauthIssuer = null;
     state.data.value.isInitialized = false;
   }
 
@@ -166,6 +172,7 @@ export const useMetaStore = defineStore("meta", () => {
     demoReadOnly,
     demoLoginCredentials,
     dashboardCachePolicy,
+    oauthIssuer,
     isInitialized,
     error,
     loadMeta,

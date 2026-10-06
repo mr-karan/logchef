@@ -4,13 +4,15 @@ import { useI18n } from "vue-i18n";
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 import { cn } from "@/lib/utils";
-import { SlidersHorizontal, UserCircle2 } from "lucide-vue-next";
+import { PlugZap, SlidersHorizontal, UserCircle2 } from "lucide-vue-next";
+import { useMetaStore } from "@/stores/meta";
 
 const { t } = useI18n();
 
 const route = useRoute();
+const metaStore = useMetaStore();
 
-const navItems = [
+const baseNavItems = [
   {
     get label() { return t('ui.profile'); },
     to: "/settings/profile",
@@ -22,6 +24,13 @@ const navItems = [
     icon: SlidersHorizontal,
   },
 ];
+
+// Connected apps exists only when the server runs Logchef OAuth.
+const navItems = computed(() =>
+  metaStore.oauthIssuer
+    ? [...baseNavItems, { get label() { return t("routes.connectedApps"); }, to: "/settings/connected-apps", icon: PlugZap }]
+    : baseNavItems,
+);
 
 const activePath = computed(() => route.path);
 const isActive = (to: string) => activePath.value === to || activePath.value.startsWith(to + "/");

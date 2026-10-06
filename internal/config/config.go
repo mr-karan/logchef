@@ -170,6 +170,10 @@ type ServerConfig struct {
 	// ProxyHeader is the forwarding header read for the client IP when the
 	// direct peer is a trusted proxy. Defaults to X-Forwarded-For.
 	ProxyHeader string `koanf:"proxy_header"`
+	// PublicURL is the canonical external URL of this Logchef instance, with
+	// no trailing slash. It is the OAuth issuer and the base of the OAuth
+	// resource identifiers. Required when auth.oauth.enabled is true.
+	PublicURL string `koanf:"public_url"`
 }
 
 // IsSecureCookie returns whether cookies should have the Secure flag set.
@@ -285,7 +289,45 @@ type AuthConfig struct {
 	// AutoProvision enables just-in-time user creation on first OIDC login
 	// from an allowed company domain, instead of failing with "user not found".
 	AutoProvision AutoProvisionConfig `koanf:"auto_provision"`
+	// OAuth turns Logchef into an OAuth authorization server for the CLI and
+	// MCP hosts. Disabled by default.
+	OAuth OAuthConfig `koanf:"oauth"`
 }
+
+// OAuthConfig configures Logchef's own OAuth authorization server. When
+// Enabled is false, no OAuth route or metadata exists.
+type OAuthConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// Clients are the pre-registered public web clients (for example an MCP
+	// host). The native "logchef-cli" client is built in and is not listed here.
+	Clients []OAuthClientConfig `koanf:"clients"`
+}
+
+// OAuthClientConfig is one pre-registered hosted (web) OAuth client. It may
+// only obtain tokens for /mcp. Copy each redirect URI exactly from the host's
+// management page; matching is exact. Known hosted redirect URIs:
+//
+//   - Claude.ai and Claude Desktop custom connectors: https://claude.ai/api/mcp/auth_callback
+//   - ChatGPT connectors: https://chatgpt.com/connector_platform_oauth_redirect
+//   - Cursor web agents: https://www.cursor.com/agents/mcp/oauth/callback
+//
+// Local MCP hosts (Claude Code, Codex CLI, Cursor desktop) use the built-in
+// OAuthMCPClientID instead.
+type OAuthClientConfig struct {
+	ID           string   `koanf:"id"`
+	Name         string   `koanf:"name"`
+	RedirectURIs []string `koanf:"redirect_uris"`
+}
+
+// Built-in native OAuth clients. Both redirect to a loopback listener. They
+// differ only in the resource they may obtain tokens for.
+const (
+	// OAuthCLIClientID is the Logchef CLI. Its tokens are for /api only.
+	OAuthCLIClientID = "logchef-cli"
+	// OAuthMCPClientID is for local MCP hosts such as Claude Code, Codex CLI
+	// and Cursor desktop. Its tokens are for /mcp only.
+	OAuthMCPClientID = "logchef-mcp"
+)
 
 // AutoProvisionConfig controls JIT (just-in-time) user provisioning on first
 // OIDC login. When Enabled, a user authenticating via OIDC for the first time
@@ -534,6 +576,76 @@ func validateTrustedProxies(proxies []string) error {
 	return nil
 }
 
+// validateOAuth checks the OAuth server settings. It runs only when OAuth is
+// enabled, so a disabled block never stops startup.
+func validateOAuth(cfg *OAuthConfig, publicURL string) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if err := validatePublicURL(publicURL); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(cfg.Clients))
+	for i, client := range cfg.Clients {
+		if client.ID == "" {
+			return fmt.Errorf("auth.oauth.clients[%d].id is required", i)
+		}
+		if client.ID == OAuthCLIClientID || client.ID == OAuthMCPClientID {
+			return fmt.Errorf("auth.oauth.clients[%d].id %q is reserved for a built-in client", i, client.ID)
+		}
+		if _, dup := seen[client.ID]; dup {
+			return fmt.Errorf("auth.oauth.clients[%d].id %q is not unique", i, client.ID)
+		}
+		seen[client.ID] = struct{}{}
+		if client.Name == "" {
+			return fmt.Errorf("auth.oauth.clients[%d].name is required", i)
+		}
+		if len(client.RedirectURIs) == 0 {
+			return fmt.Errorf("auth.oauth.clients[%d].redirect_uris must not be empty", i)
+		}
+		for _, raw := range client.RedirectURIs {
+			u, err := url.Parse(raw)
+			if err != nil || u.Scheme != "https" || u.Host == "" || u.Fragment != "" || strings.Contains(raw, "#") {
+				return fmt.Errorf("auth.oauth.clients[%d].redirect_uris entry %q must be an absolute https URL without a fragment", i, raw)
+			}
+		}
+	}
+	return nil
+}
+
+// validatePublicURL requires an absolute URL with no trailing slash, query or
+// fragment. It must be https, except on a loopback host for local development.
+func validatePublicURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("server.public_url is required when auth.oauth.enabled is true (either in file or %sSERVER__PUBLIC_URL)", envPrefix)
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "?#") || strings.HasSuffix(raw, "/") {
+		return fmt.Errorf("server.public_url %q must be an absolute URL with no trailing slash, query or fragment", raw)
+	}
+	// RFC 8414 path-inserted discovery is not implemented, so an issuer with a
+	// path would advertise metadata that clients cannot find.
+	if u.Path != "" || u.RawPath != "" || u.Opaque != "" || u.User != nil {
+		return fmt.Errorf("server.public_url %q must be an origin only (scheme, host and optional port); a base path is not supported with OAuth", raw)
+	}
+	switch {
+	case u.Scheme == "https":
+		return nil
+	case u.Scheme == "http" && isLoopbackHost(u.Hostname()):
+		return nil
+	}
+	return fmt.Errorf("server.public_url %q must use https (http is allowed only for localhost, 127.0.0.1 and ::1)", raw)
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation is a flat sequence of independent required-field checks
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
@@ -566,6 +678,10 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 	}
 	if len(cfg.Auth.APITokenSecret) < 32 {
 		return fmt.Errorf("api_token_secret must be at least 32 characters long for security")
+	}
+
+	if err := validateOAuth(&cfg.Auth.OAuth, cfg.Server.PublicURL); err != nil {
+		return err
 	}
 
 	if cfg.Demo.ShowLoginCredentials && !cfg.Demo.ReadOnly {

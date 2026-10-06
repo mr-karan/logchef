@@ -12,6 +12,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v3"
@@ -438,6 +439,21 @@ func (s *Server) handleGetCurrentUser(c fiber.Ctx) error {
 			"prefix":       apiToken.Prefix,
 			"last_used_at": apiToken.LastUsedAt,
 			"created_at":   apiToken.CreatedAt,
+		}
+		response["auth"] = fiber.Map{
+			"method":     "token",
+			"scopes":     apiToken.Scopes,
+			"expires_at": apiToken.ExpiresAt,
+		}
+	}
+
+	// OAuth callers see the access token's scopes, expiry and client.
+	if token, ok := c.Locals("oauth_token").(*oauth.AccessToken); ok && token != nil {
+		response["auth"] = fiber.Map{
+			"method":     "oauth",
+			"scopes":     token.Principal.Scopes(),
+			"expires_at": token.ExpiresAt,
+			"client_id":  token.Principal.ClientID,
 		}
 	}
 

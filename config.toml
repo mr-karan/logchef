@@ -131,6 +131,35 @@ allowed_domains = ["example.com"]
 # A nonexistent team ID is logged and skipped; it never fails the login.
 # default_team_ids = [1]
 
+# Logchef OAuth authorization server (optional, disabled by default).
+# Lets the Logchef CLI and MCP hosts connect with a browser consent instead of
+# an API token. Requires [server] public_url: the external origin of this
+# instance (scheme, host and optional port; no path), for example
+# public_url = "https://logchef.example.com". For local development with the
+# Vite dev server, set public_url = "http://localhost:5173".
+# Built-in public clients (no config needed):
+#   logchef-cli  the Logchef CLI, tokens for /api only
+#   logchef-mcp  local MCP hosts (Claude Code, Codex CLI, Cursor desktop),
+#                tokens for /mcp only, loopback redirects on any port
+# Hosted MCP clients are listed below with their exact redirect URIs.
+# [auth.oauth]
+# enabled = true
+#
+# [[auth.oauth.clients]]
+# id = "claude"
+# name = "Claude"
+# redirect_uris = ["https://claude.ai/api/mcp/auth_callback"]
+#
+# [[auth.oauth.clients]]
+# id = "chatgpt"
+# name = "ChatGPT"
+# redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
+#
+# [[auth.oauth.clients]]
+# id = "cursor-web"
+# name = "Cursor"
+# redirect_uris = ["https://www.cursor.com/agents/mcp/oauth/callback"]
+
 # -----------------------------------------------------------------------------
 # Query Settings (optional)
 # -----------------------------------------------------------------------------

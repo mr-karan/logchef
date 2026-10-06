@@ -8,6 +8,7 @@ import { AlertCircle, KeyRound, Loader2 } from 'lucide-vue-next'
 import { useAuthStore } from '@/stores/auth'
 import { useMetaStore } from '@/stores/meta'
 import { prefillEmptyLoginFields } from '@/utils/demoCredentials'
+import { safeRedirectPath } from '@/utils/safeRedirect'
 import { useRoute, useRouter } from 'vue-router'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -91,8 +92,8 @@ async function handleLocalLogin() {
   try {
     const result = await authStore.localLogin(email.value.trim(), password.value)
     if (result?.success) {
-      const redirectPath = (route.query.redirect as string) || '/logs/explore'
-      await router.push(redirectPath)
+      // Same rule as the server applies to the OIDC redirect.
+      await router.push(safeRedirectPath(route.query.redirect, '/logs/explore'))
     } else {
       localError.value = t('pages.invalidEmailPassword')
       password.value = ''

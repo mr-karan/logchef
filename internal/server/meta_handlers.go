@@ -27,5 +27,16 @@ func (s *Server) handleGetMeta(c fiber.Ctx) error {
 	if s.oidcProvider != nil {
 		oidcIssuer = s.oidcProvider.GetIssuer()
 	}
-	return SendSuccess(c, fiber.StatusOK, core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil))
+	meta := metaResponse{MetaResponse: core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil)}
+	if s.oauth != nil {
+		meta.OAuthIssuer = s.oauth.Issuer()
+	}
+	return SendSuccess(c, fiber.StatusOK, meta)
+}
+
+// metaResponse adds the HTTP-only OAuth fields to the shared metadata. A CLI
+// that sees oauth_issuer logs in through Logchef OAuth.
+type metaResponse struct {
+	core.MetaResponse
+	OAuthIssuer string `json:"oauth_issuer,omitempty"`
 }

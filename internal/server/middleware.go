@@ -4,6 +4,7 @@ import (
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/metrics"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"errors"
@@ -31,14 +32,19 @@ func isUserAdmin(c fiber.Ctx) bool {
 }
 
 // requireAuth is middleware that ensures the request includes valid authentication.
-// It supports both API token authentication (Authorization: Bearer <token>) and
-// session-based authentication (session cookie). It validates the authentication,
-// retrieves the associated user, and stores the user information in the request
-// context (c.Locals) for subsequent handlers.
+// It supports API tokens and, when OAuth is enabled, OAuth access tokens
+// (Authorization: Bearer <token>), and session-based authentication (session
+// cookie). A bearer value with the API token prefix always takes the API token
+// path. It validates the authentication, retrieves the associated user, and
+// stores the user information in the request context (c.Locals) for
+// subsequent handlers.
 func (s *Server) requireAuth(c fiber.Ctx) error {
-	// Try API token authentication first
 	authHeader := c.Get("Authorization")
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		bearer := strings.TrimPrefix(authHeader, "Bearer ")
+		if s.oauth != nil && bearer != "" && !strings.HasPrefix(bearer, core.TokenPrefix) {
+			return s.authenticateWithOAuth(c, bearer)
+		}
 		return s.authenticateWithToken(c, authHeader)
 	}
 
@@ -77,6 +83,53 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 	c.Locals("api_token", apiToken)
 	c.Locals("auth_method", "token")
 
+	return c.Next()
+}
+
+// authenticateWithOAuth accepts only access tokens issued for the API
+// resource. A token issued for /mcp, an ID token or a refresh token is
+// rejected with invalid_token.
+func (s *Server) authenticateWithOAuth(c fiber.Ctx, bearer string) error {
+	token, err := s.oauth.AuthenticateAccessToken(c.RequestCtx(), bearer, oauth.ResourceAPI)
+	if err != nil {
+		metrics.RecordAuthAttempt("oauth", false, nil)
+		if errors.Is(err, oauth.ErrInvalidAccessToken) {
+			c.Set(fiber.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired token", models.AuthenticationErrorType)
+		}
+		s.log.Error("error authenticating OAuth access token", "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
+	}
+	metrics.RecordAuthAttempt("oauth", true, token.Principal.User)
+	c.Locals("user", token.Principal.User)
+	c.Locals("oauth_token", token)
+	c.Locals("auth_method", "oauth")
+	return c.Next()
+}
+
+// requireSession allows only browser-session authentication. Any
+// Authorization header is refused, even an empty one, so neither an API token nor an OAuth
+// access token can read or change OAuth consent.
+func (s *Server) requireSession(c fiber.Ctx) error {
+	if _, present := c.GetReqHeaders()[fiber.HeaderAuthorization]; present {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "This endpoint requires a browser session", models.AuthenticationErrorType)
+	}
+	return s.authenticateWithSession(c)
+}
+
+// requireSameOrigin is the CSRF control for session-only routes that change
+// state: the browser Origin must equal the origin of server.public_url, and a
+// POST body must be JSON.
+func (s *Server) requireSameOrigin(c fiber.Ctx) error {
+	if c.Get(fiber.HeaderOrigin) != s.oauth.Origin() {
+		return SendErrorWithType(c, fiber.StatusForbidden, "Request origin is not allowed", models.AuthorizationErrorType)
+	}
+	if c.Method() == fiber.MethodPost {
+		mediaType, _, _ := strings.Cut(c.Get(fiber.HeaderContentType), ";")
+		if !strings.EqualFold(strings.TrimSpace(mediaType), fiber.MIMEApplicationJSON) {
+			return SendErrorWithType(c, fiber.StatusUnsupportedMediaType, "Content-Type must be application/json", models.ValidationErrorType)
+		}
+	}
 	return c.Next()
 }
 
@@ -139,11 +192,18 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 
 // requireAdmin is middleware that ensures the authenticated user has the global 'admin' role.
 // It assumes requireAuth has already run and placed the user in the context.
+// OAuth access tokens never pass, whatever the user's role: an OAuth client
+// holds read scopes only and must not reach administrative routes.
 func (s *Server) requireAdmin(c fiber.Ctx) error {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		s.log.Error("user not found in context for admin check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
+
+	if c.Locals("auth_method") == "oauth" {
+		metrics.RecordAuthorizationFailure(c.Route().Path, user, "oauth_admin_route")
+		return SendErrorWithType(c, fiber.StatusForbidden, "Admin routes are not available to OAuth clients", models.AuthorizationErrorType)
 	}
 
 	if user.Role != models.UserRoleAdmin {
@@ -168,6 +228,10 @@ func principalFromLocals(c fiber.Ctx) access.Principal {
 	case "token":
 		apiToken, _ := c.Locals("api_token").(*models.APIToken)
 		return access.APITokenPrincipal(user, apiToken)
+	case "oauth":
+		if token, ok := c.Locals("oauth_token").(*oauth.AccessToken); ok && token != nil {
+			return token.Principal
+		}
 	}
 	return access.Principal{User: user}
 }
@@ -184,6 +248,9 @@ func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
 
 func sendInsufficientScope(c fiber.Ctx, user *models.User) error {
 	metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
+	if c.Locals("auth_method") == "oauth" {
+		c.Set(fiber.HeaderWWWAuthenticate, `Bearer error="insufficient_scope"`)
+	}
 	return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
 }
 

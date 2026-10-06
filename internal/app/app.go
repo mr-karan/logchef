@@ -14,6 +14,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
 	"github.com/mr-karan/logchef/internal/server"
 	"github.com/mr-karan/logchef/internal/store"
@@ -126,6 +127,16 @@ func (a *App) Initialize(ctx context.Context) error {
 		}
 	}
 
+	// The OAuth authorization server exists only when enabled; nil otherwise.
+	var oauthServer *oauth.Server
+	if a.Config.Auth.OAuth.Enabled {
+		oauthServer, err = oauth.New(a.Config, a.SQLite, a.Logger)
+		if err != nil {
+			return fmt.Errorf("failed to initialize OAuth server: %w", err)
+		}
+		a.Logger.Info("OAuth authorization server enabled", "issuer", oauthServer.Issuer())
+	}
+
 	// Bootstrap the local-auth admin when configured (idempotent).
 	if err := ensureLocalAdmin(ctx, a.Config, a.SQLite, a.Logger); err != nil {
 		return fmt.Errorf("failed to bootstrap local auth admin: %w", err)
@@ -175,6 +186,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
 		OIDCProvider:  oidcProvider,
+		OAuth:         oauthServer,
 		FS:            a.WebFS,
 		Logger:        a.Logger,
 		BuildInfo:     a.BuildInfo,

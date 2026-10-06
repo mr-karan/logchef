@@ -461,4 +461,8 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	if err := s.sqlite.DeleteExpiredSessions(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired sessions", "error", err)
 	}
+
+	if err := s.sqlite.DeleteExpiredOAuthRows(ctx, now); err != nil {
+		s.log.Warn("failed to delete expired OAuth rows", "error", err)
+	}
 }

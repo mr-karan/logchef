@@ -240,7 +240,26 @@ const routes: RouteRecordRaw[] = [
         component: lazy("UserPreferences", () => import("@/views/settings/UserPreferences.vue")),
         meta: { title: "routes.preferences" },
       },
+      {
+        path: "connected-apps",
+        name: "ConnectedApps",
+        component: lazy("ConnectedApps", () => import("@/views/settings/ConnectedApps.vue")),
+        meta: { title: "routes.connectedApps", requiresOAuth: true },
+      },
     ],
+  },
+
+  // OAuth consent. Not public: without a session the guard sends the user to
+  // login with this URL as the redirect, and login returns here.
+  {
+    path: "/oauth/consent",
+    name: "OAuthConsent",
+    component: lazy("OAuthConsent", () => import("@/views/oauth/OAuthConsent.vue")),
+    meta: {
+      title: "routes.oauthConsent",
+      layout: "outer",
+      requiresOAuth: true,
+    },
   },
 
   // Error Pages
@@ -273,6 +292,16 @@ const router = createRouter({
 });
 
 router.beforeEach(async (to) => {
+  // OAuth pages exist only when the server runs Logchef OAuth. Meta may not
+  // be loaded yet on a cold visit, so load it before deciding.
+  if (to.matched.some((record) => record.meta.requiresOAuth)) {
+    const metaStore = useMetaStore();
+    await metaStore.loadMeta();
+    if (!metaStore.oauthIssuer) {
+      return { name: "NotFound", params: { pathMatch: to.path.slice(1).split("/") } };
+    }
+  }
+
   const authStore = useAuthStore();
   const isAuthenticated = authStore.isAuthenticated;
   const isAdmin = authStore.user?.role === "admin";

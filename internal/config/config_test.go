@@ -368,3 +368,75 @@ func TestLoad_RejectsUnparseableFrontendURL(t *testing.T) {
 		t.Fatal("Load with an unparseable server.frontend_url: want error, got nil")
 	}
 }
+
+func TestLoad_OAuthDisabledByDefault(t *testing.T) {
+	cfg, err := Load(writeConfig(t, ""))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Auth.OAuth.Enabled || len(cfg.Auth.OAuth.Clients) != 0 {
+		t.Fatalf("OAuth = %+v, want disabled with no clients", cfg.Auth.OAuth)
+	}
+}
+
+func TestLoad_OAuthValidation(t *testing.T) {
+	const client = `
+[[auth.oauth.clients]]
+id = "chatgpt"
+name = "ChatGPT"
+redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
+`
+	tests := []struct {
+		name    string
+		extra   string
+		wantErr bool
+	}{
+		{"enabled without public_url", "[auth.oauth]\nenabled = true\n", true},
+		{"https public_url", "[server]\npublic_url = \"https://logchef.example.com\"\n[auth.oauth]\nenabled = true\n" + client, false},
+		{"base path public_url", "[server]\npublic_url = \"https://example.com/logchef\"\n[auth.oauth]\nenabled = true\n", true},
+		{"userinfo public_url", "[server]\npublic_url = \"https://user@logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"port public_url", "[server]\npublic_url = \"https://logchef.example.com:8443\"\n[auth.oauth]\nenabled = true\n", false},
+		{"loopback http public_url", "[server]\npublic_url = \"http://localhost:8125\"\n[auth.oauth]\nenabled = true\n", false},
+		{"non-loopback http public_url", "[server]\npublic_url = \"http://logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"trailing slash", "[server]\npublic_url = \"https://logchef.example.com/\"\n[auth.oauth]\nenabled = true\n", true},
+		{"query in public_url", "[server]\npublic_url = \"https://logchef.example.com?x=1\"\n[auth.oauth]\nenabled = true\n", true},
+		{"relative public_url", "[server]\npublic_url = \"logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"disabled ignores bad block", "[auth.oauth]\nenabled = false\n[[auth.oauth.clients]]\nid = \"logchef-cli\"\n", false},
+		{"reserved client id", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"logchef-cli\"\nname = \"x\"\nredirect_uris = [\"https://a.example.com/cb\"]\n", true},
+		{"reserved MCP client id", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"logchef-mcp\"\nname = \"x\"\nredirect_uris = [\"https://a.example.com/cb\"]\n", true},
+		{"duplicate client id", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n" + client + client, true},
+		{"missing name", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"a\"\nredirect_uris = [\"https://a.example.com/cb\"]\n", true},
+		{"no redirect uris", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"a\"\nname = \"A\"\n", true},
+		{"http redirect uri", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"a\"\nname = \"A\"\nredirect_uris = [\"http://a.example.com/cb\"]\n", true},
+		{"relative redirect uri", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"a\"\nname = \"A\"\nredirect_uris = [\"/cb\"]\n", true},
+		{"fragment redirect uri", "[server]\npublic_url = \"https://l.example.com\"\n[auth.oauth]\nenabled = true\n[[auth.oauth.clients]]\nid = \"a\"\nname = \"A\"\nredirect_uris = [\"https://a.example.com/cb#x\"]\n", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := Load(writeConfig(t, tt.extra))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("Load error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoad_OAuthClientsFromTOML(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[server]
+public_url = "https://logchef.example.com"
+[auth.oauth]
+enabled = true
+[[auth.oauth.clients]]
+id = "chatgpt"
+name = "ChatGPT"
+redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	clients := cfg.Auth.OAuth.Clients
+	if len(clients) != 1 || clients[0].ID != "chatgpt" || clients[0].Name != "ChatGPT" || len(clients[0].RedirectURIs) != 1 {
+		t.Fatalf("clients = %+v", clients)
+	}
+}
