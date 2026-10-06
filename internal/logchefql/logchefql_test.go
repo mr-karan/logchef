@@ -1442,3 +1442,21 @@ func TestMapColumnFallback(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildFullQueryFractionalTimeRange(t *testing.T) {
+	params := QueryBuildParams{TableName: "logs.test", TimestampField: "timestamp", StartTime: "2026-10-01 10:43:44.840", EndTime: "2026-10-01 11:43:44.123456789", Timezone: "UTC", Limit: 100}
+	query, err := BuildFullQuery(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "`timestamp` BETWEEN toDateTime64('2026-10-01 10:43:44.840', 9, 'UTC') AND toDateTime64('2026-10-01 11:43:44.123456789', 9, 'UTC')"
+	if !strings.Contains(query, want) {
+		t.Fatalf("fractional time range lost precision: %s", query)
+	}
+	for _, value := range []string{"2026-10-01 10:43:44.", "2026-10-01 10:43:44.1234567890", "2026-10-01 10:43:44.125' OR 1=1", "2026-02-30 10:43:44.125"} {
+		params.StartTime = value
+		if _, err := BuildFullQuery(params); err == nil {
+			t.Errorf("invalid timestamp %q accepted", value)
+		}
+	}
+}

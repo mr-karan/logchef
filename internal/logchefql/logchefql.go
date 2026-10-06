@@ -246,7 +246,7 @@ func formatConditionValue(v any) string {
 }
 
 var (
-	timeFormatRegex     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
+	timeFormatRegex     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,9})?$`)
 	timezoneAllowedChar = regexp.MustCompile(`^[A-Za-z0-9_/+:-]+$`)
 	// Allows @ prefix for ELK-style @timestamp fields
 	validIdentifier = regexp.MustCompile(`^@?[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -258,7 +258,7 @@ func validateTimeFormat(t string) *ParseError {
 	if !timeFormatRegex.MatchString(t) {
 		return &ParseError{
 			Code:    ErrInvalidTimeFormat,
-			Message: fmt.Sprintf("invalid time format: expected 'YYYY-MM-DD HH:MM:SS', got '%s'", t),
+			Message: fmt.Sprintf("invalid time format: expected 'YYYY-MM-DD HH:MM:SS' with optional fractional seconds, got '%s'", t),
 		}
 	}
 	if _, err := time.Parse("2006-01-02 15:04:05", t); err != nil {
@@ -395,15 +395,11 @@ func buildFullQueryFromTranslation(params QueryBuildParams, translateResult *Tra
 	// WHERE clause with time range
 	query.WriteString("WHERE `")
 	query.WriteString(params.TimestampField)
-	query.WriteString("` BETWEEN toDateTime('")
-	query.WriteString(params.StartTime)
-	query.WriteString("', '")
-	query.WriteString(params.Timezone)
-	query.WriteString("') AND toDateTime('")
-	query.WriteString(params.EndTime)
-	query.WriteString("', '")
-	query.WriteString(params.Timezone)
-	query.WriteString("')")
+	if strings.Contains(params.StartTime, ".") || strings.Contains(params.EndTime, ".") {
+		fmt.Fprintf(&query, "` BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", params.StartTime, params.Timezone, params.EndTime, params.Timezone)
+	} else {
+		fmt.Fprintf(&query, "` BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", params.StartTime, params.Timezone, params.EndTime, params.Timezone)
+	}
 
 	// Add LogchefQL conditions if present
 	if translateResult.SQL != "" {
@@ -432,8 +428,8 @@ type QueryBuildParams struct {
 	Schema         *Schema // Optional schema for type-aware SQL generation
 	TableName      string  // Fully qualified table name (database.table)
 	TimestampField string  // Name of the timestamp column
-	StartTime      string  // Start time in format "2006-01-02 15:04:05"
-	EndTime        string  // End time in format "2006-01-02 15:04:05"
+	StartTime      string  // SQL timestamp with optional fractional seconds
+	EndTime        string  // SQL timestamp with optional fractional seconds
 	Timezone       string  // Timezone for time conversion
 	Limit          int     // Result limit
 }
