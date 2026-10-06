@@ -43,7 +43,7 @@ Read the [v2.0 release notes](https://logchef.app/changelog/#v2.0.0) or [try the
 - **Single binary**: One executable, no runtime dependencies.
 - **Pluggable metadata store**: Zero-config SQLite by default; opt into [Postgres](https://logchef.app/operations/database-backends/) for multi-replica high availability.
 - **Comprehensive metrics**: Prometheus metrics for usage and performance.
-- **MCP integration**: Model Context Protocol server for AI assistants ([logchef-mcp](https://github.com/mr-karan/logchef-mcp)).
+- **MCP integration**: Built-in Model Context Protocol endpoint for AI assistants, with OAuth sign-in ([docs](https://logchef.app/integration/mcp-server/)).
 - **CLI**: Query logs from your terminal with syntax highlighting and multi-context support (query, explain, histogram, tail, doctor, and more).
 
 ## Quick Start

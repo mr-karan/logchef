@@ -38,7 +38,7 @@ before spending a scan, `find` when you don't yet know which source to look in.
 ## Quick start
 
 ```bash
-logchef auth --server https://logs.example.com   # OIDC browser login (once)
+logchef auth --server https://logs.example.com   # Logchef OAuth browser login (once)
 logchef config set team    platform              # set defaults so -t/-S are optional
 logchef config set source  app-logs
 logchef config set timezone Asia/Kolkata         # --from/--to are read in this zone
@@ -57,7 +57,7 @@ source resolve, and prints a fix hint for each problem.
 
 | Command | What it does |
 |---|---|
-| `logchef auth --server <url>` | OIDC PKCE browser login. `--status`, `--logout`, `auth current` (offline, no network). |
+| `logchef auth --server <url>` | Logchef OAuth browser login (server needs `auth.oauth`; else use `--token` / `LOGCHEF_AUTH_TOKEN`). `--no-browser` prints the URL only. `--status`, `--logout`, `auth current` (offline, no network). |
 | `logchef whoami` | Current user + accessible teams. |
 | `logchef teams` / `logchef sources -t <team>` | List teams / list a team's sources (with `TYPE`: ClickHouse or VictoriaLogs). |
 | `logchef schema -t <team> -S <src>` | Table columns and types. |

@@ -55,7 +55,15 @@ trusted_proxies = []
 # Forwarding header read for the client IP, ONLY when the direct peer is one of
 # trusted_proxies (otherwise ignored, so untrusted callers can't spoof it).
 proxy_header = "X-Forwarded-For"
+
+# Canonical external origin of this instance, for example
+# "https://logs.example.com". Required when [auth.oauth] is enabled.
+# Origin only: scheme, host, and optional port. No path, no trailing slash.
+# Must be https, except on localhost, 127.0.0.1, or ::1.
+public_url = ""
 ```
+
+`public_url` is separate from `frontend_url`. `frontend_url` builds links in the UI and can include a subpath. `public_url` is the OAuth issuer. [Logchef OAuth](#logchef-oauth) does not work under a subpath.
 
 :::note[Client IP behind a proxy]
 `trusted_proxies` is what lets client-IP features (e.g. per-IP rate limiting)
@@ -99,9 +107,6 @@ token_url = "http://dex:5556/dex/token"
 client_id = "logchef"
 client_secret = "logchef-secret"
 
-# CLI client ID for CLI authentication (public OIDC client, PKCE flow)
-cli_client_id = "logchef-cli"
-
 # Callback URL for OIDC authentication
 # Must match the URL configured in your OIDC provider
 redirect_url = "http://localhost:8125/api/v1/auth/callback"
@@ -115,12 +120,98 @@ scopes = ["openid", "email", "profile"]
 skip_email_verified_check = false
 ```
 
-If you plan to use the CLI, create a public OIDC client with loopback redirect URIs
-(`http://127.0.0.1:19876/callback` through `http://127.0.0.1:19878/callback`) and set
-`oidc.cli_client_id` to that client ID.
-
 `oidc.skip_email_verified_check` is useful for providers such as Cloudflare Access that do not emit
 the `email_verified` claim. It does not bypass an explicit `email_verified=false` response.
+
+### Logchef OAuth
+
+Logchef OAuth lets the [Logchef CLI](/integration/cli) and AI assistants sign in with a browser consent, instead of a copied API token. The same server also serves the [MCP endpoint](/integration/mcp-server) at `/mcp`. OAuth is **off by default**. When it is off, no OAuth route, metadata, or `/mcp` endpoint exists.
+
+Users still sign in to Logchef with OIDC or local login. OAuth adds a consent step on top. Logchef OAuth does not replace your SSO provider.
+
+To enable it, set `server.public_url` and turn on `auth.oauth`:
+
+```toml
+[server]
+public_url = "https://logchef.example.com"
+
+[auth.oauth]
+enabled = true
+```
+
+Environment variables: `LOGCHEF_SERVER__PUBLIC_URL`, `LOGCHEF_AUTH__OAUTH__ENABLED=true`.
+
+Logchef refuses to start when OAuth is on and `public_url` is missing or invalid. It must be an origin with `https`. Plain `http` is allowed only for `localhost`, `127.0.0.1`, and `::1`. A path (a subpath deployment) is not supported with OAuth. Set `public_url` to the address that users and agents type in a browser or an MCP client. A mismatch makes sign-in fail, because the issuer must equal the address the client uses.
+
+Behind a reverse proxy, the proxy must forward `/oauth/*`, `/.well-known/oauth-*`, and `/mcp` to Logchef. Refer to [Reverse Proxy](/operations/reverse-proxy).
+
+#### Built-in clients
+
+Two clients are built in. You do not configure them.
+
+| Client ID | For | Tokens work at | Callback |
+|-----------|-----|----------------|----------|
+| `logchef-cli` | The Logchef CLI | `/api` | `http://127.0.0.1:<port>/callback` |
+| `logchef-mcp` | Claude Code, Codex, Cursor desktop | `/mcp` | `http://localhost:<port>/callback`, `127.0.0.1`, or `[::1]` |
+
+You cannot reuse these IDs in your own client list.
+
+#### Hosted clients
+
+A hosted assistant, such as Claude.ai or ChatGPT, runs in a vendor's cloud. It cannot use a loopback callback. Add one `[[auth.oauth.clients]]` entry for each host, with the exact callback URL:
+
+```toml
+[[auth.oauth.clients]]
+id = "claude"
+name = "Claude"
+redirect_uris = ["https://claude.ai/api/mcp/auth_callback"]
+
+[[auth.oauth.clients]]
+id = "chatgpt"
+name = "ChatGPT"
+redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
+
+[[auth.oauth.clients]]
+id = "cursor-web"
+name = "Cursor"
+redirect_uris = ["https://www.cursor.com/agents/mcp/oauth/callback"]
+```
+
+| Setting | Description |
+|---------|-------------|
+| `id` | Client ID that you enter in the host. Must be unique. Cannot be `logchef-cli` or `logchef-mcp`. |
+| `name` | Name shown on the consent page. |
+| `redirect_uris` | Exact callback URLs. Each must be an absolute `https` URL without a fragment. Matching is exact. |
+
+Hosted clients are public clients. They use PKCE, and they have no client secret. They can get tokens for `/mcp` only. Refer to [Agent Setup](/integration/agent-setup) for the host-side steps.
+
+To let a browser-based MCP tool call `/mcp` from another origin, list that origin in `auth.oauth.mcp_allowed_origins`. Requests with no `Origin` header, such as those from desktop clients, are always allowed.
+
+```toml
+[auth.oauth]
+enabled = true
+mcp_allowed_origins = ["https://inspector.example.com"]
+```
+
+#### What users can do
+
+- Each agent connection shows in **Settings → Connected apps**, where the user can revoke it.
+- Access tokens last 10 minutes. Refresh tokens last 30 days.
+- OAuth tokens carry read scopes only. They cannot change data or reach admin routes, even for an admin user. They see only the teams the user belongs to.
+
+#### Local development
+
+To test OAuth with the Vite dev server, set `public_url` to the Vite address. The dev server proxies the OAuth endpoints and metadata to the backend, so the issuer, the consent page, and the browser origin all match.
+
+```toml
+[server]
+public_url = "http://localhost:5173"
+
+[auth.oauth]
+enabled = true
+```
+
+Without Vite, build the UI with `just build`, and set `public_url` to the backend address, for example `http://localhost:8125`.
 
 ### Local authentication (run without OIDC)
 
@@ -190,8 +281,7 @@ Behavior notes:
 - The created users are **unmanaged** with respect to
   [declarative provisioning](/getting-started/provisioning/): the reconciler
   never adopts, updates, or prunes them, and admins can edit them freely.
-- Applies to the **browser OIDC login** only. The CLI token exchange still
-  requires the user to already exist. Run the web login once first.
+- Applies to the **browser OIDC login** only.
 
 ### Auth Settings
 
@@ -281,7 +371,7 @@ unauthenticated auth/token endpoints, and per-user on the query endpoints.
 ```toml
 [rate_limit]
 enabled = false
-auth_per_ip_per_minute    = 20     # /auth/login, /auth/callback, /cli/token, ...
+auth_per_ip_per_minute    = 20     # /auth/login, /auth/callback, /oauth/authorize, /oauth/token, ...
 auth_global_per_minute    = 300    # 0 disables the global cap
 query_per_user_per_minute = 120    # /logs/query, /logs/histogram, field values
 ```
@@ -570,7 +660,6 @@ auth_url = "https://dex.example.com/auth"
 token_url = "https://dex.example.com/token"
 client_id = "logchef"
 client_secret = "your-secure-secret"
-cli_client_id = "logchef-cli"
 redirect_url = "https://logchef.example.com/api/v1/auth/callback"
 scopes = ["openid", "email", "profile"]
 

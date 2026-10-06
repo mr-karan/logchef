@@ -126,11 +126,24 @@ A blank page means that the proxy does not remove the subpath.
 
 ### CLI
 
-Include the subpath in the server URL:
+[Logchef OAuth](/getting-started/configuration#logchef-oauth) does not support a subpath, because `server.public_url` must be an origin only. For the browser sign-in of the CLI (`logchef auth`) and for the `/mcp` endpoint, serve Logchef on its own domain.
+
+Under a subpath, use an [API token](/integration/cli/#api-token-authentication) and include the subpath in the server URL:
 
 ```bash
-logchef auth --server https://example.com/logchef
+logchef --server https://example.com/logchef --token "$LOGCHEF_AUTH_TOKEN" whoami
 ```
+
+## OAuth and MCP
+
+When [Logchef OAuth](/getting-started/configuration#logchef-oauth) is on, the proxy must pass these paths to Logchef without a rewrite:
+
+- `/oauth/*`
+- `/.well-known/oauth-authorization-server`
+- `/.well-known/oauth-protected-resource` and `/.well-known/oauth-protected-resource/mcp`
+- `/mcp`
+
+Set `server.public_url` to the exact address that clients use. Keep the `Host` header and the `https` scheme as the client sent them. The OAuth issuer must equal that address.
 
 ## Live tail
 

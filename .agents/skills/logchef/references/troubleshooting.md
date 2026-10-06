@@ -18,7 +18,9 @@
 | `--stream does not support --output <x>` | `--stream` only allows `jsonl`. Use `--output csv` (no `--stream`) for CSV, or drop `--stream`. |
 | `SELECT …` fails on a VictoriaLogs source | `sql` sends **LogsQL** there, not SQL. Use `logchef query` or LogsQL syntax. |
 | `Token may be invalid or expired` | Re-authenticate: `logchef auth`. Check with `logchef auth --status` / `auth current`. |
-| `CLI authentication not configured on this server` | Server admin must set `oidc.cli_client_id`. |
+| `does not offer Logchef OAuth sign-in` | The server has no `auth.oauth`. Ask the admin to enable it, or use an API token: `--token` / `LOGCHEF_AUTH_TOKEN`. |
+| `{"error":{"type":"auth_required",…}}` (with `--output json`/`jsonl`) | The saved sign-in is gone or revoked. Run the command in `error.fix` (for example `logchef auth --context prod`). |
+| `logchef auth` hangs or no browser opens | Use `--no-browser`; the URL goes to stderr. On a remote host, forward the port in the URL's `redirect_uri` over SSH (`ssh -L <port>:127.0.0.1:<port> host`), or use an API token. |
 | Query returns nothing unexpectedly | See "Empty results" below. |
 
 ## Empty results — debug order
@@ -43,10 +45,10 @@ Logchef uses kubectl-style **contexts** — one per server. The token is stored 
 convention / `$XDG_CONFIG_HOME`).
 
 ```bash
-logchef auth --server https://logs.example.com   # OIDC PKCE browser login → creates/updates a context
+logchef auth --server https://logs.example.com   # Logchef OAuth browser login → creates/updates a context
 logchef auth --status                             # authenticated? who?
 logchef auth current                              # active context, server, token source (offline, no network)
-logchef auth --logout                             # clear the token for the active context
+logchef auth --logout                             # revoke and clear the sign-in for the active context
 logchef whoami                                    # user + accessible teams
 
 logchef config list                               # all contexts (* = current)

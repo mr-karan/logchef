@@ -3,7 +3,7 @@ title: Logchef CLI
 description: Query ClickHouse and VictoriaLogs logs from the terminal with the Logchef CLI, built for scripting and quick investigations.
 ---
 
-A Rust CLI for querying logs from the terminal. Supports LogchefQL across supported sources, raw native queries (SQL for ClickHouse, LogsQL for VictoriaLogs), syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and OIDC PKCE authentication.
+A Rust CLI for querying logs from the terminal. Supports LogchefQL across supported sources, raw native queries (SQL for ClickHouse, LogsQL for VictoriaLogs), syntax highlighting (via [tailspin](https://github.com/bensadeh/tailspin)), multi-context management (dev/staging/prod), and browser sign-in through Logchef OAuth.
 
 ## Quick Start
 
@@ -116,29 +116,53 @@ logchef --help
 
 ## Authentication
 
-The CLI supports two authentication methods: browser-based OIDC and API tokens.
+The CLI supports two authentication methods: browser sign-in through Logchef OAuth, and API tokens. Use browser sign-in on your own machine. Use API tokens for CI and other automation.
 
-### Server Prerequisite (OIDC)
+### Server Prerequisite (Logchef OAuth)
 
-To use browser-based auth, configure a public OIDC client for the CLI and set it in the server config:
+Browser sign-in needs [Logchef OAuth](/getting-started/configuration#logchef-oauth) on the server:
 
 ```toml
-[oidc]
-cli_client_id = "logchef-cli"
+[server]
+public_url = "https://logs.example.com"
+
+[auth.oauth]
+enabled = true
 ```
 
-Your OIDC provider must allow loopback redirects for the CLI:
-`http://127.0.0.1:19876/callback` through `http://127.0.0.1:19878/callback`.
+The `logchef-cli` client is built in. You do not register it with your identity provider, and the CLI no longer needs `oidc.cli_client_id`. If the server does not offer OAuth, `logchef auth` stops with an error and tells you to use an API token.
 
-### Browser-Based Login (OIDC)
+The server URL that you give to the CLI must equal `server.public_url`. If it differs, the CLI prints the correct `--server` value.
 
-For interactive use, authenticate via your browser:
+### Browser-Based Login
+
+For interactive use, sign in through your browser:
 
 ```bash
 logchef auth
 ```
 
-This opens your browser to complete the OIDC login flow. The token is automatically saved to your config file.
+The CLI opens your browser at the Logchef consent page. Sign in to Logchef if needed, then choose **Approve**. The CLI receives the result on a loopback address (`127.0.0.1`, random port) and saves the grant to your config file. The CLI asks for read access to your Logchef data. It does not get write access or admin access.
+
+The access token lasts 10 minutes. The CLI refreshes it when needed. The refresh token lasts 30 days. You can revoke the sign-in at any time in **Settings → Connected apps**.
+
+The CLI prints the sign-in URL on stderr. It opens a browser only when it runs in a terminal and `CI` is not set. Data commands such as `query` never open a browser.
+
+#### Remote machines and `--no-browser`
+
+On a machine with no browser, such as an SSH session, use `--no-browser`. The CLI prints the URL and does not try to open it:
+
+```bash
+logchef auth --no-browser
+```
+
+After you approve, the browser must reach the CLI's loopback listener on the remote machine. Opening the URL on your workstation does not work by itself. The sign-in URL has a `redirect_uri` parameter, such as `http://127.0.0.1:41000/callback`. Forward that port from your workstation, then open the printed URL in your local browser:
+
+```bash
+ssh -L 41000:127.0.0.1:41000 user@remote-host
+```
+
+Replace `41000` with the port in `redirect_uri`. If you cannot forward a port, use an [API token](#api-token-authentication).
 
 ```bash
 # Check authentication status (hits the server)
@@ -147,23 +171,41 @@ logchef auth --status
 # Print the active context, server URL, and token source (offline — no API call)
 logchef auth current
 
-# Log out (clear stored token)
+# Log out (revoke the sign-in on the server and clear it locally)
 logchef auth --logout
 ```
+
+`auth --status` shows the user, the method, the scopes, and the expiry. `auth --logout` revokes the grant at the server first. If the server cannot be reached, it still removes the local credential, exits with status 1, and tells you to revoke the grant in **Settings → Connected apps**.
 
 `auth current` is the offline counterpart to `auth --status` and `whoami`. It tells you which server + token a subsequent command will use, without making a network call:
 
 ```text
 context: prod
 server:  https://logs.example.com
-token:   set (from config, expires 2026-06-03T07:00:00Z)
+token:   Logchef OAuth (from config, renewed automatically)
 ```
 
 When the token comes from `--token` / `LOGCHEF_AUTH_TOKEN`, the line reports the source but omits an expiry (the CLI doesn't validate or parse externally-supplied tokens). Useful for CI / bot debugging when an API call fails and you want to verify the credential is actually picked up before troubleshooting further.
 
+#### When the sign-in expires
+
+If a refresh fails, because someone revoked the grant or the 30-day refresh window ended, the command exits with an `auth_required` error. With `--output json` or `jsonl`, the CLI prints one JSON object on stdout:
+
+```json
+{
+  "error": {
+    "type": "auth_required",
+    "message": "...",
+    "fix": "logchef auth --context prod"
+  }
+}
+```
+
+Run the command in `fix` to sign in again. A script or agent can read `error.type` and `error.fix` instead of parsing text. The text error still goes to stderr.
+
 ### API Token Authentication
 
-For scripts and automation, use an API token directly:
+For CI, scripts, and other automation where no one can approve a browser prompt, use an API token. A token passed with `--token` or `LOGCHEF_AUTH_TOKEN` takes precedence over a saved sign-in.
 
 ```bash
 # Set token via environment variable
@@ -1210,4 +1252,4 @@ done
 - Learn the filter syntax the `query` command accepts in [Search Syntax](/guide/search-syntax)
 - Query a VictoriaLogs source end to end in the [VictoriaLogs tutorial](/tutorials/victorialogs/)
 - Connect an AI assistant to the same data with the [MCP Server](/integration/mcp-server)
-- Configure the `oidc.cli_client_id` prerequisite in [Configuration](/getting-started/configuration/#openid-connect-oidc)
+- Enable browser sign-in on the server with [Logchef OAuth](/getting-started/configuration/#logchef-oauth)
