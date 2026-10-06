@@ -27,16 +27,10 @@ pub struct MetaData {
     pub version: String,
     #[serde(default)]
     pub build_info: Option<String>,
+    /// The Logchef OAuth issuer. Absent when the server is older or has
+    /// `auth.oauth` disabled; the CLI then cannot sign in.
     #[serde(default)]
-    pub oidc_issuer: Option<String>,
-    #[serde(default)]
-    pub cli_client_id: Option<String>,
-}
-
-impl MetaData {
-    pub fn oidc_enabled(&self) -> bool {
-        self.oidc_issuer.is_some() && self.cli_client_id.is_some()
-    }
+    pub oauth_issuer: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -44,6 +38,20 @@ pub struct UserData {
     pub user: User,
     #[serde(default)]
     pub auth_method: Option<String>,
+    /// Present for API token and OAuth callers.
+    #[serde(default)]
+    pub auth: Option<MeAuth>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MeAuth {
+    pub method: String,
+    #[serde(default)]
+    pub scopes: Vec<String>,
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub client_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -414,31 +422,6 @@ pub struct QueryStats {
     pub rows_read: i64,
     #[serde(default)]
     pub bytes_read: i64,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TokenExchangeApiResponse {
-    pub status: String,
-    pub data: TokenExchangeData,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TokenExchangeData {
-    pub token: String,
-    #[serde(default)]
-    pub expires_at: Option<DateTime<Utc>>,
-    #[serde(default)]
-    pub user: Option<TokenUser>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct TokenUser {
-    pub id: i64,
-    pub email: String,
-    #[serde(default)]
-    pub full_name: Option<String>,
-    #[serde(default)]
-    pub role: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

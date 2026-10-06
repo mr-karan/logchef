@@ -2,12 +2,13 @@ use anyhow::{Context, Result};
 use clap::Args;
 use logchef_core::Config;
 use logchef_core::api::Client;
-use logchef_core::config::Context as CtxConfig;
+use logchef_core::config::{Context as CtxConfig, ContextAuth};
 use logchef_core::timerange::{parse_timezone, resolve_timezone};
 use serde::Serialize;
 use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
+use crate::session::{self, ResolvedContext};
 
 const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -107,15 +108,15 @@ pub async fn run(args: DoctorArgs, global: GlobalArgs) -> Result<()> {
 /// Results of a doctor run, without any printing.
 pub(crate) struct Diagnosis {
     pub(crate) checks: Vec<Check>,
-    /// Whether the server offers CLI OIDC login. `None` when the server's
-    /// metadata could not be read.
-    pub(crate) oidc_enabled: Option<bool>,
+    /// Whether the server offers Logchef OAuth sign-in. `None` when the
+    /// server's metadata could not be read.
+    pub(crate) oauth_enabled: Option<bool>,
 }
 
 /// Runs every doctor check and returns the results without printing.
 pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     let mut checks = Vec::new();
-    let mut oidc_enabled = None;
+    let mut oauth_enabled = None;
 
     let config = Config::load();
 
@@ -145,16 +146,16 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
             ));
             return Diagnosis {
                 checks,
-                oidc_enabled,
+                oauth_enabled,
             };
         }
     };
 
     // Resolve the context to inspect: --context, then --server, then current.
-    let resolved = resolve_context(&config, global);
+    let resolved = session::resolve(&config, global).ok();
 
     match &resolved {
-        Some((name, _)) => checks.push(Check::ok("Context", name.clone())),
+        Some(r) => checks.push(Check::ok("Context", r.name.clone())),
         None => checks.push(Check::fail(
             "Context",
             "no context configured",
@@ -165,15 +166,15 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     let effective_tz = resolve_timezone(
         resolved
             .as_ref()
-            .and_then(|(_, c)| c.defaults.timezone.as_deref()),
+            .and_then(|r| r.ctx.defaults.timezone.as_deref()),
     );
     let tz_check = match resolved
         .as_ref()
-        .and_then(|(_, c)| c.defaults.timezone.clone())
+        .and_then(|r| r.ctx.defaults.timezone.clone())
     {
         Some(tz) if parse_timezone(&tz).is_some() => Check::ok("Timezone", tz),
         Some(tz) => {
-            let context = resolved.as_ref().map_or("", |(name, _)| name.as_str());
+            let context = resolved.as_ref().map_or("", |r| r.name.as_str());
             Check::warn(
                 "Timezone",
                 format!("'{}' is not a valid IANA zone, using {}", tz, effective_tz),
@@ -188,11 +189,9 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     checks.push(tz_check);
 
     // ---- Server ----------------------------------------------------------
-    let server_url = resolved.as_ref().map(|(_, c)| c.server_url.clone());
-    let token = global
-        .token
-        .clone()
-        .or_else(|| resolved.as_ref().and_then(|(_, c)| c.token.clone()));
+    let server_url = resolved.as_ref().map(|r| r.ctx.server_url.clone());
+    let saved_auth = resolved.as_ref().and_then(|r| r.ctx.auth.clone());
+    let token_present = global.token.is_some() || saved_auth.is_some();
 
     let Some(server_url) = server_url else {
         checks.push(Check::fail(
@@ -213,16 +212,13 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
         ));
         return Diagnosis {
             checks,
-            oidc_enabled,
+            oauth_enabled,
         };
     };
     checks.push(Check::ok("Server URL", server_url.clone()));
 
-    let client = match Client::new(&server_url, 15) {
-        Ok(client) => match &token {
-            Some(t) => client.with_token(t.clone()),
-            None => client,
-        },
+    let client = match build_client(resolved.as_ref(), global, &server_url, token_present) {
+        Ok(client) => client,
         Err(err) => {
             checks.push(Check::fail(
                 "Server reachable",
@@ -231,7 +227,7 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
             ));
             return Diagnosis {
                 checks,
-                oidc_enabled,
+                oauth_enabled,
             };
         }
     };
@@ -244,15 +240,16 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
                 "Server reachable",
                 format!("Logchef {}", meta.data.version),
             ));
-            oidc_enabled = Some(meta.data.oidc_enabled());
-            if meta.data.oidc_enabled() {
-                checks.push(Check::ok("CLI auth", "OIDC configured on server"));
-            } else {
-                checks.push(Check::warn(
+            oauth_enabled = Some(meta.data.oauth_issuer.is_some());
+            match &meta.data.oauth_issuer {
+                Some(issuer) => {
+                    checks.push(Check::ok("CLI auth", format!("Logchef OAuth ({issuer})")))
+                }
+                None => checks.push(Check::warn(
                     "CLI auth",
-                    "OIDC/CLI login not configured on server",
-                    "ask your admin to set oidc.cli_client_id, or use --token",
-                ));
+                    "server does not offer Logchef OAuth sign-in",
+                    "upgrade the server and enable auth.oauth, or use an API token (--token or LOGCHEF_AUTH_TOKEN)",
+                )),
             }
             // The CLI (0.x) and server (2.x) are versioned independently, so
             // the numbers are reported, not compared. The update notifier
@@ -272,11 +269,12 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     }
 
     // ---- Auth ------------------------------------------------------------
-    let token_present = token.is_some();
-    let expiry = applicable_expiry(
-        global.token.is_some(),
-        resolved.as_ref().and_then(|(_, c)| c.token_expires_at),
-    );
+    let pat_expiry = match &saved_auth {
+        Some(ContextAuth::Pat { expires_at, .. }) => *expires_at,
+        _ => None,
+    };
+    let expiry = applicable_expiry(global.token.is_some(), pat_expiry);
+    let oauth_saved = global.token.is_none() && matches!(saved_auth, Some(ContextAuth::OAuth(_)));
     if !token_present {
         checks.push(Check::fail(
             "Auth token",
@@ -302,6 +300,11 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
                 ),
             ));
         }
+    } else if oauth_saved {
+        checks.push(Check::ok(
+            "Auth token",
+            "Logchef OAuth (renewed automatically)",
+        ));
     } else {
         checks.push(Check::ok("Auth token", "set"));
     }
@@ -327,7 +330,7 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
     let can_resolve = token_present && meta.is_ok();
     check_defaults(
         &client,
-        resolved.as_ref().map(|(_, c)| c),
+        resolved.as_ref().map(|r| &r.ctx),
         can_resolve,
         &mut checks,
     )
@@ -335,13 +338,10 @@ pub(crate) async fn collect_checks(global: &GlobalArgs) -> Diagnosis {
 
     Diagnosis {
         checks,
-        oidc_enabled,
+        oauth_enabled,
     }
 }
 
-/// Resolves which context doctor should inspect, honoring --context and
-/// --server overrides, then the current context. Returns None when nothing is
-/// configured (so the network checks degrade gracefully).
 /// A `--token` override replaces the saved token, so the saved expiry must
 /// not apply to it.
 fn applicable_expiry(
@@ -351,18 +351,18 @@ fn applicable_expiry(
     if token_overridden { None } else { saved_expiry }
 }
 
-fn resolve_context(config: &Config, global: &GlobalArgs) -> Option<(String, CtxConfig)> {
-    if let Some(name) = &global.context {
-        return config.get_context(name).map(|c| (name.clone(), c.clone()));
+/// A client with the credential `session::client_for` would use, or none
+/// when nothing is saved, so the meta check still runs.
+fn build_client(
+    resolved: Option<&ResolvedContext>,
+    global: &GlobalArgs,
+    server_url: &str,
+    token_present: bool,
+) -> Result<Client> {
+    match resolved {
+        Some(resolved) if token_present => session::client_for(resolved, global, 15),
+        _ => Ok(Client::new(server_url, 15)?),
     }
-    if let Some(url) = &global.server {
-        if let Some((name, ctx)) = config.find_context_by_url(url) {
-            return Some((name.to_string(), ctx.clone()));
-        }
-        return Some(("(ephemeral)".to_string(), CtxConfig::new(url.clone())));
-    }
-    let name = config.current_context_name()?.to_string();
-    config.current_context().map(|c| (name, c.clone()))
 }
 
 async fn check_defaults(

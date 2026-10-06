@@ -2,6 +2,7 @@
 name = "logchef-cli"
 version.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
@@ -28,3 +29,9 @@ inquire.workspace = true
 iana-time-zone.workspace = true
 url.workspace = true
 open.workspace = true
+
+[dev-dependencies]
+# Already in the workspace through logchef-core. The in-test OAuth server
+# uses them to verify the PKCE S256 challenge.
+base64 = "0.23.1"
+sha2 = "0.11.0"

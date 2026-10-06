@@ -1,6 +1,7 @@
 use anyhow::{Context, Result, bail};
 use clap::{Args, Subcommand, ValueEnum};
 use logchef_core::Config;
+use logchef_core::config::ContextAuth;
 use serde::Serialize;
 use url::Url;
 
@@ -79,15 +80,15 @@ pub async fn run(args: AgentArgs, global: GlobalArgs) -> Result<()> {
     let resolved = resolve_instance(&global)?;
     let doctor::Diagnosis {
         checks,
-        oidc_enabled,
+        oauth_enabled,
     } = doctor::collect_checks(&global).await;
     let steps = if host == Some(Host::Chatgpt) {
         Vec::new()
     } else {
-        let plan = authentication(resolved.token_resolved, oidc_enabled);
-        if plan == Authentication::OidcUnverified && !global.quiet {
+        let plan = authentication(resolved.token_resolved, oauth_enabled);
+        if plan == Authentication::OAuthUnverified && !global.quiet {
             eprintln!(
-                "Note: could not read server metadata. The auth step applies to OIDC instances only."
+                "Note: could not read server metadata. The auth step applies only to instances with Logchef OAuth."
             );
         }
         steps(&resolved.instance, plan)
@@ -123,22 +124,23 @@ struct ResolvedInstance {
 /// How the person gets a usable token for the selected instance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Authentication {
-    /// A usable token already resolves (flag, env, or unexpired saved token).
+    /// A usable credential already resolves (flag, env, unexpired saved
+    /// token, or a saved OAuth grant).
     NotNeeded,
-    /// The server supports CLI OIDC login.
-    Oidc,
-    /// Server metadata was unavailable. OIDC is assumed.
-    OidcUnverified,
-    /// The server has no CLI OIDC login. Use an API token.
+    /// The server offers Logchef OAuth sign-in.
+    OAuth,
+    /// Server metadata was unavailable. Logchef OAuth is assumed.
+    OAuthUnverified,
+    /// The server has no Logchef OAuth. Use an API token.
     ApiToken,
 }
 
-fn authentication(token_resolved: bool, oidc_enabled: Option<bool>) -> Authentication {
-    match (token_resolved, oidc_enabled) {
+fn authentication(token_resolved: bool, oauth_enabled: Option<bool>) -> Authentication {
+    match (token_resolved, oauth_enabled) {
         (true, _) => Authentication::NotNeeded,
-        (false, Some(true)) => Authentication::Oidc,
+        (false, Some(true)) => Authentication::OAuth,
         (false, Some(false)) => Authentication::ApiToken,
-        (false, None) => Authentication::OidcUnverified,
+        (false, None) => Authentication::OAuthUnverified,
     }
 }
 
@@ -176,11 +178,14 @@ fn resolve_instance(global: &GlobalArgs) -> Result<ResolvedInstance> {
     };
 
     let server_url = sanitize_server_url(&resolved.ctx.server_url).context("Invalid server URL")?;
-    let saved_token_usable = resolved.ctx.token.is_some()
-        && resolved
-            .ctx
-            .token_expires_at
-            .is_none_or(|expiry| expiry > chrono::Utc::now());
+    // An OAuth grant renews itself, so only a PAT can be unusable by expiry.
+    let saved_token_usable = match &resolved.ctx.auth {
+        Some(ContextAuth::Pat { expires_at, .. }) => {
+            expires_at.is_none_or(|expiry| expiry > chrono::Utc::now())
+        }
+        Some(ContextAuth::OAuth(_)) => true,
+        None => false,
+    };
     Ok(ResolvedInstance {
         instance: Instance {
             context: (!resolved.is_ephemeral).then_some(resolved.name),
@@ -216,14 +221,14 @@ fn steps(instance: &Instance, authentication: Authentication) -> Vec<Step> {
     let mut steps = Vec::new();
     match authentication {
         Authentication::NotNeeded => {}
-        Authentication::Oidc | Authentication::OidcUnverified => steps.push(Step {
+        Authentication::OAuth | Authentication::OAuthUnverified => steps.push(Step {
             id: "auth",
-            description: "Sign in and save a token for this instance",
+            description: "Sign in with Logchef OAuth in a browser and save the grant for this instance",
             command: auth_command(instance),
         }),
         Authentication::ApiToken => steps.push(Step {
             id: "token",
-            description: "This server has no CLI login. Create an API token in the web UI, then set it",
+            description: "This server does not offer Logchef OAuth sign-in. Upgrade it, or create an API token in the web UI and set it",
             command: "export LOGCHEF_AUTH_TOKEN=<your-api-token>".to_string(),
         }),
     }
@@ -331,7 +336,7 @@ mod tests {
     }
 
     fn auth_step(instance: &Instance) -> String {
-        steps(instance, Authentication::Oidc)[0].command.clone()
+        steps(instance, Authentication::OAuth)[0].command.clone()
     }
 
     #[test]
@@ -385,7 +390,7 @@ mod tests {
     fn two_contexts_sharing_a_url_keep_their_own_name_in_steps() {
         let url = "https://logs.example.com";
         let second = instance(Some("second"), Some(url));
-        let steps = steps(&second, Authentication::Oidc);
+        let steps = steps(&second, Authentication::OAuth);
         assert_eq!(steps[0].command, "logchef auth --context 'second'");
         assert_eq!(steps[1].command, "logchef doctor --json --context 'second'");
     }
@@ -410,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn oidc_absent_gives_token_env_step_and_no_auth_step() {
+    fn oauth_absent_gives_token_env_step_and_no_auth_step() {
         let steps = steps(&instance(None, None), authentication(false, Some(false)));
         let ids: Vec<_> = steps.iter().map(|s| s.id).collect();
         assert_eq!(ids, ["token", "verify", "skills"]);
@@ -420,8 +425,8 @@ mod tests {
 
     #[test]
     fn unknown_metadata_keeps_auth_step() {
-        assert_eq!(authentication(false, None), Authentication::OidcUnverified);
-        let steps = steps(&instance(None, None), Authentication::OidcUnverified);
+        assert_eq!(authentication(false, None), Authentication::OAuthUnverified);
+        let steps = steps(&instance(None, None), Authentication::OAuthUnverified);
         assert_eq!(steps[0].id, "auth");
     }
 
@@ -447,7 +452,7 @@ mod tests {
                 server_url: None,
             },
             checks: Vec::new(),
-            steps: steps(&instance(None, None), Authentication::Oidc),
+            steps: steps(&instance(None, None), Authentication::OAuth),
         };
         let value = serde_json::to_value(&preview).unwrap();
         let mut keys: Vec<_> = value.as_object().unwrap().keys().cloned().collect();

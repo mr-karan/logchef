@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Args, Subcommand};
 use logchef_core::Config;
+use logchef_core::config::ContextAuth;
 use logchef_core::timerange::{parse_timezone, resolve_timezone};
 
 #[derive(Args)]
@@ -85,28 +86,25 @@ fn list_contexts() -> Result<()> {
 }
 
 fn use_context(name: &str) -> Result<()> {
-    let mut config = Config::load().context("Failed to load config")?;
-    config.use_context(name)?;
-    config.save().context("Failed to save config")?;
+    Config::update(|config| config.use_context(name))?;
     println!("Switched to context '{}'.", name);
     Ok(())
 }
 
 fn rename_context(old_name: &str, new_name: &str) -> Result<()> {
-    let mut config = Config::load().context("Failed to load config")?;
-    config.rename_context(old_name, new_name)?;
-    config.save().context("Failed to save config")?;
+    Config::update(|config| config.rename_context(old_name, new_name))?;
     println!("Renamed '{}' to '{}'.", old_name, new_name);
     Ok(())
 }
 
 fn delete_context(name: &str) -> Result<()> {
-    let mut config = Config::load().context("Failed to load config")?;
-    config.delete_context(name)?;
-    config.save().context("Failed to save config")?;
+    let current = Config::update(|config| {
+        config.delete_context(name)?;
+        Ok(config.current_context_name().map(str::to_string))
+    })?;
     println!("Deleted context '{}'.", name);
 
-    if let Some(current) = config.current_context_name() {
+    if let Some(current) = current {
         println!("Current context is now '{}'.", current);
     }
 
@@ -144,19 +142,23 @@ fn show_config() -> Result<()> {
     println!("Server:  {}", ctx.server_url);
     println!("Timeout: {}s", ctx.timeout_secs);
 
-    if let Some(ref token) = ctx.token {
-        let masked = if token.len() > 14 {
-            format!("{}****...", &token[..10])
-        } else {
-            "****".to_string()
-        };
-        println!("Token:   {}", masked);
-    } else {
-        println!("Token:   (not set)");
-    }
-
-    if let Some(ref expires) = ctx.token_expires_at {
-        println!("Expires: {}", expires);
+    match &ctx.auth {
+        Some(ContextAuth::Pat { token, expires_at }) => {
+            let masked = if token.len() > 14 {
+                format!("{}****...", &token[..10])
+            } else {
+                "****".to_string()
+            };
+            println!("Token:   {}", masked);
+            if let Some(expires) = expires_at {
+                println!("Expires: {}", expires);
+            }
+        }
+        Some(ContextAuth::OAuth(credential)) => {
+            println!("Auth:    Logchef OAuth ({})", credential.issuer);
+            println!("Scopes:  {}", credential.scopes.join(" "));
+        }
+        None => println!("Token:   (not set)"),
     }
 
     println!("\nDefaults:");
@@ -191,22 +193,25 @@ fn show_path() -> Result<()> {
 }
 
 fn set_value(key: &str, value: &str) -> Result<()> {
-    let mut config = Config::load().context("Failed to load config")?;
+    let shown = Config::update(|config| {
+        apply_setting(config, key, value).map_err(|e| logchef_core::Error::other(format!("{e:#}")))
+    })?;
+    println!("Set {} = {}", key, shown);
+    Ok(())
+}
 
+/// Applies one `config set` and returns the value to print.
+fn apply_setting(config: &mut Config, key: &str, value: &str) -> Result<String> {
     // Global (non-context) CLI preferences. Handled before requiring a context
     // so they can be toggled even without an authenticated context.
     match key {
         "banner" | "show_banner" => {
             config.show_banner = parse_bool(value)?;
-            config.save().context("Failed to save config")?;
-            println!("Set {} = {}", key, config.show_banner);
-            return Ok(());
+            return Ok(config.show_banner.to_string());
         }
         "check-updates" | "check_updates" => {
             config.check_updates = parse_bool(value)?;
-            config.save().context("Failed to save config")?;
-            println!("Set {} = {}", key, config.check_updates);
-            return Ok(());
+            return Ok(config.check_updates.to_string());
         }
         _ => {}
     }
@@ -246,9 +251,7 @@ fn set_value(key: &str, value: &str) -> Result<()> {
         ),
     }
 
-    config.save().context("Failed to save config")?;
-    println!("Set {} = {}", key, value);
-    Ok(())
+    Ok(value.to_string())
 }
 
 fn parse_bool(value: &str) -> Result<bool> {

@@ -5,6 +5,8 @@ members = ["crates/*"]
 [workspace.package]
 version = "0.2.3"
 edition = "2024"
+# std File::lock (config and refresh locks) is stable since 1.89.
+rust-version = "1.89"
 license = "AGPL-3.0"
 repository = "https://github.com/mr-karan/logchef"
 authors = ["Karan <karan@logchef.app>"]

@@ -3,21 +3,37 @@ use clap::{Args, Subcommand};
 use inquire::Text;
 use logchef_core::Config;
 use logchef_core::api::Client;
-use logchef_core::auth::AuthFlow;
-use logchef_core::config::{Context as CtxConfig, ContextDefaults, context_name_from_url};
+use logchef_core::auth::{self, CallbackLimits, LoginOptions};
+use logchef_core::config::{
+    Context as CtxConfig, ContextAuth, ContextDefaults, context_lock_path, context_name_from_url,
+    lock_exclusive,
+};
 
 use crate::cli::GlobalArgs;
+use crate::session;
+use crate::ui;
 
 #[derive(Args)]
+#[command(
+    after_help = "Signs in through the server's Logchef OAuth with a browser on this \
+machine. The server must advertise `oauth_issuer` in /api/v1/meta. Without it, use an API \
+token: pass --token or set LOGCHEF_AUTH_TOKEN."
+)]
 pub struct AuthArgs {
     #[command(subcommand)]
     command: Option<AuthCmd>,
 
+    /// Revoke the sign-in at the server, then remove it from this machine.
     #[arg(long, short)]
     logout: bool,
 
+    /// Show the instance, user, method, scopes, and expiry.
     #[arg(long)]
     status: bool,
+
+    /// Print the sign-in URL to stderr and do not open a browser.
+    #[arg(long)]
+    no_browser: bool,
 }
 
 #[derive(Subcommand)]
@@ -28,71 +44,54 @@ enum AuthCmd {
 }
 
 pub async fn run(args: AuthArgs, global: GlobalArgs) -> Result<()> {
-    let mut config = Config::load().context("Failed to load config")?;
+    let config = Config::load().context("Failed to load config")?;
 
     if let Some(AuthCmd::Current) = args.command {
         return current(&config, &global);
     }
 
     if args.logout {
-        return logout(&mut config, &global);
+        return logout(&config, &global).await;
     }
 
     if args.status {
         return status(&config, &global).await;
     }
 
-    login(&mut config, global).await
+    let open_browser = !args.no_browser && ui::interactive();
+    login(&config, global, open_browser).await
 }
 
 fn current(config: &Config, global: &GlobalArgs) -> Result<()> {
     // Resolve context without hitting the network. Prefers --context, then
     // --server (matched against saved contexts), then the active context.
-    let (ctx_name, server_url, token_line) = if let Some(name) = &global.context {
+    let (ctx_name, server_url, auth) = if let Some(name) = &global.context {
         let ctx = config
             .get_context(name)
             .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", name))?;
-        let line = token_line(
-            ctx.token.is_some(),
-            global.token.is_some(),
-            false,
-            ctx.token_expires_at,
-        );
-        (name.clone(), ctx.server_url.clone(), line)
+        (name.clone(), ctx.server_url.clone(), ctx.auth.as_ref())
     } else if let Some(url) = &global.server {
-        if let Some((name, ctx)) = config.find_context_by_url(url) {
-            let line = token_line(
-                ctx.token.is_some(),
-                global.token.is_some(),
-                false,
-                ctx.token_expires_at,
-            );
-            (name.to_string(), ctx.server_url.clone(), line)
-        } else {
-            let line = token_line(false, global.token.is_some(), true, None);
-            ("(ephemeral)".to_string(), url.clone(), line)
+        match config.find_context_by_url(url) {
+            Some((name, ctx)) => (name.to_string(), ctx.server_url.clone(), ctx.auth.as_ref()),
+            None => ("(ephemeral)".to_string(), url.clone(), None),
         }
     } else if let Some(name) = config.current_context_name() {
         let ctx = config
             .current_context()
             .ok_or_else(|| anyhow::anyhow!("Current context '{}' not found", name))?;
-        let line = token_line(
-            ctx.token.is_some(),
-            global.token.is_some(),
-            false,
-            ctx.token_expires_at,
-        );
-        (name.to_string(), ctx.server_url.clone(), line)
+        (name.to_string(), ctx.server_url.clone(), ctx.auth.as_ref())
     } else if let Ok(env_url) = std::env::var("LOGCHEF_SERVER_URL") {
-        let line = token_line(false, global.token.is_some(), true, None);
-        ("(ephemeral)".to_string(), env_url, line)
+        ("(ephemeral)".to_string(), env_url, None)
     } else {
         anyhow::bail!("No context configured and no --server/LOGCHEF_SERVER_URL provided.");
     };
 
     println!("context: {}", ctx_name);
     println!("server:  {}", server_url);
-    println!("token:   {}", token_line);
+    println!(
+        "token:   {}",
+        token_line(auth, global.token.is_some(), ctx_name == "(ephemeral)")
+    );
 
     if let Ok(team) = std::env::var("LOGCHEF_DEFAULT_TEAM") {
         println!("team:    {} (from LOGCHEF_DEFAULT_TEAM)", team);
@@ -104,95 +103,142 @@ fn current(config: &Config, global: &GlobalArgs) -> Result<()> {
     Ok(())
 }
 
-fn token_line(
-    saved_token: bool,
-    env_token: bool,
-    is_ephemeral: bool,
-    expires_at: Option<chrono::DateTime<chrono::Utc>>,
-) -> String {
-    // --token / LOGCHEF_AUTH_TOKEN takes precedence over the saved token, and
-    // we don't know the env-supplied token's expiry, so skip it there.
+fn token_line(auth: Option<&ContextAuth>, env_token: bool, is_ephemeral: bool) -> String {
+    // --token / LOGCHEF_AUTH_TOKEN takes precedence over the saved credential,
+    // and we don't know the env-supplied token's expiry, so skip it there.
     if env_token {
         return "set (from --token/LOGCHEF_AUTH_TOKEN)".to_string();
     }
-    if saved_token {
-        let mut s = "set (from config".to_string();
-        if let Some(ts) = expires_at {
-            let expired = ts < chrono::Utc::now();
-            s.push_str(if expired { ", EXPIRED " } else { ", expires " });
-            s.push_str(&ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
-            if expired {
-                s.push_str(" — run `logchef auth` to sign in again");
+    match auth {
+        Some(ContextAuth::Pat { expires_at, .. }) => {
+            let mut s = "API token (from config".to_string();
+            if let Some(ts) = expires_at {
+                let expired = *ts < chrono::Utc::now();
+                s.push_str(if expired { ", EXPIRED " } else { ", expires " });
+                s.push_str(&ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+                if expired {
+                    s.push_str(". Run `logchef auth` to sign in again");
+                }
             }
+            s.push(')');
+            s
         }
-        s.push(')');
-        return s;
-    }
-    if is_ephemeral {
-        "not set (ephemeral context; pass --token or run `logchef auth`)".to_string()
-    } else {
-        "not set (run `logchef auth` to sign in)".to_string()
+        Some(ContextAuth::OAuth(_)) => {
+            "Logchef OAuth (from config, renewed automatically)".to_string()
+        }
+        None if is_ephemeral => {
+            "not set (ephemeral context; pass --token or run `logchef auth`)".to_string()
+        }
+        None => "not set (run `logchef auth` to sign in)".to_string(),
     }
 }
 
-fn logout(config: &mut Config, global: &GlobalArgs) -> Result<()> {
+async fn logout(config: &Config, global: &GlobalArgs) -> Result<()> {
     let ctx_name = resolve_context_name(config, global)?;
-
-    if let Some(ctx) = config.get_context_mut(&ctx_name) {
-        ctx.token = None;
-        ctx.token_expires_at = None;
-        config.save().context("Failed to save config")?;
-        println!("Logged out from context '{}'.", ctx_name);
-    } else {
+    if config.get_context(&ctx_name).is_none() {
         println!("Context '{}' not found.", ctx_name);
+        return Ok(());
     }
 
+    // The context lock keeps a concurrent refresh from rotating the refresh
+    // token between the revocation and the local removal.
+    let config_path = Config::config_path()?;
+    let lock_path = context_lock_path(&config_path, &ctx_name)?;
+    let _lock = tokio::task::spawn_blocking(move || lock_exclusive(&lock_path)).await??;
+
+    let saved = Config::load_from(&config_path)?
+        .get_context(&ctx_name)
+        .and_then(|ctx| ctx.auth.clone());
+    let revoked = match &saved {
+        Some(ContextAuth::OAuth(credential)) => auth::revoke(credential).await,
+        _ => Ok(()),
+    };
+
+    Config::update(|config| {
+        if let Some(ctx) = config.get_context_mut(&ctx_name) {
+            ctx.auth = None;
+        }
+        Ok(())
+    })
+    .context("Failed to save config")?;
+
+    match (saved, revoked) {
+        (None, _) => println!("Context '{}' was not signed in.", ctx_name),
+        (Some(_), Ok(())) => println!("Logged out from context '{}'.", ctx_name),
+        (Some(_), Err(err)) => anyhow::bail!(
+            "Removed the local sign-in for context '{}', but the server did not confirm the \
+             revocation ({}). Revoke the CLI grant in Logchef under Settings, Connected apps.",
+            ctx_name,
+            err
+        ),
+    }
     Ok(())
 }
 
 async fn status(config: &Config, global: &GlobalArgs) -> Result<()> {
-    let ctx_name = match resolve_context_name(config, global) {
-        Ok(name) => name,
+    let resolved = match session::resolve(config, global) {
+        Ok(resolved) => resolved,
         Err(_) => {
             println!("No contexts configured. Run 'logchef auth --server <url>' to set up.");
             return Ok(());
         }
     };
 
-    let ctx = config
-        .get_context(&ctx_name)
-        .ok_or_else(|| anyhow::anyhow!("Context '{}' not found", ctx_name))?;
+    println!("Context:  {}", resolved.name);
+    println!("Instance: {}", resolved.ctx.server_url);
 
-    println!("Context: {}", ctx_name);
-    println!("Server:  {}", ctx.server_url);
-
-    if !ctx.is_authenticated() {
-        println!("Status:  Not authenticated");
+    if !resolved.ctx.is_authenticated() && global.token.is_none() {
+        println!("Status:   Not authenticated");
         return Ok(());
     }
 
-    let client = Client::from_context(ctx)?;
-    match client.get_current_user().await {
-        Ok(user) => {
-            println!("User:    {}", user.email);
-            if let Some(name) = &user.full_name {
-                println!("Name:    {}", name);
+    let client = session::client_for(&resolved, global, resolved.ctx.timeout_secs)?;
+    let me = client.get_me().await?;
+    println!("User:     {}", me.user.email);
+    if let Some(name) = &me.user.full_name {
+        println!("Name:     {}", name);
+    }
+    println!("Role:     {}", me.user.role);
+    match &me.auth {
+        Some(auth) => {
+            let method = match auth.method.as_str() {
+                "oauth" => "Logchef OAuth",
+                "token" => "API token",
+                other => other,
+            };
+            match &auth.client_id {
+                Some(client_id) => println!("Method:   {} (client {})", method, client_id),
+                None => println!("Method:   {}", method),
             }
-            println!("Role:    {}", user.role);
+            println!("Scopes:   {}", auth.scopes.join(" "));
+            match auth.expires_at {
+                Some(ts) => println!(
+                    "Expires:  {}{}",
+                    ts.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                    if auth.method == "oauth" {
+                        " (access token; renewed automatically)"
+                    } else {
+                        ""
+                    }
+                ),
+                None => println!("Expires:  never"),
+            }
         }
-        Err(e) => {
-            println!("Status:  Token may be invalid or expired ({})", e);
+        None => {
+            if let Some(method) = &me.auth_method {
+                println!("Method:   {}", method);
+            }
         }
     }
 
     Ok(())
 }
 
-async fn login(config: &mut Config, global: GlobalArgs) -> Result<()> {
+async fn login(config: &Config, global: GlobalArgs, open_browser: bool) -> Result<()> {
     let server_url = get_server_url(config, &global)?;
     let server_url = server_url.trim_end_matches('/').to_string();
 
-    println!("Connecting to {}...", server_url);
+    eprintln!("Connecting to {}...", server_url);
 
     let client = Client::new(&server_url, 30)?;
     let meta = client
@@ -200,26 +246,32 @@ async fn login(config: &mut Config, global: GlobalArgs) -> Result<()> {
         .await
         .context("Failed to connect to server")?;
 
-    println!("Connected to Logchef {}", meta.data.version);
-
-    if !meta.data.oidc_enabled() {
+    let Some(issuer) = meta.data.oauth_issuer else {
         anyhow::bail!(
-            "CLI authentication not configured on this server. Ask your admin to set oidc.cli_client_id in server config."
+            "{} (Logchef {}) does not offer Logchef OAuth sign-in. Upgrade the server and \
+             enable auth.oauth, or use an API token: pass --token or set LOGCHEF_AUTH_TOKEN.",
+            server_url,
+            meta.data.version
+        );
+    };
+    if issuer != server_url {
+        anyhow::bail!(
+            "The server's OAuth issuer is {} but you connected to {}. Sign in with \
+             `logchef auth --server {}`.",
+            issuer,
+            server_url,
+            logchef_core::error::shell_quote(&issuer)
         );
     }
 
-    let oidc_issuer = meta
-        .data
-        .oidc_issuer
-        .ok_or_else(|| anyhow::anyhow!("Server did not provide OIDC issuer URL"))?;
-
-    let cli_client_id = meta
-        .data
-        .cli_client_id
-        .ok_or_else(|| anyhow::anyhow!("Server did not provide CLI client ID"))?;
-
-    let auth_flow = AuthFlow::new(server_url.clone(), oidc_issuer, cli_client_id);
-    let result = auth_flow.run().await?;
+    let credential = auth::login(
+        &issuer,
+        LoginOptions {
+            open_browser,
+            limits: CallbackLimits::default(),
+        },
+    )
+    .await?;
 
     let ctx_name = global
         .context
@@ -231,26 +283,52 @@ async fn login(config: &mut Config, global: GlobalArgs) -> Result<()> {
         })
         .unwrap_or_else(|| context_name_from_url(&server_url));
 
-    let timezone = iana_time_zone::get_timezone().ok();
+    let config_path = Config::config_path()?;
+    let lock_path = context_lock_path(&config_path, &ctx_name)?;
+    let _lock = tokio::task::spawn_blocking(move || lock_exclusive(&lock_path)).await??;
+    let saved_ctx = ctx_name.clone();
+    Config::update(move |config| {
+        // A new sign-in replaces only the credential and URL. Defaults and the
+        // timeout of an existing context stay as they were.
+        let ctx = match config.get_context(&saved_ctx) {
+            Some(existing) => CtxConfig {
+                server_url: server_url.clone(),
+                auth: Some(ContextAuth::OAuth(credential)),
+                ..existing.clone()
+            },
+            None => CtxConfig {
+                auth: Some(ContextAuth::OAuth(credential)),
+                defaults: ContextDefaults {
+                    timezone: iana_time_zone::get_timezone().ok(),
+                    ..Default::default()
+                },
+                ..CtxConfig::new(server_url.clone())
+            },
+        };
+        config.add_or_update_context(saved_ctx, ctx);
+        Ok(())
+    })
+    .context("Failed to save config")?;
 
-    let ctx = CtxConfig {
-        server_url: server_url.clone(),
-        timeout_secs: 30,
-        token: Some(result.token),
-        token_expires_at: result.expires_at,
-        defaults: ContextDefaults {
-            timezone,
-            ..Default::default()
-        },
+    let resolved = session::ResolvedContext {
+        ctx: Config::load()?
+            .get_context(&ctx_name)
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("Context '{}' not found after saving", ctx_name))?,
+        name: ctx_name.clone(),
+        is_ephemeral: false,
     };
-
-    config.add_or_update_context(ctx_name.clone(), ctx);
-    config.save().context("Failed to save config")?;
-
-    if let Some(email) = result.user_email {
-        println!("\nAuthenticated as {} (context: '{}')", email, ctx_name);
-    } else {
-        println!("\nAuthenticated! (context: '{}')", ctx_name);
+    let no_override = GlobalArgs {
+        token: None,
+        ..global
+    };
+    let client = session::client_for(&resolved, &no_override, resolved.ctx.timeout_secs)?;
+    match client.get_current_user().await {
+        Ok(user) => eprintln!(
+            "\nAuthenticated as {} (context: '{}')",
+            user.email, ctx_name
+        ),
+        Err(_) => eprintln!("\nAuthenticated (context: '{}')", ctx_name),
     }
 
     Ok(())
@@ -288,8 +366,14 @@ fn get_server_url(config: &Config, global: &GlobalArgs) -> Result<String> {
         anyhow::bail!("Context '{}' not found", ctx_name);
     }
 
-    // Priority 3: Interactive prompt with optional default
+    // Priority 3: Interactive prompt with optional default. Never prompt
+    // without a terminal or in CI.
     let default = config.current_context().map(|ctx| ctx.server_url.clone());
+    if !ui::interactive() {
+        return default.ok_or_else(|| {
+            anyhow::anyhow!("No server to sign in to. Pass --server <url> or --context <name>.")
+        });
+    }
 
     let mut prompt = Text::new("Logchef server URL:");
     if let Some(ref default_url) = default {
