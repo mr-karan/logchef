@@ -16,10 +16,19 @@ const demoProvisioningTokenHeader = "X-Logchef-Demo-Provisioning-Token"
 
 var publicDemoQueryPath = regexp.MustCompile(`^/api/v1/teams/[^/]+/sources/[^/]+/(?:logs/(?:query|histogram|context)|logs/query/[^/]+/cancel|generate-sql|logchefql/(?:query|translate|validate))$`)
 
+// OAuth consent and Connected apps revocation change only the visitor's own
+// grants, so a read-only demo can still connect an MCP host. Both routes are
+// session-only and check the browser Origin.
+var (
+	publicDemoOAuthDecisionPath = regexp.MustCompile(`^/api/v1/oauth/requests/[^/]+/decision$`)
+	publicDemoConnectedAppPath  = regexp.MustCompile(`^/api/v1/me/connected-apps/[^/]+$`)
+)
+
 // enforceDemoReadOnly rejects metadata mutations when the instance advertises
 // public demo mode. Query endpoints remain POST because their bodies contain
 // queries, but they do not mutate Logchef metadata or the underlying log
-// stores. Authentication login/logout must also remain available.
+// stores. Authentication login/logout, the OAuth consent decision and
+// Connected apps revocation must also remain available.
 func (s *Server) enforceDemoReadOnly(c fiber.Ctx) error {
 	if s.config == nil || !s.config.Demo.ReadOnly {
 		return c.Next()
@@ -40,7 +49,12 @@ func (s *Server) enforceDemoReadOnly(c fiber.Ctx) error {
 		return c.Next()
 	case fiber.MethodPost:
 		path := c.Path()
-		if path == "/api/v1/auth/local/login" || path == "/api/v1/auth/logout" || publicDemoQueryPath.MatchString(path) {
+		if path == "/api/v1/auth/local/login" || path == "/api/v1/auth/logout" ||
+			publicDemoQueryPath.MatchString(path) || publicDemoOAuthDecisionPath.MatchString(path) {
+			return c.Next()
+		}
+	case fiber.MethodDelete:
+		if publicDemoConnectedAppPath.MatchString(c.Path()) {
 			return c.Next()
 		}
 	}
