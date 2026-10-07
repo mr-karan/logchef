@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
-version = "0.2.3"
+version = "0.3.0"
 edition = "2024"
 # std File::lock (config and refresh locks) is stable since 1.89.
 rust-version = "1.89"

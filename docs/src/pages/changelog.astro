@@ -210,7 +210,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         </div>
         <ul class="change-list">
           <li>Back up the metadata database: migration 33 adds the OAuth tables.</li>
-          <li>Update the CLI. Older CLIs cannot sign in to this server; their saved sessions keep working until they expire.</li>
+          <li>Update the CLI to 0.3.0. Older CLIs cannot sign in to this server and report that <code>oidc.cli_client_id</code> is not set; ignore that message and upgrade. Their saved sessions keep working until they expire.</li>
         </ul>
       </div>
     </article>

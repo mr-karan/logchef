@@ -59,8 +59,9 @@ adds database migration 33; back up the metadata database before upgrading.
 
 ### Upgrade notes
 - Back up the metadata database: migration 33 adds the OAuth tables.
-- Update the CLI. Older CLIs cannot sign in to this server; their saved
-  sessions keep working until they expire.
+- Update the CLI to 0.3.0. Older CLIs cannot sign in to this server and
+  report that `oidc.cli_client_id` is not set; ignore that message and
+  upgrade. Their saved sessions keep working until they expire.
 
 ## [2.2.0] - 2026-09-29
 
