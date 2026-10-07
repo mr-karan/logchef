@@ -22,7 +22,7 @@ The endpoint accepts Logchef OAuth access tokens and nothing else. The MCP clien
 3. You choose **Approve** or **Deny**.
 4. The client receives a short-lived access token (10 minutes) and a refresh token (30 days).
 
-The consent page shows the client name, the address the browser returns to, and the exact scopes. Approve only a connection that you started yourself.
+The consent page shows the client name, the address the browser returns to, and the exact scopes. For a client that identifies itself with a URL, it also shows "Published by" and the host of that URL. Approve only a connection that you started yourself.
 
 These credentials get `401` at `/mcp`:
 
@@ -35,7 +35,7 @@ An OAuth token for `/mcp` gets `401` at `/api`. The two are separate audiences.
 To revoke an assistant, open **Settings → Connected apps** in the Logchef web UI and remove it. The next request from that assistant fails.
 
 <Aside type="note">
-The endpoint exists only when an operator has enabled OAuth. Without it, `/mcp` returns `404`. Refer to [Logchef OAuth](/getting-started/configuration#logchef-oauth) for the server settings.
+The endpoint exists only when an operator has enabled OAuth. Without it, `/mcp` and unknown `/.well-known/*` paths return `404`. Refer to [Logchef OAuth](/getting-started/configuration#logchef-oauth) for the server settings.
 </Aside>
 
 ## Connect a client
@@ -49,7 +49,7 @@ An assistant acts with your identity and sees only what you can see.
 - **Read-only.** Every tool reads data. No tool changes teams, sources, users, tokens, saved queries, or alerts.
 - **Seven read scopes.** The consent page requests `profile:read`, `teams:read`, `sources:read`, `logs:read`, `saved_queries:read`, `collections:read`, and `alerts:read`. It can also request `offline_access`, which lets the client refresh the token without asking you again. Tools that need a scope the token does not hold do not appear in the tool list.
 - **Team membership only.** An OAuth token sees the teams you belong to and the sources linked to those teams. This applies to admins too. An admin's web session can open any team, but an admin's agent token cannot.
-- **Same limits as the web UI.** Query timeouts follow `query.max_timeout_seconds`. Concurrency limits follow `query.max_concurrent_per_user` and `query.max_concurrent_global`.
+- **Same limits as the web UI.** One MCP tool call ends after `query.mcp_call_timeout_seconds` (default 60, never more than `query.max_timeout_seconds`). Concurrency limits follow `query.max_concurrent_per_user` and `query.max_concurrent_global`.
 
 <Aside type="caution">
 Logs are untrusted text. A log line can contain instructions aimed at an assistant. Review what an assistant does with log content, and keep the assistants you connect to the minimum that you need.

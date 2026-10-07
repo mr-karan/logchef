@@ -61,6 +61,10 @@ proxy_header = "X-Forwarded-For"
 # Origin only: scheme, host, and optional port. No path, no trailing slash.
 # Must be https, except on localhost, 127.0.0.1, or ::1.
 public_url = ""
+
+# Origin that browsers use for the OAuth sign-in pages, when it differs from
+# public_url. Optional. Same rules as public_url. Unset means public_url.
+browser_url = ""
 ```
 
 `public_url` is separate from `frontend_url`. `frontend_url` builds links in the UI and can include a subpath. `public_url` is the OAuth issuer. [Logchef OAuth](#logchef-oauth) does not work under a subpath.
@@ -141,9 +145,35 @@ enabled = true
 
 Environment variables: `LOGCHEF_SERVER__PUBLIC_URL`, `LOGCHEF_AUTH__OAUTH__ENABLED=true`.
 
-Logchef refuses to start when OAuth is on and `public_url` is missing or invalid. It must be an origin with `https`. Plain `http` is allowed only for `localhost`, `127.0.0.1`, and `::1`. A path (a subpath deployment) is not supported with OAuth. Set `public_url` to the address that users and agents type in a browser or an MCP client. A mismatch makes sign-in fail, because the issuer must equal the address the client uses.
+When OAuth is off, `/mcp` and every unknown `/.well-known/*` path return `404`.
+
+Logchef refuses to start when OAuth is on and `public_url` is missing or invalid. It must be an origin with `https`. Plain `http` is allowed only for `localhost`, `127.0.0.1`, and `::1`. A path (a subpath deployment) is not supported with OAuth. Set `public_url` to the address that users and agents type in a browser or an MCP client. A mismatch makes sign-in fail, because the issuer must equal the address the client uses. If browsers and agents use different hosts, refer to [Split deployments](#split-deployments).
 
 Behind a reverse proxy, the proxy must forward `/oauth/*`, `/.well-known/oauth-*`, and `/mcp` to Logchef. Refer to [Reverse Proxy](/operations/reverse-proxy).
+
+#### Clients that connect without registration
+
+Most MCP hosts, including Claude Code, Codex, Claude.ai, and ChatGPT, identify themselves with an `https` URL that points to a public document. The document lists the client name and its callback URLs. This is a Client ID Metadata Document (CIMD). With CIMD, a user connects with only the `/mcp` URL. You add no client to the config.
+
+CIMD is **on by default** when OAuth is enabled. To turn it off, set `cimd_enabled` to `false`:
+
+```toml
+[auth.oauth]
+enabled = true
+cimd_enabled = false
+```
+
+When CIMD is on, Logchef fetches the document from the client ID URL. It applies these rules:
+
+- Only `https` client IDs are fetched. Logchef refuses addresses that are not public on the internet, such as loopback, private, and link-local ranges. It does not follow redirects.
+- The document must be small, must name the same client ID, and must not contain a client secret. Only a public client (`none`) is accepted.
+- A callback URL must be `https`, or `http` on a loopback host. Matching is exact. A loopback callback without a port matches any port.
+- The client gets tokens for `/mcp` only.
+- Fetches are rate limited, and Logchef caches a document for the time that its `Cache-Control` header allows.
+
+The consent page shows the client name from the document and a line "Published by", followed by the host of the client ID URL. The name is chosen by the client, so check the host. Approve only a connection that you started yourself.
+
+Clients that you list in `[[auth.oauth.clients]]` and the built-in clients always take precedence over CIMD. Cursor desktop does not use CIMD. It needs the built-in client ID `logchef-mcp`.
 
 #### Built-in clients
 
@@ -158,7 +188,7 @@ You cannot reuse these IDs in your own client list.
 
 #### Hosted clients
 
-A hosted assistant, such as Claude.ai or ChatGPT, runs in a vendor's cloud. It cannot use a loopback callback. Add one `[[auth.oauth.clients]]` entry for each host, with the exact callback URL:
+Use this section when CIMD is off, or when a host does not support it. A hosted assistant, such as Claude.ai or ChatGPT, runs in a vendor's cloud. It cannot use a loopback callback. Add one `[[auth.oauth.clients]]` entry for each host, with the exact callback URL:
 
 ```toml
 [[auth.oauth.clients]]
@@ -192,6 +222,34 @@ To let a browser-based MCP tool call `/mcp` from another origin, list that origi
 enabled = true
 mcp_allowed_origins = ["https://inspector.example.com"]
 ```
+
+#### Split deployments
+
+Some deployments put the web UI behind an SSO proxy, and serve the API on a second host that CLIs and agents reach directly. Set `server.browser_url` for this case:
+
+```toml
+[server]
+# Issuer and machine origin: metadata, token, revocation, /mcp, and the "iss" value.
+public_url = "https://logchef-api.example.com"
+# Browser origin: authorize, consent, and connected apps.
+browser_url = "https://logchef.example.com"
+# The web UI, the OIDC login callback, and the session cookie stay on the UI host.
+frontend_url = "https://logchef.example.com"
+
+[auth.oauth]
+enabled = true
+```
+
+Environment variables: `LOGCHEF_SERVER__PUBLIC_URL`, `LOGCHEF_SERVER__BROWSER_URL`.
+
+| Item | Host |
+|------|------|
+| Issuer, `iss` on every redirect, token endpoint, revocation endpoint, protected resource metadata, `/mcp`, `/api` | `public_url` (API host) |
+| `authorization_endpoint` in the metadata, the consent page, Settings → Connected apps | `browser_url` (UI host) |
+
+`browser_url` must follow the same rules as `public_url`: an origin only, with `https` (or `http` on a loopback host). Logchef checks it only when OAuth is enabled. If `browser_url` is unset, one host serves everything, and `public_url` is used for the browser pages too.
+
+The user's browser goes to the UI host to sign in and approve. The CLI or agent talks to the API host for tokens and tool calls. A request for `/oauth/authorize` on the API host is answered with a redirect to the consent page on the UI host. For the paths that each host must pass, refer to [Reverse Proxy](/operations/reverse-proxy#split-ui-and-api-hosts).
 
 #### What users can do
 
@@ -321,6 +379,8 @@ max_preview_limit = 100000
 max_response_bytes = 67108864
 default_timeout_seconds = 30
 max_timeout_seconds = 120
+# Whole-call limit for one MCP tool call. Default 60. Capped by max_timeout_seconds.
+mcp_call_timeout_seconds = 60
 max_concurrent_per_user = 3
 max_concurrent_global = 30
 
@@ -338,6 +398,8 @@ formats = ["csv", "ndjson"]
 default_ttl = "720h"
 max_query_text_bytes = 1048576
 ```
+
+`query.mcp_call_timeout_seconds` ends one whole [MCP](/integration/mcp-server) tool call. It also frees the query slot of a call that a client abandoned. The effective value is never above `query.max_timeout_seconds`. The HTTP API is not affected. Environment variable: `LOGCHEF_QUERY__MCP_CALL_TIMEOUT_SECONDS`.
 
 The UI uses preview limits for Run and export limits for Download.
 
