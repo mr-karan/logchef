@@ -10,25 +10,27 @@ import (
 var ErrOperationNotSupported = errors.New("datasource operation not supported")
 
 type QueryRequest struct {
-	RawQuery         string
-	StartTime        *time.Time
-	EndTime          *time.Time
-	Timezone         string
-	Limit            int
-	DefaultLimit     int
-	MaxLimit         int
-	MaxResponseBytes int
-	QueryTimeout     *int
+	ExtraStreamFilters []string
+	RawQuery           string
+	StartTime          *time.Time
+	EndTime            *time.Time
+	Timezone           string
+	Limit              int
+	DefaultLimit       int
+	MaxLimit           int
+	MaxResponseBytes   int
+	QueryTimeout       *int
 }
 
 type HistogramRequest struct {
-	StartTime    *time.Time
-	EndTime      *time.Time
-	Window       string
-	Query        string
-	GroupBy      string
-	Timezone     string
-	QueryTimeout *int
+	ExtraStreamFilters []string
+	StartTime          *time.Time
+	EndTime            *time.Time
+	Window             string
+	Query              string
+	GroupBy            string
+	Timezone           string
+	QueryTimeout       *int
 }
 
 type HistogramBucket struct {

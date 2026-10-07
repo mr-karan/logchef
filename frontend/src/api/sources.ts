@@ -43,6 +43,31 @@ export interface VictoriaLogsConnectionInfo {
     query?: string;
   };
   headers?: Record<string, string>;
+  optimizer?: VictoriaLogsOptimizer;
+}
+
+export interface VictoriaLogsOptimizer {
+  enabled: boolean;
+  max_window_seconds?: number;
+  concurrency?: number;
+  sidebar_lookback_seconds?: number;
+  sidebar_values_cap?: number;
+  histogram_enabled?: boolean;
+  stream_fields?: string[];
+}
+
+export function getVictoriaLogsOptimizer(source: Source | undefined | null): VictoriaLogsOptimizer | null {
+  if (source?.source_type !== 'victorialogs') return null;
+  if (!('optimizer' in source.connection)) return null;
+  const optimizer = source.connection.optimizer;
+  if (!optimizer || typeof optimizer !== 'object' || !('enabled' in optimizer) || optimizer.enabled !== true) return null;
+  return {
+    enabled: true,
+    max_window_seconds: 'max_window_seconds' in optimizer && typeof optimizer.max_window_seconds === 'number' ? optimizer.max_window_seconds : undefined,
+    sidebar_lookback_seconds: 'sidebar_lookback_seconds' in optimizer && typeof optimizer.sidebar_lookback_seconds === 'number' ? optimizer.sidebar_lookback_seconds : undefined,
+    concurrency: 'concurrency' in optimizer && typeof optimizer.concurrency === 'number' ? optimizer.concurrency : undefined,
+    histogram_enabled: 'histogram_enabled' in optimizer && typeof optimizer.histogram_enabled === 'boolean' ? optimizer.histogram_enabled : undefined,
+  };
 }
 
 export type SourceConnectionInfo =

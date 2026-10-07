@@ -123,6 +123,9 @@ func (p *Provider) QueryLogs(ctx context.Context, source *models.Source, req dat
 		form.Set("timeout", timeout)
 	}
 	applyScopeFilters(form, conn)
+	for _, filter := range req.ExtraStreamFilters {
+		form.Add("extra_stream_filters", filter)
+	}
 
 	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/query", form)
 	if err != nil {
@@ -364,6 +367,9 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	}
 	applyScopeFilters(form, conn)
 
+	for _, filter := range req.ExtraStreamFilters {
+		form.Add("extra_stream_filters", filter)
+	}
 	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/hits", form)
 	if err != nil {
 		return nil, err
@@ -485,6 +491,9 @@ func (p *Provider) GetFieldValues(ctx context.Context, source *models.Source, re
 	query, err := compileQueryForVictoriaLogs(req.QueryText, req.Language, source)
 	if err != nil {
 		return nil, err
+	}
+	if conn.Optimizer != nil && conn.Optimizer.Enabled {
+		return p.optimizedFieldValues(ctx, source, conn, req, query)
 	}
 
 	form := url.Values{}
@@ -1151,7 +1160,7 @@ func formatTimeout(timeout *int) string {
 }
 
 func formatAPITime(ts time.Time) string {
-	return ts.UTC().Format(time.RFC3339)
+	return ts.UTC().Format(time.RFC3339Nano)
 }
 
 // formatTimezoneOffset returns a VictoriaLogs-compatible duration string for

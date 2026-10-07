@@ -167,12 +167,61 @@ type VictoriaLogsScope struct {
 }
 
 type VictoriaLogsConnectionInfo struct {
-	BaseURL string             `json:"base_url"`
-	Auth    VictoriaLogsAuth   `json:"auth,omitempty"`
-	Tenant  VictoriaLogsTenant `json:"tenant,omitempty"`
-	Scope   VictoriaLogsScope  `json:"scope,omitempty"`
-	Headers map[string]string  `json:"headers,omitempty"`
-	Options map[string]any     `json:"options,omitempty"`
+	BaseURL   string                 `json:"base_url"`
+	Auth      VictoriaLogsAuth       `json:"auth,omitempty"`
+	Tenant    VictoriaLogsTenant     `json:"tenant,omitempty"`
+	Scope     VictoriaLogsScope      `json:"scope,omitempty"`
+	Headers   map[string]string      `json:"headers,omitempty"`
+	Options   map[string]any         `json:"options,omitempty"`
+	Optimizer *VictoriaLogsOptimizer `json:"optimizer,omitempty"`
+}
+
+type VictoriaLogsOptimizer struct {
+	Enabled                bool     `json:"enabled"`
+	MaxWindowSeconds       int      `json:"max_window_seconds,omitempty"`
+	Concurrency            int      `json:"concurrency,omitempty"`
+	SidebarLookbackSeconds int      `json:"sidebar_lookback_seconds,omitempty"`
+	SidebarValuesCap       int      `json:"sidebar_values_cap,omitempty"`
+	HistogramEnabled       *bool    `json:"histogram_enabled,omitempty"`
+	StreamFields           []string `json:"stream_fields,omitempty"`
+}
+
+func (o VictoriaLogsOptimizer) WithDefaults() VictoriaLogsOptimizer {
+	if o.MaxWindowSeconds == 0 {
+		o.MaxWindowSeconds = 10800
+	}
+	if o.Concurrency == 0 {
+		o.Concurrency = 2
+	}
+	if o.SidebarLookbackSeconds == 0 {
+		o.SidebarLookbackSeconds = 900
+	}
+	if o.SidebarValuesCap == 0 {
+		o.SidebarValuesCap = 10000
+	}
+	return o
+}
+
+func (o VictoriaLogsOptimizer) Validate() error {
+	o = o.WithDefaults()
+	if o.MaxWindowSeconds < 60 || o.MaxWindowSeconds > 86400 {
+		return fmt.Errorf("max_window_seconds must be between 60 and 86400")
+	}
+	if o.Concurrency < 1 || o.Concurrency > 8 {
+		return fmt.Errorf("concurrency must be between 1 and 8")
+	}
+	if o.SidebarLookbackSeconds < 60 || o.SidebarLookbackSeconds > 10800 {
+		return fmt.Errorf("sidebar_lookback_seconds must be between 60 and 10800")
+	}
+	if o.SidebarValuesCap < 100 || o.SidebarValuesCap > 100000 {
+		return fmt.Errorf("sidebar_values_cap must be between 100 and 100000")
+	}
+	for _, field := range o.StreamFields {
+		if strings.TrimSpace(field) == "" || len(field) > 1024 || strings.ContainsAny(field, "\x00\r\n") {
+			return fmt.Errorf("stream_fields must contain non-empty field names without control characters")
+		}
+	}
+	return nil
 }
 
 // Source represents a datasource in our system.
