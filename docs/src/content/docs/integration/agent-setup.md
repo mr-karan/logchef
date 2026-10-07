@@ -120,7 +120,7 @@ Then add a custom connector with the server URL `https://logchef.example.com/mcp
 
 ### ChatGPT
 
-The operator adds a web client with the ChatGPT callback:
+ChatGPT connects from OpenAI's servers, so your Logchef must be reachable from the internet over HTTPS, and the operator must register ChatGPT as a client first:
 
 ```toml
 [auth.oauth]
@@ -132,7 +132,16 @@ name = "ChatGPT"
 redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
 ```
 
-Then, in ChatGPT, add an app that uses `https://logchef.example.com/mcp`, choose OAuth, enter the client ID `chatgpt`, and leave the client secret empty.
+Then, in ChatGPT on the web:
+
+1. Open **Plugins**, choose **Add**, then **Add custom MCP server**.
+2. Name it `Logchef` and set the MCP server URL to `https://logchef.example.com/mcp`.
+3. Choose **OAuth** as the authentication, open the advanced OAuth settings, and set the client ID to `chatgpt`. Leave the client secret empty. ChatGPT discovers the authorization server and shows the callback `https://chatgpt.com/connector_platform_oauth_redirect`, which must match the config above.
+4. Create the connection. ChatGPT opens Logchef: sign in if needed, check that the consent page says **Allow ChatGPT to access Logchef?** and returns to `chatgpt.com`, then approve.
+
+Ask, for example, "Using Logchef, find errors in the last hour and open an investigation". ChatGPT lists your sources, reads the schema, runs the query, and opens the investigation panel in the conversation, where you can change the filter, select a histogram interval or rows, and compare with the previous window.
+
+To disconnect, revoke ChatGPT under **Settings → Connected apps** in Logchef.
 
 ### Other hosts
 

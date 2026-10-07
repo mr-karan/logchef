@@ -72,7 +72,7 @@ func (t *tools) addDiscoverTools(s *server.MCPServer) {
 		mcp.WithDescription("Get top values for all LowCardinality fields in one call. Returns a map of field names to their top values with counts. Much faster than calling get_field_values for each field individually. Use this for initial source exploration to understand what dimensions exist."),
 		mcp.WithInputSchema[GetAllFieldDimensionsParams](),
 		mcp.WithTitleAnnotation("Get All Field Dimensions"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(dimensionsTool, mcp.NewTypedToolHandler(t.handleGetAllFieldDimensions))
 }

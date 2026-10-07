@@ -247,7 +247,7 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		mcp.WithInputSchema[QueryLogsParams](),
 		mcp.WithOutputSchema[QueryResult](),
 		mcp.WithTitleAnnotation("Query Logs (SQL)"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(queryLogsTool, mcp.NewTypedToolHandler(t.handleQueryLogs))
 
@@ -256,7 +256,7 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetSourceSchemaParams](),
 		mcp.WithOutputSchema[[]SchemaColumnResult](),
 		mcp.WithTitleAnnotation("Get Source Schema"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(schemaTool, mcp.NewStructuredToolHandler(t.handleGetSourceSchema))
 
@@ -266,7 +266,7 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetLogHistogramParams](),
 		mcp.WithOutputSchema[HistogramResult](),
 		mcp.WithTitleAnnotation("Get Log Histogram"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(histogramTool, mcp.NewTypedToolHandler(t.handleGetLogHistogram))
 
@@ -275,7 +275,7 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		mcp.WithInputSchema[ListSavedQueriesParams](),
 		mcp.WithOutputSchema[[]SavedQueryResult](),
 		mcp.WithTitleAnnotation("List Saved Queries"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(listSavedQueriesTool, mcp.NewStructuredToolHandler(t.handleListSavedQueries))
 
@@ -284,7 +284,7 @@ func (t *tools) addLogsTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetSavedQueryParams](),
 		mcp.WithOutputSchema[SavedQueryResult](),
 		mcp.WithTitleAnnotation("Get Saved Query"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(getSavedQueryTool, mcp.NewStructuredToolHandler(t.handleGetSavedQuery))
 }

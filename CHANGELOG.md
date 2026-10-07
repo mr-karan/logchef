@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- The MCP investigation panel now applies each new `open_investigation` call
+  (source, team, filter and time range) and runs the query, instead of keeping
+  the previous results. Opening the panel runs its first query.
+- MCP tools declare themselves read-only, non-destructive and closed-world.
+  They previously advertised the library defaults (destructive, open-world),
+  which can make hosts ask for confirmation before every read.
+
 ## [2.3.1] - 2026-10-07
 
 ### Fixed

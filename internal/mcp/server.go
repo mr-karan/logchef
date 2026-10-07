@@ -101,7 +101,7 @@ func newMCPServer(deps Deps) *server.MCPServer {
 		server.WithToolHandlerMiddleware(t.callDeadline),
 		server.WithToolHandlerMiddleware(t.authErrors),
 	)
-	addInvestigationApp(s)
+	addInvestigationApp(s, investigationUIDomain(deps.Config))
 	t.addProfileTools(s)
 	t.addSourcesTools(s)
 	t.addLogsTools(s)
@@ -112,6 +112,28 @@ func newMCPServer(deps Deps) *server.MCPServer {
 	t.addResourceTemplates(s)
 	addPrompts(s)
 	return s
+}
+
+// investigationUIDomain returns the origin the investigation panel declares
+// as its ChatGPT sandbox domain. With OAuth enabled, config validation
+// guarantees server.public_url is a canonical origin; without OAuth a
+// directory client cannot connect, so no domain is declared.
+func investigationUIDomain(cfg *config.Config) string {
+	if !cfg.Auth.OAuth.Enabled {
+		return ""
+	}
+	return cfg.Server.PublicURL
+}
+
+// readOnlyTool sets every safety hint on a tool that only reads from the
+// caller's own Logchef workspace. mcp-go defaults to destructive and
+// open-world hints, so a tool without this option advertises itself as a
+// write that reaches the public internet.
+func readOnlyTool(tool *mcp.Tool) {
+	tool.Annotations.ReadOnlyHint = new(true)
+	tool.Annotations.DestructiveHint = new(false)
+	tool.Annotations.IdempotentHint = new(true)
+	tool.Annotations.OpenWorldHint = new(false)
 }
 
 // tools holds the dependencies shared by every tool handler.

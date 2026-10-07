@@ -232,7 +232,7 @@ func (t *tools) addAnalysisTools(s *server.MCPServer) {
 		mcp.WithInputSchema[CompareWindowsParams](),
 		mcp.WithOutputSchema[CompareWindowsResult](),
 		mcp.WithTitleAnnotation("Compare Time Windows"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(compareWindowsTool, mcp.NewStructuredToolHandler(t.handleCompareWindows))
 
@@ -241,7 +241,7 @@ func (t *tools) addAnalysisTools(s *server.MCPServer) {
 		mcp.WithInputSchema[TopValuesParams](),
 		mcp.WithOutputSchema[TopValuesResult](),
 		mcp.WithTitleAnnotation("Top Field Values"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(topValuesTool, mcp.NewStructuredToolHandler(t.handleTopValues))
 }
