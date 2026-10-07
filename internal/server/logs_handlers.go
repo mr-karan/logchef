@@ -257,6 +257,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// a source config change. Explorer/ad-hoc requests carry no directive and
 	// stay uncached, preserving the streaming path exactly.
 	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
+	cacheable = cacheable && len(req.ExtraStreamFilters) == 0
 	var cacheKey [32]byte
 	if cacheable {
 		effLimit := req.Limit

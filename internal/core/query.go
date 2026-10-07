@@ -78,13 +78,14 @@ func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest) (dataso
 	}
 
 	params := datasource.QueryRequest{
-		RawQuery:         query,
-		Timezone:         req.Timezone,
-		Limit:            req.Limit,
-		DefaultLimit:     cfg.DefaultPreviewLimit,
-		MaxLimit:         cfg.MaxPreviewLimit,
-		MaxResponseBytes: cfg.MaxResponseBytes,
-		QueryTimeout:     timeout,
+		ExtraStreamFilters: req.ExtraStreamFilters,
+		RawQuery:           query,
+		Timezone:           req.Timezone,
+		Limit:              req.Limit,
+		DefaultLimit:       cfg.DefaultPreviewLimit,
+		MaxLimit:           cfg.MaxPreviewLimit,
+		MaxResponseBytes:   cfg.MaxResponseBytes,
+		QueryTimeout:       timeout,
 	}
 	if req.StartTime != "" || req.EndTime != "" {
 		startTime, endTime, err := parseRFC3339TimeRange(req.StartTime, req.EndTime)
@@ -115,13 +116,14 @@ func RunQuery(ctx context.Context, ds *datasource.Service, cfg config.QueryConfi
 
 // LogchefQLQueryRequest is a LogchefQL query to run against one source.
 type LogchefQLQueryRequest struct {
-	Query        string                    `json:"query"`
-	StartTime    string                    `json:"start_time"`    // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
-	EndTime      string                    `json:"end_time"`      // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
-	Timezone     string                    `json:"timezone"`      // Timezone for time conversion
-	Limit        int                       `json:"limit"`         // Result limit
-	QueryTimeout *int                      `json:"query_timeout"` // Optional timeout in seconds
-	Variables    []models.TemplateVariable `json:"variables,omitempty"`
+	ExtraStreamFilters []string                  `json:"extra_stream_filters,omitempty"`
+	Query              string                    `json:"query"`
+	StartTime          string                    `json:"start_time"`    // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
+	EndTime            string                    `json:"end_time"`      // Accepts "2006-01-02 15:04:05" and ISO8601/RFC3339
+	Timezone           string                    `json:"timezone"`      // Timezone for time conversion
+	Limit              int                       `json:"limit"`         // Result limit
+	QueryTimeout       *int                      `json:"query_timeout"` // Optional timeout in seconds
+	Variables          []models.TemplateVariable `json:"variables,omitempty"`
 }
 
 // PreparedLogchefQL is a LogchefQL query compiled into the source's native
@@ -195,13 +197,14 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	}
 
 	params := datasource.QueryRequest{
-		RawQuery:         compiled.Query,
-		Timezone:         req.Timezone,
-		Limit:            req.Limit,
-		DefaultLimit:     cfg.DefaultPreviewLimit,
-		MaxLimit:         cfg.MaxPreviewLimit,
-		MaxResponseBytes: cfg.MaxResponseBytes,
-		QueryTimeout:     timeout,
+		ExtraStreamFilters: req.ExtraStreamFilters,
+		RawQuery:           compiled.Query,
+		Timezone:           req.Timezone,
+		Limit:              req.Limit,
+		DefaultLimit:       cfg.DefaultPreviewLimit,
+		MaxLimit:           cfg.MaxPreviewLimit,
+		MaxResponseBytes:   cfg.MaxResponseBytes,
+		QueryTimeout:       timeout,
 	}
 	if compiled.Language == models.QueryLanguageLogsQL {
 		startTime, endTime, err := parseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
@@ -323,9 +326,10 @@ func PrepareHistogram(req models.APIHistogramRequest) (HistogramParams, error) {
 		window = "1m"
 	}
 	params := HistogramParams{
-		Window:   window,
-		Query:    query,
-		Timezone: req.Timezone,
+		ExtraStreamFilters: req.ExtraStreamFilters,
+		Window:             window,
+		Query:              query,
+		Timezone:           req.Timezone,
 	}
 
 	startTime, endTime, err := parseHistogramTimeRange(req)

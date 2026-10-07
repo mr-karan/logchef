@@ -418,6 +418,8 @@ func (s *Server) setupRoutes() {
 	// rate-limited per authenticated user (queryLimiter runs after the group's
 	// requireAuth, so the user context is available).
 	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/query", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleQueryLogs)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/windowed", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleWindowedQuery)
+	registerLimited(teamSourceOps, fiber.MethodGet, "/logs/stream-fields", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleStreamFields)
 	teamSourceOps.Get("/logs/tail", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleTailLogs)
 	teamSourceOps.Post("/logs/export", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleExportLogs)
 	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCancelQuery)

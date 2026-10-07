@@ -87,6 +87,50 @@ A few behaviors worth knowing:
 - If VictoriaLogs closes the tail connection on its own (a restart, an idle timeout, a network drop) rather than because you stopped the tail, Logchef reports that as a dropped connection rather than a normal stop — so you can tell "I stopped this" apart from "the connection died."
 - Live Tail works in both LogchefQL and native LogsQL query modes.
 
+## Windowed search
+
+For large sources, enable **Windowed search** in the VictoriaLogs source form.
+The explorer searches short windows newest first and stops once it fills the
+page. **Load older** continues the same query and fixed time range. Queries
+with pipes use the standard query path to preserve their meaning.
+
+Provisioning accepts the same settings under the source connection:
+
+```toml
+[sources.connection.optimizer]
+enabled = true
+max_window_seconds = 10800
+concurrency = 2
+sidebar_lookback_seconds = 900
+sidebar_values_cap = 10000
+histogram_enabled = true
+stream_fields = ["service"]
+```
+
+The defaults are three-hour windows, two concurrent requests per source, and
+a fifteen-minute sidebar lookback. Leave `stream_fields` empty to discover
+stream fields automatically. The stream picker sends separate stream filters
+and keeps your query text intact. **Select all shown** selects the displayed
+values. **Clear** removes the restriction.
+
+Search progress and failed or skipped time ranges appear above the results.
+Retry a failed window individually, or skip a slow or failed window and continue
+older. A window fails when one of its logs exceeds the response size limit;
+skip it or narrow the query. Stopping a search fails only the window that was
+being read. Skipped ranges remain visible until you search them successfully.
+
+If the first page contains every matching row, the explorer builds the histogram
+from those rows. Otherwise, background window counts provide both the total and
+histogram. Both histograms align buckets to the selected timezone, like the
+standard histogram. The coverage strip distinguishes counted, pending, and
+failed ranges.
+Disable `histogram_enabled` to hide the chart while keeping the background total.
+
+Cursors use deterministic row ordering and an offset within the current window.
+They preserve timestamp ties for unchanged data. VictoriaLogs does not provide
+snapshot isolation across requests, so late ingestion or retention changes can
+affect pagination. Rerun the search after changing source settings or filters.
+
 ## Known gaps on VictoriaLogs sources
 
 A handful of Logchef features only work against ClickHouse sources today:

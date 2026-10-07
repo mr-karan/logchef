@@ -102,8 +102,9 @@ type TemplateVariable struct {
 
 // APIQueryRequest represents the request payload for the standard log querying endpoint.
 type APIQueryRequest struct {
-	Limit     int    `json:"limit"`
-	QueryText string `json:"query_text"`
+	ExtraStreamFilters []string `json:"extra_stream_filters,omitempty"`
+	Limit              int      `json:"limit"`
+	QueryText          string   `json:"query_text"`
 	// Optional ISO8601/RFC3339 time range for datasource-native query execution.
 	StartTime string `json:"start_time,omitempty"`
 	EndTime   string `json:"end_time,omitempty"`
@@ -121,15 +122,16 @@ type APIQueryRequest struct {
 
 // APIHistogramRequest represents the request payload for the histogram endpoint.
 type APIHistogramRequest struct {
-	StartTimestamp int64  `json:"start_timestamp,omitempty"` // Legacy - Unix timestamp in milliseconds
-	EndTimestamp   int64  `json:"end_timestamp,omitempty"`   // Legacy - Unix timestamp in milliseconds
-	StartTime      string `json:"start_time,omitempty"`      // ISO8601/RFC3339 time range start
-	EndTime        string `json:"end_time,omitempty"`        // ISO8601/RFC3339 time range end
-	Limit          int    `json:"limit"`                     // Limit might influence histogram sampling/performance
-	QueryText      string `json:"query_text"`                // Contains non-time filters
-	Window         string `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"
-	GroupBy        string `json:"group_by,omitempty"`        // For histogram queries: field to group by
-	Timezone       string `json:"timezone,omitempty"`        // Kept for histogram, optional otherwise
+	ExtraStreamFilters []string `json:"extra_stream_filters,omitempty"`
+	StartTimestamp     int64    `json:"start_timestamp,omitempty"` // Legacy - Unix timestamp in milliseconds
+	EndTimestamp       int64    `json:"end_timestamp,omitempty"`   // Legacy - Unix timestamp in milliseconds
+	StartTime          string   `json:"start_time,omitempty"`      // ISO8601/RFC3339 time range start
+	EndTime            string   `json:"end_time,omitempty"`        // ISO8601/RFC3339 time range end
+	Limit              int      `json:"limit"`                     // Limit might influence histogram sampling/performance
+	QueryText          string   `json:"query_text"`                // Contains non-time filters
+	Window             string   `json:"window,omitempty"`          // For histogram queries: time window size like "1m", "5m", "1h"
+	GroupBy            string   `json:"group_by,omitempty"`        // For histogram queries: field to group by
+	Timezone           string   `json:"timezone,omitempty"`        // Kept for histogram, optional otherwise
 	// Variables for template substitution in the query text.
 	Variables []TemplateVariable `json:"variables,omitempty"`
 	// Query execution timeout in seconds. If not specified, uses default timeout.

@@ -50,6 +50,8 @@ import HistogramVisualization from "./components/HistogramVisualization.vue";
 import EmptyResultsState from "./components/EmptyResultsState.vue";
 import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
+import WindowedSearchPanel from "./components/WindowedSearchPanel.vue";
+import { useExploreWindowedStore } from '@/stores/exploreWindowed';
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
 
@@ -170,6 +172,7 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 const isLoadingQuery = ref(false);
 const editQueryData = ref<SavedQuery | null>(null);
 const topBarRef = ref<InstanceType<typeof ExploreTopBar> | null>(null);
+const windowedStore = useExploreWindowedStore();
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
 const isHistogramVisible = ref(true);
 
@@ -1462,6 +1465,7 @@ onMounted(async () => {
               exploreStore.timeRange
             ">
               <!-- Unified Results Toolbar -->
+              <WindowedSearchPanel />
               <ResultsToolbar
                 :isHistogramVisible="isHistogramVisible"
                 :availableFields="availableFields"
@@ -1513,7 +1517,7 @@ onMounted(async () => {
                     v-if="displayMode === 'json'"
                     :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
                     :data="exploreStore.logs"
-                    :is-loading="isExecutingQuery || isInitialQueryPending"
+                    :is-loading="(isExecutingQuery || isInitialQueryPending) && !(windowedStore.active && exploreStore.logs.length > 0)"
                   />
 
                   <component
@@ -1523,7 +1527,7 @@ onMounted(async () => {
                     :columns="exploreStore.columns as any"
                     :data="exploreStore.logs"
                     :stats="exploreStore.queryStats"
-                    :is-loading="isExecutingQuery || isInitialQueryPending"
+                    :is-loading="(isExecutingQuery || isInitialQueryPending) && !(windowedStore.active && exploreStore.logs.length > 0)"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
                     :source="sourceDetails"

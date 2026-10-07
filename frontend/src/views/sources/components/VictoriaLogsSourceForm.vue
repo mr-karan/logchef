@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
@@ -41,6 +42,69 @@ function updateAuthMode(value: unknown) {
 
 <template>
   <div class="space-y-6">
+    <fieldset class="flex flex-col gap-4 rounded-md border p-4">
+      <legend class="px-1 text-sm font-medium">{{ t('sources.windowedSearch') }}</legend>
+      <div class="flex items-center gap-3">
+        <Switch
+          id="windowed_search"
+          :model-value="modelValue.windowedEnabled"
+          @update:model-value="value => updateForm({ windowedEnabled: value })"
+        />
+        <Label for="windowed_search">{{ t('sources.enableWindowedSearch') }}</Label>
+      </div>
+      <p class="text-sm text-muted-foreground">{{ t('sources.windowedSearchDescription') }}</p>
+      <template v-if="modelValue.windowedEnabled">
+        <div class="grid gap-4 md:grid-cols-2">
+          <div class="flex flex-col gap-2">
+            <Label for="window_seconds">{{ t('sources.maxWindowSeconds') }}</Label>
+            <Input
+              id="window_seconds" type="number" min="60" max="86400"
+              :model-value="modelValue.maxWindowSeconds"
+              @update:model-value="value => updateForm({ maxWindowSeconds: String(value) })"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="window_concurrency">{{ t('sources.windowConcurrency') }}</Label>
+            <Input
+              id="window_concurrency" type="number" min="1" max="8"
+              :model-value="modelValue.concurrency"
+              @update:model-value="value => updateForm({ concurrency: String(value) })"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="sidebar_lookback">{{ t('sources.sidebarLookbackSeconds') }}</Label>
+            <Input
+              id="sidebar_lookback" type="number" min="60" max="10800"
+              :model-value="modelValue.sidebarLookbackSeconds"
+              @update:model-value="value => updateForm({ sidebarLookbackSeconds: String(value) })"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
+            <Label for="sidebar_cap">{{ t('sources.sidebarValuesCap') }}</Label>
+            <Input
+              id="sidebar_cap" type="number" min="100" max="100000"
+              :model-value="modelValue.sidebarValuesCap"
+              @update:model-value="value => updateForm({ sidebarValuesCap: String(value) })"
+            />
+          </div>
+        </div>
+        <div class="flex flex-col gap-2">
+          <Label for="stream_fields">{{ t('sources.streamFields') }}</Label>
+          <Input
+            id="stream_fields" :model-value="modelValue.streamFields"
+            @update:model-value="value => updateForm({ streamFields: String(value) })"
+          />
+          <p class="text-xs text-muted-foreground">{{ t('sources.streamFieldsDescription') }}</p>
+        </div>
+        <div class="flex items-center gap-3">
+          <Switch
+            id="window_histogram" :model-value="modelValue.histogramEnabled"
+            @update:model-value="value => updateForm({ histogramEnabled: value })"
+          />
+          <Label for="window_histogram">{{ t('sources.windowHistogram') }}</Label>
+        </div>
+      </template>
+    </fieldset>
     <div class="space-y-4">
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-medium">{{ t("sources.victoriaLogsConnection") }}</h3>

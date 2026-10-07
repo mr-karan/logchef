@@ -61,6 +61,7 @@ export interface TemplateVariable {
 }
 
 export interface QueryRequest {
+  extra_stream_filters?: string[];
   query: string;
   start_time: string;  // Explore time picker format ("YYYY-MM-DD HH:mm:ss"); server also accepts ISO8601
   end_time: string;    // Explore time picker format ("YYYY-MM-DD HH:mm:ss"); server also accepts ISO8601

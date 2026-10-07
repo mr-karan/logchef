@@ -31,7 +31,9 @@ import { type TimeRange } from '@/types/query';
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
 import { createTimeRangeCondition, formatDateForSQL } from '@/utils/time-utils';
-import { asClickHouseConnection } from '@/api/sources';
+import { asClickHouseConnection, getVictoriaLogsOptimizer } from '@/api/sources';
+import { useExploreWindowedStore } from './exploreWindowed';
+import { WindowedHTTPError } from '@/api/windowed';
 import {
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
@@ -210,6 +212,10 @@ export const useExploreStore = defineStore("explore", () => {
   const sourcesStore = useSourcesStore();
   const preferencesStore = usePreferencesStore();
   const histogramStore = useExploreHistogramStore();
+  const windowedStore = useExploreWindowedStore();
+  watch(() => [windowedStore.histogram, windowedStore.granularity, windowedStore.isCounting] as const, ([data, granularity, isLoading]) => {
+    if (windowedStore.active && windowedStore.histogramEnabled) histogramStore.setWindowedHistogram(data, granularity, isLoading);
+  });
   const aiStore = useExploreAIStore();
   
   const state = useBaseStore<ExploreState>({
@@ -318,6 +324,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   const isHistogramEligible = computed(() => {
     const source = getCurrentSource();
+    if (getVictoriaLogsOptimizer(source)?.histogram_enabled === false) return false;
     return (
       state.data.value.activeMode === 'logchefql' ||
       (state.data.value.activeMode === 'native' && isNativeHistogramSource(source))
@@ -665,6 +672,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   function onSourceChange(_newSourceId: number) {
+    windowedStore.reset(true);
     // Abort any query still in flight for the previous source so its response
     // can't land under the new source. The request-token guard in executeQuery
     // is the ultimate backstop (a response whose body already arrived before
@@ -1152,6 +1160,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   async function executeQuery() {
+    windowedStore.reset();
     const relativeTime = state.data.value.selectedRelativeTime;
 
     // Refresh time range if using relative time to prevent stale queries
@@ -1213,6 +1222,45 @@ export const useExploreStore = defineStore("explore", () => {
       state.data.value.hasExecutedQuery = true;
 
       const executionSnapshot = captureExecutionState();
+      const optimizer = getVictoriaLogsOptimizer(sourceDetails);
+      if (optimizer && state.data.value.timeRange) {
+        const timezone = getTimezoneIdentifier();
+        const timeRange = state.data.value.timeRange;
+        const { getVariablesForApi } = useVariables();
+        state.data.value.logs = [];
+        state.data.value.columns = [];
+        try {
+          await windowedStore.start({
+            teamId: currentTeamId,
+            sourceId: requestSourceId,
+            histogram: optimizer.histogram_enabled !== false,
+            request: {
+              query_text: executionSnapshot.mode === 'logchefql' ? state.data.value.logchefqlCode : sqlForExecution.value,
+              query_language: executionSnapshot.mode === 'logchefql' ? 'logchefql' : 'logsql',
+              start_time: timeRange.start.toDate(timezone).toISOString(),
+              end_time: timeRange.end.toDate(timezone).toISOString(),
+              timezone,
+              limit: state.data.value.limit,
+              query_timeout: state.data.value.queryTimeout,
+              variables: getVariablesForApi(),
+              extra_stream_filters: windowedStore.streamFilters,
+            },
+            onRows: (logs, stats) => {
+              if (isStaleResponse()) return;
+              state.data.value.logs = markRaw(logs);
+              state.data.value.columns = normalizeQueryColumns([], logs);
+              state.data.value.queryStats = stats ?? DEFAULT_QUERY_STATS;
+              state.data.value.queryWarnings = [];
+            },
+          }, abortController.signal);
+          if (!isStaleResponse()) { _updateLastExecutedState(executionSnapshot); persistDraft(); }
+          return { success: !windowedStore.error, data: null, error: windowedStore.error ? { message: windowedStore.error, error_type: 'DatabaseError' } : null };
+        } catch (err) {
+          if (!(err instanceof WindowedHTTPError && err.status === 422)) throw err;
+        } finally {
+          if (windowedStore.active && state.data.value.currentQueryAbortController === abortController) state.data.value.currentQueryAbortController = null;
+        }
+      }
       if (executionSnapshot.mode === 'logchefql') {
         try {
           const { getVariablesForApi } = useVariables();
@@ -1223,6 +1271,7 @@ export const useExploreStore = defineStore("explore", () => {
           const queryTimeout = state.data.value.queryTimeout;
 
           const queryResponse = await logchefqlApi.query(currentTeamId, sourceId.value, {
+            extra_stream_filters: optimizer ? windowedStore.streamFilters : undefined,
             query: state.data.value.logchefqlCode,
             start_time: formatDateForSQL(timeRange.start, false, timezone),
             end_time: formatDateForSQL(timeRange.end, false, timezone),
@@ -1320,6 +1369,8 @@ export const useExploreStore = defineStore("explore", () => {
       };
 
       const params: QueryParams = {
+        extra_stream_filters: optimizer ? windowedStore.streamFilters : undefined,
+        limit: optimizer ? state.data.value.limit : undefined,
         query_text: '',
         query_timeout: state.data.value.queryTimeout,
         start_time: activeTimeRange?.start ? toISOString(activeTimeRange.start) : undefined,
@@ -1447,6 +1498,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   async function cancelQuery() {
+    if (windowedStore.active) windowedStore.stop();
     if (state.data.value.isCancellingQuery) {
       return;
     }
@@ -1729,6 +1781,7 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   async function fetchHistogramData(granularity?: string) {
+    if (windowedStore.active) return { success: true, data: null };
     if (!isHistogramEligible.value) {
       histogramStore.clearHistogramData();
       return { success: false, error: { message: "Histogram is not available for this query mode" } };
@@ -1747,6 +1800,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     return histogramStore.fetchHistogramData({
+      extraStreamFilters: getVictoriaLogsOptimizer(getCurrentSource()) ? windowedStore.streamFilters : undefined,
       queryText,
       timeRange: state.data.value.timeRange,
       timezone: state.data.value.selectedTimezoneIdentifier || undefined,

@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button'
 import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Braces, Share2 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
 import GroupBySelector from './GroupBySelector.vue'
+import StreamPicker from './StreamPicker.vue'
+import { useExploreWindowedStore } from '@/stores/exploreWindowed'
 import {
   Tooltip,
   TooltipContent,
@@ -44,6 +46,7 @@ const emit = defineEmits<{
 }>()
 
 const exploreStore = useExploreStore()
+const windowedStore = useExploreWindowedStore()
 
 const queryStats = computed(() => exploreStore.queryStats)
 const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
@@ -74,6 +77,7 @@ const warningText = computed(() => {
   <div class="flex items-center justify-between h-9 px-3 bg-muted/30 border-b text-xs">
     <!-- Left: Histogram toggle + Stats -->
     <div class="flex items-center gap-3">
+      <StreamPicker />
       <!-- Histogram Toggle -->
       <button
         v-if="isHistogramEligible"
@@ -108,7 +112,7 @@ const warningText = computed(() => {
 
     <!-- Center: Group By -->
     <div v-if="isHistogramEligible" class="flex items-center">
-      <GroupBySelector :available-fields="availableFields" />
+      <GroupBySelector v-if="!windowedStore.active" :available-fields="availableFields" />
     </div>
     <div v-else />
 
