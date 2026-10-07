@@ -163,7 +163,7 @@ func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 		mcp.WithInputSchema[QueryLogchefQLParams](),
 		mcp.WithOutputSchema[QueryResult](),
 		mcp.WithTitleAnnotation("Query LogchefQL"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(queryTool, mcp.NewTypedToolHandler(t.handleQueryLogchefQL))
 
@@ -172,7 +172,7 @@ func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 		mcp.WithInputSchema[TranslateLogchefQLParams](),
 		mcp.WithOutputSchema[TranslateResult](),
 		mcp.WithTitleAnnotation("Translate LogchefQL to SQL"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(translateTool, mcp.NewStructuredToolHandler(t.handleTranslateLogchefQL))
 
@@ -181,7 +181,7 @@ func (t *tools) addLogchefQLTools(s *server.MCPServer) {
 		mcp.WithInputSchema[ValidateLogchefQLParams](),
 		mcp.WithOutputSchema[ValidateResult](),
 		mcp.WithTitleAnnotation("Validate LogchefQL"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(validateTool, mcp.NewStructuredToolHandler(t.handleValidateLogchefQL))
 }

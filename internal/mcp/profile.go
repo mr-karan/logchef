@@ -106,7 +106,7 @@ func (t *tools) addProfileTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetProfileParams](),
 		mcp.WithOutputSchema[ProfileResult](),
 		mcp.WithTitleAnnotation("Get Profile"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	profileTool.Meta = mcp.NewMetaFromMap(map[string]any{"openai/profile": true})
 	s.AddTool(profileTool, mcp.NewStructuredToolHandler(t.handleGetProfile))
@@ -116,7 +116,7 @@ func (t *tools) addProfileTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetTeamsParams](),
 		mcp.WithOutputSchema[[]TeamResult](),
 		mcp.WithTitleAnnotation("Get My Teams"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(teamsTool, mcp.NewStructuredToolHandler(t.handleGetTeams))
 
@@ -125,7 +125,7 @@ func (t *tools) addProfileTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetMetaParams](),
 		mcp.WithOutputSchema[MetaResult](),
 		mcp.WithTitleAnnotation("Get Server Metadata"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(metaTool, mcp.NewStructuredToolHandler(t.handleGetMeta))
 }

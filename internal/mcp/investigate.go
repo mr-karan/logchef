@@ -232,7 +232,7 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 		mcp.WithDescription("Get the top distinct values for a specific field in a time range. Useful for exploring dimensions (e.g. top severity levels, service names, status codes) before writing queries."),
 		mcp.WithInputSchema[GetFieldValuesParams](),
 		mcp.WithTitleAnnotation("Get Field Values"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(fieldValuesTool, mcp.NewTypedToolHandler(t.handleGetFieldValues))
 
@@ -240,7 +240,7 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 		mcp.WithDescription("Get surrounding log entries (before and after) a specific timestamp. Useful for investigating what happened around a particular event."),
 		mcp.WithInputSchema[GetLogContextParams](),
 		mcp.WithTitleAnnotation("Get Log Context"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(logContextTool, mcp.NewTypedToolHandler(t.handleGetLogContext))
 
@@ -248,7 +248,7 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 		mcp.WithDescription("List all alert rules configured for a source. Shows name, severity, active status, query mode, and last state (firing/resolved)."),
 		mcp.WithInputSchema[ListAlertsParams](),
 		mcp.WithTitleAnnotation("List Alerts"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(listAlertsTool, mcp.NewTypedToolHandler(t.handleListAlerts))
 
@@ -256,7 +256,7 @@ func (t *tools) addInvestigateTools(s *server.MCPServer) {
 		mcp.WithDescription("Get the evaluation history for a specific alert. Shows when it triggered, resolved, or errored, with the actual metric values."),
 		mcp.WithInputSchema[GetAlertHistoryParams](),
 		mcp.WithTitleAnnotation("Get Alert History"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(alertHistoryTool, mcp.NewTypedToolHandler(t.handleGetAlertHistory))
 }

@@ -805,6 +805,64 @@ func TestInvestigationExtensionContract(t *testing.T) {
 	}
 }
 
+// TestToolSafetyAnnotations checks the hints the ChatGPT directory requires on
+// every tool. All Logchef tools read from the caller's own workspace.
+func TestToolSafetyAnnotations(t *testing.T) {
+	t.Parallel()
+	w := newWorld(t)
+	var listed struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			Annotations struct {
+				ReadOnly    *bool `json:"readOnlyHint"`
+				Destructive *bool `json:"destructiveHint"`
+				Idempotent  *bool `json:"idempotentHint"`
+				OpenWorld   *bool `json:"openWorldHint"`
+			} `json:"annotations"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(rpc(t, w.server(), session(w.member), "tools/list", map[string]any{}), &listed); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed.Tools) != len(toolScopes) {
+		t.Fatalf("listed %d tools, want %d", len(listed.Tools), len(toolScopes))
+	}
+	is := func(hint *bool, want bool) bool { return hint != nil && *hint == want }
+	for _, tool := range listed.Tools {
+		a := tool.Annotations
+		if !is(a.ReadOnly, true) || !is(a.Destructive, false) || !is(a.Idempotent, true) || !is(a.OpenWorld, false) {
+			t.Errorf("%s: hints = %+v, want read-only, non-destructive, idempotent, closed-world", tool.Name, a)
+		}
+	}
+}
+
+func TestInvestigationUIDomain(t *testing.T) {
+	t.Parallel()
+	readDomain := func(w *world) (string, bool) {
+		var resource struct {
+			Contents []struct {
+				Meta struct {
+					UI map[string]any `json:"ui"`
+				} `json:"_meta"`
+			} `json:"contents"`
+		}
+		if err := json.Unmarshal(rpc(t, w.server(), token(w.member, models.TokenScopeLogsRead), "resources/read", map[string]any{"uri": InvestigationURI}), &resource); err != nil {
+			t.Fatal(err)
+		}
+		domain, ok := resource.Contents[0].Meta.UI["domain"].(string)
+		return domain, ok
+	}
+	w := newWorld(t)
+	w.cfg.Server.PublicURL = "https://logs.example.com"
+	if domain, ok := readDomain(w); ok {
+		t.Fatalf("declared UI domain %q without OAuth", domain)
+	}
+	w.cfg.Auth.OAuth.Enabled = true
+	if domain, _ := readDomain(w); domain != "https://logs.example.com" {
+		t.Fatalf("UI domain = %q, want server.public_url", domain)
+	}
+}
+
 // fieldBackend is a VictoriaLogs stand-in that knows fields f0..f29 and
 // records the field value queries it receives.
 type fieldBackend struct {

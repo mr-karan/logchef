@@ -56,14 +56,14 @@ func handleOpenInvestigation(_ context.Context, _ mcp.CallToolRequest, params Op
 	return InvestigationState{TeamID: params.TeamID, SourceID: params.SourceID, Query: params.Query, StartTime: start.UTC().Format(time.RFC3339), EndTime: end.UTC().Format(time.RFC3339), Timezone: "UTC"}, nil
 }
 
-func addInvestigationApp(s *server.MCPServer) {
+// addInvestigationApp registers the panel tool and its UI resource. uiDomain
+// is the dedicated origin ChatGPT requires for a published UI; empty omits it.
+func addInvestigationApp(s *server.MCPServer, uiDomain string) {
 	tool := mcp.NewTool("open_investigation",
 		mcp.WithToolTitle("Investigate logs"),
 		mcp.WithDescription("Open the interactive Logchef investigation panel. Browse sources, run bounded LogchefQL queries, select histogram intervals or log rows, and attach evidence to the conversation. The panel runs the requested query when it opens, and a later call replaces the query in an open panel."),
 		mcp.WithInputSchema[OpenInvestigationParams](), mcp.WithOutputSchema[InvestigationState](),
-		mcp.WithReadOnlyHintAnnotation(true),
-		mcp.WithDestructiveHintAnnotation(false),
-		mcp.WithOpenWorldHintAnnotation(false),
+		readOnlyTool,
 	)
 	tool.Meta = mcp.NewMetaFromMap(map[string]any{
 		"ui":        map[string]any{"resourceUri": InvestigationURI},
@@ -71,15 +71,19 @@ func addInvestigationApp(s *server.MCPServer) {
 	})
 	s.AddTool(tool, mcp.NewStructuredToolHandler(handleOpenInvestigation))
 	resource := mcp.NewResource(InvestigationURI, "Logchef investigation", mcp.WithMIMEType(appMIMEType))
+	uiMeta := map[string]any{
+		"prefersBorder": true,
+		"csp":           map[string]any{"connectDomains": []string{}, "resourceDomains": []string{}},
+	}
+	if uiDomain != "" {
+		uiMeta["domain"] = uiDomain
+	}
 	s.AddResource(resource, func(_ context.Context, _ mcp.ReadResourceRequest) ([]mcp.ResourceContents, error) {
 		return []mcp.ResourceContents{mcp.TextResourceContents{URI: InvestigationURI, MIMEType: appMIMEType, Text: ui.InvestigationHTML,
 			Meta: map[string]any{
 				"openai/ui":                map[string]any{"availableDisplayModes": []string{"inline", "fullscreen"}},
 				"openai/widgetDescription": "Inspect bounded log queries, select evidence, and compare time windows without leaving the conversation.",
-				"ui": map[string]any{
-					"prefersBorder": true,
-					"csp":           map[string]any{"connectDomains": []string{}, "resourceDomains": []string{}},
-				},
+				"ui":                       uiMeta,
 			},
 		}}, nil
 	})

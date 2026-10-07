@@ -179,7 +179,7 @@ func (t *tools) addSourcesTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetTeamSourcesParams](),
 		mcp.WithOutputSchema[[]SourceResult](),
 		mcp.WithTitleAnnotation("Get Team Sources"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(teamSourcesTool, mcp.NewStructuredToolHandler(t.handleGetTeamSources))
 
@@ -188,7 +188,7 @@ func (t *tools) addSourcesTools(s *server.MCPServer) {
 		mcp.WithInputSchema[GetSourcesParams](),
 		mcp.WithOutputSchema[SourcesAggregateResult](),
 		mcp.WithTitleAnnotation("Get All Accessible Sources"),
-		mcp.WithReadOnlyHintAnnotation(true),
+		readOnlyTool,
 	)
 	s.AddTool(sourcesTool, mcp.NewStructuredToolHandler(t.handleGetSources))
 }
