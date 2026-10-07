@@ -6,3 +6,4 @@
 *.tgz
 charts
 README.md
+chart_test.go

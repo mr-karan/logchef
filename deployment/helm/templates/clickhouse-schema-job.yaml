@@ -1,8 +1,8 @@
 {{- if .Values.clickhouse.enabled }}
-{{- $schemaName := printf "%s-clickhouse-schema" (include "logchef.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- $schemaName := include "logchef.suffixedName" (dict "name" (include "logchef.fullname" .) "suffix" "-clickhouse-schema") }}
 {{- $jobRev := .Values.clickhouse.schemaJobRevision | default "1" | toString }}
 {{- $sqlHash := .Values.clickhouse.initSql | sha256sum | trunc 8 }}
-{{- $jobName := printf "%s-ch-schema-%s-%s" (include "logchef.fullname" .) $jobRev $sqlHash | trunc 63 | trimSuffix "-" }}
+{{- $jobName := include "logchef.suffixedName" (dict "name" (include "logchef.fullname" .) "suffix" (printf "-ch-schema-%s-%s" $jobRev $sqlHash)) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

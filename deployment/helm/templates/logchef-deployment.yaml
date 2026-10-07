@@ -1,4 +1,12 @@
 {{- if .Values.logchef.enabled }}
+{{- $driver := .Values.logchef.config.database.driver | default "sqlite" }}
+{{- if and (eq $driver "sqlite") (gt (int .Values.logchef.replicaCount) 1) }}
+{{- fail "SQLite supports only one Logchef replica. Set logchef.config.database.driver=postgres for multiple replicas." }}
+{{- end }}
+{{- $singleNodeVolume := and .Values.logchef.persistence.enabled (or (has "ReadWriteOnce" .Values.logchef.persistence.accessModes) (has "ReadWriteOncePod" .Values.logchef.persistence.accessModes)) }}
+{{- if and $singleNodeVolume (gt (int .Values.logchef.replicaCount) 1) }}
+{{- fail "Multiple Logchef replicas require logchef.persistence.enabled=false or a ReadWriteMany volume." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +21,12 @@ metadata:
     {{- end }}
 spec:
   replicas: {{ .Values.logchef.replicaCount }}
+  strategy:
+    {{- if .Values.logchef.strategy }}
+    {{- toYaml .Values.logchef.strategy | nindent 4 }}
+    {{- else }}
+    type: {{ ternary "Recreate" "RollingUpdate" (or (eq $driver "sqlite") $singleNodeVolume) }}
+    {{- end }}
   selector:
     matchLabels:
       {{- include "logchef.selectorLabels" . | nindent 6 }}
@@ -46,7 +60,11 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- if dig "enabled" true (.Values.logchef.dataPermsInit | default dict) }}
-      {{- $fsGroup := (.Values.logchef.podSecurityContext | default dict).fsGroup | default 1000 }}
+      {{- $podSecurityContext := .Values.logchef.podSecurityContext | default dict }}
+      {{- $fsGroup := 1000 }}
+      {{- if hasKey $podSecurityContext "fsGroup" }}
+      {{- $fsGroup = $podSecurityContext.fsGroup }}
+      {{- end }}
       initContainers:
         - name: fix-data-perms
           # Dedicated root image: logchef image may lack a usable root shell/chown.
@@ -80,6 +98,13 @@ spec:
                 secretKeyRef:
                   name: {{ include "logchef.apiTokenSecretName" . | quote }}
                   key: {{ include "logchef.apiTokenSecretKey" . | quote }}
+            {{- if .Values.logchef.oidc.existingSecret }}
+            - name: LOGCHEF_OIDC__CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.logchef.oidc.existingSecret | quote }}
+                  key: {{ .Values.logchef.oidc.clientSecretKey | quote }}
+            {{- end }}
             {{- if $aiCfg.enabled | default false }}
             - name: LOGCHEF_AI__ENABLED
               value: "true"
@@ -112,7 +137,7 @@ spec:
             {{- end }}
           ports:
             - name: http
-              containerPort: {{ .Values.logchef.service.port }}
+              containerPort: {{ .Values.logchef.config.server.port }}
               protocol: TCP
           volumeMounts:
             - name: config

@@ -1,0 +1,36 @@
+name: Helm Tests
+
+on:
+  pull_request:
+    paths:
+      - deployment/helm/**
+      - .github/workflows/helm-tests.yml
+  push:
+    branches: [main]
+    paths:
+      - deployment/helm/**
+      - .github/workflows/helm-tests.yml
+
+jobs:
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Helm
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz -o /tmp/helm.tar.gz
+          curl --fail --silent --show-error --location https://get.helm.sh/helm-v3.19.0-linux-amd64.tar.gz.sha256sum -o /tmp/helm.sha256sum
+          checksum=$(awk '{print $1}' /tmp/helm.sha256sum)
+          printf '%s  /tmp/helm.tar.gz\n' "$checksum" | sha256sum --check
+          tar -xzf /tmp/helm.tar.gz -C /tmp linux-amd64/helm
+      - name: Lint chart
+        run: /tmp/linux-amd64/helm lint deployment/helm --strict --set logchef.auth.existingSecret=test-api-token --set dex.enabled=false
+      - name: Chart regression tests
+        env:
+          HELM_BIN: /tmp/linux-amd64/helm
+        run: go test ./deployment/helm -v
