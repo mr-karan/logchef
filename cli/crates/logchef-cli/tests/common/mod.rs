@@ -236,6 +236,8 @@ pub struct ServerState {
     /// Holds each refresh response this long, to widen race windows.
     pub refresh_delay: Duration,
     pub bearer_seen: Vec<String>,
+    /// Advertised as `ui_url` in /api/v1/meta when set.
+    pub ui_url: Option<String>,
 }
 
 pub struct FakeServer {
@@ -389,8 +391,12 @@ fn route(
     match (req.method.as_str(), path) {
         ("GET", "/api/v1/meta") => {
             let mut data = serde_json::json!({"version": "test"});
-            if state.lock().unwrap().oauth_enabled {
+            let s = state.lock().unwrap();
+            if s.oauth_enabled {
                 data["oauth_issuer"] = base.into();
+            }
+            if let Some(ui_url) = &s.ui_url {
+                data["ui_url"] = ui_url.as_str().into();
             }
             (200, serde_json::json!({"status": "success", "data": data}))
         }

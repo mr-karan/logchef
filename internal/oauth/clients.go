@@ -60,8 +60,9 @@ type client struct {
 // passes its check; redirectAllowed applies the stricter policy first.
 var nativeRedirectURIs = []string{"http://127.0.0.1/callback", "http://[::1]/callback", "http://localhost/callback"}
 
-func newClients(cfg config.OAuthConfig, issuer string) map[models.OAuthClientID]*client {
-	consentURL := issuer + "/oauth/consent?request="
+// newClients builds the static clients. consentURL is the browser consent
+// page, ending in "?request=".
+func newClients(cfg config.OAuthConfig, issuer, consentURL string) map[models.OAuthClientID]*client {
 	clients := map[models.OAuthClientID]*client{
 		config.OAuthCLIClientID: {
 			info:         ClientInfo{ID: config.OAuthCLIClientID, Name: "Logchef CLI", Kind: ClientNative},

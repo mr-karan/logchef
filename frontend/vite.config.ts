@@ -68,7 +68,7 @@ export default defineConfig(async ({ mode }): Promise<UserConfig> => {
           secure: false,
         },
         // OAuth server endpoints and metadata. /oauth/consent stays on Vite
-        // because it is an SPA route. For OAuth in dev, set server.public_url
+        // because it is an SPA route. For OAuth in dev, set server.browser_url
         // to this dev server's URL so the consent Origin check matches.
         ...Object.fromEntries(
           ["/oauth/authorize", "/oauth/token", "/oauth/revoke", "/.well-known/oauth-"].map((path) => [

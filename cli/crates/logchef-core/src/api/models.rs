@@ -31,6 +31,11 @@ pub struct MetaData {
     /// `auth.oauth` disabled; the CLI then cannot sign in.
     #[serde(default)]
     pub oauth_issuer: Option<String>,
+    /// The base URL of the web UI, for browser links. It can differ from the
+    /// API URL the CLI talks to (a UI host behind an SSO proxy and an API
+    /// host without it). Absent on older servers; links then use the API URL.
+    #[serde(default)]
+    pub ui_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

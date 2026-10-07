@@ -179,6 +179,12 @@ type ServerConfig struct {
 	// no trailing slash. It is the OAuth issuer and the base of the OAuth
 	// resource identifiers. Required when auth.oauth.enabled is true.
 	PublicURL string `koanf:"public_url"`
+	// BrowserURL is the origin browsers use, when it differs from PublicURL
+	// (for example a UI host behind an SSO proxy and an API host without
+	// it). OAuth advertises its authorization endpoint and serves consent on
+	// this origin; the issuer, token endpoint and resources stay on
+	// PublicURL. Optional; defaults to PublicURL.
+	BrowserURL string `koanf:"browser_url"`
 }
 
 // IsSecureCookie returns whether cookies should have the Secure flag set.
@@ -591,12 +597,20 @@ func validateTrustedProxies(proxies []string) error {
 
 // validateOAuth checks the OAuth server settings. It runs only when OAuth is
 // enabled, so a disabled block never stops startup.
-func validateOAuth(cfg *OAuthConfig, publicURL string) error {
+func validateOAuth(cfg *OAuthConfig, publicURL, browserURL string) error {
 	if !cfg.Enabled {
 		return nil
 	}
-	if err := validatePublicURL(publicURL); err != nil {
+	if publicURL == "" {
+		return fmt.Errorf("server.public_url is required when auth.oauth.enabled is true (either in file or %sSERVER__PUBLIC_URL)", envPrefix)
+	}
+	if err := validateOAuthOrigin("server.public_url", publicURL); err != nil {
 		return err
+	}
+	if browserURL != "" {
+		if err := validateOAuthOrigin("server.browser_url", browserURL); err != nil {
+			return err
+		}
 	}
 	if err := validateMCPAllowedOrigins(cfg.MCPAllowedOrigins); err != nil {
 		return err
@@ -640,28 +654,48 @@ func validateMCPAllowedOrigins(origins []string) error {
 	return nil
 }
 
-// validatePublicURL requires an absolute URL with no trailing slash, query or
-// fragment. It must be https, except on a loopback host for local development.
-func validatePublicURL(raw string) error {
-	if raw == "" {
-		return fmt.Errorf("server.public_url is required when auth.oauth.enabled is true (either in file or %sSERVER__PUBLIC_URL)", envPrefix)
-	}
+// validateOAuthOrigin requires an origin: scheme, host and optional port, with
+// no path, trailing slash, query or fragment. It must be https, except on a
+// loopback host for local development. key names the setting in errors.
+func validateOAuthOrigin(key, raw string) error {
 	u, err := url.Parse(raw)
 	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "?#") || strings.HasSuffix(raw, "/") {
-		return fmt.Errorf("server.public_url %q must be an absolute URL with no trailing slash, query or fragment", raw)
+		return fmt.Errorf("%s %q must be an absolute URL with no trailing slash, query or fragment", key, raw)
 	}
 	// RFC 8414 path-inserted discovery is not implemented, so an issuer with a
 	// path would advertise metadata that clients cannot find.
 	if u.Path != "" || u.RawPath != "" || u.Opaque != "" || u.User != nil {
-		return fmt.Errorf("server.public_url %q must be an origin only (scheme, host and optional port); a base path is not supported with OAuth", raw)
+		return fmt.Errorf("%s %q must be an origin only (scheme, host and optional port); a base path is not supported with OAuth", key, raw)
 	}
 	switch {
 	case u.Scheme == "https":
-		return nil
 	case u.Scheme == "http" && isLoopbackHost(u.Hostname()):
-		return nil
+	default:
+		return fmt.Errorf("%s %q must use https (http is allowed only for localhost, 127.0.0.1 and ::1)", key, raw)
 	}
-	return fmt.Errorf("server.public_url %q must use https (http is allowed only for localhost, 127.0.0.1 and ::1)", raw)
+	// Browsers send Origin in canonical form: lowercase scheme and host, no
+	// default port. The origin is compared as a string, so require that form.
+	if canonical := canonicalOrigin(u); raw != canonical {
+		return fmt.Errorf("%s %q is not in canonical form; use %q (lowercase scheme and host, no default port)", key, raw, canonical)
+	}
+	return nil
+}
+
+// canonicalOrigin serializes an origin the way browsers send it in Origin.
+func canonicalOrigin(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host
 }
 
 // isLoopbackHost reports whether host is localhost or a loopback IP.
@@ -707,7 +741,7 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 		return fmt.Errorf("api_token_secret must be at least 32 characters long for security")
 	}
 
-	if err := validateOAuth(&cfg.Auth.OAuth, cfg.Server.PublicURL); err != nil {
+	if err := validateOAuth(&cfg.Auth.OAuth, cfg.Server.PublicURL, cfg.Server.BrowserURL); err != nil {
 		return err
 	}
 

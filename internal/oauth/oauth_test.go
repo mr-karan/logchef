@@ -210,7 +210,7 @@ func TestParseScopes(t *testing.T) {
 
 func TestNativeRedirectPolicy(t *testing.T) {
 	t.Parallel()
-	clients := newClients(config.OAuthConfig{}, "https://logchef.test")
+	clients := newClients(config.OAuthConfig{}, "https://logchef.test", "https://logchef.test/oauth/consent?request=")
 	for uri, want := range map[string]bool{
 		"http://127.0.0.1:8080/callback":    true,
 		"http://127.0.0.1/callback":         true,

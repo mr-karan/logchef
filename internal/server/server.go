@@ -447,7 +447,7 @@ func (s *Server) setupRoutes() {
 		s.app.Get("/.well-known/oauth-protected-resource", s.handleMCPResourceMetadata)
 
 		// Consent and Connected apps: browser session only. Changes also
-		// require the public_url Origin.
+		// require the browser_url Origin.
 		api.Get("/oauth/requests/:requestID", s.requireSession, s.handleGetOAuthRequest)
 		api.Post("/oauth/requests/:requestID/decision", s.requireSession, s.requireSameOrigin, s.handleOAuthDecision)
 		api.Get("/me/connected-apps", s.requireSession, s.handleListConnectedApps)

@@ -52,7 +52,7 @@ func (s *Server) ConsentRequest(ctx context.Context, id models.OAuthAuthRequestI
 	return &ConsentRequest{
 		ID:            req.ID,
 		Client:        s.consentClientInfo(ctx, req.ClientID),
-		Instance:      s.issuer,
+		Instance:      s.browserURL,
 		Resource:      req.Resource,
 		ResourceKind:  s.ResourceKind(req.Resource),
 		Scopes:        scopes,

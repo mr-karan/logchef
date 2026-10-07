@@ -1,8 +1,12 @@
 package server
 
 import (
+	"cmp"
+	"strings"
+
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
 )
 
@@ -27,16 +31,28 @@ func (s *Server) handleGetMeta(c fiber.Ctx) error {
 	if s.oidcProvider != nil {
 		oidcIssuer = s.oidcProvider.GetIssuer()
 	}
-	meta := metaResponse{MetaResponse: core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil)}
+	meta := metaResponse{
+		MetaResponse: core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil),
+		UIURL:        uiURL(&s.config.Server),
+	}
 	if s.oauth != nil {
 		meta.OAuthIssuer = s.oauth.Issuer()
 	}
 	return SendSuccess(c, fiber.StatusOK, meta)
 }
 
-// metaResponse adds the HTTP-only OAuth fields to the shared metadata. A CLI
-// that sees oauth_issuer logs in through Logchef OAuth.
+// metaResponse adds the HTTP-only fields to the shared metadata. A CLI that
+// sees oauth_issuer logs in through Logchef OAuth, and builds browser links
+// (for example the log explorer) on ui_url instead of the API URL it uses.
 type metaResponse struct {
 	core.MetaResponse
 	OAuthIssuer string `json:"oauth_issuer,omitempty"`
+	UIURL       string `json:"ui_url,omitempty"`
+}
+
+// uiURL is the base URL of the web UI: server.frontend_url when set (it may
+// carry a base path), else server.browser_url, else server.public_url. It is
+// empty when none is set.
+func uiURL(cfg *config.ServerConfig) string {
+	return cmp.Or(strings.TrimSuffix(cfg.FrontendURL, "/"), cfg.BrowserURL, cfg.PublicURL)
 }

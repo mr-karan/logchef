@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -398,6 +399,21 @@ redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
 		{"userinfo public_url", "[server]\npublic_url = \"https://user@logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
 		{"port public_url", "[server]\npublic_url = \"https://logchef.example.com:8443\"\n[auth.oauth]\nenabled = true\n", false},
 		{"loopback http public_url", "[server]\npublic_url = \"http://localhost:8125\"\n[auth.oauth]\nenabled = true\n", false},
+		{"browser_url on another host", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"https://logchef.example.com\"\n[auth.oauth]\nenabled = true\n", false},
+		{"loopback browser_url", "[server]\npublic_url = \"http://127.0.0.1:8125\"\nbrowser_url = \"http://localhost:8125\"\n[auth.oauth]\nenabled = true\n", false},
+		{"browser_url with path", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"https://logchef.example.com/ui\"\n[auth.oauth]\nenabled = true\n", true},
+		{"browser_url trailing slash", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"https://logchef.example.com/\"\n[auth.oauth]\nenabled = true\n", true},
+		{"non-loopback http browser_url", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"http://logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"uppercase browser_url host", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"https://LOGCHEF.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"browser_url default https port", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"https://logchef.example.com:443\"\n[auth.oauth]\nenabled = true\n", true},
+		{"browser_url default http port", "[server]\npublic_url = \"http://127.0.0.1:8125\"\nbrowser_url = \"http://localhost:80\"\n[auth.oauth]\nenabled = true\n", true},
+		{"uppercase browser_url scheme", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"HTTPS://logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"browser_url non-default port", "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \"https://logchef.example.com:8443\"\n[auth.oauth]\nenabled = true\n", false},
+		{"uppercase public_url host", "[server]\npublic_url = \"https://Logchef-API.example.com\"\n[auth.oauth]\nenabled = true\n", true},
+		{"public_url default https port", "[server]\npublic_url = \"https://logchef-api.example.com:443\"\n[auth.oauth]\nenabled = true\n", true},
+		{"public_url default http port", "[server]\npublic_url = \"http://localhost:80\"\n[auth.oauth]\nenabled = true\n", true},
+		{"ipv6 loopback public_url", "[server]\npublic_url = \"http://[::1]:8125\"\n[auth.oauth]\nenabled = true\n", false},
+		{"disabled ignores bad browser_url", "[server]\nbrowser_url = \"not a url\"\n", false},
 		{"non-loopback http public_url", "[server]\npublic_url = \"http://logchef.example.com\"\n[auth.oauth]\nenabled = true\n", true},
 		{"trailing slash", "[server]\npublic_url = \"https://logchef.example.com/\"\n[auth.oauth]\nenabled = true\n", true},
 		{"query in public_url", "[server]\npublic_url = \"https://logchef.example.com?x=1\"\n[auth.oauth]\nenabled = true\n", true},
@@ -510,5 +526,20 @@ func TestLoad_MCPCallTimeoutSeconds(t *testing.T) {
 				t.Fatalf("mcp_call_timeout_seconds = %d, want %d", cfg.Query.MCPCallTimeoutSeconds, tc.want)
 			}
 		})
+	}
+}
+
+// The canonical-form error names the exact value to use.
+func TestLoad_NonCanonicalOriginErrorNamesCanonicalForm(t *testing.T) {
+	for raw, canonical := range map[string]string{
+		"https://LOGCHEF.example.com":     "https://logchef.example.com",
+		"https://logchef.example.com:443": "https://logchef.example.com",
+		"http://localhost:80":             "http://localhost",
+		"HTTPS://Logchef.Example.com:443": "https://logchef.example.com",
+	} {
+		_, err := Load(writeConfig(t, "[server]\npublic_url = \"https://logchef-api.example.com\"\nbrowser_url = \""+raw+"\"\n[auth.oauth]\nenabled = true\n"))
+		if err == nil || !strings.Contains(err.Error(), "server.browser_url") || !strings.Contains(err.Error(), fmt.Sprintf("%q", canonical)) {
+			t.Errorf("browser_url %q: err = %v, want it to name %q", raw, err, canonical)
+		}
 	}
 }

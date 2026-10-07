@@ -102,9 +102,8 @@ fn http_client() -> Result<reqwest::Client> {
         .map_err(|e| Error::other(format!("Failed to create HTTP client: {e}")))
 }
 
-/// Fetches `<issuer>/.well-known/oauth-authorization-server` and checks that
-/// it describes this issuer, supports S256 and RFC 9207 `iss`, and keeps
-/// every endpoint under the issuer.
+/// Fetches `<issuer>/.well-known/oauth-authorization-server` and checks it
+/// with [`check_metadata`].
 async fn discover(http: &reqwest::Client, issuer: &str) -> Result<ServerMetadata> {
     let url = format!("{issuer}/.well-known/oauth-authorization-server");
     debug!(url = %url, "Fetching authorization server metadata");
@@ -119,7 +118,17 @@ async fn discover(http: &reqwest::Client, issuer: &str) -> Result<ServerMetadata
         .json()
         .await
         .map_err(|e| Error::oauth(format!("Invalid authorization server metadata: {e}")))?;
+    check_metadata(issuer, &metadata)?;
+    Ok(metadata)
+}
 
+/// Checks that the metadata describes this issuer, supports S256 and RFC 9207
+/// `iss`, and keeps the token and revocation endpoints (which receive
+/// credentials) under the issuer. The authorization endpoint only receives a
+/// PKCE challenge in the browser, so it may live on another origin (a server
+/// whose browser host differs from its API host); it must still be https, or
+/// http on a loopback host.
+fn check_metadata(issuer: &str, metadata: &ServerMetadata) -> Result<()> {
     if metadata.issuer != issuer {
         return Err(Error::oauth(format!(
             "authorization server metadata names issuer {}, expected {issuer}",
@@ -141,12 +150,11 @@ async fn discover(http: &reqwest::Client, issuer: &str) -> Result<ServerMetadata
         ));
     }
     let prefix = format!("{issuer}/");
-    let endpoints = [
-        Some(&metadata.authorization_endpoint),
+    let machine_endpoints = [
         Some(&metadata.token_endpoint),
         metadata.revocation_endpoint.as_ref(),
     ];
-    if let Some(outside) = endpoints
+    if let Some(outside) = machine_endpoints
         .into_iter()
         .flatten()
         .find(|e| !e.starts_with(&prefix))
@@ -155,7 +163,25 @@ async fn discover(http: &reqwest::Client, issuer: &str) -> Result<ServerMetadata
             "authorization server endpoint {outside} is outside the issuer {issuer}"
         )));
     }
-    Ok(metadata)
+    let authorize = Url::parse(&metadata.authorization_endpoint).map_err(|e| {
+        Error::oauth(format!(
+            "invalid authorization endpoint {}: {e}",
+            metadata.authorization_endpoint
+        ))
+    })?;
+    let loopback = matches!(
+        authorize.host(),
+        Some(url::Host::Domain("localhost"))
+            | Some(url::Host::Ipv4(std::net::Ipv4Addr::LOCALHOST))
+            | Some(url::Host::Ipv6(std::net::Ipv6Addr::LOCALHOST))
+    );
+    if !(authorize.scheme() == "https" || (authorize.scheme() == "http" && loopback)) {
+        return Err(Error::oauth(format!(
+            "authorization endpoint {} must use https",
+            metadata.authorization_endpoint
+        )));
+    }
+    Ok(())
 }
 
 async fn post_token(
@@ -418,4 +444,72 @@ fn random_token(len: usize) -> Result<String> {
     getrandom::fill(&mut bytes)
         .map_err(|e| Error::other(format!("Failed to generate random bytes: {e}")))?;
     Ok(URL_SAFE_NO_PAD.encode(bytes))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn metadata(authorization_endpoint: &str) -> ServerMetadata {
+        ServerMetadata {
+            issuer: "https://logchef-api.example.com".into(),
+            authorization_endpoint: authorization_endpoint.into(),
+            token_endpoint: "https://logchef-api.example.com/oauth/token".into(),
+            revocation_endpoint: Some("https://logchef-api.example.com/oauth/revoke".into()),
+            code_challenge_methods_supported: vec!["S256".into()],
+            authorization_response_iss_parameter_supported: true,
+        }
+    }
+
+    const ISSUER: &str = "https://logchef-api.example.com";
+
+    #[test]
+    fn authorization_endpoint_may_use_the_browser_host() {
+        for endpoint in [
+            "https://logchef-api.example.com/oauth/authorize",
+            "https://logchef.example.com/oauth/authorize",
+            "http://localhost:8147/oauth/authorize",
+            "http://127.0.0.1:8147/oauth/authorize",
+        ] {
+            check_metadata(ISSUER, &metadata(endpoint))
+                .unwrap_or_else(|e| panic!("{endpoint}: {e}"));
+        }
+    }
+
+    #[test]
+    fn authorization_endpoint_must_be_https_or_loopback() {
+        for endpoint in [
+            "http://logchef.example.com/oauth/authorize",
+            "not a url",
+            "javascript:alert(1)",
+        ] {
+            assert!(
+                check_metadata(ISSUER, &metadata(endpoint)).is_err(),
+                "{endpoint} accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn credential_endpoints_stay_under_the_issuer() {
+        let mut token = metadata("https://logchef.example.com/oauth/authorize");
+        token.token_endpoint = "https://logchef.example.com/oauth/token".into();
+        assert!(check_metadata(ISSUER, &token).is_err());
+        let mut revoke = metadata("https://logchef.example.com/oauth/authorize");
+        revoke.revocation_endpoint = Some("https://evil.example.com/oauth/revoke".into());
+        assert!(check_metadata(ISSUER, &revoke).is_err());
+    }
+
+    #[test]
+    fn issuer_s256_and_iss_are_required() {
+        let mut other = metadata("https://logchef.example.com/oauth/authorize");
+        other.issuer = "https://logchef.example.com".into();
+        assert!(check_metadata(ISSUER, &other).is_err());
+        let mut plain = metadata("https://logchef.example.com/oauth/authorize");
+        plain.code_challenge_methods_supported = vec!["plain".into()];
+        assert!(check_metadata(ISSUER, &plain).is_err());
+        let mut no_iss = metadata("https://logchef.example.com/oauth/authorize");
+        no_iss.authorization_response_iss_parameter_supported = false;
+        assert!(check_metadata(ISSUER, &no_iss).is_err());
+    }
 }

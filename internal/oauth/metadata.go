@@ -34,7 +34,7 @@ type ProtectedResourceMetadata struct {
 func (s *Server) Metadata() AuthorizationServerMetadata {
 	return AuthorizationServerMetadata{
 		Issuer:                                     s.issuer,
-		AuthorizationEndpoint:                      s.issuer + AuthorizePath,
+		AuthorizationEndpoint:                      s.browserURL + AuthorizePath,
 		TokenEndpoint:                              s.issuer + TokenPath,
 		RevocationEndpoint:                         s.issuer + RevokePath,
 		ResponseTypesSupported:                     []string{"code"},

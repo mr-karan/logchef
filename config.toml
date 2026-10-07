@@ -131,8 +131,12 @@ allowed_domains = ["example.com"]
 # Lets the Logchef CLI and MCP hosts connect with a browser consent instead of
 # an API token. Requires [server] public_url: the external origin of this
 # instance (scheme, host and optional port; no path), for example
-# public_url = "https://logchef.example.com". For local development with the
-# Vite dev server, set public_url = "http://localhost:5173".
+# public_url = "https://logchef.example.com". It is the issuer and serves
+# the token endpoint, metadata and /mcp. If browsers reach Logchef on another
+# origin (for example a UI host behind an SSO proxy), also set [server]
+# browser_url to that origin: authorization and consent then happen there.
+# For local development with the Vite dev server, set
+# browser_url = "http://localhost:5173".
 # Built-in public clients (no config needed):
 #   logchef-cli  the Logchef CLI, tokens for /api only
 #   logchef-mcp  local MCP hosts (Claude Code, Codex CLI, Cursor desktop),

@@ -1572,3 +1572,123 @@ func TestOAuthClientCredentialFieldsRefused(t *testing.T) {
 		t.Fatalf("revocation did not take effect: /me status %d", resp.StatusCode)
 	}
 }
+
+// Two-host deployments: server.public_url is the issuer and machine origin
+// (metadata, token, revocation, resources, iss); server.browser_url is where
+// browsers authorize and consent. Each part answers on its own origin, and
+// the same process serves both.
+func TestOAuthTwoHosts(t *testing.T) {
+	t.Parallel()
+	const browser = "https://logchef-ui.test"
+	cfg := testOAuthConfig()
+	cfg.Server.BrowserURL = browser
+	e := newOAuthEnvWithConfig(t, cfg, models.UserRoleMember)
+
+	md := e.oauth.Metadata()
+	if md.Issuer != testIssuer || md.AuthorizationEndpoint != browser+oauth.AuthorizePath ||
+		md.TokenEndpoint != testIssuer+oauth.TokenPath || md.RevocationEndpoint != testIssuer+oauth.RevokePath {
+		t.Fatalf("metadata %+v", md)
+	}
+	prm := e.oauth.MCPResourceMetadata()
+	if prm.Resource != testMCPResource || !slices.Equal(prm.AuthorizationServers, []string{testIssuer}) {
+		t.Fatalf("PRM %+v", prm)
+	}
+	var meta struct {
+		Data struct {
+			OAuthIssuer string `json:"oauth_issuer"`
+			UIURL       string `json:"ui_url"`
+		} `json:"data"`
+	}
+	if resp := e.do(httptest.NewRequest(http.MethodGet, testIssuer+"/api/v1/meta", http.NoBody)); json.NewDecoder(resp.Body).Decode(&meta) != nil ||
+		meta.Data.OAuthIssuer != testIssuer || meta.Data.UIURL != browser {
+		t.Fatalf("meta oauth_issuer %q ui_url %q, want the issuer and the browser URL", meta.Data.OAuthIssuer, meta.Data.UIURL)
+	}
+
+	// /oauth/authorize answers on either host and always sends the browser to
+	// consent on the browser origin.
+	p := newPKCE()
+	params := cliAuthorizeParams(p)
+	var id string
+	for _, host := range []string{testIssuer, browser} {
+		resp := e.do(httptest.NewRequest(http.MethodGet, host+oauth.AuthorizePath+"?"+params.Encode(), http.NoBody))
+		loc, err := url.Parse(resp.Header.Get("Location"))
+		if err != nil || resp.StatusCode != http.StatusFound || loc.Scheme+"://"+loc.Host+loc.Path != browser+oauth.ConsentPath {
+			t.Fatalf("authorize on %s: status %d Location %q, want the browser consent page", host, resp.StatusCode, resp.Header.Get("Location"))
+		}
+		id = loc.Query().Get("request")
+	}
+
+	consentPath := "/api/v1/oauth/requests/" + id
+	get := httptest.NewRequest(http.MethodGet, browser+consentPath, http.NoBody)
+	get.AddCookie(&http.Cookie{Name: sessionCookieName, Value: e.session})
+	var got struct {
+		Data struct {
+			Instance string `json:"instance"`
+		} `json:"data"`
+	}
+	if resp := e.do(get); resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&got) != nil || got.Data.Instance != browser {
+		t.Fatalf("consent GET on the browser host: status %d instance %q", resp.StatusCode, got.Data.Instance)
+	}
+
+	decide := func(origin string) *testResponse {
+		req := httptest.NewRequest(http.MethodPost, browser+consentPath+"/decision", strings.NewReader(`{"approve":true}`))
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: e.session})
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Content-Type", "application/json")
+		return e.do(req)
+	}
+	if resp := decide(testIssuer); resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("decision with the API origin: status %d, want 403", resp.StatusCode)
+	}
+	resp := decide(browser)
+	var decision struct {
+		Data struct {
+			RedirectURL string `json:"redirect_url"`
+		} `json:"data"`
+	}
+	if resp.StatusCode != http.StatusOK || json.NewDecoder(resp.Body).Decode(&decision) != nil {
+		t.Fatalf("decision with the browser origin: status %d", resp.StatusCode)
+	}
+	redirect, err := url.Parse(decision.Data.RedirectURL)
+	if err != nil || redirect.Query().Get("iss") != testIssuer || redirect.Query().Get("code") == "" {
+		t.Fatalf("decision redirect %q, want a code with iss = issuer", decision.Data.RedirectURL)
+	}
+
+	// Machine endpoints on the API host.
+	status, tokens := e.postToken(codeExchangeForm(params, redirect.Query().Get("code"), p.verifier))
+	if status != http.StatusOK {
+		t.Fatalf("token exchange on the API host: status %d error %q", status, tokens.Error)
+	}
+	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/v1/me on the API host: status %d", resp.StatusCode)
+	}
+	if resp := e.do(httptest.NewRequest(http.MethodGet, testIssuer+oauth.AuthorizationServerMetadataPath, http.NoBody)); resp.StatusCode != http.StatusOK {
+		t.Fatalf("metadata on the API host: status %d", resp.StatusCode)
+	}
+
+	// Connected apps follow the browser origin too.
+	revoke := func(origin string) int {
+		req := httptest.NewRequest(http.MethodDelete, browser+"/api/v1/me/connected-apps/1", http.NoBody)
+		req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: e.session})
+		req.Header.Set("Origin", origin)
+		return e.do(req).StatusCode
+	}
+	if status := revoke(testIssuer); status != http.StatusForbidden {
+		t.Fatalf("connected-app revoke with the API origin: status %d, want 403", status)
+	}
+	if status := revoke(browser); status != http.StatusNoContent {
+		t.Fatalf("connected-app revoke with the browser origin: status %d, want 204", status)
+	}
+}
+
+// Without server.browser_url every browser URL is the issuer, as before.
+func TestOAuthBrowserURLDefaultsToIssuer(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	if md := e.oauth.Metadata(); md.AuthorizationEndpoint != testIssuer+oauth.AuthorizePath {
+		t.Fatalf("authorization_endpoint %q", md.AuthorizationEndpoint)
+	}
+	if e.oauth.BrowserOrigin() != testIssuer || e.oauth.IssuerOrigin() != testIssuer {
+		t.Fatalf("origins %q %q", e.oauth.BrowserOrigin(), e.oauth.IssuerOrigin())
+	}
+}

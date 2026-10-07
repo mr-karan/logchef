@@ -117,10 +117,10 @@ func (s *Server) requireSession(c fiber.Ctx) error {
 }
 
 // requireSameOrigin is the CSRF control for session-only routes that change
-// state: the browser Origin must equal the origin of server.public_url, and a
-// POST body must be JSON.
+// state: the browser Origin must equal the origin of server.browser_url
+// (server.public_url when unset), and a POST body must be JSON.
 func (s *Server) requireSameOrigin(c fiber.Ctx) error {
-	if c.Get(fiber.HeaderOrigin) != s.oauth.Origin() {
+	if c.Get(fiber.HeaderOrigin) != s.oauth.BrowserOrigin() {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Request origin is not allowed", models.AuthorizationErrorType)
 	}
 	if c.Method() == fiber.MethodPost {

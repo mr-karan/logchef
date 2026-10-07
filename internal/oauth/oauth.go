@@ -7,6 +7,7 @@
 package oauth
 
 import (
+	"cmp"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/hkdf"
@@ -65,17 +66,22 @@ const (
 
 // Server is the authorization server. Build it with New.
 type Server struct {
-	issuer      string
-	origin      string
-	apiResource string
-	mcpResource string
-	db          store.Store
-	clients     map[models.OAuthClientID]*client
-	cimd        *cimdResolver // nil when auth.oauth.cimd_enabled is false
-	hashKey     models.OAuthHashKey
-	crypto      op.Crypto
-	provider    *op.Provider
-	log         *slog.Logger
+	issuer string
+	origin string
+	// browserURL is where browsers reach Logchef: the advertised
+	// authorization endpoint and the consent page. It equals issuer unless
+	// server.browser_url is set.
+	browserURL    string
+	browserOrigin string
+	apiResource   string
+	mcpResource   string
+	db            store.Store
+	clients       map[models.OAuthClientID]*client
+	cimd          *cimdResolver // nil when auth.oauth.cimd_enabled is false
+	hashKey       models.OAuthHashKey
+	crypto        op.Crypto
+	provider      *op.Provider
+	log           *slog.Logger
 }
 
 // New builds the authorization server from the validated configuration. The
@@ -86,6 +92,12 @@ func New(cfg *config.Config, db store.Store, log *slog.Logger) (*Server, error) 
 	if err != nil {
 		return nil, fmt.Errorf("parsing server.public_url: %w", err)
 	}
+	browserURL := cmp.Or(cfg.Server.BrowserURL, issuer)
+	b, err := url.Parse(browserURL)
+	if err != nil {
+		return nil, fmt.Errorf("parsing server.browser_url: %w", err)
+	}
+	consentURL := browserURL + ConsentPath + "?request="
 	hashKey, err := deriveKey(cfg.Auth.APITokenSecret, hashKeyLabel)
 	if err != nil {
 		return nil, err
@@ -100,20 +112,22 @@ func New(cfg *config.Config, db store.Store, log *slog.Logger) (*Server, error) 
 	}
 
 	s := &Server{
-		issuer:      issuer,
-		origin:      u.Scheme + "://" + u.Host,
-		apiResource: issuer + "/api",
-		mcpResource: issuer + "/mcp",
-		db:          db,
-		clients:     newClients(cfg.Auth.OAuth, issuer),
-		hashKey:     models.OAuthHashKey(hashKey),
+		issuer:        issuer,
+		origin:        u.Scheme + "://" + u.Host,
+		browserURL:    browserURL,
+		browserOrigin: b.Scheme + "://" + b.Host,
+		apiResource:   issuer + "/api",
+		mcpResource:   issuer + "/mcp",
+		db:            db,
+		clients:       newClients(cfg.Auth.OAuth, issuer, consentURL),
+		hashKey:       models.OAuthHashKey(hashKey),
 		// AES-GCM only. ZITADEL's default crypto also decrypts the legacy,
 		// unauthenticated AES-CFB format (dependency audit F3).
 		crypto: op.NewAES256GCMCrypto(cryptoKey, ""),
 		log:    log.With("component", "oauth"),
 	}
 	if cfg.Auth.OAuth.CIMDEnabled {
-		s.cimd = newCIMDResolver(s.mcpResource, issuer+ConsentPath+"?request=", s.log)
+		s.cimd = newCIMDResolver(s.mcpResource, consentURL, s.log)
 	}
 
 	opts := []op.Option{
@@ -142,9 +156,13 @@ func New(cfg *config.Config, db store.Store, log *slog.Logger) (*Server, error) 
 // Issuer returns the issuer identifier, which is server.public_url.
 func (s *Server) Issuer() string { return s.issuer }
 
-// Origin returns the scheme and host of the issuer. Session-only routes that
-// change state require the browser Origin header to equal it.
-func (s *Server) Origin() string { return s.origin }
+// IssuerOrigin returns the scheme and host of the issuer, the machine origin
+// that serves /mcp.
+func (s *Server) IssuerOrigin() string { return s.origin }
+
+// BrowserOrigin returns the origin of the browser URL. Session-only routes
+// that change state require the browser Origin header to equal it.
+func (s *Server) BrowserOrigin() string { return s.browserOrigin }
 
 func (s *Server) resourceURL(r Resource) string {
 	if r == ResourceMCP {

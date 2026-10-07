@@ -73,7 +73,7 @@ func (s *Server) registerMCPRoutes() {
 // Origin header (a native MCP host) passes.
 func (s *Server) requireMCPOrigin(c fiber.Ctx) error {
 	origin := c.Get(fiber.HeaderOrigin)
-	if origin == "" || origin == s.oauth.Origin() || slices.Contains(s.config.Auth.OAuth.MCPAllowedOrigins, origin) {
+	if origin == "" || origin == s.oauth.IssuerOrigin() || slices.Contains(s.config.Auth.OAuth.MCPAllowedOrigins, origin) {
 		return c.Next()
 	}
 	return SendErrorWithType(c, fiber.StatusForbidden, "Request origin is not allowed", models.AuthorizationErrorType)
