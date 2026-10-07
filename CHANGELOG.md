@@ -7,6 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Logchef can now be its own OAuth server for agents and the CLI, and serves MCP
+at `/mcp` from the same process. Claude Code, Codex, Cursor and other MCP
+hosts connect with a browser approval instead of a pasted token. This release
+adds database migration 33; back up the metadata database before upgrading.
+
+### Added
+- **Built-in MCP endpoint.** With OAuth enabled, `<server.public_url>/mcp`
+  serves the read tools for profile, teams, sources, schema, LogchefQL and SQL
+  queries, histograms, field values, log context, saved queries and alerts,
+  plus `compare_windows`, `top_values` and an investigation panel for hosts
+  that render MCP Apps. Tool calls use the same access checks and query limits
+  as the HTTP API. The separate logchef-mcp server is no longer needed.
+- **Logchef OAuth.** Set `server.public_url` and `[auth.oauth] enabled = true`
+  to let agents and the CLI sign in through a consent page after the normal
+  Logchef login (local or OIDC). Authorization code with S256 PKCE, rotating
+  refresh tokens, and tokens bound to either the API or `/mcp`. Users review
+  and revoke grants under Settings → Connected apps.
+- **Connect with only the URL.** Hosts that support Client ID Metadata
+  Documents (Claude Code, Claude.ai, Codex, ChatGPT) need no client ID; others
+  use the built-in `logchef-mcp` client ID. Hosted web clients are configured
+  under `[[auth.oauth.clients]]`.
+- **Split UI and API hosts.** `server.browser_url` puts the consent page on a
+  UI host behind an SSO proxy while the CLI and agents use `server.public_url`.
+- **`logchef agent setup`** prints the steps to connect a coding agent.
+- `query.mcp_call_timeout_seconds` (default 60) bounds each MCP tool call.
+
+### Changed
+- **`logchef auth` signs in through Logchef OAuth** and needs a server with
+  OAuth enabled. `--no-browser` prints the URL instead of opening a browser,
+  and `auth --logout` revokes the grant on the server. API tokens (`--token`,
+  `LOGCHEF_AUTH_TOKEN`) work as before.
+- OAuth tokens get team membership access only, also for admins. Admin
+  sessions and API tokens are unchanged.
+- LogchefQL accepts RFC3339 and fractional-second time ranges on ClickHouse.
+- Team and source access checks now run in the server core for every caller.
+  An unknown path under a source that is not linked to the team returns 404,
+  and rate-limited routes report the limit before the link check.
+
+### Fixed
+- A saved query or alert that does not exist or is not visible returned 200
+  with empty data, and alert history returned 500. They now return 404.
+- Collection errors (403, 404, 409) were reported as 500.
+- A ClickHouse server that accepted connections but never answered held every
+  query for the full dial timeout. Queries now stop at their own deadline.
+- `logchef doctor` reported a saved token's expiry when `--token` overrode it.
+- An invalid alert test query returns 400 instead of 500.
+
+### Removed
+- `POST /api/v1/cli/token` and the `oidc.cli_client_id` setting. Existing
+  configs that still set `cli_client_id` load unchanged.
+
+### Upgrade notes
+- Back up the metadata database: migration 33 adds the OAuth tables.
+- Update the CLI. Older CLIs cannot sign in to this server; their saved
+  sessions keep working until they expire.
+
 ## [2.2.0] - 2026-09-29
 
 Logchef 2.2 can run under a subpath behind a reverse proxy and completes the
