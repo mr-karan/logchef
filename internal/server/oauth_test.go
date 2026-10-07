@@ -1803,3 +1803,51 @@ func TestOAuthRevokeRacesRotation(t *testing.T) {
 		})
 	}
 }
+
+// RFC 6749 5.1: token responses, errors included, and revocation responses
+// must not be cached.
+func TestOAuthTokenEndpointsNoStore(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	p := newPKCE()
+	params := cliAuthorizeParams(p)
+	params.Set("scope", "logs:read offline_access")
+	code := e.code(params)
+
+	post := func(path string, form url.Values) *testResponse {
+		req := httptest.NewRequest(http.MethodPost, testIssuer+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return e.do(req)
+	}
+	bad := codeExchangeForm(params, code, newPKCE().verifier)
+	good := codeExchangeForm(params, code, p.verifier)
+	var refresh string
+	for name, tc := range map[string]struct {
+		path string
+		form url.Values
+		want int
+	}{
+		"error response": {oauth.TokenPath, bad, http.StatusBadRequest},
+		"success":        {oauth.TokenPath, good, http.StatusOK},
+	} {
+		resp := post(tc.path, tc.form)
+		if resp.StatusCode != tc.want {
+			t.Fatalf("%s status %d, want %d", name, resp.StatusCode, tc.want)
+		}
+		if got := resp.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+			t.Errorf("%s Cache-Control = %q, want no-store", name, got)
+		}
+		if name == "success" {
+			var out tokenResponse
+			_ = json.NewDecoder(resp.Body).Decode(&out)
+			refresh = out.RefreshToken
+		}
+	}
+	resp := post(oauth.RevokePath, url.Values{"client_id": {config.OAuthCLIClientID}, "token": {refresh}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke status %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Errorf("revoke Cache-Control = %q, want no-store", got)
+	}
+}

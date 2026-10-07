@@ -114,6 +114,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 // Only public clients exist, so any client credential is refused. The
 // resource must be present and equal the client's resource.
 func (s *Server) token(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
 	if r.URL.RawQuery != "" {
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "parameters must be sent in the request body")
 		return
@@ -161,6 +162,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 // tokens cannot belong to this server, so they are refused here and get the
 // RFC 7009 answer for an unknown token: 200.
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
+	noStore(w)
 	if r.URL.RawQuery != "" {
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "parameters must be sent in the request body")
 		return
@@ -278,7 +280,7 @@ func (w *issWriter) WriteHeader(code int) {
 
 func (s *Server) writeTokenError(w http.ResponseWriter, status int, code, description string) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Cache-Control", "no-store")
+	noStore(w)
 	w.WriteHeader(status)
 	if err := json.NewEncoder(w).Encode(map[string]string{"error": code, "error_description": description}); err != nil {
 		s.log.Warn("writing OAuth token error", "error", err)
@@ -300,4 +302,11 @@ func (s *Server) errorPage(w http.ResponseWriter, message string) {
 	if err := errorPageTemplate.Execute(w, message); err != nil {
 		s.log.Warn("writing OAuth error page", "error", err)
 	}
+}
+
+// noStore marks a token or revocation response as uncacheable (RFC 6749
+// section 5.1), including the responses the provider writes.
+func noStore(w http.ResponseWriter) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Pragma", "no-cache")
 }
