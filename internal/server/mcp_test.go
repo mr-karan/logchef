@@ -627,3 +627,22 @@ func TestMCPCallCancelledByShutdown(t *testing.T) {
 		t.Fatalf("%d admission slots held after cancellation", n)
 	}
 }
+
+// A token narrower than a tool needs lists only the tools it can use, and
+// calling a hidden tool anyway is refused as not found.
+func TestMCPNarrowTokenCannotCallHiddenTool(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	p := newPKCE()
+	params := mcpNativeAuthorizeParams(p, "http://localhost:8787/callback")
+	params.Set("scope", "profile:read")
+	narrow := e.tokens(params, p).AccessToken
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query_logs","arguments":{"team_id":1,"source_id":1,"raw_sql":"SELECT 1"}}}`)
+	resp := e.mcpPost(narrow, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
+	data, _ := io.ReadAll(resp.Body)
+	var env mcpEnvelope
+	if err := json.Unmarshal(data, &env); err != nil || resp.StatusCode != http.StatusOK || env.Result != nil || !strings.Contains(string(env.Error), "tool not found") {
+		t.Fatalf("query_logs with profile:read: status %d body %s", resp.StatusCode, data)
+	}
+}

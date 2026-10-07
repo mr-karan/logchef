@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -1718,5 +1719,87 @@ func TestOAuthBrowserURLDefaultsToIssuer(t *testing.T) {
 	}
 	if e.oauth.BrowserOrigin() != testIssuer || e.oauth.IssuerOrigin() != testIssuer {
 		t.Fatalf("origins %q %q", e.oauth.BrowserOrigin(), e.oauth.IssuerOrigin())
+	}
+}
+
+// A refresh token works only for the client it was issued to, whichever
+// resource the other client asks for.
+func TestOAuthRefreshBoundToClient(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	p := newPKCE()
+	params := cliAuthorizeParams(p)
+	params.Set("scope", "logs:read offline_access")
+	tokens := e.tokens(params, p)
+
+	mcpParams := mcpNativeAuthorizeParams(p, "http://localhost:8787/callback")
+	webParams := webAuthorizeParams(p)
+	for name, other := range map[string]url.Values{"logchef-mcp": mcpParams, "web": webParams} {
+		for _, resource := range []string{testAPIResource, other.Get("resource")} {
+			form := refreshForm(other, tokens.RefreshToken)
+			form.Set("resource", resource)
+			status, out := e.postToken(form)
+			if status != http.StatusBadRequest || (out.Error != "invalid_grant" && out.Error != "invalid_target") {
+				t.Errorf("%s refreshing a CLI token for %q: status %d error %q, want 400 invalid_grant or invalid_target", name, resource, status, out.Error)
+			}
+			if resource == other.Get("resource") && out.Error != "invalid_grant" {
+				t.Errorf("%s refreshing a CLI token for its own resource: error %q, want invalid_grant", name, out.Error)
+			}
+		}
+	}
+	if status, out := e.postToken(refreshForm(params, tokens.RefreshToken)); status != http.StatusOK {
+		t.Fatalf("owner refresh after another client's attempts: status %d error %q", status, out.Error)
+	}
+}
+
+// Revoking a refresh token while it rotates must leave no usable credential,
+// whichever request the server handles first.
+func TestOAuthRevokeRacesRotation(t *testing.T) {
+	t.Parallel()
+	for i := range 8 {
+		t.Run("round "+strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
+			e := newOAuthEnv(t)
+			p := newPKCE()
+			params := cliAuthorizeParams(p)
+			params.Set("scope", "logs:read offline_access")
+			tokens := e.tokens(params, p)
+
+			revoke := url.Values{"client_id": {config.OAuthCLIClientID}, "token": {tokens.RefreshToken}, "token_type_hint": {"refresh_token"}}
+			var (
+				wg       sync.WaitGroup
+				revoked  int
+				rotated  tokenResponse
+				rotation int
+			)
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				req := httptest.NewRequest(http.MethodPost, testIssuer+oauth.RevokePath, strings.NewReader(revoke.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				revoked = e.do(req).StatusCode
+			}()
+			go func() {
+				defer wg.Done()
+				rotation, rotated = e.postToken(refreshForm(params, tokens.RefreshToken))
+			}()
+			wg.Wait()
+
+			if revoked != http.StatusOK {
+				t.Fatalf("revoke status %d", revoked)
+			}
+			if status, _ := e.postToken(refreshForm(params, tokens.RefreshToken)); status == http.StatusOK {
+				t.Fatal("revoked refresh token still rotates")
+			}
+			if rotation != http.StatusOK {
+				return
+			}
+			if resp := e.apiGet("/api/v1/me", rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("access token minted by the racing rotation status %d, want 401", resp.StatusCode)
+			}
+			if status, _ := e.postToken(refreshForm(params, rotated.RefreshToken)); status == http.StatusOK {
+				t.Fatal("refresh token minted by the racing rotation still works")
+			}
+		})
 	}
 }
