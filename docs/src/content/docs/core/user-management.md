@@ -84,7 +84,8 @@ layer wins.
 
 This produces a few important guarantees:
 
-- Joining a collection never grants access to its logs.
+- Joining a collection, directly or through a team it is shared with, never grants
+  access to its logs. A team share grants only the collection Member role.
 - Team membership only exposes sources explicitly assigned to that team.
 - Team admins can manage members and source assignments without becoming global admins.
 - Scoped service tokens can be limited by both action and source access.

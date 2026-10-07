@@ -15,6 +15,8 @@ type Querier interface {
 	AddCollectionItem(ctx context.Context, arg AddCollectionItemParams) error
 	// Add a member; idempotent on (collection_id, user_id).
 	AddCollectionMember(ctx context.Context, arg AddCollectionMemberParams) error
+	// Share a collection with a team; idempotent on (collection_id, team_id).
+	AddCollectionTeam(ctx context.Context, arg AddCollectionTeamParams) error
 	// Team Members
 	// Add a member to a team
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error
@@ -37,6 +39,9 @@ type Querier interface {
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
+	// Count the teams shared with a collection that the user currently belongs to.
+	// A non-zero count grants the user the collection Member role.
+	CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error)
 	// Count shared (non-personal) collections that contain the given saved query and
 	// in which the user is an owner or editor. A non-zero count means the user has
 	// delegated edit rights on that query via collection membership.
@@ -122,8 +127,8 @@ type Querier interface {
 	// Get an API token by its hash (for authentication)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAlert(ctx context.Context, id int64) (Alert, error)
-	// Look up a collection by id
-	GetCollection(ctx context.Context, id int64) (Collection, error)
+	// Look up a collection by id with direct member, shared team, and item counts
+	GetCollection(ctx context.Context, id int64) (GetCollectionRow, error)
 	// Look up a single membership row
 	GetCollectionMember(ctx context.Context, arg GetCollectionMemberParams) (CollectionMember, error)
 	// Look up one dashboard by id, with creator identity like ListDashboards.
@@ -205,7 +210,12 @@ type Querier interface {
 	ListCollectionItems(ctx context.Context, collectionID int64) ([]ListCollectionItemsRow, error)
 	// List members of a collection with user details
 	ListCollectionMembers(ctx context.Context, collectionID int64) ([]ListCollectionMembersRow, error)
-	// List collections the user owns or is a member of, with member count and item count
+	// List teams a collection is shared with, with team names
+	ListCollectionTeams(ctx context.Context, collectionID int64) ([]ListCollectionTeamsRow, error)
+	// List collections the user can see: direct membership (any role) or membership
+	// in a team the collection is shared with. Each collection appears once. A
+	// direct role wins; team-only access is always 'member'. member_count counts
+	// direct membership rows only (owners included); team_count counts team shares.
 	ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error)
 	// List every dashboard, newest-updated first, with the creator's email/name via
 	// a LEFT JOIN (NULL for dashboards whose author was deleted).
@@ -276,6 +286,8 @@ type Querier interface {
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection
 	RemoveCollectionMember(ctx context.Context, arg RemoveCollectionMemberParams) error
+	// Remove a team share. Direct memberships and other team shares are untouched.
+	RemoveCollectionTeam(ctx context.Context, arg RemoveCollectionTeamParams) error
 	// Remove a member from a team
 	RemoveTeamMember(ctx context.Context, arg RemoveTeamMemberParams) error
 	// Remove a data source from a team

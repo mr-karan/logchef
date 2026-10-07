@@ -778,8 +778,20 @@ VALUES ($1, $2, $3, $4)
 RETURNING id, created_at, updated_at;
 
 -- name: GetCollection :one
--- Look up a collection by id
-SELECT * FROM collections WHERE id = $1;
+-- Look up a collection by id with direct member, shared team, and item counts
+SELECT
+    c.id,
+    c.name,
+    c.description,
+    c.is_personal,
+    c.created_by,
+    c.created_at,
+    c.updated_at,
+    (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_teams WHERE collection_id = c.id) AS team_count,
+    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
+FROM collections c
+WHERE c.id = $1;
 
 -- name: GetPersonalCollection :one
 -- Find the caller's personal collection if it exists
@@ -798,7 +810,10 @@ WHERE id = $3;
 DELETE FROM collections WHERE id = $1;
 
 -- name: ListCollectionsForUser :many
--- List collections the user owns or is a member of, with member count and item count
+-- List collections the user can see: direct membership (any role) or membership
+-- in a team the collection is shared with. Each collection appears once. A
+-- direct role wins; team-only access is always 'member'. member_count counts
+-- direct membership rows only (owners included); team_count counts team shares.
 SELECT
     c.id,
     c.name,
@@ -807,12 +822,19 @@ SELECT
     c.created_by,
     c.created_at,
     c.updated_at,
-    cm.role AS caller_role,
+    CAST(COALESCE(cm.role, 'member') AS TEXT) AS caller_role,
     (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_teams WHERE collection_id = c.id) AS team_count,
     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
 FROM collections c
-JOIN collection_members cm ON cm.collection_id = c.id
-WHERE cm.user_id = $1
+LEFT JOIN collection_members cm ON cm.collection_id = c.id AND cm.user_id = sqlc.arg(user_id)
+WHERE cm.user_id IS NOT NULL
+   OR EXISTS (
+        SELECT 1
+        FROM collection_teams ct
+        JOIN team_members tm ON tm.team_id = ct.team_id
+        WHERE ct.collection_id = c.id AND tm.user_id = sqlc.arg(user_id)
+   )
 ORDER BY c.is_personal DESC, c.updated_at DESC;
 
 -- name: AddCollectionMember :exec
@@ -874,6 +896,32 @@ JOIN saved_queries sq ON sq.id = ci.saved_query_id
 JOIN sources s ON s.id = sq.source_id
 WHERE ci.collection_id = $1
 ORDER BY ci.sort_order ASC, ci.created_at ASC;
+
+-- name: AddCollectionTeam :exec
+-- Share a collection with a team; idempotent on (collection_id, team_id).
+INSERT INTO collection_teams (collection_id, team_id, added_by)
+VALUES ($1, $2, $3)
+ON CONFLICT(collection_id, team_id) DO NOTHING;
+
+-- name: RemoveCollectionTeam :exec
+-- Remove a team share. Direct memberships and other team shares are untouched.
+DELETE FROM collection_teams WHERE collection_id = $1 AND team_id = $2;
+
+-- name: ListCollectionTeams :many
+-- List teams a collection is shared with, with team names
+SELECT ct.collection_id, ct.team_id, ct.added_by, ct.created_at, t.name AS team_name
+FROM collection_teams ct
+JOIN teams t ON t.id = ct.team_id
+WHERE ct.collection_id = $1
+ORDER BY t.name ASC;
+
+-- name: CountCollectionTeamAccess :one
+-- Count the teams shared with a collection that the user currently belongs to.
+-- A non-zero count grants the user the collection Member role.
+SELECT COUNT(*)
+FROM collection_teams ct
+JOIN team_members tm ON tm.team_id = ct.team_id
+WHERE ct.collection_id = $1 AND tm.user_id = $2;
 
 -- name: CountSharedCollectionEditAccess :one
 -- Count shared (non-personal) collections that contain the given saved query and

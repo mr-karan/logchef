@@ -93,7 +93,7 @@ type SavedQueryStore interface {
 }
 
 // CollectionStore persists collections (curated groups of saved queries) plus
-// their membership and items.
+// their direct membership, team shares, and items.
 type CollectionStore interface {
 	CreateCollection(ctx context.Context, name, description string, isPersonal bool, createdBy models.UserID) (*models.Collection, error)
 	GetCollection(ctx context.Context, collectionID int) (*models.Collection, error)
@@ -105,6 +105,12 @@ type CollectionStore interface {
 	GetCollectionMember(ctx context.Context, collectionID int, userID models.UserID) (*models.CollectionMember, error)
 	ListCollectionMembers(ctx context.Context, collectionID int) ([]*models.CollectionMember, error)
 	RemoveCollectionMember(ctx context.Context, collectionID int, userID models.UserID) error
+	AddCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID, addedBy *models.UserID) error
+	RemoveCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID) error
+	ListCollectionTeams(ctx context.Context, collectionID int) ([]*models.CollectionTeam, error)
+	// UserHasCollectionTeamAccess reports whether the user currently belongs to
+	// any team the collection is shared with.
+	UserHasCollectionTeamAccess(ctx context.Context, collectionID int, userID models.UserID) (bool, error)
 	AddCollectionItem(ctx context.Context, collectionID, savedQueryID, sortOrder int, addedBy *models.UserID) error
 	RemoveCollectionItem(ctx context.Context, collectionID, savedQueryID int) error
 	ListCollectionItems(ctx context.Context, collectionID int) ([]*models.CollectionItem, error)

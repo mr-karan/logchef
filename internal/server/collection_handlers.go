@@ -24,7 +24,11 @@ func mapCollectionError(c fiber.Ctx, err error) (handled bool, sendErr error) {
 	case errors.Is(err, core.ErrPersonalCollectionImmutable):
 		return true, SendErrorWithType(c, fiber.StatusBadRequest, "Personal collections cannot be modified or deleted", models.ValidationErrorType)
 	case errors.Is(err, core.ErrInvalidCollectionRole):
-		return true, SendErrorWithType(c, fiber.StatusBadRequest, "Role must be 'owner' or 'member'", models.ValidationErrorType)
+		return true, SendErrorWithType(c, fiber.StatusBadRequest, "Role must be 'owner', 'editor', or 'member'", models.ValidationErrorType)
+	case errors.Is(err, core.ErrCollectionTeamNotMember):
+		return true, SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+	case errors.Is(err, core.ErrTeamNotFound):
+		return true, SendErrorWithType(c, fiber.StatusNotFound, "Team not found", models.NotFoundErrorType)
 	case errors.Is(err, core.ErrLastOwnerRemoval):
 		return true, SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ValidationErrorType)
 	case errors.Is(err, core.ErrQueryNotFound):
@@ -179,6 +183,66 @@ func (s *Server) handleRemoveCollectionMember(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Member removed"})
+}
+
+// handleListCollectionTeams returns the teams a collection is shared with.
+func (s *Server) handleListCollectionTeams(c fiber.Ctx) error {
+	id, err := parseCollectionID(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	teams, err := core.ListCollectionTeams(c.Context(), s.sqlite, s.log, id, principalFromLocals(c))
+	if err != nil {
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
+		}
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list teams", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusOK, teams)
+}
+
+// handleAddCollectionTeam shares a collection with a team.
+func (s *Server) handleAddCollectionTeam(c fiber.Ctx) error {
+	id, err := parseCollectionID(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	var req models.AddCollectionTeamRequest
+	if err := c.Bind().Body(&req); err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
+	}
+	if req.TeamID <= 0 {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team id", models.ValidationErrorType)
+	}
+	if err := core.AddCollectionTeam(c.Context(), s.sqlite, s.log, id, principalFromLocals(c), req.TeamID); err != nil {
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
+		}
+		s.log.Error("failed to add collection team", "error", err, "collection_id", id, "team_id", req.TeamID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to share collection with team", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusCreated, fiber.Map{"message": "Team added"})
+}
+
+// handleRemoveCollectionTeam removes a team share.
+func (s *Server) handleRemoveCollectionTeam(c fiber.Ctx) error {
+	user := c.Locals("user").(*models.User)
+	id, err := parseCollectionID(c)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
+	teamID, err := parsePositiveIntParam(c, "teamID")
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team id", models.ValidationErrorType)
+	}
+	if err := core.RemoveCollectionTeam(c.Context(), s.sqlite, s.log, id, user.ID, models.TeamID(teamID)); err != nil {
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
+		}
+		s.log.Error("failed to remove collection team", "error", err, "collection_id", id, "team_id", teamID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to remove team", models.GeneralErrorType)
+	}
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Team removed"})
 }
 
 // handleListCollectionItems returns items with the runnable flag.

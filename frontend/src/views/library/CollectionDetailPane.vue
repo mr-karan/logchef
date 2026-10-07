@@ -51,6 +51,7 @@ import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useAuthStore } from "@/stores/auth";
 import { useTeamPermissions } from "@/composables/useTeamPermissions";
 import { useUsersStore } from "@/stores/users";
+import { useTeamsStore } from "@/stores/teams";
 import {
   Select,
   SelectContent,
@@ -72,6 +73,7 @@ const store = useCollectionsStore();
 const savedQueriesStore = useSavedQueriesStore();
 const authStore = useAuthStore();
 const usersStore = useUsersStore();
+const teamsStore = useTeamsStore();
 const { data } = storeToRefs(store);
 const { isAnyTeamAdmin, isGlobalAdmin, canManageCollection } = useTeamPermissions();
 
@@ -79,9 +81,11 @@ const collectionID = computed(() => props.collectionId);
 const collection = computed(() => store.collections.find((c) => c.id === collectionID.value) ?? null);
 const items = computed(() => data.value.items[collectionID.value] ?? []);
 const members = computed(() => data.value.members[collectionID.value] ?? []);
+const sharedTeams = computed(() => data.value.teams[collectionID.value] ?? []);
 
 const itemCount = computed(() => items.value.length);
 const memberCount = computed(() => members.value.length);
+const teamCount = computed(() => sharedTeams.value.length);
 
 // Initials for the member avatar — first + last initial, falling back to the
 // first character of whatever identifier we have.
@@ -111,6 +115,12 @@ const canCurate = computed(() => isGlobalAdmin.value || !!collection.value?.call
 // populated without it.
 const canListUsers = computed(() => isGlobalAdmin.value || isAnyTeamAdmin.value);
 const canInviteMembers = computed(() => isOwner.value && canListUsers.value && !collection.value?.is_personal);
+// Team shares are managed by actual collection owners only: the server rejects
+// global admins who do not own the collection, so canManageCollection's admin
+// bypass must not apply. Owners need no user directory to share with a team.
+const canManageTeams = computed(
+  () => collection.value?.caller_role === "owner" && !collection.value.is_personal
+);
 
 function translateCollectionRole(role: string) {
   switch (role) {
@@ -138,6 +148,20 @@ const availableUserItems = computed<SearchableItem[]>(() =>
   }))
 );
 
+const showAddTeam = ref(false);
+const newTeamId = ref("");
+
+// Global admins may share with any existing team; other owners only with teams
+// they belong to (the server enforces the same rule).
+const shareableTeams = computed(() => {
+  const sharedIds = new Set(sharedTeams.value.map((t) => t.team_id));
+  const candidates = isGlobalAdmin.value ? teamsStore.adminTeams : teamsStore.userTeams;
+  return candidates.filter((t) => !sharedIds.has(t.id));
+});
+const shareableTeamItems = computed<SearchableItem[]>(() =>
+  shareableTeams.value.map((t) => ({ value: String(t.id), label: t.name }))
+);
+
 const showRename = ref(false);
 const renameName = ref("");
 const renameDescription = ref("");
@@ -147,6 +171,7 @@ const showDeleteDialog = ref(false);
 // Confirm-dialog state — populated by handleRemove* and consumed by the
 // ConfirmDialog instances at the bottom of the template.
 const pendingMemberRemoval = ref<number | null>(null);
+const pendingTeamRemoval = ref<number | null>(null);
 const pendingItemRemoval = ref<number | null>(null);
 
 async function load() {
@@ -159,7 +184,7 @@ async function load() {
   // hide it, and only the collection owner (or a global admin) may view the
   // member roster.
   if (collection.value && !collection.value.is_personal && isOwner.value) {
-    tasks.push(store.fetchMembers(collectionID.value));
+    tasks.push(store.fetchMembers(collectionID.value), store.fetchTeams(collectionID.value));
   }
   await Promise.all(tasks);
 }
@@ -175,6 +200,37 @@ watch(showAddMember, async (isOpen) => {
     await usersStore.loadUsers();
   }
 });
+
+// Reload candidates on every open: team membership can change in another
+// session, and a cached list would hide new teams or offer revoked ones.
+watch(showAddTeam, async (isOpen) => {
+  if (!isOpen) return;
+  if (isGlobalAdmin.value) {
+    await teamsStore.loadAdminTeams(true);
+  } else {
+    await teamsStore.loadUserTeams();
+  }
+  if (!shareableTeamItems.value.some((item) => item.value === newTeamId.value)) {
+    newTeamId.value = "";
+  }
+});
+
+async function handleAddTeam() {
+  const teamId = Number(newTeamId.value);
+  if (!teamId) return;
+  const result = await store.addTeam(collectionID.value, { team_id: teamId });
+  if (result.success) {
+    showAddTeam.value = false;
+    newTeamId.value = "";
+  }
+}
+
+async function confirmTeamRemoval() {
+  const teamId = pendingTeamRemoval.value;
+  pendingTeamRemoval.value = null;
+  if (teamId == null) return;
+  await store.removeTeam(collectionID.value, teamId);
+}
 
 async function handleAddMember() {
   const idNum = Number(newMemberId.value);
@@ -318,6 +374,10 @@ async function handleDeleteCollection() {
             <UserPlus class="mr-2 h-4 w-4" />
             {{ t('library.inviteMember') }}
           </Button>
+          <Button v-if="canManageTeams" variant="outline" size="sm" @click="showAddTeam = true">
+            <Users class="mr-2 h-4 w-4" />
+            {{ t('library.shareWithTeam') }}
+          </Button>
           <Button v-if="isOwner && !collection.is_personal" variant="destructive" size="sm" @click="showDeleteDialog = true">
             <Trash2 class="mr-2 h-4 w-4" />
             {{ t('ui.delete') }}
@@ -343,16 +403,18 @@ async function handleDeleteCollection() {
           </span>
         </template>
         <span class="text-muted-foreground/40">•</span>
-        <span>
-          <span class="font-medium text-foreground tabular-nums">{{ itemCount }}</span>
-          {{ t('collections.items', { count: itemCount }, itemCount) }}
-        </span>
+        <i18n-t keypath="collections.items" :plural="itemCount" scope="global">
+          <template #count><span class="font-medium text-foreground tabular-nums">{{ itemCount }}</span></template>
+        </i18n-t>
         <template v-if="!collection.is_personal && isOwner">
           <span class="text-muted-foreground/40">•</span>
-          <span>
-            <span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span>
-            {{ t('collections.members', { count: memberCount }, memberCount) }}
-          </span>
+          <i18n-t keypath="collections.members" :plural="memberCount" scope="global">
+            <template #count><span class="font-medium text-foreground tabular-nums">{{ memberCount }}</span></template>
+          </i18n-t>
+          <span class="text-muted-foreground/40">•</span>
+          <i18n-t keypath="library.teamCount" :plural="teamCount" scope="global">
+            <template #count><span class="font-medium text-foreground tabular-nums">{{ teamCount }}</span></template>
+          </i18n-t>
         </template>
         <template v-if="collection.created_at">
           <span class="text-muted-foreground/40">•</span>
@@ -522,7 +584,71 @@ async function handleDeleteCollection() {
           </li>
         </ul>
       </PageSection>
+
+      <PageSection
+        v-if="!collection.is_personal && isOwner"
+        :title="t('library.sharedTeams')"
+        :description="t('library.sharedTeamsDescription')"
+        flush
+      >
+        <LoadingState v-if="store.isLoadingOperation(`listTeams-${collectionID}`)" />
+        <p v-else-if="sharedTeams.length === 0" class="px-4 py-3 text-sm text-muted-foreground">
+          {{ t('library.noSharedTeams') }}
+        </p>
+        <ul v-else class="divide-y">
+          <li v-for="team in sharedTeams" :key="team.team_id" class="flex items-center gap-3 px-4 py-3">
+            <div
+              class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground"
+              aria-hidden="true"
+            >
+              <Users class="h-4 w-4" />
+            </div>
+            <p class="min-w-0 flex-1 truncate text-sm font-medium">{{ team.team_name }}</p>
+            <Badge variant="outline" class="w-16 shrink-0 justify-center capitalize">
+              {{ translateCollectionRole('member') }}
+            </Badge>
+            <div class="flex w-8 shrink-0 justify-center">
+              <Button
+                v-if="canManageTeams"
+                variant="ghost"
+                size="icon"
+                class="h-7 w-7"
+                :title="t('library.removeTeamShare')"
+                @click="pendingTeamRemoval = team.team_id"
+              >
+                <X class="h-4 w-4 text-destructive" />
+              </Button>
+            </div>
+          </li>
+        </ul>
+      </PageSection>
     </template>
+
+    <Dialog :open="showAddTeam" @update:open="(val) => !val && (showAddTeam = false)">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{{ t('library.shareWithTeam') }}</DialogTitle>
+          <DialogDescription>
+            {{ t('library.shareWithTeamDescription') }}
+          </DialogDescription>
+        </DialogHeader>
+        <form @submit.prevent="handleAddTeam" class="space-y-4">
+          <div class="grid gap-2">
+            <Label>{{ t('library.team') }}</Label>
+            <SearchableSelect
+              v-model="newTeamId"
+              :items="shareableTeamItems"
+              :placeholder="t('library.selectTeamToShare')"
+              :search-placeholder="t('library.searchTeams')"
+              :empty-text="t('library.noTeamsAvailable')" />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" @click="showAddTeam = false">{{ t('ui.cancel') }}</Button>
+            <Button type="submit" :disabled="!newTeamId">{{ t('library.share') }}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
 
     <Dialog :open="showAddMember" @update:open="(val) => !val && (showAddMember = false)">
       <DialogContent class="sm:max-w-md">
@@ -654,6 +780,15 @@ async function handleDeleteCollection() {
       destructive
       @update:open="(v) => { if (!v) pendingMemberRemoval = null }"
       @confirm="confirmMemberRemoval"
+    />
+    <ConfirmDialog
+      :open="pendingTeamRemoval !== null"
+      :title="t('library.removeTeamShareTitle')"
+      :description="t('library.removeTeamShareDescription')"
+      :confirm-text="t('library.remove')"
+      destructive
+      @update:open="(v) => { if (!v) pendingTeamRemoval = null }"
+      @confirm="confirmTeamRemoval"
     />
     <ConfirmDialog
       :open="pendingItemRemoval !== null"

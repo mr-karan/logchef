@@ -5,9 +5,11 @@ import {
   type Collection,
   type CollectionItem,
   type CollectionMember,
+  type CollectionTeam,
   type CreateCollectionRequest,
   type UpdateCollectionRequest,
   type AddCollectionMemberRequest,
+  type AddCollectionTeamRequest,
   type AddCollectionItemRequest,
 } from "@/api/collections";
 import { useBaseStore } from "./base";
@@ -16,6 +18,7 @@ interface CollectionsState {
   collections: Collection[];
   selectedId: number | null;
   members: Record<number, CollectionMember[]>;
+  teams: Record<number, CollectionTeam[]>;
   items: Record<number, CollectionItem[]>;
 }
 
@@ -24,6 +27,7 @@ export const useCollectionsStore = defineStore("collections", () => {
     collections: [],
     selectedId: null,
     members: {},
+    teams: {},
     items: {},
   });
 
@@ -98,6 +102,7 @@ export const useCollectionsStore = defineStore("collections", () => {
         onSuccess: () => {
           state.data.value.collections = state.data.value.collections.filter((c) => c.id !== id);
           delete state.data.value.members[id];
+          delete state.data.value.teams[id];
           delete state.data.value.items[id];
           if (state.data.value.selectedId === id) state.data.value.selectedId = null;
         },
@@ -126,7 +131,7 @@ export const useCollectionsStore = defineStore("collections", () => {
         operationKey: `addMember-${id}`,
         successMessage: "Member added",
         onSuccess: async () => {
-          await fetchMembers(id);
+          await Promise.all([fetchMembers(id), fetchCollections()]);
         },
       });
     });
@@ -139,7 +144,47 @@ export const useCollectionsStore = defineStore("collections", () => {
         operationKey: `removeMember-${id}-${userId}`,
         successMessage: "Member removed",
         onSuccess: async () => {
-          await fetchMembers(id);
+          await Promise.all([fetchMembers(id), fetchCollections()]);
+        },
+      });
+    });
+  }
+
+  async function fetchTeams(id: number) {
+    return await state.withLoading(`listTeams-${id}`, async () => {
+      return await state.callApi<CollectionTeam[]>({
+        apiCall: () => collectionsApi.listTeams(id),
+        operationKey: `listTeams-${id}`,
+        onSuccess: (data) => {
+          state.data.value.teams[id] = data ?? [];
+        },
+        defaultData: [],
+        showToast: false,
+      });
+    });
+  }
+
+  async function addTeam(id: number, payload: AddCollectionTeamRequest) {
+    return await state.withLoading(`addTeam-${id}`, async () => {
+      return await state.callApi<{ message: string }>({
+        apiCall: () => collectionsApi.addTeam(id, payload),
+        operationKey: `addTeam-${id}`,
+        successMessage: "Team added",
+        onSuccess: async () => {
+          await Promise.all([fetchTeams(id), fetchCollections()]);
+        },
+      });
+    });
+  }
+
+  async function removeTeam(id: number, teamId: number) {
+    return await state.withLoading(`removeTeam-${id}-${teamId}`, async () => {
+      return await state.callApi<{ message: string }>({
+        apiCall: () => collectionsApi.removeTeam(id, teamId),
+        operationKey: `removeTeam-${id}-${teamId}`,
+        successMessage: "Team removed",
+        onSuccess: async () => {
+          await Promise.all([fetchTeams(id), fetchCollections()]);
         },
       });
     });
@@ -206,6 +251,9 @@ export const useCollectionsStore = defineStore("collections", () => {
     fetchMembers,
     addMember,
     removeMember,
+    fetchTeams,
+    addTeam,
+    removeTeam,
     fetchItems,
     addItem,
     removeItem,

@@ -165,6 +165,7 @@ function navigateToCollection(collectionId: number) {
                   <div class="text-xs text-muted-foreground">
                     {{ t('collections.items', { count: c.item_count }, c.item_count) }}
                     <span v-if="!c.is_personal"> · {{ t('collections.members', { count: c.member_count }, c.member_count) }}</span>
+                    <span v-if="c.team_count > 0"> · {{ t('library.teamCount', { count: c.team_count }, c.team_count) }}</span>
                   </div>
                 </div>
               </div>

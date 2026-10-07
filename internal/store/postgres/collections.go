@@ -56,7 +56,18 @@ func (s *Store) GetCollection(ctx context.Context, collectionID int) (*models.Co
 		}
 		return nil, fmt.Errorf("getting collection id %d: %w", collectionID, err)
 	}
-	return collectionToModel(row), nil
+	return &models.Collection{
+		ID:          int(row.ID),
+		Name:        row.Name,
+		Description: textStr(row.Description),
+		IsPersonal:  row.IsPersonal,
+		CreatedBy:   userIDPtr(row.CreatedBy),
+		MemberCount: int(row.MemberCount),
+		TeamCount:   int(row.TeamCount),
+		ItemCount:   int(row.ItemCount),
+		CreatedAt:   row.CreatedAt.Time,
+		UpdatedAt:   row.UpdatedAt.Time,
+	}, nil
 }
 
 // GetPersonalCollection returns the user's personal collection, or models.ErrNotFound
@@ -94,7 +105,8 @@ func (s *Store) DeleteCollection(ctx context.Context, collectionID int) error {
 	return nil
 }
 
-// ListCollectionsForUser returns every collection the user owns or is a member of.
+// ListCollectionsForUser returns every collection the user can see through a
+// direct membership or a team share, once each.
 func (s *Store) ListCollectionsForUser(ctx context.Context, userID models.UserID) ([]*models.Collection, error) {
 	rows, err := s.q.ListCollectionsForUser(ctx, int64(userID))
 	if err != nil {
@@ -112,6 +124,7 @@ func (s *Store) ListCollectionsForUser(ctx context.Context, userID models.UserID
 			CreatedBy:   userIDPtr(r.CreatedBy),
 			CallerRole:  models.CollectionRole(r.CallerRole),
 			MemberCount: int(r.MemberCount),
+			TeamCount:   int(r.TeamCount),
 			ItemCount:   int(r.ItemCount),
 			CreatedAt:   r.CreatedAt.Time,
 			UpdatedAt:   r.UpdatedAt.Time,
@@ -188,6 +201,65 @@ func (s *Store) RemoveCollectionMember(ctx context.Context, collectionID int, us
 		return fmt.Errorf("error removing collection member: %w", err)
 	}
 	return nil
+}
+
+// AddCollectionTeam shares a collection with a team (idempotent via ON CONFLICT).
+func (s *Store) AddCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID, addedBy *models.UserID) error {
+	params := sqlc.AddCollectionTeamParams{
+		CollectionID: int64(collectionID),
+		TeamID:       int64(teamID),
+	}
+	if addedBy != nil {
+		params.AddedBy = int8Val(int64(*addedBy))
+	}
+	if err := s.q.AddCollectionTeam(ctx, params); err != nil {
+		s.log.Error("failed to add collection team", "error", err, "collection_id", collectionID, "team_id", teamID)
+		return fmt.Errorf("error adding collection team: %w", err)
+	}
+	return nil
+}
+
+// RemoveCollectionTeam removes a team share.
+func (s *Store) RemoveCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID) error {
+	if err := s.q.RemoveCollectionTeam(ctx, sqlc.RemoveCollectionTeamParams{
+		CollectionID: int64(collectionID),
+		TeamID:       int64(teamID),
+	}); err != nil {
+		return fmt.Errorf("error removing collection team: %w", err)
+	}
+	return nil
+}
+
+// ListCollectionTeams returns the teams a collection is shared with.
+func (s *Store) ListCollectionTeams(ctx context.Context, collectionID int) ([]*models.CollectionTeam, error) {
+	rows, err := s.q.ListCollectionTeams(ctx, int64(collectionID))
+	if err != nil {
+		return nil, fmt.Errorf("error listing collection teams: %w", err)
+	}
+	out := make([]*models.CollectionTeam, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, &models.CollectionTeam{
+			CollectionID: int(r.CollectionID),
+			TeamID:       models.TeamID(r.TeamID),
+			TeamName:     r.TeamName,
+			AddedBy:      userIDPtr(r.AddedBy),
+			CreatedAt:    r.CreatedAt.Time,
+		})
+	}
+	return out, nil
+}
+
+// UserHasCollectionTeamAccess reports whether the user belongs to any team the
+// collection is shared with.
+func (s *Store) UserHasCollectionTeamAccess(ctx context.Context, collectionID int, userID models.UserID) (bool, error) {
+	n, err := s.q.CountCollectionTeamAccess(ctx, sqlc.CountCollectionTeamAccessParams{
+		CollectionID: int64(collectionID),
+		UserID:       int64(userID),
+	})
+	if err != nil {
+		return false, fmt.Errorf("error checking collection team access: %w", err)
+	}
+	return n > 0, nil
 }
 
 // AddCollectionItem links a saved query to a collection (idempotent via ON CONFLICT).

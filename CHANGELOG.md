@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Shared collections can be shared with whole teams. Metadata migrations run
+automatically at startup: SQLite to version 34 and Postgres to version 9.
+
+### Added
+- **Share a collection with a team.** Owners choose **Share with team** to give
+  every current team member the collection Member role. Membership is live:
+  people who join the team see the collection, and people who leave lose it
+  unless they have another share or a direct membership. A team share never
+  grants Editor or Owner rights, and a direct role takes precedence. Owners can
+  share with teams they belong to; global admins can share their own
+  collections with any team. Owners can remove a share even after leaving the
+  team ([#114](https://github.com/mr-karan/logchef/issues/114)).
+
+### Changed
+- Team shares never grant source access. Running, pinning, and editing a query
+  still need access to its source; other items show a lock icon. A collection
+  shared through several teams and a direct membership appears once.
+- Collections report `team_count` beside `member_count`. `member_count` still
+  counts direct members only, owners included.
+
 ### Fixed
 - The MCP investigation panel now applies each new `open_investigation` call
   (source, team, filter and time range) and runs the query, instead of keeping
@@ -14,6 +34,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MCP tools declare themselves read-only, non-destructive and closed-world.
   They previously advertised the library defaults (destructive, open-world),
   which can make hosts ask for confirmation before every read.
+
+- `GET /api/v1/collections/:id` returns the member and item counts instead of
+  zero, so the detail and the list agree.
+- The collection header no longer shows counts twice, such as "3 3 items".
+- Pages without a team in the URL, such as the Library, no longer open Access
+  Denied after someone removes you from your last-used team. On load, Logchef
+  checks the saved team against your current teams and switches to one you
+  still belong to, or clears the selection if none remain.
 
 ## [2.3.1] - 2026-10-07
 
