@@ -148,7 +148,7 @@ Two prompts guide an investigation.
 - Compare two time windows.
 - Attach the evidence you selected to the conversation.
 
-Opening the panel does not run a query. The panel shows inline or in full screen, depending on the client. A client that does not support MCP Apps still gets the tool result as text.
+The panel runs the requested query when it opens. If the assistant calls `open_investigation` again while the panel is open, the panel replaces its source, filter and time range with the new request, clears the previous selection and attached evidence, and runs the new query. The panel shows inline or in full screen, depending on the client. A client that does not support MCP Apps still gets the tool result as text.
 
 The panel is one self-contained page. It has no access to external networks. It calls the same read-only tools as the assistant, with the same token.
 

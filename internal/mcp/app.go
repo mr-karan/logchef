@@ -59,7 +59,7 @@ func handleOpenInvestigation(_ context.Context, _ mcp.CallToolRequest, params Op
 func addInvestigationApp(s *server.MCPServer) {
 	tool := mcp.NewTool("open_investigation",
 		mcp.WithToolTitle("Investigate logs"),
-		mcp.WithDescription("Open the interactive Logchef investigation panel. Browse sources, run bounded LogchefQL queries, select histogram intervals or log rows, and attach evidence to the conversation. Opening the panel does not execute a query."),
+		mcp.WithDescription("Open the interactive Logchef investigation panel. Browse sources, run bounded LogchefQL queries, select histogram intervals or log rows, and attach evidence to the conversation. The panel runs the requested query when it opens, and a later call replaces the query in an open panel."),
 		mcp.WithInputSchema[OpenInvestigationParams](), mcp.WithOutputSchema[InvestigationState](),
 		mcp.WithReadOnlyHintAnnotation(true),
 		mcp.WithDestructiveHintAnnotation(false),

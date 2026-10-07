@@ -1,7 +1,7 @@
 import { computed, ref, onUnmounted } from 'vue'
 import { app, callTool, applyTheme, toolError } from './bridge'
-import { attachmentPayload, boundedRange, parseSources, parseEvidence, parseHistogram, record, text, items, selectedInterval, parseComparison } from './data'
-import type { Source, QueryEvidence, Histogram, InvestigationInput } from './data'
+import { attachmentPayload, boundedRange, parseSources, parseEvidence, parseHistogram, record, text, items, selectedInterval, parseComparison, parseToolRequest, sameToolRequest } from './data'
+import type { Source, QueryEvidence, Histogram, InvestigationInput, ToolRequest } from './data'
 
 export function useInvestigation() {
   const sources = ref<Source[]>([])
@@ -27,6 +27,11 @@ export function useInvestigation() {
   const source = computed(() => sources.value.find((source) => String(source.id) === selectedSource.value))
   const canAttach = computed(() => ready.value && Boolean(app.getHostCapabilities()?.updateModelContext))
   const canMessage = computed(() => ready.value && Boolean(app.getHostCapabilities()?.message))
+  // A host can deliver a new tool call to an open panel at any time. The
+  // newest request waits for the running action; its result notification
+  // does not run the same request twice.
+  let queuedRequest: ToolRequest | null = null
+  let unansweredInput: ToolRequest | null = null
 
   async function action(work: () => Promise<void>) {
     if (pending.value) return
@@ -34,6 +39,7 @@ export function useInvestigation() {
     error.value = ''
     notice.value = ''
     try { await work() } catch (failure) { error.value = toolError(failure) } finally { pending.value = false }
+    if (queuedRequest) await runQueuedRequest()
   }
 
   async function clearSelection() {
@@ -63,28 +69,30 @@ export function useInvestigation() {
     notice.value = 'Selection attached to the conversation.'
   }
 
+  async function execute(input?: InvestigationInput) {
+    const currentSource = source.value
+    const team = requestedTeam.value === null ? currentSource?.teams[0] : currentSource?.teams.find((team) => team.id === requestedTeam.value)
+    if (!currentSource || !team) throw new Error('Select a source accessible to the requested team.')
+    const args: InvestigationInput = input ?? { team_id: team.id, source_id: currentSource.id, query: query.value, ...boundedRange(start.value, end.value), timezone: 'UTC' }
+    await reset()
+    const result = parseEvidence(await callTool('query_logchefql', { ...args, limit: 100 }))
+    executed.value = args
+    evidence.value = result
+    // Preserve successful log results if translation or histogram fails.
+    try {
+      const translated = await callTool('translate_logchefql', { ...args, limit: 100 })
+      if (!record(translated) || translated.valid !== true) throw new Error('The filter could not be translated for the histogram.')
+      const language = text(translated.generated_query_language)
+      if (language !== 'logsql' && language !== 'victorialogs-logsql' && language !== 'clickhouse-sql') throw new Error('Unknown native query language.')
+      const filter = language === 'clickhouse-sql' ? text(translated.full_sql) : text(translated.generated_query)
+      if (!filter) throw new Error('Translation returned no executable query.')
+      const data = await callTool('get_log_histogram', { team_id: args.team_id, source_id: args.source_id, raw_sql: filter, start_time: args.start_time, end_time: args.end_time, timezone: 'UTC' })
+      histogram.value = parseHistogram(data)
+    } catch (failure) { notice.value = `Logs loaded. Histogram unavailable: ${toolError(failure)}` }
+  }
+
   async function runQuery(input?: InvestigationInput) {
-    await action(async () => {
-      const currentSource = source.value
-      const team = requestedTeam.value === null ? currentSource?.teams[0] : currentSource?.teams.find((team) => team.id === requestedTeam.value)
-      if (!currentSource || !team) throw new Error('Select a source accessible to the requested team.')
-      const args: InvestigationInput = input ?? { team_id: team.id, source_id: currentSource.id, query: query.value, ...boundedRange(start.value, end.value), timezone: 'UTC' }
-      await reset()
-      const result = parseEvidence(await callTool('query_logchefql', { ...args, limit: 100 }))
-      executed.value = args
-      evidence.value = result
-      // Preserve successful log results if translation or histogram fails.
-      try {
-        const translated = await callTool('translate_logchefql', { ...args, limit: 100 })
-        if (!record(translated) || translated.valid !== true) throw new Error('The filter could not be translated for the histogram.')
-        const language = text(translated.generated_query_language)
-        if (language !== 'logsql' && language !== 'victorialogs-logsql' && language !== 'clickhouse-sql') throw new Error('Unknown native query language.')
-        const filter = language === 'clickhouse-sql' ? text(translated.full_sql) : text(translated.generated_query)
-        if (!filter) throw new Error('Translation returned no executable query.')
-        const data = await callTool('get_log_histogram', { team_id: args.team_id, source_id: args.source_id, raw_sql: filter, start_time: args.start_time, end_time: args.end_time, timezone: 'UTC' })
-        histogram.value = parseHistogram(data)
-      } catch (failure) { notice.value = `Logs loaded. Histogram unavailable: ${toolError(failure)}` }
-    })
+    await action(() => execute(input))
   }
 
   async function selectRow(index: number) {
@@ -168,19 +176,42 @@ export function useInvestigation() {
     start.value = new Date(Date.now() - minutes * 60000).toISOString()
   }
 
-  function receiveInput(value: unknown) {
-    if (!record(value)) return
-    if (typeof value.team_id === 'number') requestedTeam.value = value.team_id
-    if (typeof value.source_id === 'number') selectedSource.value = String(value.source_id)
-    if (typeof value.query === 'string') query.value = value.query
-    if (typeof value.start_time === 'string') start.value = value.start_time
-    if (typeof value.end_time === 'string') end.value = value.end_time
+  async function runQueuedRequest() {
+    const request = queuedRequest
+    if (!request || pending.value) return
+    queuedRequest = null
+    await action(async () => {
+      requestedTeam.value = request.team_id ?? null
+      selectedSource.value = request.source_id === undefined ? String(sources.value[0]?.id ?? '') : String(request.source_id)
+      query.value = request.query
+      end.value = request.end_time ?? new Date().toISOString()
+      start.value = request.start_time ?? new Date(Date.parse(end.value) - 3600000).toISOString()
+      await reset()
+      await execute()
+    })
+  }
+
+  function receiveToolInput(value: unknown) {
+    const request = parseToolRequest(value)
+    unansweredInput = request
+    if (!request) return
+    queuedRequest = request
+    void runQueuedRequest()
+  }
+
+  function receiveToolResult(value: unknown) {
+    const request = parseToolRequest(value)
+    const input = unansweredInput
+    unansweredInput = null
+    if (!request || (input && sameToolRequest(input, request))) return
+    queuedRequest = request
+    void runQueuedRequest()
   }
 
   async function initialize() {
     app.onhostcontextchanged = updateHost
-    app.ontoolinput = (params) => receiveInput(params.arguments)
-    app.ontoolresult = (result) => receiveInput(result.structuredContent)
+    app.ontoolinput = (params) => receiveToolInput(params.arguments)
+    app.ontoolresult = (result) => receiveToolResult(result.structuredContent)
     app.ontoolcancelled = () => { notice.value = 'Opening the investigation was cancelled.' }
     await action(async () => {
       await app.connect()
@@ -188,7 +219,6 @@ export function useInvestigation() {
       ready.value = true
       sources.value = parseSources(await callTool('get_sources', {}))
       if (!selectedSource.value && sources.value[0]) selectedSource.value = String(sources.value[0].id)
-      if (selectedSource.value && !source.value) throw new Error('The requested source is not accessible. Choose another source.')
       if (sources.value.length === 0) notice.value = 'No log sources are accessible to this account.'
     })
   }
