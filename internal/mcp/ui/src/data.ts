@@ -16,6 +16,34 @@ export interface InvestigationInput {
   timezone: string
 }
 
+// The panel request carried by an open_investigation tool input or result.
+// Absent times default to the hour before the request is applied.
+export interface ToolRequest {
+  team_id?: number
+  source_id?: number
+  query: string
+  start_time?: string
+  end_time?: string
+}
+
+export function parseToolRequest(value: unknown): ToolRequest | null {
+  if (!record(value)) return null
+  const request: ToolRequest = { query: text(value.query) }
+  if (typeof value.team_id === 'number') request.team_id = value.team_id
+  if (typeof value.source_id === 'number') request.source_id = value.source_id
+  if (typeof value.start_time === 'string') request.start_time = value.start_time
+  if (typeof value.end_time === 'string') request.end_time = value.end_time
+  return request
+}
+
+// A tool result repeats its input with defaults filled in, so a time the
+// input omitted matches any time in the result.
+export function sameToolRequest(input: ToolRequest, result: ToolRequest): boolean {
+  const sameTime = (a?: string, b?: string) => a === undefined || b === undefined || Date.parse(a) === Date.parse(b)
+  return input.team_id === result.team_id && input.source_id === result.source_id && input.query === result.query &&
+    sameTime(input.start_time, result.start_time) && sameTime(input.end_time, result.end_time)
+}
+
 export interface QueryEvidence {
   logs: Record<string, unknown>[]
   columns: { name: string; type: string }[]

@@ -32,7 +32,23 @@ document.querySelector('#theme')?.addEventListener('click', () => {
 document.querySelector('#width')?.addEventListener('click', () => {
   frame.style.maxWidth = frame.style.maxWidth === '390px' ? '' : '390px'
 })
-bridge.oninitialized = () => { status.textContent = 'Apps bridge connected'; void bridge.sendToolInput({ arguments: {} }) }
+// Deliver an open_investigation call the way a host does: the arguments,
+// then the tool result. Repeat it to test a call that reuses an open panel.
+async function deliverToolCall(args: Record<string, unknown>) {
+  await bridge.sendToolInput({ arguments: args })
+  const response = await fetch('/rpc', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: crypto.randomUUID(), method: 'tools/call', params: { name: 'open_investigation', arguments: args } }) })
+  const body: unknown = await response.json()
+  if (typeof body !== 'object' || body === null || !('result' in body)) throw new Error('open_investigation failed.')
+  await bridge.sendToolResult(CallToolResultSchema.parse(body.result))
+}
+const toolInput = document.querySelector('#tool-input')
+document.querySelector('#deliver')?.addEventListener('click', () => {
+  if (!(toolInput instanceof HTMLTextAreaElement)) return
+  const args: unknown = JSON.parse(toolInput.value)
+  if (typeof args !== 'object' || args === null || Array.isArray(args)) throw new Error('Tool input must be a JSON object.')
+  void deliverToolCall(Object.fromEntries(Object.entries(args)))
+})
+bridge.oninitialized = () => { status.textContent = 'Apps bridge connected'; void deliverToolCall({}) }
 frame.addEventListener('load', () => {
   if (!frame.contentWindow) throw new Error('Frame unavailable.')
   void bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow))
