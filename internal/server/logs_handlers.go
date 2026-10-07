@@ -243,7 +243,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// memory stays bounded regardless of result size (the OOM this endpoint used
 	// to hit came from buffering the full result set into a []map before
 	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
-	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -328,7 +328,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 
 	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
-	queryCtx, cancel := context.WithCancel(c.RequestCtx())
+	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
 
 	// Add query to tracker atomically with admission control.

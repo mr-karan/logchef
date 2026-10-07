@@ -29,7 +29,7 @@ func (s *Server) handleGetSourceSchema(c fiber.Ctx) error {
 
 	// Get schema via core function, bounded by core.SchemaTimeout so a
 	// slow/misbehaving datasource can't hang the request indefinitely.
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.SchemaTimeout)
+	ctx, cancel := context.WithTimeout(c.Context(), core.SchemaTimeout)
 	defer cancel()
 
 	schema, err := core.GetSourceSchema(ctx, s.datasources, src)
@@ -123,7 +123,7 @@ func (s *Server) handleGetFieldValues(c fiber.Ctx) error {
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.FieldValuesTimeout)
+	ctx, cancel := context.WithTimeout(c.Context(), core.FieldValuesTimeout)
 	defer cancel()
 
 	result, err := core.GetFieldValues(ctx, s.datasources, src, core.FieldValuesParams{
@@ -225,7 +225,7 @@ func (s *Server) handleGetAllFieldValues(c fiber.Ctx) error {
 
 	// Create timeout context - this propagates to ClickHouse as max_execution_time
 	// Also allows early termination if client disconnects (e.g., user navigates away)
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.FieldValuesTimeout)
+	ctx, cancel := context.WithTimeout(c.Context(), core.FieldValuesTimeout)
 	defer cancel()
 
 	result, err := core.GetAllFieldValues(ctx, s.datasources, src, core.AllFieldValuesParams{

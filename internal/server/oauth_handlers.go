@@ -31,7 +31,7 @@ func sendPublicJSON(c fiber.Ctx, body any) error {
 // handleGetOAuthRequest returns a pending authorization request for the
 // consent screen. Session only.
 func (s *Server) handleGetOAuthRequest(c fiber.Ctx) error {
-	req, err := s.oauth.ConsentRequest(c.RequestCtx(), models.OAuthAuthRequestID(c.Params("requestID")))
+	req, err := s.oauth.ConsentRequest(c.Context(), models.OAuthAuthRequestID(c.Params("requestID")))
 	if errors.Is(err, oauth.ErrRequestNotFound) || errors.Is(err, oauth.ErrRequestDecided) {
 		return SendErrorWithType(c, fiber.StatusNotFound, oauth.ErrRequestNotFound.Error(), models.NotFoundErrorType)
 	}
@@ -66,7 +66,7 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, `Body must be {"approve": true} or {"approve": false}`, models.ValidationErrorType)
 	}
 	user := c.Locals("user").(*models.User)
-	redirectURL, err := s.oauth.Decide(c.RequestCtx(), models.OAuthAuthRequestID(c.Params("requestID")), user, *body.Approve)
+	redirectURL, err := s.oauth.Decide(c.Context(), models.OAuthAuthRequestID(c.Params("requestID")), user, *body.Approve)
 	switch {
 	case errors.Is(err, oauth.ErrRequestNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
@@ -83,7 +83,7 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 // handleListConnectedApps lists the session user's active OAuth grants.
 func (s *Server) handleListConnectedApps(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
-	apps, err := s.oauth.ConnectedApps(c.RequestCtx(), user.ID)
+	apps, err := s.oauth.ConnectedApps(c.Context(), user.ID)
 	if err != nil {
 		s.log.Error("failed to list connected apps", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to list connected apps")
@@ -98,7 +98,7 @@ func (s *Server) handleRevokeConnectedApp(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 	user := c.Locals("user").(*models.User)
-	err = s.oauth.RevokeConnectedApp(c.RequestCtx(), user.ID, models.OAuthGrantID(id))
+	err = s.oauth.RevokeConnectedApp(c.Context(), user.ID, models.OAuthGrantID(id))
 	if errors.Is(err, oauth.ErrGrantNotFound) {
 		return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
 	}

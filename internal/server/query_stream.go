@@ -253,7 +253,7 @@ func (s *Server) streamPreviewQuery(
 	historyLanguage models.QueryLanguage,
 ) error {
 	queryID := uuid.New().String()
-	streamCtx, cancel := context.WithCancel(c.RequestCtx())
+	streamCtx, cancel := context.WithCancel(c.Context())
 	if err := queryTracker.StartQueryWithID(
 		queryID,
 		QueryClassPreview,

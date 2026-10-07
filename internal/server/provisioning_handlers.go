@@ -10,7 +10,7 @@ import (
 // database state as a provisioning config JSON.
 // GET /api/v1/admin/provisioning/export
 func (s *Server) handleExportProvisioning(c fiber.Ctx) error {
-	cfg, err := provisioning.ExportConfig(c.RequestCtx(), s.sqlite)
+	cfg, err := provisioning.ExportConfig(c.Context(), s.sqlite)
 	if err != nil {
 		s.log.Error("failed to export provisioning config", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to export provisioning config")

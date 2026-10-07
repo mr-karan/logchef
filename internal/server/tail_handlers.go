@@ -47,7 +47,7 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 
 	// Gate on the source capability before any streaming setup so non-supporting
 	// sources get a clean 400.
-	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -76,7 +76,7 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	}
 
 	// Admission control: class tail, per-user and global caps → 429.
-	streamCtx, cancel := context.WithCancel(c.RequestCtx())
+	streamCtx, cancel := context.WithCancel(c.Context())
 	queryID, err := queryTracker.StartQuery(
 		QueryClassTail,
 		user.ID,
@@ -253,7 +253,7 @@ func (s *Server) resolveTailQuery(c fiber.Ctx, source *models.Source, sourceID m
 			_ = SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
 			return "", "", false
 		}
-		compiled, compileErr := s.datasources.CompileLogchefQL(c.RequestCtx(), sourceID, datasource.LogchefQLCompileRequest{
+		compiled, compileErr := s.datasources.CompileLogchefQL(c.Context(), sourceID, datasource.LogchefQLCompileRequest{
 			Query: rawQuery,
 		})
 		if compiled == nil {

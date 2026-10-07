@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -86,6 +87,11 @@ func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServ
 		Logger:      log,
 	})
 	t.Cleanup(func() {
+		select {
+		case <-srv.stop: // the test already shut the server down
+			return
+		default:
+		}
 		if err := srv.Shutdown(context.Background()); err != nil {
 			t.Errorf("Shutdown: %v", err)
 		}
@@ -153,6 +159,27 @@ func testRequest(t *testing.T, app *fiber.App, req *http.Request) *testResponse 
 func (e *oauthEnv) do(req *http.Request) *testResponse {
 	e.t.Helper()
 	return testRequest(e.t, e.srv.app, req)
+}
+
+// serve runs the server on a real socket and returns its base URL. shutdown
+// stops the server through Server.Shutdown and waits for Serve to return.
+func (e *oauthEnv) serve() (baseURL string, shutdown func()) {
+	e.t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		e.t.Fatalf("listen: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- e.srv.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true}) }()
+	return "http://" + ln.Addr().String(), func() {
+		e.t.Helper()
+		if err := e.srv.Shutdown(context.Background()); err != nil {
+			e.t.Errorf("Shutdown: %v", err)
+		}
+		if err := <-served; err != nil {
+			e.t.Errorf("Listener: %v", err)
+		}
+	}
 }
 
 type pkcePair struct{ verifier, challenge string }
@@ -1174,7 +1201,8 @@ func TestOAuthIssuerOnQueryBearingCallback(t *testing.T) {
 }
 
 // malformedAudienceJWT is an unsigned JWT whose aud array holds non-strings,
-// the input that panics ZITADEL's claim decoder (dependency audit F1).
+// the input that panicked ZITADEL's claim decoder before v3.51.13
+// (dependency audit F1).
 func malformedAudienceJWT() string {
 	enc := base64.RawURLEncoding.EncodeToString
 	return enc([]byte(`{"alg":"RS256","kid":"x"}`)) + "." + enc([]byte(`{"iss":"https://logchef.test","sub":"1","aud":[1,{"a":2}],"exp":4102444800,"iat":1}`)) + "." + enc([]byte("sig"))

@@ -61,7 +61,7 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 	}
 
 	// Authenticate token and get associated user
-	user, apiToken, err := core.AuthenticateAPIToken(c.RequestCtx(), s.sqlite, s.log, &s.config.Auth, token)
+	user, apiToken, err := core.AuthenticateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, token)
 	if err != nil {
 		metrics.RecordAuthAttempt("token", false, nil)
 
@@ -89,7 +89,7 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 // resource. A token issued for /mcp, an ID token or a refresh token is
 // rejected with invalid_token.
 func (s *Server) authenticateWithOAuth(c fiber.Ctx, bearer string) error {
-	token, err := s.oauth.AuthenticateAccessToken(c.RequestCtx(), bearer, oauth.ResourceAPI)
+	token, err := s.oauth.AuthenticateAccessToken(c.Context(), bearer, oauth.ResourceAPI)
 	if err != nil {
 		metrics.RecordAuthAttempt("oauth", false, nil)
 		if errors.Is(err, oauth.ErrInvalidAccessToken) {
@@ -143,7 +143,7 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 	sessionID := models.SessionID(sessionIDStr)
 
 	// Validate the session exists and is not expired.
-	session, err := core.ValidateSession(c.RequestCtx(), s.sqlite, s.log, sessionID)
+	session, err := core.ValidateSession(c.Context(), s.sqlite, s.log, sessionID)
 	if err != nil {
 		metrics.RecordSessionOperation("validate", false, nil)
 
@@ -157,7 +157,7 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 	}
 
 	// Retrieve associated user information.
-	user, err := core.GetUser(c.RequestCtx(), s.sqlite, session.UserID)
+	user, err := core.GetUser(c.Context(), s.sqlite, session.UserID)
 	if err != nil {
 		// If user not found for a valid session, treat as an auth issue.
 		if errors.Is(err, core.ErrUserNotFound) {
@@ -263,7 +263,7 @@ func (s *Server) requireSourceNotManaged(c fiber.Ctx) error {
 	if err != nil {
 		return c.Next() // let handler deal with bad ID
 	}
-	managed, err := s.sqlite.IsSourceManaged(c.RequestCtx(), sourceID)
+	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
 	if err == nil && managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This source is managed by provisioning config and cannot be modified via API",
@@ -282,7 +282,7 @@ func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 	if err != nil {
 		return c.Next()
 	}
-	managed, err := s.sqlite.IsTeamManaged(c.RequestCtx(), teamID)
+	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
 	if err == nil && managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This team is managed by provisioning config and cannot be modified via API",
@@ -308,7 +308,7 @@ func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 	}
 
 	// Check if the user is an admin of any team.
-	isAnyAdmin, err := core.IsAnyTeamAdmin(c.RequestCtx(), s.sqlite, user.ID)
+	isAnyAdmin, err := core.IsAnyTeamAdmin(c.Context(), s.sqlite, user.ID)
 	if err != nil {
 		s.log.Error("failed to check if user is any team admin", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
@@ -344,7 +344,7 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 	}
 
 	// Check membership using core function.
-	isMember, err := core.IsTeamMember(c.RequestCtx(), s.sqlite, teamID, user.ID)
+	isMember, err := core.IsTeamMember(c.Context(), s.sqlite, teamID, user.ID)
 	if err != nil {
 		s.log.Error("failed to verify team membership", "error", err, "team_id", teamID, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team membership")
@@ -378,7 +378,7 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 	}
 
 	// Check if the user is a team admin
-	isTeamAdmin, err := core.IsTeamAdmin(c.RequestCtx(), s.sqlite, teamID, userID)
+	isTeamAdmin, err := core.IsTeamAdmin(c.Context(), s.sqlite, teamID, userID)
 	if err != nil {
 		s.log.Error("Error checking team admin status", "error", err, "team_id", teamID, "user_id", userID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team admin status")
@@ -410,7 +410,7 @@ func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
 		}
 
 		p := principalFromLocals(c)
-		src, err := access.AuthorizeTeamSource(c.RequestCtx(), s.sqlite, p, teamID, sourceID, scope)
+		src, err := access.AuthorizeTeamSource(c.Context(), s.sqlite, p, teamID, sourceID, scope)
 		switch {
 		case err == nil:
 		case errors.Is(err, access.ErrNotTeamMember):

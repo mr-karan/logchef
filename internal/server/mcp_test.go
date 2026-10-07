@@ -38,7 +38,18 @@ type mcpEnvelope struct {
 // mcpPost sends one JSON-RPC request to /mcp. headers override the defaults.
 func (e *oauthEnv) mcpPost(bearer string, body []byte, headers map[string]string) *testResponse {
 	e.t.Helper()
-	req := httptest.NewRequest(http.MethodPost, testIssuer+MCPPath, bytes.NewReader(body))
+	req, err := mcpRequest(testIssuer, bearer, body, headers)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	return e.do(req)
+}
+
+func mcpRequest(baseURL, bearer string, body []byte, headers map[string]string) (*http.Request, error) {
+	req, err := http.NewRequest(http.MethodPost, baseURL+MCPPath, bytes.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if bearer != "" {
@@ -47,7 +58,22 @@ func (e *oauthEnv) mcpPost(bearer string, body []byte, headers map[string]string
 	for k, v := range headers {
 		req.Header.Set(k, v)
 	}
-	return e.do(req)
+	return req, nil
+}
+
+// mcpPostOver sends one JSON-RPC request to /mcp over a real socket.
+func mcpPostOver(baseURL, bearer string, body []byte, headers map[string]string) (string, error) {
+	req, err := mcpRequest(baseURL, bearer, body, headers)
+	if err != nil {
+		return "", err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	text, err := io.ReadAll(resp.Body)
+	return string(text), err
 }
 
 // mcpCall sends a request in the given protocol version and returns the
@@ -438,9 +464,7 @@ func TestMCPDiscoveryToolsAreAdmitted(t *testing.T) {
 // abandoned or not, ends at query.mcp_call_timeout_seconds. With a 2 s MCP
 // bound and a 30 s query maximum, a call blocked in the backend is still
 // running shortly after it starts, then ends at the MCP bound with its backend
-// request cancelled and its admission slot released. (A real-socket variant
-// trips a pre-existing fasthttp race between Serve/Shutdown and
-// RequestCtx.Done readers in the OAuth token path, so this uses app.Test.)
+// request cancelled and its admission slot released.
 func TestMCPCallEndsAtBound(t *testing.T) {
 	// Not parallel: the query tracker is process-global and every test DB
 	// starts user IDs at 1, so admission tests must not overlap.
@@ -478,12 +502,16 @@ func TestMCPCallEndsAtBound(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	baseURL, shutdown := e.serve()
+	defer shutdown()
 	start := time.Now()
 	done := make(chan string, 1)
 	go func() {
-		resp := e.mcpPost(token, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
-		text, _ := io.ReadAll(resp.Body)
-		done <- string(text)
+		text, err := mcpPostOver(baseURL, token, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
+		if err != nil {
+			text = err.Error()
+		}
+		done <- text
 	}()
 	select {
 	case <-entered:
@@ -519,13 +547,10 @@ func TestMCPCallEndsAtBound(t *testing.T) {
 	}
 }
 
-// MCP requests run on the server's base context instead of the fasthttp
-// RequestCtx. Shutdown cancels that context (cancelMCP) before stopping
-// fasthttp, so an in-flight tool call stops at once rather than running to
-// the MCP bound. The test calls cancelMCP directly: a full fasthttp Shutdown
-// right after DB-backed requests trips a pre-existing fasthttp data race on
-// RequestCtx.Done that is unrelated to MCP.
-func TestMCPCallCancelledByBaseContext(t *testing.T) {
+// Requests run on the server's base context instead of the fasthttp
+// RequestCtx. Shutdown cancels that context before stopping fasthttp, so an
+// in-flight tool call stops at once rather than running to the MCP bound.
+func TestMCPCallCancelledByShutdown(t *testing.T) {
 	// Not parallel: the query tracker is process-global and every test DB
 	// starts user IDs at 1, so admission tests must not overlap.
 	entered := make(chan struct{}, 1)
@@ -553,18 +578,24 @@ func TestMCPCallCancelledByBaseContext(t *testing.T) {
 	e := newOAuthEnv(t) // MCP bound 30 s
 	team, src := e.vlSourceFor(backend.URL)
 	token := e.mcpToken()
+	body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
+		"name": "query_logs", "arguments": map[string]any{"team_id": team.ID, "source_id": src.ID, "raw_sql": "*", "start_time": "2026-10-01T09:00:00Z", "end_time": "2026-10-01T12:00:00Z"},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseURL, shutdown := e.serve()
 	done := make(chan map[string]any, 1)
 	go func() {
-		body, err := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": map[string]any{
-			"name": "query_logs", "arguments": map[string]any{"team_id": team.ID, "source_id": src.ID, "raw_sql": "*", "start_time": "2026-10-01T09:00:00Z", "end_time": "2026-10-01T12:00:00Z"},
-		}})
+		text, err := mcpPostOver(baseURL, token, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
+		var env mcpEnvelope
+		if err == nil {
+			err = json.Unmarshal([]byte(text), &env)
+		}
 		if err != nil {
 			done <- nil
 			return
 		}
-		resp := e.mcpPost(token, body, map[string]string{"Mcp-Protocol-Version": protocolLegacy})
-		var env mcpEnvelope
-		_ = json.NewDecoder(resp.Body).Decode(&env)
 		done <- env.Result
 	}()
 	select {
@@ -574,17 +605,19 @@ func TestMCPCallCancelledByBaseContext(t *testing.T) {
 	}
 
 	start := time.Now()
-	e.srv.cancelMCP()
+	shutdown()
 	var result map[string]any
 	select {
 	case result = <-done:
 	case <-time.After(5 * time.Second):
-		t.Fatal("the tool call did not end after the base context was cancelled")
+		t.Fatal("the tool call did not end after Shutdown")
 	}
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("the call ended %v after cancellation, want well under the 30 s bound", elapsed)
+		t.Fatalf("the call ended %v after Shutdown, want well under the 30 s bound", elapsed)
 	}
-	if result["isError"] == false {
+	// mcp-go writes no body for a call whose context was cancelled, so the
+	// client gets no result; a result, if any, must be an error.
+	if result != nil && result["isError"] != true {
 		t.Fatalf("result %v: the cancelled call reported success", result)
 	}
 	if !cancelled.Load() {

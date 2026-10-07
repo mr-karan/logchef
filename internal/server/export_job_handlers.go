@@ -38,7 +38,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	// Gate exports behind the source capability before persisting a job or
 	// spawning the async worker. Non-supporting sources (e.g. VictoriaLogs) get
 	// a clean 400 instead of an async job failure.
-	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -127,7 +127,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
 	}
 
-	if err := s.sqlite.CreateExportJob(c.RequestCtx(), job); err != nil {
+	if err := s.sqlite.CreateExportJob(c.Context(), job); err != nil {
 		queryTracker.RemoveQuery(job.ID)
 		cancel()
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
@@ -183,13 +183,13 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	}
 
 	if strings.TrimSpace(job.FilePath) == "" {
-		_ = s.sqlite.FailExportJob(c.RequestCtx(), job.ID, "export artifact is unavailable", time.Now().UTC())
+		_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
 	if _, err := os.Stat(job.FilePath); err != nil {
 		s.log.Error("failed to stat export artifact", "error", err, "job_id", job.ID, "path", job.FilePath)
 		if errors.Is(err, os.ErrNotExist) {
-			_ = s.sqlite.FailExportJob(c.RequestCtx(), job.ID, "export artifact is unavailable", time.Now().UTC())
+			_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
@@ -221,7 +221,7 @@ func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, error) {
 		return nil, SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	job, err := s.sqlite.GetExportJob(c.RequestCtx(), exportID)
+	job, err := s.sqlite.GetExportJob(c.Context(), exportID)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)

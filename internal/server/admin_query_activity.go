@@ -80,7 +80,7 @@ func (s *Server) handleAdminQueryActivity(c fiber.Ctx) error {
 		})
 	}
 
-	window, err := s.sqlite.ListQueryActivity(c.RequestCtx(), queryActivityWindow)
+	window, err := s.sqlite.ListQueryActivity(c.Context(), queryActivityWindow)
 	if err != nil {
 		s.log.Error("failed to list query activity", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing query activity")

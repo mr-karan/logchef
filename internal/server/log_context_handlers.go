@@ -57,7 +57,7 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 		afterLimit = 100
 	}
 
-	result, err := core.GetLogContext(c.RequestCtx(), s.datasources, src, core.LogContextParams{
+	result, err := core.GetLogContext(c.Context(), s.datasources, src, core.LogContextParams{
 		TargetTimestamp: targetTime.UnixMilli(),
 		TargetTime:      &targetTime,
 		BeforeLimit:     beforeLimit,
