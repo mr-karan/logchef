@@ -7,8 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Logchef can now be its own OAuth server for agents and the CLI, and serves MCP
-at `/mcp` from the same process. Claude Code, Codex, Cursor and other MCP
+## [2.3.0] - 2026-10-07
+
+Logchef 2.3 can now be its own OAuth server for agents and the CLI, and serves
+MCP at `/mcp` from the same process. Claude Code, Codex, Cursor and other MCP
 hosts connect with a browser approval instead of a pasted token. This release
 adds database migration 33; back up the metadata database before upgrading.
 
@@ -1403,7 +1405,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.2.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/mr-karan/logchef/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/mr-karan/logchef/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/mr-karan/logchef/compare/v2.0.2...v2.1.0
 [2.0.2]: https://github.com/mr-karan/logchef/compare/v2.0.1...v2.0.2
