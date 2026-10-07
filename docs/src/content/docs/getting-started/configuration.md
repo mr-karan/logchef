@@ -151,30 +151,6 @@ Logchef refuses to start when OAuth is on and `public_url` is missing or invalid
 
 Behind a reverse proxy, the proxy must forward `/oauth/*`, `/.well-known/oauth-*`, and `/mcp` to Logchef. Refer to [Reverse Proxy](/operations/reverse-proxy).
 
-#### Clients that connect without registration
-
-Most MCP hosts, including Claude Code, Codex, Claude.ai, and ChatGPT, identify themselves with an `https` URL that points to a public document. The document lists the client name and its callback URLs. This is a Client ID Metadata Document (CIMD). With CIMD, a user connects with only the `/mcp` URL. You add no client to the config.
-
-CIMD is **on by default** when OAuth is enabled. To turn it off, set `cimd_enabled` to `false`:
-
-```toml
-[auth.oauth]
-enabled = true
-cimd_enabled = false
-```
-
-When CIMD is on, Logchef fetches the document from the client ID URL. It applies these rules:
-
-- Only `https` client IDs are fetched. Logchef refuses addresses that are not public on the internet, such as loopback, private, and link-local ranges. It does not follow redirects.
-- The document must be small, must name the same client ID, and must not contain a client secret. Only a public client (`none`) is accepted.
-- A callback URL must be `https`, or `http` on a loopback host. Matching is exact. A loopback callback without a port matches any port.
-- The client gets tokens for `/mcp` only.
-- Fetches are rate limited, and Logchef caches a document for the time that its `Cache-Control` header allows.
-
-The consent page shows the client name from the document and a line "Published by", followed by the host of the client ID URL. The name is chosen by the client, so check the host. Approve only a connection that you started yourself.
-
-Clients that you list in `[[auth.oauth.clients]]` and the built-in clients always take precedence over CIMD. Cursor desktop does not use CIMD. It needs the built-in client ID `logchef-mcp`.
-
 #### Built-in clients
 
 Two clients are built in. You do not configure them.
@@ -188,7 +164,7 @@ You cannot reuse these IDs in your own client list.
 
 #### Hosted clients
 
-Use this section when CIMD is off, or when a host does not support it. A hosted assistant, such as Claude.ai or ChatGPT, runs in a vendor's cloud. It cannot use a loopback callback. Add one `[[auth.oauth.clients]]` entry for each host, with the exact callback URL:
+A hosted assistant, such as Claude.ai or ChatGPT, runs in a vendor's cloud. It cannot use a loopback callback. Add one `[[auth.oauth.clients]]` entry for each host, with the exact callback URL:
 
 ```toml
 [[auth.oauth.clients]]

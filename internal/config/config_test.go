@@ -441,19 +441,6 @@ redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
 	}
 }
 
-func TestLoad_OAuthCIMDDefault(t *testing.T) {
-	const oauth = "[server]\npublic_url = \"https://logchef.example.com\"\n[auth.oauth]\nenabled = true\n"
-	for extra, want := range map[string]bool{oauth: true, oauth + "cimd_enabled = false\n": false} {
-		cfg, err := Load(writeConfig(t, extra))
-		if err != nil {
-			t.Fatalf("Load: %v", err)
-		}
-		if cfg.Auth.OAuth.CIMDEnabled != want {
-			t.Errorf("cimd_enabled = %v, want %v for\n%s", cfg.Auth.OAuth.CIMDEnabled, want, extra)
-		}
-	}
-}
-
 func TestLoad_OAuthClientsFromTOML(t *testing.T) {
 	cfg, err := Load(writeConfig(t, `
 [server]

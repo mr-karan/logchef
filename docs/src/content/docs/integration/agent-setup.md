@@ -63,24 +63,12 @@ Before you start:
 - The Logchef operator must enable OAuth. Refer to [Logchef OAuth](/getting-started/configuration#logchef-oauth).
 - The instance must be reachable from the machine that runs the agent. For Claude.ai and ChatGPT, it must be reachable from the internet over HTTPS.
 
-Claude Code, Codex, Claude.ai, Claude Desktop, and ChatGPT identify themselves with a Client ID Metadata Document. They connect with **only the `/mcp` URL**. You enter no client ID, and the operator adds no client. This works when OAuth is enabled and `auth.oauth.cimd_enabled` is not `false` (the default is on).
-
-The Logchef consent page then shows the client name and "Published by" with the host of the client, for example `claude.ai`. Check that the host is the one you expect, then approve.
-
-If your server has CIMD off, or a host does not support it, use a client ID instead:
+Every agent connects with a client ID that Logchef knows:
 
 - **Local agents** run on your machine and receive the OAuth callback on a local port. Claude Code, Codex, and Cursor desktop use the built-in client ID `logchef-mcp`. You need no server configuration for it.
 - **Hosted agents** run in a vendor's cloud. Claude.ai, Claude Desktop connectors, and ChatGPT need a client that the operator adds to the server config with the exact callback URL of the host.
 
-Cursor desktop always needs the client ID `logchef-mcp`.
-
 ### Claude Code
-
-```bash
-claude mcp add --transport http logchef https://logchef.example.com/mcp
-```
-
-If CIMD is off on the server, pass the built-in client ID:
 
 ```bash
 claude mcp add --transport http --client-id logchef-mcp logchef https://logchef.example.com/mcp
@@ -91,14 +79,8 @@ Then run `/mcp` in Claude Code, choose `logchef`, and sign in. The browser opens
 ### Codex
 
 ```bash
-codex mcp add logchef --url https://logchef.example.com/mcp
-codex mcp login logchef
-```
-
-If CIMD is off on the server, pass the built-in client ID:
-
-```bash
 codex mcp add logchef --url https://logchef.example.com/mcp --oauth-client-id logchef-mcp
+codex mcp login logchef
 ```
 
 ### Cursor desktop
@@ -122,9 +104,7 @@ Cursor receives the callback at `http://localhost:8787/callback`. The `logchef-m
 
 ### Claude.ai and Claude Desktop
 
-Add a custom connector with the server URL `https://logchef.example.com/mcp`. Leave the client ID and secret empty. Claude connects, and you approve the request on the Logchef consent page.
-
-If CIMD is off on the server, the operator adds a web client to the Logchef config:
+The operator adds a web client to the Logchef config:
 
 ```toml
 [auth.oauth]
@@ -136,13 +116,11 @@ name = "Claude"
 redirect_uris = ["https://claude.ai/api/mcp/auth_callback"]
 ```
 
-Then, in the connector's advanced settings, set **OAuth Client ID** to `claude`. Leave the client secret empty. The client is public and uses PKCE.
+Then add a custom connector with the server URL `https://logchef.example.com/mcp`. In the connector's advanced settings, set **OAuth Client ID** to `claude`. Leave the client secret empty. The client is public and uses PKCE.
 
 ### ChatGPT
 
-In ChatGPT, add an app that uses your MCP URL, `https://logchef.example.com/mcp`. ChatGPT connects with no client ID, and you approve the request on the Logchef consent page.
-
-If CIMD is off on the server, the operator adds a web client with the ChatGPT callback:
+The operator adds a web client with the ChatGPT callback:
 
 ```toml
 [auth.oauth]
@@ -154,17 +132,16 @@ name = "ChatGPT"
 redirect_uris = ["https://chatgpt.com/connector_platform_oauth_redirect"]
 ```
 
-Then, in the app settings, choose OAuth, enter the client ID `chatgpt`, and leave the client secret empty.
+Then, in ChatGPT, add an app that uses `https://logchef.example.com/mcp`, choose OAuth, enter the client ID `chatgpt`, and leave the client secret empty.
 
 ### Other hosts
 
 Any MCP client that supports OAuth with a pre-registered client ID can connect:
 
-- A client that supports Client ID Metadata Documents connects with only the URL, when CIMD is on.
 - A client that receives the callback on a loopback address (`localhost`, `127.0.0.1`, or `[::1]`, any port, path `/callback`) uses `logchef-mcp`.
 - A client that runs in the cloud needs a `[[auth.oauth.clients]]` entry with its exact callback URL. Matching is exact. Copy the URL from the host's connector settings.
 
-Logchef does not support dynamic client registration.
+Logchef does not support dynamic client registration or client ID metadata documents.
 
 ### Check the connection
 

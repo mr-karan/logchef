@@ -2,7 +2,6 @@ package oauth
 
 import (
 	"encoding/json"
-	"errors"
 	"html/template"
 	"net/http"
 	"net/url"
@@ -67,9 +66,9 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 		s.errorPage(w, "The authorization request repeats client_id or redirect_uri.")
 		return
 	}
-	c, err := s.lookupClient(r.Context(), models.OAuthClientID(form.Get("client_id")))
-	if err != nil {
-		s.clientErrorPage(w, form.Get("client_id"), err)
+	c, ok := s.clients[models.OAuthClientID(form.Get("client_id"))]
+	if !ok {
+		s.errorPage(w, "The application that sent you here is not registered with this Logchef instance.")
 		return
 	}
 	redirectURI := form.Get("redirect_uri")
@@ -80,7 +79,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 	state := form.Get("state")
 	fail := func(code, description string) {
 		// redirectURI passed the client's registered redirect policy above.
-		http.Redirect(w, r, s.errorRedirectURL(redirectURI, state, code, description), http.StatusFound)
+		http.Redirect(w, r, s.errorRedirectURL(redirectURI, state, code, description), http.StatusFound) //nolint:gosec // G710: validated by redirectAllowed
 	}
 	switch {
 	case repeated(form, singleValued...):
@@ -105,7 +104,7 @@ func (s *Server) authorize(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		iw := &issWriter{ResponseWriter: w, redirectURI: redirectURI, issuer: s.issuer}
-		s.provider.ServeHTTP(iw, r.WithContext(withClient(withResource(r.Context(), c.resource), c)))
+		s.provider.ServeHTTP(iw, r.WithContext(withResource(r.Context(), c.resource)))
 	}
 }
 
@@ -141,9 +140,8 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		s.writeTokenError(w, http.StatusBadRequest, "unsupported_grant_type", "grant_type must be authorization_code or refresh_token")
 		return
 	}
-	c, err := s.lookupClient(r.Context(), models.OAuthClientID(form.Get("client_id")))
-	if err != nil {
-		s.logClientError(form.Get("client_id"), err)
+	c, ok := s.clients[models.OAuthClientID(form.Get("client_id"))]
+	if !ok {
 		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
 		return
 	}
@@ -151,7 +149,7 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_target", "resource must be "+c.resource)
 		return
 	}
-	s.provider.ServeHTTP(w, r.WithContext(withClient(withResource(r.Context(), c.resource), c)))
+	s.provider.ServeHTTP(w, r.WithContext(withResource(r.Context(), c.resource)))
 }
 
 // revoke passes only this server's own token formats to ZITADEL: an access
@@ -176,9 +174,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "only public clients are supported")
 		return
 	}
-	c, err := s.lookupClient(r.Context(), models.OAuthClientID(r.PostForm.Get("client_id")))
-	if err != nil {
-		s.logClientError(r.PostForm.Get("client_id"), err)
+	if _, ok := s.clients[models.OAuthClientID(r.PostForm.Get("client_id"))]; !ok {
 		s.writeTokenError(w, http.StatusUnauthorized, "invalid_client", "unknown client")
 		return
 	}
@@ -189,7 +185,7 @@ func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	s.provider.ServeHTTP(w, r.WithContext(withClient(r.Context(), c)))
+	s.provider.ServeHTTP(w, r)
 }
 
 // hasClientCredential reports any form of client authentication. Every client
@@ -291,27 +287,6 @@ var errorPageTemplate = template.Must(template.New("oauth-error").Parse(`<!docty
 <title>Authorization error</title>
 <style>body{font-family:system-ui,sans-serif;max-width:32rem;margin:4rem auto;padding:0 1rem;line-height:1.5}</style>
 </head><body><h1>Authorization error</h1><p>{{.}}</p><p>Close this page and start the connection again from the application.</p></body></html>`))
-
-// clientErrorPage reports a client that cannot be used, without redirecting.
-func (s *Server) clientErrorPage(w http.ResponseWriter, clientID string, err error) {
-	s.logClientError(clientID, err)
-	switch {
-	case errors.Is(err, errUnknownClient):
-		s.errorPage(w, "The application that sent you here is not registered with this Logchef instance.")
-	case errors.Is(err, errCIMDRateLimited):
-		s.errorPage(w, "Too many applications are connecting right now. Wait a minute and try again.")
-	default:
-		s.errorPage(w, "The application's client metadata document could not be loaded or is not valid.")
-	}
-}
-
-// logClientError records why a CIMD client was refused. Unknown clients are
-// not logged: anyone can send them.
-func (s *Server) logClientError(clientID string, err error) {
-	if !errors.Is(err, errUnknownClient) {
-		s.log.Warn("refusing OAuth client", "client_id", clientID, "error", err)
-	}
-}
 
 // errorPage reports an error without redirecting, for a request whose client
 // or redirect URI cannot be trusted.

@@ -51,7 +51,7 @@ func (s *Server) ConsentRequest(ctx context.Context, id models.OAuthAuthRequestI
 	}
 	return &ConsentRequest{
 		ID:            req.ID,
-		Client:        s.consentClientInfo(ctx, req.ClientID),
+		Client:        s.ClientInfo(req.ClientID),
 		Instance:      s.browserURL,
 		Resource:      req.Resource,
 		ResourceKind:  s.ResourceKind(req.Resource),
@@ -60,16 +60,6 @@ func (s *Server) ConsentRequest(ctx context.Context, id models.OAuthAuthRequestI
 		RedirectURI:   req.RedirectURI,
 		ExpiresAt:     req.ExpiresAt,
 	}, nil
-}
-
-// consentClientInfo describes the client for the consent screen. A CIMD
-// client's document is fetched again if it has left the cache, so the screen
-// shows its current name.
-func (s *Server) consentClientInfo(ctx context.Context, id models.OAuthClientID) ClientInfo {
-	if c, err := s.lookupClient(ctx, id); err == nil {
-		return c.info
-	}
-	return s.ClientInfo(id)
 }
 
 func (s *Server) pendingRequest(ctx context.Context, id models.OAuthAuthRequestID) (*models.OAuthAuthRequest, error) {

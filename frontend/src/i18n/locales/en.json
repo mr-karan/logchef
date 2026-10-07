@@ -1331,8 +1331,6 @@
   "pages.oauthPhishingWarning": "If someone sent you this link, or you do not recognize the application or the address it returns to, choose Deny.",
   "pages.oauthApplication": "Application",
   "pages.oauthReturnsTo": "Returns to",
-  "pages.oauthPublishedBy": "Published by",
-  "pages.oauthCimdNotice": "The application chose the name {client} itself. Approve only if {host} belongs to the application you are connecting.",
   "pages.oauthAccessType": "Access for",
   "pages.oauthInstance": "Logchef instance",
   "pages.oauthSignedInAs": "Signed in as",

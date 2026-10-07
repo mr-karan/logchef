@@ -28,7 +28,6 @@ require (
 	github.com/valyala/fasthttp v1.74.0
 	github.com/zitadel/oidc/v3 v3.51.11
 	golang.org/x/crypto v0.57.0
-	golang.org/x/net v0.59.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.23.0
 	modernc.org/sqlite v1.59.0
@@ -110,6 +109,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.41.0 // indirect
+	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.42.0 // indirect
 	golang.org/x/tools v0.50.0 // indirect

@@ -24,10 +24,9 @@ adds database migration 33; back up the metadata database before upgrading.
   Logchef login (local or OIDC). Authorization code with S256 PKCE, rotating
   refresh tokens, and tokens bound to either the API or `/mcp`. Users review
   and revoke grants under Settings → Connected apps.
-- **Connect with only the URL.** Hosts that support Client ID Metadata
-  Documents (Claude Code, Claude.ai, Codex, ChatGPT) need no client ID; others
-  use the built-in `logchef-mcp` client ID. Hosted web clients are configured
-  under `[[auth.oauth.clients]]`.
+- **Built-in MCP clients.** Claude Code, Codex and Cursor connect with the
+  built-in client ID `logchef-mcp`; hosted web clients such as Claude.ai and
+  ChatGPT are configured under `[[auth.oauth.clients]]`.
 - **Split UI and API hosts.** `server.browser_url` puts the consent page on a
   UI host behind an SSO proxy while the CLI and agents use `server.public_url`.
 - **`logchef agent setup`** prints the steps to connect a coding agent.

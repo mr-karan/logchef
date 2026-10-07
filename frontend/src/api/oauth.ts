@@ -1,15 +1,13 @@
 import { apiClient } from "./apiUtils";
 import type { TokenScope } from "@/lib/tokenScopes";
 
-export type OAuthClientKind = "native" | "web" | "cimd" | "unknown";
+export type OAuthClientKind = "native" | "web" | "unknown";
 export type OAuthResourceKind = "api" | "mcp" | "unknown";
 
 export interface OAuthClientInfo {
   id: string;
   name: string;
   kind: OAuthClientKind;
-  /** Host of a CIMD client's metadata URL; the name is self-declared. */
-  host?: string;
 }
 
 export interface OAuthScopeInfo {

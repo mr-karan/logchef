@@ -2,7 +2,7 @@ package oauth
 
 // AuthorizationServerMetadata is the RFC 8414 document. Logchef serves its own
 // instead of ZITADEL's discovery (adapter A3), so it advertises only what is
-// implemented: no OpenID Connect fields, no registration endpoint, no JWKS.
+// implemented: no OpenID Connect fields, no registration, no JWKS.
 type AuthorizationServerMetadata struct {
 	Issuer                                     string   `json:"issuer"`
 	AuthorizationEndpoint                      string   `json:"authorization_endpoint"`
@@ -16,10 +16,6 @@ type AuthorizationServerMetadata struct {
 	RevocationEndpointAuthMethodsSupported     []string `json:"revocation_endpoint_auth_methods_supported"`
 	ScopesSupported                            []string `json:"scopes_supported"`
 	AuthorizationResponseIssParameterSupported bool     `json:"authorization_response_iss_parameter_supported"`
-	// ClientIDMetadataDocumentSupported is present only when CIMD is enabled.
-	// MCP hosts use CIMD only when it is true and "none" is listed in
-	// token_endpoint_auth_methods_supported.
-	ClientIDMetadataDocumentSupported bool `json:"client_id_metadata_document_supported,omitempty"`
 }
 
 // ProtectedResourceMetadata is the RFC 9728 document for the MCP resource.
@@ -45,7 +41,6 @@ func (s *Server) Metadata() AuthorizationServerMetadata {
 		RevocationEndpointAuthMethodsSupported:     []string{"none"},
 		ScopesSupported:                            scopeStrings(ReadScopes, true),
 		AuthorizationResponseIssParameterSupported: true,
-		ClientIDMetadataDocumentSupported:          s.cimd != nil,
 	}
 }
 

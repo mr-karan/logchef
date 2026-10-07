@@ -126,10 +126,6 @@ async function decide(approve: boolean) {
           <CardTitle class="text-xl">
             {{ t("pages.oauthConsentTitle", { client: request.client.name }) }}
           </CardTitle>
-          <p v-if="request.client.host" class="text-sm" data-testid="oauth-client-host">
-            {{ t("pages.oauthPublishedBy") }}
-            <span class="font-mono font-semibold break-all">{{ request.client.host }}</span>
-          </p>
           <CardDescription>{{ t("pages.oauthConsentDescription") }}</CardDescription>
         </CardHeader>
 
@@ -137,12 +133,7 @@ async function decide(approve: boolean) {
           <Alert class="border-amber-500/60 bg-amber-50 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100" data-testid="oauth-phishing-warning">
             <ShieldAlert class="h-4 w-4" />
             <AlertTitle>{{ t("pages.oauthPhishingTitle") }}</AlertTitle>
-            <AlertDescription>
-              {{ t("pages.oauthPhishingWarning") }}
-              <template v-if="request.client.host">
-                {{ t("pages.oauthCimdNotice", { client: request.client.name, host: request.client.host }) }}
-              </template>
-            </AlertDescription>
+            <AlertDescription>{{ t("pages.oauthPhishingWarning") }}</AlertDescription>
           </Alert>
 
           <dl class="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
