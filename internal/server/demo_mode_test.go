@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -30,6 +31,13 @@ func TestEnforceDemoReadOnly(t *testing.T) {
 		{name: "dashboard create is blocked", method: http.MethodPost, path: "/api/v1/dashboards", want: http.StatusForbidden},
 		{name: "preference update is blocked", method: http.MethodPut, path: "/api/v1/me/preferences", want: http.StatusForbidden},
 		{name: "source validation is blocked", method: http.MethodPost, path: "/api/v1/admin/sources/validate", want: http.StatusForbidden},
+		{name: "OAuth consent decision remains available", method: http.MethodPost, path: "/api/v1/oauth/requests/abc/decision", want: http.StatusNoContent},
+		{name: "connected app revocation remains available", method: http.MethodDelete, path: "/api/v1/me/connected-apps/7", want: http.StatusNoContent},
+		{name: "OAuth decision with another method is blocked", method: http.MethodPut, path: "/api/v1/oauth/requests/abc/decision", want: http.StatusForbidden},
+		{name: "OAuth decision with a longer path is blocked", method: http.MethodPost, path: "/api/v1/oauth/requests/abc/decision/x", want: http.StatusForbidden},
+		{name: "connected app POST is blocked", method: http.MethodPost, path: "/api/v1/me/connected-apps/7", want: http.StatusForbidden},
+		{name: "connected apps collection DELETE is blocked", method: http.MethodDelete, path: "/api/v1/me/connected-apps", want: http.StatusForbidden},
+		{name: "connected app subpath DELETE is blocked", method: http.MethodDelete, path: "/api/v1/me/connected-apps/7/x", want: http.StatusForbidden},
 		{name: "exports stay blocked", method: http.MethodPost, path: "/api/v1/teams/1/sources/5/logs/export", want: http.StatusForbidden},
 	}
 
@@ -152,5 +160,37 @@ func TestDemoReadOnlyDoesNotExposeSharedQueryHistory(t *testing.T) {
 	}
 	if len(envelope.Data) != 0 {
 		t.Fatalf("history = %+v, want empty", envelope.Data)
+	}
+}
+
+// A read-only demo with OAuth enabled lets a session approve consent and
+// revoke the resulting connected app; other mutations stay blocked.
+func TestDemoReadOnlyAllowsOAuthConsent(t *testing.T) {
+	t.Parallel()
+	cfg := testOAuthConfig()
+	cfg.Demo.ReadOnly = true
+	e := newOAuthEnvWithConfig(t, cfg, models.UserRoleMember)
+
+	p := newPKCE()
+	e.tokens(cliAuthorizeParams(p), p) // approves consent through the decision route
+	apps := e.connectedApps(e.session)
+	if len(apps) != 1 {
+		t.Fatalf("connected apps = %+v, want one", apps)
+	}
+	path := "/api/v1/me/connected-apps/" + strconv.Itoa(int(apps[0].ID))
+	if resp := e.consentRequest(http.MethodDelete, path, e.session, "", map[string]string{"Origin": testIssuer}); resp.StatusCode != http.StatusNoContent {
+		t.Fatalf("revoke status %d, want 204", resp.StatusCode)
+	}
+	if apps := e.connectedApps(e.session); len(apps) != 0 {
+		t.Fatalf("connected apps after revoke = %+v, want none", apps)
+	}
+
+	resp := e.consentRequest(http.MethodPost, "/api/v1/saved-queries", e.session, `{"name":"q"}`, sameOriginJSON)
+	var body Response
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if resp.StatusCode != http.StatusForbidden || body.ErrorType != "DEMO_INSTANCE" {
+		t.Fatalf("saved query create: status %d, %+v; want 403 DEMO_INSTANCE", resp.StatusCode, body)
 	}
 }

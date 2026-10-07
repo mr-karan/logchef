@@ -31,7 +31,7 @@ func (s *Server) loadSavedQueryWithVisibility(c fiber.Ctx) (*models.SavedQuery, 
 		return nil, nil, false
 	}
 
-	query, err := core.GetSavedQueryForPrincipal(c.RequestCtx(), s.sqlite, s.log, principalFromLocals(c), queryID)
+	query, err := core.GetSavedQueryForPrincipal(c.Context(), s.sqlite, s.log, principalFromLocals(c), queryID)
 	if err != nil {
 		if errors.Is(err, core.ErrQueryNotFound) {
 			s.sendLoadFailure(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
@@ -59,7 +59,7 @@ func (s *Server) enrichSavedQueryPermissions(c fiber.Ctx, query *models.SavedQue
 	}
 	canDelete := core.UserCanDeleteSavedQuery(query, user)
 	query.CanDelete = &canDelete
-	canEdit, err := core.UserCanEditSavedQuery(c.RequestCtx(), s.sqlite, query, user)
+	canEdit, err := core.UserCanEditSavedQuery(c.Context(), s.sqlite, query, user)
 	if err != nil {
 		s.log.Error("failed to compute can_edit for saved query", "error", err, "query_id", query.ID, "user_id", user.ID)
 		return
@@ -77,13 +77,13 @@ func (s *Server) enrichSavedQueryPermissions(c fiber.Ctx, query *models.SavedQue
 func (s *Server) handleAdminListSavedQueries(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 
-	queries, err := core.ListAllSavedQueries(c.RequestCtx(), s.sqlite, s.log)
+	queries, err := core.ListAllSavedQueries(c.Context(), s.sqlite, s.log)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list saved queries", models.GeneralErrorType)
 	}
 	// Mark which rows this admin can actually run (source access); the rest are
 	// shown locked. Best-effort — a failure just leaves runnable unset.
-	if err := core.MarkSavedQueriesRunnable(c.RequestCtx(), s.sqlite, user.ID, queries); err != nil {
+	if err := core.MarkSavedQueriesRunnable(c.Context(), s.sqlite, user.ID, queries); err != nil {
 		s.log.Error("failed to mark saved queries runnable", "error", err, "user_id", user.ID)
 	}
 	return SendSuccess(c, fiber.StatusOK, queries)
@@ -100,14 +100,14 @@ func (s *Server) handleListSavedQueries(c fiber.Ctx) error {
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 		}
-		queries, err := core.ListSavedQueriesForUserBySource(c.RequestCtx(), s.sqlite, s.log, user.ID, sourceID)
+		queries, err := core.ListSavedQueriesForUserBySource(c.Context(), s.sqlite, s.log, user.ID, sourceID)
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list saved queries", models.GeneralErrorType)
 		}
 		return SendSuccess(c, fiber.StatusOK, queries)
 	}
 
-	queries, err := core.ListSavedQueriesForUser(c.RequestCtx(), s.sqlite, s.log, user.ID)
+	queries, err := core.ListSavedQueriesForUser(c.Context(), s.sqlite, s.log, user.ID)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list saved queries", models.GeneralErrorType)
 	}
@@ -131,7 +131,7 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "query_language or editor_mode is required", models.ValidationErrorType)
 	}
 
-	hasAccess, err := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, req.SourceID)
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
 	if err != nil {
 		s.log.Error("failed to check source access for saved query create", "error", err, "user_id", user.ID, "source_id", req.SourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
@@ -141,7 +141,7 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 	}
 
 	if req.CreatedFromTeamID != nil {
-		isMember, memberErr := core.IsTeamMember(c.RequestCtx(), s.sqlite, *req.CreatedFromTeamID, user.ID)
+		isMember, memberErr := core.IsTeamMember(c.Context(), s.sqlite, *req.CreatedFromTeamID, user.ID)
 		if memberErr != nil {
 			s.log.Error("failed to check saved query team membership", "error", memberErr, "user_id", user.ID, "team_id", *req.CreatedFromTeamID)
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify team access", models.GeneralErrorType)
@@ -150,7 +150,7 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusForbidden, "You are not a member of the selected team", models.AuthorizationErrorType)
 		}
 
-		teamHasSource, teamSourceErr := core.TeamHasSourceAccess(c.RequestCtx(), s.sqlite, *req.CreatedFromTeamID, req.SourceID)
+		teamHasSource, teamSourceErr := core.TeamHasSourceAccess(c.Context(), s.sqlite, *req.CreatedFromTeamID, req.SourceID)
 		if teamSourceErr != nil {
 			s.log.Error("failed to check saved query team source access", "error", teamSourceErr, "team_id", *req.CreatedFromTeamID, "source_id", req.SourceID)
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
@@ -160,7 +160,7 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 		}
 	}
 
-	created, err := core.CreateSavedQuery(c.RequestCtx(), s.sqlite, s.datasources, s.log, req.SourceID, req.CreatedFromTeamID, req.Name, req.Description, req.QueryContent, req.QueryLanguage, req.EditorMode, user.ID)
+	created, err := core.CreateSavedQuery(c.Context(), s.sqlite, s.datasources, s.log, req.SourceID, req.CreatedFromTeamID, req.Name, req.Description, req.QueryContent, req.QueryLanguage, req.EditorMode, user.ID)
 	if err != nil {
 		if errors.Is(err, core.ErrQueryLanguageRequired) || errors.Is(err, core.ErrInvalidQueryDefinition) || errors.Is(err, core.ErrUnsupportedSavedQueryDefinition) || errors.Is(err, core.ErrInvalidQueryContent) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -187,7 +187,7 @@ func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	canEdit, editErr := core.UserCanEditSavedQuery(c.RequestCtx(), s.sqlite, query, user)
+	canEdit, editErr := core.UserCanEditSavedQuery(c.Context(), s.sqlite, query, user)
 	if editErr != nil {
 		s.log.Error("failed to check saved query edit access", "error", editErr, "query_id", query.ID, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify edit access", models.GeneralErrorType)
@@ -228,7 +228,7 @@ func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
 		queryContent = *req.QueryContent
 	}
 
-	updated, updateErr := core.UpdateSavedQuery(c.RequestCtx(), s.sqlite, s.datasources, s.log, query.ID, name, description, queryContent, queryLanguage, editorMode)
+	updated, updateErr := core.UpdateSavedQuery(c.Context(), s.sqlite, s.datasources, s.log, query.ID, name, description, queryContent, queryLanguage, editorMode)
 	if updateErr != nil {
 		if errors.Is(updateErr, core.ErrQueryNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
@@ -251,7 +251,7 @@ func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this query", models.AuthorizationErrorType)
 	}
 
-	if delErr := core.DeleteSavedQuery(c.RequestCtx(), s.sqlite, s.log, query.ID); delErr != nil {
+	if delErr := core.DeleteSavedQuery(c.Context(), s.sqlite, s.log, query.ID); delErr != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete saved query", models.GeneralErrorType)
 	}
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Saved query deleted successfully"})
@@ -269,7 +269,7 @@ func (s *Server) handleResolveSavedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve saved query context", models.GeneralErrorType)
 	}
 
-	teams, err := core.ListTeamsWithAccessToSource(c.RequestCtx(), s.sqlite, s.log, query.SourceID, user.ID)
+	teams, err := core.ListTeamsWithAccessToSource(c.Context(), s.sqlite, s.log, query.SourceID, user.ID)
 	if err != nil {
 		s.log.Error("failed to resolve saved query team", "error", err, "query_id", query.ID, "source_id", query.SourceID, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve saved query context", models.GeneralErrorType)

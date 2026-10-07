@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 	"maps"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -17,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -86,6 +88,11 @@ func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServ
 		Logger:      log,
 	})
 	t.Cleanup(func() {
+		select {
+		case <-srv.stop: // the test already shut the server down
+			return
+		default:
+		}
 		if err := srv.Shutdown(context.Background()); err != nil {
 			t.Errorf("Shutdown: %v", err)
 		}
@@ -153,6 +160,27 @@ func testRequest(t *testing.T, app *fiber.App, req *http.Request) *testResponse 
 func (e *oauthEnv) do(req *http.Request) *testResponse {
 	e.t.Helper()
 	return testRequest(e.t, e.srv.app, req)
+}
+
+// serve runs the server on a real socket and returns its base URL. shutdown
+// stops the server through Server.Shutdown and waits for Serve to return.
+func (e *oauthEnv) serve() (baseURL string, shutdown func()) {
+	e.t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		e.t.Fatalf("listen: %v", err)
+	}
+	served := make(chan error, 1)
+	go func() { served <- e.srv.app.Listener(ln, fiber.ListenConfig{DisableStartupMessage: true}) }()
+	return "http://" + ln.Addr().String(), func() {
+		e.t.Helper()
+		if err := e.srv.Shutdown(context.Background()); err != nil {
+			e.t.Errorf("Shutdown: %v", err)
+		}
+		if err := <-served; err != nil {
+			e.t.Errorf("Listener: %v", err)
+		}
+	}
 }
 
 type pkcePair struct{ verifier, challenge string }
@@ -1174,7 +1202,8 @@ func TestOAuthIssuerOnQueryBearingCallback(t *testing.T) {
 }
 
 // malformedAudienceJWT is an unsigned JWT whose aud array holds non-strings,
-// the input that panics ZITADEL's claim decoder (dependency audit F1).
+// the input that panicked ZITADEL's claim decoder before v3.51.13
+// (dependency audit F1).
 func malformedAudienceJWT() string {
 	enc := base64.RawURLEncoding.EncodeToString
 	return enc([]byte(`{"alg":"RS256","kid":"x"}`)) + "." + enc([]byte(`{"iss":"https://logchef.test","sub":"1","aud":[1,{"a":2}],"exp":4102444800,"iat":1}`)) + "." + enc([]byte("sig"))
@@ -1690,5 +1719,135 @@ func TestOAuthBrowserURLDefaultsToIssuer(t *testing.T) {
 	}
 	if e.oauth.BrowserOrigin() != testIssuer || e.oauth.IssuerOrigin() != testIssuer {
 		t.Fatalf("origins %q %q", e.oauth.BrowserOrigin(), e.oauth.IssuerOrigin())
+	}
+}
+
+// A refresh token works only for the client it was issued to, whichever
+// resource the other client asks for.
+func TestOAuthRefreshBoundToClient(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	p := newPKCE()
+	params := cliAuthorizeParams(p)
+	params.Set("scope", "logs:read offline_access")
+	tokens := e.tokens(params, p)
+
+	mcpParams := mcpNativeAuthorizeParams(p, "http://localhost:8787/callback")
+	webParams := webAuthorizeParams(p)
+	for name, other := range map[string]url.Values{"logchef-mcp": mcpParams, "web": webParams} {
+		for _, resource := range []string{testAPIResource, other.Get("resource")} {
+			form := refreshForm(other, tokens.RefreshToken)
+			form.Set("resource", resource)
+			status, out := e.postToken(form)
+			if status != http.StatusBadRequest || (out.Error != "invalid_grant" && out.Error != "invalid_target") {
+				t.Errorf("%s refreshing a CLI token for %q: status %d error %q, want 400 invalid_grant or invalid_target", name, resource, status, out.Error)
+			}
+			if resource == other.Get("resource") && out.Error != "invalid_grant" {
+				t.Errorf("%s refreshing a CLI token for its own resource: error %q, want invalid_grant", name, out.Error)
+			}
+		}
+	}
+	if status, out := e.postToken(refreshForm(params, tokens.RefreshToken)); status != http.StatusOK {
+		t.Fatalf("owner refresh after another client's attempts: status %d error %q", status, out.Error)
+	}
+}
+
+// Revoking a refresh token while it rotates must leave no usable credential,
+// whichever request the server handles first.
+func TestOAuthRevokeRacesRotation(t *testing.T) {
+	t.Parallel()
+	for i := range 8 {
+		t.Run("round "+strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
+			e := newOAuthEnv(t)
+			p := newPKCE()
+			params := cliAuthorizeParams(p)
+			params.Set("scope", "logs:read offline_access")
+			tokens := e.tokens(params, p)
+
+			revoke := url.Values{"client_id": {config.OAuthCLIClientID}, "token": {tokens.RefreshToken}, "token_type_hint": {"refresh_token"}}
+			var (
+				wg       sync.WaitGroup
+				revoked  int
+				rotated  tokenResponse
+				rotation int
+			)
+			wg.Add(2)
+			go func() {
+				defer wg.Done()
+				req := httptest.NewRequest(http.MethodPost, testIssuer+oauth.RevokePath, strings.NewReader(revoke.Encode()))
+				req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				revoked = e.do(req).StatusCode
+			}()
+			go func() {
+				defer wg.Done()
+				rotation, rotated = e.postToken(refreshForm(params, tokens.RefreshToken))
+			}()
+			wg.Wait()
+
+			if revoked != http.StatusOK {
+				t.Fatalf("revoke status %d", revoked)
+			}
+			if status, _ := e.postToken(refreshForm(params, tokens.RefreshToken)); status == http.StatusOK {
+				t.Fatal("revoked refresh token still rotates")
+			}
+			if rotation != http.StatusOK {
+				return
+			}
+			if resp := e.apiGet("/api/v1/me", rotated.AccessToken); resp.StatusCode != http.StatusUnauthorized {
+				t.Fatalf("access token minted by the racing rotation status %d, want 401", resp.StatusCode)
+			}
+			if status, _ := e.postToken(refreshForm(params, rotated.RefreshToken)); status == http.StatusOK {
+				t.Fatal("refresh token minted by the racing rotation still works")
+			}
+		})
+	}
+}
+
+// RFC 6749 5.1: token responses, errors included, and revocation responses
+// must not be cached.
+func TestOAuthTokenEndpointsNoStore(t *testing.T) {
+	t.Parallel()
+	e := newOAuthEnv(t)
+	p := newPKCE()
+	params := cliAuthorizeParams(p)
+	params.Set("scope", "logs:read offline_access")
+	code := e.code(params)
+
+	post := func(path string, form url.Values) *testResponse {
+		req := httptest.NewRequest(http.MethodPost, testIssuer+path, strings.NewReader(form.Encode()))
+		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		return e.do(req)
+	}
+	bad := codeExchangeForm(params, code, newPKCE().verifier)
+	good := codeExchangeForm(params, code, p.verifier)
+	var refresh string
+	for name, tc := range map[string]struct {
+		path string
+		form url.Values
+		want int
+	}{
+		"error response": {oauth.TokenPath, bad, http.StatusBadRequest},
+		"success":        {oauth.TokenPath, good, http.StatusOK},
+	} {
+		resp := post(tc.path, tc.form)
+		if resp.StatusCode != tc.want {
+			t.Fatalf("%s status %d, want %d", name, resp.StatusCode, tc.want)
+		}
+		if got := resp.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+			t.Errorf("%s Cache-Control = %q, want no-store", name, got)
+		}
+		if name == "success" {
+			var out tokenResponse
+			_ = json.NewDecoder(resp.Body).Decode(&out)
+			refresh = out.RefreshToken
+		}
+	}
+	resp := post(oauth.RevokePath, url.Values{"client_id": {config.OAuthCLIClientID}, "token": {refresh}})
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("revoke status %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Cache-Control"); !strings.Contains(got, "no-store") {
+		t.Errorf("revoke Cache-Control = %q, want no-store", got)
 	}
 }

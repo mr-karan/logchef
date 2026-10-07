@@ -19,7 +19,7 @@ import (
 // URL: GET /api/v1/admin/sources
 // Requires: Admin privileges
 func (s *Server) handleListSources(c fiber.Ctx) error {
-	sources, err := core.ListSources(c.RequestCtx(), s.sqlite, s.datasources)
+	sources, err := core.ListSources(c.Context(), s.sqlite, s.datasources)
 	if err != nil {
 		s.log.Error("failed to list sources", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing sources")
@@ -43,7 +43,7 @@ func (s *Server) handleCreateSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	createdSource, err := core.CreateSourceFromRequest(c.RequestCtx(), s.datasources, &req)
+	createdSource, err := core.CreateSourceFromRequest(c.Context(), s.datasources, &req)
 	if err != nil {
 		// Handle specific validation or creation errors from core.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
@@ -84,7 +84,7 @@ func (s *Server) handleDeleteSource(c fiber.Ctx) error {
 	}
 
 	// Call core function to remove from manager and delete from DB.
-	if err := core.DeleteSource(c.RequestCtx(), s.datasources, sourceID); err != nil {
+	if err := core.DeleteSource(c.Context(), s.datasources, sourceID); err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
@@ -113,7 +113,7 @@ func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updatedSource, err := core.UpdateSource(c.RequestCtx(), s.datasources, sourceID, &req)
+	updatedSource, err := core.UpdateSource(c.Context(), s.datasources, sourceID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
@@ -140,7 +140,7 @@ func (s *Server) handleValidateSourceConnection(c fiber.Ctx) error {
 		s.log.Warn("invalid connection validation request", "error", err)
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
-	result, err := core.ValidateSourceConnection(c.RequestCtx(), s.datasources, &req)
+	result, err := core.ValidateSourceConnection(c.Context(), s.datasources, &req)
 	if err != nil {
 		// Handle specific validation errors.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
@@ -172,9 +172,9 @@ func (s *Server) handleGetSourceStats(c fiber.Ctx) error {
 
 	var inspection *core.SourceInspection
 	if c.Query("refresh") == "true" {
-		inspection, err = core.RefreshSourceInspection(c.RequestCtx(), s.datasources, sourceID)
+		inspection, err = core.RefreshSourceInspection(c.Context(), s.datasources, sourceID)
 	} else {
-		inspection, err = core.InspectSource(c.RequestCtx(), s.datasources, sourceID)
+		inspection, err = core.InspectSource(c.Context(), s.datasources, sourceID)
 	}
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
@@ -217,7 +217,7 @@ func (s *Server) handleGetSourceActivity(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
 	}
 	p := principalFromLocals(c)
-	activity, err := core.InspectSourceActivityAsAdmin(c.RequestCtx(), s.datasources, p, sourceID, c.Query("refresh") == "true")
+	activity, err := core.InspectSourceActivityAsAdmin(c.Context(), s.datasources, p, sourceID, c.Query("refresh") == "true")
 	if errors.Is(err, access.ErrGlobalAdminRequired) {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
 	}
@@ -232,7 +232,7 @@ func (s *Server) handleGetTeamSourceActivity(c fiber.Ctx) error {
 	if !ok {
 		return nil
 	}
-	activity, err := core.InspectTeamSourceActivity(c.RequestCtx(), s.datasources, src, c.Query("refresh") == "true")
+	activity, err := core.InspectTeamSourceActivity(c.Context(), s.datasources, src, c.Query("refresh") == "true")
 	return s.sendSourceActivity(c, src.SourceID(), activity, err)
 }
 

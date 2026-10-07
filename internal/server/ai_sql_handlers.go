@@ -33,7 +33,7 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized", models.AuthenticationErrorType)
 	}
 
-	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.RequestCtx(), s.sqlite, s.log, user.ID, teamID, sourceID)
+	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, teamID, sourceID)
 	if accessErr != nil {
 		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
 	}
@@ -58,7 +58,7 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 	// and the editor mode. The model never chooses the backend.
 	target := deriveAITarget(source.SourceType, req.Mode)
 
-	generatedQuery, err := s.callAIToGenerateSQL(c.RequestCtx(), req, target, schemaJSON, tableName)
+	generatedQuery, err := s.callAIToGenerateSQL(c.Context(), req, target, schemaJSON, tableName)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (s *Server) parseSourceTeamIDs(c fiber.Ctx) (models.SourceID, models.TeamID
 }
 
 func (s *Server) getSourceSchemaForAI(c fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.RequestCtx(), s.datasources, sourceID)
+	source, err = core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)

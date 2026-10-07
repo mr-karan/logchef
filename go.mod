@@ -26,7 +26,7 @@ require (
 	github.com/shopspring/decimal v1.4.0
 	github.com/swaggo/swag v1.16.6
 	github.com/valyala/fasthttp v1.74.0
-	github.com/zitadel/oidc/v3 v3.51.11
+	github.com/zitadel/oidc/v3 v3.51.13
 	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.23.0

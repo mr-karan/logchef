@@ -58,7 +58,7 @@ func (s *Server) loadAlertWithVisibility(c fiber.Ctx) (*models.Alert, *models.Us
 		return nil, nil, false
 	}
 
-	alert, err := core.GetAlertForPrincipal(c.RequestCtx(), s.sqlite, s.log, principalFromLocals(c), alertID)
+	alert, err := core.GetAlertForPrincipal(c.Context(), s.sqlite, s.log, principalFromLocals(c), alertID)
 	if err != nil {
 		if errors.Is(err, core.ErrAlertNotFound) || models.IsNotFound(err) {
 			s.sendLoadFailure(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
@@ -86,7 +86,7 @@ func (s *Server) handleListAlerts(c fiber.Ctx) error {
 		if err != nil {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source_id parameter", models.ValidationErrorType)
 		}
-		alerts, err := core.ListAlertsBySourceForPrincipal(c.RequestCtx(), s.sqlite, principalFromLocals(c), sourceID)
+		alerts, err := core.ListAlertsBySourceForPrincipal(c.Context(), s.sqlite, principalFromLocals(c), sourceID)
 		if err != nil {
 			if errors.Is(err, core.ErrSourceAccessDenied) {
 				return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
@@ -99,7 +99,7 @@ func (s *Server) handleListAlerts(c fiber.Ctx) error {
 		return SendSuccess(c, fiber.StatusOK, alerts)
 	}
 
-	alerts, err := core.ListAlertsForUser(c.RequestCtx(), s.sqlite, user.ID)
+	alerts, err := core.ListAlertsForUser(c.Context(), s.sqlite, user.ID)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alerts", models.GeneralErrorType)
 	}
@@ -123,7 +123,7 @@ func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 		req.LookbackSeconds = int(s.config.Alerts.DefaultLookback.Seconds())
 	}
 
-	hasAccess, err := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, req.SourceID)
+	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, req.SourceID)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
 	}
@@ -131,7 +131,7 @@ func (s *Server) handleCreateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "No team you belong to has access to this source", models.AuthorizationErrorType)
 	}
 
-	alert, err := core.CreateAlert(c.RequestCtx(), s.sqlite, s.datasources, s.log, req.SourceID, user.ID, &req)
+	alert, err := core.CreateAlert(c.Context(), s.sqlite, s.datasources, s.log, req.SourceID, user.ID, &req)
 	if err != nil {
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -166,7 +166,7 @@ func (s *Server) handleUpdateAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	updated, updateErr := core.UpdateAlert(c.RequestCtx(), s.sqlite, s.datasources, s.log, alert.ID, &req)
+	updated, updateErr := core.UpdateAlert(c.Context(), s.sqlite, s.datasources, s.log, alert.ID, &req)
 	if updateErr != nil {
 		switch {
 		case errors.Is(updateErr, core.ErrInvalidAlertConfiguration):
@@ -191,7 +191,7 @@ func (s *Server) handleDeleteAlert(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this alert", models.AuthorizationErrorType)
 	}
 
-	if delErr := core.DeleteAlert(c.RequestCtx(), s.sqlite, s.log, alert.ID); delErr != nil {
+	if delErr := core.DeleteAlert(c.Context(), s.sqlite, s.log, alert.ID); delErr != nil {
 		if errors.Is(delErr, core.ErrAlertNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 		}
@@ -216,7 +216,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 	}
 
 	if s.alertsManager != nil {
-		if err := s.alertsManager.ManualResolve(c.RequestCtx(), alert.ID, strings.TrimSpace(req.Message)); err != nil {
+		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, strings.TrimSpace(req.Message)); err != nil {
 			if strings.Contains(err.Error(), "no active alert") {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
@@ -224,7 +224,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve alert", models.GeneralErrorType)
 		}
 	} else {
-		if err := core.ResolveAlert(c.RequestCtx(), s.sqlite, s.log, alert.ID, strings.TrimSpace(req.Message)); err != nil {
+		if err := core.ResolveAlert(c.Context(), s.sqlite, s.log, alert.ID, strings.TrimSpace(req.Message)); err != nil {
 			if errors.Is(err, core.ErrAlertNotFound) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
@@ -253,7 +253,7 @@ func (s *Server) handleListAlertHistory(c fiber.Ctx) error {
 		}
 	}
 
-	history, err := core.ListAlertHistory(c.RequestCtx(), s.sqlite, alert.ID, limit)
+	history, err := core.ListAlertHistory(c.Context(), s.sqlite, alert.ID, limit)
 	if err != nil {
 		s.log.Error("failed to list alert history", "alert_id", alert.ID, "error", err)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list alert history", models.GeneralErrorType)
@@ -279,7 +279,7 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 
 	// Bound by TestAlertTimeout so a slow/misbehaving datasource can't hang
 	// the request indefinitely.
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), TestAlertTimeout)
+	ctx, cancel := context.WithTimeout(c.Context(), TestAlertTimeout)
 	defer cancel()
 
 	p := principalFromLocals(c)

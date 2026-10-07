@@ -91,7 +91,7 @@ func (s *Server) tryServeDashboardCache(
 		c.Set("X-Logchef-Cache", string(cache.StatusBypass))
 		return false, nil
 	}
-	data, status, age, ferr := s.dashCache.GetOrFill(c.RequestCtx(), key, effTTL, fillTimeout, fill)
+	data, status, age, ferr := s.dashCache.GetOrFill(c.Context(), key, effTTL, fillTimeout, fill)
 	if ferr != nil {
 		metrics.RecordDashboardCacheRequest("bypass")
 		c.Set("X-Logchef-Cache", string(cache.StatusBypass))

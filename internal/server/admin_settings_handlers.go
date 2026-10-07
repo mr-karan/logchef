@@ -47,7 +47,7 @@ type SettingsByCategoryResponse struct {
 // handleListSettings returns all system settings grouped by category.
 // GET /api/v1/admin/settings
 func (s *Server) handleListSettings(c fiber.Ctx) error {
-	settings, err := s.sqlite.ListSettings(c.RequestCtx())
+	settings, err := s.sqlite.ListSettings(c.Context())
 	if err != nil {
 		s.log.Error("failed to list settings", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
@@ -80,7 +80,7 @@ func (s *Server) handleListSettingsByCategory(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "category parameter is required")
 	}
 
-	settings, err := s.sqlite.ListSettingsByCategory(c.RequestCtx(), category)
+	settings, err := s.sqlite.ListSettingsByCategory(c.Context(), category)
 	if err != nil {
 		s.log.Error("failed to list settings by category", "category", category, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
@@ -102,7 +102,7 @@ func (s *Server) handleGetSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
-	value, err := s.sqlite.GetSetting(c.RequestCtx(), key)
+	value, err := s.sqlite.GetSetting(c.Context(), key)
 	if err != nil {
 		s.log.Error("failed to get setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusNotFound, "setting not found")
@@ -148,7 +148,7 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	}
 
 	// Upsert the setting
-	if err := s.sqlite.UpsertSetting(c.RequestCtx(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
+	if err := s.sqlite.UpsertSetting(c.Context(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
 		s.log.Error("failed to update setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to update setting")
 	}
@@ -172,7 +172,7 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
-	if err := s.sqlite.DeleteSetting(c.RequestCtx(), key); err != nil {
+	if err := s.sqlite.DeleteSetting(c.Context(), key); err != nil {
 		s.log.Error("failed to delete setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to delete setting")
 	}
@@ -376,7 +376,7 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	}
 
 	// Load SMTP config from DB
-	smtpConfig := s.loadSMTPConfig(c.RequestCtx())
+	smtpConfig := s.loadSMTPConfig(c.Context())
 
 	// Validate SMTP is configured
 	if smtpConfig.Host == "" || smtpConfig.Port == 0 || smtpConfig.From == "" {
@@ -405,7 +405,7 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	}
 
 	// Send test email
-	if err := sender.Send(c.RequestCtx(), notification); err != nil {
+	if err := sender.Send(c.Context(), notification); err != nil {
 		s.log.Error("failed to send test email", "error", err, "recipient", recipientEmail, "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test email: %v", err))
 	}
@@ -447,8 +447,8 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	}
 
 	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       s.sqlite.GetDurationSetting(c.RequestCtx(), "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(c.RequestCtx(), "alerts.tls_insecure_skip_verify", false),
+		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	})
 
@@ -471,7 +471,7 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	}
 
 	// Send test webhook
-	if err := sender.Send(c.RequestCtx(), notification); err != nil {
+	if err := sender.Send(c.Context(), notification); err != nil {
 		s.log.Error("failed to send test webhook", "error", err, "url", webhookURL, "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test webhook: %v", err))
 	}

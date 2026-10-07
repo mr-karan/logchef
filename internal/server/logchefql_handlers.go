@@ -67,7 +67,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		return nil
 	}
 
-	translation, err := core.TranslateLogchefQL(c.RequestCtx(), s.datasources, src, datasource.LogchefQLCompileRequest{
+	translation, err := core.TranslateLogchefQL(c.Context(), s.datasources, src, datasource.LogchefQLCompileRequest{
 		Query:     req.Query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
@@ -226,7 +226,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	prepared, err := core.PrepareLogchefQLQuery(c.RequestCtx(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
+	prepared, err := core.PrepareLogchefQLQuery(c.Context(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
 		return s.sendLogchefQLPrepareError(c, sourceID, err, "Failed to compile query")
 	}
@@ -325,7 +325,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 
 	// Buffered fallback for non-streaming providers.
 	// Create a cancellable context for this query
-	queryCtx, cancel := context.WithCancel(c.RequestCtx())
+	queryCtx, cancel := context.WithCancel(c.Context())
 	defer cancel() // Ensure cleanup
 
 	// Add query to tracker atomically with admission control.

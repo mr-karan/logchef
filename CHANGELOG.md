@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-10-07
+
+### Fixed
+- OAuth token and revocation responses now carry `Cache-Control: no-store`.
+- A read-only demo instance can approve an OAuth connection and revoke a
+  connected app; every other write stays blocked.
+- Handlers no longer pass the HTTP server's pooled request context to
+  database and datasource calls, which raced with server start and shutdown.
+
+### Changed
+- zitadel/oidc v3.51.13, which includes the upstream fix for its audience
+  decoder panic.
+
 ## [2.3.0] - 2026-10-07
 
 Logchef 2.3 can now be its own OAuth server for agents and the CLI, and serves
@@ -1405,7 +1418,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/mr-karan/logchef/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/mr-karan/logchef/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/mr-karan/logchef/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/mr-karan/logchef/compare/v2.0.2...v2.1.0

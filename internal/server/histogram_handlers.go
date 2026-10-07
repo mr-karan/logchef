@@ -44,7 +44,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 	// is a cache candidate. A source lookup hiccup just falls through to the
 	// uncached path below. Explorer requests carry no directive.
 	if effTTL, ok := s.dashboardCacheParams(req.Cache); ok {
-		if source, serr := core.GetSource(c.RequestCtx(), s.datasources, sourceID); serr == nil {
+		if source, serr := core.GetSource(c.Context(), s.datasources, sourceID); serr == nil {
 			key := dashcache.ComputeKey(dashcache.KeyInput{
 				EndpointKind:     "histogram",
 				TeamID:           int64(src.TeamID()),
@@ -81,7 +81,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 
 	// Execute histogram query via core function, bounded by HistogramTimeout so
 	// a slow/misbehaving datasource can't hang the request indefinitely.
-	ctx, cancel := context.WithTimeout(c.RequestCtx(), core.HistogramTimeout)
+	ctx, cancel := context.WithTimeout(c.Context(), core.HistogramTimeout)
 	defer cancel()
 
 	result, err := s.executeHistogram(ctx, QueryClassHistogram, src, params)

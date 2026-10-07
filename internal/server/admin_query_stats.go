@@ -56,17 +56,17 @@ func (s *Server) handleAdminQueryStats(c fiber.Ctx) error {
 
 	since := time.Now().UTC().AddDate(0, 0, -(days - 1)).Format("2006-01-02")
 
-	topSources, err := s.sqlite.TopSourcesByQueries(c.RequestCtx(), since, queryStatsTopN)
+	topSources, err := s.sqlite.TopSourcesByQueries(c.Context(), since, queryStatsTopN)
 	if err != nil {
 		s.log.Error("failed to list top sources by queries", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
 	}
-	topUsers, err := s.sqlite.TopUsersByQueries(c.RequestCtx(), since, queryStatsTopN)
+	topUsers, err := s.sqlite.TopUsersByQueries(c.Context(), since, queryStatsTopN)
 	if err != nil {
 		s.log.Error("failed to list top users by queries", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")
 	}
-	volumeByDay, err := s.sqlite.QueryVolumeByDay(c.RequestCtx(), since)
+	volumeByDay, err := s.sqlite.QueryVolumeByDay(c.Context(), since)
 	if err != nil {
 		s.log.Error("failed to list query volume by day", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing query stats")

@@ -68,10 +68,10 @@ type Server struct {
 	dashCache     *dashcache.Cache // per-dashboard TTL result cache
 
 	stop chan struct{} // closed by Shutdown to stop background maintenance loops
-	// cancelMCP cancels the context MCP requests run on (see
-	// registerMCPRoutes). Nil when OAuth, and so /mcp, is disabled.
-	cancelMCP context.CancelFunc
-	wg        sync.WaitGroup
+	// cancelRequests cancels the base context every request runs on (see
+	// requestContext).
+	cancelRequests context.CancelFunc
+	wg             sync.WaitGroup
 }
 
 // @title Logchef API
@@ -128,7 +128,10 @@ func New(opts ServerOptions) *Server {
 		},
 	})
 
+	baseCtx, cancelRequests := context.WithCancel(context.Background())
+
 	// Add essential middleware.
+	app.Use(requestContext(baseCtx))
 	app.Use(recoverMiddleware(log))
 	app.Use(compress.New(compress.Config{
 		// SSE streams (live tail) must not be buffered/compressed: the compressor
@@ -168,7 +171,8 @@ func New(opts ServerOptions) *Server {
 			MaxEntries:         opts.Config.DashboardCache.MaxEntries,
 			MaxConcurrentFills: opts.Config.DashboardCache.MaxConcurrentFills,
 		}),
-		stop: make(chan struct{}),
+		stop:           make(chan struct{}),
+		cancelRequests: cancelRequests,
 	}
 
 	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())
@@ -182,6 +186,32 @@ func New(opts ServerOptions) *Server {
 	s.startBackgroundCleanup()
 
 	return s
+}
+
+// requestContext makes c.Context() the server base context, which
+// Shutdown cancels. Handlers pass c.Context(), never c.RequestCtx(), to code
+// that takes a context.Context: the fasthttp RequestCtx is recycled after the
+// handler returns, and its Done channel is a server field that fasthttp's
+// Serve and Shutdown write without synchronization against readers such as
+// database driver goroutines.
+func requestContext(baseCtx context.Context) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		c.SetContext(baseCtx)
+		return c.Next()
+	}
+}
+
+// httpHandlerWithRequestContext adapts h like adaptor.HTTPHandler, but runs
+// it on c.Context() instead of the fasthttp RequestCtx (see requestContext).
+func httpHandlerWithRequestContext(h http.Handler) fiber.Handler {
+	return adaptor.HTTPHandlerWithContext(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx, ok := adaptor.LocalContextFromHTTPRequest(r)
+		if !ok {
+			http.Error(w, "missing request context", http.StatusInternalServerError)
+			return
+		}
+		h.ServeHTTP(w, r.WithContext(ctx)) //nolint:contextcheck // deliberately c.Context(), not the fasthttp RequestCtx the adaptor put on r
+	}))
 }
 
 func recoverMiddleware(log *slog.Logger) fiber.Handler {
@@ -436,7 +466,7 @@ func (s *Server) setupRoutes() {
 
 	// --- OAuth authorization server (only when auth.oauth.enabled) ---
 	if s.oauth != nil {
-		oauthEndpoints := adaptor.HTTPHandler(s.oauth.Handler())
+		oauthEndpoints := httpHandlerWithRequestContext(s.oauth.Handler())
 		registerLimited(s.app, fiber.MethodGet, oauth.AuthorizePath, authLimiter, oauthEndpoints)
 		registerLimited(s.app, fiber.MethodPost, oauth.AuthorizePath, authLimiter, oauthEndpoints)
 		registerLimited(s.app, fiber.MethodPost, oauth.TokenPath, authLimiter, oauthEndpoints)
@@ -503,9 +533,7 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
 	close(s.stop)
-	if s.cancelMCP != nil {
-		s.cancelMCP()
-	}
+	s.cancelRequests()
 	if s.dashCache != nil {
 		s.dashCache.Close()
 	}

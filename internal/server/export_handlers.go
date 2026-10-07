@@ -59,7 +59,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // reque
 	// Gate exports behind the source capability before doing any work or
 	// touching the ClickHouse connection. Non-supporting sources (e.g.
 	// VictoriaLogs) get a clean 400 instead of an opaque connection error.
-	source, err := core.GetSource(c.RequestCtx(), s.datasources, sourceID)
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
@@ -152,7 +152,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // reque
 	}
 
 	queryID := uuid.New().String()
-	streamCtx, cancel := context.WithCancel(c.RequestCtx())
+	streamCtx, cancel := context.WithCancel(c.Context())
 	if err := queryTracker.StartQueryWithID(
 		queryID,
 		QueryClassExport,
