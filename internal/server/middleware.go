@@ -2,7 +2,9 @@ package server
 
 import (
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/metrics"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"errors"
@@ -20,24 +22,28 @@ func getUserIDFromContext(c fiber.Ctx) models.UserID {
 	return user.ID
 }
 
-// isUserAdmin checks if the user in context has admin role
-func isUserAdmin(c fiber.Ctx) bool {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
-		return false
-	}
-	return user.Role == models.UserRoleAdmin
+// hasGlobalAdminBypass reports whether the caller may skip a team or
+// ownership check as a global admin. Sessions and API tokens of admin users
+// may; OAuth access tokens never may, so delegated access stays limited to
+// the user's own memberships and objects.
+func hasGlobalAdminBypass(c fiber.Ctx) bool {
+	return principalFromLocals(c).RequireGlobalAdmin() == nil
 }
 
 // requireAuth is middleware that ensures the request includes valid authentication.
-// It supports both API token authentication (Authorization: Bearer <token>) and
-// session-based authentication (session cookie). It validates the authentication,
-// retrieves the associated user, and stores the user information in the request
-// context (c.Locals) for subsequent handlers.
+// It supports API tokens and, when OAuth is enabled, OAuth access tokens
+// (Authorization: Bearer <token>), and session-based authentication (session
+// cookie). A bearer value with the API token prefix always takes the API token
+// path. It validates the authentication, retrieves the associated user, and
+// stores the user information in the request context (c.Locals) for
+// subsequent handlers.
 func (s *Server) requireAuth(c fiber.Ctx) error {
-	// Try API token authentication first
 	authHeader := c.Get("Authorization")
 	if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
+		bearer := strings.TrimPrefix(authHeader, "Bearer ")
+		if s.oauth != nil && bearer != "" && !strings.HasPrefix(bearer, core.TokenPrefix) {
+			return s.authenticateWithOAuth(c, bearer)
+		}
 		return s.authenticateWithToken(c, authHeader)
 	}
 
@@ -76,6 +82,53 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 	c.Locals("api_token", apiToken)
 	c.Locals("auth_method", "token")
 
+	return c.Next()
+}
+
+// authenticateWithOAuth accepts only access tokens issued for the API
+// resource. A token issued for /mcp, an ID token or a refresh token is
+// rejected with invalid_token.
+func (s *Server) authenticateWithOAuth(c fiber.Ctx, bearer string) error {
+	token, err := s.oauth.AuthenticateAccessToken(c.RequestCtx(), bearer, oauth.ResourceAPI)
+	if err != nil {
+		metrics.RecordAuthAttempt("oauth", false, nil)
+		if errors.Is(err, oauth.ErrInvalidAccessToken) {
+			c.Set(fiber.HeaderWWWAuthenticate, `Bearer error="invalid_token"`)
+			return SendErrorWithType(c, fiber.StatusUnauthorized, "Invalid or expired token", models.AuthenticationErrorType)
+		}
+		s.log.Error("error authenticating OAuth access token", "error", err)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
+	}
+	metrics.RecordAuthAttempt("oauth", true, token.Principal.User)
+	c.Locals("user", token.Principal.User)
+	c.Locals("oauth_token", token)
+	c.Locals("auth_method", "oauth")
+	return c.Next()
+}
+
+// requireSession allows only browser-session authentication. Any
+// Authorization header is refused, even an empty one, so neither an API token nor an OAuth
+// access token can read or change OAuth consent.
+func (s *Server) requireSession(c fiber.Ctx) error {
+	if _, present := c.GetReqHeaders()[fiber.HeaderAuthorization]; present {
+		return SendErrorWithType(c, fiber.StatusUnauthorized, "This endpoint requires a browser session", models.AuthenticationErrorType)
+	}
+	return s.authenticateWithSession(c)
+}
+
+// requireSameOrigin is the CSRF control for session-only routes that change
+// state: the browser Origin must equal the origin of server.browser_url
+// (server.public_url when unset), and a POST body must be JSON.
+func (s *Server) requireSameOrigin(c fiber.Ctx) error {
+	if c.Get(fiber.HeaderOrigin) != s.oauth.BrowserOrigin() {
+		return SendErrorWithType(c, fiber.StatusForbidden, "Request origin is not allowed", models.AuthorizationErrorType)
+	}
+	if c.Method() == fiber.MethodPost {
+		mediaType, _, _ := strings.Cut(c.Get(fiber.HeaderContentType), ";")
+		if !strings.EqualFold(strings.TrimSpace(mediaType), fiber.MIMEApplicationJSON) {
+			return SendErrorWithType(c, fiber.StatusUnsupportedMediaType, "Content-Type must be application/json", models.ValidationErrorType)
+		}
+	}
 	return c.Next()
 }
 
@@ -138,11 +191,18 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 
 // requireAdmin is middleware that ensures the authenticated user has the global 'admin' role.
 // It assumes requireAuth has already run and placed the user in the context.
+// OAuth access tokens never pass, whatever the user's role: an OAuth client
+// holds read scopes only and must not reach administrative routes.
 func (s *Server) requireAdmin(c fiber.Ctx) error {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
 		s.log.Error("user not found in context for admin check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+	}
+
+	if c.Locals("auth_method") == "oauth" {
+		metrics.RecordAuthorizationFailure(c.Route().Path, user, "oauth_admin_route")
+		return SendErrorWithType(c, fiber.StatusForbidden, "Admin routes are not available to OAuth clients", models.AuthorizationErrorType)
 	}
 
 	if user.Role != models.UserRoleAdmin {
@@ -156,21 +216,41 @@ func (s *Server) requireAdmin(c fiber.Ctx) error {
 	return c.Next()
 }
 
+// principalFromLocals builds the access principal from what requireAuth stored.
+// A request without a known auth method gets the zero Principal, which every
+// scope check denies.
+func principalFromLocals(c fiber.Ctx) access.Principal {
+	user, _ := c.Locals("user").(*models.User)
+	switch c.Locals("auth_method") {
+	case "session":
+		return access.SessionPrincipal(user)
+	case "token":
+		apiToken, _ := c.Locals("api_token").(*models.APIToken)
+		return access.APITokenPrincipal(user, apiToken)
+	case "oauth":
+		if token, ok := c.Locals("oauth_token").(*oauth.AccessToken); ok && token != nil {
+			return token.Principal
+		}
+	}
+	return access.Principal{User: user}
+}
+
 func (s *Server) requireTokenScope(scope models.TokenScope) fiber.Handler {
 	return func(c fiber.Ctx) error {
-		authMethod, _ := c.Locals("auth_method").(string)
-		if authMethod != "token" {
-			return c.Next()
-		}
-
-		apiToken, ok := c.Locals("api_token").(*models.APIToken)
-		if !ok || !core.TokenHasScope(apiToken, scope) {
-			user, _ := c.Locals("user").(*models.User)
-			metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
-			return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
+		p := principalFromLocals(c)
+		if err := p.Require(scope); err != nil {
+			return sendInsufficientScope(c, p.User)
 		}
 		return c.Next()
 	}
+}
+
+func sendInsufficientScope(c fiber.Ctx, user *models.User) error {
+	metrics.RecordAuthorizationFailure(c.Route().Path, user, "insufficient_token_scope")
+	if c.Locals("auth_method") == "oauth" {
+		c.Set(fiber.HeaderWWWAuthenticate, `Bearer error="insufficient_scope"`)
+	}
+	return SendErrorWithType(c, fiber.StatusForbidden, "API token does not have the required scope", models.AuthorizationErrorType)
 }
 
 // requireSourceNotManaged rejects mutations on config-managed sources.
@@ -222,8 +302,8 @@ func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
 
-	// Global admins bypass specific team admin checks.
-	if user.Role == models.UserRoleAdmin {
+	// Global admins bypass specific team admin checks (not through OAuth).
+	if hasGlobalAdminBypass(c) {
 		return c.Next()
 	}
 
@@ -253,10 +333,8 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 	}
 	teamIDStr := c.Params("teamID")
 
-	// Global admins bypass specific team membership checks.
-	if user.Role == models.UserRoleAdmin {
-		c.Locals("isGlobalAdmin", true)
-		c.Locals("isTeamMember", true)
+	// Global admins bypass specific team membership checks (not through OAuth).
+	if hasGlobalAdminBypass(c) {
 		return c.Next()
 	}
 
@@ -271,10 +349,6 @@ func (s *Server) requireTeamMember(c fiber.Ctx) error {
 		s.log.Error("failed to verify team membership", "error", err, "team_id", teamID, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team membership")
 	}
-
-	// Store status for potential use in handlers (though check ensures access).
-	c.Locals("isGlobalAdmin", false)
-	c.Locals("isTeamMember", isMember)
 
 	if !isMember {
 		s.log.Warn("Team membership denied", "user_id", user.ID, "team_id", teamID)
@@ -298,9 +372,9 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
 	}
 
-	// Check if the user is a global admin
-	if isUserAdmin(c) {
-		return c.Next() // Allow global admins unconditionally
+	// Global admins pass, except through OAuth.
+	if hasGlobalAdminBypass(c) {
+		return c.Next()
 	}
 
 	// Check if the user is a team admin
@@ -319,38 +393,53 @@ func (s *Server) requireTeamAdminOrGlobalAdmin(c fiber.Ctx) error {
 	return c.Next()
 }
 
-// requireTeamHasSource is a middleware that verifies if the requested team has access to the specified source.
-// This must be used after requireTeamMember to ensure team membership is already verified.
-func (s *Server) requireTeamHasSource(c fiber.Ctx) error {
-	// Extract path parameters
-	teamIDStr := c.Params("teamID")
-	sourceIDStr := c.Params("sourceID")
+const authorizedSourceKey = "authorized_source"
 
-	// Parse IDs
-	teamID, err := core.ParseTeamID(teamIDStr)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+// requireTeamHasSource authorizes the caller for the team and source in the
+// path and the route's scope, then stores the access.AuthorizedSource for the
+// handler. It runs after requireTeamMember, which answers non-members first.
+func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
+	return func(c fiber.Ctx) error {
+		teamID, err := core.ParseTeamID(c.Params("teamID"))
+		if err != nil {
+			return SendError(c, fiber.StatusBadRequest, "Invalid team ID: "+err.Error())
+		}
+		sourceID, err := core.ParseSourceID(c.Params("sourceID"))
+		if err != nil {
+			return SendError(c, fiber.StatusBadRequest, "Invalid source ID: "+err.Error())
+		}
+
+		p := principalFromLocals(c)
+		src, err := access.AuthorizeTeamSource(c.RequestCtx(), s.sqlite, p, teamID, sourceID, scope)
+		switch {
+		case err == nil:
+		case errors.Is(err, access.ErrNotTeamMember):
+			return SendErrorWithType(c, fiber.StatusForbidden, "Team membership required", models.AuthorizationErrorType)
+		case errors.Is(err, access.ErrSourceNotInTeam):
+			s.log.Warn("Team does not have access to source", "team_id", teamID, "source_id", sourceID)
+			return SendError(c, fiber.StatusForbidden, "Team does not have access to this source")
+		case errors.Is(err, access.ErrInsufficientScope):
+			return sendInsufficientScope(c, p.User)
+		default:
+			s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
+			return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")
+		}
+
+		c.Locals(authorizedSourceKey, src)
+		return c.Next()
 	}
+}
 
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendError(c, fiber.StatusBadRequest, "Invalid source ID: "+err.Error())
+// authorizedSource returns the source that requireTeamHasSource authorized.
+// When it is missing, it writes a 500 and returns ok=false: the route is
+// registered without the middleware, which is a server bug.
+func (s *Server) authorizedSource(c fiber.Ctx) (src access.AuthorizedSource, ok bool) {
+	src, ok = c.Locals(authorizedSourceKey).(access.AuthorizedSource)
+	if !ok {
+		s.log.Error("route reached handler without source authorization", "path", c.Route().Path)
+		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Authorization context missing", models.GeneralErrorType)
 	}
-
-	// Check if the team has access to the source
-	hasAccess, err := core.TeamHasSourceAccess(c.RequestCtx(), s.sqlite, teamID, sourceID)
-	if err != nil {
-		s.log.Error("Error checking team-source access", "error", err, "team_id", teamID, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Failed to verify team source access")
-	}
-
-	if !hasAccess {
-		s.log.Warn("Team does not have access to source", "team_id", teamID, "source_id", sourceID)
-		return SendError(c, fiber.StatusForbidden, "Team does not have access to this source")
-	}
-
-	// Team has access to the source, continue with the request
-	return c.Next()
+	return src, ok
 }
 
 // notFoundHandler returns a standardized 404 Not Found error for API routes.

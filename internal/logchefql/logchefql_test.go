@@ -1442,3 +1442,99 @@ func TestMapColumnFallback(t *testing.T) {
 		}
 	})
 }
+
+func TestBuildFullQueryFractionalTimeRange(t *testing.T) {
+	params := QueryBuildParams{TableName: "logs.test", TimestampField: "timestamp", StartTime: "2026-10-01 10:43:44.840", EndTime: "2026-10-01 11:43:44.123456789", Timezone: "UTC", Limit: 100}
+	query, err := BuildFullQuery(params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "`timestamp` BETWEEN toDateTime64('2026-10-01 10:43:44.840', 9, 'UTC') AND toDateTime64('2026-10-01 11:43:44.123456789', 9, 'UTC')"
+	if !strings.Contains(query, want) {
+		t.Fatalf("fractional time range lost precision: %s", query)
+	}
+	for _, value := range []string{"2026-10-01 10:43:44.", "2026-10-01 10:43:44.1234567890", "2026-10-01 10:43:44.125' OR 1=1", "2026-02-30 10:43:44.125"} {
+		params.StartTime = value
+		if _, err := BuildFullQuery(params); err == nil {
+			t.Errorf("invalid timestamp %q accepted", value)
+		}
+	}
+}
+
+func TestBuildFullQueryAcceptsRFC3339(t *testing.T) {
+	build := func(start, end, timezone string) (string, error) {
+		return BuildFullQuery(QueryBuildParams{
+			LogchefQL:      `field="value"`,
+			Schema:         testSchema,
+			TableName:      "logs.test",
+			TimestampField: "timestamp",
+			StartTime:      start,
+			EndTime:        end,
+			Timezone:       timezone,
+			Limit:          100,
+		})
+	}
+
+	// RFC3339 bounds are absolute instants, so they are written as UTC
+	// timestamps read in 'UTC', whatever the source timezone.
+	for _, tc := range []struct {
+		name, start, end, timezone, want string
+	}{
+		{"UTC instant in UTC", "2026-10-01T09:00:00Z", "2026-10-01T12:00:00Z", "UTC",
+			"BETWEEN toDateTime('2026-10-01 09:00:00', 'UTC') AND toDateTime('2026-10-01 12:00:00', 'UTC')"},
+		{"browser ISO string with zero milliseconds", "2026-10-01T09:00:00.000Z", "2026-10-01T12:00:00.000Z", "UTC",
+			"BETWEEN toDateTime('2026-10-01 09:00:00', 'UTC') AND toDateTime('2026-10-01 12:00:00', 'UTC')"},
+		{"offset input", "2026-10-01T14:30:00+05:30", "2026-10-01T15:30:00+05:30", "UTC",
+			"BETWEEN toDateTime('2026-10-01 09:00:00', 'UTC') AND toDateTime('2026-10-01 10:00:00', 'UTC')"},
+		{"named source timezone", "2026-10-01T09:00:00Z", "2026-10-01T10:00:00Z", "Asia/Kolkata",
+			"BETWEEN toDateTime('2026-10-01 09:00:00', 'UTC') AND toDateTime('2026-10-01 10:00:00', 'UTC')"},
+		{"fractional seconds keep DateTime64", "2026-10-01T09:00:00.250Z", "2026-10-01T09:00:01.5Z", "UTC",
+			"BETWEEN toDateTime64('2026-10-01 09:00:00.25', 9, 'UTC') AND toDateTime64('2026-10-01 09:00:01.5', 9, 'UTC')"},
+		{"nanoseconds kept", "2026-10-01T09:00:00.123456789+05:30", "2026-10-01T09:00:01Z", "UTC",
+			"BETWEEN toDateTime64('2026-10-01 03:30:00.123456789', 9, 'UTC') AND toDateTime64('2026-10-01 09:00:01', 9, 'UTC')"},
+		{"SQL format keeps the source timezone", "2026-10-01 09:00:00", "2026-10-01 12:00:00", "Asia/Kolkata",
+			"BETWEEN toDateTime('2026-10-01 09:00:00', 'Asia/Kolkata') AND toDateTime('2026-10-01 12:00:00', 'Asia/Kolkata')"},
+		{"mixed bounds each keep their own zone", "2026-10-01T09:00:00Z", "2026-10-01 15:30:00", "Asia/Kolkata",
+			"BETWEEN toDateTime('2026-10-01 09:00:00', 'UTC') AND toDateTime('2026-10-01 15:30:00', 'Asia/Kolkata')"},
+		// Instants of logchef-mcp client/time_test.go vectors, the
+		// client-side conversion this replaces.
+		{"sidecar vector: offset", "2026-10-01T10:30:00+05:30", "2026-10-01T06:00:00Z", "UTC",
+			"BETWEEN toDateTime('2026-10-01 05:00:00', 'UTC') AND toDateTime('2026-10-01 06:00:00', 'UTC')"},
+		{"sidecar vector: fraction kept", "2026-10-01T05:00:00.125Z", "2026-10-01T06:00:00Z", "Asia/Kolkata",
+			"BETWEEN toDateTime64('2026-10-01 05:00:00.125', 9, 'UTC') AND toDateTime64('2026-10-01 06:00:00', 9, 'UTC')"},
+		// 2026-11-01 01:00-02:00 repeats in America/New_York. 05:30Z is the
+		// first 01:30 (EDT) and 06:30Z the second (EST). A local wall clock
+		// would write both as '2026-11-01 01:30:00'.
+		{"DST fold: both occurrences stay distinct", "2026-11-01T05:30:00Z", "2026-11-01T06:30:00Z", "America/New_York",
+			"BETWEEN toDateTime('2026-11-01 05:30:00', 'UTC') AND toDateTime('2026-11-01 06:30:00', 'UTC')"},
+		{"DST fold: offsets of both occurrences", "2026-11-01T01:30:00-04:00", "2026-11-01T01:30:00-05:00", "America/New_York",
+			"BETWEEN toDateTime('2026-11-01 05:30:00', 'UTC') AND toDateTime('2026-11-01 06:30:00', 'UTC')"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sql, err := build(tc.start, tc.end, tc.timezone)
+			if err != nil {
+				t.Fatalf("BuildFullQuery: %v", err)
+			}
+			if !strings.Contains(sql, tc.want) {
+				t.Fatalf("sql = %s\nwant it to contain %s", sql, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct {
+		name, start, timezone, wantErr string
+	}{
+		{"quote after an RFC3339 time", "2026-10-01T09:00:00Z'); DROP TABLE logs; --", "UTC", "invalid time format"},
+		{"boolean injection after an RFC3339 time", "2026-10-01T09:00:00Z' OR '1'='1", "UTC", "invalid time format"},
+		{"T without a zone", "2026-10-01T09:00:00", "UTC", "invalid time format"},
+		{"impossible date", "2026-02-30T09:00:00Z", "UTC", "invalid time format"},
+		{"RFC3339 with a dangerous timezone", "2026-10-01T09:00:00Z", "UTC'); DROP TABLE logs; --", "invalid timezone"},
+	} {
+		t.Run("rejects "+tc.name, func(t *testing.T) {
+			_, err := build(tc.start, "2026-10-01T12:00:00Z", tc.timezone)
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("err = %v, want %q", err, tc.wantErr)
+			}
+		})
+	}
+}

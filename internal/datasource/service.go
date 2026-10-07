@@ -485,7 +485,7 @@ func (s *Service) CheckSourceConnectionStatus(ctx context.Context, source *model
 }
 
 func (s *Service) GetSourceHealth(ctx context.Context, sourceID models.SourceID) (models.SourceHealth, error) {
-	source, err := s.db.GetSource(ctx, sourceID)
+	source, err := s.loadSource(ctx, sourceID)
 	if err != nil {
 		return models.SourceHealth{}, err
 	}
@@ -582,8 +582,29 @@ func (s *Service) InitializeAllSources(ctx context.Context) error {
 	return nil
 }
 
-func (s *Service) sourceAndProvider(ctx context.Context, sourceID models.SourceID) (*models.Source, Provider, error) {
+// StoreError is a metadata-store failure while a datasource operation loads
+// its source. Its text is the store's own error, which can describe the
+// database, so callers outside the trusted UI log it and show a generic
+// message. A missing source is not a StoreError.
+type StoreError struct {
+	Err error
+}
+
+func (e *StoreError) Error() string { return e.Err.Error() }
+func (e *StoreError) Unwrap() error { return e.Err }
+
+// loadSource reads a source from the metadata store and marks a failure
+// other than not-found as a StoreError.
+func (s *Service) loadSource(ctx context.Context, sourceID models.SourceID) (*models.Source, error) {
 	source, err := s.db.GetSource(ctx, sourceID)
+	if err != nil && !errors.Is(err, models.ErrNotFound) {
+		return nil, &StoreError{Err: err}
+	}
+	return source, err
+}
+
+func (s *Service) sourceAndProvider(ctx context.Context, sourceID models.SourceID) (*models.Source, Provider, error) {
+	source, err := s.loadSource(ctx, sourceID)
 	if err != nil {
 		return nil, nil, err
 	}

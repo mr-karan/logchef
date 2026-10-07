@@ -103,6 +103,11 @@ type QueryConfig struct {
 	DefaultTimeoutSeconds int `koanf:"default_timeout_seconds"`
 	// MaxTimeoutSeconds caps preview query timeout requests.
 	MaxTimeoutSeconds int `koanf:"max_timeout_seconds"`
+	// MCPCallTimeoutSeconds bounds one whole MCP tool call. fasthttp gives no
+	// per-request disconnect signal, so this is what ends abandoned calls and
+	// frees their admission slots. The effective value is at most
+	// MaxTimeoutSeconds. The HTTP API is not affected.
+	MCPCallTimeoutSeconds int `koanf:"mcp_call_timeout_seconds"`
 	// MaxConcurrentPerUser limits active queries per user, counted separately
 	// for each interactive class (preview, histogram).
 	MaxConcurrentPerUser int `koanf:"max_concurrent_per_user"`
@@ -170,6 +175,16 @@ type ServerConfig struct {
 	// ProxyHeader is the forwarding header read for the client IP when the
 	// direct peer is a trusted proxy. Defaults to X-Forwarded-For.
 	ProxyHeader string `koanf:"proxy_header"`
+	// PublicURL is the canonical external URL of this Logchef instance, with
+	// no trailing slash. It is the OAuth issuer and the base of the OAuth
+	// resource identifiers. Required when auth.oauth.enabled is true.
+	PublicURL string `koanf:"public_url"`
+	// BrowserURL is the origin browsers use, when it differs from PublicURL
+	// (for example a UI host behind an SSO proxy and an API host without
+	// it). OAuth advertises its authorization endpoint and serves consent on
+	// this origin; the issuer, token endpoint and resources stay on
+	// PublicURL. Optional; defaults to PublicURL.
+	BrowserURL string `koanf:"browser_url"`
 }
 
 // IsSecureCookie returns whether cookies should have the Secure flag set.
@@ -252,8 +267,6 @@ type OIDCConfig struct {
 	RedirectURL  string   `koanf:"redirect_url"`
 	Scopes       []string `koanf:"scopes"`
 
-	CLIClientID string `koanf:"cli_client_id"`
-
 	// SkipEmailVerifiedCheck disables the email_verified claim check during
 	// OIDC authentication. Set to true only if your OIDC provider does not
 	// include the email_verified claim but the email address is verified by
@@ -285,7 +298,49 @@ type AuthConfig struct {
 	// AutoProvision enables just-in-time user creation on first OIDC login
 	// from an allowed company domain, instead of failing with "user not found".
 	AutoProvision AutoProvisionConfig `koanf:"auto_provision"`
+	// OAuth turns Logchef into an OAuth authorization server for the CLI and
+	// MCP hosts. Disabled by default.
+	OAuth OAuthConfig `koanf:"oauth"`
 }
+
+// OAuthConfig configures Logchef's own OAuth authorization server. When
+// Enabled is false, no OAuth route or metadata exists.
+type OAuthConfig struct {
+	Enabled bool `koanf:"enabled"`
+	// Clients are the pre-registered public web clients (for example an MCP
+	// host). The native "logchef-cli" client is built in and is not listed here.
+	Clients []OAuthClientConfig `koanf:"clients"`
+	// MCPAllowedOrigins are browser origins, besides server.public_url, that
+	// may call /mcp (for example a browser-based MCP inspector). A request
+	// without an Origin header is always allowed.
+	MCPAllowedOrigins []string `koanf:"mcp_allowed_origins"`
+}
+
+// OAuthClientConfig is one pre-registered hosted (web) OAuth client. It may
+// only obtain tokens for /mcp. Copy each redirect URI exactly from the host's
+// management page; matching is exact. Known hosted redirect URIs:
+//
+//   - Claude.ai and Claude Desktop custom connectors: https://claude.ai/api/mcp/auth_callback
+//   - ChatGPT connectors: https://chatgpt.com/connector_platform_oauth_redirect
+//   - Cursor web agents: https://www.cursor.com/agents/mcp/oauth/callback
+//
+// Local MCP hosts (Claude Code, Codex CLI, Cursor desktop) use the built-in
+// OAuthMCPClientID instead.
+type OAuthClientConfig struct {
+	ID           string   `koanf:"id"`
+	Name         string   `koanf:"name"`
+	RedirectURIs []string `koanf:"redirect_uris"`
+}
+
+// Built-in native OAuth clients. Both redirect to a loopback listener. They
+// differ only in the resource they may obtain tokens for.
+const (
+	// OAuthCLIClientID is the Logchef CLI. Its tokens are for /api only.
+	OAuthCLIClientID = "logchef-cli"
+	// OAuthMCPClientID is for local MCP hosts such as Claude Code, Codex CLI
+	// and Cursor desktop. Its tokens are for /mcp only.
+	OAuthMCPClientID = "logchef-mcp"
+)
 
 // AutoProvisionConfig controls JIT (just-in-time) user provisioning on first
 // OIDC login. When Enabled, a user authenticating via OIDC for the first time
@@ -390,6 +445,7 @@ const (
 	defaultQueryMaxResponseBytes     = 64 * 1024 * 1024
 	defaultQueryDefaultTimeoutSecs   = 30
 	defaultQueryMaxTimeoutSecs       = 300
+	defaultQueryMCPCallTimeoutSecs   = 60
 	defaultQueryMaxConcurrentPerUser = 3
 	defaultQueryMaxConcurrentGlobal  = 30
 
@@ -534,6 +590,118 @@ func validateTrustedProxies(proxies []string) error {
 	return nil
 }
 
+// validateOAuth checks the OAuth server settings. It runs only when OAuth is
+// enabled, so a disabled block never stops startup.
+func validateOAuth(cfg *OAuthConfig, publicURL, browserURL string) error {
+	if !cfg.Enabled {
+		return nil
+	}
+	if publicURL == "" {
+		return fmt.Errorf("server.public_url is required when auth.oauth.enabled is true (either in file or %sSERVER__PUBLIC_URL)", envPrefix)
+	}
+	if err := validateOAuthOrigin("server.public_url", publicURL); err != nil {
+		return err
+	}
+	if browserURL != "" {
+		if err := validateOAuthOrigin("server.browser_url", browserURL); err != nil {
+			return err
+		}
+	}
+	if err := validateMCPAllowedOrigins(cfg.MCPAllowedOrigins); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{}, len(cfg.Clients))
+	for i, client := range cfg.Clients {
+		if client.ID == "" {
+			return fmt.Errorf("auth.oauth.clients[%d].id is required", i)
+		}
+		if client.ID == OAuthCLIClientID || client.ID == OAuthMCPClientID {
+			return fmt.Errorf("auth.oauth.clients[%d].id %q is reserved for a built-in client", i, client.ID)
+		}
+		if _, dup := seen[client.ID]; dup {
+			return fmt.Errorf("auth.oauth.clients[%d].id %q is not unique", i, client.ID)
+		}
+		seen[client.ID] = struct{}{}
+		if client.Name == "" {
+			return fmt.Errorf("auth.oauth.clients[%d].name is required", i)
+		}
+		if len(client.RedirectURIs) == 0 {
+			return fmt.Errorf("auth.oauth.clients[%d].redirect_uris must not be empty", i)
+		}
+		for _, raw := range client.RedirectURIs {
+			u, err := url.Parse(raw)
+			if err != nil || u.Scheme != "https" || u.Host == "" || u.Fragment != "" || strings.Contains(raw, "#") {
+				return fmt.Errorf("auth.oauth.clients[%d].redirect_uris entry %q must be an absolute https URL without a fragment", i, raw)
+			}
+		}
+	}
+	return nil
+}
+
+// validateMCPAllowedOrigins requires each entry to be an exact browser origin.
+func validateMCPAllowedOrigins(origins []string) error {
+	for i, origin := range origins {
+		u, err := url.Parse(origin)
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.Scheme+"://"+u.Host != origin {
+			return fmt.Errorf("auth.oauth.mcp_allowed_origins[%d] %q must be an origin: scheme://host[:port] with no path", i, origin)
+		}
+	}
+	return nil
+}
+
+// validateOAuthOrigin requires an origin: scheme, host and optional port, with
+// no path, trailing slash, query or fragment. It must be https, except on a
+// loopback host for local development. key names the setting in errors.
+func validateOAuthOrigin(key, raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || strings.ContainsAny(raw, "?#") || strings.HasSuffix(raw, "/") {
+		return fmt.Errorf("%s %q must be an absolute URL with no trailing slash, query or fragment", key, raw)
+	}
+	// RFC 8414 path-inserted discovery is not implemented, so an issuer with a
+	// path would advertise metadata that clients cannot find.
+	if u.Path != "" || u.RawPath != "" || u.Opaque != "" || u.User != nil {
+		return fmt.Errorf("%s %q must be an origin only (scheme, host and optional port); a base path is not supported with OAuth", key, raw)
+	}
+	switch {
+	case u.Scheme == "https":
+	case u.Scheme == "http" && isLoopbackHost(u.Hostname()):
+	default:
+		return fmt.Errorf("%s %q must use https (http is allowed only for localhost, 127.0.0.1 and ::1)", key, raw)
+	}
+	// Browsers send Origin in canonical form: lowercase scheme and host, no
+	// default port. The origin is compared as a string, so require that form.
+	if canonical := canonicalOrigin(u); raw != canonical {
+		return fmt.Errorf("%s %q is not in canonical form; use %q (lowercase scheme and host, no default port)", key, raw, canonical)
+	}
+	return nil
+}
+
+// canonicalOrigin serializes an origin the way browsers send it in Origin.
+func canonicalOrigin(u *url.URL) string {
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	port := u.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	if port != "" {
+		host += ":" + port
+	}
+	return scheme + "://" + host
+}
+
+// isLoopbackHost reports whether host is localhost or a loopback IP.
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation is a flat sequence of independent required-field checks
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
@@ -566,6 +734,10 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 	}
 	if len(cfg.Auth.APITokenSecret) < 32 {
 		return fmt.Errorf("api_token_secret must be at least 32 characters long for security")
+	}
+
+	if err := validateOAuth(&cfg.Auth.OAuth, cfg.Server.PublicURL, cfg.Server.BrowserURL); err != nil {
+		return err
 	}
 
 	if cfg.Demo.ShowLoginCredentials && !cfg.Demo.ReadOnly {
@@ -731,6 +903,9 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	if !k.Exists("query.max_timeout_seconds") {
 		cfg.Query.MaxTimeoutSeconds = defaultQueryMaxTimeoutSecs
 	}
+	if !k.Exists("query.mcp_call_timeout_seconds") {
+		cfg.Query.MCPCallTimeoutSeconds = defaultQueryMCPCallTimeoutSecs
+	}
 	if !k.Exists("query.max_concurrent_per_user") {
 		cfg.Query.MaxConcurrentPerUser = defaultQueryMaxConcurrentPerUser
 	}
@@ -757,6 +932,12 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	}
 	if cfg.Query.DefaultTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
 		cfg.Query.DefaultTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
+	}
+	if cfg.Query.MCPCallTimeoutSeconds <= 0 {
+		cfg.Query.MCPCallTimeoutSeconds = defaultQueryMCPCallTimeoutSecs
+	}
+	if cfg.Query.MCPCallTimeoutSeconds > cfg.Query.MaxTimeoutSeconds {
+		cfg.Query.MCPCallTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
 	}
 
 	if !k.Exists("export.max_rows") {

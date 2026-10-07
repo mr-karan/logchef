@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -23,10 +24,10 @@ func TestCreateAPITokenPersistsScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
-	if !TokenHasScope(created.APIToken, models.TokenScopeLogsRead) {
+	if access.APITokenPrincipal(nil, created.APIToken).Require(models.TokenScopeLogsRead) != nil {
 		t.Fatal("created token does not grant logs:read")
 	}
-	if TokenHasScope(created.APIToken, models.TokenScopeSavedQueriesWrite) {
+	if access.APITokenPrincipal(nil, created.APIToken).Require(models.TokenScopeSavedQueriesWrite) == nil {
 		t.Fatal("created token unexpectedly grants saved_queries:write")
 	}
 
@@ -34,10 +35,10 @@ func TestCreateAPITokenPersistsScopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AuthenticateAPIToken: %v", err)
 	}
-	if !TokenHasScope(authenticatedToken, models.TokenScopeSourcesRead) {
+	if access.APITokenPrincipal(nil, authenticatedToken).Require(models.TokenScopeSourcesRead) != nil {
 		t.Fatal("authenticated token lost sources:read scope")
 	}
-	if TokenHasScope(authenticatedToken, models.TokenScopeTokensWrite) {
+	if access.APITokenPrincipal(nil, authenticatedToken).Require(models.TokenScopeTokensWrite) == nil {
 		t.Fatal("authenticated token unexpectedly grants tokens:write")
 	}
 }

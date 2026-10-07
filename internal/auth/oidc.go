@@ -186,12 +186,6 @@ func (p *OIDCProvider) GetAuthURL(state string) string {
 	return p.oauthConf.AuthCodeURL(state)
 }
 
-// VerifyIDToken verifies an ID token string and returns the parsed token.
-// Issuer validation follows the configured allow-list (see verify).
-func (p *OIDCProvider) VerifyIDToken(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
-	return p.verify(ctx, rawIDToken)
-}
-
 // GetIssuer returns the OIDC issuer URL.
 func (p *OIDCProvider) GetIssuer() string {
 	return p.oidcCfg.ProviderURL

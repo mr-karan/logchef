@@ -1,7 +1,8 @@
 use anyhow::Result;
-use logchef_core::Config;
 use logchef_core::api::Client;
-use logchef_core::config::Context;
+use logchef_core::auth::SavedCredential;
+use logchef_core::config::{Context, ContextAuth};
+use logchef_core::{Config, Error};
 
 use crate::cli::GlobalArgs;
 
@@ -11,13 +12,7 @@ pub struct AuthedSession {
 }
 
 pub fn authed(config: &Config, global: &GlobalArgs) -> Result<AuthedSession> {
-    let resolved = resolve(config, global)?;
-    enforce_auth(&resolved, global)?;
-    let client = build_client(&resolved.ctx, global.token.as_deref(), None)?;
-    Ok(AuthedSession {
-        client,
-        ctx: resolved.ctx,
-    })
+    authed_with_timeout(config, global, |ctx| ctx.timeout_secs)
 }
 
 pub fn authed_with_timeout(
@@ -26,9 +21,8 @@ pub fn authed_with_timeout(
     pick_timeout: impl FnOnce(&Context) -> u64,
 ) -> Result<AuthedSession> {
     let resolved = resolve(config, global)?;
-    enforce_auth(&resolved, global)?;
     let timeout_secs = pick_timeout(&resolved.ctx);
-    let client = build_client(&resolved.ctx, global.token.as_deref(), Some(timeout_secs))?;
+    let client = client_for(&resolved, global, timeout_secs)?;
     Ok(AuthedSession {
         client,
         ctx: resolved.ctx,
@@ -84,30 +78,37 @@ pub fn resolve(config: &Config, global: &GlobalArgs) -> Result<ResolvedContext> 
     })
 }
 
-fn enforce_auth(resolved: &ResolvedContext, global: &GlobalArgs) -> Result<()> {
-    if resolved.ctx.is_authenticated() || global.token.is_some() {
-        return Ok(());
+/// Builds a client with the credential that applies: `--token` or
+/// `LOGCHEF_AUTH_TOKEN` first, then the context's saved PAT or OAuth grant.
+/// Without either, the error names the fix and no prompt or browser opens.
+pub fn client_for(
+    resolved: &ResolvedContext,
+    global: &GlobalArgs,
+    timeout_secs: u64,
+) -> Result<Client> {
+    let client = Client::new(&resolved.ctx.server_url, timeout_secs)?;
+    if let Some(token) = &global.token {
+        return Ok(client.with_token(token.clone()));
     }
-    if resolved.is_ephemeral {
-        anyhow::bail!(
-            "Token required for server '{}'. Use --token or run 'logchef auth --server {}'.",
-            resolved.ctx.server_url,
-            resolved.ctx.server_url
-        );
-    }
-    anyhow::bail!(
-        "Not authenticated for context '{}'. Run 'logchef auth' first.",
-        resolved.name
-    );
-}
-
-fn build_client(ctx: &Context, token: Option<&str>, timeout_secs: Option<u64>) -> Result<Client> {
-    let client = match timeout_secs {
-        Some(t) => Client::from_context_with_timeout(ctx, t)?,
-        None => Client::from_context(ctx)?,
-    };
-    match token {
-        Some(t) => Ok(client.with_token(t.to_string())),
-        None => Ok(client),
+    match &resolved.ctx.auth {
+        Some(ContextAuth::Pat { token, .. }) => Ok(client.with_token(token.clone())),
+        Some(ContextAuth::OAuth(credential)) => Ok(client.with_oauth(SavedCredential {
+            config_path: Config::config_path()?,
+            context: resolved.name.clone(),
+            credential: credential.clone(),
+        })),
+        None if resolved.is_ephemeral => Err(Error::AuthRequired {
+            reason: format!("No token for server '{}'", resolved.ctx.server_url),
+            fix: format!(
+                "pass --token, or run `logchef auth --server {}`",
+                logchef_core::error::shell_quote(&resolved.ctx.server_url)
+            ),
+        }
+        .into()),
+        None => Err(Error::auth_required(
+            &resolved.name,
+            format!("Context '{}' is not signed in", resolved.name),
+        )
+        .into()),
     }
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -118,7 +119,25 @@ func RefreshSourceInspection(ctx context.Context, ds *datasource.Service, source
 	return result, err
 }
 
-func InspectSourceActivity(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, refresh bool) (*datasource.SourceActivity, error) {
+// InspectTeamSourceActivity returns recent ingestion activity for a source
+// the caller reached through a team.
+func InspectTeamSourceActivity(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, refresh bool) (*datasource.SourceActivity, error) {
+	return inspectSourceActivity(ctx, ds, src.SourceID(), refresh)
+}
+
+// InspectSourceActivityAsAdmin returns recent ingestion activity for any
+// source. The principal must be a global admin and hold sources:read.
+func InspectSourceActivityAsAdmin(ctx context.Context, ds *datasource.Service, p access.Principal, sourceID models.SourceID, refresh bool) (*datasource.SourceActivity, error) {
+	if err := p.RequireGlobalAdmin(); err != nil {
+		return nil, err
+	}
+	if err := p.Require(models.TokenScopeSourcesRead); err != nil {
+		return nil, err
+	}
+	return inspectSourceActivity(ctx, ds, sourceID, refresh)
+}
+
+func inspectSourceActivity(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, refresh bool) (*datasource.SourceActivity, error) {
 	var result *datasource.SourceActivity
 	var err error
 	if refresh {

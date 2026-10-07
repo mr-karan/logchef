@@ -21,8 +21,20 @@ type Querier interface {
 	// Team Sources
 	// Add a data source to a team
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
+	ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
+	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
+	// Record the first decision on a pending, unexpired request. Zero rows means
+	// the request is unknown, expired or already decided.
+	ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOAuthAuthRequestDecisionParams) (OauthAuthRequest, error)
 	// Mark an export job as complete and return its ID
 	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
+	// Single-use consumption. Exactly one concurrent caller gets the row.
+	ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (OauthAuthRequest, error)
+	// Single-use consumption of an approved code. Expiry is checked here, before
+	// consumption, so an approved but expired code never issues tokens.
+	ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (sql.NullInt64, error)
+	// Rotation claim. Exactly one concurrent caller gets the row.
+	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
 	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
 	// Count shared (non-personal) collections that contain the given saved query and
@@ -45,6 +57,12 @@ type Querier interface {
 	// Export Jobs
 	// Persist an async export job
 	CreateExportJob(ctx context.Context, arg CreateExportJobParams) error
+	// OAuth authorization server ------------------------------------------------
+	// Times are Unix milliseconds (see 000033_oauth.up.sql). Every *_hash
+	// argument is an HMAC hex digest, never a plaintext code or token.
+	CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAuthRequestParams) error
+	CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error
+	CreateOAuthGrant(ctx context.Context, arg CreateOAuthGrantParams) (OauthGrant, error)
 	// Query Shares
 	// Persist an ad hoc query share token
 	CreateQueryShare(ctx context.Context, arg CreateQueryShareParams) error
@@ -72,6 +90,13 @@ type Querier interface {
 	DeleteDashboard(ctx context.Context, id int64) (int64, error)
 	// Delete expired export jobs
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
+	DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt int64) error
+	DeleteExpiredOAuthAuthRequests(ctx context.Context, now int64) error
+	DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt int64) error
+	// Delete refresh rows only when no row of the same grant is still live. A
+	// consumed row therefore stays while its family can still be refreshed, so a
+	// replay of it is still detected.
+	DeleteExpiredOAuthRefreshFamilies(ctx context.Context, now int64) error
 	// Delete all sessions whose expiry is at or before the given time
 	DeleteExpiredSessions(ctx context.Context, expiresAt time.Time) error
 	// Delete a query share and return its token
@@ -89,6 +114,7 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
 	DeleteUserSessions(ctx context.Context, userID int64) error
+	DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error)
 	// Mark an export job as failed and return its ID
 	FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error)
 	// Get an API token by ID
@@ -105,6 +131,11 @@ type Querier interface {
 	// Retrieve an export job by ID
 	GetExportJob(ctx context.Context, id string) (ExportJob, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID int64) (AlertHistory, error)
+	GetOAuthAuthCodeState(ctx context.Context, codeHash sql.NullString) (GetOAuthAuthCodeStateRow, error)
+	GetOAuthAuthRequest(ctx context.Context, id string) (OauthAuthRequest, error)
+	GetOAuthGrant(ctx context.Context, id int64) (OauthGrant, error)
+	GetOAuthRefreshTokenState(ctx context.Context, tokenHash string) (GetOAuthRefreshTokenStateRow, error)
+	GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
 	// Find the caller's personal collection if it exists
 	GetPersonalCollection(ctx context.Context, createdBy sql.NullInt64) (Collection, error)
 	// Retrieve an ad hoc query share by token with creator details
@@ -142,6 +173,10 @@ type Querier interface {
 	IncrementQueryStats(ctx context.Context, arg IncrementQueryStatsParams) error
 	// Alert history queries
 	InsertAlertHistory(ctx context.Context, arg InsertAlertHistoryParams) (AlertHistory, error)
+	// Insert only while the grant is active, so a token is never issued under a
+	// grant revoked a moment earlier.
+	InsertOAuthAccessToken(ctx context.Context, arg InsertOAuthAccessTokenParams) (int64, error)
+	InsertOAuthRefreshToken(ctx context.Context, arg InsertOAuthRefreshTokenParams) (int64, error)
 	// Query history ---------------------------------------------------------------
 	// Record one executed query and return its id.
 	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
@@ -184,6 +219,7 @@ type Querier interface {
 	ListManagedTeams(ctx context.Context) ([]Team, error)
 	// Get all users managed by provisioning config
 	ListManagedUsers(ctx context.Context) ([]User, error)
+	ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]OauthGrant, error)
 	// Most recent query_history rows across all users, newest first, enriched with
 	// the executing user's email and the source's display name. LEFT JOIN on
 	// sources so history survives a deleted source (source_name is NULL then).
@@ -230,6 +266,12 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
+	// Record one poll. An early poll on a nonterminal request (not expired, not
+	// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
+	// last_polled_at, so on_time is false. Expired and denied requests are
+	// never slowed down: they report their terminal state on every poll. Every
+	// SET expression reads the pre-update row.
+	RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection
@@ -239,6 +281,15 @@ type Querier interface {
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
 	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error)
+	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)
+	// Revoke the grant that owns an access-token ID hash or refresh-token hash,
+	// only when the grant belongs to the given client.
+	RevokeOAuthGrantByToken(ctx context.Context, arg RevokeOAuthGrantByTokenParams) error
+	RevokeOAuthGrantForUser(ctx context.Context, arg RevokeOAuthGrantForUserParams) (int64, error)
+	// Attach the code to an approved request. A request carries at most one code.
+	SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error)
+	SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error
+	SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error
 	// Mark a team as managed/unmanaged
@@ -257,6 +308,7 @@ type Querier interface {
 	// Top users by total query count over rollup rows on/after `since`, joined to
 	// users for the email.
 	TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error)
+	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error
 	// Update the last used timestamp for an API token

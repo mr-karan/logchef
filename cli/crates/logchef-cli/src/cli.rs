@@ -3,8 +3,8 @@ use clap::{CommandFactory, Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 use crate::commands::{
-    auth, collections, completions, config, doctor, explain, fields, find, histogram, history,
-    open, query, saved_queries, schema, skills, sources, sql, tail, teams, whoami,
+    agent, auth, collections, completions, config, doctor, explain, fields, find, histogram,
+    history, open, query, saved_queries, schema, skills, sources, sql, tail, teams, whoami,
 };
 
 const LONG_ABOUT: &str = "\
@@ -136,6 +136,9 @@ enum Commands {
     #[command(about = "Manage CLI configuration")]
     Config(config::ConfigArgs),
 
+    #[command(about = "Preview how to connect a coding agent to Logchef")]
+    Agent(agent::AgentArgs),
+
     #[command(about = "Show bundled skills for using Logchef")]
     Skills(skills::SkillsArgs),
 
@@ -161,11 +164,16 @@ impl Cli {
         tracing_subscriber::fmt()
             .with_env_filter(filter)
             .with_target(false)
+            .with_writer(std::io::stderr)
             .init();
 
         let quiet = self.quiet;
-        // The completions command emits a script; keep it free of any notice.
-        let run_update_check = !matches!(self.command, Some(Commands::Completions(_)));
+        // The completions command emits a script, and the agent preview is
+        // read-only (the notifier writes a cache file); skip the notice for both.
+        let run_update_check = !matches!(
+            self.command,
+            Some(Commands::Completions(_) | Commands::Agent(_))
+        );
 
         let global = GlobalArgs {
             context: self.context,
@@ -193,6 +201,7 @@ impl Cli {
             Some(Commands::Schema(args)) => schema::run(args, global).await,
             Some(Commands::Doctor(args)) => doctor::run(args, global).await,
             Some(Commands::Config(args)) => config::run(args).await,
+            Some(Commands::Agent(args)) => agent::run(args, global).await,
             Some(Commands::Skills(args)) => skills::run(args).await,
             Some(Commands::Completions(args)) => completions::run(args).await,
             None => {

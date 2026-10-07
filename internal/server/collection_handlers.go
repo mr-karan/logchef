@@ -15,22 +15,22 @@ func parseCollectionID(c fiber.Ctx) (int, error) {
 	return int(id), err
 }
 
-func mapCollectionError(c fiber.Ctx, err error) error {
+func mapCollectionError(c fiber.Ctx, err error) (handled bool, sendErr error) {
 	switch {
 	case errors.Is(err, core.ErrCollectionNotFound):
-		return SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
+		return true, SendErrorWithType(c, fiber.StatusNotFound, "Collection not found", models.NotFoundErrorType)
 	case errors.Is(err, core.ErrCollectionForbidden):
-		return SendErrorWithType(c, fiber.StatusForbidden, "Only collection owners can perform this action", models.AuthorizationErrorType)
+		return true, SendErrorWithType(c, fiber.StatusForbidden, "Only collection owners can perform this action", models.AuthorizationErrorType)
 	case errors.Is(err, core.ErrPersonalCollectionImmutable):
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Personal collections cannot be modified or deleted", models.ValidationErrorType)
+		return true, SendErrorWithType(c, fiber.StatusBadRequest, "Personal collections cannot be modified or deleted", models.ValidationErrorType)
 	case errors.Is(err, core.ErrInvalidCollectionRole):
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Role must be 'owner' or 'member'", models.ValidationErrorType)
+		return true, SendErrorWithType(c, fiber.StatusBadRequest, "Role must be 'owner' or 'member'", models.ValidationErrorType)
 	case errors.Is(err, core.ErrLastOwnerRemoval):
-		return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ValidationErrorType)
+		return true, SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ValidationErrorType)
 	case errors.Is(err, core.ErrQueryNotFound):
-		return SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
+		return true, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
 	}
-	return nil
+	return false, nil
 }
 
 // handleListCollections returns the caller's collections (auto-creates personal).
@@ -55,8 +55,8 @@ func (s *Server) handleCreateCollection(c fiber.Ctx) error {
 
 	collection, err := core.CreateCollection(c.RequestCtx(), s.sqlite, s.log, req.Name, req.Description, user.ID)
 	if err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		s.log.Error("failed to create collection", "error", err, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
@@ -74,8 +74,8 @@ func (s *Server) handleGetCollection(c fiber.Ctx) error {
 
 	collection, _, err := core.GetCollectionForUser(c.RequestCtx(), s.sqlite, s.log, id, user.ID)
 	if err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load collection", models.GeneralErrorType)
 	}
@@ -97,8 +97,8 @@ func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 
 	updated, err := core.UpdateCollection(c.RequestCtx(), s.sqlite, s.log, id, user.ID, req.Name, req.Description)
 	if err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		s.log.Error("failed to update collection", "error", err, "collection_id", id)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
@@ -115,8 +115,8 @@ func (s *Server) handleDeleteCollection(c fiber.Ctx) error {
 	}
 
 	if err := core.DeleteCollection(c.RequestCtx(), s.sqlite, s.log, id, user.ID); err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		s.log.Error("failed to delete collection", "error", err, "collection_id", id)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to delete collection", models.GeneralErrorType)
@@ -126,15 +126,14 @@ func (s *Server) handleDeleteCollection(c fiber.Ctx) error {
 
 // handleListCollectionMembers returns members of a collection.
 func (s *Server) handleListCollectionMembers(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	members, err := core.ListCollectionMembers(c.RequestCtx(), s.sqlite, s.log, id, user.ID)
+	members, err := core.ListCollectionMembers(c.RequestCtx(), s.sqlite, s.log, id, principalFromLocals(c))
 	if err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list members", models.GeneralErrorType)
 	}
@@ -153,8 +152,8 @@ func (s *Server) handleAddCollectionMember(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 	if err := core.AddCollectionMember(c.RequestCtx(), s.sqlite, s.log, id, user.ID, req.UserID, req.Role); err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
@@ -174,8 +173,8 @@ func (s *Server) handleRemoveCollectionMember(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid user id", models.ValidationErrorType)
 	}
 	if err := core.RemoveCollectionMember(c.RequestCtx(), s.sqlite, s.log, id, user.ID, models.UserID(userIDNum)); err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
@@ -191,8 +190,8 @@ func (s *Server) handleListCollectionItems(c fiber.Ctx) error {
 	}
 	items, err := core.ListCollectionItems(c.RequestCtx(), s.sqlite, s.log, id, user.ID)
 	if err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to list items", models.GeneralErrorType)
 	}
@@ -215,8 +214,8 @@ func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 	if err := core.AddCollectionItem(c.RequestCtx(), s.sqlite, s.log, id, user.ID, req.SavedQueryID, req.SortOrder); err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
@@ -236,8 +235,8 @@ func (s *Server) handleRemoveCollectionItem(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid query id", models.ValidationErrorType)
 	}
 	if err := core.RemoveCollectionItem(c.RequestCtx(), s.sqlite, s.log, id, user.ID, queryIDNum); err != nil {
-		if mapped := mapCollectionError(c, err); mapped != nil {
-			return mapped
+		if handled, sendErr := mapCollectionError(c, err); handled {
+			return sendErr
 		}
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}

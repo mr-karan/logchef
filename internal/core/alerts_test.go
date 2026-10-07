@@ -344,7 +344,7 @@ func TestAlertQueryEvalWiring(t *testing.T) {
 		ThresholdOperator: models.AlertThresholdGreaterThan,
 		ThresholdValue:    10,
 	}
-	resp, err := TestAlertQuery(ctx, db, ds, src.ID, req)
+	resp, err := testAlertQuery(ctx, db, ds, src.ID, req)
 	if err != nil {
 		t.Fatalf("TestAlertQuery: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestAlertQueryNoRowsIsGraceful(t *testing.T) {
 		ThresholdOperator: models.AlertThresholdGreaterThan,
 		ThresholdValue:    10,
 	}
-	resp, err := TestAlertQuery(ctx, db, ds, src.ID, req)
+	resp, err := testAlertQuery(ctx, db, ds, src.ID, req)
 	if err != nil {
 		t.Fatalf("TestAlertQuery: %v", err)
 	}

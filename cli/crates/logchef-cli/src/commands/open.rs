@@ -124,7 +124,20 @@ pub async fn run(args: OpenArgs, global: GlobalArgs) -> Result<()> {
         pairs.push(("limit", limit.to_string()));
     }
 
-    let url = explorer_url(&ctx.server_url, &pairs)?.to_string();
+    // Browser links use the server's web UI address; API calls stay on
+    // server_url. An older server, or one that cannot be reached, gets the
+    // previous behavior: links on server_url.
+    let ui_url = match client.get_meta().await {
+        Ok(meta) => meta.data.ui_url,
+        Err(e) => {
+            eprintln!(
+                "warning: could not read the server's web UI address ({e}); linking to {}",
+                ctx.server_url
+            );
+            None
+        }
+    };
+    let url = explorer_url(ui_url.as_deref().unwrap_or(&ctx.server_url), &pairs)?.to_string();
 
     if args.print {
         println!("{}", url);

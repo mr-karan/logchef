@@ -18,11 +18,11 @@ import (
 // for logs). Routed through the datasource service; sources whose provider
 // lacks the log_context capability get a 400.
 func (s *Server) handleGetLogContext(c fiber.Ctx) error {
-	sourceIDStr := c.Params("sourceID")
-	sourceID, err := core.ParseSourceID(sourceIDStr)
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
+	sourceID := src.SourceID()
 
 	var req models.LogContextRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -57,7 +57,7 @@ func (s *Server) handleGetLogContext(c fiber.Ctx) error {
 		afterLimit = 100
 	}
 
-	result, err := core.GetLogContext(c.RequestCtx(), s.datasources, sourceID, core.LogContextParams{
+	result, err := core.GetLogContext(c.RequestCtx(), s.datasources, src, core.LogContextParams{
 		TargetTimestamp: targetTime.UnixMilli(),
 		TargetTime:      &targetTime,
 		BeforeLimit:     beforeLimit,

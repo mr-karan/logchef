@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 )
 
 func TestHandleGetMetaAlertsEnabled(t *testing.T) {
@@ -103,7 +104,7 @@ func TestHandleGetMetaAdvertisesDemoReadOnly(t *testing.T) {
 	defer resp.Body.Close()
 
 	var envelope struct {
-		Data MetaResponse `json:"data"`
+		Data core.MetaResponse `json:"data"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&envelope); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -188,7 +189,7 @@ func TestHandleGetMetaDemoLoginCredentials(t *testing.T) {
 				return
 			}
 
-			var got DemoLoginCredentials
+			var got core.DemoLoginCredentials
 			if err := json.Unmarshal(raw, &got); err != nil {
 				t.Fatalf("decode demo_login_credentials: %v", err)
 			}
@@ -196,5 +197,25 @@ func TestHandleGetMetaDemoLoginCredentials(t *testing.T) {
 				t.Fatalf("demo_login_credentials = %#v, want configured local credentials", got)
 			}
 		})
+	}
+}
+
+// ui_url is frontend_url (trailing slash trimmed), else browser_url, else
+// public_url, else absent.
+func TestUIURL(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		frontend, browser, public, want string
+	}{
+		{"https://logchef.example.com/", "https://ui.example.com", "https://api.example.com", "https://logchef.example.com"},
+		{"https://example.com/logchef/", "", "https://api.example.com", "https://example.com/logchef"},
+		{"", "https://ui.example.com", "https://api.example.com", "https://ui.example.com"},
+		{"", "", "https://api.example.com", "https://api.example.com"},
+		{"", "", "", ""},
+	} {
+		got := uiURL(&config.ServerConfig{FrontendURL: tc.frontend, BrowserURL: tc.browser, PublicURL: tc.public})
+		if got != tc.want {
+			t.Errorf("uiURL(%q, %q, %q) = %q, want %q", tc.frontend, tc.browser, tc.public, got, tc.want)
+		}
 	}
 }

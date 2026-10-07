@@ -2,12 +2,14 @@ mod models;
 
 pub use models::*;
 
-use crate::config::Context;
+use crate::auth::{self, SavedCredential};
 use crate::error::{Error, Result};
 use reqwest::Client as HttpClient;
 use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderValue, USER_AGENT};
+use reqwest::{RequestBuilder, Response, StatusCode};
 use serde::de::DeserializeOwned;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::debug;
 
 const USER_AGENT_VALUE: &str = concat!("logchef-cli/", env!("CARGO_PKG_VERSION"));
@@ -15,7 +17,21 @@ const USER_AGENT_VALUE: &str = concat!("logchef-cli/", env!("CARGO_PKG_VERSION")
 pub struct Client {
     http: HttpClient,
     base_url: String,
-    token: Option<String>,
+    credential: Credential,
+}
+
+enum Credential {
+    None,
+    /// A PAT or `--token`. Sent as is and never refreshed.
+    Bearer(String),
+    /// A saved OAuth grant. Refreshed at most once per client: before the
+    /// first request when the access token has expired, or after a 401.
+    OAuth(Box<Mutex<OAuthState>>),
+}
+
+struct OAuthState {
+    saved: SavedCredential,
+    refreshed: bool,
 }
 
 impl Client {
@@ -43,33 +59,29 @@ impl Client {
         Ok(Self {
             http,
             base_url,
-            token: None,
+            credential: Credential::None,
         })
     }
 
-    pub fn from_context(ctx: &Context) -> Result<Self> {
-        let mut client = Self::new(&ctx.server_url, ctx.timeout_secs)?;
-        client.token = ctx.token.clone();
-        Ok(client)
-    }
-
-    pub fn from_context_with_timeout(ctx: &Context, timeout_secs: u64) -> Result<Self> {
-        let mut client = Self::new(&ctx.server_url, timeout_secs)?;
-        client.token = ctx.token.clone();
-        Ok(client)
-    }
-
     pub fn with_token(mut self, token: String) -> Self {
-        self.token = Some(token);
+        self.credential = Credential::Bearer(token);
         self
     }
 
-    fn headers(&self) -> HeaderMap {
+    pub fn with_oauth(mut self, saved: SavedCredential) -> Self {
+        self.credential = Credential::OAuth(Box::new(Mutex::new(OAuthState {
+            saved,
+            refreshed: false,
+        })));
+        self
+    }
+
+    fn headers(token: Option<&str>) -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.insert(USER_AGENT, HeaderValue::from_static(USER_AGENT_VALUE));
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-        if let Some(ref token) = self.token
+        if let Some(token) = token
             && let Ok(value) = HeaderValue::from_str(&format!("Bearer {}", token))
         {
             headers.insert(AUTHORIZATION, value);
@@ -78,11 +90,61 @@ impl Client {
         headers
     }
 
+    /// The bearer token for the next request. An expired OAuth access token
+    /// is refreshed first, which uses up the client's one refresh.
+    async fn bearer(&self) -> Result<Option<String>> {
+        match &self.credential {
+            Credential::None => Ok(None),
+            Credential::Bearer(token) => Ok(Some(token.clone())),
+            Credential::OAuth(state) => {
+                let mut state = state.lock().await;
+                if !state.refreshed && auth::needs_refresh(&state.saved.credential) {
+                    refresh(&mut state).await?;
+                }
+                Ok(Some(state.saved.credential.access_token.clone()))
+            }
+        }
+    }
+
+    /// Sends the request built by `build` with the current bearer token. On a
+    /// 401 with an OAuth grant it refreshes once and sends the request again.
+    /// A 401 after that is an auth error that names the fix.
+    async fn send(&self, build: impl Fn() -> RequestBuilder) -> Result<Response> {
+        let token = self.bearer().await?;
+        let response = build()
+            .headers(Self::headers(token.as_deref()))
+            .send()
+            .await?;
+        let (Credential::OAuth(state), Some(used)) = (&self.credential, token) else {
+            return Ok(response);
+        };
+        if response.status() != StatusCode::UNAUTHORIZED {
+            return Ok(response);
+        }
+
+        let token = {
+            let mut state = state.lock().await;
+            if state.saved.credential.access_token == used {
+                if state.refreshed {
+                    return Err(rejected(&state.saved.context));
+                }
+                refresh(&mut state).await?;
+            }
+            state.saved.credential.access_token.clone()
+        };
+        let response = build().headers(Self::headers(Some(&token))).send().await?;
+        if response.status() == StatusCode::UNAUTHORIZED {
+            let state = state.lock().await;
+            return Err(rejected(&state.saved.context));
+        }
+        Ok(response)
+    }
+
     async fn get<T: DeserializeOwned>(&self, path: &str) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
         debug!(url = %url, "GET request");
 
-        let response = self.http.get(&url).headers(self.headers()).send().await?;
+        let response = self.send(|| self.http.get(&url)).await?;
 
         self.handle_response(response).await
     }
@@ -95,13 +157,7 @@ impl Client {
         let url = format!("{}{}", self.base_url, path);
         debug!(url = %url, "POST request");
 
-        let response = self
-            .http
-            .post(&url)
-            .headers(self.headers())
-            .json(body)
-            .send()
-            .await?;
+        let response = self.send(|| self.http.post(&url).json(body)).await?;
 
         self.handle_response(response).await
     }
@@ -157,8 +213,13 @@ impl Client {
     }
 
     pub async fn get_current_user(&self) -> Result<User> {
+        Ok(self.get_me().await?.user)
+    }
+
+    /// `/api/v1/me`, including how the caller authenticated.
+    pub async fn get_me(&self) -> Result<UserData> {
         let response: ApiResponse<UserData> = self.get("/api/v1/me").await?;
-        Ok(response.data.user)
+        Ok(response.data)
     }
 
     pub async fn list_teams(&self) -> Result<Vec<Team>> {
@@ -313,13 +374,7 @@ impl Client {
         );
         debug!(url = %url, "POST stream request");
 
-        let response = self
-            .http
-            .post(&url)
-            .headers(self.headers())
-            .json(request)
-            .send()
-            .await?;
+        let response = self.send(|| self.http.post(&url).json(request)).await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -374,7 +429,7 @@ impl Client {
             .build()
             .map_err(|e| Error::other(format!("Failed to build tail client: {}", e)))?;
 
-        let response = http.get(&url).headers(self.headers()).send().await?;
+        let response = self.send(|| http.get(&url)).await?;
 
         let status = response.status();
         if !status.is_success() {
@@ -440,7 +495,7 @@ impl Client {
         );
         debug!(url = %url, "GET export download request");
 
-        let response = self.http.get(&url).headers(self.headers()).send().await?;
+        let response = self.send(|| self.http.get(&url)).await?;
         let status = response.status();
         if !status.is_success() {
             let status_code = status.as_u16();
@@ -461,21 +516,6 @@ impl Client {
         }
 
         Ok(response)
-    }
-
-    pub async fn exchange_token(&self, oidc_token: &str) -> Result<TokenExchangeData> {
-        let url = format!("{}/api/v1/cli/token", self.base_url);
-        debug!(url = %url, "Token exchange request");
-
-        let mut headers = self.headers();
-        if let Ok(value) = HeaderValue::from_str(&format!("Bearer {}", oidc_token)) {
-            headers.insert(AUTHORIZATION, value);
-        }
-
-        let response = self.http.post(&url).headers(headers).send().await?;
-
-        let api_response: TokenExchangeApiResponse = self.handle_response(response).await?;
-        Ok(api_response.data)
     }
 
     pub async fn list_collections(&self, _team_id: i64, source_id: i64) -> Result<Vec<Collection>> {
@@ -529,6 +569,25 @@ impl Client {
             .await?;
         Ok(response.data)
     }
+}
+
+/// Refreshes the grant and marks the client's one refresh as used.
+async fn refresh(state: &mut OAuthState) -> Result<()> {
+    state.refreshed = true;
+    state.saved.credential = auth::refresh_context(
+        &state.saved.config_path,
+        &state.saved.context,
+        &state.saved.credential.access_token,
+    )
+    .await?;
+    Ok(())
+}
+
+fn rejected(context: &str) -> Error {
+    Error::auth_required(
+        context,
+        format!("The server rejected the access token for context '{context}'"),
+    )
 }
 
 #[cfg(test)]

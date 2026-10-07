@@ -11,7 +11,7 @@ use logchef_core::highlight::{
 };
 use logchef_core::timerange::{TimeInput, resolve_time_range, resolve_timezone};
 use serde::Serialize;
-use std::io::{IsTerminal, Read, Write};
+use std::io::{Read, Write};
 use tokio::time::{Duration, sleep};
 
 use crate::cli::GlobalArgs;
@@ -152,7 +152,7 @@ pub async fn run(args: SqlArgs, global: GlobalArgs) -> Result<()> {
         && arg_source.is_none()
         && default_team.is_none()
         && default_source.is_none()
-        && std::io::stdin().is_terminal();
+        && crate::ui::interactive();
 
     // Resolve team
     let team_id = if is_interactive {

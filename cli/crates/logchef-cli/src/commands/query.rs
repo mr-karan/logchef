@@ -10,7 +10,6 @@ use logchef_core::highlight::{
 };
 use logchef_core::timerange::{TimeInput, resolve_time_range};
 use serde::Serialize;
-use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
@@ -129,7 +128,7 @@ pub async fn run(args: QueryArgs, global: GlobalArgs) -> Result<()> {
         && args.source.is_none()
         && default_team.is_none()
         && default_source.is_none()
-        && std::io::stdin().is_terminal();
+        && crate::ui::interactive();
 
     // Resolve team
     let team_id = if is_interactive {

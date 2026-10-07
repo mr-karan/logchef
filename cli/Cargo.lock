@@ -976,9 +976,10 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "logchef-cli"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "anyhow",
+ "base64",
  "chrono",
  "clap",
  "clap_complete",
@@ -990,6 +991,7 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
+ "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -998,7 +1000,7 @@ dependencies = [
 
 [[package]]
 name = "logchef-core"
-version = "0.2.3"
+version = "0.3.0"
 dependencies = [
  "base64",
  "chrono",

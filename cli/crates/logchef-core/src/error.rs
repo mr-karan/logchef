@@ -5,11 +5,11 @@ pub enum Error {
     #[error("Configuration error: {0}")]
     Config(String),
 
-    #[error("Not authenticated. Run 'logchef auth' to log in.")]
-    NotAuthenticated,
-
-    #[error("Authentication failed: {0}")]
-    Auth(String),
+    /// The saved credential is missing, expired, revoked or rejected. `fix`
+    /// is the command that signs in again. Data commands report this instead
+    /// of opening a browser.
+    #[error("{reason}. To fix: {fix}")]
+    AuthRequired { reason: String, fix: String },
 
     #[error("API error: {message}")]
     Api {
@@ -35,6 +35,13 @@ pub enum Error {
     #[error("OAuth error: {0}")]
     OAuth(String),
 
+    /// The authorization server sent `error=` to the loopback callback.
+    #[error("Sign-in was not completed: {error}{}", .description.as_deref().map(|d| format!(" ({d})")).unwrap_or_default())]
+    OAuthRedirect {
+        error: String,
+        description: Option<String>,
+    },
+
     #[error("Timeout waiting for authentication")]
     AuthTimeout,
 
@@ -52,8 +59,12 @@ impl Error {
         Self::Config(msg.into())
     }
 
-    pub fn auth(msg: impl Into<String>) -> Self {
-        Self::Auth(msg.into())
+    /// An auth error whose fix is signing in again to a saved context.
+    pub fn auth_required(context: &str, reason: impl Into<String>) -> Self {
+        Self::AuthRequired {
+            reason: reason.into(),
+            fix: format!("logchef auth --context {}", shell_quote(context)),
+        }
     }
 
     pub fn api(status: Option<u16>, msg: impl Into<String>) -> Self {
@@ -82,5 +93,20 @@ impl Error {
 
     pub fn other(msg: impl Into<String>) -> Self {
         Self::Other(msg.into())
+    }
+}
+
+/// Quotes a value for POSIX shells only when it needs quoting, so the common
+/// case (`logchef auth --context prod`) stays easy to read and copy.
+pub fn shell_quote(value: &str) -> String {
+    let plain = !value.is_empty()
+        && !value.starts_with('-')
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | ':' | '/'));
+    if plain {
+        value.to_string()
+    } else {
+        format!("'{}'", value.replace('\'', "'\\''"))
     }
 }

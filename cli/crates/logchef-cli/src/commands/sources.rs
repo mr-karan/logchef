@@ -5,7 +5,6 @@ use logchef_core::Config;
 use logchef_core::api::Client;
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
 use serde::Serialize;
-use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
@@ -49,8 +48,7 @@ pub async fn run(args: SourcesArgs, global: GlobalArgs) -> Result<()> {
     let mut cache = Cache::new(&ctx.server_url);
     let default_team = ctx.defaults.team_with_env();
 
-    let is_interactive =
-        args.team.is_none() && default_team.is_none() && std::io::stdin().is_terminal();
+    let is_interactive = args.team.is_none() && default_team.is_none() && crate::ui::interactive();
 
     let team_id = if is_interactive {
         prompt_team_interactive(client, &mut cache).await?

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 
@@ -157,7 +158,7 @@ func (s *Server) handleValidateSourceConnection(c fiber.Ctx) error {
 
 // handleGetSourceStats retrieves provider-neutral inspection data for a specific source.
 // URL: GET /api/v1/sources/:sourceID/stats
-// Requires: User must have access to the source via team membership (checked by requireSourceAccess middleware).
+// Requires: User must have access to the source via team membership (checked by requireTeamHasSource middleware).
 func (s *Server) handleGetSourceStats(c fiber.Ctx) error {
 	// Source ID access validated by middleware.
 	sourceIDStr := c.Params("sourceID")
@@ -215,7 +216,27 @@ func (s *Server) handleGetSourceActivity(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
 	}
-	activity, err := core.InspectSourceActivity(c.RequestCtx(), s.datasources, sourceID, c.Query("refresh") == "true")
+	p := principalFromLocals(c)
+	activity, err := core.InspectSourceActivityAsAdmin(c.RequestCtx(), s.datasources, p, sourceID, c.Query("refresh") == "true")
+	if errors.Is(err, access.ErrGlobalAdminRequired) {
+		return SendErrorWithType(c, fiber.StatusForbidden, "Admin access required", models.AuthorizationErrorType)
+	}
+	if errors.Is(err, access.ErrInsufficientScope) {
+		return sendInsufficientScope(c, p.User)
+	}
+	return s.sendSourceActivity(c, sourceID, activity, err)
+}
+
+func (s *Server) handleGetTeamSourceActivity(c fiber.Ctx) error {
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
+	}
+	activity, err := core.InspectTeamSourceActivity(c.RequestCtx(), s.datasources, src, c.Query("refresh") == "true")
+	return s.sendSourceActivity(c, src.SourceID(), activity, err)
+}
+
+func (s *Server) sendSourceActivity(c fiber.Ctx, sourceID models.SourceID, activity *datasource.SourceActivity, err error) error {
 	if err == nil {
 		return SendSuccess(c, fiber.StatusOK, activity)
 	}
@@ -231,5 +252,3 @@ func (s *Server) handleGetSourceActivity(c fiber.Ctx) error {
 	s.log.Error("failed to get source activity", "error", err, "source_id", sourceID)
 	return SendError(c, fiber.StatusInternalServerError, "Error getting recent activity")
 }
-
-func (s *Server) handleGetTeamSourceActivity(c fiber.Ctx) error { return s.handleGetSourceActivity(c) }

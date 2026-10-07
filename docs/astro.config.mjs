@@ -207,6 +207,7 @@ Key areas of the docs:
             { label: "Kubernetes Logs", link: "/integration/kubernetes" },
             { label: "Docker Logs", link: "/integration/docker" },
             { label: "CLI", link: "/integration/cli" },
+            { label: "Agent Setup", link: "/integration/agent-setup" },
             { label: "MCP Server", link: "/integration/mcp-server" },
             { label: "Schema Design", link: "/integration/schema-design" },
           ],

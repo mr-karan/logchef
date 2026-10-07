@@ -1,50 +1,16 @@
 package server
 
 import (
-	"time"
+	"cmp"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
 )
 
 // --- Meta Handlers ---
-
-// DashboardCacheMeta advertises the server's dashboard result-cache policy so
-// the frontend can resolve the effective per-dashboard TTL the SAME way the
-// server does (see internal/server/dashcache.go). The client must snap relative
-// ranges to this TTL bucket before pre-translating panel queries, so it needs
-// the policy up front. Durations are whole seconds to avoid sub-second rounding
-// becoming a source of client/server disagreement.
-type DashboardCacheMeta struct {
-	Enabled           bool `json:"enabled"`
-	DefaultTTLSeconds int  `json:"default_ttl_seconds"`
-	MaxTTLSeconds     int  `json:"max_ttl_seconds"`
-}
-
-// DemoLoginCredentials contains local credentials that a deliberately
-// configured public demo may advertise on its login page.
-type DemoLoginCredentials struct {
-	Email    string `json:"email"`
-	Password string `json:"password"`
-}
-
-// MetaResponse represents the server metadata response
-type MetaResponse struct {
-	Version              string                `json:"version"`
-	HTTPServerTimeout    string                `json:"http_server_timeout"`
-	OIDCIssuer           string                `json:"oidc_issuer,omitempty"`
-	CLIClientID          string                `json:"cli_client_id,omitempty"`
-	MaxQueryLimit        int                   `json:"max_query_limit"`
-	MaxQueryTimeoutSecs  int                   `json:"max_query_timeout_seconds"`
-	DefaultPreviewLimit  int                   `json:"default_preview_limit"`
-	MaxPreviewLimit      int                   `json:"max_preview_limit"`
-	MaxExportRows        int                   `json:"max_export_rows"`
-	AlertsEnabled        bool                  `json:"alerts_enabled"`
-	LocalAuthEnabled     bool                  `json:"local_auth_enabled"`
-	OIDCEnabled          bool                  `json:"oidc_enabled"`
-	DemoReadOnly         bool                  `json:"demo_read_only"`
-	DemoLoginCredentials *DemoLoginCredentials `json:"demo_login_credentials,omitempty"`
-	DashboardCache       DashboardCacheMeta    `json:"dashboard_cache"`
-}
 
 // handleGetMeta returns server metadata including version and configuration
 // URL: GET /api/v1/meta
@@ -54,45 +20,39 @@ type MetaResponse struct {
 // @Tags meta
 // @Accept json
 // @Produce json
-// @Success 200 {object} MetaResponse "Server metadata"
+// @Success 200 {object} core.MetaResponse "Server metadata"
 // @Router /meta [get]
 func (s *Server) handleGetMeta(c fiber.Ctx) error {
 	// Runtime metadata can intentionally include public demo credentials. Never
 	// let a browser or intermediary retain them after opt-out or rotation.
 	c.Set(fiber.HeaderCacheControl, "no-store, private")
 
-	meta := MetaResponse{
-		Version:             s.version,
-		HTTPServerTimeout:   s.config.Server.HTTPServerTimeout.String(),
-		MaxQueryLimit:       s.config.Query.MaxPreviewLimit,
-		MaxQueryTimeoutSecs: s.config.Query.MaxTimeoutSeconds,
-		DefaultPreviewLimit: s.config.Query.DefaultPreviewLimit,
-		MaxPreviewLimit:     s.config.Query.MaxPreviewLimit,
-		MaxExportRows:       s.config.Export.MaxRows,
-		AlertsEnabled:       s.config.Alerts.Enabled,
-		LocalAuthEnabled:    s.config.Auth.Local.Enabled,
-		OIDCEnabled:         s.oidcProvider != nil,
-		DemoReadOnly:        s.config.Demo.ReadOnly,
-		DashboardCache: DashboardCacheMeta{
-			Enabled:           s.config.DashboardCache.Enabled,
-			DefaultTTLSeconds: int(s.config.DashboardCache.DefaultTTL / time.Second),
-			MaxTTLSeconds:     int(s.config.DashboardCache.MaxTTL / time.Second),
-		},
-	}
-
+	var oidcIssuer string
 	if s.oidcProvider != nil {
-		meta.OIDCIssuer = s.oidcProvider.GetIssuer()
-		meta.CLIClientID = s.config.OIDC.CLIClientID
+		oidcIssuer = s.oidcProvider.GetIssuer()
 	}
-
-	localAuth := s.config.Auth.Local
-	if s.config.Demo.ReadOnly && s.config.Demo.ShowLoginCredentials && localAuth.Enabled &&
-		localAuth.AdminEmail != "" && localAuth.AdminPassword != "" {
-		meta.DemoLoginCredentials = &DemoLoginCredentials{
-			Email:    localAuth.AdminEmail,
-			Password: localAuth.AdminPassword,
-		}
+	meta := metaResponse{
+		MetaResponse: core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil),
+		UIURL:        uiURL(&s.config.Server),
 	}
-
+	if s.oauth != nil {
+		meta.OAuthIssuer = s.oauth.Issuer()
+	}
 	return SendSuccess(c, fiber.StatusOK, meta)
+}
+
+// metaResponse adds the HTTP-only fields to the shared metadata. A CLI that
+// sees oauth_issuer logs in through Logchef OAuth, and builds browser links
+// (for example the log explorer) on ui_url instead of the API URL it uses.
+type metaResponse struct {
+	core.MetaResponse
+	OAuthIssuer string `json:"oauth_issuer,omitempty"`
+	UIURL       string `json:"ui_url,omitempty"`
+}
+
+// uiURL is the base URL of the web UI: server.frontend_url when set (it may
+// carry a base path), else server.browser_url, else server.public_url. It is
+// empty when none is set.
+func uiURL(cfg *config.ServerConfig) string {
+	return cmp.Or(strings.TrimSuffix(cfg.FrontendURL, "/"), cfg.BrowserURL, cfg.PublicURL)
 }

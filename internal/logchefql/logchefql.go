@@ -246,7 +246,7 @@ func formatConditionValue(v any) string {
 }
 
 var (
-	timeFormatRegex     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
+	timeFormatRegex     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}(\.\d{1,9})?$`)
 	timezoneAllowedChar = regexp.MustCompile(`^[A-Za-z0-9_/+:-]+$`)
 	// Allows @ prefix for ELK-style @timestamp fields
 	validIdentifier = regexp.MustCompile(`^@?[a-zA-Z_][a-zA-Z0-9_]*$`)
@@ -258,7 +258,7 @@ func validateTimeFormat(t string) *ParseError {
 	if !timeFormatRegex.MatchString(t) {
 		return &ParseError{
 			Code:    ErrInvalidTimeFormat,
-			Message: fmt.Sprintf("invalid time format: expected 'YYYY-MM-DD HH:MM:SS', got '%s'", t),
+			Message: fmt.Sprintf("invalid time format: expected 'YYYY-MM-DD HH:MM:SS' with optional fractional seconds, or RFC3339, got '%s'", t),
 		}
 	}
 	if _, err := time.Parse("2006-01-02 15:04:05", t); err != nil {
@@ -315,7 +315,8 @@ func validateTableName(name string) *ParseError {
 // BuildFullQuery builds a complete SQL query from LogchefQL with time range and other parameters.
 // This is used when executing the query against ClickHouse.
 func BuildFullQuery(params QueryBuildParams) (string, error) {
-	if err := validateQueryBuildParams(params); err != nil {
+	start, end, err := prepareTimeRange(params)
+	if err != nil {
 		return "", err
 	}
 
@@ -331,14 +332,15 @@ func BuildFullQuery(params QueryBuildParams) (string, error) {
 		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
 	}
 
-	return buildFullQueryFromTranslation(params, translateResult)
+	return buildFullQueryFromTranslation(params, start, end, translateResult)
 }
 
 // BuildFullQueryFromTranslation builds a complete SQL query from an already
 // translated query. Callers that need both preview metadata and executable SQL
 // can translate once and pass that result here.
 func BuildFullQueryFromTranslation(params QueryBuildParams, translateResult *TranslateResult) (string, error) {
-	if err := validateQueryBuildParams(params); err != nil {
+	start, end, err := prepareTimeRange(params)
+	if err != nil {
 		return "", err
 	}
 	if translateResult == nil {
@@ -350,29 +352,60 @@ func BuildFullQueryFromTranslation(params QueryBuildParams, translateResult *Tra
 		}
 		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
 	}
-	return buildFullQueryFromTranslation(params, translateResult)
+	return buildFullQueryFromTranslation(params, start, end, translateResult)
 }
 
-func validateQueryBuildParams(params QueryBuildParams) error {
-	if err := validateTimeFormat(params.StartTime); err != nil {
-		return err
-	}
-	if err := validateTimeFormat(params.EndTime); err != nil {
-		return err
-	}
+// timeBound is one end of the query time range: a SQL timestamp and the
+// timezone ClickHouse reads it in.
+type timeBound struct {
+	value string
+	zone  string
+}
+
+// prepareTimeRange validates params and returns the start and end bounds.
+func prepareTimeRange(params QueryBuildParams) (start, end timeBound, err error) {
 	if err := validateTimezone(params.Timezone); err != nil {
-		return err
+		return timeBound{}, timeBound{}, err
+	}
+	start, perr := parseTimeBound(params.StartTime, params.Timezone)
+	if perr != nil {
+		return timeBound{}, timeBound{}, perr
+	}
+	end, perr = parseTimeBound(params.EndTime, params.Timezone)
+	if perr != nil {
+		return timeBound{}, timeBound{}, perr
 	}
 	if err := validateTableName(params.TableName); err != nil {
-		return err
+		return timeBound{}, timeBound{}, err
 	}
 	if err := validateIdentifier(params.TimestampField, "timestamp field"); err != nil {
-		return err
+		return timeBound{}, timeBound{}, err
 	}
-	return nil
+	return start, end, nil
 }
 
-func buildFullQueryFromTranslation(params QueryBuildParams, translateResult *TranslateResult) (string, error) {
+// parseTimeBound accepts "YYYY-MM-DD HH:MM:SS" with optional fractional
+// seconds, read in timezone, or an RFC3339 time. An RFC3339 time is an
+// absolute instant, so it becomes a UTC timestamp read in 'UTC': a local wall
+// clock would merge the two occurrences of an hour that repeats when DST
+// ends. The value always passes validateTimeFormat before it reaches SQL.
+func parseTimeBound(value, timezone string) (timeBound, *ParseError) {
+	zone := timezone
+	if strings.ContainsRune(value, 'T') {
+		parsed, err := time.Parse(time.RFC3339Nano, value)
+		if err != nil {
+			return timeBound{}, validateTimeFormat(value)
+		}
+		value = parsed.UTC().Format("2006-01-02 15:04:05.999999999")
+		zone = "UTC"
+	}
+	if err := validateTimeFormat(value); err != nil {
+		return timeBound{}, err
+	}
+	return timeBound{value: value, zone: zone}, nil
+}
+
+func buildFullQueryFromTranslation(params QueryBuildParams, start, end timeBound, translateResult *TranslateResult) (string, error) {
 	var query strings.Builder
 
 	query.WriteString("SELECT ")
@@ -395,15 +428,11 @@ func buildFullQueryFromTranslation(params QueryBuildParams, translateResult *Tra
 	// WHERE clause with time range
 	query.WriteString("WHERE `")
 	query.WriteString(params.TimestampField)
-	query.WriteString("` BETWEEN toDateTime('")
-	query.WriteString(params.StartTime)
-	query.WriteString("', '")
-	query.WriteString(params.Timezone)
-	query.WriteString("') AND toDateTime('")
-	query.WriteString(params.EndTime)
-	query.WriteString("', '")
-	query.WriteString(params.Timezone)
-	query.WriteString("')")
+	if strings.Contains(start.value, ".") || strings.Contains(end.value, ".") {
+		fmt.Fprintf(&query, "` BETWEEN toDateTime64('%s', 9, '%s') AND toDateTime64('%s', 9, '%s')", start.value, start.zone, end.value, end.zone)
+	} else {
+		fmt.Fprintf(&query, "` BETWEEN toDateTime('%s', '%s') AND toDateTime('%s', '%s')", start.value, start.zone, end.value, end.zone)
+	}
 
 	// Add LogchefQL conditions if present
 	if translateResult.SQL != "" {
@@ -432,8 +461,8 @@ type QueryBuildParams struct {
 	Schema         *Schema // Optional schema for type-aware SQL generation
 	TableName      string  // Fully qualified table name (database.table)
 	TimestampField string  // Name of the timestamp column
-	StartTime      string  // Start time in format "2006-01-02 15:04:05"
-	EndTime        string  // End time in format "2006-01-02 15:04:05"
+	StartTime      string  // SQL timestamp with optional fractional seconds, or RFC3339
+	EndTime        string  // SQL timestamp with optional fractional seconds, or RFC3339
 	Timezone       string  // Timezone for time conversion
 	Limit          int     // Result limit
 }

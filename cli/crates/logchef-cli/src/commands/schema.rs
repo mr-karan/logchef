@@ -4,7 +4,6 @@ use inquire::Select;
 use logchef_core::Config;
 use logchef_core::api::{Client, Column};
 use logchef_core::cache::{Cache, Identifier, parse_identifier};
-use std::io::IsTerminal;
 
 use crate::cli::GlobalArgs;
 use crate::session;
@@ -45,7 +44,7 @@ pub async fn run(args: SchemaArgs, global: GlobalArgs) -> Result<()> {
         && args.source.is_none()
         && default_team.is_none()
         && default_source.is_none()
-        && std::io::stdin().is_terminal();
+        && crate::ui::interactive();
 
     let team_id = if is_interactive {
         prompt_team_interactive(client, &mut cache).await?

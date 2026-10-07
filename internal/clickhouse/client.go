@@ -105,6 +105,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		}
 	}
 
+	const dialTimeout = 10 * time.Second
 	options := &clickhouse.Options{
 		Addr: []string{host},
 		Auth: clickhouse.Auth{
@@ -116,7 +117,8 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 			// Default settings.
 			"max_execution_time": 60,
 		},
-		DialTimeout: 10 * time.Second,
+		DialTimeout: dialTimeout,
+		DialContext: newDialContext(tlsCfg, dialTimeout),
 		Compression: &clickhouse.Compression{
 			Method: clickhouse.CompressionLZ4,
 		},

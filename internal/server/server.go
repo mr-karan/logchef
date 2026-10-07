@@ -18,11 +18,13 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/metrics"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/contrib/v3/swaggo"
 	"github.com/gofiber/fiber/v3"
+	"github.com/gofiber/fiber/v3/middleware/adaptor"
 	"github.com/gofiber/fiber/v3/middleware/compress"
 	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/static"
@@ -40,6 +42,7 @@ type ServerOptions struct {
 	Datasources   *datasource.Service
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
+	OAuth         *oauth.Server      // OAuth authorization server; nil when auth.oauth is disabled.
 	FS            http.FileSystem    // Filesystem for serving static assets (frontend).
 	Logger        *slog.Logger
 	BuildInfo     string
@@ -56,6 +59,7 @@ type Server struct {
 	datasources   *datasource.Service
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
+	oauth         *oauth.Server      // nil when auth.oauth is disabled
 	fs            http.FileSystem
 	indexHTML     []byte // index.html with <base href> set; nil when the UI is not embedded
 	log           *slog.Logger
@@ -64,7 +68,10 @@ type Server struct {
 	dashCache     *dashcache.Cache // per-dashboard TTL result cache
 
 	stop chan struct{} // closed by Shutdown to stop background maintenance loops
-	wg   sync.WaitGroup
+	// cancelMCP cancels the context MCP requests run on (see
+	// registerMCPRoutes). Nil when OAuth, and so /mcp, is disabled.
+	cancelMCP context.CancelFunc
+	wg        sync.WaitGroup
 }
 
 // @title Logchef API
@@ -147,6 +154,7 @@ func New(opts ServerOptions) *Server {
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
 		oidcProvider:  opts.OIDCProvider,
+		oauth:         opts.OAuth,
 		fs:            opts.FS,
 		log:           opts.Logger,
 		buildInfo:     opts.BuildInfo,
@@ -234,9 +242,6 @@ func (s *Server) setupRoutes() {
 	registerLimited(api, fiber.MethodPost, "/auth/local/login", authLimiter, s.handleLocalLogin)
 	registerLimited(api, fiber.MethodGet, "/auth/callback", authLimiter, s.handleCallback)
 	api.Post("/auth/logout", s.handleLogout)
-
-	// --- CLI Authentication ---
-	registerLimited(api, fiber.MethodPost, "/cli/token", authLimiter, s.handleCLITokenExchange)
 
 	// --- Current User ("Me") Routes ---
 	api.Get("/me", s.requireAuth, s.requireTokenScope(models.TokenScopeProfileRead), s.handleGetCurrentUser)
@@ -373,36 +378,36 @@ func (s *Server) setupRoutes() {
 
 	// --- Team Source Operations (requires team membership) ---
 	// These endpoints allow team members to interact with a specific source linked to their team
-	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember, s.requireTeamHasSource)
+	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember)
 	// Get detailed source info including connection status and schema
-	teamSourceOps.Get("/", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSource)
-	teamSourceOps.Get("/stats", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
-	teamSourceOps.Get("/activity", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
+	teamSourceOps.Get("/", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSource)
+	teamSourceOps.Get("/stats", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
+	teamSourceOps.Get("/activity", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
 
 	// Query and explore logs. The heavy query/exploration endpoints are
 	// rate-limited per authenticated user (queryLimiter runs after the group's
 	// requireAuth, so the user context is available).
-	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/query", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleQueryLogs)
-	teamSourceOps.Get("/logs/tail", s.requireTokenScope(models.TokenScopeLogsRead), s.handleTailLogs)
-	teamSourceOps.Post("/logs/export", s.requireTokenScope(models.TokenScopeLogsRead), s.handleExportLogs)
-	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCancelQuery)
-	teamSourceOps.Post("/exports", s.requireTokenScope(models.TokenScopeLogsRead), s.handleCreateExportJob)
-	teamSourceOps.Get("/exports/:exportID", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetExportJob)
-	teamSourceOps.Get("/exports/:exportID/download", s.requireTokenScope(models.TokenScopeLogsRead), s.handleDownloadExportJob)
-	teamSourceOps.Get("/schema", s.requireTokenScope(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
-	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/histogram", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetHistogram)
-	teamSourceOps.Post("/logs/context", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetLogContext)
-	teamSourceOps.Post("/generate-sql", s.requireTokenScope(models.TokenScopeLogsRead), s.handleGenerateAISQL)
-	teamSourceOps.Post("/query-shares", s.requireTokenScope(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/query", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleQueryLogs)
+	teamSourceOps.Get("/logs/tail", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleTailLogs)
+	teamSourceOps.Post("/logs/export", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleExportLogs)
+	teamSourceOps.Post("/logs/query/:queryID/cancel", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCancelQuery)
+	teamSourceOps.Post("/exports", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleCreateExportJob)
+	teamSourceOps.Get("/exports/:exportID", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetExportJob)
+	teamSourceOps.Get("/exports/:exportID/download", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleDownloadExportJob)
+	teamSourceOps.Get("/schema", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetSourceSchema)
+	registerLimited(teamSourceOps, fiber.MethodPost, "/logs/histogram", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetHistogram)
+	teamSourceOps.Post("/logs/context", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetLogContext)
+	teamSourceOps.Post("/generate-sql", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGenerateAISQL)
+	teamSourceOps.Post("/query-shares", s.requireTeamHasSource(models.TokenScopeQuerySharesWrite), s.handleCreateQueryShare)
 
 	// LogchefQL endpoints - query language parsing and translation
-	teamSourceOps.Post("/logchefql/translate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
-	teamSourceOps.Post("/logchefql/validate", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax
-	teamSourceOps.Post("/logchefql/query", s.requireTokenScope(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
+	teamSourceOps.Post("/logchefql/translate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLTranslate) // Translate LogchefQL to SQL
+	teamSourceOps.Post("/logchefql/validate", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLValidate)   // Validate LogchefQL syntax
+	teamSourceOps.Post("/logchefql/query", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleLogchefQLQuery)         // Execute LogchefQL query directly
 
 	// Field value exploration for sidebar
-	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
-	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTokenScope(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
+	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
+	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin
@@ -429,8 +434,36 @@ func (s *Server) setupRoutes() {
 	dashboardRoutes.Put("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleUpdateDashboard)
 	dashboardRoutes.Delete("/:dashboardID", s.requireTokenScope(models.TokenScopeDashboardsWrite), s.handleDeleteDashboard)
 
+	// --- OAuth authorization server (only when auth.oauth.enabled) ---
+	if s.oauth != nil {
+		oauthEndpoints := adaptor.HTTPHandler(s.oauth.Handler())
+		registerLimited(s.app, fiber.MethodGet, oauth.AuthorizePath, authLimiter, oauthEndpoints)
+		registerLimited(s.app, fiber.MethodPost, oauth.AuthorizePath, authLimiter, oauthEndpoints)
+		registerLimited(s.app, fiber.MethodPost, oauth.TokenPath, authLimiter, oauthEndpoints)
+		registerLimited(s.app, fiber.MethodPost, oauth.RevokePath, authLimiter, oauthEndpoints)
+		s.app.Get(oauth.AuthorizationServerMetadataPath, s.handleOAuthMetadata)
+		s.app.Get(oauth.ProtectedResourceMetadataPath, s.handleMCPResourceMetadata)
+		// Clients written against older MCP drafts look for the PRM at the root.
+		s.app.Get("/.well-known/oauth-protected-resource", s.handleMCPResourceMetadata)
+
+		// Consent and Connected apps: browser session only. Changes also
+		// require the browser_url Origin.
+		api.Get("/oauth/requests/:requestID", s.requireSession, s.handleGetOAuthRequest)
+		api.Post("/oauth/requests/:requestID/decision", s.requireSession, s.requireSameOrigin, s.handleOAuthDecision)
+		api.Get("/me/connected-apps", s.requireSession, s.handleListConnectedApps)
+		api.Delete("/me/connected-apps/:grantID", s.requireSession, s.requireSameOrigin, s.handleRevokeConnectedApp)
+
+		s.registerMCPRoutes()
+	}
+
 	// --- Static Asset and SPA Handling ---
 	s.app.Use("/api/*", s.notFoundHandler) // Catch-all for API 404s
+	// Machine endpoints never fall through to the SPA's index.html. Anything
+	// not registered above is a 404: unknown well-known URIs (RFC 8615), and
+	// /mcp for every method when OAuth is disabled.
+	notFound := func(c fiber.Ctx) error { return c.SendStatus(fiber.StatusNotFound) }
+	s.app.Use("/.well-known", notFound)
+	s.app.Use(MCPPath, notFound)
 	// Embedded files have no modification time. Drop the zero Last-Modified
 	// header so browsers do not revalidate against year 1 and get 304 forever.
 	dropLastModified := func(c fiber.Ctx) error {
@@ -470,6 +503,9 @@ func (s *Server) Start() error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
 	close(s.stop)
+	if s.cancelMCP != nil {
+		s.cancelMCP()
+	}
 	if s.dashCache != nil {
 		s.dashCache.Close()
 	}

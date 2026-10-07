@@ -116,6 +116,73 @@ type ExportJob struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
+type OauthAccessToken struct {
+	IDHash    string `json:"id_hash"`
+	GrantID   int64  `json:"grant_id"`
+	ExpiresAt int64  `json:"expires_at"`
+	CreatedAt int64  `json:"created_at"`
+}
+
+type OauthAuthRequest struct {
+	ID             string         `json:"id"`
+	ClientID       string         `json:"client_id"`
+	RedirectUri    string         `json:"redirect_uri"`
+	Resource       string         `json:"resource"`
+	Scopes         string         `json:"scopes"`
+	OfflineAccess  int64          `json:"offline_access"`
+	CodeChallenge  string         `json:"code_challenge"`
+	State          string         `json:"state"`
+	UserID         sql.NullInt64  `json:"user_id"`
+	GrantID        sql.NullInt64  `json:"grant_id"`
+	CodeHash       sql.NullString `json:"code_hash"`
+	CodeExpiresAt  sql.NullInt64  `json:"code_expires_at"`
+	CodeConsumedAt sql.NullInt64  `json:"code_consumed_at"`
+	DecidedAt      sql.NullInt64  `json:"decided_at"`
+	Denied         int64          `json:"denied"`
+	ExpiresAt      int64          `json:"expires_at"`
+	CreatedAt      int64          `json:"created_at"`
+}
+
+type OauthDeviceAuthorization struct {
+	DeviceCodeHash string        `json:"device_code_hash"`
+	UserCodeHash   string        `json:"user_code_hash"`
+	ClientID       string        `json:"client_id"`
+	Resource       string        `json:"resource"`
+	Scopes         string        `json:"scopes"`
+	OfflineAccess  int64         `json:"offline_access"`
+	IntervalSecs   int64         `json:"interval_secs"`
+	LastPolledAt   sql.NullInt64 `json:"last_polled_at"`
+	UserID         sql.NullInt64 `json:"user_id"`
+	GrantID        sql.NullInt64 `json:"grant_id"`
+	ApprovedAt     sql.NullInt64 `json:"approved_at"`
+	DeniedAt       sql.NullInt64 `json:"denied_at"`
+	ConsumedAt     sql.NullInt64 `json:"consumed_at"`
+	ExpiresAt      int64         `json:"expires_at"`
+	CreatedAt      int64         `json:"created_at"`
+}
+
+type OauthGrant struct {
+	ID            int64          `json:"id"`
+	UserID        int64          `json:"user_id"`
+	ClientID      string         `json:"client_id"`
+	Resource      string         `json:"resource"`
+	Scopes        string         `json:"scopes"`
+	OfflineAccess int64          `json:"offline_access"`
+	CreatedAt     int64          `json:"created_at"`
+	LastUsedAt    sql.NullInt64  `json:"last_used_at"`
+	RevokedAt     sql.NullInt64  `json:"revoked_at"`
+	RevokeReason  sql.NullString `json:"revoke_reason"`
+}
+
+type OauthRefreshToken struct {
+	TokenHash      string         `json:"token_hash"`
+	GrantID        int64          `json:"grant_id"`
+	ExpiresAt      int64          `json:"expires_at"`
+	ConsumedAt     sql.NullInt64  `json:"consumed_at"`
+	ReplacedByHash sql.NullString `json:"replaced_by_hash"`
+	CreatedAt      int64          `json:"created_at"`
+}
+
 type QueryHistory struct {
 	ID            int64     `json:"id"`
 	UserID        int64     `json:"user_id"`

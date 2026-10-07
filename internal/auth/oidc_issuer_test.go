@@ -7,9 +7,10 @@ import (
 	"testing"
 )
 
-// TestVerifyIDToken_IssuerAllowList covers #91: issuer validation is enforced
-// (no longer skipped). With no override the single discovered issuer is
-// required; with an explicit allow-list only listed issuers are accepted.
+// TestVerifyIDToken_IssuerAllowList covers #91 through verify, the check the
+// login callback uses: issuer validation is enforced (no longer skipped).
+// With no override the single discovered issuer is required; with an explicit
+// allow-list only listed issuers are accepted.
 func TestVerifyIDToken_IssuerAllowList(t *testing.T) {
 	t.Parallel()
 	fake := newFakeOIDCServer(t)
@@ -27,7 +28,7 @@ func TestVerifyIDToken_IssuerAllowList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewOIDCProvider: %v", err)
 		}
-		if _, err := p.VerifyIDToken(ctx, raw); err != nil {
+		if _, err := p.verify(ctx, raw); err != nil {
 			t.Fatalf("verify with discovered issuer: %v", err)
 		}
 	})
@@ -40,7 +41,7 @@ func TestVerifyIDToken_IssuerAllowList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewOIDCProvider: %v", err)
 		}
-		if _, err := p.VerifyIDToken(ctx, raw); err == nil {
+		if _, err := p.verify(ctx, raw); err == nil {
 			t.Fatalf("expected rejection for issuer not in allow-list")
 		}
 	})
@@ -53,7 +54,7 @@ func TestVerifyIDToken_IssuerAllowList(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewOIDCProvider: %v", err)
 		}
-		if _, err := p.VerifyIDToken(ctx, raw); err != nil {
+		if _, err := p.verify(ctx, raw); err != nil {
 			t.Fatalf("verify with allow-listed issuer: %v", err)
 		}
 	})

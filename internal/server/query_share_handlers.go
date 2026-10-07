@@ -174,7 +174,7 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get share link", models.GeneralErrorType)
 	}
-	if user.Role != models.UserRoleAdmin && share.CreatedBy != user.ID {
+	if !hasGlobalAdminBypass(c) && share.CreatedBy != user.ID {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or an admin can delete this share link", models.AuthorizationErrorType)
 	}
 	if err := s.sqlite.DeleteQueryShare(c.RequestCtx(), token); err != nil {

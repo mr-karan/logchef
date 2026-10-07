@@ -24,6 +24,12 @@ pub fn stderr_human(quiet: bool) -> bool {
     !quiet && std::io::stderr().is_terminal()
 }
 
+/// True when the CLI may prompt or open a browser: stdin is a terminal and
+/// `CI` is unset. Scripts, pipes, and CI never block on input.
+pub fn interactive() -> bool {
+    std::io::stdin().is_terminal() && !crate::env_flags::ci()
+}
+
 /// Formats an integer with thousands separators: `1234567` → `"1,234,567"`.
 pub fn thousands(n: i64) -> String {
     let digits = n.unsigned_abs().to_string();
@@ -258,15 +264,49 @@ impl Drop for Spinner {
 /// Renders a failed command to stderr the way anyhow's default `main` would
 /// (`Error:` + cause chain), then appends a single actionable `→` hint when
 /// stderr is an interactive terminal (and not `--quiet`). Hints are pure human
-/// chrome: stdout is untouched, so machine consumers reading stdout are
-/// unaffected and the process still exits non-zero.
-pub fn report_error(err: &anyhow::Error, quiet: bool) {
+/// chrome. With `--output json|jsonl`, an auth error is also written to stdout
+/// as one JSON error object, so stdout stays machine-readable. The process
+/// still exits non-zero.
+pub fn report_error(err: &anyhow::Error, quiet: bool, json_output: bool) {
+    if json_output && let Some(object) = json_error(err) {
+        println!("{object}");
+    }
     eprintln!("Error: {err:?}");
     if stderr_human(quiet)
         && let Some(hint) = hint_for_error(err)
     {
         eprintln!("\n  → {hint}");
     }
+}
+
+/// The JSON error object for an auth failure, or `None` for other errors.
+fn json_error(err: &anyhow::Error) -> Option<serde_json::Value> {
+    err.chain().find_map(|cause| match cause.downcast_ref() {
+        Some(logchef_core::Error::AuthRequired { reason, fix }) => Some(serde_json::json!({
+            "error": {
+                "type": "auth_required",
+                "message": reason,
+                "fix": fix,
+            }
+        })),
+        _ => None,
+    })
+}
+
+/// True when the invoked command (or subcommand) was given `--output json`
+/// or `--output jsonl`. Each command defines its own `--output`, so this reads
+/// the raw value from whichever level has it.
+pub fn wants_json_output(matches: &clap::ArgMatches) -> bool {
+    let mut level = Some(matches);
+    while let Some(m) = level {
+        if let Ok(Some(mut values)) = m.try_get_raw("output")
+            && values.any(|v| v == "json" || v == "jsonl")
+        {
+            return true;
+        }
+        level = m.subcommand().map(|(_, sub)| sub);
+    }
+    false
 }
 
 /// Maps a failure to a one-line, copy-pasteable next step. Prefers the
@@ -339,9 +379,8 @@ pub fn hint_for_error(err: &anyhow::Error) -> Option<String> {
 fn hint_for_core(err: &logchef_core::Error) -> Option<String> {
     use logchef_core::Error;
     match err {
-        Error::NotAuthenticated => {
-            Some("run `logchef auth` to sign in, then `logchef doctor` to verify".into())
-        }
+        // The message already names the fix.
+        Error::AuthRequired { .. } => None,
         Error::Api {
             status: Some(401), ..
         } => Some("token invalid or expired — run `logchef auth`".into()),

@@ -16,41 +16,38 @@ func parseSavedQueryID(c fiber.Ctx) (int, error) {
 }
 
 // loadSavedQueryWithVisibility fetches a saved query and verifies the caller
-// has visibility (source access via any team). Returns the query, the caller,
-// and a Fiber response if either lookup or authorization fails.
-func (s *Server) loadSavedQueryWithVisibility(c fiber.Ctx) (*models.SavedQuery, *models.User, error) {
+// has visibility (source access via any team). On failure it writes the error
+// response and returns false; the caller must then return nil.
+func (s *Server) loadSavedQueryWithVisibility(c fiber.Ctx) (*models.SavedQuery, *models.User, bool) {
 	user, ok := c.Locals("user").(*models.User)
 	if !ok || user == nil {
-		return nil, nil, SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+		s.sendLoadFailure(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
+		return nil, nil, false
 	}
 
 	queryID, err := parseSavedQueryID(c)
 	if err != nil {
-		return nil, nil, SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		s.sendLoadFailure(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		return nil, nil, false
 	}
 
-	query, err := core.GetSavedQuery(c.RequestCtx(), s.sqlite, s.log, queryID)
+	query, err := core.GetSavedQueryForPrincipal(c.RequestCtx(), s.sqlite, s.log, principalFromLocals(c), queryID)
 	if err != nil {
 		if errors.Is(err, core.ErrQueryNotFound) {
-			return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
+			s.sendLoadFailure(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
+			return nil, nil, false
+		}
+		if errors.Is(err, core.ErrAccessCheck) {
+			s.log.Error("failed to check source access for saved query", "error", err, "user_id", user.ID, "query_id", queryID)
+			s.sendLoadFailure(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
+			return nil, nil, false
 		}
 		s.log.Error("failed to load saved query", "error", err, "query_id", queryID)
-		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to load saved query", models.GeneralErrorType)
+		s.sendLoadFailure(c, fiber.StatusInternalServerError, "Failed to load saved query", models.GeneralErrorType)
+		return nil, nil, false
 	}
 
-	// Admins do not get a free pass on visibility — they must be a member of a
-	// team that has the source. Edit gates (UserCanEditSavedQuery) still let
-	// an admin who can SEE a query also edit it.
-	hasAccess, accessErr := s.sqlite.UserHasSourceAccess(c.RequestCtx(), user.ID, query.SourceID)
-	if accessErr != nil {
-		s.log.Error("failed to check source access for saved query", "error", accessErr, "user_id", user.ID, "source_id", query.SourceID)
-		return nil, nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to verify access", models.GeneralErrorType)
-	}
-	if !hasAccess {
-		return nil, nil, SendErrorWithType(c, fiber.StatusNotFound, "Saved query not found", models.NotFoundErrorType)
-	}
-
-	return query, user, nil
+	return query, user, true
 }
 
 // enrichSavedQueryPermissions populates CanEdit/CanDelete on the query for the
@@ -175,9 +172,9 @@ func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
 
 // handleGetSavedQuery returns a single saved query.
 func (s *Server) handleGetSavedQuery(c fiber.Ctx) error {
-	query, user, err := s.loadSavedQueryWithVisibility(c)
-	if err != nil {
-		return err
+	query, user, ok := s.loadSavedQueryWithVisibility(c)
+	if !ok {
+		return nil
 	}
 	s.enrichSavedQueryPermissions(c, query, user)
 	return SendSuccess(c, fiber.StatusOK, query)
@@ -186,9 +183,9 @@ func (s *Server) handleGetSavedQuery(c fiber.Ctx) error {
 // handleUpdateSavedQuery updates a saved query. Allowed only for the creator
 // or a global admin; legacy queries (created_by IS NULL) require global admin.
 func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
-	query, user, err := s.loadSavedQueryWithVisibility(c)
-	if err != nil {
-		return err
+	query, user, ok := s.loadSavedQueryWithVisibility(c)
+	if !ok {
+		return nil
 	}
 	canEdit, editErr := core.UserCanEditSavedQuery(c.RequestCtx(), s.sqlite, query, user)
 	if editErr != nil {
@@ -246,9 +243,9 @@ func (s *Server) handleUpdateSavedQuery(c fiber.Ctx) error {
 
 // handleDeleteSavedQuery removes a saved query (creator + global admin only).
 func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
-	query, user, err := s.loadSavedQueryWithVisibility(c)
-	if err != nil {
-		return err
+	query, user, ok := s.loadSavedQueryWithVisibility(c)
+	if !ok {
+		return nil
 	}
 	if !core.UserCanDeleteSavedQuery(query, user) {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or a global admin can delete this query", models.AuthorizationErrorType)
@@ -263,9 +260,9 @@ func (s *Server) handleDeleteSavedQuery(c fiber.Ctx) error {
 // handleResolveSavedQuery returns the full saved-query struct for the explorer
 // to hydrate without round-tripping through URL params.
 func (s *Server) handleResolveSavedQuery(c fiber.Ctx) error {
-	query, user, err := s.loadSavedQueryWithVisibility(c)
-	if err != nil {
-		return err
+	query, user, ok := s.loadSavedQueryWithVisibility(c)
+	if !ok {
+		return nil
 	}
 	if query == nil || user == nil {
 		s.log.Error("saved query resolver loaded invalid context", "query_nil", query == nil, "user_nil", user == nil)

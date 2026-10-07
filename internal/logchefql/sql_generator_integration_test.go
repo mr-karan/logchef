@@ -3,6 +3,7 @@ package logchefql
 import (
 	"context"
 	"os"
+	"regexp"
 	"testing"
 	"time"
 
@@ -66,5 +67,40 @@ func TestSchemaAwareQueriesClickHouse(t *testing.T) {
 				t.Fatalf("got %d rows, want %d", count, tt.want)
 			}
 		})
+	}
+}
+
+// The generated bounds for both occurrences of a repeated DST hour must
+// resolve to their own instants in ClickHouse, not to the same local time.
+func TestRFC3339BoundsKeepInstantsAcrossDSTFoldClickHouse(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	conn, err := ch.Open(&ch.Options{Addr: []string{addr}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	sql, err := BuildFullQuery(QueryBuildParams{
+		LogchefQL: `field="value"`, Schema: testSchema, TableName: "logs.test", TimestampField: "timestamp",
+		StartTime: "2026-11-01T05:30:00Z", EndTime: "2026-11-01T06:30:00Z", Timezone: "America/New_York", Limit: 1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bounds := regexp.MustCompile("BETWEEN (.+) AND (.+)\n").FindStringSubmatch(sql)
+	if bounds == nil {
+		t.Fatalf("no time range in %s", sql)
+	}
+	var start, end uint32
+	if err := conn.QueryRow(ctx, "SELECT toUnixTimestamp("+bounds[1]+"), toUnixTimestamp("+bounds[2]+")").Scan(&start, &end); err != nil {
+		t.Fatal(err)
+	}
+	if start != 1793511000 || end != 1793514600 {
+		t.Fatalf("bounds resolve to %d and %d, want 1793511000 and 1793514600", start, end)
 	}
 }
