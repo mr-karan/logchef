@@ -41,11 +41,12 @@ spec:
       tolerations:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      # SQLite needs a writable /data; PVC is often root-owned without fsGroup.
+      {{- with .Values.logchef.podSecurityContext }}
       securityContext:
-        fsGroup: {{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }}
-        fsGroupChangePolicy: OnRootMismatch
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- if dig "enabled" true (.Values.logchef.dataPermsInit | default dict) }}
+      {{- $fsGroup := (.Values.logchef.podSecurityContext | default dict).fsGroup | default 1000 }}
       initContainers:
         - name: fix-data-perms
           # Dedicated root image: logchef image may lack a usable root shell/chown.
@@ -56,7 +57,7 @@ spec:
             - -ec
             - |
               mkdir -p /data
-              chown -R {{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }}:{{ .Values.logchef.podSecurityContext.fsGroup | default 1000 }} /data
+              chown -R {{ $fsGroup }}:{{ $fsGroup }} /data
               chmod 775 /data
               ls -la /data
           volumeMounts:
@@ -138,6 +139,10 @@ spec:
             failureThreshold: {{ .Values.logchef.probes.readiness.failureThreshold }}
           resources:
             {{- toYaml .Values.logchef.resources | nindent 12 }}
+          {{- with .Values.logchef.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: config
           secret:

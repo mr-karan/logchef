@@ -54,9 +54,17 @@ logchef:
     storageClass: ""
     accessModes:
       - ReadWriteOnce
+  # Pod-level security settings. SQLite needs a writable /data volume.
   podSecurityContext:
     fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  # Security settings for the Logchef container, such as allowPrivilegeEscalation
+  # or capabilities. Pod-level settings such as runAsNonRoot are inherited.
+  securityContext: {}
   dataPermsInit:
+    # Disable in restricted namespaces: this init container runs as root.
+    # The storage driver must then provide a writable /data volume via fsGroup
+    # or preconfigured volume permissions.
     enabled: true
     image:
       repository: busybox
