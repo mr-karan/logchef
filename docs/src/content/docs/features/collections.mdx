@@ -67,8 +67,9 @@ Open the collection and choose **Share with team**.
   the other items show with a lock icon, and the server rejects any attempt to run them.
 - **Which teams you can pick:** owners can share with teams they belong to. Global admins
   can share their own collections with any team. Being a global admin does not let you
-  manage someone else's collection. Through an OAuth token the global admin role does not
-  apply, so an admin can share only with their own teams and sees the lists only as an owner.
+  manage someone else's collection. OAuth tokens are read-only and cannot change shares.
+  The global admin role does not apply through OAuth, so only collection owners can read
+  the member and team lists with those tokens.
 - **Removing a share** affects only that team. Direct members and other shared teams keep
   access. Owners can remove a share even after they leave the team. Deleting a team removes
   its shares automatically.
