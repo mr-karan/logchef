@@ -106,7 +106,7 @@ func TestLegacyCFBTokensRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacy, err := op.NewAESCrypto(key).Encrypt(plain)
+	legacy, err := op.NewAESCrypto(key).Encrypt(plain) //nolint:staticcheck // SA1019: builds a legacy AES-CFB token on purpose to prove it is rejected
 	if err != nil {
 		t.Fatal(err)
 	}

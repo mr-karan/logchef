@@ -23,7 +23,9 @@ var refreshTokenFormat = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 
 // unsupportedAuthorizeParams are OpenID Connect request parameters Logchef
 // does not implement. id_token_hint in particular would make ZITADEL parse an
-// attacker-supplied JWT, whose claim decoder can panic (audit F1).
+// attacker-supplied JWT. Its claim decoder panicked on malformed input
+// (audit F1, fixed upstream in v3.51.13); the guard stays so unsupported
+// input is refused before it reaches the provider.
 var unsupportedAuthorizeParams = []string{"id_token_hint", "claims", "registration"}
 
 // singleValued are the parameters that must not repeat (RFC 6749 section 3.1):
@@ -154,9 +156,10 @@ func (s *Server) token(w http.ResponseWriter, r *http.Request) {
 
 // revoke passes only this server's own token formats to ZITADEL: an access
 // token that decrypts with the server key, or a refresh token. For anything
-// else ZITADEL would parse the value as a JWT, and its claim decoder can
-// panic on malformed input (dependency audit F1). Such tokens cannot belong
-// to this server, so they get the RFC 7009 answer for an unknown token: 200.
+// else ZITADEL would parse the value as a JWT; its claim decoder panicked on
+// malformed input (dependency audit F1, fixed upstream in v3.51.13). Such
+// tokens cannot belong to this server, so they are refused here and get the
+// RFC 7009 answer for an unknown token: 200.
 func (s *Server) revoke(w http.ResponseWriter, r *http.Request) {
 	if r.URL.RawQuery != "" {
 		s.writeTokenError(w, http.StatusBadRequest, "invalid_request", "parameters must be sent in the request body")
