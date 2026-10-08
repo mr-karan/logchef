@@ -213,6 +213,7 @@ describe("useTeamPermissions", () => {
       created_by: 10,
       caller_role: "owner",
       member_count: 1,
+      team_count: 0,
       item_count: 0,
       created_at: "",
       updated_at: "",

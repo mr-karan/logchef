@@ -34,6 +34,7 @@ sql:
       - "internal/store/sqlite/migrations/000031_add_query_history.up.sql"
       - "internal/store/sqlite/migrations/000032_add_query_stats_daily.up.sql"
       - "internal/store/sqlite/migrations/000033_oauth.up.sql"
+      - "internal/store/sqlite/migrations/000034_add_collection_teams.up.sql"
     gen:
       go:
         package: "sqlc"
@@ -54,6 +55,7 @@ sql:
       - "internal/store/postgres/migrations/000006_add_query_history.up.sql"
       - "internal/store/postgres/migrations/000007_add_query_stats_daily.up.sql"
       - "internal/store/postgres/migrations/000008_oauth.up.sql"
+      - "internal/store/postgres/migrations/000009_add_collection_teams.up.sql"
     gen:
       go:
         package: "sqlc"

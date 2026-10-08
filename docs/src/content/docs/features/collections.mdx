@@ -8,7 +8,7 @@ them. Members run queries, editors change the shared query, and owners manage th
 collection, but a collection never grants access to log data.
 
 Open the Library from the sidebar. Collections sit in the left rail; selecting one shows its
-queries and members on the right.
+queries, members, and shared teams on the right.
 
 ## Saved queries
 
@@ -30,23 +30,56 @@ A collection is a curated list of saved queries with its own members.
 - **Personal collection**: every user has one, created automatically. It's private and can't
   be shared, renamed, or deleted. Think of it as your bookmarks.
 - **Shared collections**: anyone can create one. You become its owner and can invite
-  teammates. Use them for on-call runbooks, incident playbooks, or a team's go-to queries.
+  teammates or share it with whole teams. Use them for on-call runbooks, incident playbooks,
+  or a team's go-to queries.
 
-Create a collection with **New** in the Library rail, then **Invite** teammates and pin
-queries to it.
+Create a collection with **New** in the Library rail, then **Invite** teammates or
+**Share with team**, and pin queries to it.
 
 ## Roles
 
 Shared collections have three roles:
 
-| Role | Read &amp; run | Edit the queries | Add/remove items | Manage members | Delete collection |
-|------|:----------:|:----------------:|:----------------:|:--------------:|:-----------------:|
-| **Member** | ✓ | — | — | — | — |
-| **Editor** | ✓ | ✓ | — | — | — |
+| Role | Read &amp; run | Add/remove items | Edit the queries | Manage members and teams | Delete collection |
+|------|:----------:|:----------------:|:----------------:|:------------------------:|:-----------------:|
+| **Member** | ✓ | ✓ | — | — | — |
+| **Editor** | ✓ | ✓ | ✓ | — | — |
 | **Owner**  | ✓ | ✓ | ✓ | ✓ | ✓ |
 
-Running and editing always also require **source access**: a role in a collection never
-grants access to the underlying logs. A query you can't run shows with a lock icon.
+Running, pinning, and editing always also require **source access**: a role in a collection
+never grants access to the underlying logs. A query you can't run shows with a lock icon.
+Removing an item from a collection needs no source access, so participants can unpin a
+locked query.
+
+## Share with a team
+
+Owners can share a collection with a whole team instead of inviting people one by one.
+Open the collection and choose **Share with team**.
+
+- **Every current member of the team** sees the collection with the **Member** role. This
+  includes team admins and editors: a team share never grants Editor or Owner rights. To
+  give someone more, invite them directly; a direct role always takes precedence.
+- **Membership is live.** People who join the team see the collection on their next request.
+  People who leave the team lose it, unless they are direct members or belong to another
+  shared team.
+- **No source access is granted.** A team share controls who sees the collection, not who can
+  read logs. Each person runs only the queries whose sources their own teams can reach;
+  the other items show with a lock icon, and the server rejects any attempt to run them.
+- **Which teams you can pick:** owners can share with teams they belong to. Global admins
+  can share their own collections with any team. Being a global admin does not let you
+  manage someone else's collection. OAuth tokens are read-only and cannot change shares.
+  The global admin role does not apply through OAuth, so only collection owners can read
+  the member and team lists with those tokens.
+- **Removing a share** affects only that team. Direct members and other shared teams keep
+  access. Owners can remove a share even after they leave the team. Deleting a team removes
+  its shares automatically.
+- Personal collections can't be shared with teams.
+
+The member count shows direct members only (owners included); shared teams are listed and
+counted separately. Only owners see the member and team lists. A global admin sees them only
+when they also participate in the collection, directly or through a shared team, and still
+needs to be an owner to change them. Other members and editors don't see either list. Leaving a collection removes your direct membership only; you keep
+access through a shared team until you leave that team or the owner removes the share.
 
 ## Who can edit a query
 
@@ -68,7 +101,8 @@ can delete it, since deletion removes it from every collection at once.
 **Share a team's go-to queries**
 
 1. **New** → name the collection (e.g. "Payments on-call").
-2. **Invite** teammates as Members (read & run) or Editors (can also refine the queries).
+2. **Share with team** to give the whole team read & run access, or **Invite** individuals
+   as Members (read & run) or Editors (can also refine the queries).
 3. Open each query in the explorer and **Save** it into the collection.
 
 **Hand a query to a teammate to maintain**

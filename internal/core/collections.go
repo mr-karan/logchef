@@ -26,6 +26,9 @@ var (
 	// ErrLastOwnerRemoval is returned when removing a member would leave
 	// the collection ownerless. Surfaces to the API as a 409 Conflict.
 	ErrLastOwnerRemoval = errors.New("cannot remove the last owner; delete the collection instead")
+	// ErrCollectionTeamNotMember is returned when a collection owner who is not
+	// a global admin tries to share with a team they do not belong to.
+	ErrCollectionTeamNotMember = errors.New("you can only share a collection with teams you belong to")
 )
 
 // personalCollectionName is the default name for an auto-created personal
@@ -110,10 +113,12 @@ func CreateCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 	return collection, nil
 }
 
-// GetCollectionForUser fetches a collection if the user is a member.
-// Returns ErrCollectionNotFound when the user has no membership row. Admins
-// do not get a free pass — they must be a collection member like everyone
-// else (matches the team-membership model for sources).
+// GetCollectionForUser fetches a collection if the user participates in it.
+// A direct membership row wins and keeps its role (owner/editor/member).
+// Without one, membership in any team the collection is shared with grants the
+// member role. Returns ErrCollectionNotFound when neither applies. Admins do
+// not get a free pass — they must participate like everyone else (matches the
+// team-membership model for sources).
 func GetCollectionForUser(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, userID models.UserID) (*models.Collection, models.CollectionRole, error) {
 	collection, err := db.GetCollection(ctx, collectionID)
 	if err != nil {
@@ -130,11 +135,21 @@ func GetCollectionForUser(ctx context.Context, db store.StoreOps, log *slog.Logg
 		return nil, "", memberErr
 	}
 
-	if member == nil || models.IsNotFound(memberErr) {
+	if memberErr == nil {
+		collection.CallerRole = member.Role
+		return collection, member.Role, nil
+	}
+
+	viaTeam, err := db.UserHasCollectionTeamAccess(ctx, collectionID, userID)
+	if err != nil {
+		log.Error("failed to check collection team access", "error", err, "collection_id", collectionID, "user_id", userID)
+		return nil, "", err
+	}
+	if !viaTeam {
 		return nil, "", ErrCollectionNotFound
 	}
-	collection.CallerRole = member.Role
-	return collection, member.Role, nil
+	collection.CallerRole = models.CollectionRoleMember
+	return collection, models.CollectionRoleMember, nil
 }
 
 // UpdateCollection renames/redescribes a collection. Owner-only.
@@ -208,8 +223,10 @@ func AddCollectionMember(ctx context.Context, db store.StoreOps, log *slog.Logge
 	return db.AddCollectionMember(ctx, collectionID, targetUserID, role, &added)
 }
 
-// RemoveCollectionMember drops a member. Owners can remove anyone (except the
-// last owner); members can self-leave.
+// RemoveCollectionMember drops a direct membership row. Owners can remove
+// anyone (except the last owner); members can self-leave. Access derived from a
+// team share is not affected: it ends only when the share or the team
+// membership is removed.
 func RemoveCollectionMember(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, callerID, targetUserID models.UserID) error {
 	collection, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
 	if err != nil {
@@ -248,21 +265,105 @@ func RemoveCollectionMember(ctx context.Context, db store.StoreOps, log *slog.Lo
 	return db.RemoveCollectionMember(ctx, collectionID, targetUserID)
 }
 
-func ListCollectionMembers(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, p access.Principal) ([]*models.CollectionMember, error) {
+// requireRosterAccess gates the member and team rosters: visible only to the
+// collection owner or a participating global admin (not through OAuth), not to
+// editors/members who merely participate.
+func requireRosterAccess(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, p access.Principal) error {
 	if p.User == nil {
-		return nil, ErrCollectionForbidden
+		return ErrCollectionForbidden
 	}
 	_, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, p.User.ID)
 	if err != nil {
+		return err
+	}
+	if callerRole != models.CollectionRoleOwner && p.RequireGlobalAdmin() != nil {
+		return ErrCollectionForbidden
+	}
+	return nil
+}
+
+func ListCollectionMembers(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, p access.Principal) ([]*models.CollectionMember, error) {
+	if err := requireRosterAccess(ctx, db, log, collectionID, p); err != nil {
 		return nil, err
 	}
-	// The member roster (with emails) is visible only to the collection owner or
-	// a global admin (not through OAuth), not to editors/members who merely
-	// participate.
-	if callerRole != models.CollectionRoleOwner && p.RequireGlobalAdmin() != nil {
-		return nil, ErrCollectionForbidden
-	}
 	return db.ListCollectionMembers(ctx, collectionID)
+}
+
+// ListCollectionTeams returns the teams a collection is shared with. Same
+// visibility rule as the member roster.
+func ListCollectionTeams(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, p access.Principal) ([]*models.CollectionTeam, error) {
+	if err := requireRosterAccess(ctx, db, log, collectionID, p); err != nil {
+		return nil, err
+	}
+	return db.ListCollectionTeams(ctx, collectionID)
+}
+
+// AddCollectionTeam shares a collection with a team, giving every current team
+// member the collection Member role. The caller must be a direct owner of the
+// collection; being a global admin does not replace ownership. Owners who are
+// not global admins (or who call through OAuth) may only share with teams they
+// belong to, so the endpoint cannot be used to probe or reach arbitrary teams.
+// Sharing is idempotent.
+func AddCollectionTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, p access.Principal, teamID models.TeamID) error {
+	if p.User == nil {
+		return ErrCollectionForbidden
+	}
+	callerID := p.User.ID
+	collection, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
+	if err != nil {
+		return err
+	}
+	if callerRole != models.CollectionRoleOwner {
+		return ErrCollectionForbidden
+	}
+	if collection.IsPersonal {
+		return ErrPersonalCollectionImmutable
+	}
+	if p.RequireGlobalAdmin() == nil {
+		if _, err := db.GetTeam(ctx, teamID); err != nil {
+			if models.IsNotFound(err) {
+				return ErrTeamNotFound
+			}
+			return err
+		}
+	} else {
+		// Check membership before existence so non-admins cannot tell a missing
+		// team from one they do not belong to.
+		isMember, err := IsTeamMember(ctx, db, teamID, callerID)
+		if err != nil {
+			return err
+		}
+		if !isMember {
+			return ErrCollectionTeamNotMember
+		}
+	}
+	added := callerID
+	if err := db.AddCollectionTeam(ctx, collectionID, teamID, &added); err != nil {
+		return err
+	}
+	log.Info("collection shared with team", "collection_id", collectionID, "team_id", teamID, "user_id", callerID)
+	return nil
+}
+
+// RemoveCollectionTeam removes a team share. Direct-owner only. The owner does
+// not need to belong to the team, so a share stays revocable after the owner
+// leaves it. Direct memberships and other team shares are untouched.
+func RemoveCollectionTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, callerID models.UserID, teamID models.TeamID) error {
+	collection, callerRole, err := GetCollectionForUser(ctx, db, log, collectionID, callerID)
+	if err != nil {
+		return err
+	}
+	if callerRole != models.CollectionRoleOwner {
+		return ErrCollectionForbidden
+	}
+	if collection.IsPersonal {
+		return ErrPersonalCollectionImmutable
+	}
+	if err := db.RemoveCollectionTeam(ctx, collectionID, teamID); err != nil {
+		return err
+	}
+	log.Info("collection team share removed", "collection_id", collectionID, "team_id", teamID, "user_id", callerID)
+	return nil
 }
 
 // AddCollectionItem references a saved query in a collection. Any participant

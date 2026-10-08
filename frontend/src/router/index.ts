@@ -351,7 +351,7 @@ router.beforeEach(async (to) => {
   }
 
   if (isAuthenticated && !isPublic) {
-    contextRouterGuard(to);
+    await contextRouterGuard(to);
   }
 });
 

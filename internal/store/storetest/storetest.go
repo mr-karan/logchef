@@ -26,6 +26,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
+	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
 	t.Run("QueryHistory", func(t *testing.T) { testQueryHistory(t, ctx, s) })
 	t.Run("QueryStats", func(t *testing.T) { testQueryStats(t, ctx, s) })
@@ -292,6 +293,155 @@ func testSavedQueriesCollections(t *testing.T, ctx context.Context, s store.Stor
 	}
 	if _, err := s.GetCollectionMember(ctx, pc.ID, stranger.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("GetCollectionMember(non-member) err = %v, want ErrNotFound", err)
+	}
+}
+
+// collectionTeamsFixture is a shared collection owned by owner, plus two teams
+// that viaTeams (and not outsider) belongs to.
+type collectionTeamsFixture struct {
+	owner, viaTeams, outsider *models.User
+	teamA, teamB              *models.Team
+	coll                      *models.Collection
+}
+
+// testCollectionTeams covers the collection_teams relation: team-derived
+// visibility, deduplicated listing, direct-role precedence, separate counts,
+// idempotent sharing, share removal, and cleanup on team deletion.
+func testCollectionTeams(t *testing.T, ctx context.Context, s store.Store) {
+	f := seedCollectionTeams(t, ctx, s)
+	verifyCollectionTeamShares(t, ctx, s, f)
+	verifyCollectionTeamListing(t, ctx, s, f)
+	verifyCollectionTeamRemoval(t, ctx, s, f)
+}
+
+func seedCollectionTeams(t *testing.T, ctx context.Context, s store.Store) collectionTeamsFixture {
+	t.Helper()
+	f := collectionTeamsFixture{
+		owner:    mkUser(t, ctx, s, "ct-owner@test.dev"),
+		viaTeams: mkUser(t, ctx, s, "ct-via-teams@test.dev"),
+		outsider: mkUser(t, ctx, s, "ct-outsider@test.dev"),
+		teamA:    &models.Team{Name: "ct-team-a"},
+		teamB:    &models.Team{Name: "ct-team-b"},
+	}
+	for _, team := range []*models.Team{f.teamA, f.teamB} {
+		if err := s.CreateTeam(ctx, team); err != nil {
+			t.Fatalf("CreateTeam(%s): %v", team.Name, err)
+		}
+		if err := s.AddTeamMember(ctx, team.ID, f.viaTeams.ID, models.TeamRoleAdmin); err != nil {
+			t.Fatalf("AddTeamMember(%s): %v", team.Name, err)
+		}
+	}
+	coll, err := s.CreateCollection(ctx, "Shared", "", false, f.owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := s.AddCollectionMember(ctx, coll.ID, f.owner.ID, models.CollectionRoleOwner, &f.owner.ID); err != nil {
+		t.Fatalf("AddCollectionMember(owner): %v", err)
+	}
+	f.coll = coll
+	return f
+}
+
+func assertCollectionTeamAccess(t *testing.T, ctx context.Context, s store.Store, collectionID int, u *models.User, want bool) {
+	t.Helper()
+	if ok, err := s.UserHasCollectionTeamAccess(ctx, collectionID, u.ID); err != nil || ok != want {
+		t.Errorf("UserHasCollectionTeamAccess(%s) = %v / %v, want %v", u.Email, ok, err, want)
+	}
+}
+
+// verifyCollectionTeamShares adds both shares (plus a duplicate) and checks
+// access resolution and the team roster.
+func verifyCollectionTeamShares(t *testing.T, ctx context.Context, s store.Store, f collectionTeamsFixture) {
+	t.Helper()
+	assertCollectionTeamAccess(t, ctx, s, f.coll.ID, f.viaTeams, false)
+	for _, team := range []*models.Team{f.teamA, f.teamB, f.teamA} { // duplicate is a no-op
+		if err := s.AddCollectionTeam(ctx, f.coll.ID, team.ID, &f.owner.ID); err != nil {
+			t.Fatalf("AddCollectionTeam(%s): %v", team.Name, err)
+		}
+	}
+	assertCollectionTeamAccess(t, ctx, s, f.coll.ID, f.viaTeams, true)
+	assertCollectionTeamAccess(t, ctx, s, f.coll.ID, f.outsider, false)
+
+	teams, err := s.ListCollectionTeams(ctx, f.coll.ID)
+	if err != nil || len(teams) != 2 || teams[0].TeamName != f.teamA.Name || teams[1].TeamID != f.teamB.ID {
+		t.Fatalf("ListCollectionTeams = %+v / %v, want teams a, b", teams, err)
+	}
+	if teams[0].AddedBy == nil || *teams[0].AddedBy != f.owner.ID || teams[0].CreatedAt.IsZero() {
+		t.Errorf("ListCollectionTeams[0] = %+v, want added_by owner and created_at", teams[0])
+	}
+}
+
+// assertListedOnce checks the fixture collection appears exactly once for u
+// with the given caller role and direct member count, and both team shares.
+func assertListedOnce(t *testing.T, ctx context.Context, s store.Store, u *models.User, collectionID int, wantRole models.CollectionRole, wantMembers int) {
+	t.Helper()
+	list, err := s.ListCollectionsForUser(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("ListCollectionsForUser(%s): %v", u.Email, err)
+	}
+	var matches []*models.Collection
+	for _, c := range list {
+		if c.ID == collectionID {
+			matches = append(matches, c)
+		}
+	}
+	if len(matches) != 1 {
+		t.Fatalf("collection listed %d times for %s, want 1", len(matches), u.Email)
+	}
+	c := matches[0]
+	if c.CallerRole != wantRole || c.MemberCount != wantMembers || c.TeamCount != 2 {
+		t.Errorf("listed for %s: role %q members %d teams %d, want %q/%d/2", u.Email, c.CallerRole, c.MemberCount, c.TeamCount, wantRole, wantMembers)
+	}
+}
+
+// verifyCollectionTeamListing checks deduplicated listing, direct-role
+// precedence, and that member_count counts direct rows only.
+func verifyCollectionTeamListing(t *testing.T, ctx context.Context, s store.Store, f collectionTeamsFixture) {
+	t.Helper()
+	assertListedOnce(t, ctx, s, f.viaTeams, f.coll.ID, models.CollectionRoleMember, 1)
+	assertListedOnce(t, ctx, s, f.owner, f.coll.ID, models.CollectionRoleOwner, 1)
+	if list, err := s.ListCollectionsForUser(ctx, f.outsider.ID); err != nil || len(list) != 0 {
+		t.Errorf("ListCollectionsForUser(outsider) = %d / %v, want 0", len(list), err)
+	}
+
+	if err := s.AddCollectionMember(ctx, f.coll.ID, f.viaTeams.ID, models.CollectionRoleEditor, &f.owner.ID); err != nil {
+		t.Fatalf("AddCollectionMember(editor): %v", err)
+	}
+	assertListedOnce(t, ctx, s, f.viaTeams, f.coll.ID, models.CollectionRoleEditor, 2)
+	detail, err := s.GetCollection(ctx, f.coll.ID)
+	if err != nil || detail.MemberCount != 2 || detail.TeamCount != 2 || detail.ItemCount != 0 {
+		t.Errorf("GetCollection counts = %+v / %v, want members 2 teams 2 items 0", detail, err)
+	}
+	if err := s.RemoveCollectionMember(ctx, f.coll.ID, f.viaTeams.ID); err != nil {
+		t.Fatalf("RemoveCollectionMember: %v", err)
+	}
+	assertListedOnce(t, ctx, s, f.viaTeams, f.coll.ID, models.CollectionRoleMember, 1)
+}
+
+// verifyCollectionTeamRemoval checks share removal, team-deletion cleanup, and
+// cascade on collection deletion.
+func verifyCollectionTeamRemoval(t *testing.T, ctx context.Context, s store.Store, f collectionTeamsFixture) {
+	t.Helper()
+	if err := s.RemoveCollectionTeam(ctx, f.coll.ID, f.teamA.ID); err != nil {
+		t.Fatalf("RemoveCollectionTeam: %v", err)
+	}
+	assertCollectionTeamAccess(t, ctx, s, f.coll.ID, f.viaTeams, true)
+	if err := s.DeleteTeam(ctx, f.teamB.ID); err != nil {
+		t.Fatalf("DeleteTeam: %v", err)
+	}
+	if teams, err := s.ListCollectionTeams(ctx, f.coll.ID); err != nil || len(teams) != 0 {
+		t.Errorf("ListCollectionTeams after team deletion = %d / %v, want 0", len(teams), err)
+	}
+	assertCollectionTeamAccess(t, ctx, s, f.coll.ID, f.viaTeams, false)
+
+	if err := s.AddCollectionTeam(ctx, f.coll.ID, f.teamA.ID, nil); err != nil {
+		t.Fatalf("AddCollectionTeam(nil added_by): %v", err)
+	}
+	if err := s.DeleteCollection(ctx, f.coll.ID); err != nil {
+		t.Fatalf("DeleteCollection: %v", err)
+	}
+	if teams, err := s.ListCollectionTeams(ctx, f.coll.ID); err != nil || len(teams) != 0 {
+		t.Errorf("ListCollectionTeams after collection deletion = %d / %v, want 0", len(teams), err)
 	}
 }
 

@@ -141,6 +141,51 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <!-- Unreleased -->
+    <article class="version" id="unreleased">
+      <div class="version-header">
+        <a class="version-tag unreleased" href="#unreleased">Unreleased</a>
+        <a href="https://github.com/mr-karan/logchef/compare/v2.3.1...HEAD" class="version-link" target="_blank">View diff &rarr;</a>
+      </div>
+
+      <p class="release-intro">
+        Shared collections can be shared with whole teams. Metadata migrations run automatically at startup: SQLite to version 34 and Postgres to version 9.
+      </p>
+
+      <div class="change-section">
+        <div class="change-type added">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+          Added
+        </div>
+        <ul class="change-list">
+          <li><strong>Share a collection with a team</strong>: Owners choose <strong>Share with team</strong> to give every current team member the collection Member role. Membership is live: people who join the team see the collection, and people who leave lose it unless they have another share or a direct membership. A team share never grants Editor or Owner rights, and a direct role takes precedence. Owners can share with teams they belong to; global admins can share their own collections with any team. Owners can remove a share even after leaving the team (<a href="https://github.com/mr-karan/logchef/issues/114" target="_blank">#114</a>).</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 20v-8m0 0V4m0 8h8m-8 0H4"/></svg>
+          Changed
+        </div>
+        <ul class="change-list">
+          <li><strong>Source access</strong>: Team shares never grant source access. Running, pinning, and editing a query still need access to its source; other items show a lock icon. A collection shared through several teams and a direct membership appears once.</li>
+          <li><strong>Collection counts</strong>: Collections report <code>team_count</code> beside <code>member_count</code>. <code>member_count</code> still counts direct members only, owners included.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M20 6L9 17l-5-5"/></svg>
+          Fixed
+        </div>
+        <ul class="change-list">
+          <li><strong>Collection detail</strong>: <code>GET /api/v1/collections/:id</code> returns the member and item counts instead of zero, so the detail and the list agree.</li>
+          <li><strong>Collection header</strong> no longer shows counts twice, such as "3 3 items".</li>
+          <li><strong>Removed from a team</strong>: Pages without a team in the URL, such as the Library, no longer open Access Denied after someone removes you from your last-used team. On load, Logchef checks the saved team against your current teams and switches to one you still belong to, or clears the selection if none remain.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v2.3.1 -->
     <article class="version" id="v2.3.1">
       <div class="version-header">

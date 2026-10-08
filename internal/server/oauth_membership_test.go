@@ -101,6 +101,7 @@ func TestOAuthAdminIsMembershipOnlyHTTP(t *testing.T) {
 	teamB := "/api/v1/teams/" + itoa(w.teamB.ID)
 	exportPath := "/api/v1/teams/" + itoa(w.teamA.ID) + "/sources/" + itoa(w.srcA.ID) + "/exports/" + w.exportID
 	membersPath := "/api/v1/collections/" + strconv.Itoa(w.collection.ID) + "/members"
+	collectionTeamsPath := "/api/v1/collections/" + strconv.Itoa(w.collection.ID) + "/teams"
 
 	for _, tc := range []struct {
 		path              string
@@ -113,6 +114,7 @@ func TestOAuthAdminIsMembershipOnlyHTTP(t *testing.T) {
 		{"/api/v1/alerts/" + itoa(w.alertB.ID), http.StatusNotFound, http.StatusNotFound},
 		{exportPath, http.StatusForbidden, http.StatusOK},
 		{membersPath, http.StatusForbidden, http.StatusOK},
+		{collectionTeamsPath, http.StatusForbidden, http.StatusOK},
 		{"/api/v1/teams/" + itoa(w.teamA.ID), http.StatusOK, http.StatusOK},
 		{"/api/v1/saved-queries/" + strconv.Itoa(w.queryA.ID), http.StatusOK, http.StatusOK},
 	} {
