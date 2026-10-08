@@ -32,7 +32,7 @@ logchef:
   enabled: true
   image:
     repository: ghcr.io/mr-karan/logchef
-    tag: "v2.3.1"
+    tag: "v2.3.2"
     pullPolicy: IfNotPresent
   replicaCount: 1
   service:

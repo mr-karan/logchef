@@ -141,15 +141,17 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
-    <!-- Unreleased -->
-    <article class="version" id="unreleased">
+    <!-- v2.3.2 -->
+    <article class="version" id="v2.3.2">
       <div class="version-header">
-        <a class="version-tag unreleased" href="#unreleased">Unreleased</a>
-        <a href="https://github.com/mr-karan/logchef/compare/v2.3.1...HEAD" class="version-link" target="_blank">View diff &rarr;</a>
+        <a class="version-tag" href="#v2.3.2">v2.3.2</a>
+        <span class="version-date">Oct 8, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.3.2" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <p class="release-intro">
-        Shared collections can be shared with whole teams. Metadata migrations run automatically at startup: SQLite to version 34 and Postgres to version 9.
+        Shared collections can be shared with whole teams. Metadata migrations run automatically at startup: SQLite to version 34 and Postgres to version 9. Back up the metadata database before upgrading.
       </p>
 
       <div class="change-section">
@@ -179,6 +181,9 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           Fixed
         </div>
         <ul class="change-list">
+          <li>SQLite alerts now evaluate at their configured interval instead of waiting for the cutoff date to change. Existing timestamps need no migration (<a href="https://github.com/mr-karan/logchef/issues/124" target="_blank">#124</a>).</li>
+          <li>Helm deployments now preserve all configuration sections, use persistent credentials and Dex storage, and support configurable security contexts. Read the <a href="https://github.com/mr-karan/logchef/blob/main/deployment/helm/README.md" target="_blank">chart upgrade guide</a> before upgrading.</li>
+          <li>The MCP investigation panel applies each new call and runs its query. MCP tools now declare their read-only and closed-world behavior.</li>
           <li><strong>Collection detail</strong>: <code>GET /api/v1/collections/:id</code> returns the member and item counts instead of zero, so the detail and the list agree.</li>
           <li><strong>Collection header</strong> no longer shows counts twice, such as "3 3 items".</li>
           <li><strong>Removed from a team</strong>: Pages without a team in the URL, such as the Library, no longer open Access Denied after someone removes you from your last-used team. On load, Logchef checks the saved team against your current teams and switches to one you still belong to, or clears the selection if none remain.</li>
@@ -191,7 +196,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="version-header">
         <a class="version-tag" href="#v2.3.1">v2.3.1</a>
         <span class="version-date">Oct 7, 2026</span>
-        <span class="version-badge">Latest</span>
+
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.3.1" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

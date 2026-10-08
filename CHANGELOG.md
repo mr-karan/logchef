@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.2] - 2026-10-08
+
 Shared collections can be shared with whole teams. Metadata migrations run
 automatically at startup: SQLite to version 34 and Postgres to version 9.
+Back up the metadata database before upgrading.
 
 ### Added
 - **Share a collection with a team.** Owners choose **Share with team** to give
@@ -28,6 +31,11 @@ automatically at startup: SQLite to version 34 and Postgres to version 9.
   counts direct members only, owners included.
 
 ### Fixed
+- SQLite alerts now evaluate at their configured interval instead of waiting
+  for the cutoff date to change. Existing timestamps need no migration (#124).
+- Helm deployments now preserve all configuration sections, use persistent
+  credentials and Dex storage, and support configurable security contexts.
+  See `deployment/helm/README.md` before upgrading an existing chart.
 - The MCP investigation panel now applies each new `open_investigation` call
   (source, team, filter and time range) and runs the query, instead of keeping
   the previous results. Opening the panel runs its first query.
@@ -1454,7 +1462,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.2...HEAD
+[2.3.2]: https://github.com/mr-karan/logchef/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/mr-karan/logchef/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/mr-karan/logchef/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/mr-karan/logchef/compare/v2.1.0...v2.2.0
