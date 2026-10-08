@@ -32,7 +32,7 @@ logchef:
   enabled: true
   image:
     repository: ghcr.io/mr-karan/logchef
-    tag: latest
+    tag: "v2.3.1"
     pullPolicy: IfNotPresent
   replicaCount: 1
   service:
@@ -54,9 +54,19 @@ logchef:
     storageClass: ""
     accessModes:
       - ReadWriteOnce
+  # Empty selects Recreate for SQLite and RollingUpdate for Postgres.
+  strategy: {}
+  # Pod-level security settings. SQLite needs a writable /data volume.
   podSecurityContext:
     fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  # Security settings for the Logchef container, such as allowPrivilegeEscalation
+  # or capabilities. Pod-level settings such as runAsNonRoot are inherited.
+  securityContext: {}
   dataPermsInit:
+    # Disable in restricted namespaces: this init container runs as root.
+    # The storage driver must then provide a writable /data volume via fsGroup
+    # or preconfigured volume permissions.
     enabled: true
     image:
       repository: busybox
@@ -75,6 +85,8 @@ logchef:
   # Overridable config.toml fragments. OIDC URLs are templated from publicDomain
   # and in-cluster Dex service DNS when left empty.
   config:
+    database:
+      driver: sqlite
     server:
       host: "0.0.0.0"
       port: 8125
@@ -88,8 +100,8 @@ logchef:
       # Empty → http://<release>-dex:5556/dex/token (in-cluster token exchange)
       token_url: ""
       client_id: logchef
-      # Prefer existingSecret; plaintext used only for bootstrap.
-      client_secret: logchef-secret
+      # Prefer logchef.oidc.existingSecret for the OIDC client credential.
+      client_secret: ""
       # Empty → https://<release>.<publicDomain>/api/v1/auth/callback
       redirect_url: ""
       scopes:
@@ -99,8 +111,7 @@ logchef:
       # Set true when the IdP does not send email_verified=true.
       skip_email_verified_check: false
     auth:
-      admin_emails:
-        - admin@logchef.internal
+      admin_emails: []
       session_duration: 24h
       max_concurrent_sessions: 1
       default_token_expiry: 2160h
@@ -117,16 +128,19 @@ logchef:
       # Do not set api_key here — use logchef.ai.existingSecret + LOGCHEF_AI__API_KEY.
     logging:
       level: info
-  # HMAC pepper for user API tokens (injected as LOGCHEF_AUTH__API_TOKEN_SECRET).
-  # Leave existingSecret empty: the chart creates <release>-api-token once
-  # (openssl rand -hex 32) and reuses it on upgrade via lookup.
+  # Persistent HMAC pepper for user API tokens. Use an existing Secret for GitOps.
+  # Generation is an explicit opt-in for native Helm installs only.
   auth:
     existingSecret: ""
+    generateSecret: false
     apiTokenSecretKey: api-token-secret
   # OpenAI API key from a manually created Secret (e.g. logchef-ai).
   ai:
     existingSecret: ""
     apiKeyKey: api-key
+  oidc:
+    existingSecret: ""
+    clientSecretKey: client-secret
   extraEnv: []
   existingSecret: ""
   probes:
@@ -179,8 +193,26 @@ dex:
           - path: /
             pathType: Prefix
     tls: []
-  # Local password DB (demo). Set false when using external IdP connectors.
-  enablePasswordDB: true
+  # SQLite requires persistent storage and a single replica. External storage
+  # (postgres/mysql/kubernetes) can be configured with the Dex storage map.
+  storage:
+    type: sqlite3
+    config:
+      file: /var/dex/dex.db
+  persistence:
+    enabled: true
+    existingClaim: ""
+    size: 1Gi
+    storageClass: ""
+    accessModes:
+      - ReadWriteOnce
+  podSecurityContext:
+    fsGroup: 1000
+    fsGroupChangePolicy: OnRootMismatch
+  securityContext: {}
+  extraEnv: []
+  # Enable only with your own staticPasswords. No demo accounts are installed.
+  enablePasswordDB: false
   # Optional: inject OIDC client id/secret from a Secret into Dex env
   # (referenced from connectors as $OIDC_CLIENT_ID / $OIDC_CLIENT_SECRET).
   oidcSecret:
@@ -191,16 +223,7 @@ dex:
     clientSecretEnv: OIDC_CLIENT_SECRET
   # Dex IdP connectors (OIDC/SAML/etc). See https://dexidp.io/docs/connectors/
   connectors: []
-  # bcrypt of "password" (same as upstream docker-compose demo)
-  staticPasswords:
-    - email: admin@logchef.internal
-      hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
-      username: admin
-      userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
-    - email: demo@logchef.internal
-      hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
-      username: demo-user
-      userID: "08a8684b-db88-4b73-90a9-3cd1661f5467"
+  staticPasswords: []
   probes:
     liveness:
       path: /dex/.well-known/openid-configuration
@@ -223,13 +246,14 @@ dex:
 # ---------------------------------------------------------------------------
 clickhouse:
   enabled: true
-  name: logchef
+  # Empty uses a release-specific name. Set logchef when upgrading legacy installs.
+  name: ""
   image: clickhouse/clickhouse-server:24.8.4
   cluster:
     name: logchef
     shards: 1
     replicas: 1
-  # Empty → clickhouse-{chi} (Altinity default), e.g. clickhouse-logchef for chi name logchef.
+  # Empty uses clickhouse-<CHI name>. An override also names the generated Service.
   serviceName: ""
   resources:
     requests:

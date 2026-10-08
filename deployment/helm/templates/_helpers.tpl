@@ -2,6 +2,19 @@
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
+{{- /* Keep suffixes intact. Hash shortened bases to avoid name collisions. */ -}}
+{{- define "logchef.suffixedName" -}}
+{{- $limit := int (.maxLength | default 63) -}}
+{{- $name := .name -}}
+{{- $suffix := .suffix -}}
+{{- if gt (len (printf "%s%s" $name $suffix)) $limit -}}
+{{- $prefixLength := sub (sub $limit (len $suffix)) 9 | int -}}
+{{- printf "%s-%s%s" ($name | trunc $prefixLength | trimSuffix "-") ($name | sha256sum | trunc 8) $suffix -}}
+{{- else -}}
+{{- printf "%s%s" $name $suffix -}}
+{{- end -}}
+{{- end }}
+
 {{- define "logchef.fullname" -}}
 {{- if .Values.fullnameOverride }}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
@@ -10,7 +23,7 @@
 {{- if contains $name .Release.Name }}
 {{- .Release.Name | trunc 63 | trimSuffix "-" }}
 {{- else }}
-{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- include "logchef.suffixedName" (dict "name" (printf "%s-%s" .Release.Name $name) "suffix" "") }}
 {{- end }}
 {{- end }}
 {{- end }}
@@ -49,7 +62,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.logchef.auth.existingSecret }}
 {{- .Values.logchef.auth.existingSecret }}
 {{- else }}
-{{- printf "%s-api-token" (include "logchef.logchefServiceName" .) | trunc 63 | trimSuffix "-" }}
+{{- include "logchef.suffixedName" (dict "name" (include "logchef.fullname" .) "suffix" "-api-token") }}
 {{- end }}
 {{- end }}
 
@@ -59,20 +72,22 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- /* Reuse the in-cluster Secret when present (helm upgrade). Generate openssl rand -hex 32 on first install. */ -}}
 {{- define "logchef.apiTokenSecretValue" -}}
-{{- $name := printf "%s-api-token" (include "logchef.logchefServiceName" .) | trunc 63 | trimSuffix "-" }}
+{{- $name := include "logchef.apiTokenSecretName" . }}
 {{- $key := include "logchef.apiTokenSecretKey" . }}
 {{- $existing := lookup "v1" "Secret" .Release.Namespace $name }}
 {{- if and $existing $existing.data (index $existing.data $key) }}
 {{- index $existing.data $key | b64dec }}
 {{- else if .Values.logchef.config.auth.api_token_secret }}
 {{- .Values.logchef.config.auth.api_token_secret }}
-{{- else }}
+{{- else if .Values.logchef.auth.generateSecret }}
 {{- printf "%x" (randBytes 32 | b64dec) }}
+{{- else }}
+{{- fail "Set logchef.auth.existingSecret to a persistent API-token Secret. Native Helm installs may explicitly set logchef.auth.generateSecret=true; do not use generation with offline/GitOps rendering." }}
 {{- end }}
 {{- end }}
 
 {{- define "logchef.dexServiceName" -}}
-{{- printf "%s-dex" (include "logchef.fullname" .) | trunc 63 | trimSuffix "-" }}
+{{- include "logchef.suffixedName" (dict "name" (include "logchef.fullname" .) "suffix" "-dex") }}
 {{- end }}
 
 {{- define "logchef.publicDomain" -}}
@@ -137,6 +152,31 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- if .Values.clickhouse.serviceName -}}
 {{- .Values.clickhouse.serviceName -}}
 {{- else -}}
-{{- printf "clickhouse-%s" .Values.clickhouse.name -}}
+{{- printf "clickhouse-%s" (include "logchef.clickhouseName" .) -}}
+{{- end -}}
+{{- end }}
+
+{{- define "logchef.clickhouseName" -}}
+{{- .Values.clickhouse.name | default (include "logchef.suffixedName" (dict "name" (include "logchef.fullname" .) "suffix" "" "maxLength" 52)) -}}
+{{- end }}
+
+{{- /* TOML inline tables preserve arbitrary nested configuration maps. */ -}}
+{{- define "logchef.tomlValue" -}}
+{{- if kindIs "map" . -}}
+{{- $entries := list -}}
+{{- range $key, $value := . -}}
+{{- $entries = append $entries (printf "%s = %s" ($key | toJson) (include "logchef.tomlValue" $value)) -}}
+{{- end -}}
+{{- printf "{ %s }" (join ", " $entries) -}}
+{{- else if kindIs "slice" . -}}
+{{- $entries := list -}}
+{{- range . -}}
+{{- $entries = append $entries (include "logchef.tomlValue" .) -}}
+{{- end -}}
+{{- printf "[%s]" (join ", " $entries) -}}
+{{- else if eq (kindOf .) "invalid" -}}
+{{- fail "Null values are not supported in logchef.config; remove the key instead." -}}
+{{- else -}}
+{{- . | mustToJson -}}
 {{- end -}}
 {{- end }}
