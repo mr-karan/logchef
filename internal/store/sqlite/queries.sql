@@ -653,7 +653,7 @@ SELECT * FROM alerts
 WHERE is_active = 1
   AND (
         last_evaluated_at IS NULL
-        OR last_evaluated_at <= datetime('now', '-' || frequency_seconds || ' seconds')
+        OR datetime(last_evaluated_at) <= datetime('now', '-' || frequency_seconds || ' seconds')
       );
 
 -- Alert history queries
