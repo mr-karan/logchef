@@ -181,6 +181,7 @@ type VictoriaLogsOptimizer struct {
 	MaxWindowSeconds       int      `json:"max_window_seconds,omitempty"`
 	Concurrency            int      `json:"concurrency,omitempty"`
 	SidebarLookbackSeconds int      `json:"sidebar_lookback_seconds,omitempty"`
+	SchemaLookbackSeconds  int      `json:"schema_lookback_seconds,omitempty"`
 	SidebarValuesCap       int      `json:"sidebar_values_cap,omitempty"`
 	HistogramEnabled       *bool    `json:"histogram_enabled,omitempty"`
 	StreamFields           []string `json:"stream_fields,omitempty"`
@@ -195,6 +196,9 @@ func (o VictoriaLogsOptimizer) WithDefaults() VictoriaLogsOptimizer {
 	}
 	if o.SidebarLookbackSeconds == 0 {
 		o.SidebarLookbackSeconds = 900
+	}
+	if o.SchemaLookbackSeconds == 0 {
+		o.SchemaLookbackSeconds = 300
 	}
 	if o.SidebarValuesCap == 0 {
 		o.SidebarValuesCap = 10000
@@ -212,6 +216,9 @@ func (o VictoriaLogsOptimizer) Validate() error {
 	}
 	if o.SidebarLookbackSeconds < 60 || o.SidebarLookbackSeconds > 10800 {
 		return fmt.Errorf("sidebar_lookback_seconds must be between 60 and 10800")
+	}
+	if o.SchemaLookbackSeconds < 60 || o.SchemaLookbackSeconds > 86400 {
+		return fmt.Errorf("schema_lookback_seconds must be between 60 and 86400")
 	}
 	if o.SidebarValuesCap < 100 || o.SidebarValuesCap > 100000 {
 		return fmt.Errorf("sidebar_values_cap must be between 100 and 100000")

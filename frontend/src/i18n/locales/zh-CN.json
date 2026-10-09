@@ -1354,6 +1354,7 @@
   "sources.maxWindowSeconds": "最大窗口时长（秒）",
   "sources.windowConcurrency": "每个数据源的并发窗口数",
   "sources.sidebarLookbackSeconds": "侧栏回溯时长（秒）",
+  "sources.schemaLookbackSeconds": "字段发现回溯时长（秒）",
   "sources.sidebarValuesCap": "侧栏值数量上限",
   "sources.windowHistogram": "显示直方图",
   "sources.streamFields": "流字段",

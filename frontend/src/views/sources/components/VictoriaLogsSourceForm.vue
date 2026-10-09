@@ -80,6 +80,14 @@ function updateAuthMode(value: unknown) {
             />
           </div>
           <div class="flex flex-col gap-2">
+            <Label for="schema_lookback">{{ t('sources.schemaLookbackSeconds') }}</Label>
+            <Input
+              id="schema_lookback" type="number" min="60" max="86400"
+              :model-value="modelValue.schemaLookbackSeconds"
+              @update:model-value="value => updateForm({ schemaLookbackSeconds: String(value) })"
+            />
+          </div>
+          <div class="flex flex-col gap-2">
             <Label for="sidebar_cap">{{ t('sources.sidebarValuesCap') }}</Label>
             <Input
               id="sidebar_cap" type="number" min="100" max="100000"

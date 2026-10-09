@@ -1354,6 +1354,7 @@
   "sources.maxWindowSeconds": "Maximum window duration (seconds)",
   "sources.windowConcurrency": "Concurrent windows per source",
   "sources.sidebarLookbackSeconds": "Sidebar lookback (seconds)",
+  "sources.schemaLookbackSeconds": "Schema lookback (seconds)",
   "sources.sidebarValuesCap": "Sidebar value cap",
   "sources.windowHistogram": "Show histogram",
   "sources.streamFields": "Stream fields",

@@ -102,13 +102,17 @@ enabled = true
 max_window_seconds = 10800
 concurrency = 2
 sidebar_lookback_seconds = 900
+schema_lookback_seconds = 300
 sidebar_values_cap = 10000
 histogram_enabled = true
 stream_fields = ["service"]
 ```
 
-The defaults are three-hour windows, two concurrent requests per source, and
-a fifteen-minute sidebar lookback. Leave `stream_fields` empty to discover
+The defaults are three-hour windows, two concurrent requests per source,
+a fifteen-minute sidebar lookback, and a five-minute schema lookback. Field
+names come from logs in the schema lookback, instead of the last 24 hours that
+sources without windowed search use. Increase `schema_lookback_seconds` if rare
+fields are missing from the field list. Leave `stream_fields` empty to discover
 stream fields automatically. The stream picker sends separate stream filters
 and keeps your query text intact. **Select all shown** selects the displayed
 values. **Clear** removes the restriction.
@@ -126,8 +130,18 @@ standard histogram. The coverage strip distinguishes counted, pending, and
 failed ranges.
 Disable `histogram_enabled` to hide the chart while keeping the background total.
 
-Cursors use deterministic row ordering and an offset within the current window.
-They preserve timestamp ties for unchanged data. VictoriaLogs does not provide
+Each page first finds the oldest timestamp it can reach with a time-only sort,
+which VictoriaLogs answers from the newest logs. Logchef then orders only that
+short time range by the complete row. Cursors store the last timestamp and the
+number of rows already read at that timestamp. For unchanged data, each stored
+row appears exactly once, including rows that share a timestamp and identical
+duplicate rows. A page reads
+all rows that share its oldest timestamp, so sources that store many logs with
+the same timestamp page more slowly. Some VictoriaLogs versions (at least
+v1.51 and v1.52) can return a timestamp that is too new from the time-only
+sort. When the short range then holds fewer rows than the page needs, Logchef
+reads the page again over the full window, so that page costs as much as a
+full-window sort. VictoriaLogs does not provide
 snapshot isolation across requests, so late ingestion or retention changes can
 affect pagination. Rerun the search after changing source settings or filters.
 

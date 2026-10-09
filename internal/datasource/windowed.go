@@ -23,11 +23,19 @@ type SearchWindow struct {
 	End   time.Time `json:"end"`
 }
 
+// WindowPosition marks the rows already read from a search window: every row
+// newer than Time, and the first Skip rows at exactly Time in the provider's
+// deterministic tie order. The zero value is the start of a window.
+type WindowPosition struct {
+	Time time.Time
+	Skip int
+}
+
 type WindowedPlan struct {
 	Request     WindowedRequest
 	Windows     []SearchWindow
 	Index       int
-	Offset      int
+	Position    WindowPosition
 	Fingerprint string
 	Concurrency int
 }

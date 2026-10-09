@@ -1,6 +1,9 @@
 package provisioning
 
 import (
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -426,5 +429,70 @@ func TestResolveSecrets_DefaultMemberRole(t *testing.T) {
 	ResolveSecrets(cfg)
 	if cfg.Teams[0].Members[0].Role != "member" {
 		t.Errorf("expected default role 'member', got %q", cfg.Teams[0].Members[0].Role)
+	}
+}
+
+func TestValidateConfig_VictoriaLogsSchemaLookbackFromTOML(t *testing.T) {
+	dir := t.TempDir()
+	mainConfig := `
+[auth]
+admin_emails = ["admin@example.com"]
+api_token_secret = "0123456789abcdef0123456789abcdef"
+
+[oidc]
+provider_url = "http://localhost/dex"
+auth_url = "http://localhost/dex/auth"
+token_url = "http://localhost/dex/token"
+client_id = "logchef"
+redirect_url = "http://localhost/callback"
+
+[provisioning]
+file = "provisioning.toml"
+`
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(mainConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		lookback int
+		valid    bool
+	}{{900, true}, {59, false}, {86401, false}} {
+		provisioning := fmt.Sprintf(`
+manage_sources = true
+
+[[sources]]
+name = "payments"
+source_type = "victorialogs"
+
+[sources.connection]
+base_url = "https://logs.example.com"
+
+[sources.connection.optimizer]
+enabled = true
+schema_lookback_seconds = %d
+`, tc.lookback)
+		if err := os.WriteFile(filepath.Join(dir, "provisioning.toml"), []byte(provisioning), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := config.Load(filepath.Join(dir, "config.toml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = ValidateConfig(&cfg.Provisioning)
+		if !tc.valid {
+			if err == nil || !strings.Contains(err.Error(), "schema_lookback_seconds") {
+				t.Fatalf("schema_lookback_seconds = %d: got %v", tc.lookback, err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn, err := cfg.Provisioning.Sources[0].VictoriaLogsConnection()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if conn.Optimizer == nil || conn.Optimizer.SchemaLookbackSeconds != tc.lookback {
+			t.Fatalf("decoded optimizer %+v", conn.Optimizer)
+		}
 	}
 }

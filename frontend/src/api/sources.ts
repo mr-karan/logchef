@@ -51,6 +51,7 @@ export interface VictoriaLogsOptimizer {
   max_window_seconds?: number;
   concurrency?: number;
   sidebar_lookback_seconds?: number;
+  schema_lookback_seconds?: number;
   sidebar_values_cap?: number;
   histogram_enabled?: boolean;
   stream_fields?: string[];

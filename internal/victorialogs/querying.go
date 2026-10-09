@@ -299,6 +299,10 @@ func (p *Provider) GetSourceSchema(ctx context.Context, source *models.Source) (
 	}
 
 	start, end := defaultDiscoveryWindow()
+	if conn.Optimizer != nil && conn.Optimizer.Enabled {
+		// Large optimized sources cannot scan a day of logs to list field names.
+		start = end.Add(-time.Duration(conn.Optimizer.WithDefaults().SchemaLookbackSeconds) * time.Second)
+	}
 	form := url.Values{}
 	form.Set("query", "*")
 	form.Set("start", formatAPITime(start))

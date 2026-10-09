@@ -20,10 +20,15 @@ import (
 
 const maxSearchWindows = 4096
 
+// windowCursorVersion is part of the plan fingerprint, so cursors from an
+// incompatible pagination scheme do not match.
+const windowCursorVersion = 2
+
 type windowCursor struct {
 	Fingerprint string `json:"fingerprint"`
 	Index       int    `json:"index"`
-	Offset      int    `json:"offset"`
+	TimeNanos   int64  `json:"time_ns,omitempty"`
+	Skip        int    `json:"skip,omitempty"`
 }
 
 type windowLimiter struct {
@@ -113,6 +118,7 @@ func (p *Provider) PrepareWindowedQuery(source *models.Source, req datasource.Wi
 	limit, _, _ := resolveQueryLimit(req.Limit, req.DefaultLimit, req.MaxLimit)
 	req.Limit = limit
 	fingerprintData, err := json.Marshal(struct {
+		Version  int             `json:"version"`
 		SourceID models.SourceID `json:"source_id"`
 		Revision time.Time       `json:"revision"`
 		Query    string          `json:"query"`
@@ -120,7 +126,7 @@ func (p *Provider) PrepareWindowedQuery(source *models.Source, req datasource.Wi
 		End      time.Time       `json:"end"`
 		Width    int             `json:"width"`
 		Filters  []string        `json:"filters"`
-	}{source.ID, source.UpdatedAt, req.RawQuery, *req.StartTime, *req.EndTime, settings.MaxWindowSeconds, req.StreamFilters})
+	}{windowCursorVersion, source.ID, source.UpdatedAt, req.RawQuery, *req.StartTime, *req.EndTime, settings.MaxWindowSeconds, req.StreamFilters})
 	if err != nil {
 		return nil, err
 	}
@@ -168,18 +174,9 @@ func validateWindowedRequest(req *datasource.WindowedRequest) error {
 func restoreWindowCursor(plan *datasource.WindowedPlan) error {
 	req := plan.Request
 	if req.Cursor != "" {
-		if len(req.Cursor) > 2048 {
-			return fmt.Errorf("invalid search cursor")
+		if err := decodeWindowCursor(plan, req.Cursor); err != nil {
+			return err
 		}
-		data, err := base64.RawURLEncoding.DecodeString(req.Cursor)
-		if err != nil {
-			return fmt.Errorf("invalid search cursor")
-		}
-		var cursor windowCursor
-		if err := json.Unmarshal(data, &cursor); err != nil || cursor.Fingerprint != plan.Fingerprint || cursor.Index < 0 || cursor.Index >= len(plan.Windows) || cursor.Offset < 0 || cursor.Offset > math.MaxInt-plan.Request.Limit-1 {
-			return fmt.Errorf("search cursor does not match this query or source")
-		}
-		plan.Index, plan.Offset = cursor.Index, cursor.Offset
 	}
 	if req.WindowIndex != nil {
 		if *req.WindowIndex < 0 || *req.WindowIndex >= len(plan.Windows) {
@@ -196,20 +193,49 @@ func restoreWindowCursor(plan *datasource.WindowedPlan) error {
 	return nil
 }
 
-func searchCursor(plan *datasource.WindowedPlan, index, offset int) string {
+func decodeWindowCursor(plan *datasource.WindowedPlan, encoded string) error {
+	if len(encoded) > 2048 {
+		return fmt.Errorf("invalid search cursor")
+	}
+	data, err := base64.RawURLEncoding.DecodeString(encoded)
+	if err != nil {
+		return fmt.Errorf("invalid search cursor")
+	}
+	var cursor windowCursor
+	if err := json.Unmarshal(data, &cursor); err != nil || cursor.Fingerprint != plan.Fingerprint || cursor.Index < 0 || cursor.Index >= len(plan.Windows) || cursor.Skip < 0 || cursor.Skip > math.MaxInt-plan.Request.Limit-1 {
+		return fmt.Errorf("search cursor does not match this query or source")
+	}
+	plan.Index = cursor.Index
+	if cursor.Skip > 0 {
+		window := plan.Windows[cursor.Index]
+		position := datasource.WindowPosition{Time: time.Unix(0, cursor.TimeNanos).UTC(), Skip: cursor.Skip}
+		if position.Time.Before(window.Start) || !position.Time.Before(window.End) {
+			return fmt.Errorf("search cursor does not match this query or source")
+		}
+		plan.Position = position
+	}
+	return nil
+}
+
+func searchCursor(plan *datasource.WindowedPlan, index int, position datasource.WindowPosition) string {
 	if index >= len(plan.Windows) {
 		return ""
 	}
-	data := fmt.Sprintf(`{"fingerprint":%q,"index":%d,"offset":%d}`, plan.Fingerprint, index, offset)
+	data := fmt.Sprintf(`{"fingerprint":%q,"index":%d}`, plan.Fingerprint, index)
+	if position.Skip > 0 {
+		data = fmt.Sprintf(`{"fingerprint":%q,"index":%d,"time_ns":%d,"skip":%d}`, plan.Fingerprint, index, position.Time.UnixNano(), position.Skip)
+	}
 	return base64.RawURLEncoding.EncodeToString([]byte(data))
 }
 
 type windowResult struct {
-	index   int
-	rows    []map[string]any
-	buckets []datasource.HistogramBucket
-	stats   models.QueryStats
-	err     error
+	index int
+	rows  []map[string]any
+	// positions[i] is the window position after rows[:i+1].
+	positions []datasource.WindowPosition
+	buckets   []datasource.HistogramBucket
+	stats     models.QueryStats
+	err       error
 }
 
 // StreamWindowedQuery owns its workers. At most Concurrency windows are in
@@ -223,14 +249,14 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 	var workers sync.WaitGroup
 	defer func() { cancel(); workers.Wait() }()
 	limiter := p.windowLimiter(source.ID, plan.Concurrency)
-	if err := emit(datasource.WindowedEvent{Type: datasource.WindowPlan, Windows: plan.Windows, Cursor: searchCursor(plan, plan.Index, plan.Offset)}); err != nil {
+	if err := emit(datasource.WindowedEvent{Type: datasource.WindowPlan, Windows: plan.Windows, Cursor: searchCursor(plan, plan.Index, plan.Position)}); err != nil {
 		return err
 	}
 	index := plan.Index
 	if plan.Request.SkipWindow != nil {
 		window := plan.Windows[index]
 		index++
-		if err := emit(datasource.WindowedEvent{Type: datasource.WindowState, Window: &window, Status: datasource.WindowSkipped, Cursor: searchCursor(plan, index, 0)}); err != nil {
+		if err := emit(datasource.WindowedEvent{Type: datasource.WindowState, Window: &window, Status: datasource.WindowSkipped, Cursor: searchCursor(plan, index, datasource.WindowPosition{})}); err != nil {
 			return err
 		}
 	}
@@ -244,13 +270,16 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 	remaining := plan.Request.Limit
 	bytesRemaining := plan.Request.MaxResponseBytes
 	pending := make(map[int]windowResult)
+	startPosition := func(i int) datasource.WindowPosition {
+		if i == plan.Index && plan.Request.SkipWindow == nil {
+			return plan.Position
+		}
+		return datasource.WindowPosition{}
+	}
 	launch := func(i int) error {
 		window := plan.Windows[i]
-		offset := 0
-		if i == plan.Index && plan.Request.SkipWindow == nil {
-			offset = plan.Offset
-		}
-		if err := emit(datasource.WindowedEvent{Type: datasource.WindowState, Window: &window, Status: datasource.WindowRunning, Cursor: searchCursor(plan, i, offset)}); err != nil {
+		position := startPosition(i)
+		if err := emit(datasource.WindowedEvent{Type: datasource.WindowState, Window: &window, Status: datasource.WindowRunning, Cursor: searchCursor(plan, i, position)}); err != nil {
 			return err
 		}
 		inFlight++
@@ -259,7 +288,7 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 			if err := limiter.acquire(ctx); err != nil {
 				result.err = err
 			} else {
-				result = p.querySearchWindow(ctx, conn, plan.Request, window, offset)
+				result = p.querySearchWindow(ctx, conn, source.ID, plan.Request, window, position)
 				limiter.release()
 			}
 			select {
@@ -292,10 +321,8 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 			}
 			delete(pending, index)
 			window := plan.Windows[index]
-			cursor := searchCursor(plan, index, 0)
-			if index == plan.Index {
-				cursor = searchCursor(plan, index, plan.Offset)
-			}
+			position := startPosition(index)
+			cursor := searchCursor(plan, index, position)
 			if result.err != nil {
 				p.log.Warn("window query failed", "source_id", source.ID, "window", index, "error", result.err)
 				if err := emit(datasource.WindowedEvent{Type: datasource.WindowState, Window: &window, Status: datasource.WindowFailed, Cursor: cursor, Message: "Window query failed. Retry this time range."}); err != nil {
@@ -328,15 +355,11 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 					bytesRemaining -= len(data) + 1
 				}
 			}
-			offset := 0
-			if index == plan.Index && plan.Request.SkipWindow == nil {
-				offset = plan.Offset
-			}
 			exhausted := len(result.rows) <= n && !result.stats.Truncated
 			if exhausted {
-				cursor = searchCursor(plan, index+1, 0)
-			} else {
-				cursor = searchCursor(plan, index, offset+n)
+				cursor = searchCursor(plan, index+1, datasource.WindowPosition{})
+			} else if n > 0 {
+				cursor = searchCursor(plan, index, result.positions[n-1])
 			}
 			result.stats.RowsReturned = n
 			result.stats.LimitApplied = plan.Request.Limit
@@ -365,27 +388,158 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 	return emit(datasource.WindowedEvent{Type: datasource.WindowEnd, Complete: true})
 }
 
-func (p *Provider) querySearchWindow(ctx context.Context, conn models.VictoriaLogsConnectionInfo, req datasource.WindowedRequest, window datasource.SearchWindow, offset int) windowResult {
+func (p *Provider) querySearchWindow(ctx context.Context, conn models.VictoriaLogsConnectionInfo, sourceID models.SourceID, req datasource.WindowedRequest, window datasource.SearchWindow, position datasource.WindowPosition) windowResult {
 	result := windowResult{index: window.Index}
 	if req.QueryTimeout != nil {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, time.Duration(*req.QueryTimeout)*time.Second)
 		defer cancel()
 	}
-	query := req.RawQuery
 	if req.Count {
 		// Align buckets to the selected timezone, as the standard hits histogram does.
 		bucket := "_time:" + req.Step
 		if offset := formatTimezoneOffset(req.Timezone, req.StartTime, req.EndTime); offset != "" {
 			bucket += " offset " + offset
 		}
-		query += " | stats by (" + bucket + ") count() as log_count"
-	} else {
-		// Pack the original row before sorting. The complete row breaks timestamp
-		// ties, and decoding it restores even a pre-existing _logchef_row field.
-		query += fmt.Sprintf(" | pack_json as _logchef_row | sort by (_time desc, _logchef_row) offset %d limit %d | fields _logchef_row", offset, req.Limit+1)
+		query := req.RawQuery + " | stats by (" + bucket + ") count() as log_count"
+		var rows []map[string]any
+		rows, result.stats, result.err = p.queryWindowRows(ctx, conn, req, query, window.Start, window.End)
+		if result.err == nil && result.stats.Truncated {
+			result.err = fmt.Errorf("count response exceeds the response byte limit")
+		}
+		if result.err == nil {
+			result.buckets, result.err = decodeCountRows(rows)
+		}
+		return result
 	}
-	form := url.Values{"query": {query}, "start": {formatAPITime(window.Start)}, "end": {formatAPITime(window.End)}}
+	// Sorting packed rows orders timestamp ties exactly, but packs every row
+	// in the range. Find the oldest timestamp this page can reach with a
+	// time-only sort first, so only that short range is packed and sorted.
+	// VictoriaLogs optimizes the time-only sort to read the newest logs.
+	start, end := window.Start, window.End
+	newer := end
+	if position.Skip > 0 {
+		newer = position.Time
+		end = position.Time.Add(time.Nanosecond)
+	}
+	oldest, err := p.querySearchBoundary(ctx, conn, req, start, newer)
+	if err != nil {
+		result.err = err
+		return result
+	}
+	if !oldest.IsZero() {
+		start = oldest
+	}
+	// The complete row breaks timestamp ties, and decoding it restores even
+	// a pre-existing _logchef_row field.
+	query := req.RawQuery + fmt.Sprintf(" | pack_json as _logchef_row | sort by (_time desc, _logchef_row) offset %d limit %d | fields _logchef_row", position.Skip, req.Limit+1)
+	rows, stats, err := p.queryWindowRows(ctx, conn, req, query, start, end)
+	// The narrowed range holds every row at or after its start, so its rows
+	// are a correct prefix of the window. A correct boundary leaves at least
+	// Limit+1 rows in that range, so a short page that was not cut by the
+	// byte limit means the boundary was too new and cannot prove that the
+	// window is exhausted. VictoriaLogs v1.52.0 can return such a boundary
+	// from its last-N optimization. Read the page again from the window start.
+	if err == nil && start.After(window.Start) && !stats.Truncated && len(rows) <= req.Limit {
+		p.log.Warn("search boundary did not fill the page, reading the full window", "source_id", sourceID, "window", window.Index, "window_start", window.Start, "window_end", window.End)
+		rows, stats, err = p.queryWindowRows(ctx, conn, req, query, window.Start, end)
+	}
+	result.stats = stats
+	if err != nil {
+		result.err = err
+		return result
+	}
+	result.rows, result.positions, result.err = decodeSearchRows(rows, position)
+	return result
+}
+
+// queryWindowRows runs one window query over [start, end) and reads at most
+// the response byte limit.
+func (p *Provider) queryWindowRows(ctx context.Context, conn models.VictoriaLogsConnectionInfo, req datasource.WindowedRequest, query string, start, end time.Time) ([]map[string]any, models.QueryStats, error) {
+	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/query", windowForm(conn, req, query, start, end))
+	if err != nil {
+		return nil, models.QueryStats{}, err
+	}
+	defer resp.Body.Close()
+	rows, _, bytesReturned, truncated, err := readQueryRows(resp.Body, req.MaxResponseBytes, req.Limit+1)
+	stats := statsFromHeaders(resp, len(rows))
+	stats.BytesReturned = bytesReturned
+	stats.Truncated = truncated != ""
+	stats.TruncatedReason = truncated
+	return rows, stats, err
+}
+
+func decodeCountRows(rows []map[string]any) ([]datasource.HistogramBucket, error) {
+	buckets := make([]datasource.HistogramBucket, 0, len(rows))
+	for _, row := range rows {
+		bucket, err := rowTime(row)
+		if err != nil {
+			return nil, fmt.Errorf("invalid count bucket: %w", err)
+		}
+		count, err := strconv.Atoi(fmt.Sprint(row["log_count"]))
+		if err != nil || count < 0 {
+			return nil, fmt.Errorf("invalid window count")
+		}
+		buckets = append(buckets, datasource.HistogramBucket{Bucket: bucket, LogCount: count})
+	}
+	return buckets, nil
+}
+
+// decodeSearchRows unpacks rows sorted by (_time desc, packed row) and returns
+// the window position after each row.
+func decodeSearchRows(rows []map[string]any, position datasource.WindowPosition) ([]map[string]any, []datasource.WindowPosition, error) {
+	originals := make([]map[string]any, 0, len(rows))
+	positions := make([]datasource.WindowPosition, 0, len(rows))
+	for _, row := range rows {
+		packed, ok := row["_logchef_row"].(string)
+		if !ok {
+			return nil, nil, fmt.Errorf("window result has no packed row")
+		}
+		var original map[string]any
+		if err := json.Unmarshal([]byte(packed), &original); err != nil {
+			return nil, nil, err
+		}
+		timestamp, err := rowTime(original)
+		if err != nil {
+			return nil, nil, err
+		}
+		if timestamp.Equal(position.Time) {
+			position.Skip++
+		} else {
+			position = datasource.WindowPosition{Time: timestamp, Skip: 1}
+		}
+		originals = append(originals, original)
+		positions = append(positions, position)
+	}
+	return originals, positions, nil
+}
+
+// querySearchBoundary returns the timestamp of the (limit+1)-th newest row in
+// [start, end), or the zero time when the range has fewer rows. The query
+// matches the "sort by (_time desc) offset N limit M" form that VictoriaLogs
+// optimizes for the last N results.
+func (p *Provider) querySearchBoundary(ctx context.Context, conn models.VictoriaLogsConnectionInfo, req datasource.WindowedRequest, start, end time.Time) (time.Time, error) {
+	query := req.RawQuery + fmt.Sprintf(" | sort by (_time desc) offset %d limit 1 | fields _time", req.Limit)
+	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/query", windowForm(conn, req, query, start, end))
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer resp.Body.Close()
+	rows, _, _, truncated, err := readQueryRows(resp.Body, 4096, 1)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if truncated != "" {
+		return time.Time{}, fmt.Errorf("invalid search boundary response")
+	}
+	if len(rows) == 0 {
+		return time.Time{}, nil
+	}
+	return rowTime(rows[0])
+}
+
+func windowForm(conn models.VictoriaLogsConnectionInfo, req datasource.WindowedRequest, query string, start, end time.Time) url.Values {
+	form := url.Values{"query": {query}, "start": {formatAPITime(start)}, "end": {formatAPITime(end)}}
 	if timeout := formatTimeout(req.QueryTimeout); timeout != "" {
 		form.Set("timeout", timeout)
 	}
@@ -393,56 +547,13 @@ func (p *Provider) querySearchWindow(ctx context.Context, conn models.VictoriaLo
 	for _, filter := range req.StreamFilters {
 		form.Add("extra_stream_filters", filter)
 	}
-	resp, err := p.doFormRequest(ctx, conn, "/select/logsql/query", form)
-	if err != nil {
-		result.err = err
-		return result
+	return form
+}
+
+func rowTime(row map[string]any) (time.Time, error) {
+	timestamp, ok := row["_time"].(string)
+	if !ok {
+		return time.Time{}, fmt.Errorf("window row has no timestamp")
 	}
-	defer resp.Body.Close()
-	rows, _, bytesReturned, truncated, err := readQueryRows(resp.Body, req.MaxResponseBytes, req.Limit+1)
-	result.stats = statsFromHeaders(resp, len(rows))
-	result.stats.BytesReturned = bytesReturned
-	result.stats.Truncated = truncated != ""
-	result.stats.TruncatedReason = truncated
-	if err != nil {
-		result.err = err
-		return result
-	}
-	if req.Count && truncated != "" {
-		result.err = fmt.Errorf("count response exceeds the response byte limit")
-		return result
-	}
-	for _, row := range rows {
-		if req.Count {
-			timestamp, ok := row["_time"].(string)
-			if !ok {
-				result.err = fmt.Errorf("count bucket has no timestamp")
-				return result
-			}
-			bucket, err := time.Parse(time.RFC3339Nano, timestamp)
-			if err != nil {
-				result.err = err
-				return result
-			}
-			count, err := strconv.Atoi(fmt.Sprint(row["log_count"]))
-			if err != nil || count < 0 {
-				result.err = fmt.Errorf("invalid window count")
-				return result
-			}
-			result.buckets = append(result.buckets, datasource.HistogramBucket{Bucket: bucket, LogCount: count})
-		} else {
-			packed, ok := row["_logchef_row"].(string)
-			if !ok {
-				result.err = fmt.Errorf("window result has no packed row")
-				return result
-			}
-			var original map[string]any
-			if err := json.Unmarshal([]byte(packed), &original); err != nil {
-				result.err = err
-				return result
-			}
-			result.rows = append(result.rows, original)
-		}
-	}
-	return result
+	return time.Parse(time.RFC3339Nano, timestamp)
 }

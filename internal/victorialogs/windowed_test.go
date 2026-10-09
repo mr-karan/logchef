@@ -3,13 +3,19 @@ package victorialogs
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"reflect"
 	"strings"
 	"sync"
@@ -39,11 +45,37 @@ func TestPrepareWindowedQuery(t *testing.T) {
 			t.Fatal("gap between windows")
 		}
 	}
-	req.Cursor = searchCursor(plan, 1, 2)
+	position := datasource.WindowPosition{Time: plan.Windows[1].Start.Add(time.Nanosecond), Skip: 2}
+	req.Cursor = searchCursor(plan, 1, position)
 	continued, err := provider.PrepareWindowedQuery(source, req)
-	if err != nil || continued.Index != 1 || continued.Offset != 2 {
+	if err != nil || continued.Index != 1 || !continued.Position.Time.Equal(position.Time) || continued.Position.Skip != 2 {
 		t.Fatalf("cursor: %+v, %v", continued, err)
 	}
+	for _, outside := range []time.Time{plan.Windows[1].End, plan.Windows[1].Start.Add(-time.Nanosecond)} {
+		req.Cursor = searchCursor(plan, 1, datasource.WindowPosition{Time: outside, Skip: 1})
+		if _, err := provider.PrepareWindowedQuery(source, req); err == nil {
+			t.Fatalf("accepted cursor position %s outside its window", outside)
+		}
+	}
+	// A cursor from the offset-based scheme carries the old fingerprint.
+	legacy, err := json.Marshal(struct {
+		SourceID models.SourceID `json:"source_id"`
+		Revision time.Time       `json:"revision"`
+		Query    string          `json:"query"`
+		Start    time.Time       `json:"start"`
+		End      time.Time       `json:"end"`
+		Width    int             `json:"width"`
+		Filters  []string        `json:"filters"`
+	}{source.ID, source.UpdatedAt, req.RawQuery, start, end, 10800, nil})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyHash := sha256.Sum256(legacy)
+	req.Cursor = base64.RawURLEncoding.EncodeToString(fmt.Appendf(nil, `{"fingerprint":%q,"index":1,"offset":2}`, hex.EncodeToString(legacyHash[:])))
+	if _, err := provider.PrepareWindowedQuery(source, req); err == nil {
+		t.Fatal("accepted an offset-based cursor")
+	}
+	req.Cursor = searchCursor(plan, 1, position)
 	req.RawQuery = "level:error"
 	if _, err := provider.PrepareWindowedQuery(source, req); err == nil {
 		t.Fatal("accepted cursor for different query")
@@ -160,6 +192,9 @@ func TestWindowedFailureRetryAndSkip(t *testing.T) {
 		timestamp := r.Form.Get("start")
 		if timestamp == formatAPITime(end.Add(-time.Minute)) && fail.Load() {
 			http.Error(w, "upstream failure", http.StatusInternalServerError)
+			return
+		}
+		if isBoundaryQuery(r) {
 			return
 		}
 		row := map[string]string{"_time": timestamp, "_msg": timestamp}
@@ -318,6 +353,9 @@ func TestWindowedEarlyStopCancelsOlderWindow(t *testing.T) {
 			return
 		}
 		<-olderStarted
+		if isBoundaryQuery(r) {
+			return
+		}
 		for _, message := range []string{"newest", "next", "lookahead"} {
 			packed, _ := json.Marshal(map[string]string{"_time": formatAPITime(end.Add(-time.Second)), "_msg": message})
 			_ = json.NewEncoder(w).Encode(map[string]string{"_logchef_row": string(packed)})
@@ -358,7 +396,15 @@ func TestWindowedPageByteBudget(t *testing.T) {
 		t.Fatal(err)
 	}
 	packed = append(packed, '\n')
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(packed) }))
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+			return
+		}
+		if !isBoundaryQuery(r) {
+			_, _ = w.Write(packed)
+		}
+	}))
 	defer server.Close()
 	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true, MaxWindowSeconds: 60, Concurrency: 2}})
@@ -454,6 +500,9 @@ func TestWindowedOversizedHeadRowCanBeSkipped(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if err := r.ParseForm(); err != nil {
 			t.Error(err)
+			return
+		}
+		if isBoundaryQuery(r) {
 			return
 		}
 		message := "older"
@@ -561,6 +610,504 @@ func TestIntegrationWindowedCountsUseTimezone(t *testing.T) {
 			if !reflect.DeepEqual(got, want) {
 				t.Fatalf("%s %s buckets = %v, want %v", timezone, step, got, want)
 			}
+		}
+	}
+}
+
+// isBoundaryQuery reports whether r is the time-only query that bounds a page.
+// The fake servers that use it hold fewer rows than a page, so VictoriaLogs
+// would return no boundary row.
+func isBoundaryQuery(r *http.Request) bool {
+	return !strings.Contains(r.Form.Get("query"), "pack_json")
+}
+
+func TestIntegrationWindowedTimestampTies(t *testing.T) {
+	baseURL := integrationBaseURL(t)
+	runID := newTestRunID(t)
+	base := time.Now().UTC().Truncate(time.Second).Add(-5 * time.Minute)
+	boundary := base.Add(2 * time.Minute)
+	tie := boundary.Add(30*time.Second + 123456789)
+	older := base.Add(90 * time.Second)
+	type fixture struct {
+		at  time.Time
+		msg string
+	}
+	fixtures := []fixture{
+		{boundary, "edge-new-a"}, {boundary, "edge-new-b"}, {boundary.Add(-time.Nanosecond), "edge-old"},
+		{tie.Add(time.Nanosecond), "after-tie"}, {tie.Add(-time.Nanosecond), "before-tie"},
+		{tie, "dup"}, {tie, "dup"}, {tie, "dup"},
+		{older, "older-dup"}, {older, "older-dup"}, {older, "older-dup"}, {older, "older-dup"}, {older, "older-unique"},
+		{base, "oldest"},
+	}
+	for i := range 6 {
+		fixtures = append(fixtures, fixture{tie, fmt.Sprintf("tie-%d", i)})
+	}
+	want := make(map[string]int)
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	for _, row := range fixtures {
+		want[row.msg]++
+		// All rows share one stream, so only the row content breaks ties.
+		if err := encoder.Encode(map[string]string{"_time": row.at.Format(time.RFC3339Nano), "_msg": row.msg, "test_run": runID}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	response, err := http.Post(strings.TrimRight(baseURL, "/")+"/insert/jsonline?_time_field=_time&_msg_field=_msg", "application/stream+json", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status %d", response.StatusCode)
+	}
+	// Record the packed-row queries that reach the real VictoriaLogs instance.
+	upstream, err := url.Parse(baseURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	var mu sync.Mutex
+	var packedStarts []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(data))
+		if form, err := url.ParseQuery(string(data)); err == nil && strings.Contains(form.Get("query"), "pack_json") {
+			mu.Lock()
+			packedStarts = append(packedStarts, form.Get("start"))
+			mu.Unlock()
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	defer server.Close()
+	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Scope: models.VictoriaLogsScope{Query: "test_run:=" + runID}, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true, MaxWindowSeconds: 60, Concurrency: 1}})
+	end := base.Add(3 * time.Minute)
+	waitForFixtures(t, provider, source, queryWindow{start: base, end: end}, len(fixtures))
+
+	type page struct {
+		logs   []map[string]any
+		cursor string
+		window int
+	}
+	run := func(req datasource.WindowedRequest) page {
+		t.Helper()
+		plan, err := provider.PrepareWindowedQuery(source, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		result := page{window: -1}
+		if err := provider.StreamWindowedQuery(context.Background(), source, plan, func(event datasource.WindowedEvent) error {
+			if event.Status == datasource.WindowFailed {
+				t.Fatalf("window failed: %+v", event)
+			}
+			if event.Type == datasource.WindowRows && result.window < 0 {
+				result.window = event.Window.Index
+			}
+			result.logs = append(result.logs, event.Logs...)
+			if event.Type == datasource.WindowEnd {
+				result.cursor = event.Cursor
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	collect := func(limit, maxBytes int) []map[string]any {
+		t.Helper()
+		req := datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &base, EndTime: &end, Limit: limit, MaxResponseBytes: maxBytes}}
+		var all []map[string]any
+		for range 50 {
+			first := run(req)
+			if req.Cursor != "" && first.window >= 0 {
+				// Retrying the same cursor for its window returns the same rows.
+				retryReq := req
+				retryReq.WindowIndex = &first.window
+				retry := run(retryReq)
+				var sameWindow []map[string]any
+				for _, row := range first.logs {
+					if rowWindow(t, row, base) == first.window {
+						sameWindow = append(sameWindow, row)
+					}
+				}
+				if !reflect.DeepEqual(retry.logs, sameWindow) {
+					t.Fatalf("retry returned %v, want %v", retry.logs, sameWindow)
+				}
+			}
+			if maxBytes < 1<<20 && len(first.logs) > 2 {
+				t.Fatalf("byte budget allowed %d rows", len(first.logs))
+			}
+			all = append(all, first.logs...)
+			if first.cursor == "" {
+				return all
+			}
+			req.Cursor = first.cursor
+		}
+		t.Fatal("pagination did not finish")
+		return nil
+	}
+	check := func(name string, rows []map[string]any, want map[string]int) {
+		t.Helper()
+		got := make(map[string]int)
+		for i, row := range rows {
+			got[row["_msg"].(string)]++
+			if i > 0 && rowTimeForTest(t, rows[i-1]).Before(rowTimeForTest(t, row)) {
+				t.Fatalf("%s: rows not newest first at %d", name, i)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: got %v, want %v", name, got, want)
+		}
+	}
+
+	all := collect(4, 1<<20)
+	check("row limit", all, want)
+	mu.Lock()
+	firstPacked := packedStarts[0]
+	mu.Unlock()
+	if firstPacked != formatAPITime(tie) {
+		t.Fatalf("first page packed rows from %s, want the range from the fifth newest row at %s", firstPacked, formatAPITime(tie))
+	}
+	maxRow := 0
+	for _, row := range all {
+		data, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		maxRow = max(maxRow, len(data)+1)
+	}
+	for _, limit := range []int{3, 5} {
+		check(fmt.Sprintf("byte limit %d", limit), collect(limit, 2*maxRow+maxRow/2), want)
+	}
+
+	// Skip the newest window from a cursor inside its timestamp tie.
+	req := datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &base, EndTime: &end, Limit: 4}}
+	req.Cursor = run(req).cursor
+	skip := 0
+	req.SkipWindow = &skip
+	skipped := run(req)
+	for skipped.cursor != "" {
+		req.SkipWindow = nil
+		req.Cursor = skipped.cursor
+		next := run(req)
+		skipped.logs = append(skipped.logs, next.logs...)
+		skipped.cursor = next.cursor
+	}
+	check("skip", skipped.logs, map[string]int{"edge-old": 1, "older-dup": 4, "older-unique": 1, "oldest": 1})
+}
+
+// TestIntegrationWindowedShortBoundaryPage covers a bug in the VictoriaLogs
+// v1.51-v1.52 last-N optimization. After the binary search extends its range
+// downward, it counts rows at the split timestamp twice, so the boundary query
+// returns a timestamp that is too new. Rows at exact split points trigger it:
+// m1 is the midpoint of the older window, and m2 is the midpoint of the range
+// before the tie, which a page resumed inside the tie searches.
+func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
+	baseURL := strings.TrimRight(integrationBaseURL(t), "/")
+	runID := newTestRunID(t)
+	base := time.Now().UTC().Truncate(10 * time.Second).Add(-15 * time.Minute)
+	newerStart := base.Add(time.Minute)
+	end := newerStart.Add(time.Minute)
+	m1 := base.Add(30 * time.Second)
+	m2 := newerStart.Add(20 * time.Second)
+	tie := newerStart.Add(40 * time.Second)
+	var body bytes.Buffer
+	encoder := json.NewEncoder(&body)
+	want := make(map[string]int)
+	total := 0
+	add := func(at time.Time, msgs ...string) {
+		for _, msg := range msgs {
+			want[msg]++
+			total++
+			if err := encoder.Encode(map[string]string{"_time": at.Format(time.RFC3339Nano), "_msg": msg, "test_run": runID}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	add(tie, "tie-dup", "tie-dup", "tie-dup", "tie-0", "tie-1")
+	add(m2, "m2-dup", "m2-dup", "m2-0")
+	add(m1, "m1-dup", "m1-dup", "m1-0")
+	for _, split := range []struct {
+		at  time.Time
+		msg string
+	}{{m2, "m2-older"}, {m1, "m1-older"}} {
+		for i := range 8 {
+			add(split.at.Add(-time.Second+time.Duration(i)*time.Millisecond), fmt.Sprintf("%s-%d", split.msg, i))
+		}
+		add(split.at.Add(-time.Second+8*time.Millisecond), split.msg+"-dup", split.msg+"-dup")
+	}
+	response, err := http.Post(baseURL+"/insert/jsonline?_time_field=_time&_msg_field=_msg", "application/stream+json", &body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		t.Fatalf("ingest status %d", response.StatusCode)
+	}
+
+	// Forward every request to the real VictoriaLogs instance and record the
+	// range and response size of each packed-row query.
+	type packedQuery struct {
+		start, end string
+		lines      int
+		bytes      int
+	}
+	var mu sync.Mutex
+	var packed []packedQuery
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		forward, err := http.NewRequestWithContext(r.Context(), r.Method, baseURL+r.URL.RequestURI(), bytes.NewReader(data))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		forward.Header = r.Header.Clone()
+		upstreamResponse, err := http.DefaultClient.Do(forward)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		defer upstreamResponse.Body.Close()
+		result, err := io.ReadAll(upstreamResponse.Body)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if form, err := url.ParseQuery(string(data)); err == nil && strings.Contains(form.Get("query"), "pack_json") {
+			mu.Lock()
+			packed = append(packed, packedQuery{start: form.Get("start"), end: form.Get("end"), lines: bytes.Count(result, []byte("\n")), bytes: len(result)})
+			mu.Unlock()
+		}
+		maps.Copy(w.Header(), upstreamResponse.Header)
+		w.WriteHeader(upstreamResponse.StatusCode)
+		if _, err := w.Write(result); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Scope: models.VictoriaLogsScope{Query: "test_run:=" + runID}, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true, MaxWindowSeconds: 60, Concurrency: 1}})
+	waitForFixtures(t, provider, source, queryWindow{start: base, end: end}, total)
+
+	run := func(req datasource.WindowedRequest) (logs []map[string]any, cursor string) {
+		t.Helper()
+		plan, err := provider.PrepareWindowedQuery(source, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := provider.StreamWindowedQuery(context.Background(), source, plan, func(event datasource.WindowedEvent) error {
+			if event.Status == datasource.WindowFailed {
+				t.Fatalf("window failed: %+v", event)
+			}
+			logs = append(logs, event.Logs...)
+			if event.Type == datasource.WindowEnd {
+				cursor = event.Cursor
+			}
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+		return logs, cursor
+	}
+	windowStart := func(query packedQuery) string {
+		if query.end > formatAPITime(newerStart) {
+			return formatAPITime(newerStart)
+		}
+		return formatAPITime(base)
+	}
+	// collect pages through the range and returns the rows and the packed
+	// queries it sent. Each resumed page is retried once for its window.
+	collect := func(limit, maxBytes int) ([]map[string]any, []packedQuery) {
+		t.Helper()
+		mu.Lock()
+		packed = nil
+		mu.Unlock()
+		req := datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &base, EndTime: &end, Limit: limit, MaxResponseBytes: maxBytes}}
+		var all []map[string]any
+		for range 50 {
+			logs, cursor := run(req)
+			if req.Cursor != "" && len(logs) > 0 {
+				plan, err := provider.PrepareWindowedQuery(source, req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				retryReq := req
+				retryReq.WindowIndex = &plan.Index
+				retry, _ := run(retryReq)
+				if len(retry) > len(logs) || !reflect.DeepEqual(retry, logs[:len(retry)]) {
+					t.Fatalf("retry returned %v, want a prefix of %v", retry, logs)
+				}
+			}
+			all = append(all, logs...)
+			if cursor == "" {
+				mu.Lock()
+				queries := packed
+				mu.Unlock()
+				return all, queries
+			}
+			req.Cursor = cursor
+		}
+		t.Fatal("pagination did not finish")
+		return nil, nil
+	}
+	check := func(name string, rows []map[string]any) {
+		t.Helper()
+		got := make(map[string]int)
+		for i, row := range rows {
+			got[row["_msg"].(string)]++
+			if i > 0 && rowTimeForTest(t, rows[i-1]).Before(rowTimeForTest(t, row)) {
+				t.Fatalf("%s: rows not newest first at %d", name, i)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("%s: got %v, want %v", name, got, want)
+		}
+	}
+	// fallbackEnds returns the end of each full-window reread that follows a
+	// narrowed page query over the same range, and checks that each reread
+	// follows a short page that the byte limit did not cut.
+	fallbackEnds := func(name string, queries []packedQuery, limit, maxBytes int) map[string]bool {
+		t.Helper()
+		ends := make(map[string]bool)
+		for i := 1; i < len(queries); i++ {
+			previous, query := queries[i-1], queries[i]
+			if query.end != previous.end || query.start != windowStart(query) || previous.start == query.start {
+				continue
+			}
+			if previous.lines > limit || (maxBytes > 0 && previous.bytes > maxBytes) {
+				t.Fatalf("%s: reread after a full or byte-limited page %+v", name, previous)
+			}
+			ends[query.end] = true
+		}
+		return ends
+	}
+
+	resumedEnd := formatAPITime(tie.Add(time.Nanosecond))
+	for _, limit := range []int{3, 4, 5} {
+		name := fmt.Sprintf("limit %d", limit)
+		rows, queries := collect(limit, 0)
+		check(name, rows)
+		ends := fallbackEnds(name, queries, limit, 0)
+		// Every limit reaches the older window from its start with a boundary
+		// that is too new.
+		if !ends[formatAPITime(newerStart)] {
+			t.Fatalf("%s: older window was not reread from its start: %+v", name, queries)
+		}
+		// With limit 4, the page resumed inside the tie also gets a boundary
+		// that is too new and leaves the page short.
+		if limit == 4 && !ends[resumedEnd] {
+			t.Fatalf("%s: resumed page was not reread from the window start: %+v", name, queries)
+		}
+		bounded := false
+		for i, query := range queries {
+			if query.start != windowStart(query) && (i+1 == len(queries) || queries[i+1].end != query.end || queries[i+1].start != windowStart(query)) {
+				bounded = true
+			}
+		}
+		if !bounded {
+			t.Fatalf("%s: no page used only the narrowed range: %+v", name, queries)
+		}
+	}
+
+	// A page that the byte limit cuts is not complete, so a short narrowed
+	// page that is cut must not be reread.
+	rows, _ := collect(4, 0)
+	maxRow := 0
+	for _, row := range rows {
+		data, err := json.Marshal(row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		maxRow = max(maxRow, len(data)+1)
+	}
+	maxBytes := 2*maxRow + maxRow/2
+	rows, queries := collect(4, maxBytes)
+	check("byte limit", rows)
+	fallbackEnds("byte limit", queries, 4, maxBytes)
+	cut := false
+	for i, query := range queries {
+		if query.end == formatAPITime(newerStart) && query.start != formatAPITime(base) && query.lines <= 4 && query.bytes > maxBytes {
+			cut = true
+			if i+1 < len(queries) && queries[i+1].end == query.end && queries[i+1].start == formatAPITime(base) {
+				t.Fatalf("byte limit: short page cut by the byte limit was reread: %+v", queries)
+			}
+		}
+	}
+	if !cut {
+		t.Fatalf("byte limit: no short narrowed page was cut by the byte limit: %+v", queries)
+	}
+}
+
+func rowTimeForTest(t *testing.T, row map[string]any) time.Time {
+	t.Helper()
+	timestamp, err := rowTime(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return timestamp
+}
+
+// rowWindow returns the index of the one-minute window that holds row, for
+// the three-minute range that starts at base.
+func rowWindow(t *testing.T, row map[string]any, base time.Time) int {
+	t.Helper()
+	return 2 - int(rowTimeForTest(t, row).Sub(base)/time.Minute)
+}
+
+func TestSchemaDiscoveryLookback(t *testing.T) {
+	type request struct {
+		lookback time.Duration
+		scope    []string
+		account  string
+	}
+	requests := make(chan request, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+			return
+		}
+		if r.URL.Path != "/select/logsql/field_names" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+			return
+		}
+		start, startErr := time.Parse(time.RFC3339Nano, r.Form.Get("start"))
+		end, endErr := time.Parse(time.RFC3339Nano, r.Form.Get("end"))
+		if startErr != nil || endErr != nil {
+			t.Errorf("invalid discovery range %q %q", r.Form.Get("start"), r.Form.Get("end"))
+			return
+		}
+		requests <- request{end.Sub(start), r.Form["extra_filters"], r.Header.Get("AccountID")}
+		_, _ = w.Write([]byte(`{"values":[{"value":"service","hits":1}]}`))
+	}))
+	defer server.Close()
+	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	for i, tc := range []struct {
+		name      string
+		optimizer *models.VictoriaLogsOptimizer
+		want      time.Duration
+	}{
+		{"standard", nil, 24 * time.Hour},
+		{"disabled optimizer", &models.VictoriaLogsOptimizer{SchemaLookbackSeconds: 600}, 24 * time.Hour},
+		{"optimizer default", &models.VictoriaLogsOptimizer{Enabled: true}, 5 * time.Minute},
+		{"optimizer setting", &models.VictoriaLogsOptimizer{Enabled: true, SchemaLookbackSeconds: 900}, 15 * time.Minute},
+	} {
+		source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Tenant: models.VictoriaLogsTenant{AccountID: "7"}, Scope: models.VictoriaLogsScope{Query: "namespace:=prod"}, Optimizer: tc.optimizer})
+		source.ID = models.SourceID(i + 1)
+		// PopulateSourceDetails loads the source columns for the explorer.
+		if err := provider.PopulateSourceDetails(context.Background(), source); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
+		}
+		got := <-requests
+		if got.lookback != tc.want || !reflect.DeepEqual(got.scope, []string{"namespace:=prod"}) || got.account != "7" {
+			t.Fatalf("%s: discovery request %+v, want lookback %s with scope and tenant", tc.name, got, tc.want)
 		}
 	}
 }
