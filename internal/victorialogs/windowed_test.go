@@ -17,6 +17,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -806,6 +807,11 @@ func TestIntegrationWindowedTimestampTies(t *testing.T) {
 // returns a timestamp that is too new. Rows at exact split points trigger it:
 // m1 is the midpoint of the older window, and m2 is the midpoint of the range
 // before the tie, which a page resumed inside the tie searches.
+//
+// The test compares each boundary that VictoriaLogs returns with the boundary
+// that the fixtures give. The fallback checks that need the bug apply only
+// when VictoriaLogs returns a boundary that is too new, so a fixed release
+// passes. The row, order, and retry checks always apply.
 func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 	baseURL := strings.TrimRight(integrationBaseURL(t), "/")
 	runID := newTestRunID(t)
@@ -818,11 +824,11 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 	var body bytes.Buffer
 	encoder := json.NewEncoder(&body)
 	want := make(map[string]int)
-	total := 0
+	var times []time.Time
 	add := func(at time.Time, msgs ...string) {
 		for _, msg := range msgs {
 			want[msg]++
-			total++
+			times = append(times, at)
 			if err := encoder.Encode(map[string]string{"_time": at.Format(time.RFC3339Nano), "_msg": msg, "test_run": runID}); err != nil {
 				t.Fatal(err)
 			}
@@ -849,15 +855,18 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 		t.Fatalf("ingest status %d", response.StatusCode)
 	}
 
-	// Forward every request to the real VictoriaLogs instance and record the
-	// range and response size of each packed-row query.
-	type packedQuery struct {
-		start, end string
+	// Forward every request to the real VictoriaLogs instance and record, in
+	// order, each boundary query with its result and each packed-row query
+	// with its response size.
+	type traceQuery struct {
+		start, end time.Time
+		boundary   bool
+		oldest     time.Time // boundary result, zero when the range is short
 		lines      int
 		bytes      int
 	}
 	var mu sync.Mutex
-	var packed []packedQuery
+	var trace []traceQuery
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, err := io.ReadAll(r.Body)
 		if err != nil {
@@ -870,6 +879,9 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 			return
 		}
 		forward.Header = r.Header.Clone()
+		// Let the client decompress the response, so the recorded sizes are
+		// the sizes that the provider reads.
+		forward.Header.Del("Accept-Encoding")
 		upstreamResponse, err := http.DefaultClient.Do(forward)
 		if err != nil {
 			t.Error(err)
@@ -881,9 +893,30 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 			t.Error(err)
 			return
 		}
-		if form, err := url.ParseQuery(string(data)); err == nil && strings.Contains(form.Get("query"), "pack_json") {
+		form, err := url.ParseQuery(string(data))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		if boundary := strings.Contains(form.Get("query"), "sort by (_time desc) offset"); boundary || strings.Contains(form.Get("query"), "pack_json") {
+			query := traceQuery{boundary: boundary, lines: bytes.Count(result, []byte("\n")), bytes: len(result)}
+			if query.start, err = time.Parse(time.RFC3339Nano, form.Get("start")); err != nil {
+				t.Error(err)
+			}
+			if query.end, err = time.Parse(time.RFC3339Nano, form.Get("end")); err != nil {
+				t.Error(err)
+			}
+			if query.boundary && len(result) > 0 {
+				var row struct {
+					Time time.Time `json:"_time"`
+				}
+				if err := json.Unmarshal(result, &row); err != nil {
+					t.Error(err)
+				}
+				query.oldest = row.Time
+			}
 			mu.Lock()
-			packed = append(packed, packedQuery{start: form.Get("start"), end: form.Get("end"), lines: bytes.Count(result, []byte("\n")), bytes: len(result)})
+			trace = append(trace, query)
 			mu.Unlock()
 		}
 		maps.Copy(w.Header(), upstreamResponse.Header)
@@ -895,7 +928,7 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 	defer server.Close()
 	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Scope: models.VictoriaLogsScope{Query: "test_run:=" + runID}, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true, MaxWindowSeconds: 60, Concurrency: 1}})
-	waitForFixtures(t, provider, source, queryWindow{start: base, end: end}, total)
+	waitForFixtures(t, provider, source, queryWindow{start: base, end: end}, len(times))
 
 	run := func(req datasource.WindowedRequest) (logs []map[string]any, cursor string) {
 		t.Helper()
@@ -917,18 +950,19 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 		}
 		return logs, cursor
 	}
-	windowStart := func(query packedQuery) string {
-		if query.end > formatAPITime(newerStart) {
-			return formatAPITime(newerStart)
+	windowStart := func(query traceQuery) time.Time {
+		if query.end.After(newerStart) {
+			return newerStart
 		}
-		return formatAPITime(base)
+		return base
 	}
-	// collect pages through the range and returns the rows and the packed
-	// queries it sent. Each resumed page is retried once for its window.
-	collect := func(limit, maxBytes int) ([]map[string]any, []packedQuery) {
+	// collect pages through the range and returns the rows and the boundary
+	// and packed queries it sent. Each resumed page is retried once for its
+	// window.
+	collect := func(limit, maxBytes int) ([]map[string]any, []traceQuery) {
 		t.Helper()
 		mu.Lock()
-		packed = nil
+		trace = nil
 		mu.Unlock()
 		req := datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &base, EndTime: &end, Limit: limit, MaxResponseBytes: maxBytes}}
 		var all []map[string]any
@@ -949,7 +983,7 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 			all = append(all, logs...)
 			if cursor == "" {
 				mu.Lock()
-				queries := packed
+				queries := trace
 				mu.Unlock()
 				return all, queries
 			}
@@ -971,48 +1005,89 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 			t.Fatalf("%s: got %v, want %v", name, got, want)
 		}
 	}
-	// fallbackEnds returns the end of each full-window reread that follows a
-	// narrowed page query over the same range, and checks that each reread
-	// follows a short page that the byte limit did not cut.
-	fallbackEnds := func(name string, queries []packedQuery, limit, maxBytes int) map[string]bool {
+	// narrowedPages records what happened to the narrowed pages that end at
+	// one time.
+	type narrowedPages struct {
+		tooNew   bool // VictoriaLogs returned a boundary that is too new
+		reread   bool // a short page was read again from its window start
+		shortCut bool // the byte limit cut a short page
+		kept     bool // a page used only the narrowed range
+	}
+	// checkFallback checks each narrowed page in queries against the fixtures
+	// and returns the pages by end time. A boundary is too new when it is
+	// newer than the (limit+1)-th newest fixture in its range. Only a boundary
+	// that is too new can leave a page short, and a page is read again from
+	// its window start exactly when it is short and the byte limit did not
+	// cut it.
+	checkFallback := func(name string, queries []traceQuery, limit, maxBytes int) map[string]narrowedPages {
 		t.Helper()
-		ends := make(map[string]bool)
-		for i := 1; i < len(queries); i++ {
-			previous, query := queries[i-1], queries[i]
-			if query.end != previous.end || query.start != windowStart(query) || previous.start == query.start {
+		pages := make(map[string]narrowedPages)
+		for i, boundary := range queries {
+			if !boundary.boundary {
 				continue
 			}
-			if previous.lines > limit || (maxBytes > 0 && previous.bytes > maxBytes) {
-				t.Fatalf("%s: reread after a full or byte-limited page %+v", name, previous)
+			if i+1 == len(queries) || queries[i+1].boundary {
+				t.Fatalf("%s: boundary query %d has no page query: %+v", name, i, queries)
 			}
-			ends[query.end] = true
+			page := queries[i+1]
+			if !page.start.After(windowStart(page)) {
+				continue
+			}
+			var inRange []time.Time
+			for _, at := range times {
+				if !at.Before(boundary.start) && at.Before(boundary.end) {
+					inRange = append(inRange, at)
+				}
+			}
+			slices.SortFunc(inRange, func(a, b time.Time) int { return b.Compare(a) })
+			tooNew := len(inRange) <= limit || boundary.oldest.After(inRange[limit])
+			short := page.lines <= limit
+			if short && !tooNew {
+				t.Fatalf("%s: page %+v is short after a correct boundary %+v", name, page, boundary)
+			}
+			cut := maxBytes > 0 && page.bytes > maxBytes
+			reread := i+2 < len(queries) && !queries[i+2].boundary && queries[i+2].end.Equal(page.end) && queries[i+2].start.Equal(windowStart(page))
+			if reread != (short && !cut) {
+				t.Fatalf("%s: page %+v reread %t, want %t: %+v", name, page, reread, short && !cut, queries)
+			}
+			key := formatAPITime(page.end)
+			result := pages[key]
+			result.tooNew = result.tooNew || tooNew
+			result.reread = result.reread || reread
+			result.shortCut = result.shortCut || (short && cut)
+			result.kept = result.kept || !reread
+			pages[key] = result
 		}
-		return ends
+		return pages
+	}
+	// requireFallback checks that a page with a boundary that is too new was
+	// read again from its window start. A VictoriaLogs release without the bug
+	// returns correct boundaries, and then the fallback does not run.
+	requireFallback := func(name string, page narrowedPages) {
+		t.Helper()
+		switch {
+		case page.reread:
+		case page.tooNew:
+			t.Fatalf("%s: page with a boundary that is too new was not reread from the window start", name)
+		default:
+			t.Logf("%s: VictoriaLogs returned correct boundaries, so the fallback did not run", name)
+		}
 	}
 
+	olderEnd := formatAPITime(newerStart)
 	resumedEnd := formatAPITime(tie.Add(time.Nanosecond))
 	for _, limit := range []int{3, 4, 5} {
 		name := fmt.Sprintf("limit %d", limit)
 		rows, queries := collect(limit, 0)
 		check(name, rows)
-		ends := fallbackEnds(name, queries, limit, 0)
-		// Every limit reaches the older window from its start with a boundary
-		// that is too new.
-		if !ends[formatAPITime(newerStart)] {
-			t.Fatalf("%s: older window was not reread from its start: %+v", name, queries)
+		pages := checkFallback(name, queries, limit, 0)
+		// Every limit reaches the older window from its start, and with limit
+		// 4 the page resumed inside the tie searches the range before m2.
+		requireFallback(name+" older window", pages[olderEnd])
+		if limit == 4 {
+			requireFallback(name+" resumed page", pages[resumedEnd])
 		}
-		// With limit 4, the page resumed inside the tie also gets a boundary
-		// that is too new and leaves the page short.
-		if limit == 4 && !ends[resumedEnd] {
-			t.Fatalf("%s: resumed page was not reread from the window start: %+v", name, queries)
-		}
-		bounded := false
-		for i, query := range queries {
-			if query.start != windowStart(query) && (i+1 == len(queries) || queries[i+1].end != query.end || queries[i+1].start != windowStart(query)) {
-				bounded = true
-			}
-		}
-		if !bounded {
+		if !slices.ContainsFunc(slices.Collect(maps.Values(pages)), func(page narrowedPages) bool { return page.kept }) {
 			t.Fatalf("%s: no page used only the narrowed range: %+v", name, queries)
 		}
 	}
@@ -1031,18 +1106,12 @@ func TestIntegrationWindowedShortBoundaryPage(t *testing.T) {
 	maxBytes := 2*maxRow + maxRow/2
 	rows, queries := collect(4, maxBytes)
 	check("byte limit", rows)
-	fallbackEnds("byte limit", queries, 4, maxBytes)
-	cut := false
-	for i, query := range queries {
-		if query.end == formatAPITime(newerStart) && query.start != formatAPITime(base) && query.lines <= 4 && query.bytes > maxBytes {
-			cut = true
-			if i+1 < len(queries) && queries[i+1].end == query.end && queries[i+1].start == formatAPITime(base) {
-				t.Fatalf("byte limit: short page cut by the byte limit was reread: %+v", queries)
-			}
-		}
-	}
-	if !cut {
+	switch older := checkFallback("byte limit", queries, 4, maxBytes)[olderEnd]; {
+	case older.shortCut:
+	case older.tooNew:
 		t.Fatalf("byte limit: no short narrowed page was cut by the byte limit: %+v", queries)
+	default:
+		t.Logf("byte limit: VictoriaLogs returned correct boundaries, so no short page was cut")
 	}
 }
 

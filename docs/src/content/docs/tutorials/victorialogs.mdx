@@ -95,6 +95,10 @@ See the official VictoriaLogs docs for more ingestion patterns:
 
 ## Add The Datasource
 
+For a large source, enable **Windowed search** in the source form before saving.
+This also bounds initial field discovery to five minutes by default. See
+[VictoriaLogs windowed search](/guide/windowed-search) for settings and limits.
+
 As a global admin, open **Sources**, choose **Add Source**, select
 **VictoriaLogs**, and configure:
 
