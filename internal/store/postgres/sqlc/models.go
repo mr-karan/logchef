@@ -87,6 +87,13 @@ type CollectionMember struct {
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 }
 
+type CollectionTeam struct {
+	CollectionID int64              `json:"collection_id"`
+	TeamID       int64              `json:"team_id"`
+	AddedBy      pgtype.Int8        `json:"added_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
 type Dashboard struct {
 	ID          int64              `json:"id"`
 	Name        string             `json:"name"`

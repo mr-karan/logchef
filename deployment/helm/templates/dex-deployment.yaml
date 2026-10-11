@@ -1,4 +1,11 @@
 {{- if .Values.dex.enabled }}
+{{- $sqlite := eq .Values.dex.storage.type "sqlite3" }}
+{{- if and $sqlite (gt (int .Values.dex.replicaCount) 1) }}
+{{- fail "Dex SQLite storage supports only one replica. Configure shared dex.storage for multiple replicas." }}
+{{- end }}
+{{- if and $sqlite (not .Values.dex.persistence.enabled) }}
+{{- fail "Dex SQLite storage requires dex.persistence.enabled=true." }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,6 +20,8 @@ metadata:
     {{- end }}
 spec:
   replicas: {{ .Values.dex.replicaCount }}
+  strategy:
+    type: {{ ternary "Recreate" "RollingUpdate" $sqlite }}
   selector:
     matchLabels:
       {{- include "logchef.selectorLabels" . | nindent 6 }}
@@ -29,6 +38,10 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "logchef.serviceAccountName" . }}
+      {{- with .Values.dex.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
@@ -49,8 +62,16 @@ spec:
             - dex
             - serve
             - /etc/dex/config.yaml
-          {{- if .Values.dex.oidcSecret.existingSecret }}
+          {{- if or .Values.dex.oidcSecret.existingSecret .Values.logchef.oidc.existingSecret .Values.dex.extraEnv }}
           env:
+            {{- if .Values.logchef.oidc.existingSecret }}
+            - name: LOGCHEF_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.logchef.oidc.existingSecret | quote }}
+                  key: {{ .Values.logchef.oidc.clientSecretKey | quote }}
+            {{- end }}
+            {{- if .Values.dex.oidcSecret.existingSecret }}
             - name: {{ .Values.dex.oidcSecret.clientIdEnv | default "OIDC_CLIENT_ID" | quote }}
               valueFrom:
                 secretKeyRef:
@@ -61,6 +82,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.dex.oidcSecret.existingSecret | quote }}
                   key: {{ .Values.dex.oidcSecret.clientSecretKey | default "client-secret" | quote }}
+            {{- end }}
+            {{- with .Values.dex.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
           {{- end }}
           ports:
             - name: http
@@ -71,8 +96,10 @@ spec:
               mountPath: /etc/dex/config.yaml
               subPath: config.yaml
               readOnly: true
+            {{- if $sqlite }}
             - name: data
               mountPath: /var/dex
+            {{- end }}
           livenessProbe:
             httpGet:
               path: {{ .Values.dex.probes.liveness.path }}
@@ -91,10 +118,17 @@ spec:
             failureThreshold: {{ .Values.dex.probes.readiness.failureThreshold }}
           resources:
             {{- toYaml .Values.dex.resources | nindent 12 }}
+          {{- with .Values.dex.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
       volumes:
         - name: config
           secret:
             secretName: {{ include "logchef.dexServiceName" . }}-config
+        {{- if $sqlite }}
         - name: data
-          emptyDir: {}
+          persistentVolumeClaim:
+            claimName: {{ .Values.dex.persistence.existingClaim | default (printf "%s-data" (include "logchef.dexServiceName" .)) }}
+        {{- end }}
 {{- end }}

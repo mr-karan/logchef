@@ -437,3 +437,423 @@ func TestAddCollectionMemberAuthorization(t *testing.T) {
 		t.Errorf("AddCollectionMember(personal) err = %v, want ErrPersonalCollectionImmutable", err)
 	}
 }
+
+// --- Team shares ---
+
+// newTestTeam creates a team and adds each member with the given team role.
+func newTestTeam(t *testing.T, db *sqlite.DB, name string, role models.TeamRole, members ...*models.User) *models.Team {
+	t.Helper()
+	ctx := context.Background()
+	team := &models.Team{Name: name}
+	if err := db.CreateTeam(ctx, team); err != nil {
+		t.Fatalf("CreateTeam(%s): %v", name, err)
+	}
+	for _, m := range members {
+		if err := db.AddTeamMember(ctx, team.ID, m.ID, role); err != nil {
+			t.Fatalf("AddTeamMember(%s, %s): %v", name, m.Email, err)
+		}
+	}
+	return team
+}
+
+// listedCollection returns how many times collectionID appears in the user's
+// collection list, and the last matching row.
+func listedCollection(t *testing.T, db *sqlite.DB, user *models.User, collectionID int) (int, *models.Collection) {
+	t.Helper()
+	list, err := ListCollectionsForUser(context.Background(), db, discardLogger(), user)
+	if err != nil {
+		t.Fatalf("ListCollectionsForUser(%s): %v", user.Email, err)
+	}
+	n := 0
+	var found *models.Collection
+	for _, c := range list {
+		if c.ID == collectionID {
+			n++
+			found = c
+		}
+	}
+	return n, found
+}
+
+func assertNoCollectionAccess(t *testing.T, db *sqlite.DB, user *models.User, collectionID int) {
+	t.Helper()
+	if _, _, err := GetCollectionForUser(context.Background(), db, discardLogger(), collectionID, user.ID); !errors.Is(err, ErrCollectionNotFound) {
+		t.Errorf("GetCollectionForUser(%s) err = %v, want ErrCollectionNotFound", user.Email, err)
+	}
+	if n, _ := listedCollection(t, db, user, collectionID); n != 0 {
+		t.Errorf("collection listed %d times for %s, want 0", n, user.Email)
+	}
+}
+
+func assertMemberAccess(t *testing.T, db *sqlite.DB, user *models.User, collectionID int, want models.CollectionRole) {
+	t.Helper()
+	_, role, err := GetCollectionForUser(context.Background(), db, discardLogger(), collectionID, user.ID)
+	if err != nil || role != want {
+		t.Errorf("GetCollectionForUser(%s) = %q / %v, want %q", user.Email, role, err, want)
+	}
+	n, c := listedCollection(t, db, user, collectionID)
+	if n != 1 || c.CallerRole != want {
+		t.Errorf("collection listed %d times for %s (role %v), want once as %q", n, user.Email, c, want)
+	}
+}
+
+// A team share grants team members the Member role dynamically: joining the
+// team grants access on the next request, leaving it revokes access, and team
+// admins/editors get no more than Member rights.
+func TestCollectionTeamShareDynamicMembership(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "ts-owner@example.com", "Owner")
+	teamAdmin := newTestUser(t, db, "ts-team-admin@example.com", "Team Admin")
+	teamEditor := newTestUser(t, db, "ts-team-editor@example.com", "Team Editor")
+	joiner := newTestUser(t, db, "ts-joiner@example.com", "Joiner")
+	outsider := newTestUser(t, db, "ts-outsider@example.com", "Outsider")
+
+	team := newTestTeam(t, db, "project-14", models.TeamRoleMember, owner)
+	if err := db.AddTeamMember(ctx, team.ID, teamAdmin.ID, models.TeamRoleAdmin); err != nil {
+		t.Fatalf("AddTeamMember(admin): %v", err)
+	}
+	if err := db.AddTeamMember(ctx, team.ID, teamEditor.ID, models.TeamRoleEditor); err != nil {
+		t.Fatalf("AddTeamMember(editor): %v", err)
+	}
+
+	coll, err := CreateCollection(ctx, db, log, "Project 14 queries", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	assertNoCollectionAccess(t, db, teamAdmin, coll.ID)
+
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), team.ID); err != nil {
+		t.Fatalf("AddCollectionTeam: %v", err)
+	}
+	// Duplicate shares are idempotent.
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), team.ID); err != nil {
+		t.Fatalf("AddCollectionTeam(duplicate): %v", err)
+	}
+
+	assertMemberAccess(t, db, teamAdmin, coll.ID, models.CollectionRoleMember)
+	assertMemberAccess(t, db, teamEditor, coll.ID, models.CollectionRoleMember)
+	assertMemberAccess(t, db, owner, coll.ID, models.CollectionRoleOwner)
+	assertNoCollectionAccess(t, db, joiner, coll.ID)
+	assertNoCollectionAccess(t, db, outsider, coll.ID)
+
+	// Counts: member_count is direct rows only (the owner); teams are separate.
+	_, listed := listedCollection(t, db, teamAdmin, coll.ID)
+	if listed.MemberCount != 1 || listed.TeamCount != 1 {
+		t.Errorf("list counts = members %d teams %d, want 1/1", listed.MemberCount, listed.TeamCount)
+	}
+	detail, _, err := GetCollectionForUser(ctx, db, log, coll.ID, owner.ID)
+	if err != nil || detail.MemberCount != 1 || detail.TeamCount != 1 {
+		t.Errorf("detail counts = %+v / %v, want members 1 teams 1", detail, err)
+	}
+
+	// Team admins and editors get Member rights only: no collection management.
+	for _, u := range []*models.User{teamAdmin, teamEditor} {
+		if _, err := UpdateCollection(ctx, db, log, coll.ID, u.ID, "renamed", ""); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("UpdateCollection(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+		if err := DeleteCollection(ctx, db, log, coll.ID, u.ID); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("DeleteCollection(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+		if err := AddCollectionMember(ctx, db, log, coll.ID, u.ID, outsider.ID, models.CollectionRoleMember); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("AddCollectionMember(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+		if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(u), team.ID); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("AddCollectionTeam(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+		if err := RemoveCollectionTeam(ctx, db, log, coll.ID, u.ID, team.ID); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("RemoveCollectionTeam(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+		if _, err := ListCollectionMembers(ctx, db, log, coll.ID, access.SessionPrincipal(u)); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("ListCollectionMembers(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+		if _, err := ListCollectionTeams(ctx, db, log, coll.ID, access.SessionPrincipal(u)); !errors.Is(err, ErrCollectionForbidden) {
+			t.Errorf("ListCollectionTeams(%s) err = %v, want ErrCollectionForbidden", u.Email, err)
+		}
+	}
+
+	// Joining the team grants access on the next request; leaving revokes it.
+	if err := db.AddTeamMember(ctx, team.ID, joiner.ID, models.TeamRoleMember); err != nil {
+		t.Fatalf("AddTeamMember(joiner): %v", err)
+	}
+	assertMemberAccess(t, db, joiner, coll.ID, models.CollectionRoleMember)
+	if err := db.RemoveTeamMember(ctx, team.ID, joiner.ID); err != nil {
+		t.Fatalf("RemoveTeamMember(joiner): %v", err)
+	}
+	assertNoCollectionAccess(t, db, joiner, coll.ID)
+
+	// No team user was copied into direct membership.
+	members, err := ListCollectionMembers(ctx, db, log, coll.ID, access.SessionPrincipal(owner))
+	if err != nil || len(members) != 1 {
+		t.Errorf("ListCollectionMembers = %d / %v, want only the owner", len(members), err)
+	}
+}
+
+// Pinning is participation (allowed for team-derived members with source
+// access), while editing a curated saved query needs a direct Owner/Editor row.
+// Collection visibility never grants source access.
+func TestCollectionTeamShareSourceSeparation(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "sep-owner@example.com", "Owner")
+	infraMember := newTestUser(t, db, "sep-infra@example.com", "Infra Member")
+	plainMember := newTestUser(t, db, "sep-plain@example.com", "Plain Member")
+
+	shared := newTestTeam(t, db, "sep-project-14", models.TeamRoleAdmin, owner, infraMember, plainMember)
+	infra := newTestTeam(t, db, "sep-infrastructure", models.TeamRoleMember, owner, infraMember)
+	src := newTestSource(t, db, "sep_infra_logs")
+	if err := db.AddTeamSource(ctx, infra.ID, src.ID); err != nil {
+		t.Fatalf("AddTeamSource: %v", err)
+	}
+	sq, err := db.CreateSavedQuery(ctx, src.ID, nil, "infra errors", "", models.QueryLanguageClickHouseSQL, models.SavedQueryEditorModeNative, "{}", &owner.ID)
+	if err != nil {
+		t.Fatalf("CreateSavedQuery: %v", err)
+	}
+	coll, err := CreateCollection(ctx, db, log, "Shared", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := AddCollectionItem(ctx, db, log, coll.ID, owner.ID, sq.ID, 0); err != nil {
+		t.Fatalf("AddCollectionItem(owner): %v", err)
+	}
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), shared.ID); err != nil {
+		t.Fatalf("AddCollectionTeam: %v", err)
+	}
+
+	runnable := func(u *models.User) bool {
+		t.Helper()
+		items, err := ListCollectionItems(ctx, db, log, coll.ID, u.ID)
+		if err != nil || len(items) != 1 {
+			t.Fatalf("ListCollectionItems(%s) = %d / %v, want 1 item", u.Email, len(items), err)
+		}
+		return items[0].Runnable
+	}
+	if runnable(plainMember) {
+		t.Error("team-derived member without source access sees a runnable item, want locked")
+	}
+	if !runnable(infraMember) {
+		t.Error("team-derived member with source access sees a locked item, want runnable")
+	}
+	if has, err := db.UserHasSourceAccess(ctx, plainMember.ID, src.ID); err != nil || has {
+		t.Errorf("collection share granted source access: %v / %v", has, err)
+	}
+
+	// Pinning: allowed with source access, denied without it.
+	if err := RemoveCollectionItem(ctx, db, log, coll.ID, infraMember.ID, sq.ID); err != nil {
+		t.Errorf("team-derived member should unpin, got %v", err)
+	}
+	if err := AddCollectionItem(ctx, db, log, coll.ID, infraMember.ID, sq.ID, 0); err != nil {
+		t.Errorf("team-derived member with source access should pin, got %v", err)
+	}
+	if err := AddCollectionItem(ctx, db, log, coll.ID, plainMember.ID, sq.ID, 0); err == nil {
+		t.Error("team-derived member without source access pinned a query, want error")
+	}
+
+	// Editing: a team share (even from a team admin) does not delegate edit rights.
+	canEdit, err := UserCanEditSavedQuery(ctx, db, sq, infraMember)
+	if err != nil || canEdit {
+		t.Errorf("UserCanEditSavedQuery(team-derived) = %v / %v, want false", canEdit, err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, infraMember.ID, models.CollectionRoleEditor); err != nil {
+		t.Fatalf("AddCollectionMember(editor): %v", err)
+	}
+	canEdit, err = UserCanEditSavedQuery(ctx, db, sq, infraMember)
+	if err != nil || !canEdit {
+		t.Errorf("UserCanEditSavedQuery(direct editor) = %v / %v, want true", canEdit, err)
+	}
+}
+
+// Overlapping direct and team access lists the collection once; the direct role
+// wins. Removing direct membership (including self-removal) removes only that
+// row, and removing one team share keeps the other shares and direct members.
+func TestCollectionTeamShareOverlapAndRemoval(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "ov-owner@example.com", "Owner")
+	both := newTestUser(t, db, "ov-both@example.com", "Both")
+	directOnly := newTestUser(t, db, "ov-direct@example.com", "Direct")
+
+	teamA := newTestTeam(t, db, "ov-team-a", models.TeamRoleMember, owner, both)
+	teamB := newTestTeam(t, db, "ov-team-b", models.TeamRoleMember, owner, both)
+
+	coll, err := CreateCollection(ctx, db, log, "Overlap", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	for _, team := range []*models.Team{teamA, teamB} {
+		if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), team.ID); err != nil {
+			t.Fatalf("AddCollectionTeam(%s): %v", team.Name, err)
+		}
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, both.ID, models.CollectionRoleEditor); err != nil {
+		t.Fatalf("AddCollectionMember(both): %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, directOnly.ID, models.CollectionRoleMember); err != nil {
+		t.Fatalf("AddCollectionMember(directOnly): %v", err)
+	}
+
+	// Two team shares plus a direct Editor row: listed once, as editor.
+	assertMemberAccess(t, db, both, coll.ID, models.CollectionRoleEditor)
+	_, listed := listedCollection(t, db, owner, coll.ID)
+	if listed.MemberCount != 3 || listed.TeamCount != 2 {
+		t.Errorf("list counts = members %d teams %d, want 3/2", listed.MemberCount, listed.TeamCount)
+	}
+
+	// Direct self-removal drops only the direct row; team access remains.
+	if err := RemoveCollectionMember(ctx, db, log, coll.ID, both.ID, both.ID); err != nil {
+		t.Fatalf("self-removal: %v", err)
+	}
+	assertMemberAccess(t, db, both, coll.ID, models.CollectionRoleMember)
+	if _, listed := listedCollection(t, db, owner, coll.ID); listed.MemberCount != 2 {
+		t.Errorf("member_count after self-removal = %d, want 2", listed.MemberCount)
+	}
+	// Self-removal by a team-only participant is a no-op, not an exclusion.
+	if err := RemoveCollectionMember(ctx, db, log, coll.ID, both.ID, both.ID); err != nil {
+		t.Fatalf("team-only self-removal: %v", err)
+	}
+	assertMemberAccess(t, db, both, coll.ID, models.CollectionRoleMember)
+
+	// Removing one share keeps the other share and direct members.
+	if err := RemoveCollectionTeam(ctx, db, log, coll.ID, owner.ID, teamA.ID); err != nil {
+		t.Fatalf("RemoveCollectionTeam(A): %v", err)
+	}
+	assertMemberAccess(t, db, both, coll.ID, models.CollectionRoleMember)
+	assertMemberAccess(t, db, directOnly, coll.ID, models.CollectionRoleMember)
+	teams, err := ListCollectionTeams(ctx, db, log, coll.ID, access.SessionPrincipal(owner))
+	if err != nil || len(teams) != 1 || teams[0].TeamID != teamB.ID || teams[0].TeamName != teamB.Name {
+		t.Fatalf("ListCollectionTeams after removal = %+v / %v, want only team B", teams, err)
+	}
+
+	// Deleting the last shared team cleans up the share and revokes access.
+	if err := DeleteTeam(ctx, db, log, teamB.ID); err != nil {
+		t.Fatalf("DeleteTeam(B): %v", err)
+	}
+	assertNoCollectionAccess(t, db, both, coll.ID)
+	assertMemberAccess(t, db, directOnly, coll.ID, models.CollectionRoleMember)
+	if teams, err := ListCollectionTeams(ctx, db, log, coll.ID, access.SessionPrincipal(owner)); err != nil || len(teams) != 0 {
+		t.Errorf("ListCollectionTeams after team deletion = %d / %v, want 0", len(teams), err)
+	}
+}
+
+// Adding a share requires direct collection ownership plus membership in the
+// target team (global admins may pick any existing team). Removing a share
+// needs ownership only, so owners can revoke after leaving the team.
+func TestCollectionTeamShareAuthorization(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+
+	owner := newTestUser(t, db, "auth-owner@example.com", "Owner")
+	editor := newTestUser(t, db, "auth-editor@example.com", "Editor")
+	admin := newTestAdmin(t, db, "auth-admin@example.com")
+	adminOwner := newTestAdmin(t, db, "auth-admin-owner@example.com")
+
+	ownTeam := newTestTeam(t, db, "auth-own", models.TeamRoleMember, owner, editor, admin)
+	foreignTeam := newTestTeam(t, db, "auth-foreign", models.TeamRoleMember)
+
+	coll, err := CreateCollection(ctx, db, log, "Auth", "", owner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection: %v", err)
+	}
+	if err := AddCollectionMember(ctx, db, log, coll.ID, owner.ID, editor.ID, models.CollectionRoleEditor); err != nil {
+		t.Fatalf("AddCollectionMember(editor): %v", err)
+	}
+
+	// Non-member owners cannot share with teams they do not belong to, and
+	// cannot tell a missing team from a foreign one.
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), foreignTeam.ID); !errors.Is(err, ErrCollectionTeamNotMember) {
+		t.Errorf("AddCollectionTeam(foreign) err = %v, want ErrCollectionTeamNotMember", err)
+	}
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), 999999); !errors.Is(err, ErrCollectionTeamNotMember) {
+		t.Errorf("AddCollectionTeam(missing, non-admin) err = %v, want ErrCollectionTeamNotMember", err)
+	}
+	// Direct editors are not owners.
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(editor), ownTeam.ID); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("AddCollectionTeam(editor) err = %v, want ErrCollectionForbidden", err)
+	}
+	// A global admin with no participation cannot see or mutate the collection.
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(admin), ownTeam.ID); !errors.Is(err, ErrCollectionNotFound) {
+		t.Errorf("AddCollectionTeam(non-participant admin) err = %v, want ErrCollectionNotFound", err)
+	}
+
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(owner), ownTeam.ID); err != nil {
+		t.Fatalf("AddCollectionTeam(own): %v", err)
+	}
+
+	// A global admin participating through the team can read the rosters but
+	// cannot mutate shares without collection ownership.
+	if _, err := ListCollectionTeams(ctx, db, log, coll.ID, access.SessionPrincipal(admin)); err != nil {
+		t.Errorf("ListCollectionTeams(participating admin): %v", err)
+	}
+	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, access.SessionPrincipal(admin)); err != nil {
+		t.Errorf("ListCollectionMembers(participating admin): %v", err)
+	}
+	if err := RemoveCollectionTeam(ctx, db, log, coll.ID, admin.ID, ownTeam.ID); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("RemoveCollectionTeam(participating admin) err = %v, want ErrCollectionForbidden", err)
+	}
+	if err := AddCollectionTeam(ctx, db, log, coll.ID, access.SessionPrincipal(admin), foreignTeam.ID); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("AddCollectionTeam(participating admin) err = %v, want ErrCollectionForbidden", err)
+	}
+	// Through OAuth the admin role does not apply, so the roster stays hidden.
+	adminOAuth := access.OAuthPrincipal(admin, 1, "test-client", []models.TokenScope{models.TokenScopeCollectionsRead})
+	if _, err := ListCollectionTeams(ctx, db, log, coll.ID, adminOAuth); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("ListCollectionTeams(participating admin via OAuth) err = %v, want ErrCollectionForbidden", err)
+	}
+	if _, err := ListCollectionMembers(ctx, db, log, coll.ID, adminOAuth); !errors.Is(err, ErrCollectionForbidden) {
+		t.Errorf("ListCollectionMembers(participating admin via OAuth) err = %v, want ErrCollectionForbidden", err)
+	}
+
+	// An owner who left the team can still revoke the share.
+	if err := db.RemoveTeamMember(ctx, ownTeam.ID, owner.ID); err != nil {
+		t.Fatalf("RemoveTeamMember(owner): %v", err)
+	}
+	if teams, err := ListCollectionTeams(ctx, db, log, coll.ID, access.SessionPrincipal(owner)); err != nil || len(teams) != 1 {
+		t.Errorf("ListCollectionTeams(owner after leaving) = %d / %v, want 1", len(teams), err)
+	}
+	if err := RemoveCollectionTeam(ctx, db, log, coll.ID, owner.ID, ownTeam.ID); err != nil {
+		t.Errorf("RemoveCollectionTeam(owner after leaving): %v", err)
+	}
+	assertNoCollectionAccess(t, db, admin, coll.ID)
+
+	// A global admin who owns a collection may share with any existing team.
+	adminColl, err := CreateCollection(ctx, db, log, "Admin owned", "", adminOwner.ID)
+	if err != nil {
+		t.Fatalf("CreateCollection(admin): %v", err)
+	}
+	if err := AddCollectionTeam(ctx, db, log, adminColl.ID, access.SessionPrincipal(adminOwner), foreignTeam.ID); err != nil {
+		t.Errorf("AddCollectionTeam(admin owner, foreign team): %v", err)
+	}
+	if err := AddCollectionTeam(ctx, db, log, adminColl.ID, access.SessionPrincipal(adminOwner), 999999); !errors.Is(err, ErrTeamNotFound) {
+		t.Errorf("AddCollectionTeam(admin owner, missing team) err = %v, want ErrTeamNotFound", err)
+	}
+	// Through OAuth an admin owner is limited to their own teams, like any owner.
+	adminOwnerOAuth := access.OAuthPrincipal(adminOwner, 1, "test-client", []models.TokenScope{models.TokenScopeCollectionsWrite})
+	if err := AddCollectionTeam(ctx, db, log, adminColl.ID, adminOwnerOAuth, ownTeam.ID); !errors.Is(err, ErrCollectionTeamNotMember) {
+		t.Errorf("AddCollectionTeam(admin owner via OAuth, foreign team) err = %v, want ErrCollectionTeamNotMember", err)
+	}
+
+	// Personal collections never accept team shares.
+	personal, err := EnsurePersonalCollection(ctx, db, log, owner)
+	if err != nil {
+		t.Fatalf("EnsurePersonalCollection: %v", err)
+	}
+	if err := db.AddTeamMember(ctx, ownTeam.ID, owner.ID, models.TeamRoleMember); err != nil {
+		t.Fatalf("re-add owner to team: %v", err)
+	}
+	if err := AddCollectionTeam(ctx, db, log, personal.ID, access.SessionPrincipal(owner), ownTeam.ID); !errors.Is(err, ErrPersonalCollectionImmutable) {
+		t.Errorf("AddCollectionTeam(personal) err = %v, want ErrPersonalCollectionImmutable", err)
+	}
+	if err := RemoveCollectionTeam(ctx, db, log, personal.ID, owner.ID, ownTeam.ID); !errors.Is(err, ErrPersonalCollectionImmutable) {
+		t.Errorf("RemoveCollectionTeam(personal) err = %v, want ErrPersonalCollectionImmutable", err)
+	}
+}

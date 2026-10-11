@@ -30,6 +30,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.addCollectionMemberStmt, err = db.PrepareContext(ctx, addCollectionMember); err != nil {
 		return nil, fmt.Errorf("error preparing query AddCollectionMember: %w", err)
 	}
+	if q.addCollectionTeamStmt, err = db.PrepareContext(ctx, addCollectionTeam); err != nil {
+		return nil, fmt.Errorf("error preparing query AddCollectionTeam: %w", err)
+	}
 	if q.addTeamMemberStmt, err = db.PrepareContext(ctx, addTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query AddTeamMember: %w", err)
 	}
@@ -59,6 +62,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.countAdminUsersStmt, err = db.PrepareContext(ctx, countAdminUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query CountAdminUsers: %w", err)
+	}
+	if q.countCollectionTeamAccessStmt, err = db.PrepareContext(ctx, countCollectionTeamAccess); err != nil {
+		return nil, fmt.Errorf("error preparing query CountCollectionTeamAccess: %w", err)
 	}
 	if q.countSharedCollectionEditAccessStmt, err = db.PrepareContext(ctx, countSharedCollectionEditAccess); err != nil {
 		return nil, fmt.Errorf("error preparing query CountSharedCollectionEditAccess: %w", err)
@@ -303,6 +309,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listCollectionMembersStmt, err = db.PrepareContext(ctx, listCollectionMembers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListCollectionMembers: %w", err)
 	}
+	if q.listCollectionTeamsStmt, err = db.PrepareContext(ctx, listCollectionTeams); err != nil {
+		return nil, fmt.Errorf("error preparing query ListCollectionTeams: %w", err)
+	}
 	if q.listCollectionsForUserStmt, err = db.PrepareContext(ctx, listCollectionsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListCollectionsForUser: %w", err)
 	}
@@ -401,6 +410,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.removeCollectionMemberStmt, err = db.PrepareContext(ctx, removeCollectionMember); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveCollectionMember: %w", err)
+	}
+	if q.removeCollectionTeamStmt, err = db.PrepareContext(ctx, removeCollectionTeam); err != nil {
+		return nil, fmt.Errorf("error preparing query RemoveCollectionTeam: %w", err)
 	}
 	if q.removeTeamMemberStmt, err = db.PrepareContext(ctx, removeTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamMember: %w", err)
@@ -513,6 +525,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing addCollectionMemberStmt: %w", cerr)
 		}
 	}
+	if q.addCollectionTeamStmt != nil {
+		if cerr := q.addCollectionTeamStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing addCollectionTeamStmt: %w", cerr)
+		}
+	}
 	if q.addTeamMemberStmt != nil {
 		if cerr := q.addTeamMemberStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing addTeamMemberStmt: %w", cerr)
@@ -561,6 +578,11 @@ func (q *Queries) Close() error {
 	if q.countAdminUsersStmt != nil {
 		if cerr := q.countAdminUsersStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing countAdminUsersStmt: %w", cerr)
+		}
+	}
+	if q.countCollectionTeamAccessStmt != nil {
+		if cerr := q.countCollectionTeamAccessStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing countCollectionTeamAccessStmt: %w", cerr)
 		}
 	}
 	if q.countSharedCollectionEditAccessStmt != nil {
@@ -968,6 +990,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listCollectionMembersStmt: %w", cerr)
 		}
 	}
+	if q.listCollectionTeamsStmt != nil {
+		if cerr := q.listCollectionTeamsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listCollectionTeamsStmt: %w", cerr)
+		}
+	}
 	if q.listCollectionsForUserStmt != nil {
 		if cerr := q.listCollectionsForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listCollectionsForUserStmt: %w", cerr)
@@ -1131,6 +1158,11 @@ func (q *Queries) Close() error {
 	if q.removeCollectionMemberStmt != nil {
 		if cerr := q.removeCollectionMemberStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeCollectionMemberStmt: %w", cerr)
+		}
+	}
+	if q.removeCollectionTeamStmt != nil {
+		if cerr := q.removeCollectionTeamStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing removeCollectionTeamStmt: %w", cerr)
 		}
 	}
 	if q.removeTeamMemberStmt != nil {
@@ -1334,6 +1366,7 @@ type Queries struct {
 	tx                                         *sql.Tx
 	addCollectionItemStmt                      *sql.Stmt
 	addCollectionMemberStmt                    *sql.Stmt
+	addCollectionTeamStmt                      *sql.Stmt
 	addTeamMemberStmt                          *sql.Stmt
 	addTeamSourceStmt                          *sql.Stmt
 	approveOAuthDeviceAuthorizationStmt        *sql.Stmt
@@ -1344,6 +1377,7 @@ type Queries struct {
 	consumeOAuthDeviceCodeStmt                 *sql.Stmt
 	consumeOAuthRefreshTokenStmt               *sql.Stmt
 	countAdminUsersStmt                        *sql.Stmt
+	countCollectionTeamAccessStmt              *sql.Stmt
 	countSharedCollectionEditAccessStmt        *sql.Stmt
 	countUserSessionsStmt                      *sql.Stmt
 	createAPITokenStmt                         *sql.Stmt
@@ -1425,6 +1459,7 @@ type Queries struct {
 	listAllSavedQueriesStmt                    *sql.Stmt
 	listCollectionItemsStmt                    *sql.Stmt
 	listCollectionMembersStmt                  *sql.Stmt
+	listCollectionTeamsStmt                    *sql.Stmt
 	listCollectionsForUserStmt                 *sql.Stmt
 	listDashboardsStmt                         *sql.Stmt
 	listExpiredExportJobPathsStmt              *sql.Stmt
@@ -1458,6 +1493,7 @@ type Queries struct {
 	recordOAuthDevicePollStmt                  *sql.Stmt
 	removeCollectionItemStmt                   *sql.Stmt
 	removeCollectionMemberStmt                 *sql.Stmt
+	removeCollectionTeamStmt                   *sql.Stmt
 	removeTeamMemberStmt                       *sql.Stmt
 	removeTeamSourceStmt                       *sql.Stmt
 	resolveAlertHistoryStmt                    *sql.Stmt
@@ -1498,6 +1534,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		tx:                                         tx,
 		addCollectionItemStmt:                      q.addCollectionItemStmt,
 		addCollectionMemberStmt:                    q.addCollectionMemberStmt,
+		addCollectionTeamStmt:                      q.addCollectionTeamStmt,
 		addTeamMemberStmt:                          q.addTeamMemberStmt,
 		addTeamSourceStmt:                          q.addTeamSourceStmt,
 		approveOAuthDeviceAuthorizationStmt:        q.approveOAuthDeviceAuthorizationStmt,
@@ -1508,6 +1545,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		consumeOAuthDeviceCodeStmt:                 q.consumeOAuthDeviceCodeStmt,
 		consumeOAuthRefreshTokenStmt:               q.consumeOAuthRefreshTokenStmt,
 		countAdminUsersStmt:                        q.countAdminUsersStmt,
+		countCollectionTeamAccessStmt:              q.countCollectionTeamAccessStmt,
 		countSharedCollectionEditAccessStmt:        q.countSharedCollectionEditAccessStmt,
 		countUserSessionsStmt:                      q.countUserSessionsStmt,
 		createAPITokenStmt:                         q.createAPITokenStmt,
@@ -1589,6 +1627,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listAllSavedQueriesStmt:                    q.listAllSavedQueriesStmt,
 		listCollectionItemsStmt:                    q.listCollectionItemsStmt,
 		listCollectionMembersStmt:                  q.listCollectionMembersStmt,
+		listCollectionTeamsStmt:                    q.listCollectionTeamsStmt,
 		listCollectionsForUserStmt:                 q.listCollectionsForUserStmt,
 		listDashboardsStmt:                         q.listDashboardsStmt,
 		listExpiredExportJobPathsStmt:              q.listExpiredExportJobPathsStmt,
@@ -1622,6 +1661,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		recordOAuthDevicePollStmt:                  q.recordOAuthDevicePollStmt,
 		removeCollectionItemStmt:                   q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:                 q.removeCollectionMemberStmt,
+		removeCollectionTeamStmt:                   q.removeCollectionTeamStmt,
 		removeTeamMemberStmt:                       q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                       q.removeTeamSourceStmt,
 		resolveAlertHistoryStmt:                    q.resolveAlertHistoryStmt,

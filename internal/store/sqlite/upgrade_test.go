@@ -128,6 +128,47 @@ func TestDatasourceUpgradeFromV24(t *testing.T) {
 	}
 }
 
+// TestCollectionTeamsUpgradeFromV33 seeds collection data at the last schema
+// version before collection_teams, applies the migration, and asserts existing
+// collections, members, and items are untouched and the new relation exists.
+func TestCollectionTeamsUpgradeFromV33(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "upgrade.db"))
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	m := newMigrator(t, db)
+	if err := m.Migrate(33); err != nil {
+		t.Fatalf("migrate to v33: %v", err)
+	}
+
+	mustExec(t, db, `INSERT INTO users (id, email, full_name, role, status) VALUES
+			(1, 'owner@test.dev', 'Owner', 'member', 'active'),
+			(2, 'member@test.dev', 'Member', 'member', 'active')`)
+	mustExec(t, db, `INSERT INTO teams (id, name) VALUES (1, 'team-a')`)
+	mustExec(t, db, `INSERT INTO sources (id, name, _meta_is_auto_created, _meta_ts_field, connection_config, identity_key)
+			VALUES (1, 'logs.app', 0, 'timestamp', '{}', 'clickhouse:h/logs/app')`)
+	mustExec(t, db, `INSERT INTO saved_queries (id, source_id, name, query_language, editor_mode, query_content, created_by)
+			VALUES (1, 1, 'errors', 'logchefql', 'builder', '{}', 1)`)
+	mustExec(t, db, `INSERT INTO collections (id, name, is_personal, created_by) VALUES (1, 'Shared', 0, 1)`)
+	mustExec(t, db, `INSERT INTO collection_members (collection_id, user_id, role, added_by) VALUES (1, 1, 'owner', 1), (1, 2, 'editor', 1)`)
+	mustExec(t, db, `INSERT INTO collection_items (collection_id, saved_query_id, added_by) VALUES (1, 1, 1)`)
+
+	if err := m.Up(); err != nil {
+		t.Fatalf("migrate up from v33: %v", err)
+	}
+
+	assertRow(t, db, `SELECT name || '/' || is_personal || '/' || created_by FROM collections WHERE id = 1`, "Shared/0/1")
+	assertRow(t, db, `SELECT group_concat(user_id || ':' || role, ',') FROM (SELECT user_id, role FROM collection_members WHERE collection_id = 1 ORDER BY user_id)`, "1:owner,2:editor")
+	assertRow(t, db, `SELECT saved_query_id FROM collection_items WHERE collection_id = 1`, "1")
+
+	// Cascade behavior is covered by the store conformance suite, which runs
+	// with foreign_keys enabled; here we only check the new relation exists.
+	mustExec(t, db, `INSERT INTO collection_teams (collection_id, team_id, added_by) VALUES (1, 1, 1)`)
+	assertRow(t, db, `SELECT collection_id || '/' || team_id FROM collection_teams`, "1/1")
+}
+
 func newMigrator(t *testing.T, db *sql.DB) *migrate.Migrate {
 	t.Helper()
 	migrationFS, err := fs.Sub(migrationsFS, "migrations")

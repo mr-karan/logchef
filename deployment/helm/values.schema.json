@@ -1,0 +1,167 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "fullnameOverride": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "nameOverride": {
+      "type": "string",
+      "maxLength": 63,
+      "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+    },
+    "logchef": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        },
+        "strategy": {
+          "type": "object"
+        },
+        "securityContext": {
+          "type": "object"
+        },
+        "podSecurityContext": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "properties": {
+            "fsGroup": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        "auth": {
+          "type": "object",
+          "properties": {
+            "existingSecret": {
+              "type": "string"
+            },
+            "generateSecret": {
+              "type": "boolean"
+            }
+          }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object"
+          },
+          "properties": {
+            "server": {
+              "type": "object",
+              "properties": {
+                "port": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 65535
+                }
+              }
+            },
+            "database": {
+              "type": "object",
+              "properties": {
+                "driver": {
+                  "enum": [
+                    "sqlite",
+                    "postgres"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "dex": {
+      "type": "object",
+      "properties": {
+        "replicaCount": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "extraEnv": {
+          "type": "array"
+        },
+        "storage": {
+          "type": "object",
+          "required": [
+            "type",
+            "config"
+          ],
+          "properties": {
+            "type": {
+              "enum": [
+                "sqlite3",
+                "postgres",
+                "mysql",
+                "kubernetes"
+              ]
+            },
+            "config": {
+              "type": "object"
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "port": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        }
+      }
+    },
+    "clickhouse": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "maxLength": 52,
+          "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "serviceName": {
+          "type": "string",
+          "maxLength": 63,
+          "pattern": "^$|^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        },
+        "allowFrom": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "schemaJobRevision": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 10,
+          "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$"
+        }
+      }
+    }
+  }
+}

@@ -23,7 +23,10 @@ func (r CollectionRole) CanCurateItems() bool {
 
 // Collection groups saved queries across teams. Each user has a single
 // auto-created personal collection (is_personal = true); other collections
-// are shared with explicit member invites.
+// are shared with explicit member invites and with whole teams.
+// MemberCount counts direct membership rows (owners included); TeamCount
+// counts team shares. Users who see the collection only through a team share
+// are not part of MemberCount.
 type Collection struct {
 	ID          int            `json:"id"`
 	Name        string         `json:"name"`
@@ -32,6 +35,7 @@ type Collection struct {
 	CreatedBy   *UserID        `json:"created_by,omitempty"`
 	CallerRole  CollectionRole `json:"caller_role"`
 	MemberCount int            `json:"member_count"`
+	TeamCount   int            `json:"team_count"`
 	ItemCount   int            `json:"item_count"`
 	CreatedAt   time.Time      `json:"created_at"`
 	UpdatedAt   time.Time      `json:"updated_at"`
@@ -46,6 +50,16 @@ type CollectionMember struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	Email        string         `json:"email,omitempty"`
 	FullName     string         `json:"full_name,omitempty"`
+}
+
+// CollectionTeam is one team share. Every current member of the team gets the
+// collection Member role; a direct membership row takes precedence.
+type CollectionTeam struct {
+	CollectionID int       `json:"collection_id"`
+	TeamID       TeamID    `json:"team_id"`
+	TeamName     string    `json:"team_name"`
+	AddedBy      *UserID   `json:"added_by,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // CollectionItem is a saved query included in a collection. Runnable indicates
@@ -77,6 +91,11 @@ type UpdateCollectionRequest struct {
 type AddCollectionMemberRequest struct {
 	UserID UserID         `json:"user_id" validate:"required"`
 	Role   CollectionRole `json:"role" validate:"required"`
+}
+
+// AddCollectionTeamRequest is the JSON body for POST /api/v1/collections/:id/teams.
+type AddCollectionTeamRequest struct {
+	TeamID TeamID `json:"team_id" validate:"required"`
 }
 
 // AddCollectionItemRequest is the JSON body for POST /api/v1/collections/:id/items.

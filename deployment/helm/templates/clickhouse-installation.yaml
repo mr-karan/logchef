@@ -2,7 +2,7 @@
 apiVersion: clickhouse.altinity.com/v1
 kind: ClickHouseInstallation
 metadata:
-  name: {{ .Values.clickhouse.name | quote }}
+  name: {{ include "logchef.clickhouseName" . | quote }}
   labels:
     {{- include "logchef.labels" . | nindent 4 }}
     app.kubernetes.io/component: clickhouse
@@ -19,7 +19,8 @@ spec:
   configuration:
     users:
       default/access_management: "1"
-      default/networks/ip: {{ index .Values.clickhouse.allowFrom 0 | default "::/0" | quote }}
+      default/networks/ip:
+        {{- toYaml (required "clickhouse.allowFrom must contain at least one network" .Values.clickhouse.allowFrom) | nindent 8 }}
       default/profile: default
       default/quota: default
       default/named_collection_control: "1"
@@ -55,7 +56,7 @@ spec:
   templates:
     serviceTemplates:
       - name: svc-template
-        generateName: clickhouse-{chi}
+        generateName: {{ include "logchef.clickhouseServiceName" . | quote }}
         spec:
           ports:
             - name: http
@@ -104,7 +105,7 @@ spec:
           volumes:
             - name: logchef-initdb
               configMap:
-                name: {{ printf "%s-clickhouse-schema" (include "logchef.fullname" .) | trunc 63 | trimSuffix "-" }}
+                name: {{ include "logchef.suffixedName" (dict "name" (include "logchef.fullname" .) "suffix" "-clickhouse-schema") }}
                 defaultMode: 0555
     volumeClaimTemplates:
       - name: data-volume

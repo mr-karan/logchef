@@ -59,6 +59,24 @@ func (q *Queries) AddCollectionMember(ctx context.Context, arg AddCollectionMemb
 	return err
 }
 
+const addCollectionTeam = `-- name: AddCollectionTeam :exec
+INSERT INTO collection_teams (collection_id, team_id, added_by)
+VALUES ($1, $2, $3)
+ON CONFLICT(collection_id, team_id) DO NOTHING
+`
+
+type AddCollectionTeamParams struct {
+	CollectionID int64       `json:"collection_id"`
+	TeamID       int64       `json:"team_id"`
+	AddedBy      pgtype.Int8 `json:"added_by"`
+}
+
+// Share a collection with a team; idempotent on (collection_id, team_id).
+func (q *Queries) AddCollectionTeam(ctx context.Context, arg AddCollectionTeamParams) error {
+	_, err := q.db.Exec(ctx, addCollectionTeam, arg.CollectionID, arg.TeamID, arg.AddedBy)
+	return err
+}
+
 const addTeamMember = `-- name: AddTeamMember :exec
 
 INSERT INTO team_members (team_id, user_id, role)
@@ -381,6 +399,27 @@ type CountAdminUsersParams struct {
 // Count active admin users
 func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAdminUsers, arg.Role, arg.Status)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countCollectionTeamAccess = `-- name: CountCollectionTeamAccess :one
+SELECT COUNT(*)
+FROM collection_teams ct
+JOIN team_members tm ON tm.team_id = ct.team_id
+WHERE ct.collection_id = $1 AND tm.user_id = $2
+`
+
+type CountCollectionTeamAccessParams struct {
+	CollectionID int64 `json:"collection_id"`
+	UserID       int64 `json:"user_id"`
+}
+
+// Count the teams shared with a collection that the user currently belongs to.
+// A non-zero count grants the user the collection Member role.
+func (q *Queries) CountCollectionTeamAccess(ctx context.Context, arg CountCollectionTeamAccessParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countCollectionTeamAccess, arg.CollectionID, arg.UserID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -1317,13 +1356,38 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 }
 
 const getCollection = `-- name: GetCollection :one
-SELECT id, name, description, is_personal, created_by, created_at, updated_at FROM collections WHERE id = $1
+SELECT
+    c.id,
+    c.name,
+    c.description,
+    c.is_personal,
+    c.created_by,
+    c.created_at,
+    c.updated_at,
+    (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_teams WHERE collection_id = c.id) AS team_count,
+    (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
+FROM collections c
+WHERE c.id = $1
 `
 
-// Look up a collection by id
-func (q *Queries) GetCollection(ctx context.Context, id int64) (Collection, error) {
+type GetCollectionRow struct {
+	ID          int64              `json:"id"`
+	Name        string             `json:"name"`
+	Description pgtype.Text        `json:"description"`
+	IsPersonal  bool               `json:"is_personal"`
+	CreatedBy   pgtype.Int8        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	MemberCount int64              `json:"member_count"`
+	TeamCount   int64              `json:"team_count"`
+	ItemCount   int64              `json:"item_count"`
+}
+
+// Look up a collection by id with direct member, shared team, and item counts
+func (q *Queries) GetCollection(ctx context.Context, id int64) (GetCollectionRow, error) {
 	row := q.db.QueryRow(ctx, getCollection, id)
-	var i Collection
+	var i GetCollectionRow
 	err := row.Scan(
 		&i.ID,
 		&i.Name,
@@ -1332,6 +1396,9 @@ func (q *Queries) GetCollection(ctx context.Context, id int64) (Collection, erro
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.MemberCount,
+		&i.TeamCount,
+		&i.ItemCount,
 	)
 	return i, err
 }
@@ -2622,6 +2689,49 @@ func (q *Queries) ListCollectionMembers(ctx context.Context, collectionID int64)
 	return items, nil
 }
 
+const listCollectionTeams = `-- name: ListCollectionTeams :many
+SELECT ct.collection_id, ct.team_id, ct.added_by, ct.created_at, t.name AS team_name
+FROM collection_teams ct
+JOIN teams t ON t.id = ct.team_id
+WHERE ct.collection_id = $1
+ORDER BY t.name ASC
+`
+
+type ListCollectionTeamsRow struct {
+	CollectionID int64              `json:"collection_id"`
+	TeamID       int64              `json:"team_id"`
+	AddedBy      pgtype.Int8        `json:"added_by"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	TeamName     string             `json:"team_name"`
+}
+
+// List teams a collection is shared with, with team names
+func (q *Queries) ListCollectionTeams(ctx context.Context, collectionID int64) ([]ListCollectionTeamsRow, error) {
+	rows, err := q.db.Query(ctx, listCollectionTeams, collectionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCollectionTeamsRow{}
+	for rows.Next() {
+		var i ListCollectionTeamsRow
+		if err := rows.Scan(
+			&i.CollectionID,
+			&i.TeamID,
+			&i.AddedBy,
+			&i.CreatedAt,
+			&i.TeamName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCollectionsForUser = `-- name: ListCollectionsForUser :many
 SELECT
     c.id,
@@ -2631,12 +2741,19 @@ SELECT
     c.created_by,
     c.created_at,
     c.updated_at,
-    cm.role AS caller_role,
+    CAST(COALESCE(cm.role, 'member') AS TEXT) AS caller_role,
     (SELECT COUNT(*) FROM collection_members WHERE collection_id = c.id) AS member_count,
+    (SELECT COUNT(*) FROM collection_teams WHERE collection_id = c.id) AS team_count,
     (SELECT COUNT(*) FROM collection_items WHERE collection_id = c.id) AS item_count
 FROM collections c
-JOIN collection_members cm ON cm.collection_id = c.id
-WHERE cm.user_id = $1
+LEFT JOIN collection_members cm ON cm.collection_id = c.id AND cm.user_id = $1
+WHERE cm.user_id IS NOT NULL
+   OR EXISTS (
+        SELECT 1
+        FROM collection_teams ct
+        JOIN team_members tm ON tm.team_id = ct.team_id
+        WHERE ct.collection_id = c.id AND tm.user_id = $1
+   )
 ORDER BY c.is_personal DESC, c.updated_at DESC
 `
 
@@ -2650,10 +2767,14 @@ type ListCollectionsForUserRow struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	CallerRole  string             `json:"caller_role"`
 	MemberCount int64              `json:"member_count"`
+	TeamCount   int64              `json:"team_count"`
 	ItemCount   int64              `json:"item_count"`
 }
 
-// List collections the user owns or is a member of, with member count and item count
+// List collections the user can see: direct membership (any role) or membership
+// in a team the collection is shared with. Each collection appears once. A
+// direct role wins; team-only access is always 'member'. member_count counts
+// direct membership rows only (owners included); team_count counts team shares.
 func (q *Queries) ListCollectionsForUser(ctx context.Context, userID int64) ([]ListCollectionsForUserRow, error) {
 	rows, err := q.db.Query(ctx, listCollectionsForUser, userID)
 	if err != nil {
@@ -2673,6 +2794,7 @@ func (q *Queries) ListCollectionsForUser(ctx context.Context, userID int64) ([]L
 			&i.UpdatedAt,
 			&i.CallerRole,
 			&i.MemberCount,
+			&i.TeamCount,
 			&i.ItemCount,
 		); err != nil {
 			return nil, err
@@ -3931,6 +4053,21 @@ type RemoveCollectionMemberParams struct {
 // Remove a member from a collection
 func (q *Queries) RemoveCollectionMember(ctx context.Context, arg RemoveCollectionMemberParams) error {
 	_, err := q.db.Exec(ctx, removeCollectionMember, arg.CollectionID, arg.UserID)
+	return err
+}
+
+const removeCollectionTeam = `-- name: RemoveCollectionTeam :exec
+DELETE FROM collection_teams WHERE collection_id = $1 AND team_id = $2
+`
+
+type RemoveCollectionTeamParams struct {
+	CollectionID int64 `json:"collection_id"`
+	TeamID       int64 `json:"team_id"`
+}
+
+// Remove a team share. Direct memberships and other team shares are untouched.
+func (q *Queries) RemoveCollectionTeam(ctx context.Context, arg RemoveCollectionTeamParams) error {
+	_, err := q.db.Exec(ctx, removeCollectionTeam, arg.CollectionID, arg.TeamID)
 	return err
 }
 

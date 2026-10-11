@@ -45,7 +45,19 @@ func (db *DB) GetCollection(ctx context.Context, collectionID int) (*models.Coll
 	if err != nil {
 		return nil, handleNotFoundError(err, fmt.Sprintf("getting collection id %d", collectionID))
 	}
-	return mapCollectionRow(row), nil
+	c := mapCollectionRow(sqlc.Collection{
+		ID:          row.ID,
+		Name:        row.Name,
+		Description: row.Description,
+		IsPersonal:  row.IsPersonal,
+		CreatedBy:   row.CreatedBy,
+		CreatedAt:   row.CreatedAt,
+		UpdatedAt:   row.UpdatedAt,
+	})
+	c.MemberCount = int(row.MemberCount)
+	c.TeamCount = int(row.TeamCount)
+	c.ItemCount = int(row.ItemCount)
+	return c, nil
 }
 
 // GetPersonalCollection returns the user's personal collection, or
@@ -80,7 +92,8 @@ func (db *DB) DeleteCollection(ctx context.Context, collectionID int) error {
 	return nil
 }
 
-// ListCollectionsForUser returns every collection the user owns or is a member of.
+// ListCollectionsForUser returns every collection the user can see through a
+// direct membership or a team share, once each.
 func (db *DB) ListCollectionsForUser(ctx context.Context, userID models.UserID) ([]*models.Collection, error) {
 	rows, err := db.readQueries.ListCollectionsForUser(ctx, int64(userID))
 	if err != nil {
@@ -97,6 +110,7 @@ func (db *DB) ListCollectionsForUser(ctx context.Context, userID models.UserID) 
 			IsPersonal:  r.IsPersonal == 1,
 			CallerRole:  models.CollectionRole(r.CallerRole),
 			MemberCount: int(r.MemberCount),
+			TeamCount:   int(r.TeamCount),
 			ItemCount:   int(r.ItemCount),
 			CreatedAt:   r.CreatedAt,
 			UpdatedAt:   r.UpdatedAt,
@@ -185,6 +199,69 @@ func (db *DB) RemoveCollectionMember(ctx context.Context, collectionID int, user
 		return fmt.Errorf("error removing collection member: %w", err)
 	}
 	return nil
+}
+
+// AddCollectionTeam shares a collection with a team (idempotent).
+func (db *DB) AddCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID, addedBy *models.UserID) error {
+	params := sqlc.AddCollectionTeamParams{
+		CollectionID: int64(collectionID),
+		TeamID:       int64(teamID),
+	}
+	if addedBy != nil {
+		params.AddedBy = sql.NullInt64{Int64: int64(*addedBy), Valid: true}
+	}
+	if err := db.writeQueries.AddCollectionTeam(ctx, params); err != nil {
+		db.log.Error("failed to add collection team", "error", err, "collection_id", collectionID, "team_id", teamID)
+		return fmt.Errorf("error adding collection team: %w", err)
+	}
+	return nil
+}
+
+// RemoveCollectionTeam removes a team share.
+func (db *DB) RemoveCollectionTeam(ctx context.Context, collectionID int, teamID models.TeamID) error {
+	if err := db.writeQueries.RemoveCollectionTeam(ctx, sqlc.RemoveCollectionTeamParams{
+		CollectionID: int64(collectionID),
+		TeamID:       int64(teamID),
+	}); err != nil {
+		return fmt.Errorf("error removing collection team: %w", err)
+	}
+	return nil
+}
+
+// ListCollectionTeams returns the teams a collection is shared with.
+func (db *DB) ListCollectionTeams(ctx context.Context, collectionID int) ([]*models.CollectionTeam, error) {
+	rows, err := db.readQueries.ListCollectionTeams(ctx, int64(collectionID))
+	if err != nil {
+		return nil, fmt.Errorf("error listing collection teams: %w", err)
+	}
+	out := make([]*models.CollectionTeam, 0, len(rows))
+	for _, r := range rows {
+		t := &models.CollectionTeam{
+			CollectionID: int(r.CollectionID),
+			TeamID:       models.TeamID(r.TeamID),
+			TeamName:     r.TeamName,
+			CreatedAt:    r.CreatedAt,
+		}
+		if r.AddedBy.Valid {
+			uid := models.UserID(r.AddedBy.Int64)
+			t.AddedBy = &uid
+		}
+		out = append(out, t)
+	}
+	return out, nil
+}
+
+// UserHasCollectionTeamAccess reports whether the user belongs to any team the
+// collection is shared with.
+func (db *DB) UserHasCollectionTeamAccess(ctx context.Context, collectionID int, userID models.UserID) (bool, error) {
+	n, err := db.readQueries.CountCollectionTeamAccess(ctx, sqlc.CountCollectionTeamAccessParams{
+		CollectionID: int64(collectionID),
+		UserID:       int64(userID),
+	})
+	if err != nil {
+		return false, fmt.Errorf("error checking collection team access: %w", err)
+	}
+	return n > 0, nil
 }
 
 // AddCollectionItem links a saved query to a collection (idempotent).

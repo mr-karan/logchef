@@ -109,6 +109,30 @@ export const useContextStore = defineStore('context', () => {
     }
   }
 
+  // Restores the persisted team only while it is still permitted, so a revoked
+  // team never reaches the source loaders. Falls back to the first permitted
+  // team, or forgets the selection when no team remains.
+  function restoreTeam(permittedTeamIds: number[]) {
+    const persisted = loadFromStorage()
+    const storedTeamId = persisted.lastTeamId
+    if (storedTeamId !== null && permittedTeamIds.includes(storedTeamId)) {
+      selectTeam(storedTeamId)
+      return
+    }
+
+    if (storedTeamId !== null) {
+      delete persisted.sourcePerTeam[storedTeamId]
+    }
+    persisted.lastTeamId = null
+    saveToStorage(persisted)
+
+    if (permittedTeamIds.length > 0) {
+      selectTeam(permittedTeamIds[0])
+    } else {
+      clear()
+    }
+  }
+
   function getStoredDefaults(): { teamId: number | null; sourceId: number | null } {
     const persisted = loadFromStorage()
     const storedTeamId = persisted.lastTeamId
@@ -133,6 +157,7 @@ export const useContextStore = defineStore('context', () => {
     clear,
     clearStorage,
     setFromRoute,
+    restoreTeam,
     getStoredDefaults,
     getStoredSourceForTeam,
   }

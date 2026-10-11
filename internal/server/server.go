@@ -369,11 +369,13 @@ func (s *Server) setupRoutes() {
 
 	// Collections (cross-team curation lists). Each user gets an auto-created
 	// personal collection on first GET /api/v1/collections. Other collections
-	// are invite-only with two roles: owner (full control) and member (read).
+	// are invite-only (owner/editor/member) and can also be shared with whole
+	// teams; a team share grants its current members the member role only.
 	collections := api.Group("/collections", s.requireAuth)
 	collections.Get("/", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleListCollections)
 	collections.Get("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleGetCollection)
 	collections.Get("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleListCollectionMembers)
+	collections.Get("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleListCollectionTeams)
 	collections.Get("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsRead), s.handleListCollectionItems)
 	// Ownership-based: any authenticated user can create a collection; all
 	// per-collection mutations are gated on the caller's collection role inside
@@ -384,6 +386,8 @@ func (s *Server) setupRoutes() {
 	collections.Delete("/:collectionID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleDeleteCollection)
 	collections.Post("/:collectionID/members", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionMember)
 	collections.Delete("/:collectionID/members/:userID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionMember)
+	collections.Post("/:collectionID/teams", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionTeam)
+	collections.Delete("/:collectionID/teams/:teamID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionTeam)
 	collections.Post("/:collectionID/items", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleAddCollectionItem)
 	collections.Delete("/:collectionID/items/:queryID", s.requireTokenScope(models.TokenScopeCollectionsWrite), s.handleRemoveCollectionItem)
 

@@ -88,6 +88,13 @@ type CollectionMember struct {
 	CreatedAt    time.Time     `json:"created_at"`
 }
 
+type CollectionTeam struct {
+	CollectionID int64         `json:"collection_id"`
+	TeamID       int64         `json:"team_id"`
+	AddedBy      sql.NullInt64 `json:"added_by"`
+	CreatedAt    time.Time     `json:"created_at"`
+}
+
 type Dashboard struct {
 	ID          int64          `json:"id"`
 	Name        string         `json:"name"`

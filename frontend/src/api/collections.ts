@@ -10,7 +10,9 @@ export interface Collection {
   is_personal: boolean;
   created_by: number;
   caller_role?: CollectionRole;
+  /** Direct membership rows, owners included. Team shares are counted separately. */
   member_count: number;
+  team_count: number;
   item_count: number;
   created_at: string;
   updated_at: string;
@@ -24,6 +26,14 @@ export interface CollectionMember {
   created_at: string;
   email?: string;
   full_name?: string;
+}
+
+export interface CollectionTeam {
+  collection_id: number;
+  team_id: number;
+  team_name: string;
+  added_by?: number | null;
+  created_at: string;
 }
 
 export interface CollectionItem {
@@ -50,6 +60,10 @@ export interface AddCollectionMemberRequest {
   role: CollectionRole;
 }
 
+export interface AddCollectionTeamRequest {
+  team_id: number;
+}
+
 export interface AddCollectionItemRequest {
   saved_query_id: number;
   sort_order?: number;
@@ -71,6 +85,13 @@ export const collectionsApi = {
     apiClient.post<{ message: string }>(`/collections/${id}/members`, payload),
   removeMember: (id: number, userId: number) =>
     apiClient.delete<{ message: string }>(`/collections/${id}/members/${userId}`),
+
+  listTeams: (id: number) =>
+    apiClient.get<CollectionTeam[]>(`/collections/${id}/teams`),
+  addTeam: (id: number, payload: AddCollectionTeamRequest) =>
+    apiClient.post<{ message: string }>(`/collections/${id}/teams`, payload),
+  removeTeam: (id: number, teamId: number) =>
+    apiClient.delete<{ message: string }>(`/collections/${id}/teams/${teamId}`),
 
   listItems: (id: number) =>
     apiClient.get<CollectionItem[]>(`/collections/${id}/items`),

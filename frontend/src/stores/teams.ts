@@ -119,8 +119,8 @@ export const useTeamsStore = defineStore("teams", () => {
           if (Array.isArray(response)) {
             state.data.value.userTeams = response;
 
-            if (!contextStore.teamId && response.length > 0) {
-              contextStore.selectTeam(response[0].id);
+            if (!contextStore.teamId) {
+              contextStore.restoreTeam(response.map((team) => team.id));
             }
             return { success: true, data: state.data.value.userTeams };
           } else {
