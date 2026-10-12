@@ -32,6 +32,41 @@ type failingDashboardQueryProvider struct {
 	release    chan struct{}
 }
 
+func TestRawQueryRejectsStreamFiltersBeforeStreaming(t *testing.T) {
+	s := newDashboardTestServer(t)
+	s.config = &config.Config{Query: config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 10}}
+	provider := &failingDashboardQueryProvider{sourceType: models.SourceTypeClickHouse}
+	s.datasources = datasource.NewService(s.sqlite, s.log)
+	s.datasources.Register(provider)
+	source := &models.Source{Name: "stream-filter-validation", SourceType: models.SourceTypeClickHouse}
+	if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	app := fiber.New()
+	user, src := authorizeTestSource(t, s.sqlite, source.ID)
+	withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, s.handleQueryLogs)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID), strings.NewReader(`{"query_text":"SELECT * FROM logs","extra_stream_filters":["{app=\"api\"}"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status=%d, want 400", resp.StatusCode)
+	}
+	var body map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if body["error_type"] != string(models.ValidationErrorType) {
+		t.Fatalf("error_type=%v, want validation", body["error_type"])
+	}
+	if provider.executions.Load() != 0 {
+		t.Fatal("invalid stream filters reached the provider")
+	}
+}
+
 func (p *failingDashboardQueryProvider) Type() models.SourceType { return p.sourceType }
 
 func (p *failingDashboardQueryProvider) QueryLogs(context.Context, *models.Source, datasource.QueryRequest) (*models.QueryResult, error) {

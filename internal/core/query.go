@@ -64,6 +64,9 @@ func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest) (dataso
 	if err != nil {
 		return datasource.QueryRequest{}, err
 	}
+	if err := datasource.ValidateStreamFilters(req.ExtraStreamFilters); err != nil {
+		return datasource.QueryRequest{}, &QueryRequestError{Message: err.Error()}
+	}
 
 	requiredVars := template.ExtractVariableNames(req.QueryText)
 	if len(requiredVars) > 0 && len(req.Variables) == 0 {
@@ -158,6 +161,9 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	source, err := logchefQLSource(ctx, ds, src)
 	if err != nil {
 		return nil, err
+	}
+	if err := datasource.ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
+		return nil, &QueryRequestError{Message: err.Error()}
 	}
 
 	query, err := template.SubstituteLogchefQLVariables(req.Query, templateVariables(req.Variables))
@@ -306,6 +312,9 @@ func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.
 func PrepareHistogram(req models.APIHistogramRequest) (HistogramParams, error) {
 	if strings.TrimSpace(req.QueryText) == "" {
 		return HistogramParams{}, &QueryRequestError{Message: "query_text parameter is required"}
+	}
+	if err := datasource.ValidateStreamFilters(req.ExtraStreamFilters); err != nil {
+		return HistogramParams{}, &QueryRequestError{Message: err.Error()}
 	}
 
 	requiredVars := template.ExtractVariableNames(req.QueryText)

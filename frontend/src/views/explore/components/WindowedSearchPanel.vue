@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -9,6 +9,7 @@ const { t } = useI18n();
 const store = useExploreWindowedStore();
 const failedSearch = computed(() => store.coverage.filter(w => store.canRetrySearch(w)));
 const failedCounts = computed(() => store.coverage.filter(w => w.count === 'failed'));
+const showFailedCounts = ref(false);
 function range(start: string, end: string) { return `${new Date(start).toLocaleString()} to ${new Date(end).toLocaleString()}`; }
 </script>
 
@@ -27,9 +28,16 @@ function range(start: string, end: string) { return `${new Date(start).toLocaleS
       <span>{{ t(window.search === 'skipped' ? 'sources.windowedSkippedWindow' : window.search === 'partial' ? 'sources.windowedPartialWindow' : 'sources.windowedFailedWindow') }}: {{ range(window.start, window.end) }}<template v-if="window.message">. {{ window.message }}</template></span>
       <Button size="sm" variant="ghost" :disabled="store.isSearching" @click="store.retrySearch(window)">{{ t('sources.windowedRetryWindow') }}</Button>
     </div>
-    <div v-for="window in failedCounts" :key="`count-${window.index}`" class="flex flex-wrap items-center gap-2">
-      <span>{{ t('sources.windowedFailedCountWindow') }}: {{ range(window.start, window.end) }}</span>
-      <Button size="sm" variant="ghost" :disabled="store.isCounting" @click="store.retryCount(window.index)">{{ t('sources.windowedRetryWindow') }}</Button>
+    <div v-if="failedCounts.length" class="flex flex-wrap items-center gap-2">
+      <span>{{ t('sources.windowedFailedCounts', { count: failedCounts.length }) }}</span>
+      <Button size="sm" variant="ghost" :disabled="store.isCounting" @click="store.retryFailedCounts()">{{ t('sources.windowedRetryFailedCounts') }}</Button>
+      <Button size="sm" variant="ghost" :aria-expanded="showFailedCounts" @click="showFailedCounts = !showFailedCounts">{{ t(showFailedCounts ? 'sources.windowedHideFailedCounts' : 'sources.windowedShowFailedCounts') }}</Button>
     </div>
+    <template v-if="showFailedCounts">
+      <div v-for="window in failedCounts" :key="`count-${window.index}`" class="flex flex-wrap items-center gap-2">
+        <span>{{ t('sources.windowedFailedCountWindow') }}: {{ range(window.start, window.end) }}</span>
+        <Button size="sm" variant="ghost" :disabled="store.isCounting" @click="store.retryCount(window.index)">{{ t('sources.windowedRetryWindow') }}</Button>
+      </div>
+    </template>
   </div>
 </template>

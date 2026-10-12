@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Stream selection narrows searches without changing the query text.
 - Background window counts provide totals, histogram data, and count coverage.
   An exhaustive first page builds its histogram from returned rows instead.
+  Retry failed counts in one action without recounting completed windows.
 - VictoriaLogs source forms and provisioning expose window concurrency,
   schema and sidebar lookbacks, sidebar value limits, and histogram visibility.
 
@@ -27,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A short page caused by an incorrect VictoriaLogs timestamp boundary no
   longer silently ends the window. Logchef rereads the full window before
   reporting completion.
+- Successful window retries restore search completion when no gaps remain.
+  Standard query and histogram endpoints validate stream filters consistently
+  and reject them for sources other than VictoriaLogs.
 
 ## [2.3.2] - 2026-10-08
 

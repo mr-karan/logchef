@@ -124,6 +124,7 @@ describe('windowed explorer over HTTP', () => {
     expect(store.complete).toBe(false);
     await store.retrySearch(store.coverage[0]);
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
+    expect(store.complete).toBe(true);
     expect(requests.find(req => req.skip_window === 0)?.cursor).toBe('first');
     expect(cancellations).toBe(1);
   });
@@ -136,7 +137,7 @@ describe('windowed explorer over HTTP', () => {
     ];
     respond = req => {
       if (req.count) return [event({ type: 'end' })];
-      if (req.window_index === 0) return [event({ type: 'window', window: windows[0], status: 'running', cursor: 'first' }), event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('newer')], cursor: 'second' }), event({ type: 'end' })];
+      if (req.window_index === 0) return [event({ type: 'window', window: windows[0], status: 'running', cursor: 'first' }), event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('newer')], cursor: 'second' }), event({ type: 'end', cursor: 'second' })];
       if (req.window_index === 1) return [event({ type: 'rows', window: windows[1], status: 'complete', logs: [row('older', windows[1].start)] }), event({ type: 'end', complete: true })];
       if (req.cursor === 'second') return [event({ type: 'rows', window: windows[1], status: 'complete', logs: [row('older', windows[1].start)] }), event({ type: 'end', complete: true })];
       if (interruption === 'end message') return [...running, event({ type: 'end', message: 'Windowed query stopped before completion.' })];
@@ -220,6 +221,7 @@ describe('windowed explorer over HTTP', () => {
     await store.retrySearch(store.coverage[0]);
     expect(store.cursor).toBe('c2b');
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newest', 'oldest']);
+    expect(store.complete).toBe(false);
   });
 
   it('keeps an aborted head skippable and retryable when the skip request fails', async () => {
@@ -246,6 +248,72 @@ describe('windowed explorer over HTTP', () => {
     expect(requests.filter(req => req.skip_window === 0).map(req => req.cursor)).toEqual(['first', 'first']);
     expect(store.coverage.map(w => w.search)).toEqual(['skipped', 'complete']);
     expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['older']);
+  });
+
+  it('retries only failed count windows, preserves completed counts, and can retry remaining failures', async () => {
+    const three = [...windows, { index: 2, start: '2026-08-31T23:59:00Z', end: windows[1].start }];
+    let failSecond = true;
+    respond = req => {
+      if (!req.count) return [event({ type: 'plan', windows: three }), event({ type: 'rows', window: windows[0], status: 'partial', logs: [row('one')], cursor: 'next' }), event({ type: 'end', cursor: 'next' })];
+      if (req.window_index === undefined) return [event({ type: 'count', window: three[0], status: 'complete', buckets: [{ bucket: windows[0].start, log_count: 2 }] }), ...three.slice(1).map(window => event({ type: 'window', window, status: 'failed' })), event({ type: 'end' })];
+      const window = three[req.window_index];
+      if (window.index === 1 && failSecond) return [event({ type: 'window', window, status: 'failed' }), event({ type: 'end' })];
+      return [event({ type: 'count', window, status: 'complete', buckets: [{ bucket: windows[0].start, log_count: 3 }] }), event({ type: 'end' })];
+    };
+    const { store, finished } = start();
+    await finished;
+    await vi.waitFor(() => expect(store.isCounting).toBe(false));
+    await store.retryFailedCounts();
+    expect(requests.filter(req => req.count && req.window_index !== undefined).map(req => req.window_index)).toEqual([1, 2]);
+    expect(store.coverage.map(window => window.count)).toEqual(['complete', 'failed', 'complete']);
+    expect(store.total).toBe(5);
+    failSecond = false;
+    await store.retryFailedCounts();
+    expect(requests.filter(req => req.count && req.window_index !== undefined).map(req => req.window_index)).toEqual([1, 2, 1]);
+    expect(store.total).toBe(8);
+    expect(store.countComplete).toBe(true);
+  });
+
+  it('stops a bulk count retry without starting the remaining windows or a duplicate batch', async () => {
+    respond = req => {
+      if (!req.count) return [event({ type: 'plan', windows }), event({ type: 'rows', window: windows[0], status: 'partial', logs: [row('one')], cursor: 'next' }), event({ type: 'end', cursor: 'next' })];
+      if (req.window_index === undefined) return [...windows.map(window => event({ type: 'window', window, status: 'failed' })), event({ type: 'end' })];
+      return null;
+    };
+    const { store, finished } = start();
+    await finished;
+    await vi.waitFor(() => expect(store.isCounting).toBe(false));
+    openEvents = [event({ type: 'window', window: windows[0], status: 'running' })];
+    const retry = store.retryFailedCounts();
+    await vi.waitFor(() => expect(store.coverage[0].count).toBe('running'));
+    await store.retryFailedCounts();
+    store.stop();
+    await retry;
+    expect(requests.filter(req => req.count && req.window_index !== undefined).map(req => req.window_index)).toEqual([0]);
+    expect(store.coverage.map(window => window.count)).toEqual(['failed', 'failed']);
+    expect(store.isCounting).toBe(false);
+    await vi.waitFor(() => expect(cancellations).toBe(1));
+  });
+
+  it.each([false, true])('keeps retry traversal open unless the failed head is the last window (%s)', async lastWindow => {
+    const planned = lastWindow ? windows.slice(0, 1) : windows;
+    respond = req => {
+      if (req.count) return [event({ type: 'end' })];
+      if (req.window_index === 0) return [event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('newer')], cursor: lastWindow ? undefined : 'second' }), event({ type: 'end', cursor: lastWindow ? undefined : 'second', complete: lastWindow })];
+      if (req.cursor === 'second') return [event({ type: 'rows', window: windows[1], status: 'complete', logs: [row('older', windows[1].start)] }), event({ type: 'end', complete: true })];
+      return [event({ type: 'plan', windows: planned, cursor: 'first' }), event({ type: 'window', window: windows[0], status: 'failed', cursor: 'first' }), event({ type: 'end', cursor: 'first' })];
+    };
+    const { store, loaded, finished } = start();
+    await finished;
+    await store.retrySearch(store.coverage[0]);
+    expect(store.cursor).toBe(lastWindow ? '' : 'second');
+    expect(store.complete).toBe(lastWindow);
+    if (!lastWindow) {
+      expect(store.coverage[1].search).toBe('pending');
+      await store.loadOlder();
+      expect(loaded.at(-1)?.map(log => log._msg)).toEqual(['newer', 'older']);
+      expect(store.complete).toBe(true);
+    }
   });
 
   // The same rows and calendar buckets as TestIntegrationWindowedCountsUseTimezone, so row and count histograms agree.

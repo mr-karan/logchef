@@ -322,6 +322,7 @@ func (p *Provider) RemoveSource(sourceID models.SourceID) error {
 
 	delete(p.sources, sourceID)
 	delete(p.health, sourceID)
+	p.evictIdleWindowLimiter(sourceID)
 	return nil
 }
 

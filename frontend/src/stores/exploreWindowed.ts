@@ -40,6 +40,7 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
   let searchTask: Promise<void> | null = null;
   let generation = 0;
   let countsStarted = false;
+  let rangeExhausted = false;
   let stats: QueryStats | null = null;
 
   const searchedWindows = computed(() => coverage.value.filter(w => w.search === 'complete' || w.search === 'partial').length);
@@ -90,6 +91,7 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
     countsByWindow.clear();
     histogram.value = [];
     countsStarted = false;
+    rangeExhausted = false;
     stats = null;
     if (clearFilters) selectedStreams.value = {};
   }
@@ -134,9 +136,12 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
       countsByWindow.set(window.index, event.buckets ?? []);
       publishCounts();
     }
-    if (event.type === 'end' && !count && !retry) {
-      if (!event.message) cursor.value = event.cursor ?? '';
-      complete.value = event.complete && !coverage.value.some(w => w.search === 'failed' || w.search === 'skipped');
+    if (event.type === 'end' && !count) {
+      if (!retry || advanceRetry) {
+        if (!event.message && (!retry || event.cursor !== undefined || event.complete)) cursor.value = event.cursor ?? '';
+        rangeExhausted = event.complete;
+      }
+      complete.value = rangeExhausted && !coverage.value.some(w => w.search === 'failed' || w.search === 'skipped' || w.search === 'partial' || w.search === 'running');
     }
     if (event.type === 'end' && event.message) {
       error.value = event.message;
@@ -188,6 +193,16 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
     } finally {
       countControllers.delete(controller);
       if (run === generation) isCounting.value = countControllers.size > 0;
+    }
+  }
+
+  async function retryFailedCounts() {
+    if (isCounting.value) return;
+    const run = generation;
+    const failed = coverage.value.filter(window => window.count === 'failed');
+    for (const window of failed) {
+      if (run !== generation) break;
+      if (window.count === 'failed') await countWindows(window.index);
     }
   }
 
@@ -255,5 +270,5 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
   }
   function retrySearch(window: WindowCoverage) { if (!isSearching.value && canRetrySearch(window)) return search({ cursor: window.cursor, retry: window.index }); }
 
-  return { active, coverage, cursor, isSearching, isCounting, complete, error, histogramEnabled, selectedStreams, histogram, granularity, searchedWindows, total, countComplete, skippableWindow, streamFilters, start, stop, reset, loadOlder, skipWindow, canRetrySearch, retrySearch, retryCount: countWindows };
+  return { active, coverage, cursor, isSearching, isCounting, complete, error, histogramEnabled, selectedStreams, histogram, granularity, searchedWindows, total, countComplete, skippableWindow, streamFilters, start, stop, reset, loadOlder, skipWindow, canRetrySearch, retrySearch, retryFailedCounts, retryCount: countWindows };
 });

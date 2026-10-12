@@ -67,6 +67,9 @@ When the first page contains every matching row, Logchef builds the histogram
 from those rows. Otherwise, background counts cover the entire selected range.
 The count coverage strip distinguishes counted, pending, and failed windows.
 Retrying a failed count replaces that window's contribution.
+**Retry failed counts** retries the failed windows in sequence and keeps completed
+counts. **Stop** cancels the current retry and leaves the remaining windows
+available for retry. Expand **Show failed count windows** to retry one window.
 
 Results can be available while counts are still running. A partial total covers
 only the counted windows. Disabling the chart does not disable those counts.

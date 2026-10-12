@@ -90,6 +90,7 @@ func TestHistogramErrorResponses(t *testing.T) {
 		status int
 	}{
 		{"bucket budget", fmt.Errorf("provider: %w", models.ErrHistogramBudgetExceeded), fiber.StatusBadRequest},
+		{"stream filters", fmt.Errorf("provider: %w", &datasource.ValidationError{Field: "extra_stream_filters", Message: "unsupported source"}), fiber.StatusBadRequest},
 		{"admission", &QueryAdmissionError{Message: "Too many active preview queries"}, fiber.StatusTooManyRequests},
 		{"canceled fill", fmt.Errorf("provider: %w", context.Canceled), fiber.StatusRequestTimeout},
 		{"fill deadline", context.DeadlineExceeded, fiber.StatusRequestTimeout},

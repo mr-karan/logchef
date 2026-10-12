@@ -249,6 +249,25 @@ func TestWindowedFailureRetryAndSkip(t *testing.T) {
 	if returned != 1 {
 		t.Fatalf("retry returned %d rows", returned)
 	}
+	last = retried[len(retried)-1]
+	if last.Type != datasource.WindowEnd || last.Complete || last.Cursor == "" {
+		t.Fatalf("retry ended traversal before older windows: %+v", last)
+	}
+	continued := req
+	continued.WindowIndex = nil
+	continued.Cursor = last.Cursor
+	plan, err := provider.PrepareWindowedQuery(source, continued)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Index != 1 {
+		t.Fatalf("retry continuation starts at window %d, want 1", plan.Index)
+	}
+	for _, event := range run(continued) {
+		if event.Type == datasource.WindowEnd && (!event.Complete || event.Cursor != "") {
+			t.Fatalf("full traversal did not complete: %+v", event)
+		}
+	}
 	req.WindowIndex = nil
 	req.SkipWindow = &index
 	skipped := run(req)
@@ -331,9 +350,9 @@ func TestWindowedSourceConcurrencyAndCancellation(t *testing.T) {
 	if maximum.Load() != 2 {
 		t.Fatalf("peak concurrency=%d", maximum.Load())
 	}
-	limiter := provider.windowLimiter(source.ID, 2)
-	if limiter.active != 0 {
-		t.Fatal("source slots leaked")
+	limiter := provider.windowLimits[source.ID]
+	if limiter.active != 0 || limiter.users != 0 {
+		t.Fatalf("source slots leaked: active=%d users=%d", limiter.active, limiter.users)
 	}
 }
 
@@ -1179,4 +1198,208 @@ func TestSchemaDiscoveryLookback(t *testing.T) {
 			t.Fatalf("%s: discovery request %+v, want lookback %s with scope and tenant", tc.name, got, tc.want)
 		}
 	}
+}
+
+func TestWindowedStreamFilterValidation(t *testing.T) {
+	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: "http://localhost:9428", Optimizer: &models.VictoriaLogsOptimizer{Enabled: true}})
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	tooMany := slices.Repeat([]string{`{app="api"}`}, 17)
+	for _, tc := range []struct {
+		name    string
+		filters []string
+		valid   bool
+	}{
+		{"picker JSON object", []string{`{"app":["api"]}`}, true},
+		{"stream selector", []string{`{app="api"}`}, true},
+		{"JSON array", []string{`[{"app":"api"}]`}, false},
+		{"bare filter", []string{`app:=api`}, false},
+		{"too many", tooMany, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := provider.PrepareWindowedQuery(source, datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &start, EndTime: &end, Limit: 10}, StreamFilters: tc.filters})
+			if tc.valid != (err == nil) {
+				t.Fatalf("error = %v, want valid %v", err, tc.valid)
+			}
+			if err != nil && !datasource.IsValidationError(err) {
+				t.Fatalf("error %T is not a ValidationError", err)
+			}
+		})
+	}
+}
+
+// TestStreamFiltersKeepImmutableScope checks that the standard query,
+// histogram and windowed paths send the user's stream filters in addition to
+// the source scope, so VictoriaLogs ANDs them and a filter cannot widen it.
+func TestStreamFiltersKeepImmutableScope(t *testing.T) {
+	var mu sync.Mutex
+	forms := map[string][]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			t.Error(err)
+			return
+		}
+		mu.Lock()
+		forms[r.URL.Path+" "+r.Form.Get("query")] = r.Form["extra_stream_filters"]
+		mu.Unlock()
+		if r.URL.Path == "/select/logsql/hits" {
+			_, _ = fmt.Fprint(w, `{"hits":[]}`)
+		}
+	}))
+	defer server.Close()
+	provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Scope: models.VictoriaLogsScope{Query: `{env="prod"}`}, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true}})
+	start := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	end := start.Add(time.Minute)
+	filters := []string{`{"app":["api"]}`}
+	ctx := context.Background()
+	if _, err := provider.QueryLogs(ctx, source, datasource.QueryRequest{RawQuery: "*", StartTime: &start, EndTime: &end, Limit: 10, ExtraStreamFilters: filters}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.Histogram(ctx, source, datasource.HistogramRequest{Query: "*", StartTime: &start, EndTime: &end, Window: "1m", Timezone: "UTC", ExtraStreamFilters: filters}); err != nil {
+		t.Fatal(err)
+	}
+	plan, err := provider.PrepareWindowedQuery(source, datasource.WindowedRequest{QueryRequest: datasource.QueryRequest{RawQuery: "*", StartTime: &start, EndTime: &end, Limit: 10}, StreamFilters: filters})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.StreamWindowedQuery(ctx, source, plan, func(datasource.WindowedEvent) error { return nil }); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`{env="prod"}`, `{"app":["api"]}`}
+	paths := map[string]bool{}
+	for key, got := range forms {
+		paths[strings.Fields(key)[0]] = true
+		if !slices.Equal(got, want) {
+			t.Fatalf("%s: extra_stream_filters = %q, want %q", key, got, want)
+		}
+	}
+	if !paths["/select/logsql/query"] || !paths["/select/logsql/hits"] || len(forms) < 3 {
+		t.Fatalf("missing requests: %v", slices.Collect(maps.Keys(forms)))
+	}
+}
+
+func TestWindowLimiterLifecycle(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	defer server.Close()
+	newSource := func(t *testing.T) (*Provider, *models.Source) {
+		provider := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+		source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL, Optimizer: &models.VictoriaLogsOptimizer{Enabled: true}})
+		if err := provider.InitializeSource(context.Background(), source); err != nil {
+			t.Fatal(err)
+		}
+		return provider, source
+	}
+	cached := func(provider *Provider, id models.SourceID) *windowLimiter {
+		provider.mu.RLock()
+		defer provider.mu.RUnlock()
+		return provider.windowLimits[id]
+	}
+
+	t.Run("removing an idle source evicts its limiter", func(t *testing.T) {
+		provider, source := newSource(t)
+		_, done := provider.useWindowLimiter(source.ID, 1)
+		done()
+		if cached(provider, source.ID) == nil {
+			t.Fatal("limiter of a live source was evicted")
+		}
+		if err := provider.RemoveSource(source.ID); err != nil {
+			t.Fatal(err)
+		}
+		if cached(provider, source.ID) != nil {
+			t.Fatal("limiter of a removed source was kept")
+		}
+	})
+
+	t.Run("reinitialize during a request keeps one limiter", func(t *testing.T) {
+		provider, source := newSource(t)
+		held, doneHeld := provider.useWindowLimiter(source.ID, 1)
+		if err := held.acquire(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		if err := provider.RemoveSource(source.ID); err != nil {
+			t.Fatal(err)
+		}
+		if err := provider.InitializeSource(context.Background(), source); err != nil {
+			t.Fatal(err)
+		}
+		other, doneOther := provider.useWindowLimiter(source.ID, 1)
+		if other != held {
+			t.Fatal("reinitialize split the source between two limiters")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+		if err := other.acquire(ctx); !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("second request got a slot beyond the source concurrency: %v", err)
+		}
+		held.release()
+		doneHeld()
+		if err := other.acquire(context.Background()); err != nil {
+			t.Fatal(err)
+		}
+		other.release()
+		doneOther()
+		if cached(provider, source.ID) != held {
+			t.Fatal("limiter of a reinitialized source was evicted")
+		}
+	})
+
+	t.Run("delete during a request evicts after the last user", func(t *testing.T) {
+		provider, source := newSource(t)
+		held, done := provider.useWindowLimiter(source.ID, 1)
+		if err := provider.RemoveSource(source.ID); err != nil {
+			t.Fatal(err)
+		}
+		if cached(provider, source.ID) != held {
+			t.Fatal("limiter was evicted while a request used it")
+		}
+		done()
+		if cached(provider, source.ID) != nil {
+			t.Fatal("limiter of a deleted source was kept after its last user")
+		}
+	})
+
+	t.Run("source churn never exceeds concurrency", func(t *testing.T) {
+		provider, source := newSource(t)
+		var inFlight atomic.Int32
+		stop := make(chan struct{})
+		var churn sync.WaitGroup
+		churn.Go(func() {
+			for {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				_ = provider.RemoveSource(source.ID)
+				if _, err := provider.connectionForSource(source); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		})
+		var requests sync.WaitGroup
+		for range 8 {
+			requests.Go(func() {
+				for range 200 {
+					limiter, done := provider.useWindowLimiter(source.ID, 1)
+					if err := limiter.acquire(context.Background()); err != nil {
+						t.Error(err)
+						done()
+						return
+					}
+					if n := inFlight.Add(1); n > 1 {
+						t.Errorf("%d requests in flight with concurrency 1", n)
+					}
+					inFlight.Add(-1)
+					limiter.release()
+					done()
+				}
+			})
+		}
+		requests.Wait()
+		close(stop)
+		churn.Wait()
+	})
 }

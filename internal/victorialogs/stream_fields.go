@@ -25,7 +25,8 @@ func (p *Provider) StreamFields(ctx context.Context, source *models.Source) ([]s
 		return conn.Optimizer.StreamFields, nil
 	}
 	settings := conn.Optimizer.WithDefaults()
-	limiter := p.windowLimiter(source.ID, settings.Concurrency)
+	limiter, done := p.useWindowLimiter(source.ID, settings.Concurrency)
+	defer done()
 	if err := limiter.acquire(ctx); err != nil {
 		return nil, err
 	}
@@ -47,7 +48,8 @@ func (p *Provider) StreamFields(ctx context.Context, source *models.Source) ([]s
 
 func (p *Provider) optimizedFieldValues(ctx context.Context, source *models.Source, conn models.VictoriaLogsConnectionInfo, req datasource.FieldValuesRequest, query string) (*datasource.FieldValuesResult, error) {
 	settings := conn.Optimizer.WithDefaults()
-	limiter := p.windowLimiter(source.ID, settings.Concurrency)
+	limiter, done := p.useWindowLimiter(source.ID, settings.Concurrency)
+	defer done()
 	if err := limiter.acquire(ctx); err != nil {
 		return nil, err
 	}

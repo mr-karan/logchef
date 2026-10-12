@@ -139,6 +139,9 @@ func (s *Server) handleHistogramError(c fiber.Ctx, sourceID models.SourceID, err
 	if errors.Is(err, datasource.ErrOperationNotSupported) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Histogram is not supported for this source type yet", models.ValidationErrorType)
 	}
+	if datasource.IsValidationError(err) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	}
 
 	// Check for specific error types
 	switch {

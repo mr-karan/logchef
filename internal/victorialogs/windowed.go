@@ -36,25 +36,47 @@ type windowLimiter struct {
 	active  int
 	limit   int
 	changed chan struct{}
+	// users counts callers that hold this limiter. Provider.mu guards it.
+	users int
 }
 
-func (p *Provider) windowLimiter(sourceID models.SourceID, concurrency int) *windowLimiter {
+// useWindowLimiter returns the limiter shared by all requests for the source,
+// with its limit set to concurrency. Call done when the request no longer uses
+// the limiter. A limiter stays in the map while it has users, so a source
+// reinitialize during a request cannot split the source between two limiters.
+func (p *Provider) useWindowLimiter(sourceID models.SourceID, concurrency int) (limiter *windowLimiter, done func()) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.windowLimits == nil {
 		p.windowLimits = make(map[models.SourceID]*windowLimiter)
 	}
-	limiter := p.windowLimits[sourceID]
+	limiter = p.windowLimits[sourceID]
 	if limiter == nil {
 		limiter = &windowLimiter{limit: concurrency, changed: make(chan struct{})}
 		p.windowLimits[sourceID] = limiter
 	}
+	limiter.users++
 	limiter.mu.Lock()
 	limiter.limit = concurrency
 	close(limiter.changed)
 	limiter.changed = make(chan struct{})
 	limiter.mu.Unlock()
-	return limiter
+	return limiter, func() {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		limiter.users--
+		if _, ok := p.sources[sourceID]; !ok {
+			p.evictIdleWindowLimiter(sourceID)
+		}
+	}
+}
+
+// evictIdleWindowLimiter deletes the source's limiter if no request uses it.
+// The caller must hold p.mu.
+func (p *Provider) evictIdleWindowLimiter(sourceID models.SourceID) {
+	if limiter := p.windowLimits[sourceID]; limiter != nil && limiter.users == 0 {
+		delete(p.windowLimits, sourceID)
+	}
 }
 
 func (l *windowLimiter) acquire(ctx context.Context) error {
@@ -160,15 +182,7 @@ func validateWindowedRequest(req *datasource.WindowedRequest) error {
 		}
 		req.Step = step.String()
 	}
-	if len(req.StreamFilters) > 16 {
-		return fmt.Errorf("too many stream filters")
-	}
-	for _, filter := range req.StreamFilters {
-		if len(filter) > 65536 || !strings.HasPrefix(filter, "{") || !strings.HasSuffix(filter, "}") {
-			return fmt.Errorf("stream filters must be stream selectors")
-		}
-	}
-	return nil
+	return datasource.ValidateStreamFilters(req.StreamFilters)
 }
 
 func restoreWindowCursor(plan *datasource.WindowedPlan) error {
@@ -245,10 +259,12 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 	if err != nil {
 		return err
 	}
+	// done runs after workers.Wait, so no worker uses an evicted limiter.
+	limiter, done := p.useWindowLimiter(source.ID, plan.Concurrency)
+	defer done()
 	ctx, cancel := context.WithCancel(ctx)
 	var workers sync.WaitGroup
 	defer func() { cancel(); workers.Wait() }()
-	limiter := p.windowLimiter(source.ID, plan.Concurrency)
 	if err := emit(datasource.WindowedEvent{Type: datasource.WindowPlan, Windows: plan.Windows, Cursor: searchCursor(plan, plan.Index, plan.Position)}); err != nil {
 		return err
 	}
@@ -385,7 +401,10 @@ func (p *Provider) StreamWindowedQuery(ctx context.Context, source *models.Sourc
 			index++
 		}
 	}
-	return emit(datasource.WindowedEvent{Type: datasource.WindowEnd, Complete: true})
+	if plan.Request.Count {
+		return emit(datasource.WindowedEvent{Type: datasource.WindowEnd, Complete: true})
+	}
+	return emit(datasource.WindowedEvent{Type: datasource.WindowEnd, Cursor: searchCursor(plan, index, datasource.WindowPosition{}), Complete: index >= len(plan.Windows)})
 }
 
 func (p *Provider) querySearchWindow(ctx context.Context, conn models.VictoriaLogsConnectionInfo, sourceID models.SourceID, req datasource.WindowedRequest, window datasource.SearchWindow, position datasource.WindowPosition) windowResult {
