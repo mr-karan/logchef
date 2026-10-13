@@ -16,6 +16,8 @@ import {
   ListFilter,
   User,
   LockKeyhole,
+  ArrowUpDown,
+  Check,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +41,7 @@ import {
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useDashboardsStore } from "@/stores/dashboards";
 import { useMetaStore } from "@/stores/meta";
+import { useTableSearchSort, type SortDir } from "@/composables/useTableSearchSort";
 import type { Dashboard } from "@/api/dashboards";
 
 const { t, locale } = useI18n();
@@ -51,14 +54,29 @@ const isLoading = computed(() => store.isLoadingOperation("fetchDashboards"));
 const dashboards = computed(() => store.dashboards);
 const demoReadOnly = computed(() => metaStore.demoReadOnly);
 
-const search = ref("");
-const filteredDashboards = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  if (!q) return dashboards.value;
-  return dashboards.value.filter(
-    (d) => d.name.toLowerCase().includes(q) || d.description?.toLowerCase().includes(q)
-  );
+const { search, rows: filteredDashboards, sortKey, sortDir } = useTableSearchSort(dashboards, {
+  searchKeys: ["name", "description"],
+  sortAccessors: {
+    name: (d) => d.name.toLowerCase(),
+    updated: (d) => new Date(d.updated_at),
+    created: (d) => new Date(d.created_at),
+  },
+  initialSort: { key: "updated", dir: "desc" },
 });
+
+const SORT_OPTIONS: { key: string; dir: SortDir; label: () => string }[] = [
+  { key: "updated", dir: "desc", label: () => t("dashboards.sortRecentlyUpdated") },
+  { key: "created", dir: "desc", label: () => t("dashboards.sortRecentlyCreated") },
+  { key: "name", dir: "asc", label: () => t("dashboards.sortNameAsc") },
+  { key: "name", dir: "desc", label: () => t("dashboards.sortNameDesc") },
+];
+const activeSort = computed(
+  () => SORT_OPTIONS.find((o) => o.key === sortKey.value && o.dir === sortDir.value) ?? SORT_OPTIONS[0],
+);
+function selectSort(opt: (typeof SORT_OPTIONS)[number]) {
+  sortKey.value = opt.key;
+  sortDir.value = opt.dir;
+}
 
 onMounted(() => {
   void store.fetchDashboards();
@@ -147,6 +165,25 @@ async function doDelete() {
           <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input v-model="search" :placeholder="t('ui.searchDashboards')" class='h-9 w-56 pl-8' />
         </div>
+        <DropdownMenu v-if="dashboards.length > 1">
+          <DropdownMenuTrigger as-child>
+            <Button variant="outline" size="sm" class="h-9 gap-1.5" :title="t('dashboards.sortBy')">
+              <ArrowUpDown class="h-3.5 w-3.5" />
+              {{ activeSort.label() }}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" class="w-48">
+            <DropdownMenuItem
+              v-for="opt in SORT_OPTIONS"
+              :key="`${opt.key}-${opt.dir}`"
+              class="text-xs"
+              @click="selectSort(opt)"
+            >
+              <Check class="mr-2 h-3.5 w-3.5" :class="opt === activeSort ? 'opacity-100' : 'opacity-0'" />
+              {{ opt.label() }}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button v-if="!demoReadOnly" size="sm" class="gap-1.5" @click="openCreate">
           <Plus class="h-4 w-4" />
           {{ t('ui.newDashboard') }}

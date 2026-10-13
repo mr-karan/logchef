@@ -48,6 +48,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ui/ErrorAlert.vue";
 import EmptyState from "@/components/layout/EmptyState.vue";
+import SortHeader from "@/components/layout/SortHeader.vue";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
@@ -55,6 +56,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useMetaStore } from "@/stores/meta";
 import { useContextSync } from "@/composables/useContextSync";
+import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import type { Alert } from "@/api/alerts";
 
 const { t, locale } = useI18n();
@@ -75,6 +77,17 @@ const {
 } = useContextSync({ basePath: '/logs/alerts' });
 
 const { alerts } = storeToRefs(alertsStore);
+
+// No initial sort: alerts keep the server's most-recently-updated order.
+const { rows: sortedAlerts, sortKey, sortDir, toggleSort } = useTableSearchSort(alerts, {
+  searchKeys: [],
+  sortAccessors: {
+    active: (a) => (a.is_active ? 1 : 0),
+    name: (a) => a.name.toLowerCase(),
+    status: (a) => (a.last_state === "firing" ? 1 : 0),
+    lastTriggered: (a) => (a.last_triggered_at ? new Date(a.last_triggered_at).getTime() || 0 : 0),
+  },
+});
 
 const showDeleteDialog = ref(false);
 const alertToDelete = ref<Alert | null>(null);
@@ -334,16 +347,24 @@ onMounted(async () => {
           <Table v-else>
             <TableHeader>
               <TableRow>
-                <TableHead class="w-12">{{ t('ui.active') }}</TableHead>
-                <TableHead>{{ t('ui.alert') }}</TableHead>
+                <TableHead class="w-12">
+                  <SortHeader column="active" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.active') }}</SortHeader>
+                </TableHead>
+                <TableHead>
+                  <SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.alert') }}</SortHeader>
+                </TableHead>
                 <TableHead>{{ t('ui.condition') }}</TableHead>
-                <TableHead>{{ t('ui.status') }}</TableHead>
-                <TableHead>{{ t('ui.lastTriggered') }}</TableHead>
+                <TableHead>
+                  <SortHeader column="status" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.status') }}</SortHeader>
+                </TableHead>
+                <TableHead>
+                  <SortHeader column="lastTriggered" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.lastTriggered') }}</SortHeader>
+                </TableHead>
                 <TableHead class="w-24 text-right">{{ t('ui.actions') }}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              <TableRow v-for="alert in alerts" :key="alert.id" :class="{ 'opacity-50': !alert.is_active }" class="group">
+              <TableRow v-for="alert in sortedAlerts" :key="alert.id" :class="{ 'opacity-50': !alert.is_active }" class="group">
                 <!-- Active Toggle -->
                 <TableCell class="py-3">
                   <Switch 

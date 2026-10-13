@@ -10,7 +10,8 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
 import { type Source } from '@/api/sources'
-import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User, Search } from 'lucide-vue-next'
+import { SortHeader } from '@/components/layout'
 import { Badge } from '@/components/ui/badge'
 import {
     Table,
@@ -446,22 +447,19 @@ onMounted(async () => {
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>
-                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('name')">
+                                            <SortHeader column="name" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
                                                 {{ t('ui.email') }}
-                                                <component :is="memberSortKey === 'name' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
-                                            </button>
+                                            </SortHeader>
                                         </TableHead>
                                         <TableHead>
-                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('role')">
+                                            <SortHeader column="role" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
                                                 {{ t('ui.role') }}
-                                                <component :is="memberSortKey === 'role' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
-                                            </button>
+                                            </SortHeader>
                                         </TableHead>
                                         <TableHead>
-                                            <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleMemberSort('added')">
+                                            <SortHeader column="added" :sort-key="memberSortKey" :sort-dir="memberSortDir" @toggle="toggleMemberSort">
                                                 {{ t('access.added') }}
-                                                <component :is="memberSortKey === 'added' ? (memberSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
-                                            </button>
+                                            </SortHeader>
                                         </TableHead>
                                         <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
                                     </TableRow>

@@ -18,7 +18,7 @@ import {
   FolderInput,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
-import { PageHeader, PageSection, EmptyState, LoadingState } from "@/components/layout";
+import { PageHeader, PageSection, EmptyState, LoadingState, SortHeader } from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +45,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/composables/useToast";
+import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useCollectionsStore } from "@/stores/collections";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
@@ -80,6 +81,21 @@ const { isAnyTeamAdmin, isGlobalAdmin, canManageCollection } = useTeamPermission
 const collectionID = computed(() => props.collectionId);
 const collection = computed(() => store.collections.find((c) => c.id === collectionID.value) ?? null);
 const items = computed(() => data.value.items[collectionID.value] ?? []);
+// No initial sort: items keep their pinned order until a column is clicked.
+const {
+  rows: sortedItems,
+  sortKey: itemSortKey,
+  sortDir: itemSortDir,
+  toggleSort: toggleItemSort,
+} = useTableSearchSort(items, {
+  searchKeys: [],
+  sortAccessors: {
+    name: (i) => i.query.name.toLowerCase(),
+    source: (i) => (i.query.source_name ?? "").toLowerCase(),
+    createdBy: (i) => (i.query.created_by_name || i.query.created_by_email || "").toLowerCase(),
+    updated: (i) => new Date(i.query.updated_at),
+  },
+});
 const members = computed(() => data.value.members[collectionID.value] ?? []);
 const sharedTeams = computed(() => data.value.teams[collectionID.value] ?? []);
 
@@ -450,16 +466,24 @@ async function handleDeleteCollection() {
             <thead>
               <tr class="border-b bg-muted/30">
                 <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">{{ t('library.type') }}</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5">{{ t('ui.name') }}</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">{{ t('ui.source') }}</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[170px]">{{ t('library.createdBy') }}</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">{{ t('ui.updated2') }}</th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5">
+                  <SortHeader column="name" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('ui.name') }}</SortHeader>
+                </th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">
+                  <SortHeader column="source" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('ui.source') }}</SortHeader>
+                </th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[170px]">
+                  <SortHeader column="createdBy" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('library.createdBy') }}</SortHeader>
+                </th>
+                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">
+                  <SortHeader column="updated" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('ui.updated2') }}</SortHeader>
+                </th>
                 <th class="w-[90px]"></th>
               </tr>
             </thead>
             <tbody>
               <tr
-                v-for="item in items"
+                v-for="item in sortedItems"
                 :key="item.query.id"
                 class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
                 :class="!item.runnable && 'opacity-60'"

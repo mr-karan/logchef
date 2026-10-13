@@ -5,8 +5,8 @@ import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
-import { Plus, Trash2, Copy, Pencil, Database, Search, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-vue-next'
+import { PageHeader, EmptyState, LoadingState, SortHeader } from '@/components/layout'
+import { Plus, Trash2, Copy, Pencil, Database, Search } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { type Source, type VictoriaLogsConnectionInfo, asClickHouseConnection } from '@/api/sources'
 import {
@@ -169,26 +169,23 @@ onMounted(async () => {
                         <TableHeader>
                             <TableRow>
                                 <TableHead class="w-[220px]">
-                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('name')">
+                                    <SortHeader column="name" :sort-key="sourceSortKey" :sort-dir="sourceSortDir" @toggle="toggleSourceSort">
                                         {{ t('sources.source') }}
-                                        <component :is="sourceSortKey === 'name' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
-                                    </button>
+                                    </SortHeader>
                                 </TableHead>
                                 <TableHead class="w-[120px]">{{ t('sources.type') }}</TableHead>
                                 <TableHead class="w-[150px]">{{ t('sources.autoCreated') }}</TableHead>
                                 <TableHead class="w-[150px]">{{ t('sources.timestampField') }}</TableHead>
                                 <TableHead class="w-[300px]">{{ t('sources.connection') }}</TableHead>
                                 <TableHead class="w-[100px]">
-                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('status')">
+                                    <SortHeader column="status" :sort-key="sourceSortKey" :sort-dir="sourceSortDir" @toggle="toggleSourceSort">
                                         {{ t('sources.status') }}
-                                        <component :is="sourceSortKey === 'status' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
-                                    </button>
+                                    </SortHeader>
                                 </TableHead>
                                 <TableHead class="w-[100px]">
-                                    <button type="button" class="inline-flex items-center gap-1 hover:text-foreground" @click="toggleSourceSort('created')">
+                                    <SortHeader column="created" :sort-key="sourceSortKey" :sort-dir="sourceSortDir" @toggle="toggleSourceSort">
                                         {{ t('sources.createdAt') }}
-                                        <component :is="sourceSortKey === 'created' ? (sourceSortDir === 'asc' ? ArrowUp : ArrowDown) : ArrowUpDown" class="size-3.5 opacity-60" />
-                                    </button>
+                                    </SortHeader>
                                 </TableHead>
                                 <TableHead class="w-[120px] text-right">{{ t('ui.actions') }}</TableHead>
                             </TableRow>

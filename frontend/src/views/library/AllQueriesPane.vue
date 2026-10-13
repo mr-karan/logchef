@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { Lock, Search, Database, FileSearch, Shield } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
-import { PageSection, EmptyState, LoadingState } from "@/components/layout";
+import { PageSection, EmptyState, LoadingState, SortHeader } from "@/components/layout";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
 import { useAuthStore } from "@/stores/auth";
+import { useTableSearchSort } from "@/composables/useTableSearchSort";
 
 const router = useRouter();
 const { t } = useI18n();
@@ -24,14 +25,14 @@ const isLoading = computed(() =>
   store.isLoadingOperation(isAdmin.value ? "listAllSavedQueries" : "listSavedQueries"),
 );
 
-const search = ref("");
-const filtered = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  const list = rows.value ?? [];
-  if (!q) return list;
-  return list.filter(
-    (r) => r.name.toLowerCase().includes(q) || (r.source_name ?? "").toLowerCase().includes(q),
-  );
+const { search, rows: filtered, sortKey, sortDir, toggleSort } = useTableSearchSort(rows, {
+  searchKeys: ["name", (r) => r.source_name],
+  sortAccessors: {
+    name: (r) => r.name.toLowerCase(),
+    source: (r) => (r.source_name ?? "").toLowerCase(),
+    updated: (r) => new Date(r.updated_at),
+  },
+  initialSort: { key: "updated", dir: "desc" },
 });
 
 // runnable is only set on the admin scope=all list; absent means the list was
@@ -82,9 +83,15 @@ onMounted(() => {
           <thead>
             <tr class="border-b bg-muted/30">
               <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">{{ t('library.type') }}</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5">{{ t('ui.name') }}</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[160px]">{{ t('ui.source') }}</th>
-              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">{{ t('ui.updated2') }}</th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5">
+                <SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.name') }}</SortHeader>
+              </th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[160px]">
+                <SortHeader column="source" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.source') }}</SortHeader>
+              </th>
+              <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">
+                <SortHeader column="updated" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">{{ t('ui.updated2') }}</SortHeader>
+              </th>
             </tr>
           </thead>
           <tbody>

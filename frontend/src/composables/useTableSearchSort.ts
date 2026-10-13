@@ -59,9 +59,16 @@ export function useTableSearchSort<T>(
     return out
   })
 
+  // Clicking a column cycles asc → desc → back to the initial sort, so a list
+  // with a meaningful natural order (e.g. pinned items) can be restored. When
+  // the column already is the initial sort, it just flips direction.
   function toggleSort(key: string) {
-    if (sortKey.value === key) {
-      sortDir.value = sortDir.value === "asc" ? "desc" : "asc"
+    const init = opts.initialSort
+    if (sortKey.value === key && sortDir.value === "asc") {
+      sortDir.value = "desc"
+    } else if (sortKey.value === key && !(init?.key === key && init.dir === "desc")) {
+      sortKey.value = init?.key ?? ""
+      sortDir.value = init?.dir ?? "asc"
     } else {
       sortKey.value = key
       sortDir.value = "asc"
