@@ -144,6 +144,11 @@ func validateVictoriaLogsSource(prefix string, src config.ProvisionSource) (errs
 	if strings.TrimSpace(conn.BaseURL) == "" {
 		errs = append(errs, fmt.Sprintf("%s: victorialogs connection.base_url is required", prefix))
 	}
+	if conn.Optimizer != nil {
+		if err := conn.Optimizer.Validate(); err != nil {
+			errs = append(errs, fmt.Sprintf("%s: connection.optimizer: %v", prefix, err))
+		}
+	}
 
 	switch normalizedAuthMode(conn.Auth.Mode) {
 	case "", "none":

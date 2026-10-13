@@ -183,6 +183,7 @@ Key areas of the docs:
             { label: "LogchefQL Syntax", link: "/guide/search-syntax" },
             { label: "SQL Examples", link: "/guide/examples" },
             { label: "LogsQL Queries", link: "/guide/logsql-queries" },
+            { label: "VictoriaLogs Windowed Search", link: "/guide/windowed-search" },
             { label: "Field Sidebar", link: "/features/field-sidebar" },
           ],
         },

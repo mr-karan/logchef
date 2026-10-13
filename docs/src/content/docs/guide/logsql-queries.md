@@ -9,6 +9,9 @@ For the full LogchefQL syntax reference, see [Search Syntax](/guide/search-synta
 
 ## Native LogsQL mode
 
+For large sources, [windowed search](/guide/windowed-search) returns filter-only
+queries in pages, newest first. Queries with pipes keep the standard execution path.
+
 Switch a VictoriaLogs source's query editor to native mode to write LogsQL directly. A few things behave differently from LogchefQL mode:
 
 - **Time range is applied separately.** The selected time range is sent as `start`/`end` parameters alongside your query text, not baked into the query string — so you don't need (and shouldn't add) your own `_time:` filter unless you want to override the picker.

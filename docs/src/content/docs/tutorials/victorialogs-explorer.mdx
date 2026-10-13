@@ -87,6 +87,21 @@ A few behaviors worth knowing:
 - If VictoriaLogs closes the tail connection on its own (a restart, an idle timeout, a network drop) rather than because you stopped the tail, Logchef reports that as a dropped connection rather than a normal stop — so you can tell "I stopped this" apart from "the connection died."
 - Live Tail works in both LogchefQL and native LogsQL query modes.
 
+## Windowed search
+
+For large sources, enable **Windowed search** in the VictoriaLogs source form.
+The explorer searches short windows newest first and returns partial results.
+**Load older** continues the same query and fixed time range. Slow or failed
+windows can be skipped and retried individually.
+
+Schema discovery defaults to the last five minutes. Background window counts
+provide totals and histogram coverage after an incomplete first page. Results
+can arrive before the full-range counts finish. Queries with pipes keep the
+standard query path.
+
+See [VictoriaLogs windowed search](/guide/windowed-search) for source settings,
+provisioning, stream selection, count coverage, and pagination limits.
+
 ## Known gaps on VictoriaLogs sources
 
 A handful of Logchef features only work against ClickHouse sources today:

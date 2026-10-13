@@ -141,12 +141,43 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
+    <article class="version" id="v2.4.0">
+      <div class="version-header">
+        <a class="version-tag" href="#v2.4.0">v2.4.0</a>
+        <span class="version-date">Oct 13, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.4.0" class="version-link" target="_blank">Release notes &rarr;</a>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type added">Added</div>
+        <ul class="change-list">
+          <li><strong>VictoriaLogs windowed search</strong>: Opt in per source to receive newest-first pages with streamed progress, parallel time windows, stream selection, and Stop, Skip, and Retry controls. Background counts show totals, histogram buckets, and coverage as windows finish. Retry failed counts in one action while keeping completed counts. Configure the feature in the source form or provisioning file. Read the <a href="/guide/windowed-search">windowed-search guide</a> for settings and limits (<a href="https://github.com/mr-karan/logchef/issues/116" target="_blank">#116</a>).</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type changed">Changed</div>
+        <ul class="change-list">
+          <li>Optimized sources discover schema fields from the last five minutes by default. Increase the schema lookback if fields appear rarely.</li>
+          <li>Windowed pagination selects a timestamp boundary before sorting full rows, reducing work on dense windows. Searches started with an older cursor must be run again after upgrading.</li>
+        </ul>
+      </div>
+
+      <div class="change-section">
+        <div class="change-type fixed">Fixed</div>
+        <ul class="change-list">
+          <li>A short page caused by an incorrect VictoriaLogs timestamp boundary is read again across the full window so older rows are not silently omitted.</li>
+          <li>Search retries retain the next-window cursor and restore completion when no gaps remain. Query and histogram endpoints validate stream filters consistently and reject them for sources other than VictoriaLogs.</li>
+        </ul>
+      </div>
+    </article>
+
     <!-- v2.3.2 -->
     <article class="version" id="v2.3.2">
       <div class="version-header">
         <a class="version-tag" href="#v2.3.2">v2.3.2</a>
         <span class="version-date">Oct 8, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.3.2" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 

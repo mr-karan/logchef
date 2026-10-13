@@ -72,7 +72,8 @@ type Provider struct {
 	// without per-ID serialisation two concurrent operations for the SAME source
 	// can interleave and leave stale state (e.g. health cached for a source that
 	// a concurrent remove already deleted).
-	opLocks keyedMutex
+	opLocks      keyedMutex
+	windowLimits map[models.SourceID]*windowLimiter
 }
 
 // keyedMutex hands out one mutex per key, so callers can serialise operations
@@ -321,6 +322,7 @@ func (p *Provider) RemoveSource(sourceID models.SourceID) error {
 
 	delete(p.sources, sourceID)
 	delete(p.health, sourceID)
+	p.evictIdleWindowLimiter(sourceID)
 	return nil
 }
 
@@ -498,6 +500,11 @@ func mergeRedactedConnectionSecrets(conn *models.VictoriaLogsConnectionInfo, pre
 }
 
 func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.VictoriaLogsConnectionInfo) error {
+	if conn.Optimizer != nil {
+		if err := conn.Optimizer.Validate(); err != nil {
+			return &datasource.ValidationError{Field: fieldPrefix + "optimizer", Message: err.Error()}
+		}
+	}
 	if err := datasource.ValidateVictoriaLogsConnection(fieldPrefix, conn.BaseURL); err != nil {
 		return err
 	}

@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-13
+
+VictoriaLogs windowed search is opt-in. Enable it in the source form or
+provisioning file to use streamed progress, newest-first pages, and window retries.
+
+### Added
+- Opt-in VictoriaLogs windowed search returns partial results newest first,
+  with Load older, Stop, and individual window skip and retry controls (#116).
+  Stream selection narrows searches without changing the query text.
+- Background window counts provide totals, histogram data, and count coverage.
+  An exhaustive first page builds its histogram from returned rows instead.
+  Retry failed counts in one action without recounting completed windows.
+- VictoriaLogs source forms and provisioning expose window concurrency,
+  schema and sidebar lookbacks, sidebar value limits, and histogram visibility.
+
+### Changed
+- Windowed pages use a timestamp boundary to limit full-row sorting while
+  preserving timestamp ties and identical duplicate logs. Rerun existing
+  searches after upgrading because the cursor format changed.
+- Optimizer-enabled schema discovery defaults to five minutes instead of
+  24 hours. Set `schema_lookback_seconds` higher if rare fields are missing.
+
+### Fixed
+- A short page caused by an incorrect VictoriaLogs timestamp boundary no
+  longer silently ends the window. Logchef rereads the full window before
+  reporting completion.
+- Successful window retries restore search completion when no gaps remain.
+  Standard query and histogram endpoints validate stream filters consistently
+  and reject them for sources other than VictoriaLogs.
+
 ## [2.3.2] - 2026-10-08
 
 Shared collections can be shared with whole teams. Metadata migrations run
@@ -1462,7 +1492,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.2...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/mr-karan/logchef/compare/v2.3.2...v2.4.0
 [2.3.2]: https://github.com/mr-karan/logchef/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/mr-karan/logchef/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/mr-karan/logchef/compare/v2.2.0...v2.3.0

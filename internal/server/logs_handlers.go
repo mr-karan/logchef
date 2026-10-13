@@ -251,12 +251,16 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 	}
+	if err := datasource.ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
+		return s.handleLogsQueryError(c, sourceID, err)
+	}
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
 	// cache key is computed from the finalized (post-substitution) executable
 	// query and the resolved parameters; source.UpdatedAt invalidates entries on
 	// a source config change. Explorer/ad-hoc requests carry no directive and
 	// stay uncached, preserving the streaming path exactly.
 	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
+	cacheable = cacheable && len(req.ExtraStreamFilters) == 0
 	var cacheKey [32]byte
 	if cacheable {
 		effLimit := req.Limit

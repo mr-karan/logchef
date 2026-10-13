@@ -212,6 +212,9 @@ func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, req Q
 	if err != nil {
 		return nil, err
 	}
+	if err := ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
+		return nil, err
+	}
 	return provider.QueryLogs(ctx, source, req)
 }
 
@@ -247,6 +250,9 @@ func (s *Service) QueryLogsStream(ctx context.Context, sourceID models.SourceID,
 	if !ok {
 		return models.QueryStats{}, ErrOperationNotSupported
 	}
+	if err := ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
+		return models.QueryStats{}, err
+	}
 	return streamer.QueryLogsStream(ctx, source, req, w)
 }
 
@@ -261,6 +267,9 @@ func (s *Service) GetSourceSchema(ctx context.Context, sourceID models.SourceID)
 func (s *Service) Histogram(ctx context.Context, sourceID models.SourceID, req HistogramRequest) (*HistogramResult, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
+		return nil, err
+	}
+	if err := ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
 		return nil, err
 	}
 	return provider.Histogram(ctx, source, req)

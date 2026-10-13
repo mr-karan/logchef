@@ -57,6 +57,7 @@ export interface TemplateVariable {
 
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
+  extra_stream_filters?: string[];
   query_text: string;
   limit?: number;
   window?: string;

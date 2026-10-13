@@ -245,6 +245,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	// for VictoriaLogs the time range is passed separately and folded into the
 	// key, for ClickHouse it is already baked into the compiled SQL.
 	effTTL, cacheable := s.dashboardCacheParams(req.Cache)
+	cacheable = cacheable && len(req.ExtraStreamFilters) == 0
 	var cacheKey [32]byte
 	if cacheable {
 		cacheKey = dashcache.ComputeKey(dashcache.KeyInput{

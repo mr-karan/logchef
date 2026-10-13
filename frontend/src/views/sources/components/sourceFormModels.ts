@@ -51,6 +51,14 @@ export interface VictoriaLogsSourceFormState {
   scopeQuery: string;
   metaTSField: string;
   metaSeverityField: string;
+  windowedEnabled: boolean;
+  maxWindowSeconds: string;
+  concurrency: string;
+  sidebarLookbackSeconds: string;
+  schemaLookbackSeconds: string;
+  sidebarValuesCap: string;
+  histogramEnabled: boolean;
+  streamFields: string;
 }
 
 export const clickHouseSchemaTemplate = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
@@ -120,6 +128,14 @@ export function createDefaultVictoriaLogsFormState(): VictoriaLogsSourceFormStat
     scopeQuery: "",
     metaTSField: "_time",
     metaSeverityField: "",
+    windowedEnabled: false,
+    maxWindowSeconds: "10800",
+    concurrency: "2",
+    sidebarLookbackSeconds: "900",
+    schemaLookbackSeconds: "300",
+    sidebarValuesCap: "10000",
+    histogramEnabled: true,
+    streamFields: "",
   };
 }
 
@@ -216,6 +232,18 @@ export function buildVictoriaLogsConnection(state: VictoriaLogsSourceFormState):
   const connection: VictoriaLogsConnectionInfo = {
     base_url: state.baseURL.trim(),
   };
+  if (state.windowedEnabled) {
+    connection.optimizer = {
+      enabled: true,
+      max_window_seconds: Number(state.maxWindowSeconds),
+      concurrency: Number(state.concurrency),
+      sidebar_lookback_seconds: Number(state.sidebarLookbackSeconds),
+      schema_lookback_seconds: Number(state.schemaLookbackSeconds),
+      sidebar_values_cap: Number(state.sidebarValuesCap),
+      histogram_enabled: state.histogramEnabled,
+      stream_fields: state.streamFields.split(',').map(field => field.trim()).filter(Boolean),
+    };
+  }
 
   if (state.authMode !== "none") {
     connection.auth = {
@@ -342,6 +370,14 @@ export function victoriaLogsFormStateFromSource(source: Source): VictoriaLogsSou
     scopeQuery: scope.query || "",
     metaTSField: source._meta_ts_field || "_time",
     metaSeverityField: source._meta_severity_field || "",
+    windowedEnabled: connection.optimizer?.enabled ?? false,
+    maxWindowSeconds: String(connection.optimizer?.max_window_seconds || 10800),
+    concurrency: String(connection.optimizer?.concurrency || 2),
+    sidebarLookbackSeconds: String(connection.optimizer?.sidebar_lookback_seconds || 900),
+    schemaLookbackSeconds: String(connection.optimizer?.schema_lookback_seconds || 300),
+    sidebarValuesCap: String(connection.optimizer?.sidebar_values_cap || 10000),
+    histogramEnabled: connection.optimizer?.histogram_enabled ?? true,
+    streamFields: connection.optimizer?.stream_fields?.join(', ') ?? '',
   };
 }
 

@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -162,4 +163,81 @@ func TestRunQueryBoundsAndAuthorizedSource(t *testing.T) {
 	if _, ok := errors.AsType[*QueryRequestError](err); !ok {
 		t.Fatalf("RunQuery over max timeout: %v, want QueryRequestError", err)
 	}
+}
+
+// TestStreamFilterValidation checks that every standard query path rejects
+// malformed stream filters, and that a non-VictoriaLogs source rejects any
+// stream filter instead of ignoring it.
+func TestStreamFilterValidation(t *testing.T) {
+	t.Parallel()
+	cfg := config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 60}
+	malformed := []string{`[{"app":"api"}]`}
+
+	if _, err := PrepareSQLQuery(cfg, models.APIQueryRequest{QueryText: "*", ExtraStreamFilters: malformed}); !isQueryRequestError(err) {
+		t.Fatalf("PrepareSQLQuery malformed filter: %v, want QueryRequestError", err)
+	}
+	if _, err := PrepareHistogram(models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: malformed}); !isQueryRequestError(err) {
+		t.Fatalf("PrepareHistogram malformed filter: %v, want QueryRequestError", err)
+	}
+	picker := []string{`{"app":["api"]}`, `{env="prod"}`}
+	params, err := PrepareSQLQuery(cfg, models.APIQueryRequest{QueryText: "*", ExtraStreamFilters: picker})
+	if err != nil || len(params.ExtraStreamFilters) != 2 {
+		t.Fatalf("PrepareSQLQuery picker filters: %+v, %v", params.ExtraStreamFilters, err)
+	}
+	histogram, err := PrepareHistogram(models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: picker})
+	if err != nil || len(histogram.ExtraStreamFilters) != 2 {
+		t.Fatalf("PrepareHistogram picker filters: %+v, %v", histogram.ExtraStreamFilters, err)
+	}
+
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	admin := &models.User{Email: "filters-admin@example.com", FullName: "Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	if err := db.CreateUser(ctx, admin); err != nil {
+		t.Fatalf("CreateUser: %v", err)
+	}
+	source := newTestSource(t, db, "stream_filter_src")
+	team, err := CreateTeam(ctx, db, log, "stream-filters", "")
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	if err := db.AddTeamSource(ctx, team.ID, source.ID); err != nil {
+		t.Fatalf("AddTeamSource: %v", err)
+	}
+	src, err := access.AuthorizeTeamSource(ctx, db, access.SessionPrincipal(admin), team.ID, source.ID, models.TokenScopeLogsRead)
+	if err != nil {
+		t.Fatalf("AuthorizeTeamSource: %v", err)
+	}
+	queried := false
+	ds := newFakeDatasourceService(db, log, &fakeProvider{
+		queryLanguages: []models.QueryLanguage{models.QueryLanguageClickHouseSQL, models.QueryLanguageLogchefQL},
+		queryLogsFn: func(context.Context, *models.Source, datasource.QueryRequest) (*models.QueryResult, error) {
+			queried = true
+			return &models.QueryResult{}, nil
+		},
+	})
+
+	if _, err := RunQuery(ctx, ds, cfg, src, models.APIQueryRequest{QueryText: "SELECT 1"}); err != nil || !queried {
+		t.Fatalf("RunQuery without filters: queried %v, %v", queried, err)
+	}
+	queried = false
+	_, err = RunQuery(ctx, ds, cfg, src, models.APIQueryRequest{QueryText: "SELECT 1", ExtraStreamFilters: picker})
+	if !datasource.IsValidationError(err) || queried {
+		t.Fatalf("RunQuery on ClickHouse with filters: queried %v, %v, want ValidationError", queried, err)
+	}
+	_, err = RunHistogram(ctx, ds, src, models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: picker})
+	if !datasource.IsValidationError(err) || !strings.Contains(err.Error(), "invalid") {
+		t.Fatalf("RunHistogram on ClickHouse with filters: %v, want ValidationError containing \"invalid\"", err)
+	}
+	_, err = PrepareLogchefQLQuery(ctx, ds, cfg, src, LogchefQLQueryRequest{
+		Query: `level="error"`, StartTime: "2026-04-08T00:00:00Z", EndTime: "2026-04-08T01:00:00Z", ExtraStreamFilters: picker,
+	})
+	if !isQueryRequestError(err) || !strings.Contains(err.Error(), "only VictoriaLogs") {
+		t.Fatalf("PrepareLogchefQLQuery on ClickHouse with filters: %v, want QueryRequestError", err)
+	}
+}
+
+func isQueryRequestError(err error) bool {
+	_, ok := errors.AsType[*QueryRequestError](err)
+	return ok
 }

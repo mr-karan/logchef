@@ -56,7 +56,17 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     state.value.groupByField = field;
   }
 
+  function setWindowedHistogram(data: HistogramData[], granularity: string, isLoading: boolean) {
+    state.value.data = data;
+    state.value.granularity = granularity;
+    state.value.isLoading = isLoading && data.length === 0;
+    state.value.error = null;
+    state.value.notice = null;
+    state.value.groupByField = null;
+  }
+
   async function fetchHistogramData(options: {
+    extraStreamFilters?: string[];
     queryText: string;
     timeRange: { start: any; end: any } | null;
     timezone?: string;
@@ -136,6 +146,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       const variables = getVariablesForApi();
 
       const params = {
+        extra_stream_filters: options.extraStreamFilters,
         query_text: queryText,
         limit: 100,
         window: windowGranularity || '1m',
@@ -201,5 +212,6 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     clearHistogramData,
     setGroupByField,
     fetchHistogramData,
+    setWindowedHistogram,
   };
 });

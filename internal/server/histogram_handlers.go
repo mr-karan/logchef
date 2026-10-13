@@ -43,7 +43,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 	// Histogram results always buffer (no streaming path), so the whole response
 	// is a cache candidate. A source lookup hiccup just falls through to the
 	// uncached path below. Explorer requests carry no directive.
-	if effTTL, ok := s.dashboardCacheParams(req.Cache); ok {
+	if effTTL, ok := s.dashboardCacheParams(req.Cache); ok && len(req.ExtraStreamFilters) == 0 {
 		if source, serr := core.GetSource(c.Context(), s.datasources, sourceID); serr == nil {
 			key := dashcache.ComputeKey(dashcache.KeyInput{
 				EndpointKind:     "histogram",
@@ -138,6 +138,9 @@ func (s *Server) handleHistogramError(c fiber.Ctx, sourceID models.SourceID, err
 	}
 	if errors.Is(err, datasource.ErrOperationNotSupported) {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Histogram is not supported for this source type yet", models.ValidationErrorType)
+	}
+	if datasource.IsValidationError(err) {
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
 
 	// Check for specific error types
