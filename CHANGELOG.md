@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-10-13
+
+VictoriaLogs windowed search is opt-in. Enable it in the source form or
+provisioning file to use streamed progress, newest-first pages, and window retries.
+
 ### Added
 - Opt-in VictoriaLogs windowed search returns partial results newest first,
   with Load older, Stop, and individual window skip and retry controls (#116).
@@ -1487,7 +1492,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.3.2...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/mr-karan/logchef/compare/v2.3.2...v2.4.0
 [2.3.2]: https://github.com/mr-karan/logchef/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/mr-karan/logchef/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/mr-karan/logchef/compare/v2.2.0...v2.3.0
