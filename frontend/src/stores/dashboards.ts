@@ -113,6 +113,10 @@ interface DashboardsState {
   isEditing: boolean;
   editDraft: DashboardPanels | null;
   editSnapshotJson: string | null;
+  // Working copies of the dashboard's name and description, edited alongside
+  // the panel blob and sent with it on save.
+  editName: string;
+  editDescription: string;
   previewState: PanelState | null;
 }
 
@@ -252,6 +256,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     isEditing: false,
     editDraft: null,
     editSnapshotJson: null,
+    editName: "",
+    editDescription: "",
     previewState: null,
   });
 
@@ -290,12 +296,17 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   const isEditing = computed(() => state.data.value.isEditing);
   const editDraft = computed(() => state.data.value.editDraft);
+  const editName = computed(() => state.data.value.editName);
+  const editDescription = computed(() => state.data.value.editDescription);
   const previewState = computed(() => state.data.value.previewState);
   const canEdit = computed(() => state.data.value.current?.can_edit === true);
   // Dirty when the working draft diverges from the snapshot taken on entering edit.
   const isDirty = computed(() => {
-    const draft = state.data.value.editDraft;
+    const { editDraft: draft, current, editName, editDescription } = state.data.value;
     if (!state.data.value.isEditing || !draft) return false;
+    if (current && (editName.trim() !== current.name || editDescription.trim() !== current.description)) {
+      return true;
+    }
     return stableStringify(draft) !== state.data.value.editSnapshotJson;
   });
 
@@ -736,6 +747,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Snapshot the loaded blob; the draft is an independent clone we mutate.
     state.data.value.editSnapshotJson = stableStringify(blob);
     state.data.value.editDraft = cloneBlob(blob);
+    state.data.value.editName = dashboard.name;
+    state.data.value.editDescription = dashboard.description ?? "";
     state.data.value.previewState = null;
     state.data.value.isEditing = true;
     // Pin the dashboard this draft belongs to, and the version we branched from,
@@ -760,6 +773,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   function setDraft(next: DashboardPanels) {
     state.data.value.editDraft = next;
+  }
+
+  function setDraftName(name: string) {
+    state.data.value.editName = name;
+  }
+
+  function setDraftDescription(description: string) {
+    state.data.value.editDescription = description;
   }
 
   // Set the draft's per-dashboard cache TTL (seconds). 0 = off. Persisted in the
@@ -921,6 +942,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     }
     // Mirror the server-side validation with a friendly, inline message; the
     // server 400 remains the authoritative backstop.
+    const name = state.data.value.editName.trim();
+    if (!name) {
+      return { success: false, error: { message: "Dashboard name is required" } };
+    }
     const validationError = validatePanelsBlob(draft);
     if (validationError) {
       return { success: false, error: { message: validationError } };
@@ -930,8 +955,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // 409. Sent as an extension field so it works whether or not the shared
     // request type has adopted it yet; older servers ignore the unknown field.
     const body: UpdateDashboardRequest & { updated_at?: string | null } = {
-      name: dashboard.name,
-      description: dashboard.description,
+      name,
+      description: state.data.value.editDescription.trim(),
       panels: draft,
     };
     if (editBaseUpdatedAt) body.updated_at = editBaseUpdatedAt;
@@ -946,7 +971,12 @@ export const useDashboardsStore = defineStore("dashboards", () => {
           const idx = state.data.value.dashboards.findIndex((d) => d.id === data.id);
           if (idx >= 0) state.data.value.dashboards[idx] = data;
         } else {
-          state.data.value.current = { ...dashboard, panels: cloneBlob(draft) };
+          state.data.value.current = {
+            ...dashboard,
+            name: body.name,
+            description: body.description,
+            panels: cloneBlob(draft),
+          };
         }
         state.data.value.isEditing = false;
         state.data.value.editDraft = null;
@@ -1051,6 +1081,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // edit state
     isEditing,
     editDraft,
+    editName,
+    editDescription,
     previewState,
     canEdit,
     isDirty,
@@ -1075,6 +1107,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     enterEdit,
     cancelEdit,
     saveEdit,
+    setDraftName,
+    setDraftDescription,
     upsertDraftPanel,
     updateDraftPanel,
     setDraftCacheTtl,

@@ -16,6 +16,7 @@ import {
   ChevronDown,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -500,7 +501,15 @@ onBeforeRouteUpdate((to, from) => {
             <ArrowLeft class="h-4 w-4" />
           </Button>
           <LayoutDashboard class="h-5 w-5 text-muted-foreground shrink-0" />
-          <h1 class="text-lg font-semibold truncate">
+          <Input
+            v-if="isEditing"
+            :model-value="store.editName"
+            :aria-label="t('ui.name')"
+            :placeholder="t('ui.name')"
+            class="h-8 w-72 text-lg font-semibold"
+            @update:model-value="store.setDraftName(String($event))"
+          />
+          <h1 v-else class="text-lg font-semibold truncate">
             {{ dashboard?.name || (isLoading ? t('ui.loading2') : t('ui.dashboard')) }}
           </h1>
           <span
@@ -510,7 +519,15 @@ onBeforeRouteUpdate((to, from) => {
             {{ t('ui.editing') }}{{ store.isDirty ? t('ui.unsaved') : "" }}
           </span>
         </div>
-        <p v-if="dashboard?.description" class="mt-1 text-sm text-muted-foreground">
+        <Input
+          v-if="isEditing"
+          :model-value="store.editDescription"
+          :aria-label="t('ui.description')"
+          :placeholder="t('ui.description')"
+          class="mt-1.5 h-8 w-full max-w-xl text-sm"
+          @update:model-value="store.setDraftDescription(String($event))"
+        />
+        <p v-else-if="dashboard?.description" class="mt-1 text-sm text-muted-foreground">
           {{ dashboard.description }}
         </p>
         <p v-if="dashboard && !isEditing" class="mt-1 text-xs text-muted-foreground">
@@ -566,7 +583,7 @@ onBeforeRouteUpdate((to, from) => {
           <Button
             size="sm"
             class="h-8 gap-1.5 text-xs"
-            :disabled="isSaving || !store.isDirty"
+            :disabled="isSaving || !store.isDirty || !store.editName.trim()"
             @click="saveEdit"
           >
             <Save class="h-3.5 w-3.5" />

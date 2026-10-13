@@ -176,6 +176,51 @@ describe("dashboards store — edit mode / dirty guard", () => {
     // Still editing — the user can fix it.
     expect(store.isEditing).toBe(true);
   });
+
+  it("renaming marks the draft dirty and saveEdit sends the trimmed name and description (#127)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    expect(store.editName).toBe("HTTP errors");
+    expect(store.editDescription).toBe("desc");
+
+    store.setDraftName("  API errors ");
+    store.setDraftDescription(" 5xx by route ");
+    expect(store.isDirty).toBe(true);
+
+    mocks.update.mockResolvedValue({
+      status: "success",
+      data: makeDashboard({ name: "API errors", description: "5xx by route" }),
+    });
+    const result = await store.saveEdit();
+
+    expect(result.success).toBe(true);
+    const [, body] = mocks.update.mock.calls[0];
+    expect(body.name).toBe("API errors");
+    expect(body.description).toBe("5xx by route");
+    expect(store.current?.name).toBe("API errors");
+  });
+
+  it("restoring the original name clears the dirty flag (#127)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.setDraftName("Other");
+    expect(store.isDirty).toBe(true);
+    store.setDraftName("HTTP errors ");
+    expect(store.isDirty).toBe(false);
+  });
+
+  it("saveEdit rejects a blank name without a round-trip (#127)", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.setDraftName("   ");
+
+    const result = await store.saveEdit();
+
+    expect(result.success).toBe(false);
+    expect(result.error?.message).toMatch(/name/i);
+    expect(mocks.update).not.toHaveBeenCalled();
+    expect(store.isEditing).toBe(true);
+  });
 });
 
 describe("dashboards store — panel time params (issue #80: logchefql timezone shift)", () => {
