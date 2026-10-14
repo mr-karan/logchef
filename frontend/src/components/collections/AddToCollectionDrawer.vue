@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { LoadingState } from "@/components/layout";
 import { useCollectionsStore } from "@/stores/collections";
 import { collectionsApi, type CollectionItem } from "@/api/collections";
 import { useTeamPermissions } from "@/composables/useTeamPermissions";
@@ -138,10 +139,7 @@ function navigateToCollection(collectionId: number) {
       </SheetHeader>
 
       <div class="mt-6 space-y-4">
-        <div v-if="isLoadingIndex" class="flex items-center justify-center py-8">
-          <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
-          <span class="ml-2 text-sm text-muted-foreground">{{ t('ui.loadingCollections') }}</span>
-        </div>
+        <LoadingState v-if="isLoadingIndex" class="py-8" :label="t('ui.loadingCollections')" />
 
         <template v-else>
           <div class="space-y-1">

@@ -5,7 +5,7 @@
   "variables.position": "Variable {index} sur {total}",
   "settings.days": "{count} jours",
   "settings.deleteToken": "Supprimer « {name} » ? Les applications qui l’utilisent perdront leur accès. Cette action est irréversible.",
-  "queries.select": "Choisir une requête ({filtered}/{total})",
+  "queries.select": "Choisir une requête ({count})",
   "collections.items": "{count} élément | {count} éléments",
   "collections.members": "{count} membre | {count} membres",
   "explore.filteredRows": "{count} lignes sur {total}",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "Inclure la période et la limite actuelles dans la requête enregistrée.",
   "ui.saveAsNewQuery": "Enregistrer comme nouvelle requête…",
   "ui.loadFromCollection": "Charger depuis une collection",
-  "ui.noMatchingQueriesFound": "Aucune requête correspondante.",
   "ui.copyShareLink": "Copier le lien de partage",
   "ui.viewAllCollections": "Voir toutes les collections",
   "ui.main": "Principal",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "Requêtes lentes",
   "alerts.templates.slowRequestsHelp": "Trouver les requêtes de plus d’une seconde.",
   "alerts.templates.errorMessages": "Messages d’erreur",
-  "alerts.templates.errorMessagesHelp": "Trouver les messages contenant 'error'."
+  "alerts.templates.errorMessagesHelp": "Trouver les messages contenant 'error'.",
+  "common.copyName": "{name} (copie)",
+  "ui.gridView": "Vue grille",
+  "ui.listView": "Vue liste",
+  "dashboards.panels": "Panneaux",
+  "dashboards.duplicatePanel": "Dupliquer le panneau",
+  "dashboards.duplicateTitle": "Dupliquer le tableau de bord",
+  "dashboards.duplicateDescription": "Crée une copie qui vous appartient, avec les mêmes panneaux et la même disposition.",
+  "dashboards.duplicateSkipsLockedPanels": "{count} panneau utilise une source à laquelle vous n'avez pas accès. Il ne sera pas copié. | {count} panneaux utilisent des sources auxquelles vous n'avez pas accès. Ils ne seront pas copiés.",
+  "alerts.searchAlerts": "Rechercher des alertes…",
+  "alerts.noMatches": "Aucune alerte ne correspond à « {search} »"
 }

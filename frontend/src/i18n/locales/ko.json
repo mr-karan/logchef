@@ -5,7 +5,7 @@
   "variables.position": "변수 {index}/{total}",
   "settings.days": "{count}일",
   "settings.deleteToken": "\"{name}\"을 삭제할까요? 이를 사용하는 앱의 접근 권한이 사라집니다. 되돌릴 수 없습니다.",
-  "queries.select": "쿼리 선택 ({filtered}/{total})",
+  "queries.select": "쿼리 선택 ({count})",
   "collections.items": "항목 {count}개",
   "collections.members": "멤버 {count}명",
   "explore.filteredRows": "{total}행 중 {count}행",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "저장할 쿼리에 현재 시간 범위와 제한을 포함합니다.",
   "ui.saveAsNewQuery": "새 쿼리로 저장…",
   "ui.loadFromCollection": "컬렉션에서 불러오기",
-  "ui.noMatchingQueriesFound": "일치하는 쿼리를 찾을 수 없습니다.",
   "ui.copyShareLink": "공유 링크 복사",
   "ui.viewAllCollections": "모든 컬렉션 보기",
   "ui.main": "주 메뉴",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "느린 요청",
   "alerts.templates.slowRequestsHelp": "1초 이상 걸리는 요청을 찾습니다.",
   "alerts.templates.errorMessages": "오류 메시지",
-  "alerts.templates.errorMessagesHelp": "'error'가 포함된 메시지를 찾습니다."
+  "alerts.templates.errorMessagesHelp": "'error'가 포함된 메시지를 찾습니다.",
+  "common.copyName": "{name} (사본)",
+  "ui.gridView": "그리드 보기",
+  "ui.listView": "목록 보기",
+  "dashboards.panels": "패널",
+  "dashboards.duplicatePanel": "패널 복제",
+  "dashboards.duplicateTitle": "대시보드 복제",
+  "dashboards.duplicateDescription": "동일한 패널과 레이아웃으로 내가 소유한 사본을 만듭니다.",
+  "dashboards.duplicateSkipsLockedPanels": "패널 {count}개가 접근할 수 없는 소스를 사용하므로 복사되지 않습니다.",
+  "alerts.searchAlerts": "알림 검색…",
+  "alerts.noMatches": "\"{search}\"와 일치하는 알림이 없습니다"
 }

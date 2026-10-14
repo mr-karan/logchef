@@ -10,8 +10,10 @@ import { Textarea } from '@/components/ui/textarea'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useToast } from '@/composables/useToast'
 import { type Source } from '@/api/sources'
-import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User, Search } from 'lucide-vue-next'
-import { SortHeader } from '@/components/layout'
+import { type TeamMember } from '@/api/teams'
+import { Loader2, Plus, Trash2, UserPlus, Database, Bot, User, Search, Users } from 'lucide-vue-next'
+import { PageHeader, EmptyState, LoadingState, SearchInput, SortHeader } from '@/components/layout'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import { Badge } from '@/components/ui/badge'
 import {
     Table,
@@ -150,8 +152,82 @@ const {
         role: (m) => m.role || '',
         added: (m) => new Date(m.created_at),
     },
-    initialSort: { key: 'added', dir: 'desc' },
+    initialSort: { key: 'name', dir: 'asc' },
+    persistKey: 'team_members',
 })
+
+// Search + sort for the team sources table.
+const {
+    search: sourceSearch,
+    rows: sortedTeamSources,
+    sortKey: sourceSortKey,
+    sortDir: sourceSortDir,
+    toggleSort: toggleSourceSort,
+} = useTableSearchSort(teamSources, {
+    searchKeys: [(s) => formatSourceName(s), (s) => s.description],
+    sortAccessors: {
+        name: (s) => formatSourceName(s).toLowerCase(),
+        added: (s) => new Date(s.created_at),
+    },
+    initialSort: { key: 'name', dir: 'asc' },
+    persistKey: 'team_sources',
+})
+
+// Pending removals, confirmed through ConfirmDialog.
+// A removal pins the team it was opened for: the route can change to another
+// team while the dialog is open (Vue reuses this component), and confirming
+// must never act on the new team. The pending value outlives the dialog's
+// close animation so its text does not flicker.
+type PendingRemoval =
+    | { kind: 'member'; teamId: number; teamName: string; member: TeamMember }
+    | { kind: 'source'; teamId: number; teamName: string; source: Source }
+const pendingRemoval = ref<PendingRemoval | null>(null)
+const removalOpen = ref(false)
+
+function askRemoveMember(member: TeamMember) {
+    if (!team.value) return
+    pendingRemoval.value = { kind: 'member', teamId: team.value.id, teamName: team.value.name, member }
+    removalOpen.value = true
+}
+
+function askRemoveSource(source: Source) {
+    if (!team.value) return
+    pendingRemoval.value = { kind: 'source', teamId: team.value.id, teamName: team.value.name, source }
+    removalOpen.value = true
+}
+
+watch(teamId, () => {
+    removalOpen.value = false
+    pendingRemoval.value = null
+})
+
+const removalDialog = computed(() => {
+    const pending = pendingRemoval.value
+    if (!pending) return { title: '', description: undefined, confirmText: undefined }
+    return pending.kind === 'member'
+        ? {
+            title: t('access.removeMemberTitle'),
+            description: t('access.removeMemberConfirmation', { name: pending.member.full_name || pending.member.email, team: pending.teamName }),
+            confirmText: t('access.removeMember'),
+        }
+        : {
+            title: t('access.removeSourceTitle'),
+            description: t('access.removeSourceConfirmation', { name: formatSourceName(pending.source), team: pending.teamName }),
+            confirmText: t('access.removeSource'),
+        }
+})
+
+async function confirmRemoval() {
+    const pending = pendingRemoval.value
+    if (!pending) return
+    if (pending.kind === 'member') {
+        await removeMember(pending.teamId, pending.member)
+    } else {
+        // Make sure we're on the sources tab
+        activeTab.value = 'sources'
+        await teamsStore.removeTeamSource(pending.teamId, Number(pending.source.id))
+    }
+}
 
 // Load users when dialog opens to prevent unnecessary API calls
 watch(showAddMemberDialog, async (isOpen) => {
@@ -214,11 +290,9 @@ const handleAddMember = async () => {
     }
 }
 
-const handleRemoveMember = async (userId: string | number) => {
-    if (!team.value) return;
-
+const removeMember = async (teamId: number, member: TeamMember) => {
     try {
-        const result = await teamsStore.removeTeamMember(team.value.id, Number(userId));
+        const result = await teamsStore.removeTeamMember(teamId, Number(member.user_id));
 
         if (!result.success) {
             // API call failed, show an error toast.
@@ -254,15 +328,6 @@ const handleAddSource = async () => {
         selectedSourceId.value = ''
         showAddSourceDialog.value = false
     }
-}
-
-const handleRemoveSource = async (sourceId: string | number) => {
-    if (!team.value) return
-
-    // Make sure we're on the sources tab
-    activeTab.value = 'sources'
-
-    await teamsStore.removeTeamSource(team.value.id, Number(sourceId))
 }
 
 // Optimized initialization to load everything in parallel
@@ -319,29 +384,21 @@ onMounted(async () => {
 
 <template>
     <div class="space-y-6">
-        <div v-if="isLoading" class="flex items-center justify-center py-10">
-            <div class="flex flex-col items-center">
-                <div class="animate-spin w-10 h-10 rounded-full border-4 border-primary border-t-transparent mb-4">
-                </div>
-                <p class="text-muted-foreground">{{ t('access.loadingTeamSettings') }}</p>
-            </div>
-        </div>
-        <div v-else-if="!team" class="text-center py-12">
-            <h3 class="text-lg font-medium mb-2">{{ t('access.teamNotFound') }}</h3>
-            <p class="text-muted-foreground mb-4">{{ t('access.teamNotFoundDescription') }}
-            </p>
-            <Button variant="outline" @click="router.push('/access/teams')">
-                {{ t('access.backToTeams') }}
-            </Button>
-        </div>
+        <LoadingState v-if="isLoading" :label="t('access.loadingTeamSettings')" />
+        <EmptyState
+            v-else-if="!team"
+            :icon="Users"
+            :title="t('access.teamNotFound')"
+            :description="t('access.teamNotFoundDescription')"
+        >
+            <template #action>
+                <Button variant="outline" size="sm" @click="router.push({ name: 'Teams' })">
+                    {{ t('access.backToTeams') }}
+                </Button>
+            </template>
+        </EmptyState>
         <template v-else>
-            <!-- Header -->
-            <div>
-                <h1 class="text-2xl font-bold tracking-tight">{{ team.name }}</h1>
-                <p class="text-muted-foreground mt-2">
-                    {{ t('access.manageTeamDescription') }}
-                </p>
-            </div>
+            <PageHeader :title="team.name" :description="t('access.manageTeamDescription')" />
 
             <!-- Tabs -->
             <Tabs v-model="activeTab" class="space-y-6">
@@ -434,16 +491,21 @@ onMounted(async () => {
                             </div>
                         </CardHeader>
                         <CardContent>
-                            <div v-if="teamsStore.isLoadingTeamMembers(teamId)" class="text-center py-4">
-                                <Loader2 class="h-6 w-6 animate-spin mx-auto mb-2" />
-                                <p class="text-sm text-muted-foreground">{{ t('access.loadingMembers') }}</p>
-                            </div>
-                            <template v-else>
-                                <div v-if="members.length > 0" class="relative mb-3 max-w-sm">
-                                    <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                                    <Input v-model="memberSearch" :placeholder="t('access.searchMembers')" class="pl-8" />
-                                </div>
-                            <Table>
+                            <LoadingState v-if="teamsStore.isLoadingTeamMembers(teamId)" :label="t('access.loadingMembers')" />
+                            <EmptyState
+                                v-else-if="members.length === 0"
+                                :icon="Users"
+                                :title="t('access.noMembersFound')"
+                            />
+                            <div v-else class="space-y-3">
+                                <SearchInput v-model="memberSearch" :placeholder="t('access.searchMembers')" />
+                            <EmptyState
+                                v-if="sortedMembers.length === 0"
+                                :icon="Search"
+                                :title="t('access.noResults')"
+                                :description="t('access.noMembersMatch')"
+                            />
+                            <Table v-else>
                                 <TableHeader>
                                     <TableRow>
                                         <TableHead>
@@ -465,11 +527,6 @@ onMounted(async () => {
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    <TableRow v-if="sortedMembers.length === 0">
-                                        <TableCell colspan="4" class="text-center py-4 text-muted-foreground">
-                                            {{ memberSearch ? t('access.noMembersMatch') : t('access.noMembersFound') }}
-                                        </TableCell>
-                                    </TableRow>
                                     <TableRow v-for="member in sortedMembers" :key="member.user_id">
                                         <TableCell>
                                             <div class="flex flex-col gap-1">
@@ -487,8 +544,10 @@ onMounted(async () => {
                                         <TableCell>{{ translateRole(member.role) }}</TableCell>
                                         <TableCell>{{ formatDate(member.created_at) }}</TableCell>
                                         <TableCell class="text-right">
-                                            <Button variant="destructive" size="icon" :disabled="isSaving"
-                                                @click="handleRemoveMember(member.user_id)">
+                                            <Button variant="ghost" size="icon"
+                                                class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                                :title="t('access.removeMember')" :disabled="isSaving"
+                                                @click="askRemoveMember(member)">
                                                 <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" />
                                                 <Trash2 v-else class="h-4 w-4" />
                                             </Button>
@@ -496,7 +555,7 @@ onMounted(async () => {
                                     </TableRow>
                                 </TableBody>
                             </Table>
-                            </template>
+                            </div>
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -552,32 +611,46 @@ onMounted(async () => {
                             </div>
                         </CardHeader>
                         <CardContent>
-                            <div v-if="teamsStore.isLoadingTeamSources(teamId)" class="text-center py-4">
-                                <Loader2 class="h-6 w-6 animate-spin mx-auto mb-2" />
-                                <p class="text-sm text-muted-foreground">{{ t('access.loadingSources') }}</p>
-                            </div>
+                            <LoadingState v-if="teamsStore.isLoadingTeamSources(teamId)" :label="t('access.loadingSources')" />
+                            <EmptyState
+                                v-else-if="teamSources.length === 0"
+                                :icon="Database"
+                                :title="t('access.noSourcesFound')"
+                            />
+                            <div v-else class="space-y-3">
+                                <SearchInput v-model="sourceSearch" :placeholder="t('access.searchSources')" />
+                            <EmptyState
+                                v-if="sortedTeamSources.length === 0"
+                                :icon="Search"
+                                :title="t('access.noResults')"
+                            />
                             <Table v-else>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>{{ t('ui.source') }}</TableHead>
+                                        <TableHead>
+                                            <SortHeader column="name" :sort-key="sourceSortKey" :sort-dir="sourceSortDir" @toggle="toggleSourceSort">
+                                                {{ t('ui.source') }}
+                                            </SortHeader>
+                                        </TableHead>
                                         <TableHead>{{ t('ui.description') }}</TableHead>
-                                        <TableHead>{{ t('access.added') }}</TableHead>
+                                        <TableHead>
+                                            <SortHeader column="added" :sort-key="sourceSortKey" :sort-dir="sourceSortDir" @toggle="toggleSourceSort">
+                                                {{ t('access.added') }}
+                                            </SortHeader>
+                                        </TableHead>
                                         <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
-                                    <TableRow v-if="teamSources.length === 0">
-                                        <TableCell colspan="4" class="text-center py-4 text-muted-foreground">
-                                            {{ t('access.noSourcesFound') }}
-                                        </TableCell>
-                                    </TableRow>
-                                    <TableRow v-for="source in teamSources" :key="source.id">
+                                    <TableRow v-for="source in sortedTeamSources" :key="source.id">
                                         <TableCell>{{ formatSourceName(source) }}</TableCell>
                                         <TableCell>{{ source.description }}</TableCell>
                                         <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                                         <TableCell class="text-right">
-                                            <Button variant="destructive" size="icon" :disabled="isSaving"
-                                                @click="handleRemoveSource(source.id)">
+                                            <Button variant="ghost" size="icon"
+                                                class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                                                :title="t('access.removeSource')" :disabled="isSaving"
+                                                @click="askRemoveSource(source)">
                                                 <Loader2 v-if="isSaving" class="h-4 w-4 animate-spin" />
                                                 <Trash2 v-else class="h-4 w-4" />
                                             </Button>
@@ -585,6 +658,7 @@ onMounted(async () => {
                                     </TableRow>
                                 </TableBody>
                             </Table>
+                            </div>
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -624,6 +698,15 @@ onMounted(async () => {
                     </Card>
                 </TabsContent>
             </Tabs>
+
+            <ConfirmDialog
+                v-model:open="removalOpen"
+                :title="removalDialog.title"
+                :description="removalDialog.description"
+                :confirm-text="removalDialog.confirmText"
+                destructive
+                @confirm="confirmRemoval"
+            />
         </template>
     </div>
 </template>

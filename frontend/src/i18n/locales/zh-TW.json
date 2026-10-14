@@ -5,7 +5,7 @@
   "variables.position": "變數 {index}，共 {total} 個",
   "settings.days": "{count} 天",
   "settings.deleteToken": "刪除「{name}」？使用它的應用程式將失去存取權限。此操作無法復原。",
-  "queries.select": "選取查詢（{filtered}/{total}）",
+  "queries.select": "選取查詢（{count}）",
   "collections.items": "{count} 項",
   "collections.members": "{count} 位成員",
   "explore.filteredRows": "{count} 列，共 {total} 列",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "在已儲存查詢中包含目前的時間範圍與筆數限制。",
   "ui.saveAsNewQuery": "另存為新查詢…",
   "ui.loadFromCollection": "從集合載入",
-  "ui.noMatchingQueriesFound": "找不到符合的查詢。",
   "ui.copyShareLink": "複製分享連結",
   "ui.viewAllCollections": "檢視所有集合",
   "ui.main": "主要功能",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "慢速請求",
   "alerts.templates.slowRequestsHelp": "符合耗時超過一秒的請求。",
   "alerts.templates.errorMessages": "錯誤訊息",
-  "alerts.templates.errorMessagesHelp": "符合包含「error」的訊息。"
+  "alerts.templates.errorMessagesHelp": "符合包含「error」的訊息。",
+  "common.copyName": "{name}（副本）",
+  "ui.gridView": "格狀檢視",
+  "ui.listView": "清單檢視",
+  "dashboards.panels": "面板",
+  "dashboards.duplicatePanel": "複製面板",
+  "dashboards.duplicateTitle": "複製儀表板",
+  "dashboards.duplicateDescription": "建立一個歸你所有的副本，包含相同的面板與版面配置。",
+  "dashboards.duplicateSkipsLockedPanels": "{count} 個面板使用了你無權存取的資料來源，不會被複製。",
+  "alerts.searchAlerts": "搜尋警示…",
+  "alerts.noMatches": "沒有符合「{search}」的警示"
 }

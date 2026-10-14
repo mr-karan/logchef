@@ -261,7 +261,7 @@ onMounted(() => {
                     <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2 justify-end">
-                        <Button variant="outline" size="icon" @click="handleEdit(setting)">
+                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
                           <Pencil class="h-4 w-4" />
                         </Button>
                       </div>
@@ -312,7 +312,7 @@ onMounted(() => {
                     <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2 justify-end">
-                        <Button variant="outline" size="icon" @click="handleEdit(setting)">
+                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
                           <Pencil class="h-4 w-4" />
                         </Button>
                       </div>
@@ -363,7 +363,7 @@ onMounted(() => {
                     <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2 justify-end">
-                        <Button variant="outline" size="icon" @click="handleEdit(setting)">
+                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
                           <Pencil class="h-4 w-4" />
                         </Button>
                       </div>
@@ -414,7 +414,7 @@ onMounted(() => {
                     <TableCell class="text-sm text-muted-foreground">{{ setting.description || '-' }}</TableCell>
                     <TableCell>
                       <div class="flex items-center gap-2 justify-end">
-                        <Button variant="outline" size="icon" @click="handleEdit(setting)">
+                        <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('ui.edit')" @click="handleEdit(setting)">
                           <Pencil class="h-4 w-4" />
                         </Button>
                       </div>

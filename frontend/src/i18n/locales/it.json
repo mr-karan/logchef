@@ -5,7 +5,7 @@
   "variables.position": "Variabile {index} di {total}",
   "settings.days": "{count} giorni",
   "settings.deleteToken": "Eliminare «{name}»? Le applicazioni che lo usano perderanno l’accesso. L’azione è irreversibile.",
-  "queries.select": "Seleziona query ({filtered}/{total})",
+  "queries.select": "Seleziona query ({count})",
   "collections.items": "{count} elemento | {count} elementi",
   "collections.members": "{count} membro | {count} membri",
   "explore.filteredRows": "{count} di {total} righe",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "Includi l’intervallo e il limite attuali nella query salvata.",
   "ui.saveAsNewQuery": "Salva come nuova query…",
   "ui.loadFromCollection": "Carica dalla raccolta",
-  "ui.noMatchingQueriesFound": "Nessuna query corrispondente.",
   "ui.copyShareLink": "Copia link di condivisione",
   "ui.viewAllCollections": "Visualizza tutte le raccolte",
   "ui.main": "Principale",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "Richieste lente",
   "alerts.templates.slowRequestsHelp": "Trova le richieste che durano più di un secondo.",
   "alerts.templates.errorMessages": "Messaggi di errore",
-  "alerts.templates.errorMessagesHelp": "Trova i messaggi contenenti 'error'."
+  "alerts.templates.errorMessagesHelp": "Trova i messaggi contenenti 'error'.",
+  "common.copyName": "{name} (copia)",
+  "ui.gridView": "Vista a griglia",
+  "ui.listView": "Vista elenco",
+  "dashboards.panels": "Pannelli",
+  "dashboards.duplicatePanel": "Duplica pannello",
+  "dashboards.duplicateTitle": "Duplica dashboard",
+  "dashboards.duplicateDescription": "Crea una copia di tua proprietà, con gli stessi pannelli e lo stesso layout.",
+  "dashboards.duplicateSkipsLockedPanels": "{count} pannello usa una sorgente a cui non hai accesso. Non verrà copiato. | {count} pannelli usano sorgenti a cui non hai accesso. Non verranno copiati.",
+  "alerts.searchAlerts": "Cerca alert…",
+  "alerts.noMatches": "Nessun alert corrisponde a \"{search}\""
 }

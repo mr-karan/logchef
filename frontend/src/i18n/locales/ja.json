@@ -5,7 +5,7 @@
   "variables.position": "変数 {index} / {total}",
   "settings.days": "{count} 日",
   "settings.deleteToken": "「{name}」を削除しますか？使用中のアプリはアクセスできなくなります。元に戻せません。",
-  "queries.select": "クエリを選択 ({filtered}/{total})",
+  "queries.select": "クエリを選択 ({count})",
   "collections.items": "{count} 件",
   "collections.members": "メンバー {count} 人",
   "explore.filteredRows": "{total} 行中 {count} 行",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "現在の期間と上限を保存するクエリに含めます。",
   "ui.saveAsNewQuery": "新しいクエリとして保存…",
   "ui.loadFromCollection": "コレクションから読み込み",
-  "ui.noMatchingQueriesFound": "一致するクエリがありません。",
   "ui.copyShareLink": "共有リンクをコピー",
   "ui.viewAllCollections": "すべてのコレクションを表示",
   "ui.main": "メイン",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "遅いリクエスト",
   "alerts.templates.slowRequestsHelp": "1 秒を超えるリクエストに一致します。",
   "alerts.templates.errorMessages": "エラーメッセージ",
-  "alerts.templates.errorMessagesHelp": "「error」を含むメッセージに一致します。"
+  "alerts.templates.errorMessagesHelp": "「error」を含むメッセージに一致します。",
+  "common.copyName": "{name}（コピー）",
+  "ui.gridView": "グリッド表示",
+  "ui.listView": "リスト表示",
+  "dashboards.panels": "パネル",
+  "dashboards.duplicatePanel": "パネルを複製",
+  "dashboards.duplicateTitle": "ダッシュボードを複製",
+  "dashboards.duplicateDescription": "同じパネルとレイアウトで、あなたが所有するコピーを作成します。",
+  "dashboards.duplicateSkipsLockedPanels": "{count} 個のパネルはアクセスできないソースを使用しているため、コピーされません。",
+  "alerts.searchAlerts": "アラートを検索…",
+  "alerts.noMatches": "「{search}」に一致するアラートはありません"
 }

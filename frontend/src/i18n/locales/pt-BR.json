@@ -5,7 +5,7 @@
   "variables.position": "Variável {index} de {total}",
   "settings.days": "{count} dias",
   "settings.deleteToken": "Excluir “{name}”? Os aplicativos que o usam perderão o acesso. Esta ação não pode ser desfeita.",
-  "queries.select": "Selecionar consulta ({filtered}/{total})",
+  "queries.select": "Selecionar consulta ({count})",
   "collections.items": "{count} item | {count} itens",
   "collections.members": "{count} membro | {count} membros",
   "explore.filteredRows": "{count} de {total} linhas",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "Inclua o período e o limite atuais na consulta salva.",
   "ui.saveAsNewQuery": "Salvar como nova consulta…",
   "ui.loadFromCollection": "Carregar da coleção",
-  "ui.noMatchingQueriesFound": "Nenhuma consulta correspondente.",
   "ui.copyShareLink": "Copiar link de compartilhamento",
   "ui.viewAllCollections": "Ver todas as coleções",
   "ui.main": "Principal",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "Requisições lentas",
   "alerts.templates.slowRequestsHelp": "Encontre requisições que demoram mais de um segundo.",
   "alerts.templates.errorMessages": "Mensagens de erro",
-  "alerts.templates.errorMessagesHelp": "Encontre mensagens contendo 'error'."
+  "alerts.templates.errorMessagesHelp": "Encontre mensagens contendo 'error'.",
+  "common.copyName": "{name} (cópia)",
+  "ui.gridView": "Visualização em grade",
+  "ui.listView": "Visualização em lista",
+  "dashboards.panels": "Painéis",
+  "dashboards.duplicatePanel": "Duplicar painel",
+  "dashboards.duplicateTitle": "Duplicar dashboard",
+  "dashboards.duplicateDescription": "Cria uma cópia sua, com os mesmos painéis e o mesmo layout.",
+  "dashboards.duplicateSkipsLockedPanels": "{count} painel usa uma fonte à qual você não tem acesso. Ele não será copiado. | {count} painéis usam fontes às quais você não tem acesso. Eles não serão copiados.",
+  "alerts.searchAlerts": "Buscar alertas…",
+  "alerts.noMatches": "Nenhum alerta corresponde a \"{search}\""
 }

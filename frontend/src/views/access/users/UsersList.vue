@@ -4,8 +4,8 @@ import { onMounted, ref, computed } from 'vue'
 import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
-import { Plus, Trash2, Shield, User2, Search, Pencil, Users } from 'lucide-vue-next'
+import { PageHeader, EmptyState, LoadingState, SearchInput, SortHeader, RowActionsMenu } from '@/components/layout'
+import { Plus, Shield, User2, Search, Pencil, Users } from 'lucide-vue-next'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/table'
 import type { User } from '@/types'
 import { useUsersStore } from '@/stores/users'
+import { useTableSearchSort } from '@/composables/useTableSearchSort'
 import { formatDate } from '@/utils/format'
 import {
     Dialog,
@@ -51,17 +52,25 @@ const editForm = ref({
     role: '' as 'admin' | 'member'
 })
 
-const searchQuery = ref('')
-
 const humanUsers = computed(() => usersStore.users.filter(user => user.account_type !== 'service'))
 
-const filteredUsers = computed(() => {
-    if (!searchQuery.value) return humanUsers.value;
-    const query = searchQuery.value.toLowerCase();
-    return humanUsers.value.filter(user =>
-        user?.full_name?.toLowerCase().includes(query) ||
-        user?.email?.toLowerCase().includes(query)
-    );
+const {
+    search: searchQuery,
+    rows: filteredUsers,
+    sortKey,
+    sortDir,
+    toggleSort,
+} = useTableSearchSort(humanUsers, {
+    searchKeys: ['full_name', 'email'],
+    sortAccessors: {
+        name: (u) => (u.full_name || '').toLowerCase(),
+        email: (u) => (u.email || '').toLowerCase(),
+        role: (u) => u.role,
+        status: (u) => u.status,
+        created: (u) => new Date(u.created_at),
+    },
+    initialSort: { key: 'name', dir: 'asc' },
+    persistKey: 'users',
 })
 
 const loadUsers = async (forceReload = false) => {
@@ -140,10 +149,7 @@ onMounted(() => {
         </EmptyState>
 
         <div v-else class="space-y-4">
-            <div class="relative w-full max-w-sm">
-                <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input :placeholder="t('access.searchUsers')" class="pl-8 h-9" v-model="searchQuery" />
-            </div>
+            <SearchInput v-model="searchQuery" :placeholder="t('access.searchUsers')" />
 
             <EmptyState
                 v-if="filteredUsers.length === 0"
@@ -157,13 +163,33 @@ onMounted(() => {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead>{{ t('ui.name') }}</TableHead>
-                            <TableHead>{{ t('ui.email') }}</TableHead>
-                            <TableHead>{{ t('ui.role') }}</TableHead>
-                            <TableHead>{{ t('ui.status') }}</TableHead>
-                            <TableHead>{{ t('access.createdAt') }}</TableHead>
+                            <TableHead>
+                                <SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('ui.name') }}
+                                </SortHeader>
+                            </TableHead>
+                            <TableHead>
+                                <SortHeader column="email" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('ui.email') }}
+                                </SortHeader>
+                            </TableHead>
+                            <TableHead>
+                                <SortHeader column="role" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('ui.role') }}
+                                </SortHeader>
+                            </TableHead>
+                            <TableHead>
+                                <SortHeader column="status" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('ui.status') }}
+                                </SortHeader>
+                            </TableHead>
+                            <TableHead>
+                                <SortHeader column="created" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('access.createdAt') }}
+                                </SortHeader>
+                            </TableHead>
                             <TableHead>{{ t('access.lastLogin') }}</TableHead>
-                            <TableHead></TableHead>
+                            <TableHead class="text-right">{{ t('ui.actions') }}</TableHead>
                         </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -188,13 +214,12 @@ onMounted(() => {
                             <TableCell>{{ formatDate(user.created_at) }}</TableCell>
                             <TableCell>{{ formatDate(user.last_login_at) }}</TableCell>
                             <TableCell>
-                                <div class="flex items-center gap-2 justify-end">
-                                    <Button variant="outline" size="icon" @click="handleEdit(user)">
+                                <div class="flex items-center gap-1 justify-end">
+                                    <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('access.editUser')"
+                                        @click="handleEdit(user)">
                                         <Pencil class="h-4 w-4" />
                                     </Button>
-                                    <Button variant="destructive" size="icon" @click="handleDelete(user)">
-                                        <Trash2 class="h-4 w-4" />
-                                    </Button>
+                                    <RowActionsMenu @delete="handleDelete(user)" />
                                 </div>
                             </TableCell>
                         </TableRow>

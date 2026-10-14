@@ -5,7 +5,7 @@
   "variables.position": "Variable {index} de {total}",
   "settings.days": "{count} días",
   "settings.deleteToken": "¿Eliminar «{name}»? Las aplicaciones que lo usan perderán el acceso. No se puede deshacer.",
-  "queries.select": "Seleccionar consulta ({filtered}/{total})",
+  "queries.select": "Seleccionar consulta ({count})",
   "collections.items": "{count} elemento | {count} elementos",
   "collections.members": "{count} miembro | {count} miembros",
   "explore.filteredRows": "{count} de {total} filas",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "Incluye el intervalo y el límite actuales en la consulta guardada.",
   "ui.saveAsNewQuery": "Guardar como nueva consulta…",
   "ui.loadFromCollection": "Cargar desde colección",
-  "ui.noMatchingQueriesFound": "No se encontraron consultas coincidentes.",
   "ui.copyShareLink": "Copiar enlace para compartir",
   "ui.viewAllCollections": "Ver todas las colecciones",
   "ui.main": "Principal",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "Solicitudes lentas",
   "alerts.templates.slowRequestsHelp": "Coincide con solicitudes de más de un segundo.",
   "alerts.templates.errorMessages": "Mensajes de error",
-  "alerts.templates.errorMessagesHelp": "Coincide con mensajes que contienen 'error'."
+  "alerts.templates.errorMessagesHelp": "Coincide con mensajes que contienen 'error'.",
+  "common.copyName": "{name} (copia)",
+  "ui.gridView": "Vista de cuadrícula",
+  "ui.listView": "Vista de lista",
+  "dashboards.panels": "Paneles",
+  "dashboards.duplicatePanel": "Duplicar panel",
+  "dashboards.duplicateTitle": "Duplicar dashboard",
+  "dashboards.duplicateDescription": "Crea una copia de tu propiedad con los mismos paneles y diseño.",
+  "dashboards.duplicateSkipsLockedPanels": "{count} panel usa una fuente a la que no tienes acceso. No se copiará. | {count} paneles usan fuentes a las que no tienes acceso. No se copiarán.",
+  "alerts.searchAlerts": "Buscar alertas…",
+  "alerts.noMatches": "Ninguna alerta coincide con \"{search}\""
 }

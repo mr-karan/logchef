@@ -25,7 +25,6 @@ import { useAuthStore } from '@/stores/auth';
 import { useSavedQueries } from '@/composables/useSavedQueries';
 
 const { t } = useI18n();
-// Removed contextTransitionInProgress - no longer needed with clean architecture
 
 const props = defineProps<{
   selectedTeamId?: number;
@@ -49,30 +48,9 @@ const {
   canSaveQuery,
 } = useSavedQueries();
 
-// Local state
 const isOpen = ref(false);
-const searchQuery = ref('');
-
-// Computed properties from store
 const queries = computed(() => savedQueriesStore.queries);
-
-// Filtered queries based on local search term
-const filteredQueries = computed(() => {
-  if (!searchQuery.value.trim()) {
-    return queries.value;
-  }
-
-  const search = searchQuery.value.toLowerCase();
-  return queries.value.filter(query =>
-    query.name.toLowerCase().includes(search) ||
-    (query.description && query.description.toLowerCase().includes(search))
-  );
-});
-
-// Computed properties based on local filtering state
-const hasQueries = computed(() => filteredQueries.value.length > 0);
-const totalQueryCount = computed(() => queries.value.length); // Total count based on unfiltered store queries
-const filteredQueryCount = computed(() => filteredQueries.value.length); // Count based on local filter
+const hasQueries = computed(() => queries.value.length > 0);
 
 // Watch for changes in team/source ID
 watch(
@@ -89,11 +67,6 @@ watch(
 watch(isOpen, async (open) => {
   if (open && props.selectedSourceId && !queries.value.length) {
     await loadQueries(props.selectedTeamId, props.selectedSourceId);
-  }
-
-  // Clear search when dropdown is closed
-  if (!open) {
-    searchQuery.value = '';
   }
 });
 
@@ -204,14 +177,11 @@ async function copyCollectionUrl(event: Event, query: SavedQuery) {
       <DropdownMenuSub v-if="hasQueries">
         <DropdownMenuSubTrigger>
           <ListTree class="w-4 h-4 mr-2" />
-          <span>{{ t('queries.select', { filtered: filteredQueryCount, total: totalQueryCount }) }}</span>
+          <span>{{ t('queries.select', { count: queries.length }) }}</span>
         </DropdownMenuSubTrigger>
         <DropdownMenuSubContent class="max-h-96 overflow-y-auto">
-          <DropdownMenuItem v-if="filteredQueries.length === 0" disabled>
-            {{ t('ui.noMatchingQueriesFound') }}
-          </DropdownMenuItem>
           <DropdownMenuItem
-            v-for="query in filteredQueries"
+            v-for="query in queries"
             :key="query.id"
             @click="() => selectQuery(query)"
             class="flex items-center justify-between gap-2"

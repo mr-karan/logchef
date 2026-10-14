@@ -2,11 +2,12 @@
 import { useI18n } from "vue-i18n";
 import { ref, computed, onMounted } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { Plus, Search, User, Users, Loader2, LayoutList } from "lucide-vue-next";
+import { Plus, User, Users, Loader2, LayoutList } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { PageHeader, EmptyState, LoadingState, SearchInput } from "@/components/layout";
 import {
   Dialog,
   DialogContent,
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { useCollectionsStore } from "@/stores/collections";
 import type { Collection, CollectionRole } from "@/api/collections";
+import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import CollectionDetailPane from "./CollectionDetailPane.vue";
 import AllQueriesPane from "./AllQueriesPane.vue";
 
@@ -29,12 +31,8 @@ const personal = computed(() => store.personalCollection);
 const shared = computed(() => store.sharedCollections);
 const isLoading = computed(() => store.isLoadingOperation("listCollections"));
 
-const search = ref("");
-const filteredShared = computed(() => {
-  const q = search.value.trim().toLowerCase();
-  if (!q) return shared.value;
-  return shared.value.filter((c) => c.name.toLowerCase().includes(q));
-});
+// The rail keeps the store's order, so no sort accessors.
+const { search, rows: filteredShared } = useTableSearchSort(shared, { searchKeys: ["name"] });
 
 // "All queries" browse mode (?view=all) vs a selected collection.
 const isAllView = computed(() => route.query.view === "all");
@@ -114,22 +112,18 @@ function onDeleted() {
   <div class="grid lg:grid-cols-[280px_minmax(0,1fr)] gap-5">
     <!-- Collections rail -->
     <aside class="lg:border-r lg:pr-5">
-      <div class="flex items-center justify-between mb-3">
-        <h1 class="text-lg font-semibold tracking-tight">{{ t('ui.library') }}</h1>
-        <Button size="sm" variant="outline" @click="showCreate = true">
-          <Plus class="mr-1.5 h-3.5 w-3.5" />
-          {{ t('library.new') }}
-        </Button>
-      </div>
+      <PageHeader :title="t('ui.library')" class="mb-3 flex-row items-center justify-between md:items-center">
+        <template #actions>
+          <Button size="sm" variant="outline" @click="showCreate = true">
+            <Plus class="mr-1.5 h-3.5 w-3.5" />
+            {{ t('library.new') }}
+          </Button>
+        </template>
+      </PageHeader>
 
-      <div class="relative mb-3">
-        <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-        <Input v-model="search" :placeholder="t('library.searchCollections')" class="pl-8 h-9" />
-      </div>
+      <SearchInput v-model="search" :placeholder="t('library.searchCollections')" class="mb-3 max-w-none" />
 
-      <div v-if="isLoading" class="flex justify-center py-8">
-        <Loader2 class="h-5 w-5 animate-spin text-muted-foreground" />
-      </div>
+      <LoadingState v-if="isLoading" class="py-8" />
 
       <nav v-else class="space-y-4">
         <!-- All queries (flat browse — admins see every query, others see theirs) -->
@@ -178,12 +172,11 @@ function onDeleted() {
                 :class="roleClass(c.caller_role)"
               >{{ translateRole(c.caller_role) }}</span>
             </button>
-            <p
+            <EmptyState
               v-if="filteredShared.length === 0"
-              class="px-2.5 py-3 text-xs text-muted-foreground"
-            >
-              {{ search ? t('library.noCollectionsMatch') : t('library.noSharedCollections') }}
-            </p>
+              class="py-6"
+              :description="search ? t('library.noCollectionsMatch') : t('library.noSharedCollections')"
+            />
           </div>
         </div>
       </nav>

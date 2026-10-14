@@ -10,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { SearchableSelect, type SearchableItem } from "@/components/ui/searchable-select";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
-import { EmptyState, LoadingState, PageHeader, PageSection } from "@/components/layout";
+import { EmptyState, LoadingState, PageHeader, PageSection, RowActionsMenu } from "@/components/layout";
 import TokenScopePicker from "@/components/tokens/TokenScopePicker.vue";
 import { useServiceAccountsStore } from "@/stores/serviceAccounts";
 import { useTeamsStore } from "@/stores/teams";
@@ -48,6 +48,7 @@ const selectedAccount = shallowRef<User | null>(null);
 const createdTokenData = shallowRef<CreatedTokenData | null>(null);
 const accountToDelete = shallowRef<User | null>(null);
 const tokenToDelete = shallowRef<{ account: User; tokenId: number; tokenName: string } | null>(null);
+const teamToLeave = shallowRef<{ account: User; team: UserTeamMembership } | null>(null);
 const teamsDialogAccount = shallowRef<User | null>(null);
 const newTeamId = shallowRef("");
 const newTeamRole = shallowRef<'admin' | 'member' | 'editor'>('member');
@@ -144,8 +145,11 @@ async function addAccountToTeam() {
   }
 }
 
-async function removeAccountFromTeam(account: User, teamId: number) {
-  await serviceAccountsStore.removeFromTeam(account.id, teamId);
+async function confirmRemoveAccountFromTeam() {
+  const target = teamToLeave.value;
+  teamToLeave.value = null;
+  if (!target) return;
+  await serviceAccountsStore.removeFromTeam(target.account.id, target.team.id);
 }
 
 function openTokenDialog(account: User) {
@@ -276,7 +280,7 @@ function closeTokenDisplay() {
               <p class="text-sm text-muted-foreground font-mono">{{ account.email }}</p>
               <p class="text-xs text-muted-foreground">{{ t('access.createdOn', { date: formatDate(account.created_at) }) }}</p>
             </div>
-            <div class="flex gap-2">
+            <div class="flex items-center gap-2">
               <Button size="sm" variant="outline" class="gap-2" @click="openTeamsDialog(account)">
                 <Users class="h-4 w-4" />
                 {{ t('access.manageTeams') }}
@@ -285,9 +289,7 @@ function closeTokenDisplay() {
                 <KeyRound class="h-4 w-4" />
                 {{ t('access.createToken') }}
               </Button>
-              <Button size="sm" variant="ghost" class="text-destructive hover:text-destructive" @click="accountToDelete = account">
-                <Trash2 class="h-4 w-4" />
-              </Button>
+              <RowActionsMenu @delete="accountToDelete = account" />
             </div>
           </div>
 
@@ -311,9 +313,7 @@ function closeTokenDisplay() {
 
           <div class="space-y-2">
             <h4 class="text-sm font-medium">{{ t('access.tokens') }}</h4>
-            <div v-if="tokensFor(account).length === 0" class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-              {{ t('access.noTokensYet') }}
-            </div>
+            <EmptyState v-if="tokensFor(account).length === 0" :icon="KeyRound" :title="t('access.noTokensYet')" class="rounded-md border py-6" />
             <div v-else class="space-y-2">
               <div v-for="token in tokensFor(account)" :key="token.id" class="flex items-center justify-between rounded-md border p-3">
                 <div class="space-y-1 min-w-0">
@@ -337,7 +337,7 @@ function closeTokenDisplay() {
                     <span class="inline-flex items-center gap-1"><Clock class="h-3 w-3" />{{ token.last_used_at ? t('access.lastUsedOn', { date: formatDate(token.last_used_at) }) : t('access.neverUsed') }}</span>
                   </div>
                 </div>
-                <Button variant="ghost" size="sm" class="text-destructive hover:text-destructive" @click="tokenToDelete = { account, tokenId: token.id, tokenName: token.name }">
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive" :title="t('ui.delete')" @click="tokenToDelete = { account, tokenId: token.id, tokenName: token.name }">
                   <Trash2 class="h-4 w-4" />
                 </Button>
               </div>
@@ -422,10 +422,8 @@ function closeTokenDisplay() {
         <div class="space-y-4 py-2">
           <div class="space-y-2">
             <Label class="text-sm">{{ t('access.currentTeams') }}</Label>
-            <div v-if="teamsDialogAccount && teamsFor(teamsDialogAccount).length === 0"
-              class="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-              {{ t('access.notInAnyTeam') }}
-            </div>
+            <EmptyState v-if="teamsDialogAccount && teamsFor(teamsDialogAccount).length === 0"
+              :icon="Users" :title="t('access.notInAnyTeam')" class="rounded-md border py-6" />
             <div v-else-if="teamsDialogAccount" class="space-y-2">
               <div v-for="team in teamsFor(teamsDialogAccount)" :key="team.id"
                 class="flex items-center justify-between rounded-md border p-2.5">
@@ -433,8 +431,9 @@ function closeTokenDisplay() {
                   <span class="font-medium">{{ team.name }}</span>
                   <span class="text-xs text-muted-foreground">{{ translateTeamRole(team.role) }}</span>
                 </div>
-                <Button variant="ghost" size="icon" class="text-destructive hover:text-destructive"
-                  @click="removeAccountFromTeam(teamsDialogAccount, team.id)">
+                <Button variant="ghost" size="icon" class="h-8 w-8 text-muted-foreground hover:text-destructive"
+                  :title="t('access.removeMember')"
+                  @click="teamToLeave = { account: teamsDialogAccount, team }">
                   <X class="h-4 w-4" />
                 </Button>
               </div>
@@ -492,6 +491,16 @@ function closeTokenDisplay() {
       destructive
       @update:open="(open) => { if (!open) tokenToDelete = null }"
       @confirm="confirmDeleteToken"
+    />
+
+    <ConfirmDialog
+      :open="teamToLeave !== null"
+      :title="t('access.removeMemberTitle')"
+      :description="teamToLeave ? t('access.removeMemberConfirmation', { name: teamToLeave.account.full_name, team: teamToLeave.team.name }) : undefined"
+      :confirm-text="t('access.removeMember')"
+      destructive
+      @update:open="(open) => { if (!open) teamToLeave = null }"
+      @confirm="confirmRemoveAccountFromTeam"
     />
   </div>
 </template>

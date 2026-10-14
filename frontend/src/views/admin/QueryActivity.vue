@@ -11,10 +11,9 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-vue-next";
-import { PageHeader, LoadingState, EmptyState } from "@/components/layout";
+import { PageHeader, LoadingState, EmptyState, SearchInput } from "@/components/layout";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -38,6 +37,7 @@ import {
 import { isSuccessResponse } from "@/api/types";
 import { formatHistoryTimeAgo, formatHistoryDuration } from "@/lib/queryHistory";
 import { useMetaStore } from "@/stores/meta";
+import { useTableSearchSort } from "@/composables/useTableSearchSort";
 
 const RECENT_LIMIT = 100;
 const RECENT_PAGE_SIZE = 20;
@@ -51,7 +51,6 @@ const isLoading = ref(true);
 const error = ref<string | null>(null);
 const activity = ref<QueryActivityResponse | null>(null);
 const nowMs = ref(Date.now());
-const recentSearch = ref("");
 const visibleRecentCount = ref(RECENT_PAGE_SIZE);
 
 const statsDays = ref<string>("30");
@@ -209,13 +208,9 @@ function queryLabel(queryText: string, language: string): string {
   return trimmed || t("admin.queryTextUnavailable", { language: languageLabel(language) });
 }
 
-const filteredRecent = computed(() => {
-  const search = recentSearch.value.trim().toLowerCase();
-  if (!search) return recent.value;
-  return recent.value.filter((query) =>
-    [query.query_text, query.source_name, query.user_email, query.query_language]
-      .some((value) => String(value ?? "").toLowerCase().includes(search))
-  );
+// Search only: the recent sample keeps the server's newest-first order.
+const { search: recentSearch, rows: filteredRecent } = useTableSearchSort(recent, {
+  searchKeys: ["query_text", "source_name", "user_email", "query_language"],
 });
 
 const visibleRecent = computed(() =>
@@ -469,12 +464,14 @@ onMounted(refreshAll);
                   {{ t('admin.showingLoadedRecords', { shown: Math.min(visibleRecentCount, filteredRecent.length), total: filteredRecent.length }) }}
                 </p>
               </div>
-              <div class="relative w-full sm:w-72">
-                <Search class="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-                <Input v-model="recentSearch" class="h-8 pl-8 text-xs" :placeholder="t('admin.filterRecentQueries')" />
-              </div>
+              <SearchInput v-model="recentSearch" :placeholder="t('admin.filterRecentQueries')" class="sm:w-72" />
             </div>
-            <div class="overflow-x-auto">
+            <EmptyState
+              v-if="!visibleRecent.length"
+              :icon="recentSearch ? Search : Activity"
+              :title="recentSearch ? t('admin.noQueriesMatchFilter') : t('admin.noRecentQueries')"
+            />
+            <div v-else class="overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -488,11 +485,6 @@ onMounted(refreshAll);
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  <TableRow v-if="!visibleRecent.length">
-                    <TableCell colspan="7" class="py-10 text-center text-sm text-muted-foreground">
-                      {{ recentSearch ? t('admin.noQueriesMatchFilter') : t('admin.noRecentQueries') }}
-                    </TableCell>
-                  </TableRow>
                   <TableRow v-for="query in visibleRecent" :key="query.id">
                     <TableCell class="whitespace-nowrap text-xs text-muted-foreground">{{ timeAgo(query.created_at) }}</TableCell>
                     <TableCell class="whitespace-nowrap text-sm font-medium">{{ sourceLabel(query.source_name, query.source_id) }}</TableCell>

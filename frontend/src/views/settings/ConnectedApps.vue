@@ -83,13 +83,13 @@ onMounted(load);
           </div>
           <Button
             variant="ghost"
-            size="sm"
-            class="text-destructive hover:text-destructive"
+            size="icon"
+            class="h-8 w-8 text-muted-foreground hover:text-destructive"
+            :title="t('pages.connectedAppRevoke')"
             :aria-label="t('pages.connectedAppRevoke')"
             @click="appToRevoke = app"
           >
-            <Trash2 class="mr-1 h-4 w-4" />
-            {{ t("pages.connectedAppRevoke") }}
+            <Trash2 class="h-4 w-4" />
           </Button>
         </div>
       </div>

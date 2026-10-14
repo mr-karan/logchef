@@ -9,22 +9,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useContextStore } from "@/stores/context";
 import { useMetaStore } from "@/stores/meta";
 import AlertForm from "@/components/alerts/AlertForm.vue";
-import EmptyState from "@/components/layout/EmptyState.vue";
+import { EmptyState, LoadingState } from "@/components/layout";
 import type { Alert, UpdateAlertRequest } from "@/api/alerts";
 
 const { t, locale } = useI18n();
@@ -86,7 +77,6 @@ function confirmDelete() {
 async function handleDelete() {
   if (!alert.value) return;
   const result = await alertsStore.deleteAlert(undefined, undefined, alert.value.id);
-  showDeleteDialog.value = false;
   if (result.success) {
     goBack();
   }
@@ -148,7 +138,7 @@ onMounted(async () => {
         </Button>
         <div class="space-y-1">
           <div class="flex items-center gap-2 flex-wrap">
-            <h1 class="text-2xl font-bold tracking-tight">{{ alert?.name || "Alert" }}</h1>
+            <h1 class="text-2xl font-bold tracking-tight">{{ alert?.name || t('ui.alert') }}</h1>
             <Badge v-if="alert" :variant="mapSeverityVariant(alert.severity)" class="capitalize">
               {{ t(severityLabels[alert.severity]) }}
             </Badge>
@@ -166,10 +156,11 @@ onMounted(async () => {
     </div>
 
     <!-- Loading State -->
-    <div v-if="!alert" class="rounded-lg border border-dashed py-12 text-center">
-      <p class='text-sm text-muted-foreground'>{{ t('ui.alertNotFoundOrStillLoading') }}</p>
-      <Button class="mt-4" variant='outline' @click="goBack">{{ t('ui.goBack') }}</Button>
-    </div>
+    <EmptyState v-if="!alert" :icon="Bell" :description="t('ui.alertNotFoundOrStillLoading')">
+      <template #action>
+        <Button variant="outline" @click="goBack">{{ t('ui.goBack') }}</Button>
+      </template>
+    </EmptyState>
 
     <!-- Main Content with Tabs -->
     <Tabs v-else v-model="currentTab" class="space-y-6">
@@ -207,23 +198,15 @@ onMounted(async () => {
           </CardHeader>
           <CardContent>
             <!-- Loading State -->
-            <div v-if="isLoadingHistory" class="py-8 text-center">
-              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-3"></div>
-              <p class='text-sm text-muted-foreground'>{{ t('ui.loadingHistory') }}</p>
-            </div>
+            <LoadingState v-if="isLoadingHistory" :label="t('ui.loadingHistory')" />
 
             <!-- Empty State -->
-            <div v-else-if="!historyEntries.length" class="py-12 text-center">
-              <div class="flex justify-center mb-4">
-                <div class="rounded-full bg-muted p-3">
-                  <History class="h-8 w-8 text-muted-foreground" />
-                </div>
-              </div>
-              <h3 class='text-lg font-semibold mb-2'>{{ t('ui.noHistoryYet') }}</h3>
-              <p class="text-sm text-muted-foreground">
-                {{ t('ui.thisAlertHasnTBeenTriggeredYetHistoryWillAppearHereOnce') }}
-              </p>
-            </div>
+            <EmptyState
+              v-else-if="!historyEntries.length"
+              :icon="History"
+              :title="t('ui.noHistoryYet')"
+              :description="t('ui.thisAlertHasnTBeenTriggeredYetHistoryWillAppearHereOnce')"
+            />
 
             <!-- Timeline -->
             <div v-else class="relative space-y-4 py-2">
@@ -313,21 +296,13 @@ onMounted(async () => {
     </Tabs>
 
     <!-- Delete Confirmation Dialog -->
-    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{{ t('ui.deleteAlert') }}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {{ t('alerts.confirmDeleteHistory', { name: alert?.name ?? '' }) }}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>{{ t('ui.cancel') }}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="handleDelete">
-            {{ t('ui.deleteAlert2') }}
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      v-model:open="showDeleteDialog"
+      :title="t('ui.deleteAlert')"
+      :description="t('alerts.confirmDeleteHistory', { name: alert?.name ?? '' })"
+      :confirm-text="t('ui.deleteAlert2')"
+      destructive
+      @confirm="handleDelete"
+    />
   </div>
 </template>

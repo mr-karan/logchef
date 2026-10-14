@@ -4,6 +4,7 @@ import { alertStateLabels } from "@/i18n/alertLabels";
 
 import { computed, watch, ref } from "vue";
 import { storeToRefs } from "pinia";
+import { History } from "lucide-vue-next";
 import {
   Sheet,
   SheetContent,
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { EmptyState, LoadingState } from "@/components/layout";
 import { formatDate } from "@/utils/format";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useAlertsStore } from "@/stores/alerts";
@@ -118,13 +120,9 @@ watch(
       </SheetHeader>
 
       <div class="mt-6 flex flex-1 flex-col gap-6">
-        <div v-if="isLoadingHistory" class="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-          {{ t('ui.loadingHistory2') }}
-        </div>
+        <LoadingState v-if="isLoadingHistory" :label="t('ui.loadingHistory2')" />
 
-        <div v-else-if="!entries.length" class="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
-          {{ t('ui.noAlertActivityRecordedYet') }}
-        </div>
+        <EmptyState v-else-if="!entries.length" :icon="History" :description="t('ui.noAlertActivityRecordedYet')" />
 
         <ScrollArea v-else class="max-h-[50vh] rounded-lg border p-4">
           <div class="space-y-4">

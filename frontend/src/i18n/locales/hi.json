@@ -5,7 +5,7 @@
   "variables.position": "{total} में से चर {index}",
   "settings.days": "{count} दिन",
   "settings.deleteToken": "\"{name}\" मिटाएँ? इसका उपयोग करने वाले ऐप पहुँच खो देंगे। इसे वापस नहीं किया जा सकता।",
-  "queries.select": "क्वेरी चुनें ({filtered}/{total})",
+  "queries.select": "क्वेरी चुनें ({count})",
   "collections.items": "{count} आइटम",
   "collections.members": "{count} सदस्य",
   "explore.filteredRows": "{total} में से {count} पंक्तियाँ",
@@ -463,7 +463,6 @@
   "ui.includeTheCurrentTimeRangeAndLimitInTheSavedQuery": "सहेजी गई क्वेरी में मौजूदा समय सीमा और सीमा शामिल करें।",
   "ui.saveAsNewQuery": "नई क्वेरी के रूप में सहेजें…",
   "ui.loadFromCollection": "संग्रह से लोड करें",
-  "ui.noMatchingQueriesFound": "कोई मेल खाती क्वेरी नहीं मिली।",
   "ui.copyShareLink": "साझा करने का लिंक कॉपी करें",
   "ui.viewAllCollections": "सभी संग्रह देखें",
   "ui.main": "मुख्य",
@@ -688,5 +687,15 @@
   "alerts.templates.slowRequests": "धीमे अनुरोध",
   "alerts.templates.slowRequestsHelp": "एक सेकंड से अधिक समय वाले अनुरोध मिलाएँ।",
   "alerts.templates.errorMessages": "त्रुटि संदेश",
-  "alerts.templates.errorMessagesHelp": "'error' वाले संदेश मिलाएँ।"
+  "alerts.templates.errorMessagesHelp": "'error' वाले संदेश मिलाएँ।",
+  "common.copyName": "{name} (कॉपी)",
+  "ui.gridView": "ग्रिड व्यू",
+  "ui.listView": "लिस्ट व्यू",
+  "dashboards.panels": "पैनल",
+  "dashboards.duplicatePanel": "पैनल डुप्लिकेट करें",
+  "dashboards.duplicateTitle": "डैशबोर्ड डुप्लिकेट करें",
+  "dashboards.duplicateDescription": "उन्हीं पैनल और लेआउट के साथ एक कॉपी बनाएँ, जिसके मालिक आप होंगे।",
+  "dashboards.duplicateSkipsLockedPanels": "{count} पैनल ऐसे सोर्स का उपयोग करता है जिसकी आपके पास पहुँच नहीं है। इसे कॉपी नहीं किया जाएगा। | {count} पैनल ऐसे सोर्स का उपयोग करते हैं जिनकी आपके पास पहुँच नहीं है। इन्हें कॉपी नहीं किया जाएगा।",
+  "alerts.searchAlerts": "अलर्ट खोजें…",
+  "alerts.noMatches": "\"{search}\" से कोई अलर्ट मेल नहीं खाता"
 }
