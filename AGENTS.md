@@ -76,6 +76,15 @@ CLI (in `cli/`): `just build-cli`, `just check-cli` (fmt + clippy + tests).
 `internal/server/server.go` -> business logic in `internal/core/` -> frontend client
 in `frontend/src/api/` -> Pinia store in `frontend/src/stores/` if stateful.
 
+**List or table view** (frontend): use the shared pieces in
+`frontend/src/components/layout/` so every list behaves the same.
+`PageHeader` for the title, `SearchInput` + `useTableSearchSort` for search and
+sort (`initialSort` name A-Z for named entities, plus a unique `persistKey`),
+`SortHeader` on sortable columns, `RowActionsMenu` for Duplicate / Delete
+(primary actions such as Edit stay inline as ghost icon buttons),
+`ConfirmDialog` for every destructive action, `EmptyState` / `LoadingState`
+for empty, no-match and loading. Duplicated names use `common.copyName`.
+
 **LogchefQL change**: grammar in `internal/logchefql/grammar.go`, generators in
 `sql_generator.go` (ClickHouse) and `logsql_generator.go` (VictoriaLogs). Mirror
 frontend parsing in `frontend/src/utils/logchefql/` and run its vitest suite.
