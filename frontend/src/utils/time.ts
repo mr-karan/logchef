@@ -46,23 +46,11 @@ export function parseRelativeTimeString(relativeTimeString: string): { start: Da
   }
 
   if (relativeTimeString === 'yesterday') {
-    const yesterdayStart = new CalendarDateTime(
-      end.year,
-      end.month,
-      end.day - 1,
-      0, // midnight
-      0,
-      0
-    );
-    const yesterdayEnd = new CalendarDateTime(
-      end.year,
-      end.month,
-      end.day,
-      0, // midnight
-      0,
-      0
-    );
-    return { start: yesterdayStart, end: yesterdayEnd };
+    // Step back from today's midnight rather than building day `end.day - 1`:
+    // on the 1st of a month that would be day 0, which clamps to day 1 and
+    // yields an empty range.
+    const yesterdayEnd = new CalendarDateTime(end.year, end.month, end.day, 0, 0, 0);
+    return { start: yesterdayEnd.subtract({ days: 1 }), end: yesterdayEnd };
   }
 
   // Parse duration strings like "15m", "1h", "7d", etc.
