@@ -137,6 +137,91 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.isDirty).toBe(false);
   });
 
+  it("duplicateDraftPanel inserts a same-size copy after the original", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel("p1"));
+    store.upsertDraftPanel(tablePanel("p2"));
+    store.resizeDraftPanel("p1", 4, 3);
+
+    const copyId = store.duplicateDraftPanel("p1", "Recent logs (copy)");
+    expect(copyId).not.toBeNull();
+    expect(store.editDraft?.panels.map((p) => p.id)).toEqual(["p1", copyId, "p2"]);
+    const copy = store.editDraft?.panels[1];
+    expect(copy?.title).toBe("Recent logs (copy)");
+    expect(copy?.options).toEqual({ limit: 50 });
+    expect(copy?.options).not.toBe(store.editDraft?.panels[0].options);
+    const copyLayout = store.editDraft?.layout.find((l) => l.id === copyId);
+    expect(copyLayout).toMatchObject({ w: 4, h: 3 });
+  });
+
+  it("duplicateDraftPanel reuses a finished result and runs the copy otherwise", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel("p1"));
+
+    // The original's query is still in flight: the copy must run its own.
+    expect(store.getPanelState("p1").status).toBe("loading");
+    const pending = store.duplicateDraftPanel("p1", "pending copy") ?? "";
+    expect(store.getPanelState(pending).status).toBe("loading");
+    await vi.waitFor(() => expect(store.getPanelState(pending).status).toBe("empty"));
+
+    // Once finished, a new copy shows the same result without a new request.
+    await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("empty"));
+    const calls = mocks.logchefqlQuery.mock.calls.length;
+    const reused = store.duplicateDraftPanel("p1", "reused copy") ?? "";
+    expect(store.getPanelState(reused)).toBe(store.getPanelState("p1"));
+    expect(mocks.logchefqlQuery.mock.calls.length).toBe(calls);
+  });
+
+  it("a refresh in edit mode runs the draft panels, including a duplicate", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel("p1"));
+    const copyId = store.duplicateDraftPanel("p1", "copy") ?? "";
+    await store.refreshAllPanels();
+    expect(store.getPanelState(copyId).status).toBe("empty");
+    expect(store.getPanelState("p1").status).toBe("empty");
+  });
+
+  it("opens a dashboard in its saved default range, and keeps the viewer's range otherwise", async () => {
+    const store = useDashboardsStore();
+    store.setRelativeTime("30m");
+    mocks.get.mockResolvedValue({ status: "success", data: makeDashboard() });
+    await store.loadDashboard(3);
+    expect(store.timeRelative).toBe("30m");
+
+    store.setAbsoluteRange(1_000, 2_000);
+    const withDefault = makeDashboard({ id: 4, panels: { ...emptyPanels(), default_time_range: "6h" } });
+    mocks.get.mockResolvedValue({ status: "success", data: withDefault });
+    await store.loadDashboard(4);
+    expect(store.timeRelative).toBe("6h");
+    expect(store.timeAbsolute).toBeNull();
+  });
+
+  it("setDraftDefaultTimeRange saves the default, applies it, and can clear it", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.setDraftDefaultTimeRange("7d");
+    expect(store.editDraft?.default_time_range).toBe("7d");
+    expect(store.timeRelative).toBe("7d");
+    // A later layout change must not drop it.
+    store.upsertDraftPanel(tablePanel("p1"));
+    expect(store.editDraft?.default_time_range).toBe("7d");
+
+    store.setDraftDefaultTimeRange(null);
+    expect(store.editDraft).not.toHaveProperty("default_time_range");
+    expect(store.isDirty).toBe(true);
+  });
+
+  it("duplicateDraftPanel refuses to go past the panel limit", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    for (let i = 0; i < 24; i++) store.upsertDraftPanel(tablePanel(`p${i}`));
+    expect(store.duplicateDraftPanel("p0", "over")).toBeNull();
+    expect(store.editDraft?.panels).toHaveLength(24);
+  });
+
   it("saveEdit PUTs the draft, adopts the response, and exits edit mode", async () => {
     const store = await loadEditableDashboard();
     store.enterEdit();

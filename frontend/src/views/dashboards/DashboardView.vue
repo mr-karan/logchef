@@ -5,6 +5,8 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import {
   ArrowLeft,
+  Clock,
+  Copy,
   LayoutDashboard,
   Pencil,
   Trash2,
@@ -22,6 +24,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
@@ -39,10 +42,12 @@ import {
   addTileSlot,
   layoutRowCount,
   columnTrackWidth,
+  MAX_DASHBOARD_PANELS,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
 import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
+import { QUICK_RANGES, quickRangeLabelMessage, type QuickRange } from "@/lib/quickRanges";
 
 const { t, locale } = useI18n();
 
@@ -134,6 +139,13 @@ function handleEditorOpenChange(open: boolean) {
   editingPanelId.value = null;
   editorOpen.value = false;
 }
+const atPanelLimit = computed(() => (store.editDraft?.panels.length ?? 0) >= MAX_DASHBOARD_PANELS);
+
+function duplicatePanel(id: string) {
+  const title = panelById.value.get(id)?.title || "Panel";
+  store.duplicateDraftPanel(id, t("common.copyName", { name: title }));
+}
+
 function removePanel(id: string) {
   store.removeDraftPanel(id);
 }
@@ -170,6 +182,20 @@ const cacheTtlLabel = computed(() => {
 function selectCacheTtl(seconds: number) {
   store.setDraftCacheTtl(seconds);
 }
+
+// The relative range this dashboard opens with, saved in the panels blob.
+// Unset means viewers keep whatever range they already have.
+const defaultTimeRange = computed(() => store.editDraft?.default_time_range ?? null);
+function rangeLabel(range: QuickRange): string {
+  const { key, count } = quickRangeLabelMessage(range);
+  return t(key, { count }, count);
+}
+const defaultTimeRangeLabel = computed(() => {
+  const value = defaultTimeRange.value;
+  if (!value) return t("dashboards.defaultRangeNone");
+  const preset = QUICK_RANGES.find((r) => r.value === value);
+  return preset ? rangeLabel(preset) : value;
+});
 
 // --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
 const gridEl = ref<HTMLElement | null>(null);
@@ -549,6 +575,34 @@ onBeforeRouteUpdate((to, from) => {
         <template v-else-if="dashboard && isEditing">
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" :title="t('dashboards.defaultRangeHint')">
+                <Clock class="h-3.5 w-3.5" />
+                <span>{{ t('dashboards.defaultRange') }} {{ defaultTimeRangeLabel }}</span>
+                <ChevronDown class="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="max-h-80 w-44 overflow-y-auto">
+              <DropdownMenuItem
+                class="text-xs"
+                :class="{ 'font-semibold': defaultTimeRange === null }"
+                @click="store.setDraftDefaultTimeRange(null)"
+              >
+                {{ t('dashboards.defaultRangeNone') }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                v-for="range in QUICK_RANGES"
+                :key="range.value"
+                class="text-xs"
+                :class="{ 'font-semibold': range.value === defaultTimeRange }"
+                @click="store.setDraftDefaultTimeRange(range.value)"
+              >
+                {{ rangeLabel(range) }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
               <Button
                 variant="outline"
                 size="sm"
@@ -642,6 +696,15 @@ onBeforeRouteUpdate((to, from) => {
           <span class="dash-item__actions">
             <button class="dash-item__btn" :title="t('ui.editPanel')" @pointerdown.stop @click="openEditPanel(item.id)">
               <Pencil class="h-3.5 w-3.5" />
+            </button>
+            <button
+              class="dash-item__btn"
+              :title="t('dashboards.duplicatePanel')"
+              :disabled="atPanelLimit"
+              @pointerdown.stop
+              @click="duplicatePanel(item.id)"
+            >
+              <Copy class="h-3.5 w-3.5" />
             </button>
             <button
               class="dash-item__btn dash-item__btn--danger"
@@ -855,6 +918,11 @@ onBeforeRouteUpdate((to, from) => {
 .dash-item__btn:hover {
   background: var(--accent);
   color: var(--foreground);
+}
+.dash-item__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: none;
 }
 .dash-item__btn--danger:hover {
   background: color-mix(in srgb, var(--destructive) 15%, transparent);

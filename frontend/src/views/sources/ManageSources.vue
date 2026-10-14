@@ -5,8 +5,8 @@ import { storeToRefs } from 'pinia'
 import { Button } from '@/components/ui/button'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { PageHeader, EmptyState, LoadingState, SortHeader } from '@/components/layout'
-import { Plus, Trash2, Copy, Pencil, Database, Search } from 'lucide-vue-next'
+import { PageHeader, EmptyState, LoadingState, SortHeader, SearchInput, RowActionsMenu } from '@/components/layout'
+import { Plus, Pencil, Database, Search } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import { type Source, type VictoriaLogsConnectionInfo, asClickHouseConnection } from '@/api/sources'
 import {
@@ -17,7 +17,6 @@ import {
     TableHeader,
     TableRow,
 } from '@/components/ui/table'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useSourcesStore } from '@/stores/sources'
 import { useTableSearchSort } from '@/composables/useTableSearchSort'
@@ -84,6 +83,7 @@ const {
         created: (s) => new Date(s.created_at),
     },
     initialSort: { key: 'name', dir: 'asc' },
+    persistKey: 'sources',
 })
 
 const handleDelete = (source: Source) => {
@@ -161,10 +161,15 @@ onMounted(async () => {
             </template>
         </EmptyState>
         <div v-else class="space-y-4">
-                    <div class="relative max-w-sm">
-                        <Search class="absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                        <Input v-model="sourceSearch" :placeholder="t('sources.searchSources')" class="pl-8" />
-                    </div>
+                    <SearchInput v-model="sourceSearch" :placeholder="t('sources.searchSources')" />
+                    <EmptyState
+                        v-if="sortedSources.length === 0"
+                        :icon="Search"
+                        :title="t('access.noResults')"
+                        :description="t('sources.noSourcesMatch')"
+                        class="rounded-md border"
+                    />
+                    <div v-else class="rounded-md border">
                     <Table>
                         <TableHeader>
                             <TableRow>
@@ -191,13 +196,8 @@ onMounted(async () => {
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            <TableRow v-if="sortedSources.length === 0">
-                                <TableCell colspan="8" class="text-center text-muted-foreground py-6">
-                                    {{ t('sources.noSourcesMatch') }}
-                                </TableCell>
-                            </TableRow>
                             <TableRow v-for="source in sortedSources" :key="source.id">
-                                <TableCell class="font-medium">
+                                <TableCell class="max-w-[280px] whitespace-normal font-medium">
                                     <a @click="router.push({ name: 'SourceInspection', query: { sourceId: source.id } })"
                                         class="hover:underline cursor-pointer">
                                         {{ source.name }}
@@ -241,24 +241,22 @@ onMounted(async () => {
                                 </TableCell>
                                 <TableCell>{{ formatDate(source.created_at) }}</TableCell>
                                 <TableCell class="text-right">
-                                    <div class="flex items-center justify-end gap-2">
-                                        <Button variant="outline" size="icon" @click="handleEdit(source)"
+                                    <div class="flex items-center justify-end gap-1">
+                                        <Button variant="ghost" size="icon" class="h-8 w-8" @click="handleEdit(source)"
                                                 :title="t('sources.editSource')">
                                             <Pencil class="h-4 w-4" />
                                         </Button>
-                                        <Button variant="outline" size="icon" @click="handleDuplicate(source)"
-                                                :title="t('sources.duplicateSource')">
-                                            <Copy class="h-4 w-4" />
-                                        </Button>
-                                        <Button variant="destructive" size="icon" @click="handleDelete(source)"
-                                                :title="t('sources.deleteSource')">
-                                            <Trash2 class="h-4 w-4" />
-                                        </Button>
+                                        <RowActionsMenu
+                                            :delete-label="t('sources.deleteSource')"
+                                            @duplicate="handleDuplicate(source)"
+                                            @delete="handleDelete(source)"
+                                        />
                                     </div>
                                 </TableCell>
                             </TableRow>
                         </TableBody>
                     </Table>
+                    </div>
         </div>
 
         <ConfirmDialog

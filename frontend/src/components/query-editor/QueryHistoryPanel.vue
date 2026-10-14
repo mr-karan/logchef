@@ -15,12 +15,7 @@
       </SheetHeader>
 
       <!-- Loading -->
-      <div v-if="isLoading" class="flex items-center justify-center p-10">
-        <div class="flex items-center gap-2 text-sm text-muted-foreground">
-          <Loader2 class="w-4 h-4 animate-spin" />
-          {{ t('ui.loadingHistory2') }}
-        </div>
-      </div>
+      <LoadingState v-if="isLoading" :label="t('ui.loadingHistory2')" />
 
       <!-- Error -->
       <div v-else-if="error" class="flex flex-col items-center justify-center p-10 text-center">
@@ -29,11 +24,12 @@
       </div>
 
       <!-- Empty -->
-      <div v-else-if="entries.length === 0" class="flex flex-col items-center justify-center p-10 text-center">
-        <History class="w-8 h-8 text-muted-foreground mb-2" />
-        <p class='text-sm text-muted-foreground mb-1'>{{ t('ui.noQueryHistoryYet') }}</p>
-        <p class='text-xs text-muted-foreground'>{{ t('ui.executeQueriesToSeeThemAppearHere') }}</p>
-      </div>
+      <EmptyState
+        v-else-if="entries.length === 0"
+        :icon="History"
+        :title="t('ui.noQueryHistoryYet')"
+        :description="t('ui.executeQueriesToSeeThemAppearHere')"
+      />
 
       <!-- List -->
       <ScrollArea v-else class="flex-1 min-h-0">
@@ -100,7 +96,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { History, Loader2, Clock, Rows3 } from "lucide-vue-next";
+import { History, Clock, Rows3 } from "lucide-vue-next";
+import { EmptyState, LoadingState } from "@/components/layout";
 import { exploreApi, type QueryHistoryRecord } from "@/api/explore";
 import { isSuccessResponse } from "@/api/types";
 import { getQueryLanguageLabel } from "@/lib/queryMetadata";

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { QUICK_RANGES, quickRangeLabelMessage, type QuickRange } from "@/lib/quickRanges";
 import { ref, computed, watch } from "vue";
 import { storeToRefs } from "pinia";
 import { Button } from "@/components/ui/button";
@@ -90,32 +91,16 @@ const DATE_TIME_NO_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/;
 const DATE_TIME_WITH_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/;
 
 // Quick ranges organized by category
-const quickRanges = [
-  { value: "5m", duration: { minutes: 5 } },
-  { value: "15m", duration: { minutes: 15 } },
-  { value: "30m", duration: { minutes: 30 } },
-  { value: "1h", duration: { hours: 1 } },
-  { value: "3h", duration: { hours: 3 } },
-  { value: "6h", duration: { hours: 6 } },
-  { value: "12h", duration: { hours: 12 } },
-  { value: "24h", duration: { hours: 24 } },
-  { value: "2d", duration: { days: 2 } },
-  { value: "7d", duration: { days: 7 } },
-  { value: "30d", duration: { days: 30 } },
-  { value: "90d", duration: { days: 90 } },
-] as const;
-
-function quickRangeLabel(range: typeof quickRanges[number]): string {
-  if ("minutes" in range.duration) return t("time.lastMinutes", { count: range.duration.minutes }, range.duration.minutes);
-  if ("hours" in range.duration) return t("time.lastHours", { count: range.duration.hours }, range.duration.hours);
-  return t("time.lastDays", { count: range.duration.days }, range.duration.days);
+function quickRangeLabel(range: QuickRange): string {
+  const { key, count } = quickRangeLabelMessage(range);
+  return t(key, { count }, count);
 }
 
 // Filtered quick ranges based on search
 const filteredQuickRanges = computed(() => {
-  if (!quickRangeSearch.value) return quickRanges;
+  if (!quickRangeSearch.value) return QUICK_RANGES;
   const search = quickRangeSearch.value.toLowerCase();
-  return quickRanges.filter(r => 
+  return QUICK_RANGES.filter(r => 
     quickRangeLabel(r).toLowerCase().includes(search) ||
     r.value.toLowerCase().includes(search)
   );
@@ -255,7 +240,7 @@ function parseRelativeTime(input: string): ZonedDateTime | null {
   return null;
 }
 
-function applyQuickRange(range: typeof quickRanges[number]) {
+function applyQuickRange(range: QuickRange) {
   const end = now(currentTimezoneId.value);
   const start = end.subtract(range.duration);
 
@@ -338,7 +323,7 @@ function clearRecentRanges() {
 // Display text for trigger button
 const triggerDisplayText = computed(() => {
   if (selectedQuickRange.value) {
-    const range = quickRanges.find(range => selectedQuickRange.value === `Last ${range.value}`);
+    const range = QUICK_RANGES.find(range => selectedQuickRange.value === `Last ${range.value}`);
     return range ? quickRangeLabel(range) : selectedQuickRange.value;
   }
   

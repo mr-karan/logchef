@@ -204,7 +204,9 @@ export function reflowPanels(blob: DashboardPanels): DashboardPanels {
     const { w, h } = sizeForPanel(blob.layout ?? [], p.id);
     return { id: p.id, w, h };
   });
+  // Keep the blob's other fields (e.g. cache_ttl_seconds); only the layout changes.
   return {
+    ...blob,
     version: blob.version || DASHBOARD_PANELS_VERSION,
     panels: [...(blob.panels ?? [])],
     layout: packLayout(order),
@@ -513,4 +515,28 @@ export function addTileSlot(
 /** Total rows a layout occupies (bottom edge of its lowest panel). */
 export function layoutRowCount(layout: DashboardLayoutItem[]): number {
   return (layout ?? []).reduce((max, l) => Math.max(max, l.y + l.h), 0);
+}
+
+/**
+ * The panel blob for a copy of a dashboard. A panel is left out when it is
+ * locked (the caller cannot read its query) or when `canUseTeam` rejects its
+ * team: the server refuses to create a panel whose team the caller is not in.
+ * A dashboard's creator gets unlocked panels even after leaving a team, so the
+ * locked flag alone is not enough. The returned blob shares no references with
+ * `blob`.
+ */
+export function copyableDashboardPanels(
+  blob: DashboardPanels,
+  canUseTeam: (teamId: number) => boolean
+): { panels: DashboardPanels; skipped: number } {
+  const kept = (blob.panels ?? []).filter((p) => !p.locked && canUseTeam(p.team_id));
+  const keptIds = new Set(kept.map((p) => p.id));
+  const panels: DashboardPanels = JSON.parse(
+    JSON.stringify({
+      ...blob,
+      panels: kept,
+      layout: (blob.layout ?? []).filter((l) => keptIds.has(l.id)),
+    })
+  );
+  return { panels, skipped: (blob.panels ?? []).length - kept.length };
 }

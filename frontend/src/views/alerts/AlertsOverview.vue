@@ -9,13 +9,11 @@ import {
   Bell,
   BellRing,
   Clock3,
-  Copy,
   History,
-  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCcw,
-  Trash2,
+  Search,
 } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -29,26 +27,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
 import ErrorAlert from "@/components/ui/ErrorAlert.vue";
-import EmptyState from "@/components/layout/EmptyState.vue";
-import SortHeader from "@/components/layout/SortHeader.vue";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
+import {
+  EmptyState,
+  LoadingState,
+  PageHeader,
+  RowActionsMenu,
+  SearchInput,
+  SortHeader,
+} from "@/components/layout";
 import TeamSourceSelector from "@/views/explore/components/TeamSourceSelector.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useContextStore } from "@/stores/context";
@@ -78,15 +66,16 @@ const {
 
 const { alerts } = storeToRefs(alertsStore);
 
-// No initial sort: alerts keep the server's most-recently-updated order.
-const { rows: sortedAlerts, sortKey, sortDir, toggleSort } = useTableSearchSort(alerts, {
-  searchKeys: [],
+const { search, rows: sortedAlerts, sortKey, sortDir, toggleSort } = useTableSearchSort(alerts, {
+  searchKeys: ["name", "description"],
   sortAccessors: {
     active: (a) => (a.is_active ? 1 : 0),
     name: (a) => a.name.toLowerCase(),
     status: (a) => (a.last_state === "firing" ? 1 : 0),
     lastTriggered: (a) => (a.last_triggered_at ? new Date(a.last_triggered_at).getTime() || 0 : 0),
   },
+  initialSort: { key: "name", dir: "asc" },
+  persistKey: "alerts",
 });
 
 const showDeleteDialog = ref(false);
@@ -120,9 +109,6 @@ const emptyStateMessage = computed(() => {
   if (!currentSourceId.value) {
     return t('ui.selectASourceToViewItsAlertRules');
   }
-  if (isLoadingAlerts.value) {
-    return "";
-  }
   if (!alerts.value.length) {
     return t('ui.noAlertsYetCreateYourFirstAlertToReceiveNotificationsWhenLog');
   }
@@ -147,12 +133,6 @@ async function handleDelete() {
   if (!alertToDelete.value) return;
   // Alerts are no longer team-scoped — the API ignores teamId/sourceId.
   await alertsStore.deleteAlert(undefined, undefined, alertToDelete.value.id);
-  showDeleteDialog.value = false;
-  alertToDelete.value = null;
-}
-
-function cancelDelete() {
-  showDeleteDialog.value = false;
   alertToDelete.value = null;
 }
 
@@ -286,14 +266,11 @@ onMounted(async () => {
     :description="t('ui.alertingIsDisabledOnThisServerAskYourAdministratorToSetAlerts')"
   />
   <div v-else class="space-y-6">
-    <div class="flex items-start justify-between gap-4">
-      <div class="space-y-1">
-        <h1 class='text-2xl font-semibold tracking-tight'>{{ t('ui.alertRules') }}</h1>
-        <p class="text-muted-foreground">
-          {{ t('ui.monitorLogActivityAndReceiveNotificationsWhenYourThresholdsAreCrossed') }}
-        </p>
-      </div>
-      <div class="flex items-center gap-2">
+    <PageHeader
+      :title="t('ui.alertRules')"
+      :description="t('ui.monitorLogActivityAndReceiveNotificationsWhenYourThresholdsAreCrossed')"
+    >
+      <template #actions>
         <Button variant="outline" @click="refreshAlerts" :disabled="isLoadingAlerts">
           <RefreshCcw class="-ml-1 mr-2 h-4 w-4" />
           {{ t('ui.refresh') }}
@@ -302,8 +279,8 @@ onMounted(async () => {
           <Plus class="-ml-1 mr-2 h-4 w-4" />
           {{ t('ui.newAlert') }}
         </Button>
-      </div>
-    </div>
+      </template>
+    </PageHeader>
 
     <Card>
       <CardHeader class="flex items-start justify-between gap-4 space-y-0">
@@ -326,24 +303,29 @@ onMounted(async () => {
         <div v-if="loadError" class="mb-4">
           <ErrorAlert :error="loadError" :title="t('ui.failedToLoadAlerts')" @retry="retryLoad" />
         </div>
-        <div v-if="emptyStateMessage && !isLoadingAlerts" class="rounded-lg border border-dashed py-12 text-center">
-          <div class="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
-            <BellRing class="h-6 w-6" />
-          </div>
-          <h3 class="mt-4 text-lg font-semibold">{{ t('ui.alerts') }}</h3>
-          <p class="mt-1 text-sm text-muted-foreground">
-            {{ emptyStateMessage }}
-          </p>
-      <Button v-if="currentTeamId && currentSourceId && !alerts.length" class="mt-4" @click="openCreateForm">
-            <Plus class="-ml-1 mr-2 h-4 w-4" />
-            {{ t('ui.createAlert') }}
-          </Button>
-        </div>
+        <LoadingState v-if="isLoadingAlerts" :label="t('ui.loadingAlerts')" />
+        <EmptyState
+          v-else-if="emptyStateMessage"
+          :icon="BellRing"
+          :title="t('ui.alerts')"
+          :description="emptyStateMessage"
+        >
+          <template v-if="currentTeamId && currentSourceId && !alerts.length" #action>
+            <Button @click="openCreateForm">
+              <Plus class="-ml-1 mr-2 h-4 w-4" />
+              {{ t('ui.createAlert') }}
+            </Button>
+          </template>
+        </EmptyState>
 
-        <div v-else>
-          <div v-if="isLoadingAlerts" class="py-8 text-center text-sm text-muted-foreground">
-            {{ t('ui.loadingAlerts') }}
-          </div>
+        <div v-else class="space-y-4">
+          <SearchInput v-model="search" :placeholder="t('alerts.searchAlerts')" />
+          <EmptyState
+            v-if="!sortedAlerts.length"
+            :icon="Search"
+            :title="t('alerts.noMatches', { search })"
+            :description="t('ui.tryADifferentNameOrClearTheSearch')"
+          />
           <Table v-else>
             <TableHeader>
               <TableRow>
@@ -431,24 +413,7 @@ onMounted(async () => {
                     <Button variant='ghost' size="icon" class='h-8 w-8' @click="openHistory(alert)" :title="t('ui.history')">
                       <History class="h-4 w-4" />
                     </Button>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger as-child>
-                        <Button variant="ghost" size="icon" class="h-8 w-8">
-                          <MoreHorizontal class="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" class="w-40">
-                        <DropdownMenuItem @click="duplicateAlert(alert)">
-                          <Copy class="mr-2 h-4 w-4" />
-                          {{ t('ui.duplicate') }}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem class="text-destructive focus:text-destructive" @click="confirmDelete(alert)">
-                          <Trash2 class="mr-2 h-4 w-4" />
-                          {{ t('ui.delete') }}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                    <RowActionsMenu @duplicate="duplicateAlert(alert)" @delete="confirmDelete(alert)" />
                   </div>
                 </TableCell>
               </TableRow>
@@ -458,19 +423,14 @@ onMounted(async () => {
       </CardContent>
     </Card>
 
-    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{{ t('ui.deleteAlert3') }}</AlertDialogTitle>
-          <AlertDialogDescription>
-            {{ t('alerts.confirmDelete', { name: alertToDelete?.name ?? '' }) }}
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="cancelDelete">{{ t('ui.cancel') }}</AlertDialogCancel>
-          <AlertDialogAction variant='destructive' @click="handleDelete">{{ t('ui.delete') }}</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      v-model:open="showDeleteDialog"
+      :title="t('ui.deleteAlert3')"
+      :description="t('alerts.confirmDelete', { name: alertToDelete?.name ?? '' })"
+      :confirm-text="t('ui.delete')"
+      destructive
+      @confirm="handleDelete"
+      @cancel="alertToDelete = null"
+    />
   </div>
 </template>

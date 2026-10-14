@@ -187,7 +187,7 @@ async function loadSourceForPrefill(sourceId: number): Promise<Source | null> {
 
 function prefillFormFromSource(source: Source, isCopy = false) {
   sourceType.value = sourceTypeFromSource(source);
-  sourceName.value = isCopy ? `${source.name} (Copy)` : source.name;
+  sourceName.value = isCopy ? t('common.copyName', { name: source.name }) : source.name;
   description.value = source.description || "";
 
   if (sourceType.value === "clickhouse") {

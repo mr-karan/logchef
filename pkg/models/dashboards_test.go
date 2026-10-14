@@ -63,6 +63,14 @@ func TestValidateDashboardPanels_Valid(t *testing.T) {
 		t.Fatalf("valid stacked bar_mode rejected: %v", err)
 	}
 
+	// A default time range in the relative format is valid.
+	for _, r := range []string{"5m", "6h", "7d", "2w", "today", "yesterday"} {
+		blob := json.RawMessage(`{"version":1,"layout":[],"panels":[],"default_time_range":"` + r + `"}`)
+		if err := ValidateDashboardPanels(blob); err != nil {
+			t.Fatalf("default_time_range %q rejected: %v", r, err)
+		}
+	}
+
 	// Absent bar_mode is valid (defaults to stacked).
 	noBarMode := json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"timeseries","team_id":1,"source_id":1,"query":"x","query_language":"logchefql","options":{"chart":"bars"}}]}`)
 	if err := ValidateDashboardPanels(noBarMode); err != nil {
@@ -118,6 +126,9 @@ func TestValidateDashboardPanels_Violations(t *testing.T) {
 		{"limit too large", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"limit":9999999}}]}`), "max"},
 		{"columns as string", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"columns":"service"}}]}`), "invalid options"},
 		{"group_by as number", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"table","team_id":1,"source_id":1,"query_language":"logchefql","options":{"group_by":5}}]}`), "invalid options"},
+		{"empty default_time_range", json.RawMessage(`{"version":1,"layout":[],"panels":[],"default_time_range":""}`), "default_time_range"},
+		{"absolute default_time_range", json.RawMessage(`{"version":1,"layout":[],"panels":[],"default_time_range":"2026-01-01"}`), "default_time_range"},
+		{"zero default_time_range", json.RawMessage(`{"version":1,"layout":[],"panels":[],"default_time_range":"0m"}`), "default_time_range"},
 		// bar_mode validation.
 		{"invalid bar_mode", json.RawMessage(`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","type":"timeseries","team_id":1,"source_id":1,"query_language":"logchefql","options":{"chart":"bars","bar_mode":"invalid"}}]}`), "invalid options.bar_mode"},
 	}
@@ -161,5 +172,26 @@ func TestValidateDashboardPanels_Breakdown(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestRedactDashboardPanels_KeepsDashboardSettings(t *testing.T) {
+	raw := json.RawMessage(`{"version":1,"cache_ttl_seconds":0,"default_time_range":"6h","layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2}],"panels":[{"id":"p1","title":"a","type":"stat","team_id":1,"source_id":1,"query":"secret","query_language":"logchefql"}]}`)
+	out, err := RedactDashboardPanels(raw, map[string]struct{}{"p1": {}})
+	if err != nil {
+		t.Fatalf("redact: %v", err)
+	}
+	var blob dashboardPanels
+	if err := json.Unmarshal(out, &blob); err != nil {
+		t.Fatalf("unmarshal redacted blob: %v", err)
+	}
+	if blob.DefaultTimeRange == nil || *blob.DefaultTimeRange != "6h" {
+		t.Fatalf("default_time_range = %v, want 6h", blob.DefaultTimeRange)
+	}
+	if blob.CacheTTLSeconds == nil || *blob.CacheTTLSeconds != 0 {
+		t.Fatalf("cache_ttl_seconds = %v, want 0", blob.CacheTTLSeconds)
+	}
+	if blob.Panels[0].Query != "" || !blob.Panels[0].Locked {
+		t.Fatalf("panel not redacted: %+v", blob.Panels[0])
 	}
 }

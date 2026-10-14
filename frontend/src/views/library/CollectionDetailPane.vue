@@ -18,7 +18,15 @@ import {
   FolderInput,
 } from "lucide-vue-next";
 import { formatDate } from "@/utils/format";
-import { PageHeader, PageSection, EmptyState, LoadingState, SortHeader } from "@/components/layout";
+import {
+  PageHeader,
+  PageSection,
+  EmptyState,
+  LoadingState,
+  SortHeader,
+  SearchInput,
+  RowActionsMenu,
+} from "@/components/layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,16 +42,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { useToast } from "@/composables/useToast";
 import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import { TOAST_DURATION } from "@/lib/constants";
@@ -83,18 +90,20 @@ const collection = computed(() => store.collections.find((c) => c.id === collect
 const items = computed(() => data.value.items[collectionID.value] ?? []);
 // No initial sort: items keep their pinned order until a column is clicked.
 const {
+  search: itemSearch,
   rows: sortedItems,
   sortKey: itemSortKey,
   sortDir: itemSortDir,
   toggleSort: toggleItemSort,
 } = useTableSearchSort(items, {
-  searchKeys: [],
+  searchKeys: [(i) => i.query.name, (i) => i.query.source_name],
   sortAccessors: {
     name: (i) => i.query.name.toLowerCase(),
     source: (i) => (i.query.source_name ?? "").toLowerCase(),
     createdBy: (i) => (i.query.created_by_name || i.query.created_by_email || "").toLowerCase(),
     updated: (i) => new Date(i.query.updated_at),
   },
+  persistKey: "collection_items",
 });
 const members = computed(() => data.value.members[collectionID.value] ?? []);
 const sharedTeams = computed(() => data.value.teams[collectionID.value] ?? []);
@@ -306,15 +315,14 @@ function openQuery(queryId: number) {
 
 // --- Add an existing saved query to this collection (fix 4) ---
 const showAddQuery = ref(false);
-const addQuerySearch = ref("");
 
 const pinnedIds = computed(() => new Set(items.value.map((i) => i.query.id)));
 // Saved queries the caller can pin here, minus ones already in the collection.
-const addableQueries = computed(() => {
-  const q = addQuerySearch.value.trim().toLowerCase();
-  return (savedQueriesStore.queries ?? [])
-    .filter((sq) => !pinnedIds.value.has(sq.id))
-    .filter((sq) => !q || sq.name.toLowerCase().includes(q) || (sq.source_name ?? "").toLowerCase().includes(q));
+const unpinnedQueries = computed(() =>
+  (savedQueriesStore.queries ?? []).filter((sq) => !pinnedIds.value.has(sq.id))
+);
+const { search: addQuerySearch, rows: addableQueries } = useTableSearchSort(unpinnedQueries, {
+  searchKeys: ["name", (sq) => sq.source_name],
 });
 
 watch(showAddQuery, async (isOpen) => {
@@ -461,34 +469,42 @@ async function handleDeleteCollection() {
           :title="t('library.noQueriesPinned')"
           :description="t('library.noQueriesPinnedDescription')"
         />
-        <div v-else class="overflow-x-auto">
-          <table class="w-full text-sm min-w-[640px]">
-            <thead>
-              <tr class="border-b bg-muted/30">
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[40px]">{{ t('library.type') }}</th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5">
+        <template v-else>
+          <div class="border-b p-3">
+            <SearchInput v-model="itemSearch" :placeholder="t('library.searchQueries')" />
+          </div>
+          <EmptyState
+            v-if="sortedItems.length === 0"
+            :icon="FileSearch"
+            :title="t('library.noMatches')"
+            :description="t('library.nothingMatches', { query: itemSearch })"
+          />
+          <Table v-else class="min-w-[640px]">
+            <TableHeader>
+              <TableRow>
+                <TableHead class="w-[40px] px-4">{{ t('library.type') }}</TableHead>
+                <TableHead class="px-4">
                   <SortHeader column="name" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('ui.name') }}</SortHeader>
-                </th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[150px]">
+                </TableHead>
+                <TableHead class="w-[150px] px-4">
                   <SortHeader column="source" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('ui.source') }}</SortHeader>
-                </th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[170px]">
+                </TableHead>
+                <TableHead class="w-[170px] px-4">
                   <SortHeader column="createdBy" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('library.createdBy') }}</SortHeader>
-                </th>
-                <th class="text-left font-medium text-muted-foreground px-4 py-2.5 w-[140px]">
+                </TableHead>
+                <TableHead class="w-[140px] px-4">
                   <SortHeader column="updated" :sort-key="itemSortKey" :sort-dir="itemSortDir" @toggle="toggleItemSort">{{ t('ui.updated2') }}</SortHeader>
-                </th>
-                <th class="w-[90px]"></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr
+                </TableHead>
+                <TableHead class="w-[60px] px-4" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              <TableRow
                 v-for="item in sortedItems"
                 :key="item.query.id"
-                class="border-b last:border-0 hover:bg-muted/40 transition-colors group"
                 :class="!item.runnable && 'opacity-60'"
               >
-                <td class="px-4 py-3 align-middle">
+                <TableCell class="px-4 py-3">
                   <Lock
                     v-if="!item.runnable"
                     class="h-4 w-4 text-muted-foreground"
@@ -500,8 +516,8 @@ async function handleDeleteCollection() {
                     title="LogchefQL"
                   />
                   <Database v-else class="h-4 w-4 text-muted-foreground" title="SQL" />
-                </td>
-                <td class="px-4 py-3 align-middle">
+                </TableCell>
+                <TableCell class="px-4 py-3 whitespace-normal">
                   <button
                     type="button"
                     class="font-medium text-foreground text-left hover:underline disabled:cursor-not-allowed disabled:hover:no-underline"
@@ -514,13 +530,13 @@ async function handleDeleteCollection() {
                   <p v-if="item.query.description" class="text-xs text-muted-foreground mt-0.5 truncate max-w-[400px]">
                     {{ item.query.description }}
                   </p>
-                </td>
-                <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
+                </TableCell>
+                <TableCell class="px-4 py-3 text-muted-foreground text-xs">
                   <span class="inline-block max-w-[130px] truncate align-bottom">
                     {{ item.query.source_name || `source ${item.query.source_id}` }}
                   </span>
-                </td>
-                <td class="px-4 py-3 align-middle text-muted-foreground text-xs">
+                </TableCell>
+                <TableCell class="px-4 py-3 text-muted-foreground text-xs">
                   <span
                     v-if="item.query.created_by_name || item.query.created_by_email"
                     class="inline-block max-w-[150px] truncate align-bottom"
@@ -529,40 +545,28 @@ async function handleDeleteCollection() {
                     {{ item.query.created_by_name || item.query.created_by_email }}
                   </span>
                   <span v-else class="text-muted-foreground/50">{{ t('common.unknown') }}</span>
-                </td>
-                <td class="px-4 py-3 align-middle text-muted-foreground text-xs whitespace-nowrap tabular-nums">
+                </TableCell>
+                <TableCell class="px-4 py-3 text-muted-foreground text-xs tabular-nums">
                   {{ formatDate(item.query.updated_at) }}
-                </td>
-                <td class="px-4 py-3 align-middle">
-                  <div
+                </TableCell>
+                <TableCell class="px-4 py-3 text-right">
+                  <RowActionsMenu
                     v-if="canCurate"
-                    class="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                    :delete-label="t('library.remove')"
+                    @delete="handleRemoveItem(item.query.id)"
                   >
-                    <Button
-                      v-if="moveTargets.length && item.runnable"
-                      variant="ghost"
-                      size="icon"
-                      class="h-7 w-7"
-                      @click="openMove(item.query.id)"
-                      :title="t('library.moveToCollection')"
-                    >
-                      <FolderInput class="h-4 w-4 text-muted-foreground" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      class="h-7 w-7"
-                      @click="handleRemoveItem(item.query.id)"
-                      :title="t('library.removeFromCollection')"
-                    >
-                      <Trash2 class="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+                    <template v-if="moveTargets.length && item.runnable" #default>
+                      <DropdownMenuItem @click="openMove(item.query.id)">
+                        <FolderInput class="mr-2 h-4 w-4" />
+                        {{ t('library.move') }}
+                      </DropdownMenuItem>
+                    </template>
+                  </RowActionsMenu>
+                </TableCell>
+              </TableRow>
+            </TableBody>
+          </Table>
+        </template>
       </PageSection>
 
       <PageSection
@@ -598,11 +602,11 @@ async function handleDeleteCollection() {
                 v-if="isOwner && !isCurrentUser(m.user_id)"
                 variant="ghost"
                 size="icon"
-                class="h-7 w-7"
+                class="h-8 w-8 text-muted-foreground hover:text-destructive"
                 :title="t('library.removeMember')"
                 @click="handleRemoveMember(m.user_id)"
               >
-                <X class="h-4 w-4 text-destructive" />
+                <X class="h-4 w-4" />
               </Button>
             </div>
           </li>
@@ -616,9 +620,12 @@ async function handleDeleteCollection() {
         flush
       >
         <LoadingState v-if="store.isLoadingOperation(`listTeams-${collectionID}`)" />
-        <p v-else-if="sharedTeams.length === 0" class="px-4 py-3 text-sm text-muted-foreground">
-          {{ t('library.noSharedTeams') }}
-        </p>
+        <EmptyState
+          v-else-if="sharedTeams.length === 0"
+          class="py-6"
+          :icon="Users"
+          :description="t('library.noSharedTeams')"
+        />
         <ul v-else class="divide-y">
           <li v-for="team in sharedTeams" :key="team.team_id" class="flex items-center gap-3 px-4 py-3">
             <div
@@ -636,11 +643,11 @@ async function handleDeleteCollection() {
                 v-if="canManageTeams"
                 variant="ghost"
                 size="icon"
-                class="h-7 w-7"
+                class="h-8 w-8 text-muted-foreground hover:text-destructive"
                 :title="t('library.removeTeamShare')"
                 @click="pendingTeamRemoval = team.team_id"
               >
-                <X class="h-4 w-4 text-destructive" />
+                <X class="h-4 w-4" />
               </Button>
             </div>
           </li>
@@ -745,14 +752,13 @@ async function handleDeleteCollection() {
           </DialogDescription>
         </DialogHeader>
         <div class="space-y-3 min-w-0">
-          <div class="relative">
-            <Search class="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
-            <Input v-model="addQuerySearch" :placeholder="t('library.searchQueries')" class="pl-8 h-9" />
-          </div>
+          <SearchInput v-model="addQuerySearch" :placeholder="t('library.searchQueries')" class="max-w-none" />
           <LoadingState v-if="savedQueriesStore.isLoading" />
-          <p v-else-if="addableQueries.length === 0" class="px-1 py-6 text-center text-sm text-muted-foreground">
-            {{ addQuerySearch ? t('library.noQueriesMatch') : t('library.noQueriesAvailable') }}
-          </p>
+          <EmptyState
+            v-else-if="addableQueries.length === 0"
+            class="py-6"
+            :description="addQuerySearch ? t('library.noQueriesMatch') : t('library.noQueriesAvailable')"
+          />
           <ul v-else class="max-h-72 overflow-y-auto divide-y rounded-md border">
             <li v-for="sq in addableQueries" :key="sq.id" class="flex items-center gap-3 px-3 py-2">
               <div class="min-w-0 flex-1">
@@ -824,17 +830,13 @@ async function handleDeleteCollection() {
       @confirm="confirmItemRemoval"
     />
 
-    <AlertDialog :open="showDeleteDialog" @update:open="showDeleteDialog = $event">
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>{{ t('library.deleteCollectionTitle', { name: collection?.name ?? '' }) }}</AlertDialogTitle>
-          <AlertDialogDescription>{{ t('library.deleteCollectionDescription') }}</AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel @click="showDeleteDialog = false">{{ t('ui.cancel') }}</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" @click="handleDeleteCollection">{{ t('ui.delete') }}</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <ConfirmDialog
+      v-model:open="showDeleteDialog"
+      :title="t('library.deleteCollectionTitle', { name: collection?.name ?? '' })"
+      :description="t('library.deleteCollectionDescription')"
+      :confirm-text="t('ui.delete')"
+      destructive
+      @confirm="handleDeleteCollection"
+    />
   </div>
 </template>

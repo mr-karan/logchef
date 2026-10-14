@@ -57,11 +57,10 @@ async function loadAlertForDuplication() {
   }
   const found = alertsStore.alerts.find((a) => a.id === duplicateAlertId.value);
   if (found) {
-    // Create a copy with modified name
     alertToDuplicate.value = {
       ...found,
       id: 0, // Reset ID for new alert
-      name: `${found.name} (Copy)`,
+      name: t('common.copyName', { name: found.name }),
     };
   }
 }

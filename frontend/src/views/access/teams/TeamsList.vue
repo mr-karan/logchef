@@ -3,9 +3,8 @@ import { useI18n } from 'vue-i18n'
 import { onMounted, ref, computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import { PageHeader, EmptyState, LoadingState } from '@/components/layout'
-import { Input } from '@/components/ui/input'
-import { Plus, Trash2, Settings, Search, Users } from 'lucide-vue-next'
+import { PageHeader, EmptyState, LoadingState, SearchInput, SortHeader, RowActionsMenu } from '@/components/layout'
+import { Plus, Settings, Search, Users } from 'lucide-vue-next'
 import { useRouter } from 'vue-router'
 import {
     Table,
@@ -16,11 +15,11 @@ import {
     TableRow,
 } from '@/components/ui/table'
 import { type Team } from '@/api/teams'
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import AddTeam from './AddTeam.vue'
 import { useTeamsStore } from '@/stores/teams'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { useTableSearchSort } from '@/composables/useTableSearchSort'
 import { formatDate } from '@/utils/format'
 
 const router = useRouter()
@@ -34,20 +33,6 @@ const isGlobalAdmin = computed(() => authStore.user?.role === 'admin')
 const isLoading = ref(true)
 const showDeleteDialog = ref(false)
 const teamToDelete = ref<Team | null>(null)
-const searchQuery = ref('')
-
-const filteredTeams = computed(() => {
-    if (!searchQuery.value.trim()) {
-        return teamsWithDefaults.value;
-    }
-
-    const query = searchQuery.value.toLowerCase();
-    return teamsWithDefaults.value.filter(team =>
-        team.name.toLowerCase().includes(query) ||
-        (team.description && team.description.toLowerCase().includes(query))
-    );
-});
-
 // managedTeams returns adminTeams for global admins, or userTeams filtered
 // to admin role for team admins.
 const teamsWithDefaults = computed(() => {
@@ -57,6 +42,23 @@ const teamsWithDefaults = computed(() => {
         description: team.description || '',
         memberCount: team.member_count || 0
     }));
+});
+
+const {
+    search: searchQuery,
+    rows: filteredTeams,
+    sortKey,
+    sortDir,
+    toggleSort,
+} = useTableSearchSort(teamsWithDefaults, {
+    searchKeys: ['name', 'description'],
+    sortAccessors: {
+        name: (team) => team.name.toLowerCase(),
+        members: (team) => team.memberCount,
+        created: (team) => new Date(team.created_at),
+    },
+    initialSort: { key: 'name', dir: 'asc' },
+    persistKey: 'teams',
 });
 
 const handleDelete = (team: typeof teamsWithDefaults.value[number]) => {
@@ -127,7 +129,7 @@ onMounted(() => {
         <LoadingState v-if="isLoading" :label="t('access.loadingTeams')" />
 
         <EmptyState
-            v-else-if="filteredTeams.length === 0 && !searchQuery"
+            v-else-if="teamsWithDefaults.length === 0"
             :icon="Users"
             :title="t('access.noTeamsYet')"
             :description="isGlobalAdmin ? t('access.createFirstTeam') : t('access.noAdminTeams')"
@@ -143,14 +145,10 @@ onMounted(() => {
         </EmptyState>
 
         <div v-else class="space-y-4">
-            <div class="relative w-full max-w-sm">
-                <Search class="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input v-model="searchQuery" type="text" :placeholder="t('access.searchTeams')"
-                    class="pl-8 h-9" />
-            </div>
+            <SearchInput v-model="searchQuery" :placeholder="t('access.searchTeams')" />
 
             <EmptyState
-                v-if="filteredTeams.length === 0 && searchQuery.trim()"
+                v-if="filteredTeams.length === 0"
                 :icon="Search"
                 :title="t('access.noResults')"
                 :description="t('access.noTeamsMatch')"
@@ -161,10 +159,22 @@ onMounted(() => {
                 <Table>
                     <TableHeader>
                         <TableRow>
-                            <TableHead class="w-[200px]">{{ t('ui.name') }}</TableHead>
+                            <TableHead class="w-[200px]">
+                                <SortHeader column="name" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('ui.name') }}
+                                </SortHeader>
+                            </TableHead>
                             <TableHead class="w-[300px]">{{ t('ui.description') }}</TableHead>
-                            <TableHead class="w-[100px]">{{ t('access.members') }}</TableHead>
-                            <TableHead class="w-[150px]">{{ t('access.createdAt') }}</TableHead>
+                            <TableHead class="w-[100px]">
+                                <SortHeader column="members" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('access.members') }}
+                                </SortHeader>
+                            </TableHead>
+                            <TableHead class="w-[150px]">
+                                <SortHeader column="created" :sort-key="sortKey" :sort-dir="sortDir" @toggle="toggleSort">
+                                    {{ t('access.createdAt') }}
+                                </SortHeader>
+                            </TableHead>
                             <TableHead class="w-[100px] text-right">{{ t('ui.actions') }}</TableHead>
                         </TableRow>
                     </TableHeader>
@@ -182,29 +192,13 @@ onMounted(() => {
                             <TableCell>{{ team.memberCount }}</TableCell>
                             <TableCell>{{ formatDate(team.created_at) }}</TableCell>
                             <TableCell class="text-right">
-                                <div class="flex justify-end gap-2">
-                                    <Tooltip>
-                                        <TooltipTrigger asChild>
-                                            <Button variant="ghost" size="icon"
-                                                @click="router.push({ name: 'TeamSettings', params: { id: String(team.id) } })">
-                                                <Settings class="h-4 w-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                            <p>{{ t('access.editTeamSettings') }}</p>
-                                        </TooltipContent>
-                                    </Tooltip>
-                                    <Tooltip v-if="isGlobalAdmin">
-                                        <TooltipTrigger asChild>
-                                            <Button variant="destructive" size="icon"
-                                                @click="handleDelete(team)">
-                                                <Trash2 class="h-4 w-4" />
-                                            </Button>
-                                        </TooltipTrigger>
-                                        <TooltipContent>
-                                            <p>{{ t('access.deleteTeam') }}</p>
-                                        </TooltipContent>
-                                    </Tooltip>
+                                <div class="flex items-center justify-end gap-1">
+                                    <Button variant="ghost" size="icon" class="h-8 w-8" :title="t('access.editTeamSettings')"
+                                        @click="router.push({ name: 'TeamSettings', params: { id: String(team.id) } })">
+                                        <Settings class="h-4 w-4" />
+                                    </Button>
+                                    <RowActionsMenu v-if="isGlobalAdmin" :delete-label="t('access.deleteTeam')"
+                                        @delete="handleDelete(team)" />
                                 </div>
                             </TableCell>
                         </TableRow>

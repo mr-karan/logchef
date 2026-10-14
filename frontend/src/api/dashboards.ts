@@ -71,6 +71,12 @@ export interface DashboardPanels {
    * this stays snake_case to match the server's `cache_ttl_seconds` JSON tag.
    */
   cache_ttl_seconds?: number;
+  /**
+   * Relative range the dashboard opens with ("15m", "6h", "7d", "today").
+   * Absent = keep the viewer's current range. Mirrors pkg/models
+   * dashboardPanels.DefaultTimeRange.
+   */
+  default_time_range?: string;
 }
 
 export interface Dashboard {
@@ -84,6 +90,8 @@ export interface Dashboard {
   created_at: string;
   updated_at: string;
   can_edit?: boolean;
+  /** Set on list when the stored panel blob is unreadable; `panels` is then empty. */
+  panels_corrupt?: boolean;
 }
 
 export interface CreateDashboardRequest {
