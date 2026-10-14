@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "उन्हीं पैनल और लेआउट के साथ एक कॉपी बनाएँ, जिसके मालिक आप होंगे।",
   "dashboards.duplicateSkipsLockedPanels": "{count} पैनल ऐसे सोर्स का उपयोग करता है जिसकी आपके पास पहुँच नहीं है। इसे कॉपी नहीं किया जाएगा। | {count} पैनल ऐसे सोर्स का उपयोग करते हैं जिनकी आपके पास पहुँच नहीं है। इन्हें कॉपी नहीं किया जाएगा।",
   "alerts.searchAlerts": "अलर्ट खोजें…",
-  "alerts.noMatches": "\"{search}\" से कोई अलर्ट मेल नहीं खाता"
+  "alerts.noMatches": "\"{search}\" से कोई अलर्ट मेल नहीं खाता",
+  "dashboards.defaultRange": "इसके साथ खुलता है",
+  "dashboards.defaultRangeNone": "दर्शक की सीमा",
+  "dashboards.defaultRangeHint": "यह डैशबोर्ड किस समय सीमा के साथ खुलता है"
 }

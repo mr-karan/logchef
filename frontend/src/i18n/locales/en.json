@@ -1414,5 +1414,8 @@
   "access.removeMemberConfirmation": "Remove {name} from {team}?",
   "access.removeSource": "Remove source",
   "access.removeSourceTitle": "Remove source from team?",
-  "access.removeSourceConfirmation": "Remove {name} from {team}? The source itself is not deleted."
+  "access.removeSourceConfirmation": "Remove {name} from {team}? The source itself is not deleted.",
+  "dashboards.defaultRange": "Opens with",
+  "dashboards.defaultRangeNone": "Viewer's range",
+  "dashboards.defaultRangeHint": "Time range this dashboard opens with"
 }

@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "Erstellt eine Kopie, die dir gehört, mit denselben Panels und demselben Layout.",
   "dashboards.duplicateSkipsLockedPanels": "{count} Panel nutzt eine Quelle, auf die du keinen Zugriff hast. Es wird nicht kopiert. | {count} Panels nutzen Quellen, auf die du keinen Zugriff hast. Sie werden nicht kopiert.",
   "alerts.searchAlerts": "Alerts durchsuchen…",
-  "alerts.noMatches": "Keine Alerts für „{search}“"
+  "alerts.noMatches": "Keine Alerts für „{search}“",
+  "dashboards.defaultRange": "Öffnet mit",
+  "dashboards.defaultRangeNone": "Bereich des Betrachters",
+  "dashboards.defaultRangeHint": "Zeitraum, mit dem dieses Dashboard geöffnet wird"
 }

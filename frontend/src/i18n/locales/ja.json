@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "同じパネルとレイアウトで、あなたが所有するコピーを作成します。",
   "dashboards.duplicateSkipsLockedPanels": "{count} 個のパネルはアクセスできないソースを使用しているため、コピーされません。",
   "alerts.searchAlerts": "アラートを検索…",
-  "alerts.noMatches": "「{search}」に一致するアラートはありません"
+  "alerts.noMatches": "「{search}」に一致するアラートはありません",
+  "dashboards.defaultRange": "初期表示",
+  "dashboards.defaultRangeNone": "閲覧者の範囲",
+  "dashboards.defaultRangeHint": "このダッシュボードを開いたときの時間範囲"
 }

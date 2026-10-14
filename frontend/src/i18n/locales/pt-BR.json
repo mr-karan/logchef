@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "Cria uma cópia sua, com os mesmos painéis e o mesmo layout.",
   "dashboards.duplicateSkipsLockedPanels": "{count} painel usa uma fonte à qual você não tem acesso. Ele não será copiado. | {count} painéis usam fontes às quais você não tem acesso. Eles não serão copiados.",
   "alerts.searchAlerts": "Buscar alertas…",
-  "alerts.noMatches": "Nenhum alerta corresponde a \"{search}\""
+  "alerts.noMatches": "Nenhum alerta corresponde a \"{search}\"",
+  "dashboards.defaultRange": "Abre com",
+  "dashboards.defaultRangeNone": "Intervalo do usuário",
+  "dashboards.defaultRangeHint": "Intervalo de tempo com que este dashboard abre"
 }

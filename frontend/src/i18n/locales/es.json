@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "Crea una copia de tu propiedad con los mismos paneles y diseño.",
   "dashboards.duplicateSkipsLockedPanels": "{count} panel usa una fuente a la que no tienes acceso. No se copiará. | {count} paneles usan fuentes a las que no tienes acceso. No se copiarán.",
   "alerts.searchAlerts": "Buscar alertas…",
-  "alerts.noMatches": "Ninguna alerta coincide con \"{search}\""
+  "alerts.noMatches": "Ninguna alerta coincide con \"{search}\"",
+  "dashboards.defaultRange": "Abre con",
+  "dashboards.defaultRangeNone": "Rango del usuario",
+  "dashboards.defaultRangeHint": "Rango de tiempo con el que se abre este dashboard"
 }

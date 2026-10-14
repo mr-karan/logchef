@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "Crée une copie qui vous appartient, avec les mêmes panneaux et la même disposition.",
   "dashboards.duplicateSkipsLockedPanels": "{count} panneau utilise une source à laquelle vous n'avez pas accès. Il ne sera pas copié. | {count} panneaux utilisent des sources auxquelles vous n'avez pas accès. Ils ne seront pas copiés.",
   "alerts.searchAlerts": "Rechercher des alertes…",
-  "alerts.noMatches": "Aucune alerte ne correspond à « {search} »"
+  "alerts.noMatches": "Aucune alerte ne correspond à « {search} »",
+  "dashboards.defaultRange": "Ouvre avec",
+  "dashboards.defaultRangeNone": "Plage de l'utilisateur",
+  "dashboards.defaultRangeHint": "Plage de temps à l'ouverture de ce tableau de bord"
 }

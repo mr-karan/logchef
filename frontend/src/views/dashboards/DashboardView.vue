@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import {
   ArrowLeft,
+  Clock,
   Copy,
   LayoutDashboard,
   Pencil,
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
@@ -45,6 +47,7 @@ import {
   type GridGeometry,
 } from "@/utils/dashboardPanels";
 import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
+import { QUICK_RANGES, quickRangeLabelMessage, type QuickRange } from "@/lib/quickRanges";
 
 const { t, locale } = useI18n();
 
@@ -179,6 +182,20 @@ const cacheTtlLabel = computed(() => {
 function selectCacheTtl(seconds: number) {
   store.setDraftCacheTtl(seconds);
 }
+
+// The relative range this dashboard opens with, saved in the panels blob.
+// Unset means viewers keep whatever range they already have.
+const defaultTimeRange = computed(() => store.editDraft?.default_time_range ?? null);
+function rangeLabel(range: QuickRange): string {
+  const { key, count } = quickRangeLabelMessage(range);
+  return t(key, { count }, count);
+}
+const defaultTimeRangeLabel = computed(() => {
+  const value = defaultTimeRange.value;
+  if (!value) return t("dashboards.defaultRangeNone");
+  const preset = QUICK_RANGES.find((r) => r.value === value);
+  return preset ? rangeLabel(preset) : value;
+});
 
 // --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
 const gridEl = ref<HTMLElement | null>(null);
@@ -556,6 +573,34 @@ onBeforeRouteUpdate((to, from) => {
           </Button>
         </template>
         <template v-else-if="dashboard && isEditing">
+          <DropdownMenu>
+            <DropdownMenuTrigger as-child>
+              <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs" :title="t('dashboards.defaultRangeHint')">
+                <Clock class="h-3.5 w-3.5" />
+                <span>{{ t('dashboards.defaultRange') }} {{ defaultTimeRangeLabel }}</span>
+                <ChevronDown class="h-3 w-3 opacity-60" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" class="max-h-80 w-44 overflow-y-auto">
+              <DropdownMenuItem
+                class="text-xs"
+                :class="{ 'font-semibold': defaultTimeRange === null }"
+                @click="store.setDraftDefaultTimeRange(null)"
+              >
+                {{ t('dashboards.defaultRangeNone') }}
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                v-for="range in QUICK_RANGES"
+                :key="range.value"
+                class="text-xs"
+                :class="{ 'font-semibold': range.value === defaultTimeRange }"
+                @click="store.setDraftDefaultTimeRange(range.value)"
+              >
+                {{ rangeLabel(range) }}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger as-child>
               <Button

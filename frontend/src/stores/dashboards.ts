@@ -432,6 +432,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (result.success) {
       state.data.value.current = result.data ?? null;
       state.data.value.panelStates = {};
+      // A dashboard with a saved default opens in that range; one without keeps
+      // the range the viewer already has.
+      const defaultRange = state.data.value.current?.panels?.default_time_range;
+      if (defaultRange) {
+        state.data.value.timeRelative = defaultRange;
+        state.data.value.timeAbsolute = null;
+      }
       if (state.data.value.current) {
         await refreshAllPanels();
       }
@@ -806,6 +813,16 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     setDraft({ ...draft, cache_ttl_seconds: seconds });
   }
 
+  // Set (or clear, with null) the range the dashboard opens with. A new default
+  // is also applied now, so the canvas shows what viewers will see.
+  function setDraftDefaultTimeRange(relative: string | null) {
+    const draft = state.data.value.editDraft;
+    if (!draft) return;
+    const { default_time_range: _previous, ...rest } = draft;
+    setDraft(relative ? { ...rest, default_time_range: relative } : rest);
+    if (relative) setRelativeTime(relative);
+  }
+
   // Add or replace a panel in the draft (by id), then reflow the layout so the
   // grid stays top-left-first with no overlaps. A newly added panel has no layout
   // entry, so reflowPanels places it in the next free slot at the default size.
@@ -1148,6 +1165,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     upsertDraftPanel,
     updateDraftPanel,
     setDraftCacheTtl,
+    setDraftDefaultTimeRange,
     createDraftShell,
     duplicateDraftPanel,
     removeDraftPanel,

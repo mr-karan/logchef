@@ -697,5 +697,8 @@
   "dashboards.duplicateDescription": "建立一個歸你所有的副本，包含相同的面板與版面配置。",
   "dashboards.duplicateSkipsLockedPanels": "{count} 個面板使用了你無權存取的資料來源，不會被複製。",
   "alerts.searchAlerts": "搜尋警示…",
-  "alerts.noMatches": "沒有符合「{search}」的警示"
+  "alerts.noMatches": "沒有符合「{search}」的警示",
+  "dashboards.defaultRange": "開啟時",
+  "dashboards.defaultRangeNone": "沿用目前範圍",
+  "dashboards.defaultRangeHint": "開啟此儀表板時使用的時間範圍"
 }

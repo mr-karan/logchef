@@ -3,6 +3,7 @@ package models
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -173,7 +174,15 @@ type dashboardPanels struct {
 	// uses the default (600s); 0 => caching off; >0 => that TTL. The server
 	// additionally clamps to dashboard_cache.max_ttl at request time.
 	CacheTTLSeconds *int `json:"cache_ttl_seconds,omitempty"`
+	// DefaultTimeRange is the relative range the dashboard opens with, in the
+	// frontend's relative-time format ("15m", "6h", "7d", "today"). Absent =>
+	// the viewer's current range is kept.
+	DefaultTimeRange *string `json:"default_time_range,omitempty"`
 }
+
+// dashboardTimeRangePattern matches the relative ranges the frontend can parse:
+// a count of minutes, hours, days or weeks, or a calendar day.
+var dashboardTimeRangePattern = regexp.MustCompile(`^([1-9]\d{0,3}[mhdw]|today|yesterday)$`)
 
 // dashboardPanelOptions is the validated contract for a panel's `options` blob
 // (finding B8). Fields are pointers/slices so absent is distinguishable from a
@@ -275,6 +284,10 @@ func ValidateDashboardPanels(raw json.RawMessage) error {
 		if *blob.CacheTTLSeconds < 0 || *blob.CacheTTLSeconds > MaxDashboardCacheTTLSeconds {
 			return fmt.Errorf("cache_ttl_seconds %d is out of range (allowed: 0-%d)", *blob.CacheTTLSeconds, MaxDashboardCacheTTLSeconds)
 		}
+	}
+
+	if blob.DefaultTimeRange != nil && !dashboardTimeRangePattern.MatchString(*blob.DefaultTimeRange) {
+		return fmt.Errorf("default_time_range %q is not a relative range such as 15m, 6h, 7d or today", *blob.DefaultTimeRange)
 	}
 
 	if len(blob.Panels) > MaxDashboardPanels {

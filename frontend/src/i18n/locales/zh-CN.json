@@ -1414,5 +1414,8 @@
   "access.removeMemberConfirmation": "将 {name} 从 {team} 中移除？",
   "access.removeSource": "移除数据源",
   "access.removeSourceTitle": "从团队中移除数据源？",
-  "access.removeSourceConfirmation": "将 {name} 从 {team} 中移除？数据源本身不会被删除。"
+  "access.removeSourceConfirmation": "将 {name} 从 {team} 中移除？数据源本身不会被删除。",
+  "dashboards.defaultRange": "打开时",
+  "dashboards.defaultRangeNone": "沿用当前范围",
+  "dashboards.defaultRangeHint": "打开此仪表盘时使用的时间范围"
 }
