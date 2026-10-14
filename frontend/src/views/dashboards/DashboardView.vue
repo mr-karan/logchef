@@ -5,6 +5,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter, onBeforeRouteLeave, onBeforeRouteUpdate } from "vue-router";
 import {
   ArrowLeft,
+  Copy,
   LayoutDashboard,
   Pencil,
   Trash2,
@@ -39,6 +40,7 @@ import {
   addTileSlot,
   layoutRowCount,
   columnTrackWidth,
+  MAX_DASHBOARD_PANELS,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
@@ -134,6 +136,13 @@ function handleEditorOpenChange(open: boolean) {
   editingPanelId.value = null;
   editorOpen.value = false;
 }
+const atPanelLimit = computed(() => (store.editDraft?.panels.length ?? 0) >= MAX_DASHBOARD_PANELS);
+
+function duplicatePanel(id: string) {
+  const title = panelById.value.get(id)?.title || "Panel";
+  store.duplicateDraftPanel(id, t("common.copyName", { name: title }));
+}
+
 function removePanel(id: string) {
   store.removeDraftPanel(id);
 }
@@ -644,6 +653,15 @@ onBeforeRouteUpdate((to, from) => {
               <Pencil class="h-3.5 w-3.5" />
             </button>
             <button
+              class="dash-item__btn"
+              :title="t('dashboards.duplicatePanel')"
+              :disabled="atPanelLimit"
+              @pointerdown.stop
+              @click="duplicatePanel(item.id)"
+            >
+              <Copy class="h-3.5 w-3.5" />
+            </button>
+            <button
               class="dash-item__btn dash-item__btn--danger"
               :title="t('ui.removePanel')"
               @pointerdown.stop
@@ -855,6 +873,11 @@ onBeforeRouteUpdate((to, from) => {
 .dash-item__btn:hover {
   background: var(--accent);
   color: var(--foreground);
+}
+.dash-item__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  background: none;
 }
 .dash-item__btn--danger:hover {
   background: color-mix(in srgb, var(--destructive) 15%, transparent);

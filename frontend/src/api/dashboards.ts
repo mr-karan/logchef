@@ -84,6 +84,8 @@ export interface Dashboard {
   created_at: string;
   updated_at: string;
   can_edit?: boolean;
+  /** Set on list when the stored panel blob is unreadable; `panels` is then empty. */
+  panels_corrupt?: boolean;
 }
 
 export interface CreateDashboardRequest {

@@ -18,7 +18,7 @@ import {
 } from "@/api/dashboards";
 import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
-import { sumHistogramCounts, reflowPanels, validatePanelsBlob } from "@/utils/dashboardPanels";
+import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
 import { parseRelativeTimeString, calendarDateTimeToTimestamp } from "@/utils/time";
 import { isCanceledError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
@@ -118,6 +118,15 @@ interface DashboardsState {
   editName: string;
   editDescription: string;
   previewState: PanelState | null;
+}
+
+// Panel results that are final for the current query and time range.
+const FINISHED_PANEL_STATUSES: ReadonlySet<PanelStatus> = new Set(["success", "empty", "error", "locked"]);
+
+function newPanelId(): string {
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : `p-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 /** Deep clone a JSON-serializable panel blob (breaks all reactive references). */
@@ -718,7 +727,13 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // Publish what was actually queried for the toolbar to display.
     state.data.value.appliedRange = range;
 
-    const panels = dashboard.panels?.panels ?? [];
+    // In edit mode the canvas shows the draft, so refresh the draft's panels:
+    // the saved ones miss added or duplicated panels and run stale queries for
+    // edited ones. A panel without a team and source cannot run yet.
+    const draft = state.data.value.editDraft;
+    const panels = draft
+      ? draft.panels.filter((p) => p.team_id > 0 && p.source_id > 0)
+      : (dashboard.panels?.panels ?? []);
     const tasks = panels.map((panel) => () => executePanel(panel, range, signal, cache));
     await runWithConcurrency(tasks, PANEL_FETCH_CONCURRENCY);
   }
@@ -867,10 +882,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   function createDraftShell(): string | null {
     const draft = state.data.value.editDraft;
     if (!draft) return null;
-    const id =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `p-${Math.random().toString(36).slice(2, 10)}`;
+    const id = newPanelId();
     const panel: DashboardPanel = {
       id,
       title: "New panel",
@@ -884,6 +896,30 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const panels = [...draft.panels, panel];
     setDraft(reflowPanels({ ...draft, panels }));
     return id;
+  }
+
+  // Insert a copy of a draft panel right after the original, at the same size,
+  // and return the copy's id. A finished result is reused, so the canvas shows
+  // the copy without running the query again; otherwise the copy runs its own.
+  function duplicateDraftPanel(id: string, title: string): string | null {
+    const draft = state.data.value.editDraft;
+    if (!draft || draft.panels.length >= MAX_DASHBOARD_PANELS) return null;
+    const idx = draft.panels.findIndex((p) => p.id === id);
+    if (idx < 0) return null;
+    const copyId = newPanelId();
+    const copy: DashboardPanel = { ...JSON.parse(JSON.stringify(draft.panels[idx])), id: copyId, title };
+    const panels = [...draft.panels];
+    panels.splice(idx + 1, 0, copy);
+    const size = draft.layout.find((l) => l.id === id);
+    const layout = size ? [...draft.layout, { id: copyId, x: 0, y: 0, w: size.w, h: size.h }] : draft.layout;
+    setDraft(reflowPanels({ ...draft, panels, layout }));
+    const result = state.data.value.panelStates[id];
+    if (result && FINISHED_PANEL_STATUSES.has(result.status)) {
+      setPanelState(copyId, result);
+    } else if (copy.team_id > 0 && copy.source_id > 0) {
+      executeSinglePanel(copy);
+    }
+    return copyId;
   }
 
   function removeDraftPanel(id: string) {
@@ -1113,6 +1149,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     updateDraftPanel,
     setDraftCacheTtl,
     createDraftShell,
+    duplicateDraftPanel,
     removeDraftPanel,
     resizeDraftPanel,
     reorderDraftPanels,

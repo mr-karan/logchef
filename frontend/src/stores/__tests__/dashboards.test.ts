@@ -137,6 +137,61 @@ describe("dashboards store — edit mode / dirty guard", () => {
     expect(store.isDirty).toBe(false);
   });
 
+  it("duplicateDraftPanel inserts a same-size copy after the original", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel("p1"));
+    store.upsertDraftPanel(tablePanel("p2"));
+    store.resizeDraftPanel("p1", 4, 3);
+
+    const copyId = store.duplicateDraftPanel("p1", "Recent logs (copy)");
+    expect(copyId).not.toBeNull();
+    expect(store.editDraft?.panels.map((p) => p.id)).toEqual(["p1", copyId, "p2"]);
+    const copy = store.editDraft?.panels[1];
+    expect(copy?.title).toBe("Recent logs (copy)");
+    expect(copy?.options).toEqual({ limit: 50 });
+    expect(copy?.options).not.toBe(store.editDraft?.panels[0].options);
+    const copyLayout = store.editDraft?.layout.find((l) => l.id === copyId);
+    expect(copyLayout).toMatchObject({ w: 4, h: 3 });
+  });
+
+  it("duplicateDraftPanel reuses a finished result and runs the copy otherwise", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel("p1"));
+
+    // The original's query is still in flight: the copy must run its own.
+    expect(store.getPanelState("p1").status).toBe("loading");
+    const pending = store.duplicateDraftPanel("p1", "pending copy") ?? "";
+    expect(store.getPanelState(pending).status).toBe("loading");
+    await vi.waitFor(() => expect(store.getPanelState(pending).status).toBe("empty"));
+
+    // Once finished, a new copy shows the same result without a new request.
+    await vi.waitFor(() => expect(store.getPanelState("p1").status).toBe("empty"));
+    const calls = mocks.logchefqlQuery.mock.calls.length;
+    const reused = store.duplicateDraftPanel("p1", "reused copy") ?? "";
+    expect(store.getPanelState(reused)).toBe(store.getPanelState("p1"));
+    expect(mocks.logchefqlQuery.mock.calls.length).toBe(calls);
+  });
+
+  it("a refresh in edit mode runs the draft panels, including a duplicate", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    store.upsertDraftPanel(tablePanel("p1"));
+    const copyId = store.duplicateDraftPanel("p1", "copy") ?? "";
+    await store.refreshAllPanels();
+    expect(store.getPanelState(copyId).status).toBe("empty");
+    expect(store.getPanelState("p1").status).toBe("empty");
+  });
+
+  it("duplicateDraftPanel refuses to go past the panel limit", async () => {
+    const store = await loadEditableDashboard();
+    store.enterEdit();
+    for (let i = 0; i < 24; i++) store.upsertDraftPanel(tablePanel(`p${i}`));
+    expect(store.duplicateDraftPanel("p0", "over")).toBeNull();
+    expect(store.editDraft?.panels).toHaveLength(24);
+  });
+
   it("saveEdit PUTs the draft, adopts the response, and exits edit mode", async () => {
     const store = await loadEditableDashboard();
     store.enterEdit();

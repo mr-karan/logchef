@@ -18,6 +18,7 @@ import {
   previewResizeLayout,
   addTileSlot,
   layoutRowCount,
+  copyableDashboardPanels,
   type PanelSize,
   type GridGeometry,
 } from "@/utils/dashboardPanels";
@@ -403,6 +404,11 @@ describe("reflowPanels", () => {
     ]);
   });
 
+  it("keeps the blob's other fields, such as the cache TTL", () => {
+    const out = reflowPanels({ version: 1, cache_ttl_seconds: 0, panels: [panel("a")], layout: [] });
+    expect(out.cache_ttl_seconds).toBe(0);
+  });
+
   it("places a just-added (layout-less) panel in the first free slot at default size", () => {
     // a=6-wide occupies the left half of row 0; the appended "new" panel (default
     // w6 h2) fits in the free right half of that same row.
@@ -570,5 +576,45 @@ describe("breakdown panel validation", () => {
     expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "service", breakdown_view: "donut" } })]))).toBeNull();
     expect(validatePanelsBlob(breakdownBlob([panel("b", { type: "breakdown", options: { group_by: "service", breakdown_view: "pie" as never } })]))).toMatch(/view/i);
     expect(validatePanelsBlob(breakdownBlob([panel("b", { options: { breakdown_view: "donut" } })]))).toMatch(/breakdown view/i);
+  });
+});
+
+describe("copyableDashboardPanels", () => {
+  const anyTeam = () => true;
+
+  it("leaves out locked panels and their layout entries", () => {
+    const blob: DashboardPanels = {
+      version: 1,
+      cache_ttl_seconds: 60,
+      panels: [panel("a"), panel("b", { locked: true }), panel("c")],
+      layout: [
+        { id: "a", x: 0, y: 0, w: 6, h: 2 },
+        { id: "b", x: 6, y: 0, w: 6, h: 2 },
+        { id: "c", x: 0, y: 2, w: 12, h: 2 },
+      ],
+    };
+    const { panels, skipped } = copyableDashboardPanels(blob, anyTeam);
+    expect(skipped).toBe(1);
+    expect(panels.panels.map((p) => p.id)).toEqual(["a", "c"]);
+    expect(panels.layout.map((l) => l.id)).toEqual(["a", "c"]);
+    expect(panels.cache_ttl_seconds).toBe(60);
+  });
+
+  it("returns a copy that does not share references with the source", () => {
+    const blob: DashboardPanels = { version: 1, panels: [panel("a")], layout: [] };
+    const { panels } = copyableDashboardPanels(blob, anyTeam);
+    panels.panels[0].title = "changed";
+    expect(blob.panels[0].title).toBe("a");
+  });
+
+  it("leaves out panels whose team the caller cannot use", () => {
+    const blob: DashboardPanels = {
+      version: 1,
+      panels: [panel("a", { team_id: 1 }), panel("b", { team_id: 2 })],
+      layout: [],
+    };
+    const { panels, skipped } = copyableDashboardPanels(blob, (teamId) => teamId === 1);
+    expect(panels.panels.map((p) => p.id)).toEqual(["a"]);
+    expect(skipped).toBe(1);
   });
 });
