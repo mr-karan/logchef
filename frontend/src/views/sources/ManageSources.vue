@@ -197,7 +197,7 @@ onMounted(async () => {
                         </TableHeader>
                         <TableBody>
                             <TableRow v-for="source in sortedSources" :key="source.id">
-                                <TableCell class="font-medium">
+                                <TableCell class="max-w-[280px] whitespace-normal font-medium">
                                     <a @click="router.push({ name: 'SourceInspection', query: { sourceId: source.id } })"
                                         class="hover:underline cursor-pointer">
                                         {{ source.name }}
