@@ -155,14 +155,8 @@ function msToRfc3339(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-// A UTC instant as "YYYY-MM-DD HH:MM:SS" (logchefql translate/query endpoint
-// contract). Unlike the histogram/logs-query endpoints, these two do NOT
-// accept RFC3339 for ClickHouse-backed sources: the compiler bakes this
-// string straight into `toDateTime(str, tz)` and its validator rejects
-// anything but this exact layout (400 "invalid time format: expected
-// 'YYYY-MM-DD HH:MM:SS'"); `/translate` is worse — it silently omits
-// `full_sql` instead of erroring, which would run stat/timeseries panels
-// against the wrong (empty) query. So this format stays.
+// A UTC instant as "YYYY-MM-DD HH:MM:SS" for the logchefql translate/query
+// endpoints, which read it in the request's timezone (always UTC here).
 function msToSqlDateTime(ms: number): string {
   return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
 }

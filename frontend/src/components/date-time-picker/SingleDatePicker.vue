@@ -11,13 +11,13 @@ import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon, Clock } from "lucide-vue-next";
 import {
-  getLocalTimeZone,
   now,
   toZoned,
   CalendarDateTime,
   type DateValue,
 } from "@internationalized/date";
 import { cn } from "@/lib/utils";
+import { zoneFromPreference } from "@/utils/timeWindow";
 
 interface Props {
   modelValue?: string | null;
@@ -43,7 +43,8 @@ const emit = defineEmits<{
 const showPicker = ref(false);
 const showCalendar = ref(false);
 
-const currentTimezoneId = computed(() => getLocalTimeZone());
+// A variable's date value is browser wall clock, not the Explorer's window zone.
+const currentTimezoneId = computed(() => zoneFromPreference("local"));
 
 const timeValue = ref("00:00:00");
 
