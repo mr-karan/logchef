@@ -576,7 +576,22 @@ reasoning_effort = "high"
 max_tokens = 4096
 ```
 
-**Note:** After first boot, changes to `[ai]` section in `config.toml` are ignored. Manage settings via the UI.
+**Ask Chef.** Ask Chef is the read-only investigation assistant in the Explorer.
+It needs the Bedrock provider. Set `ask_chef_model` to a Bedrock model id or
+inference profile (Ask Chef is built for Claude Haiku 5.5). It reuses `enabled`,
+`provider`, `region` and the AWS credentials above. An empty `ask_chef_model`
+disables Ask Chef. Unlike the settings in the Admin UI, `ask_chef_model` is read
+from `config.toml` (or `LOGCHEF_AI__ASK_CHEF_MODEL`) on every start.
+```toml
+[ai]
+enabled = true
+provider = "bedrock"
+region = "us-east-1"
+model = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+ask_chef_model = ""  # Bedrock model id for Ask Chef; empty disables it
+```
+
+**Note:** After first boot, changes to `[ai]` section in `config.toml` are ignored, except `ask_chef_model`. Manage settings via the UI.
 
 ### Alerting
 

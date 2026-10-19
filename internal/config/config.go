@@ -399,6 +399,15 @@ type AIConfig struct {
 	Enabled bool `koanf:"enabled"`
 	// BaseURL for OpenAI API (default: "", which uses the standard OpenAI API endpoint)
 	BaseURL string `koanf:"base_url"`
+	// AskChefModel is the Bedrock model id of Ask Chef, the investigation
+	// assistant. Empty disables Ask Chef.
+	AskChefModel string `koanf:"ask_chef_model"`
+}
+
+// AskChefEnabled reports whether Ask Chef can run: AI is enabled, the
+// provider is Bedrock, and an Ask Chef model is set.
+func (c AIConfig) AskChefEnabled() bool {
+	return c.Enabled && c.Provider == "bedrock" && c.AskChefModel != ""
 }
 
 // AlertsConfig controls scheduling behaviour for alert rules.
