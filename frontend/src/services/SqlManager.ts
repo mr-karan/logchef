@@ -1,6 +1,5 @@
 import { analyzeQuery } from '@/utils/clickhouse-sql';
-import type { TimeRange } from '@/types/query';
-import { createTimeRangeCondition } from '@/utils/time-utils';
+import { sqlTimeCondition, type ResolvedWindow } from '@/utils/timeWindow';
 
 /**
  * SqlManager provides a centralized service for all SQL-related operations
@@ -17,14 +16,12 @@ export class SqlManager {
   static generateDefaultSql(params: {
     tableName: string;
     tsField: string;
-    timeRange: TimeRange;
+    window: ResolvedWindow;
     limit: number;
-    timezone?: string;
   }) {
-    const { tableName, tsField, timeRange, limit, timezone } = params;
+    const { tableName, tsField, window, limit } = params;
 
-    // Generate time condition
-    const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
+    const timeCondition = sqlTimeCondition(tsField, window);
 
     // Create a basic SQL query
     const sql = `SELECT *
@@ -47,17 +44,16 @@ LIMIT ${limit}`;
   static updateTimeRange(params: {
     sql: string;
     tsField: string;
-    timeRange: TimeRange;
-    timezone?: string;
+    window: ResolvedWindow;
   }) {
-    const { sql, tsField, timeRange, timezone } = params;
+    const { sql, tsField, window } = params;
 
     if (!sql.trim()) {
       return sql;
     }
 
     try {
-      const newTimeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
+      const newTimeCondition = sqlTimeCondition(tsField, window);
       const tsFieldForRegex = tsField.replace(/`/g, '');
       let updatedSql = sql;
       let conditionEffectivelyReplaced = false;
@@ -217,11 +213,10 @@ LIMIT ${limit}`;
   static prepareForExecution(params: {
     sql: string;
     tsField: string;
-    timeRange: TimeRange;
+    window: ResolvedWindow;
     limit: number;
-    timezone?: string;
   }) {
-    const { sql, tsField, timeRange, limit, timezone } = params;
+    const { sql, tsField, window, limit } = params;
 
     if (!sql.trim()) {
       return {
@@ -237,8 +232,7 @@ LIMIT ${limit}`;
       let processedSql = this.updateTimeRange({
         sql,
         tsField,
-        timeRange,
-        timezone
+        window
       });
 
       // Step 3: Ensure correct limit
@@ -261,18 +255,12 @@ LIMIT ${limit}`;
   }
 
   /**
-   * Creates a valid SQL time range condition
-   * @param tsField Timestamp field name
-   * @param timeRange Time range to use
-   * @param useTimezone Whether to include timezone info
-   * @param timezone Optional timezone to use (defaults to UTC)
+   * Creates a valid SQL time range condition, in the window's own zone
    */
   static createTimeCondition(params: {
     tsField: string;
-    timeRange: TimeRange;
-    timezone?: string;
+    window: ResolvedWindow;
   }) {
-    const { tsField, timeRange, timezone } = params;
-    return createTimeRangeCondition(tsField, timeRange, true, timezone);
+    return sqlTimeCondition(params.tsField, params.window);
   }
 }

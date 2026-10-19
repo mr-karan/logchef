@@ -15,7 +15,6 @@ import type { Alert, AlertHistoryEntry, AlertThresholdOperator } from "@/api/ale
 import { i18n } from "@/i18n";
 import router from "@/router";
 import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/utils/alertExplore";
-import { parseRelativeTimeString } from "@/utils/time";
 import type { ZoneId } from "@/utils/timeWindow";
 import { useAuthStore } from "./auth";
 import { useExploreStore } from "./explore";
@@ -139,13 +138,13 @@ function historyFrom(transcript: Turn[]): HistoryMessage[] {
   return history.slice(-MAX_HISTORY_ITEMS);
 }
 
-export function buildTurnRequest(context: AskChefContext, session: AskChefSession, message: string, timezone: string): TurnRequest {
-  const { subject, teamId, sourceId, start, end, mode, query } = context;
+export function buildTurnRequest(context: AskChefContext, session: AskChefSession, message: string): TurnRequest {
+  const { subject, teamId, sourceId, start, end, zone, mode, query } = context;
   const window = { start, end, ...(mode ? { mode } : {}), ...(query ? { query } : {}) };
   return {
     team_id: teamId,
     source_id: sourceId,
-    timezone,
+    timezone: zone,
     context:
       subject.kind === "alert"
         ? { kind: "alert", ...window, alert_id: subject.alertId, alert_history_id: subject.alertHistoryId }
@@ -183,27 +182,18 @@ export const useAskChefStore = defineStore("askChef", () => {
   function explorerContext(): AskChefContext | null {
     const explore = useExploreStore();
     const teamId = useTeamsStore().currentTeamId;
-    if (!teamId || !explore.sourceId) return null;
-    let range = explore.timeRange;
-    if (explore.selectedRelativeTime) {
-      try {
-        range = parseRelativeTimeString(explore.selectedRelativeTime);
-      } catch {
-        // An unknown preset keeps the last absolute range.
-      }
-    }
-    if (!range) return null;
+    if (!teamId || !explore.sourceId || !explore.hasWindow) return null;
     const mode = explore.activeMode;
     const query = (mode === "native" ? explore.nativeQuery : explore.logchefqlCode).trim();
-    // The instants the Explorer's log query reads, which converts in its timezone.
-    const timezone = explore.getTimezoneIdentifier();
+    // The window the Explorer's log query reads.
+    const { start, end, zone } = explore.resolved;
     return {
       subject: { kind: "explorer" },
       teamId,
       sourceId: explore.sourceId,
-      start: range.start.toDate(timezone).getTime(),
-      end: range.end.toDate(timezone).getTime(),
-      zone: usePreferencesStore().zone,
+      start,
+      end,
+      zone,
       mode,
       ...(query ? { query } : {}),
     };
@@ -235,7 +225,7 @@ export const useAskChefStore = defineStore("askChef", () => {
     const turnContext = pinned.value ?? explorerContext();
     if (!message || !turnContext || session.value.status.kind === "streaming") return;
 
-    const request = buildTurnRequest(turnContext, session.value, message, useExploreStore().getTimezoneIdentifier());
+    const request = buildTurnRequest(turnContext, session.value, message);
     session.value.transcript.push({ role: "user", text: message }, { role: "assistant", steps: [], text: "", evidenceIds: [], done: null });
     session.value.status = { kind: "streaming" };
     const turn = new AbortController();

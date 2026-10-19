@@ -3,7 +3,6 @@ import { useI18n } from "vue-i18n";
 
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useDark } from "@vueuse/core";
-import type { DateRange } from "reka-ui";
 import { Play } from "lucide-vue-next";
 import {
   Sheet,
@@ -25,11 +24,7 @@ import { useDashboardsStore } from "@/stores/dashboards";
 import { sourcesApi, asClickHouseConnection, type Source } from "@/api/sources";
 import { supportsQueryLanguage } from "@/lib/queryMetadata";
 import { isSuccessResponse } from "@/api/types";
-import {
-  timestampToCalendarDateTime,
-  parseRelativeTimeString,
-  calendarDateTimeToTimestamp,
-} from "@/utils/time";
+import { usePreferencesStore } from "@/stores/preferences";
 import type {
   DashboardPanel as PanelModel,
   DashboardPanelOptions,
@@ -298,34 +293,7 @@ onBeforeUnmount(() => {
 });
 
 // --- Embedded time-range control (bound to the dashboard store's range) ----
-const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
-
-const pickerModel = computed<DateRange>(() => {
-  const range = store.effectiveRange;
-  return {
-    start: timestampToCalendarDateTime(range.start),
-    end: timestampToCalendarDateTime(range.end),
-  } as DateRange;
-});
-
-const selectedQuickRange = computed(() => (store.timeRelative ? `Last ${store.timeRelative}` : null));
-
-function handleRangeChange(value: any) {
-  const quick = dateTimePickerRef.value?.selectedQuickRange as string | null | undefined;
-  if (quick) {
-    const relative = quick.replace(/^Last\s+/i, "").trim();
-    try {
-      parseRelativeTimeString(relative);
-      store.setRelativeTime(relative);
-      return;
-    } catch {
-      // not a parseable relative preset — fall through to absolute
-    }
-  }
-  if (value?.start && value?.end) {
-    store.setAbsoluteRange(calendarDateTimeToTimestamp(value.start), calendarDateTimeToTimestamp(value.end));
-  }
-}
+const preferencesStore = usePreferencesStore();
 
 function onOpenChange(value: boolean) {
   emit("update:open", value);
@@ -370,10 +338,10 @@ function onOpenChange(value: boolean) {
           </div>
           <div class="ml-auto flex items-center gap-2">
             <DateTimePicker
-              ref="dateTimePickerRef"
-              :model-value="pickerModel"
-              :selected-quick-range="selectedQuickRange"
-              @update:model-value="handleRangeChange"
+              :model-value="store.window"
+              :zone="preferencesStore.zone"
+              @update:model-value="store.setWindow"
+              @update:zone-preference="preferencesStore.updatePreferences({ timezone: $event })"
             />
             <Button
               type="button"

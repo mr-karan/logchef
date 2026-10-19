@@ -26,7 +26,7 @@ it('renders a wide schema in bounded steps and loads values only for rendered fi
   const pinia = createPinia()
   setActivePinia(pinia)
   const exploreStore = useExploreStore()
-  exploreStore.setRelativeTimeRange('15m')
+  exploreStore.setWindow({ kind: "relative", spec: "15m" })
 
   const state = reactive({
     // Every tenth field auto-loads (Int64); the rest are click-to-load strings.
@@ -96,7 +96,7 @@ it('auto-expands a low-cardinality field once and keeps it collapsed after the u
   }))
   const pinia = createPinia()
   setActivePinia(pinia)
-  useExploreStore().setRelativeTimeRange('15m')
+  useExploreStore().setWindow({ kind: "relative", spec: "15m" })
   const fields = [{ name: 'level', type: 'Int64' }, { name: 'message', type: 'String' }]
   const host = document.createElement('div')
   document.body.appendChild(host)

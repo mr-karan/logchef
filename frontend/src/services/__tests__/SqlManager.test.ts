@@ -3,23 +3,22 @@
 process.env.TZ = "Asia/Kolkata"; // UTC+05:30, no DST
 
 import { describe, it, expect } from "vitest";
-import { CalendarDateTime } from "@internationalized/date";
 import { SqlManager } from "@/services/SqlManager";
-import type { TimeRange } from "@/types/query";
+import { epochMs, zoneFromPreference, type ResolvedWindow } from "@/utils/timeWindow";
 
-const range: TimeRange = {
-  start: new CalendarDateTime(2026, 7, 14, 4, 30, 0),
-  end: new CalendarDateTime(2026, 7, 14, 6, 30, 0),
+const range: ResolvedWindow = {
+  start: epochMs(Date.UTC(2026, 6, 14, 4, 30)),
+  end: epochMs(Date.UTC(2026, 6, 14, 6, 30)),
+  zone: zoneFromPreference("utc"),
 };
 
 describe("SqlManager.generateDefaultSql — query timezone (#103)", () => {
-  it("emits wall-clock strings paired with the requested (non-browser) timezone", () => {
+  it("emits wall-clock strings paired with the window's (non-browser) zone", () => {
     const { success, sql } = SqlManager.generateDefaultSql({
       tableName: "logs.app",
       tsField: "timestamp",
-      timeRange: range,
+      window: range,
       limit: 100,
-      timezone: "UTC",
     });
 
     expect(success).toBe(true);
@@ -34,7 +33,7 @@ describe("SqlManager.generateDefaultSql — query timezone (#103)", () => {
 });
 
 describe("SqlManager.updateTimeRange — replaces existing window without shift (#103)", () => {
-  it("swaps the toDateTime BETWEEN window using the requested timezone", () => {
+  it("swaps the toDateTime BETWEEN window using the window's zone", () => {
     const original =
       "SELECT * FROM logs.app\n" +
       "WHERE `timestamp` BETWEEN toDateTime('2020-01-01 00:00:00', 'UTC') " +
@@ -44,8 +43,7 @@ describe("SqlManager.updateTimeRange — replaces existing window without shift 
     const updated = SqlManager.updateTimeRange({
       sql: original,
       tsField: "timestamp",
-      timeRange: range,
-      timezone: "UTC",
+      window: range,
     });
 
     expect(updated).toContain("toDateTime('2026-07-14 04:30:00', 'UTC')");

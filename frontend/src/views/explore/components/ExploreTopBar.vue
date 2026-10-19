@@ -5,7 +5,7 @@ import { computed, ref } from 'vue'
 import { useExploreStore } from '@/stores/explore'
 import { useAskChefStore } from '@/stores/askChef'
 import { useMetaStore } from '@/stores/meta'
-import { useTimeRange } from '@/composables/useTimeRange'
+import { usePreferencesStore } from '@/stores/preferences'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { DateTimePicker } from '@/components/date-time-picker'
@@ -51,6 +51,7 @@ const { toast } = useToast()
 const exploreStore = useExploreStore()
 const askChef = useAskChefStore()
 const metaStore = useMetaStore()
+const preferencesStore = usePreferencesStore()
 
 type TeamOption = UserTeamMembership | TeamWithMemberCount
 
@@ -69,7 +70,6 @@ const emit = defineEmits<{
   (e: 'update:source', sourceId: number): void
 }>()
 
-const { timeRange, quickRangeLabelToRelativeTime } = useTimeRange()
 const { limitOptions } = useLimitOptions()
 const selectedSourceTypeLabel = computed(() =>
   props.selectedSource ? getSourceTypeLabel(props.selectedSource) : null
@@ -77,16 +77,6 @@ const selectedSourceTypeLabel = computed(() =>
 
 // Time range display
 const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null)
-
-const quickRangeLabelFromRelativeTime = (relativeTime: string): string | null => {
-  const map: Record<string, string> = {
-    '5m': 'Last 5m', '15m': 'Last 15m', '30m': 'Last 30m',
-    '1h': 'Last 1h', '3h': 'Last 3h', '6h': 'Last 6h',
-    '12h': 'Last 12h', '24h': 'Last 24h', '2d': 'Last 2d',
-    '7d': 'Last 7d', '30d': 'Last 30d', '90d': 'Last 90d',
-  }
-  return map[relativeTime] || null
-}
 
 // Limit options
 const currentLimit = computed(() => exploreStore.limit)
@@ -120,19 +110,8 @@ const selectedTimeout = computed({
   set: (value: string) => exploreStore.setQueryTimeout(parseInt(value, 10))
 })
 
-function handleDateRangeChange(value: any) {
-  if (dateTimePickerRef.value?.selectedQuickRange) {
-    const relativeTime = quickRangeLabelToRelativeTime(dateTimePickerRef.value.selectedQuickRange)
-    if (relativeTime) {
-      exploreStore.setRelativeTimeRange(relativeTime)
-      return
-    }
-  }
-  timeRange.value = value
-}
-
-function handleTimezoneChange(timezoneId: string) {
-  exploreStore.setTimezoneIdentifier(timezoneId)
+function handleZonePreferenceChange(timezone: 'utc' | 'local') {
+  void preferencesStore.updatePreferences({ timezone })
 }
 
 function handleLimitChange(limit: number) {
@@ -163,36 +142,16 @@ function copyCliCommand() {
     return
   }
 
-  const tr = exploreStore.timeRange
   const command = generateCliCommand({
     teamId: props.currentTeamId,
     sourceId: props.currentSourceId,
-    mode: exploreStore.activeMode,
+    language: exploreStore.activeMode === 'logchefql' ? 'logchefql' : getNativeQueryLanguageForSource(props.selectedSource),
     query:
       exploreStore.activeMode === 'logchefql'
         ? exploreStore.logchefqlCode
         : exploreStore.nativeQuery,
-    relativeTime: exploreStore.selectedRelativeTime || undefined,
-    absoluteStart: tr?.start
-      ? new Date(
-          tr.start.year,
-          tr.start.month - 1,
-          tr.start.day,
-          'hour' in tr.start ? tr.start.hour : 0,
-          'minute' in tr.start ? tr.start.minute : 0,
-          'second' in tr.start ? tr.start.second : 0
-        )
-      : undefined,
-    absoluteEnd: tr?.end
-      ? new Date(
-          tr.end.year,
-          tr.end.month - 1,
-          tr.end.day,
-          'hour' in tr.end ? tr.end.hour : 0,
-          'minute' in tr.end ? tr.end.minute : 0,
-          'second' in tr.end ? tr.end.second : 0
-        )
-      : undefined,
+    window: exploreStore.window,
+    resolved: exploreStore.resolved,
     limit: exploreStore.limit,
     timeout: exploreStore.queryTimeout,
   })
@@ -253,8 +212,8 @@ defineExpose({
             <div class="cursor-not-allowed">
               <DateTimePicker
                 ref="dateTimePickerRef"
-                :model-value="timeRange"
-                :selectedQuickRange="exploreStore.selectedRelativeTime ? quickRangeLabelFromRelativeTime(exploreStore.selectedRelativeTime) : null"
+                :model-value="exploreStore.window"
+                :zone="exploreStore.resolved.zone"
                 :disabled="true"
                 class="opacity-50 pointer-events-none"
               />
@@ -267,11 +226,11 @@ defineExpose({
       </TooltipProvider>
       <DateTimePicker
         v-else
-        ref="dateTimePickerRef" 
-        :model-value="timeRange" 
-        :selectedQuickRange="exploreStore.selectedRelativeTime ? quickRangeLabelFromRelativeTime(exploreStore.selectedRelativeTime) : null"
-        @update:model-value="handleDateRangeChange" 
-        @update:timezone="handleTimezoneChange"
+        ref="dateTimePickerRef"
+        :model-value="exploreStore.window"
+        :zone="exploreStore.resolved.zone"
+        @update:model-value="exploreStore.setWindow"
+        @update:zone-preference="handleZonePreferenceChange"
       />
 
       <!-- Limit Dropdown -->

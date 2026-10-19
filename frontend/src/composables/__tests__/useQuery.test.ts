@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { CalendarDateTime, ZonedDateTime } from "@internationalized/date";
+import { epochMs, parseZoneId, zoneFromPreference, type ResolvedWindow } from "@/utils/timeWindow";
 
 const mocks = vi.hoisted(() => ({
   exploreStore: {
@@ -7,13 +7,8 @@ const mocks = vi.hoisted(() => ({
     activeMode: "logchefql" as "logchefql" | "native",
     logchefqlCode: 'lvl="WARN"',
     nativeQuery: "",
-    timeRange: {
-      start: { year: 2026, month: 8, day: 8, hour: 10, minute: 0, second: 0 },
-      end: { year: 2026, month: 8, day: 8, hour: 10, minute: 15, second: 0 },
-    },
+    resolved: null as unknown as ResolvedWindow,
     limit: 100,
-    selectedTimezoneIdentifier: "UTC",
-    getTimezoneIdentifier: vi.fn(() => "UTC"),
     lastExecutedState: null,
     isQueryStateDirty: false,
     canExecuteQuery: true,
@@ -77,6 +72,7 @@ describe("useQuery LogchefQL execution preflight", () => {
     mocks.exploreStore.activeMode = "logchefql";
     mocks.exploreStore.logchefqlCode = 'lvl="WARN"';
     mocks.exploreStore.nativeQuery = "";
+    mocks.exploreStore.resolved = { start: epochMs(Date.UTC(2026, 7, 8, 4, 30)), end: epochMs(Date.UTC(2026, 7, 8, 4, 45)), zone: zoneFromPreference("utc") };
   });
 
   it("executes valid LogchefQL for a VictoriaLogs source without requiring a table name", async () => {
@@ -147,50 +143,24 @@ describe("useQuery LogchefQL execution preflight", () => {
     expect(mocks.convertVariables).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { timezone: "UTC", start: "2026-08-08 04:30:00", end: "2026-08-08 04:45:00" },
-    { timezone: "Asia/Kolkata", start: "2026-08-08 10:00:00", end: "2026-08-08 10:15:00" },
-  ] as const)("formats a ZonedDateTime in the paired $timezone timezone", async ({ timezone, start, end }) => {
-    mocks.exploreStore.timeRange = {
-      start: new ZonedDateTime(2026, 8, 8, "Asia/Kolkata", 19_800_000, 10, 0, 0),
-      end: new ZonedDateTime(2026, 8, 8, "Asia/Kolkata", 19_800_000, 10, 15, 0),
-    };
-    mocks.exploreStore.getTimezoneIdentifier.mockReturnValue(timezone);
-    mocks.translate.mockResolvedValue({
-      data: {
-        valid: true,
-        generated_query: "SELECT 1",
-      },
-    });
+  it.each([zoneFromPreference("utc"), parseZoneId("Asia/Kolkata") ?? zoneFromPreference("utc")])(
+    "sends the resolved window as RFC3339 instants with its %s zone",
+    async (zone) => {
+      mocks.exploreStore.resolved = { start: epochMs(Date.UTC(2026, 7, 8, 4, 30)), end: epochMs(Date.UTC(2026, 7, 8, 4, 45)), zone };
+      mocks.translate.mockResolvedValue({
+        data: {
+          valid: true,
+          generated_query: "SELECT 1",
+        },
+      });
 
-    await useQuery().changeMode("native");
+      await useQuery().changeMode("native");
 
-    expect(mocks.translate).toHaveBeenCalledWith(1, 2, expect.objectContaining({
-      start_time: start,
-      end_time: end,
-      timezone,
-    }));
-  });
-
-  it("preserves CalendarDateTime wall-clock values for the selected timezone", async () => {
-    mocks.exploreStore.timeRange = {
-      start: new CalendarDateTime(2026, 8, 8, 10, 0, 0),
-      end: new CalendarDateTime(2026, 8, 8, 10, 15, 0),
-    };
-    mocks.exploreStore.getTimezoneIdentifier.mockReturnValue("Asia/Kolkata");
-    mocks.translate.mockResolvedValue({
-      data: {
-        valid: true,
-        generated_query: "SELECT 1",
-      },
-    });
-
-    await useQuery().changeMode("native");
-
-    expect(mocks.translate).toHaveBeenCalledWith(1, 2, expect.objectContaining({
-      start_time: "2026-08-08 10:00:00",
-      end_time: "2026-08-08 10:15:00",
-      timezone: "Asia/Kolkata",
-    }));
-  });
+      expect(mocks.translate).toHaveBeenCalledWith(1, 2, expect.objectContaining({
+        start_time: "2026-08-08T04:30:00.000Z",
+        end_time: "2026-08-08T04:45:00.000Z",
+        timezone: zone,
+      }));
+    },
+  );
 });

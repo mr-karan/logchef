@@ -1,8 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
-import { CalendarDateTime, ZonedDateTime, parseDateTime } from "@internationalized/date";
 import type { Source } from "@/api/sources";
+import { epochMs, relativeWindow, type TimeWindow } from "@/utils/timeWindow";
+
+// A non-UTC browser zone, so any browser-zone wall clock shows up as a shift.
+process.env.TZ = "Asia/Kolkata";
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -32,6 +35,7 @@ const mocks = vi.hoisted(() => ({
   exploreGetLogs: vi.fn(),
   exploreCancelQuery: vi.fn(),
   exploreCreateQueryShare: vi.fn(),
+  histogramFetch: vi.fn(),
 }));
 
 vi.mock("@/stores/sources", async () => {
@@ -54,7 +58,7 @@ vi.mock("@/stores/exploreHistogram", () => ({
   useExploreHistogramStore: () => ({
     clearHistogramData: vi.fn(),
     setGroupByField: vi.fn(),
-    fetchHistogramData: vi.fn().mockResolvedValue({ success: true }),
+    fetchHistogramData: mocks.histogramFetch,
     histogramData: [],
     isLoadingHistogram: false,
     histogramError: null,
@@ -104,7 +108,17 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
 import { useExploreStore } from "../explore";
 import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
-import { timestampToCalendarDateTime } from "@/utils/time";
+import { usePreferencesStore } from "../preferences";
+
+function relative(spec: string): TimeWindow {
+  const window = relativeWindow(spec);
+  if (!window) throw new Error(`bad spec ${spec}`);
+  return window;
+}
+
+function absolute(start: number, end: number): TimeWindow {
+  return { kind: "absolute", start: epochMs(start), end: epochMs(end) };
+}
 
 function makeSource(overrides: Partial<Source> = {}): Source {
   return {
@@ -138,6 +152,7 @@ describe("explore store", () => {
     setActivePinia(createPinia());
     localStorage.clear();
     vi.clearAllMocks();
+    mocks.histogramFetch.mockResolvedValue({ success: true });
     mocks.sourcesState.currentSourceDetails = null;
     mocks.sourcesState.teamSources = [];
     mocks.sourcesState.isLoadingTeamSources = false;
@@ -290,32 +305,26 @@ describe("explore store", () => {
 
     it("re-resolves the relative time window on every execution instead of reusing a stale one", async () => {
       const store = useExploreStore();
-      store.setRelativeTimeRange("15m");
-      const firstEnd = store.timeRange?.end.toString();
+      store.setWindow(relative("15m"));
+      const firstEnd = store.resolved.end;
 
       vi.setSystemTime(new Date("2026-01-01T00:10:00Z"));
       // No team is selected, so this fails fast inside withLoading — but the
       // relative-time refresh at the top of executeQuery runs unconditionally
       // before that guard, which is exactly the behavior being pinned here.
       await store.executeQuery();
-      const secondEnd = store.timeRange?.end.toString();
 
-      expect(store.selectedRelativeTime).toBe("15m");
-      expect(secondEnd).not.toEqual(firstEnd);
+      expect(store.window).toEqual(relative("15m"));
+      expect(store.resolved.end).toBe(Date.parse("2026-01-01T00:10:00Z"));
+      expect(store.resolved.end).not.toBe(firstEnd);
     });
 
     it("leaves an absolute time range untouched across executions", async () => {
       const store = useExploreStore();
-      store.setTimeConfiguration({
-        absoluteRange: {
-          start: timestampToCalendarDateTime(0),
-          end: timestampToCalendarDateTime(1_000_000),
-        },
-      });
-      const before = store.timeRange;
+      store.setWindow(absolute(0, 1_000_000));
       await store.executeQuery();
-      expect(store.timeRange).toEqual(before);
-      expect(store.selectedRelativeTime).toBeNull();
+      expect(store.window).toEqual(absolute(0, 1_000_000));
+      expect(store.resolved).toMatchObject({ start: 0, end: 1_000_000 });
     });
   });
 
@@ -330,7 +339,7 @@ describe("explore store", () => {
       contextStore.selectSource(VL_SOURCE.id);
 
       const store = useExploreStore();
-      store.setRelativeTimeRange("15m");
+      store.setWindow(relative("15m"));
       store.setLogchefqlCode('lvl="WARN"');
       mocks.logchefqlQuery.mockResolvedValue({
         data: {
@@ -361,92 +370,97 @@ describe("explore store", () => {
       );
     });
 
-    it("sends CalendarDateTime wall clocks paired with the selected timezone", async () => {
+    function exploreVictoriaLogsWith(window: TimeWindow) {
       mocks.teamsState.currentTeamId = 1;
       mocks.sourcesState.currentSourceDetails = VL_SOURCE;
       mocks.sourcesState.teamSources = [VL_SOURCE];
-
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
       contextStore.selectSource(VL_SOURCE.id);
-
       const store = useExploreStore();
-      store.setTimezoneIdentifier("Asia/Kolkata");
-      store.setTimeConfiguration({
-        absoluteRange: {
-          start: new CalendarDateTime(2026, 8, 8, 10, 0, 0),
-          end: new CalendarDateTime(2026, 8, 8, 10, 15, 0),
-        },
-      });
-      store.setLogchefqlCode('lvl="WARN"');
+      store.setWindow(window);
       mocks.logchefqlQuery.mockResolvedValue({
-        data: {
-          logs: [],
-          columns: [],
-          stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 },
-        },
+        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
       });
+      return store;
+    }
 
+    it("sends the window as RFC3339 instants with the preference zone", async () => {
+      const store = exploreVictoriaLogsWith(absolute(Date.UTC(2026, 7, 8, 4, 30), Date.UTC(2026, 7, 8, 4, 45)));
       await store.executeQuery();
 
       expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
         1,
         VL_SOURCE.id,
         expect.objectContaining({
-          start_time: "2026-08-08 10:00:00",
-          end_time: "2026-08-08 10:15:00",
-          timezone: "Asia/Kolkata",
+          start_time: "2026-08-08T04:30:00.000Z",
+          end_time: "2026-08-08T04:45:00.000Z",
+          timezone: store.resolved.zone,
         }),
         expect.anything(),
       );
     });
 
-    it("converts a ZonedDateTime instant to UTC wall clocks", async () => {
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      mocks.sourcesState.teamSources = [VL_SOURCE];
+    it("resolves today at midnight in the preference zone, not the browser's", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-10-19T20:45:00Z")); // already Oct 20 in the IST browser
+      try {
+        mocks.teamsState.currentTeamId = 1;
+        mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+        mocks.sourcesState.teamSources = [VL_SOURCE];
+        useContextStore().selectTeam(1);
+        mocks.logchefqlQuery.mockResolvedValue({
+          data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
+        });
+        const preferences = usePreferencesStore();
+        const store = useExploreStore();
+        await preferences.updatePreferences({ timezone: "utc" });
+        store.initializeFromUrl({ team: "1", source: String(VL_SOURCE.id), t: "today", mode: "logchefql", q: "" });
+        await store.executeQuery();
 
+        expect(mocks.logchefqlQuery.mock.lastCall?.[2]).toMatchObject({
+          start_time: "2026-10-19T00:00:00.000Z",
+          end_time: "2026-10-19T20:45:00.000Z",
+          timezone: "UTC",
+        });
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
+  describe("evidence links", () => {
+    it("opens a link's start and end ms as instants for the query and the histogram", async () => {
+      const start = Date.UTC(2026, 9, 19, 4);
+      const end = Date.UTC(2026, 9, 19, 5);
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
+      mocks.sourcesState.teamSources = [CH_SOURCE];
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
-      contextStore.selectSource(VL_SOURCE.id);
-
+      const preferences = usePreferencesStore();
       const store = useExploreStore();
-      store.setTimezoneIdentifier("UTC");
-      store.setTimeConfiguration({
-        absoluteRange: {
-          start: new ZonedDateTime(2026, 8, 8, "Asia/Kolkata", 19_800_000, 10, 0, 0),
-          end: new ZonedDateTime(2026, 8, 8, "Asia/Kolkata", 19_800_000, 10, 15, 0),
-        },
-      });
-      store.setLogchefqlCode('lvl="WARN"');
+      await preferences.updatePreferences({ timezone: "utc" });
       mocks.logchefqlQuery.mockResolvedValue({
-        data: {
-          logs: [],
-          columns: [],
-          stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 },
-        },
+        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 }, generated_sql: "SELECT 1" },
       });
 
+      store.initializeFromUrl({ team: "1", source: String(CH_SOURCE.id), start: String(start), end: String(end), mode: "logchefql", q: "" });
       await store.executeQuery();
 
-      expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
-        1,
-        VL_SOURCE.id,
-        expect.objectContaining({
-          start_time: "2026-08-08 04:30:00",
-          end_time: "2026-08-08 04:45:00",
-          timezone: "UTC",
-        }),
-        expect.anything(),
-      );
+      expect(mocks.logchefqlQuery.mock.lastCall?.[2]).toMatchObject({
+        start_time: new Date(start).toISOString(),
+        end_time: new Date(end).toISOString(),
+        timezone: "UTC",
+      });
+      expect(mocks.histogramFetch.mock.lastCall?.[0]).toMatchObject({ window: { start, end, zone: "UTC" } });
     });
   });
 
   describe("Ask Chef context window", () => {
-    // A zone no test machine runs in, so a browser-zone conversion shows up.
     // Ask Chef reads its window before the query runs: watchers left by
     // earlier tests reset the context store while the query is awaited.
-    const timezone = "Pacific/Chatham";
+    const QUERY = 'ask="chef"';
 
     function exploreVictoriaLogs() {
       mocks.teamsState.currentTeamId = 1;
@@ -459,21 +473,19 @@ describe("explore store", () => {
         data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
       });
       const store = useExploreStore();
-      store.setTimezoneIdentifier(timezone);
+      store.setLogchefqlCode(QUERY);
       return store;
     }
 
-    async function logQueryWindow(): Promise<{ start: number; end: number }> {
+    // Stores left by earlier tests may also query, so read this store's request by its query.
+    async function logQueryWindow(): Promise<{ start: number; end: number; zone: string }> {
       await useExploreStore().executeQuery();
-      const request = mocks.logchefqlQuery.mock.calls[0][2];
-      const instant = (wallClock: string) => parseDateTime(wallClock.replace(" ", "T")).toDate(request.timezone).getTime();
-      return { start: instant(request.start_time), end: instant(request.end_time) };
+      const request = mocks.logchefqlQuery.mock.calls.filter((call) => call[2].query === QUERY).at(-1)?.[2];
+      return { start: Date.parse(request.start_time), end: Date.parse(request.end_time), zone: request.timezone };
     }
 
     it("is the window the log query reads for an absolute range", async () => {
-      exploreVictoriaLogs().setTimeConfiguration({
-        absoluteRange: { start: new CalendarDateTime(2026, 8, 8, 10, 0, 0), end: new CalendarDateTime(2026, 8, 8, 10, 15, 0) },
-      });
+      exploreVictoriaLogs().setWindow(absolute(Date.UTC(2026, 7, 8, 4, 30), Date.UTC(2026, 7, 8, 4, 45)));
 
       const askChef = useAskChefStore();
       askChef.openForExplorer();
@@ -485,7 +497,7 @@ describe("explore store", () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-08-08T10:00:00Z"));
       try {
-        exploreVictoriaLogs().setRelativeTimeRange("1h");
+        exploreVictoriaLogs().setWindow(relative("1h"));
 
         const askChef = useAskChefStore();
         askChef.openForExplorer();
@@ -505,12 +517,7 @@ describe("explore store", () => {
       mocks.teamsState.currentTeamId = 1;
 
       const store = useExploreStore();
-      store.setTimeConfiguration({
-        absoluteRange: {
-          start: timestampToCalendarDateTime(0),
-          end: timestampToCalendarDateTime(60_000),
-        },
-      });
+      store.setWindow(absolute(0, 60_000));
       store.setLimit(250);
 
       const params = store.urlQueryParameters;
@@ -528,7 +535,7 @@ describe("explore store", () => {
       mocks.teamsState.currentTeamId = 1;
 
       const store = useExploreStore();
-      store.setRelativeTimeRange("1h");
+      store.setWindow(relative("1h"));
 
       const params = store.urlQueryParameters;
       expect(params.t).toBe("1h");
@@ -562,7 +569,7 @@ describe("explore store", () => {
       mocks.teamsState.currentTeamId = 1;
 
       const store = useExploreStore();
-      store.setRelativeTimeRange("15m");
+      store.setWindow(relative("15m"));
       store.setSelectedQueryId("42");
 
       // hasDivergedFromSavedQuery is false here because no savedQuerySnapshot
@@ -579,7 +586,7 @@ describe("explore store", () => {
       mocks.teamsState.currentTeamId = 1;
 
       const store = useExploreStore();
-      store.setRelativeTimeRange("15m");
+      store.setWindow(relative("15m"));
       store.setActiveShareToken("tok123");
 
       const params = store.urlQueryParameters;
@@ -598,7 +605,7 @@ describe("explore store", () => {
     it("defaults the time range to 15m when nothing is present", () => {
       const store = useExploreStore();
       const result = store.initializeFromUrl({});
-      expect(store.selectedRelativeTime).toBe("15m");
+      expect(store.window).toEqual(relative("15m"));
       expect(result.shouldExecute).toBe(false); // no source selected yet
     });
 
@@ -641,7 +648,7 @@ describe("explore store", () => {
 
   // ---------------------------------------------------------------------------
   // #102 — draft persistence must survive a reload. On a fresh load
-  // initializeFromUrl runs setRelativeTimeRange/setLimit (each persists a draft)
+  // initializeFromUrl sets the window and limit (each could persist a draft)
   // while the query text is still empty; without suppression those overwrite
   // the saved draft before it is restored.
   // ---------------------------------------------------------------------------
@@ -676,7 +683,7 @@ describe("explore store", () => {
       ctx.selectTeam(1);
       ctx.selectSource(10);
       const store = useExploreStore();
-      store.setRelativeTimeRange("7d");
+      store.setWindow(relative("7d"));
       store.setLogchefqlCode('level="debug"');
       setActivePinia(createPinia());
       mocks.teamsState.currentTeamId = 1;
@@ -691,7 +698,7 @@ describe("explore store", () => {
 
       expect(store.logchefqlCode).toBe("");
       expect(store.activeMode).toBe("logchefql");
-      expect(store.selectedRelativeTime).toBeNull();
+      expect(store.window).toEqual(absolute(1000, 2000));
       expect(store.urlQueryParameters).toMatchObject({ start: "1000", end: "2000" });
       expect(result.shouldExecute).toBe(true);
     });
@@ -701,13 +708,13 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.initializeFromUrl({ team: "1", source: "10", t: "1h" });
       expect(store.logchefqlCode).toBe("");
-      expect(store.selectedRelativeTime).toBe("1h");
+      expect(store.window).toEqual(relative("1h"));
 
       saveDraft();
       const next = useExploreStore();
       next.initializeFromUrl({ team: "1", source: "10", mode: "logchefql" });
       expect(next.logchefqlCode).toBe("");
-      expect(next.selectedRelativeTime).not.toBe("7d");
+      expect(next.window).not.toEqual(relative("7d"));
     });
 
     it("still restores the draft when the link names no query", () => {
@@ -717,7 +724,7 @@ describe("explore store", () => {
       store.initializeFromUrl({ team: "1", source: "10" });
 
       expect(store.logchefqlCode).toBe('level="debug"');
-      expect(store.selectedRelativeTime).toBe("7d");
+      expect(store.window).toEqual(relative("7d"));
     });
   });
 
@@ -786,7 +793,7 @@ describe("explore store", () => {
       ctx.selectSource(1);
 
       const store = useExploreStore();
-      store.setRelativeTimeRange("15m");
+      store.setWindow(relative("15m"));
       store.setLogchefqlCode('level="error"');
 
       // The FIRST query call (this store's executeQuery, invoked synchronously

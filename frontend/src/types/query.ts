@@ -1,5 +1,5 @@
 import type { FilterCondition } from '@/api/logchefql';
-import type { DateValue } from '@internationalized/date';
+import type { ResolvedWindow } from '@/utils/timeWindow';
 
 // Re-export for backwards compatibility
 export type QueryCondition = FilterCondition;
@@ -10,14 +10,6 @@ export interface SchemaInfo {
     name: string;
     type: string;
   }>;
-}
-
-/**
- * Time range representation with start and end dates
- */
-export interface TimeRange {
-  start: DateValue;
-  end: DateValue;
 }
 
 /**
@@ -37,7 +29,7 @@ export interface QueryOptions {
   tsField: string;
 
   // Query constraints
-  timeRange: TimeRange;
+  window: ResolvedWindow;
   limit: number;
   whereConditions?: string[];
 
@@ -46,9 +38,6 @@ export interface QueryOptions {
 
   // LogchefQL (when translating)
   logchefqlQuery?: string;
-
-  // Add optional timezone for query generation
-  timezone?: string;
 
   // Schema information for type-aware SQL generation
   schema?: SchemaInfo;

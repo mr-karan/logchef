@@ -19,7 +19,8 @@ import {
 import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
-import { parseRelativeTimeString, calendarDateTimeToTimestamp } from "@/utils/time";
+import { epochMs, parseRelativeSpec, relativeWindow, resolveWindow, type TimeWindow } from "@/utils/timeWindow";
+import { usePreferencesStore } from "@/stores/preferences";
 import { isCanceledError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
 
@@ -39,7 +40,7 @@ const TABLE_LIMIT_MAX = 1000;
 // a full refreshAllPanels per emission.
 const REFRESH_COALESCE_MS = 80;
 
-const DEFAULT_RELATIVE_TIME = "15m";
+const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
 
 // UI fallback for the "Default" cache-TTL label shown in the edit toolbar when
 // the server advertises no policy (old server). The authoritative default now
@@ -99,8 +100,7 @@ interface DashboardsState {
   dashboards: Dashboard[];
   current: Dashboard | null;
   panelStates: Record<string, PanelState>;
-  timeRelative: string | null;
-  timeAbsolute: EffectiveRange | null;
+  window: TimeWindow;
   // The range actually EXECUTED by the most recent refresh (snapped/moving),
   // for toolbar display. Distinct from `effectiveRange` (the user's SELECTED
   // range). null until the first refresh runs.
@@ -258,8 +258,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     dashboards: [],
     current: null,
     panelStates: {},
-    timeRelative: DEFAULT_RELATIVE_TIME,
-    timeAbsolute: null,
+    window: DEFAULT_WINDOW,
     appliedRange: null,
     refreshIntervalMs: 0,
     isEditing: false,
@@ -298,8 +297,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const dashboards = computed(() => state.data.value.dashboards);
   const current = computed(() => state.data.value.current);
   const panelStates = computed(() => state.data.value.panelStates);
-  const timeRelative = computed(() => state.data.value.timeRelative);
-  const timeAbsolute = computed(() => state.data.value.timeAbsolute);
+  const preferencesStore = usePreferencesStore();
+  const timeWindow = computed(() => state.data.value.window);
   const appliedRange = computed(() => state.data.value.appliedRange);
   const refreshIntervalMs = computed(() => state.data.value.refreshIntervalMs);
 
@@ -320,74 +319,24 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   });
 
   const effectiveRange = computed<EffectiveRange>(() => {
-    const rel = state.data.value.timeRelative;
-    if (rel) {
-      try {
-        const { start, end } = parseRelativeTimeString(rel);
-        return {
-          start: calendarDateTimeToTimestamp(start),
-          end: calendarDateTimeToTimestamp(end),
-        };
-      } catch {
-        // fall through to absolute/default
-      }
-    }
-    if (state.data.value.timeAbsolute) {
-      return state.data.value.timeAbsolute;
-    }
-    const { start, end } = parseRelativeTimeString(DEFAULT_RELATIVE_TIME);
-    return {
-      start: calendarDateTimeToTimestamp(start),
-      end: calendarDateTimeToTimestamp(end),
-    };
+    const { start, end } = resolveWindow(state.data.value.window, preferencesStore.zone, epochMs(Date.now()));
+    return { start, end };
   });
 
   // Resolve the range to EXECUTE for a refresh, anchored on a caller-supplied
   // `nowMs` (captured once per refresh — do NOT read the memoized effectiveRange
-  // here, that's what freezes `now`). Classifies the current selection, derives
-  // the unsnapped base range from the existing time parsing, then delegates the
+  // here, that's what freezes `now`). Classifies the current selection, resolves
+  // the unsnapped base range in the preference zone, then delegates the
   // snap/moving-window decision to the pure resolveAppliedRange.
   function computeAppliedRange(nowMs: number, effTtlSeconds: number): EffectiveRange {
-    const abs = state.data.value.timeAbsolute;
-    if (abs) {
-      return resolveAppliedRange({
-        kind: "absolute",
-        baseStart: abs.start,
-        baseEnd: abs.end,
-        durationMs: 0,
-        effTtlSeconds,
-        nowMs,
-      });
+    const window = state.data.value.window;
+    const { start, end } = resolveWindow(window, preferencesStore.zone, epochMs(nowMs));
+    if (window.kind === "absolute") {
+      return resolveAppliedRange({ kind: "absolute", baseStart: start, baseEnd: end, durationMs: 0, effTtlSeconds, nowMs });
     }
-    const rel = state.data.value.timeRelative ?? DEFAULT_RELATIVE_TIME;
-    const parse = (s: string) => {
-      const { start, end } = parseRelativeTimeString(s);
-      return { start: calendarDateTimeToTimestamp(start), end: calendarDateTimeToTimestamp(end) };
-    };
     // today/yesterday are calendar-boundary presets — never snapped.
-    const kind: "calendar" | "rolling" = rel === "today" || rel === "yesterday" ? "calendar" : "rolling";
-    try {
-      const { start, end } = parse(rel);
-      return resolveAppliedRange({
-        kind,
-        baseStart: start,
-        baseEnd: end,
-        durationMs: end - start,
-        effTtlSeconds,
-        nowMs,
-      });
-    } catch {
-      // Unparseable relative → fall back to the default rolling window.
-      const { start, end } = parse(DEFAULT_RELATIVE_TIME);
-      return resolveAppliedRange({
-        kind: "rolling",
-        baseStart: start,
-        baseEnd: end,
-        durationMs: end - start,
-        effTtlSeconds,
-        nowMs,
-      });
-    }
+    const kind = parseRelativeSpec(window.spec)?.kind === "calendar" ? "calendar" : "rolling";
+    return resolveAppliedRange({ kind, baseStart: start, baseEnd: end, durationMs: end - start, effTtlSeconds, nowMs });
   }
 
   function getPanelState(panelId: string): PanelState {
@@ -435,9 +384,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       // A dashboard with a saved default opens in that range; one without keeps
       // the range the viewer already has.
       const defaultRange = state.data.value.current?.panels?.default_time_range;
-      if (defaultRange) {
-        state.data.value.timeRelative = defaultRange;
-        state.data.value.timeAbsolute = null;
+      const defaultWindow = defaultRange ? relativeWindow(defaultRange) : null;
+      if (defaultWindow) {
+        state.data.value.window = defaultWindow;
       }
       if (state.data.value.current) {
         await refreshAllPanels();
@@ -485,15 +434,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     }, REFRESH_COALESCE_MS);
   }
 
-  function setRelativeTime(relative: string) {
-    state.data.value.timeRelative = relative;
-    state.data.value.timeAbsolute = null;
-    scheduleRefresh();
-  }
-
-  function setAbsoluteRange(start: number, end: number) {
-    state.data.value.timeAbsolute = { start, end };
-    state.data.value.timeRelative = null;
+  function setWindow(next: TimeWindow) {
+    state.data.value.window = next;
     scheduleRefresh();
   }
 
@@ -820,7 +762,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (!draft) return;
     const { default_time_range: _previous, ...rest } = draft;
     setDraft(relative ? { ...rest, default_time_range: relative } : rest);
-    if (relative) setRelativeTime(relative);
+    const window = relative ? relativeWindow(relative) : null;
+    if (window) setWindow(window);
   }
 
   // Add or replace a panel in the draft (by id), then reflow the layout so the
@@ -1125,8 +1068,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     dashboards,
     current,
     panelStates,
-    timeRelative,
-    timeAbsolute,
+    window: timeWindow,
     appliedRange,
     refreshIntervalMs,
     effectiveRange,
@@ -1150,8 +1092,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     deleteDashboard,
 
     // time + refresh
-    setRelativeTime,
-    setAbsoluteRange,
+    setWindow,
     setRefreshInterval,
     refreshAllPanels,
     clearCurrent,

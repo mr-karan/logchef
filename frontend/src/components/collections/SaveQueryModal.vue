@@ -35,6 +35,9 @@ import { TOAST_DURATION } from '@/lib/constants';
 import { useToast } from '@/composables/useToast';
 import { storeToRefs } from "pinia";
 import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata, type ExploreMode } from '@/lib/queryMetadata';
+import type { SavedQueryTimeRange } from '@/api/savedQueries';
+import { epochMs, type TimeWindow } from '@/utils/timeWindow';
+import { encodeStoredRange } from '@/utils/timeWindowCodec';
 
 const { t } = useI18n();
 
@@ -389,45 +392,20 @@ function prepareQueryContent(saveTimestamp: boolean): string {
     // or stale time range/limit that has nothing to do with this edit.
     const useLiveExploreState = !isEditing.value || saveTimestampUserModified.value;
 
-    let timeRangeValue = null;
+    // A preserved range keeps the version it was written with, so v1
+    // browser-field ms are never read back as instants.
+    let stored: { version: number; timeRange: SavedQueryTimeRange | null } = { version: 2, timeRange: null };
     if (saveTimestamp) {
-      if (useLiveExploreState) {
-        // When editing from Collections (exploreStore is empty), preserve original time range if available
-        const hasExploreStoreTimeRange = exploreStore.selectedRelativeTime || exploreStore.timeRange;
-
-        if (hasExploreStoreTimeRange) {
-          // Use current explore store time range (user is editing from Explorer)
-          if (exploreStore.selectedRelativeTime) {
-            timeRangeValue = { relative: exploreStore.selectedRelativeTime };
-          } else {
-            timeRangeValue = {
-              absolute: {
-                start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
-                end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
-              }
-            };
-          }
-        } else if (content.timeRange) {
-          // Preserve original time range from saved query (editing from Collections)
-          timeRangeValue = content.timeRange;
-        } else {
-          // Fallback to default time range
-          timeRangeValue = {
-            absolute: {
-              start: Date.now() - 3600000,
-              end: Date.now()
-            }
-          };
-        }
+      if (useLiveExploreState && exploreStore.hasWindow) {
+        // Use current explore store time range (user is editing from Explorer)
+        stored = encodeStoredRange(exploreStore.window);
       } else {
-        // Metadata-only edit: keep the originally saved time range as-is
-        // (from the actual persisted record, not the live-editor `content`).
-        timeRangeValue = originalSavedContent.timeRange ?? {
-          absolute: {
-            start: Date.now() - 3600000,
-            end: Date.now()
-          }
-        };
+        // Keep the originally saved time range: editing from Collections, or a
+        // metadata-only edit (from the persisted record, not the live-editor `content`).
+        const original = useLiveExploreState ? content : originalSavedContent;
+        stored = original.timeRange
+          ? { version: typeof original.version === 'number' ? original.version : 1, timeRange: original.timeRange }
+          : encodeStoredRange(lastHourWindow());
       }
     }
 
@@ -436,9 +414,9 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       : (typeof originalSavedContent.limit === 'number' ? originalSavedContent.limit : 100);
 
     const simplifiedContent = {
-      version: content.version || 1,
+      version: stored.version,
       sourceId: content.sourceId || currentSourceId.value,
-      timeRange: timeRangeValue,
+      timeRange: stored.timeRange,
       limit: limitValue,
       content: queryContent,
       variables: allVariables.value?.length ? allVariables.value : (content.variables || []),
@@ -448,27 +426,12 @@ function prepareQueryContent(saveTimestamp: boolean): string {
   } catch (error) {
     console.error('Error preparing query content:', error);
 
-    const currentTime = Date.now();
-    const oneHourAgo = currentTime - 3600000;
-
-    let fallbackTimeRange = null;
-    if (saveTimestamp) {
-      if (exploreStore.selectedRelativeTime) {
-        fallbackTimeRange = { relative: exploreStore.selectedRelativeTime };
-      } else {
-        fallbackTimeRange = {
-          absolute: {
-            start: oneHourAgo,
-            end: currentTime
-          }
-        };
-      }
-    }
+    const fallback = saveTimestamp ? encodeStoredRange(exploreStore.window) : { version: 2, timeRange: null };
 
     return JSON.stringify({
-      version: 1,
+      version: fallback.version,
       sourceId: currentSourceId.value,
-      timeRange: fallbackTimeRange,
+      timeRange: fallback.timeRange,
       limit: exploreStore.limit || 100,
       content: displayQueryContent.value || '',
       variables: allVariables?.value || []
@@ -476,39 +439,9 @@ function prepareQueryContent(saveTimestamp: boolean): string {
   }
 }
 
-// Helper function to convert DateValue to timestamp
-function getTimestampFromDateValue(dateValue: any): number {
-  if (!dateValue) return Date.now();
-
-  try {
-    // Handle CalendarDateTime objects
-    if (dateValue.year && dateValue.month && dateValue.day) {
-      const date = new Date(
-        dateValue.year,
-        dateValue.month - 1,
-        dateValue.day,
-        'hour' in dateValue ? dateValue.hour : 0,
-        'minute' in dateValue ? dateValue.minute : 0,
-        'second' in dateValue ? dateValue.second : 0
-      );
-      return date.getTime();
-    }
-
-    // Handle Date objects or timestamps
-    if (dateValue instanceof Date) {
-      return dateValue.getTime();
-    }
-
-    // Handle timestamp numbers
-    if (typeof dateValue === 'number') {
-      return dateValue;
-    }
-  } catch (e) {
-    console.error("Error converting date value to timestamp:", e);
-  }
-
-  // Fallback
-  return Date.now();
+function lastHourWindow(): TimeWindow {
+  const end = Date.now();
+  return { kind: 'absolute', start: epochMs(end - 3_600_000), end: epochMs(end) };
 }
 
 // Handle form submission

@@ -28,16 +28,3 @@ export interface SaveQueryFormData {
 
 // Editor modes
 export type EditorMode = 'logchefql' | 'clickhouse-sql';
-
-// Query builder options
-export interface QueryBuildOptions {
-  tableName: string;
-  tsField: string;
-  startDateTime: CalendarDateTime;
-  endDateTime: CalendarDateTime;
-  limit: number;
-  logchefqlQuery?: string;
-}
-
-// Import this to avoid type errors
-import { CalendarDateTime } from '@internationalized/date';

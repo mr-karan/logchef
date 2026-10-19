@@ -5,6 +5,7 @@ import { createPinia } from "pinia";
 import DateTimePicker from "@/components/date-time-picker/DateTimePicker.vue";
 import { detectLocale, isLocalePreference, locales } from "./locales";
 import { i18n, setLocale } from "./index";
+import { zoneFromPreference } from "@/utils/timeWindow";
 
 afterEach(async () => { await setLocale("en"); });
 
@@ -52,7 +53,7 @@ describe("interface languages", () => {
 
   it("translates quick ranges without changing their stored identifiers", async () => {
     const host = document.createElement("div");
-    const app = createApp(DateTimePicker, { selectedQuickRange: "Last 24h" }).use(createPinia()).use(i18n);
+    const app = createApp(DateTimePicker, { modelValue: { kind: "relative", spec: "24h" }, zone: zoneFromPreference("utc") }).use(createPinia()).use(i18n);
     app.mount(host);
     try {
       expect(host.textContent).toContain("Last 24 hours");

@@ -34,6 +34,7 @@ vi.mock("@/api/dashboards", () => ({
 
 import { useDashboardsStore } from "../dashboards";
 import type { Dashboard, DashboardPanel, DashboardPanels } from "@/api/dashboards";
+import { epochMs } from "@/utils/timeWindow";
 
 function emptyPanels(): DashboardPanels {
   return { version: 1, layout: [], panels: [] };
@@ -186,17 +187,16 @@ describe("dashboards store — edit mode / dirty guard", () => {
 
   it("opens a dashboard in its saved default range, and keeps the viewer's range otherwise", async () => {
     const store = useDashboardsStore();
-    store.setRelativeTime("30m");
+    store.setWindow({ kind: "relative", spec: "30m" });
     mocks.get.mockResolvedValue({ status: "success", data: makeDashboard() });
     await store.loadDashboard(3);
-    expect(store.timeRelative).toBe("30m");
+    expect(store.window).toEqual({ kind: "relative", spec: "30m" });
 
-    store.setAbsoluteRange(1_000, 2_000);
+    store.setWindow({ kind: "absolute", start: epochMs(1_000), end: epochMs(2_000) });
     const withDefault = makeDashboard({ id: 4, panels: { ...emptyPanels(), default_time_range: "6h" } });
     mocks.get.mockResolvedValue({ status: "success", data: withDefault });
     await store.loadDashboard(4);
-    expect(store.timeRelative).toBe("6h");
-    expect(store.timeAbsolute).toBeNull();
+    expect(store.window).toEqual({ kind: "relative", spec: "6h" });
   });
 
   it("setDraftDefaultTimeRange saves the default, applies it, and can clear it", async () => {
@@ -204,7 +204,7 @@ describe("dashboards store — edit mode / dirty guard", () => {
     store.enterEdit();
     store.setDraftDefaultTimeRange("7d");
     expect(store.editDraft?.default_time_range).toBe("7d");
-    expect(store.timeRelative).toBe("7d");
+    expect(store.window).toEqual({ kind: "relative", spec: "7d" });
     // A later layout change must not drop it.
     store.upsertDraftPanel(tablePanel("p1"));
     expect(store.editDraft?.default_time_range).toBe("7d");

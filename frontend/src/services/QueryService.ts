@@ -1,14 +1,19 @@
 import { logchefqlApi } from '@/api/logchefql';
-import {
-  createTimeRangeCondition,
-  timeRangeToCalendarDateTime,
-  formatDateForSQL,
-  getUserTimezone
-} from '@/utils/time-utils';
-import type { QueryOptions, QueryResult, TimeRange } from '@/types/query';
+import { formatWallClock, sqlTimeCondition, type ResolvedWindow } from '@/utils/timeWindow';
+import type { QueryOptions, QueryResult } from '@/types/query';
 import { SqlManager } from './SqlManager';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
+
+function timeRangeInfo(tsField: string, window: ResolvedWindow): NonNullable<NonNullable<QueryResult['meta']>['timeRangeInfo']> {
+  return {
+    field: tsField,
+    startTime: formatWallClock(window.start, window.zone),
+    endTime: formatWallClock(window.end, window.zone),
+    timezone: window.zone,
+    isTimezoneAware: true
+  };
+}
 
 // Re-export QueryCondition for backwards compatibility
 export type { FilterCondition as QueryCondition } from '@/api/logchefql';
@@ -26,10 +31,9 @@ export class QueryService {
     const {
       tableName,
       tsField,
-      timeRange,
+      window,
       limit,
-      logchefqlQuery = '',
-      timezone
+      logchefqlQuery = ''
     } = options;
 
     // --- Input Validation ---
@@ -39,17 +43,8 @@ export class QueryService {
     if (!tsField) {
       return { success: false, sql: "", error: "Timestamp field name is required." };
     }
-    if (!timeRange.start || !timeRange.end) {
-      return { success: false, sql: "", error: "Invalid start or end date/time." };
-    }
     if (typeof limit !== 'number' || limit <= 0) {
       return { success: false, sql: "", error: "Invalid limit value." };
-    }
-
-    // Convert time range to CalendarDateTime (or use directly if it already is)
-    const calendarTimeRange = timeRangeToCalendarDateTime(timeRange);
-    if (!calendarTimeRange) {
-      return { success: false, sql: "", error: "Failed to convert time range to proper format." };
     }
 
     // --- Prepare base query components ---
@@ -60,8 +55,7 @@ export class QueryService {
     const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
     const orderByClause = `ORDER BY ${formattedTsField} DESC`;
 
-    // Create timezone-aware time condition
-    const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
+    const timeCondition = sqlTimeCondition(tsField, window);
     const limitClause = `LIMIT ${limit}`;
 
     // --- Translate LogchefQL via backend ---
@@ -138,15 +132,7 @@ export class QueryService {
       limitClause
     ].join('\n');
 
-    // Add timezone metadata
-    const userTimezone = getUserTimezone();
-    meta.timeRangeInfo = {
-      field: tsField,
-      startTime: formatDateForSQL(timeRange.start, false),
-      endTime: formatDateForSQL(timeRange.end, false),
-      timezone: timezone || userTimezone,
-      isTimezoneAware: true
-    };
+    meta.timeRangeInfo = timeRangeInfo(tsField, window);
 
     return {
       success: true,
@@ -168,12 +154,11 @@ export class QueryService {
     const {
       tableName,
       tsField,
-      timeRange,
-      limit,
-      timezone
+      window,
+      limit
     } = options;
 
-    if (!tableName || !tsField || !timeRange.start || !timeRange.end) {
+    if (!tableName || !tsField) {
       return { success: false, sql: "", error: "Missing required parameters." };
     }
 
@@ -182,7 +167,7 @@ export class QueryService {
       : `\`${tableName}\``;
 
     const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
-    const timeCondition = createTimeRangeCondition(tsField, timeRange, true, timezone);
+    const timeCondition = sqlTimeCondition(tsField, window);
 
     const sql = [
       'SELECT *',
@@ -199,13 +184,7 @@ export class QueryService {
       meta: {
         fieldsUsed: [],
         operations: ['sort', 'limit'],
-        timeRangeInfo: {
-          field: tsField,
-          startTime: formatDateForSQL(timeRange.start, false),
-          endTime: formatDateForSQL(timeRange.end, false),
-          timezone: timezone || getUserTimezone(),
-          isTimezoneAware: true
-        }
+        timeRangeInfo: timeRangeInfo(tsField, window)
       }
     };
   }
@@ -216,13 +195,10 @@ export class QueryService {
   static generateDefaultSQL(params: {
     tableName: string;
     tsField: string;
-    timeRange: any;
+    window: ResolvedWindow;
     limit: number;
   }) {
-    return SqlManager.generateDefaultSql({
-      ...params,
-      timezone: undefined
-    });
+    return SqlManager.generateDefaultSql(params);
   }
 
   /**
@@ -234,18 +210,16 @@ export class QueryService {
     query: string;
     tableName: string;
     tsField: string;
-    timeRange: any;
+    window: ResolvedWindow;
     limit: number;
-    timezone?: string;
   }): Promise<QueryResult> {
     // For SQL mode, delegate to SqlManager
     if (params.mode === 'clickhouse-sql') {
       return SqlManager.prepareForExecution({
         sql: params.query,
         tsField: params.tsField,
-        timeRange: params.timeRange,
-        limit: params.limit,
-        timezone: params.timezone
+        window: params.window,
+        limit: params.limit
       });
     }
 
@@ -253,10 +227,9 @@ export class QueryService {
     return this.translateLogchefQLToSQLAsync({
       tableName: params.tableName,
       tsField: params.tsField,
-      timeRange: params.timeRange,
+      window: params.window,
       limit: params.limit,
-      logchefqlQuery: params.query,
-      timezone: params.timezone
+      logchefqlQuery: params.query
     });
   }
 
@@ -269,18 +242,16 @@ export class QueryService {
     query: string;
     tableName: string;
     tsField: string;
-    timeRange: any;
+    window: ResolvedWindow;
     limit: number;
-    timezone?: string;
   }): QueryResult {
     // For SQL mode, delegate to SqlManager
     if (params.mode === 'clickhouse-sql') {
       return SqlManager.prepareForExecution({
         sql: params.query,
         tsField: params.tsField,
-        timeRange: params.timeRange,
-        limit: params.limit,
-        timezone: params.timezone
+        window: params.window,
+        limit: params.limit
       });
     }
 
@@ -288,10 +259,9 @@ export class QueryService {
     return this.translateLogchefQLToSQL({
       tableName: params.tableName,
       tsField: params.tsField,
-      timeRange: params.timeRange,
+      window: params.window,
       limit: params.limit,
-      logchefqlQuery: '', // Empty - actual translation happens async
-      timezone: params.timezone
+      logchefqlQuery: '' // Empty - actual translation happens async
     });
   }
 
@@ -301,8 +271,7 @@ export class QueryService {
   static updateTimeRange(
     sql: string,
     tsField: string,
-    newTimeRange: TimeRange,
-    timezone?: string
+    window: ResolvedWindow
   ): { success: boolean; sql?: string; error?: string } {
     try {
       if (!sql || typeof sql !== 'string') {
@@ -311,16 +280,7 @@ export class QueryService {
       if (!tsField || typeof tsField !== 'string') {
         return { success: false, error: 'Timestamp field is required' };
       }
-      if (!newTimeRange || !newTimeRange.start || !newTimeRange.end) {
-        return { success: false, error: 'Valid time range is required' };
-      }
-
-      const updatedSql = SqlManager.updateTimeRange({
-        sql,
-        tsField,
-        timeRange: newTimeRange,
-        timezone
-      });
+      const updatedSql = SqlManager.updateTimeRange({ sql, tsField, window });
 
       return { success: true, sql: updatedSql };
     } catch (error: any) {

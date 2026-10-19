@@ -9,7 +9,6 @@ import {
   VisXYContainer,
 } from "@unovis/vue";
 import { useExploreStore } from "@/stores/explore";
-import { usePreferencesStore } from "@/stores/preferences";
 import {
   ChartContainer,
   ChartCrosshair,
@@ -44,7 +43,6 @@ const emit = defineEmits<{
 }>();
 
 const exploreStore = useExploreStore();
-const preferencesStore = usePreferencesStore();
 
 const histogramData = computed(() => exploreStore.histogramData);
 const histogramError = computed(() => exploreStore.histogramError);
@@ -96,7 +94,7 @@ const chartRange = computed(() => {
     return {
       start: Date.now() - chartModel.value.bucketWidthMs,
       end: Date.now(),
-      zone: preferencesStore.zone,
+      zone: exploreStore.resolved.zone,
     };
   }
 
@@ -105,7 +103,7 @@ const chartRange = computed(() => {
   return {
     start: first.ts,
     end: last.bucketEndTs,
-    zone: preferencesStore.zone,
+    zone: exploreStore.resolved.zone,
   };
 });
 

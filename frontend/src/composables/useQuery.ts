@@ -5,11 +5,10 @@ import { useTeamsStore } from '@/stores/teams';
 import { QueryService } from '@/services/QueryService';
 import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
-import type { TimeRange } from '@/types/query';
 import { logchefqlApi } from '@/api/logchefql';
 import { useVariables } from "@/composables/useVariables";
 import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
-import { formatDateForSQL } from '@/utils/time-utils';
+import { toRfc3339 } from '@/utils/timeWindow';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'native';
@@ -82,9 +81,7 @@ export function useQuery() {
     // Only populate if we can get the info from the store
     if (exploreStore.lastExecutedState) {
       // Time range changed
-      const currentTimeRangeJSON = JSON.stringify(exploreStore.timeRange);
-      const lastTimeRangeJSON = exploreStore.lastExecutedState.timeRange;
-      dirtyState.timeRangeChanged = currentTimeRangeJSON !== lastTimeRangeJSON;
+      dirtyState.timeRangeChanged = JSON.stringify(exploreStore.window) !== exploreStore.lastExecutedState.window;
 
       // Limit changed
       dirtyState.limitChanged = exploreStore.limit !== exploreStore.lastExecutedState.limit;
@@ -146,19 +143,17 @@ export function useQuery() {
         
         if (currentTeamId && sourceId) {
           try {
-            // Format time range for backend
-            const timeRange = exploreStore.timeRange as TimeRange;
+            const { start, end, zone } = exploreStore.resolved;
 
             // Let the backend substitute typed variables exactly once.
             const query = logchefQuery.value?.trim() || '';
             const variables = getVariablesForApi();
-            const timezone = exploreStore.getTimezoneIdentifier();
 
             const response = await logchefqlApi.translate(currentTeamId, sourceId, {
               query,
-              start_time: formatDateForSQL(timeRange?.start, false, timezone),
-              end_time: formatDateForSQL(timeRange?.end, false, timezone),
-              timezone,
+              start_time: toRfc3339(start),
+              end_time: toRfc3339(end),
+              timezone: zone,
               limit: exploreStore.limit,
               variables: variables.length > 0 ? variables : undefined,
             });
@@ -222,9 +217,8 @@ export function useQuery() {
       const params = {
         tableName: sourcesStore.getCurrentSourceTableName || '',
         tsField: sourceDetails._meta_ts_field || 'timestamp',
-        timeRange: exploreStore.timeRange as TimeRange,
+        window: exploreStore.resolved,
         limit: exploreStore.limit,
-        timezone: exploreStore.selectedTimezoneIdentifier || undefined
       };
 
       return SqlManager.generateDefaultSql(params);
@@ -248,7 +242,7 @@ export function useQuery() {
       const params = {
         tableName: sourcesStore.getCurrentSourceTableName || '',
         tsField: sourceDetails._meta_ts_field || 'timestamp',
-        timeRange: exploreStore.timeRange as TimeRange,
+        window: exploreStore.resolved,
         limit: exploreStore.limit,
         logchefqlQuery
       };

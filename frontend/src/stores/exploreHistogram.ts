@@ -5,6 +5,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
+import { toRfc3339, type ResolvedWindow } from "@/utils/timeWindow";
 
 interface HistogramState {
   data: HistogramData[];
@@ -68,12 +69,11 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
   async function fetchHistogramData(options: {
     extraStreamFilters?: string[];
     queryText: string;
-    timeRange: { start: any; end: any } | null;
-    timezone?: string;
+    window: ResolvedWindow;
     queryTimeout?: number;
     granularity?: string;
   }) {
-    const { queryText, timeRange, timezone, queryTimeout, granularity } = options;
+    const { queryText, window, queryTimeout, granularity } = options;
 
     if (!queryText) {
       clearHistogramData();
@@ -109,37 +109,9 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         return { success: false, error: { message: "No source selected" } };
       }
 
-      let windowGranularity = granularity;
-      let startISO: string | undefined;
-      let endISO: string | undefined;
-      if (!windowGranularity && timeRange) {
-        startISO = new Date(
-          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
-          'hour' in timeRange.start ? timeRange.start.hour : 0,
-          'minute' in timeRange.start ? timeRange.start.minute : 0,
-          'second' in timeRange.start ? timeRange.start.second : 0
-        ).toISOString();
-        endISO = new Date(
-          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
-          'hour' in timeRange.end ? timeRange.end.hour : 0,
-          'minute' in timeRange.end ? timeRange.end.minute : 0,
-          'second' in timeRange.end ? timeRange.end.second : 0
-        ).toISOString();
-        windowGranularity = HistogramService.calculateOptimalGranularity(startISO, endISO);
-      } else if (timeRange) {
-        startISO = new Date(
-          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
-          'hour' in timeRange.start ? timeRange.start.hour : 0,
-          'minute' in timeRange.start ? timeRange.start.minute : 0,
-          'second' in timeRange.start ? timeRange.start.second : 0
-        ).toISOString();
-        endISO = new Date(
-          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
-          'hour' in timeRange.end ? timeRange.end.hour : 0,
-          'minute' in timeRange.end ? timeRange.end.minute : 0,
-          'second' in timeRange.end ? timeRange.end.second : 0
-        ).toISOString();
-      }
+      const startISO = toRfc3339(window.start);
+      const endISO = toRfc3339(window.end);
+      const windowGranularity = granularity || HistogramService.calculateOptimalGranularity(startISO, endISO);
 
       // Get variables for backend substitution
       const { getVariablesForApi } = useVariables();
@@ -149,8 +121,9 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         extra_stream_filters: options.extraStreamFilters,
         query_text: queryText,
         limit: 100,
-        window: windowGranularity || '1m',
-        timezone: timezone || undefined,
+        window: windowGranularity,
+        // Day buckets align to the zone the labels show.
+        timezone: window.zone,
         start_time: startISO,
         end_time: endISO,
         group_by: state.value.groupByField === "__none__" || state.value.groupByField === null

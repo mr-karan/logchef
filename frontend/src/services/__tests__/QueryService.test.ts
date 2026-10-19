@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import { QueryService } from '../QueryService';
-import { now, getLocalTimeZone } from '@internationalized/date';
+import { epochMs, zoneFromPreference } from '@/utils/timeWindow';
 
 vi.mock('@/stores/teams', () => ({
   useTeamsStore: vi.fn(() => ({
@@ -30,9 +30,10 @@ describe('QueryService', () => {
   const testOptions = {
     tableName: 'logs.vector_logs',
     tsField: 'timestamp',
-    timeRange: {
-      start: now(getLocalTimeZone()).subtract({ hours: 24 }),
-      end: now(getLocalTimeZone())
+    window: {
+      start: epochMs(Date.now() - 24 * 3_600_000),
+      end: epochMs(Date.now()),
+      zone: zoneFromPreference('local')
     },
     limit: 100
   };
@@ -167,8 +168,9 @@ describe('QueryService', () => {
       const sql = 'SELECT * FROM logs.vector_logs WHERE `timestamp` BETWEEN toDateTime(\'2023-01-01 00:00:00\') AND toDateTime(\'2023-01-02 00:00:00\') ORDER BY `timestamp` DESC LIMIT 100';
 
       const newTimeRange = {
-        start: now(getLocalTimeZone()).subtract({ days: 7 }),
-        end: now(getLocalTimeZone())
+        start: epochMs(Date.now() - 7 * 86_400_000),
+        end: epochMs(Date.now()),
+        zone: zoneFromPreference('local')
       };
 
       const result = QueryService.updateTimeRange(sql, 'timestamp', newTimeRange);

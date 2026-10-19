@@ -47,7 +47,8 @@ import {
   type GridGeometry,
 } from "@/utils/dashboardPanels";
 import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
-import { QUICK_RANGES, quickRangeLabelMessage, type QuickRange } from "@/lib/quickRanges";
+import { QUICK_RANGES } from "@/lib/quickRanges";
+import { windowLabel } from "@/utils/timeWindow";
 
 const { t, locale } = useI18n();
 
@@ -186,15 +187,13 @@ function selectCacheTtl(seconds: number) {
 // The relative range this dashboard opens with, saved in the panels blob.
 // Unset means viewers keep whatever range they already have.
 const defaultTimeRange = computed(() => store.editDraft?.default_time_range ?? null);
-function rangeLabel(range: QuickRange): string {
-  const { key, count } = quickRangeLabelMessage(range);
-  return t(key, { count }, count);
+function rangeLabel(spec: string): string {
+  const label = windowLabel({ kind: "relative", spec });
+  return label ? t(label.key, { count: label.count }, label.count) : spec;
 }
 const defaultTimeRangeLabel = computed(() => {
   const value = defaultTimeRange.value;
-  if (!value) return t("dashboards.defaultRangeNone");
-  const preset = QUICK_RANGES.find((r) => r.value === value);
-  return preset ? rangeLabel(preset) : value;
+  return value ? rangeLabel(value) : t("dashboards.defaultRangeNone");
 });
 
 // --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
@@ -592,10 +591,10 @@ onBeforeRouteUpdate((to, from) => {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 v-for="range in QUICK_RANGES"
-                :key="range.value"
+                :key="range"
                 class="text-xs"
-                :class="{ 'font-semibold': range.value === defaultTimeRange }"
-                @click="store.setDraftDefaultTimeRange(range.value)"
+                :class="{ 'font-semibold': range === defaultTimeRange }"
+                @click="store.setDraftDefaultTimeRange(range)"
               >
                 {{ rangeLabel(range) }}
               </DropdownMenuItem>
