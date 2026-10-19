@@ -5,6 +5,8 @@ import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { HistogramService, type HistogramData } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
+import { calendarDateTimeToISOString } from "@/utils/time";
+import type { TimeRange } from "@/types/query";
 
 interface HistogramState {
   data: HistogramData[];
@@ -68,8 +70,8 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
   async function fetchHistogramData(options: {
     extraStreamFilters?: string[];
     queryText: string;
-    timeRange: { start: any; end: any } | null;
-    timezone?: string;
+    timeRange: TimeRange | null;
+    timezone: string;
     queryTimeout?: number;
     granularity?: string;
   }) {
@@ -112,33 +114,10 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
       let windowGranularity = granularity;
       let startISO: string | undefined;
       let endISO: string | undefined;
-      if (!windowGranularity && timeRange) {
-        startISO = new Date(
-          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
-          'hour' in timeRange.start ? timeRange.start.hour : 0,
-          'minute' in timeRange.start ? timeRange.start.minute : 0,
-          'second' in timeRange.start ? timeRange.start.second : 0
-        ).toISOString();
-        endISO = new Date(
-          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
-          'hour' in timeRange.end ? timeRange.end.hour : 0,
-          'minute' in timeRange.end ? timeRange.end.minute : 0,
-          'second' in timeRange.end ? timeRange.end.second : 0
-        ).toISOString();
-        windowGranularity = HistogramService.calculateOptimalGranularity(startISO, endISO);
-      } else if (timeRange) {
-        startISO = new Date(
-          timeRange.start.year, timeRange.start.month - 1, timeRange.start.day,
-          'hour' in timeRange.start ? timeRange.start.hour : 0,
-          'minute' in timeRange.start ? timeRange.start.minute : 0,
-          'second' in timeRange.start ? timeRange.start.second : 0
-        ).toISOString();
-        endISO = new Date(
-          timeRange.end.year, timeRange.end.month - 1, timeRange.end.day,
-          'hour' in timeRange.end ? timeRange.end.hour : 0,
-          'minute' in timeRange.end ? timeRange.end.minute : 0,
-          'second' in timeRange.end ? timeRange.end.second : 0
-        ).toISOString();
+      if (timeRange) {
+        startISO = calendarDateTimeToISOString(timeRange.start, timezone);
+        endISO = calendarDateTimeToISOString(timeRange.end, timezone);
+        windowGranularity ||= HistogramService.calculateOptimalGranularity(startISO, endISO);
       }
 
       // Get variables for backend substitution
@@ -150,7 +129,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
         query_text: queryText,
         limit: 100,
         window: windowGranularity || '1m',
-        timezone: timezone || undefined,
+        timezone,
         start_time: startISO,
         end_time: endISO,
         group_by: state.value.groupByField === "__none__" || state.value.groupByField === null

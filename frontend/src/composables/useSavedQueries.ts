@@ -12,8 +12,7 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
-import { CalendarDateTime } from '@internationalized/date'
-import { calendarDateTimeToTimestamp } from '@/utils/time'
+import { calendarDateTimeToTimestamp, timestampToCalendarDateTime } from '@/utils/time'
 import type { Source } from "@/api/sources";
 import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
@@ -288,39 +287,13 @@ export function useSavedQueries(
       } else if (content.timeRange?.relative) {
         exploreStore.setRelativeTimeRange(content.timeRange.relative);
       } else if (content.timeRange?.absolute?.start && content.timeRange?.absolute?.end) {
-        try {
-          const startDate = new Date(content.timeRange.absolute.start);
-          const endDate = new Date(content.timeRange.absolute.end);
-
-          if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-            const startDateTime = new CalendarDateTime(
-                startDate.getFullYear(),
-                startDate.getMonth() + 1,
-                startDate.getDate(),
-                startDate.getHours(),
-                startDate.getMinutes(),
-                startDate.getSeconds()
-            );
-
-            const endDateTime = new CalendarDateTime(
-                endDate.getFullYear(),
-                endDate.getMonth() + 1,
-                endDate.getDate(),
-                endDate.getHours(),
-                endDate.getMinutes(),
-                endDate.getSeconds()
-            );
-
-            exploreStore.setTimeConfiguration({
-              absoluteRange: {
-                start: startDateTime,
-                end: endDateTime
-              }
-            });
+        const timezone = exploreStore.getTimezoneIdentifier();
+        exploreStore.setTimeConfiguration({
+          absoluteRange: {
+            start: timestampToCalendarDateTime(content.timeRange.absolute.start, timezone),
+            end: timestampToCalendarDateTime(content.timeRange.absolute.end, timezone)
           }
-        } catch (error) {
-          console.error("Error converting timestamps to CalendarDateTime:", error);
-        }
+        });
       }
 
       if (Array.isArray(content.variables)) {
