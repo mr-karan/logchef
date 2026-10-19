@@ -116,7 +116,7 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 	turn := askchef.Turn{Principal: p, Request: req, Alert: alert}
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer cancelTurn(nil)
-		stream := &askChefStream{w: w, cancel: cancelTurn}
+		stream := &askChefStream{w: w, cancel: cancelTurn, log: s.log.With("user_id", user.ID)}
 		stopHeartbeat := stream.heartbeat(turnCtx, askChefHeartbeat)
 		defer stopHeartbeat()
 		agent.Run(turnCtx, turn, stream.event)

@@ -437,6 +437,32 @@ func TestAskChefStreamCancelsTheTurnWhenAWriteFails(t *testing.T) {
 	})
 }
 
+// unencodableEvent is an event that JSON cannot encode.
+type unencodableEvent struct{ C chan int }
+
+func (unencodableEvent) Name() string { return "text" }
+
+// A server bug that leaves an event unencodable is logged as an error and
+// cancels the turn with the encoding error, never as a gone client.
+func TestAskChefStreamReportsEncodingErrors(t *testing.T) {
+	var logs bytes.Buffer
+	ctx, cancel := context.WithCancelCause(t.Context())
+	var out bytes.Buffer
+	stream := &askChefStream{w: bufio.NewWriter(&out), cancel: cancel, log: slog.New(slog.NewTextHandler(&logs, nil))}
+	if stream.event(unencodableEvent{}) {
+		t.Fatal("event reported success for an unencodable event")
+	}
+	if cause := context.Cause(ctx); cause == nil || errors.Is(cause, errAskChefClientGone) || !strings.Contains(cause.Error(), "encoding text event") {
+		t.Fatalf("cause = %v, want the encoding error", cause)
+	}
+	if !strings.Contains(logs.String(), "level=ERROR") || !strings.Contains(logs.String(), "event=text") {
+		t.Fatalf("logs = %q, want an error naming the event", logs.String())
+	}
+	if out.Len() != 0 {
+		t.Fatalf("stream = %q, want nothing written", out.String())
+	}
+}
+
 func TestAskChefStreamHeartbeat(t *testing.T) {
 	var out bytes.Buffer
 	stream := &askChefStream{w: bufio.NewWriter(&out), cancel: func(error) {}}

@@ -861,3 +861,20 @@ func TestTurnPreemptedDuringAToolCall(t *testing.T) {
 		t.Fatalf("warnings logged for a cancelled call: %s", logs.String())
 	}
 }
+
+// A cancelled turn logs why it was cancelled, so a server fault that cancels
+// it is not mistaken for a client that left.
+func TestTurnLogsWhyItWasCancelled(t *testing.T) {
+	w := newWorld(t)
+	chat := &scriptedChat{replies: []ai.ChatResponse{reply(ai.TextBlock{Text: "Checking."})}}
+	var logs bytes.Buffer
+	agent := askchef.New(askchef.Opts{Tools: mcp.NewToolServer(*w.tools), Chat: chat, Model: "m", Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	ctx, cancel := context.WithCancelCause(t.Context())
+	agent.Run(ctx, askchef.Turn{Principal: access.AssistantPrincipal(w.member), Request: w.request()}, func(askchef.Event) bool {
+		cancel(errors.New("encoding text event: unsupported type"))
+		return false
+	})
+	if !strings.Contains(logs.String(), "ask chef turn cancelled") || !strings.Contains(logs.String(), "encoding text event: unsupported type") {
+		t.Fatalf("logs = %q, want the cancel cause", logs.String())
+	}
+}

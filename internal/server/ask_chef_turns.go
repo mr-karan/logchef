@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
@@ -76,6 +77,7 @@ type askChefStream struct {
 	mu     sync.Mutex
 	w      *bufio.Writer
 	cancel context.CancelCauseFunc
+	log    *slog.Logger
 	failed bool
 }
 
@@ -83,6 +85,7 @@ type askChefStream struct {
 func (s *askChefStream) event(ev askchef.Event) bool {
 	data, err := json.Marshal(ev)
 	if err != nil {
+		s.log.Error("error encoding ask chef event", "event", ev.Name(), "error", err)
 		s.cancel(fmt.Errorf("encoding %s event: %w", ev.Name(), err))
 		return false
 	}

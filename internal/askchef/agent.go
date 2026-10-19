@@ -139,7 +139,7 @@ func (a *Agent) Run(ctx context.Context, turn Turn, emit func(Event) bool) {
 	case errors.Is(context.Cause(ctx), ErrPreempted):
 		stop = StopPreempted
 	case ctx.Err() != nil:
-		run.log.Info("ask chef turn cancelled", logAttrs...)
+		run.log.Info("ask chef turn cancelled", append(logAttrs, "cause", context.Cause(ctx))...)
 		return
 	case err != nil:
 		run.log.Error("ask chef turn failed", append(logAttrs, "error", err)...)
