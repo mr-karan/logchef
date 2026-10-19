@@ -48,10 +48,15 @@ function isMemberAccess(node: ts.Node): node is ts.PropertyAccessExpression | ts
   return ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node);
 }
 
-// An options argument counts only when its type always carries a timeZone.
+// An options argument counts only when its type always carries a defined
+// timeZone. Spread or tuple arguments count as missing, because the check reads
+// the second argument as written.
 function setsTimeZone(options: ts.Expression | undefined, checker: ts.TypeChecker): boolean {
   const timeZone = options && checker.getTypeAtLocation(options).getProperty("timeZone");
-  return timeZone !== undefined && (timeZone.flags & ts.SymbolFlags.Optional) === 0;
+  if (!options || timeZone === undefined || (timeZone.flags & ts.SymbolFlags.Optional) !== 0) return false;
+  const value = checker.getTypeOfSymbolAtLocation(timeZone, options);
+  const parts = value.isUnion() ? value.types : [value];
+  return !parts.some((part) => (part.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void)) !== 0);
 }
 
 function calleeFunction(node: ts.CallExpression, checker: ts.TypeChecker): ts.Declaration | undefined {
@@ -76,7 +81,8 @@ const RULES: Rule[] = [
       const member = node.expression;
       const key = memberKey(member, checker);
       if (key === undefined || !LOCALE_METHODS.has(key)) return false;
-      const method = checker.getApparentType(checker.getTypeAtLocation(member.expression)).getProperty(key);
+      const receiver = checker.getNonNullableType(checker.getTypeAtLocation(member.expression));
+      const method = checker.getApparentType(receiver).getProperty(key);
       return isLibMember(method, "Date") && !setsTimeZone(node.arguments[1], checker);
     },
   },
@@ -93,10 +99,12 @@ const RULES: Rule[] = [
     allowed: [],
     flags: (node, checker) => {
       if (isMemberAccess(node) && memberKey(node, checker) === "timeZone") {
-        return isLibMember(checker.getTypeAtLocation(node.expression).getProperty("timeZone"), "ResolvedDateTimeFormatOptions");
+        const options = checker.getNonNullableType(checker.getTypeAtLocation(node.expression));
+        return isLibMember(options.getProperty("timeZone"), "ResolvedDateTimeFormatOptions");
       }
       if (ts.isBindingElement(node) && ts.isObjectBindingPattern(node.parent) && bindingKey(node) === "timeZone") {
-        return isLibMember(checker.getTypeAtLocation(node.parent).getProperty("timeZone"), "ResolvedDateTimeFormatOptions");
+        const options = checker.getNonNullableType(checker.getTypeAtLocation(node.parent));
+        return isLibMember(options.getProperty("timeZone"), "ResolvedDateTimeFormatOptions");
       }
       return false;
     },
@@ -252,6 +260,13 @@ describe("time zone guard", () => {
       "optionalZone.ts": 'declare const opts: Intl.DateTimeFormatOptions;\nexport const s = new Date(0).toLocaleString("en", opts);\n',
       "fields.ts": "declare const at: { year: number; month: number };\nexport const d = new Date(at.year, at.month - 1);\n",
       "imports.ts": 'import { getLocalTimeZone as here } from "@internationalized/date";\nexport const zone = here();\n',
+      "optionalChain.ts": "export function label(d: Date | undefined) {\n  return d?.toLocaleString();\n}\n",
+      "optionalRead.ts": "export function read(o: Intl.ResolvedDateTimeFormatOptions | undefined) {\n  return o?.timeZone;\n}\n",
+      "undefinedZone.ts": [
+        'export const s = new Date(0).toLocaleString("en", { timeZone: undefined });',
+        "declare const maybe: string | undefined;",
+        'export const f = new Intl.DateTimeFormat("en", { timeZone: maybe });',
+      ].join("\n"),
     });
     expect(offensesBy(fixtures)).toEqual({
       "chained.ts": ["2: Date formatted with toLocale*String and no timeZone"],
@@ -265,6 +280,9 @@ describe("time zone guard", () => {
       "optionalZone.ts": ["2: Date formatted with toLocale*String and no timeZone"],
       "fields.ts": ["2: Date built from wall-clock fields"],
       "imports.ts": ["1: @internationalized/date import", "2: getLocalTimeZone"],
+      "optionalChain.ts": ["2: Date formatted with toLocale*String and no timeZone"],
+      "optionalRead.ts": ["2: resolvedOptions().timeZone"],
+      "undefinedZone.ts": ["1: Date formatted with toLocale*String and no timeZone", "3: Intl.DateTimeFormat with no timeZone"],
     });
   });
 
@@ -282,6 +300,8 @@ describe("time zone guard", () => {
         "export const f = new Date(Date.UTC(2024, 0, 1));",
         "export const g = new Date(count);",
         'export const h = new Intl.NumberFormat("en").resolvedOptions().locale;',
+        "declare const zone: string;",
+        'export const i = new Date(0).toLocaleString("en", { timeZone: zone });',
       ].join("\n"),
     });
     expect(fixtures).toEqual([]);
