@@ -325,9 +325,15 @@ func TestTurnOffersOnlyAllowedTools(t *testing.T) {
 	var names []string
 	for _, tool := range chat.request(0).Tools {
 		names = append(names, tool.Name)
-		var schema map[string]any
-		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil || schema["type"] != "object" {
+		var schema struct {
+			Type       string                     `json:"type"`
+			Properties map[string]json.RawMessage `json:"properties"`
+		}
+		if err := json.Unmarshal(tool.InputSchema, &schema); err != nil || schema.Type != "object" {
 			t.Errorf("tool %s schema = %s", tool.Name, tool.InputSchema)
+		}
+		if _, ok := schema.Properties["raw_sql"]; ok {
+			t.Errorf("tool %s takes raw_sql", tool.Name)
 		}
 	}
 	for _, want := range []string{"query_logchefql", "compare_windows", "get_field_values", "get_alert_history"} {
@@ -335,7 +341,7 @@ func TestTurnOffersOnlyAllowedTools(t *testing.T) {
 			t.Errorf("tools %v do not include %s", names, want)
 		}
 	}
-	for _, hidden := range []string{"open_investigation", "get_profile", "list_saved_queries"} {
+	for _, hidden := range []string{"open_investigation", "get_profile", "list_saved_queries", "query_logs", "get_log_histogram"} {
 		if slices.Contains(names, hidden) {
 			t.Errorf("tools %v include %s", names, hidden)
 		}
@@ -409,6 +415,14 @@ func TestTurnReportsToolFailuresToTheModel(t *testing.T) {
 			tool:  "open_investigation",
 			input: func(*world) map[string]any { return map[string]any{} },
 			want:  `[tool did not complete: tool "open_investigation" is not available]`,
+		},
+		{
+			name: "raw SQL tool",
+			tool: "query_logs",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "raw_sql": "SELECT * FROM url('http://example.com/x')"}
+			},
+			want: `[tool did not complete: tool "query_logs" is not available]`,
 		},
 		{
 			name:  "unknown tool",

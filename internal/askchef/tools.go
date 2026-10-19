@@ -44,6 +44,8 @@ var (
 
 // allowedTools is every MCP tool Ask Chef may call. The model never sees or
 // runs a tool that is missing here, such as the open_investigation UI tool.
+// No allowed tool runs model-written SQL: raw_sql runs in the datasource's
+// permissive mode, where it can read other tables or call url().
 var allowedTools = map[string]allowedTool{
 	"get_sources":              {},
 	"get_source_schema":        {},
@@ -52,8 +54,6 @@ var allowedTools = map[string]allowedTool{
 	"list_alerts":              {},
 	"get_alert_history":        {},
 	"query_logchefql":          {evidence: &evidenceRule{mode: ModeLogchefQL, queryField: "query", windows: startEndWindow}, summarize: summarizeRows},
-	"query_logs":               {evidence: &evidenceRule{mode: ModeNative, queryField: "raw_sql", windows: startEndWindow}, summarize: summarizeRows},
-	"get_log_histogram":        {evidence: &evidenceRule{mode: ModeNative, queryField: "raw_sql", windows: startEndWindow}, summarize: summarizeHistogram},
 	"compare_windows":          {evidence: &evidenceRule{mode: ModeLogchefQL, queryField: "query", windows: compareWindows}, summarize: summarizeCompare},
 	"get_field_values":         {evidence: &evidenceRule{mode: ModeLogchefQL, windows: startEndWindow}},
 	"top_values":               {evidence: &evidenceRule{mode: ModeLogchefQL, windows: startEndWindow}},
@@ -150,14 +150,6 @@ func summarizeRows(result string) string {
 		return fmt.Sprintf("%d rows (truncated)", r.RowCount)
 	}
 	return fmt.Sprintf("%d rows", r.RowCount)
-}
-
-func summarizeHistogram(result string) string {
-	var r mcp.HistogramResult
-	if err := json.Unmarshal([]byte(result), &r); err != nil {
-		return "done"
-	}
-	return fmt.Sprintf("%d buckets", len(r.Data))
 }
 
 func summarizeCompare(result string) string {

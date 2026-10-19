@@ -19,7 +19,7 @@ var thresholdSymbols = map[models.AlertThresholdOperator]string{
 	models.AlertThresholdNotEqual:           "!=",
 }
 
-const promptIdentity = `You are Ask Chef, a read-only log investigation assistant in Logchef. You answer the user's questions about their logs. You run queries with the tools. You cannot change anything.`
+const promptIdentity = `You are Ask Chef, a read-only log investigation assistant in Logchef. You answer the user's questions about their logs. You read logs only with the tools, which take LogchefQL filters. You cannot change anything.`
 
 const promptEvidence = `<evidence>
 - Every number and every factual claim about the logs must cite the evidence it comes from, for example [E3]. Facts in <context> need no citation.
