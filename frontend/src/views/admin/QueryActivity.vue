@@ -37,6 +37,7 @@ import {
 import { isSuccessResponse } from "@/api/types";
 import { formatHistoryTimeAgo, formatHistoryDuration } from "@/lib/queryHistory";
 import { useMetaStore } from "@/stores/meta";
+import { usePreferencesStore } from "@/stores/preferences";
 import { useTableSearchSort } from "@/composables/useTableSearchSort";
 
 const RECENT_LIMIT = 100;
@@ -44,6 +45,7 @@ const RECENT_PAGE_SIZE = 20;
 const DAYS_OPTIONS = ["7", "30", "90"] as const;
 
 const metaStore = useMetaStore();
+const preferencesStore = usePreferencesStore();
 const { t, locale } = useI18n();
 const isDemo = computed(() => metaStore.demoReadOnly);
 
@@ -189,7 +191,7 @@ function formatDay(date: string): string {
 }
 
 function timeAgo(createdAt: string): string {
-  return formatHistoryTimeAgo(createdAt, nowMs.value, toValue(locale));
+  return formatHistoryTimeAgo(createdAt, preferencesStore.zone, nowMs.value, toValue(locale));
 }
 
 function duration(ms: number): string {

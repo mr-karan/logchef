@@ -43,6 +43,8 @@ import { useContextStore } from "@/stores/context";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useMetaStore } from "@/stores/meta";
+import { usePreferencesStore } from "@/stores/preferences";
+import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useContextSync } from "@/composables/useContextSync";
 import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import type { Alert } from "@/api/alerts";
@@ -57,6 +59,7 @@ const contextStore = useContextStore();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const metaStore = useMetaStore();
+const preferencesStore = usePreferencesStore();
 
 const {
   initialize: initializeContext,
@@ -202,7 +205,8 @@ function formatThreshold(alert: Alert) {
 function formatDate(dateStr: string): string {
   const normalizedDateStr = dateStr.includes('T') || dateStr.includes('Z') || dateStr.includes('+') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
   const date = new Date(normalizedDateStr);
-  return date.toLocaleDateString(locale.value, { month: "short", day: "numeric", year: "numeric" });
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return formatInZone(epochMs(date), preferencesStore.zone, { month: "short", day: "numeric", year: "numeric" }, locale.value);
 }
 
 function formatRelativeTime(dateStr: string | null | undefined): string {

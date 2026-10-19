@@ -164,6 +164,12 @@ const formatTimestamp = (timestamp: any) => {
   })
 }
 
+const formatTooltipTimestamp = (timestamp: any) => {
+  const date = new Date(timestamp)
+  if (isNaN(date.getTime())) return String(timestamp)
+  return formatInZone(epochMs(date), preferencesStore.zone, { dateStyle: 'medium', timeStyle: 'medium' }, locale.value)
+}
+
 // HTML escape utility to prevent XSS attacks
 const escapeHtml = (text: string): string => {
   const htmlEscapeMap: Record<string, string> = {
@@ -432,7 +438,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
             expandedRowId === row.id ? 'py-1 items-start' : 'py-0.5 min-h-[22px] items-center'
           ]"
           @click="handleClick($event, row.id)"
-          :title="t('pages.logRowTooltip', { timestamp: new Date(row.raw[props.timestampField]).toLocaleString(locale) })"
+          :title="t('pages.logRowTooltip', { timestamp: formatTooltipTimestamp(row.raw[props.timestampField]) })"
         >
           <!-- Timestamp (fixed width grid column) -->
           <span 

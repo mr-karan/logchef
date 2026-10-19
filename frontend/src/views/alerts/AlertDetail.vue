@@ -15,6 +15,8 @@ import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useAskChefStore } from "@/stores/askChef";
 import { useContextStore } from "@/stores/context";
 import { useMetaStore } from "@/stores/meta";
+import { usePreferencesStore } from "@/stores/preferences";
+import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useTeamsStore } from "@/stores/teams";
 import { useToast } from "@/composables/useToast";
 import { alertHistoryExploreQuery } from "@/utils/alertExplore";
@@ -34,6 +36,13 @@ const metaStore = useMetaStore();
 const askChef = useAskChefStore();
 const teamsStore = useTeamsStore();
 const { toast } = useToast();
+const preferencesStore = usePreferencesStore();
+
+function formatEventTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return timestamp;
+  return formatInZone(epochMs(date), preferencesStore.zone, { dateStyle: "medium", timeStyle: "short" }, locale.value);
+}
 
 const alertId = computed(() => Number(route.params.alertID));
 const currentTab = ref<"edit" | "history">("edit");
@@ -296,10 +305,7 @@ onMounted(async () => {
                           {{ t(alertStateLabels[entry.status]) }}
                         </Badge>
                         <span class="text-sm text-muted-foreground">
-                          {{ new Date(entry.triggered_at).toLocaleString(locale, {
-                            dateStyle: 'medium',
-                            timeStyle: 'short'
-                          }) }}
+                          {{ formatEventTime(entry.triggered_at) }}
                         </span>
                         <!-- Value Display Inline -->
                         <span v-if="entry.value != null" class="text-sm text-muted-foreground">
@@ -344,10 +350,7 @@ onMounted(async () => {
 
                   <!-- Resolution Info -->
                   <div v-if="entry.resolved_at" class="text-xs text-muted-foreground">
-                    {{ t('ui.resolved') }} {{ new Date(entry.resolved_at).toLocaleString(locale, {
-                      dateStyle: 'medium',
-                      timeStyle: 'short'
-                    }) }}
+                    {{ t('ui.resolved') }} {{ formatEventTime(entry.resolved_at) }}
                   </div>
                 </div>
               </div>

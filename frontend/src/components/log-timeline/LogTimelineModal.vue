@@ -15,8 +15,11 @@ import { ref, watch } from 'vue'
 import { exploreApi } from '@/api/explore'
 import { Clock, ArrowDown, ArrowUp } from 'lucide-vue-next'
 import { timestampIdentity } from './timestampIdentity'
+import { usePreferencesStore } from '@/stores/preferences'
+import { epochMs, formatInZone } from '@/utils/timeWindow'
 
-const { t } = useI18n();
+const { t, locale } = useI18n();
+const preferencesStore = usePreferencesStore()
 
 const props = defineProps<{
     isOpen: boolean
@@ -229,7 +232,9 @@ async function loadMore(direction: 'before' | 'after') {
 
 // Helper to format timestamp
 function formatTime(timestamp: string | number) {
-    return new Date(timestamp).toLocaleString()
+    const date = new Date(timestamp)
+    if (isNaN(date.getTime())) return String(timestamp)
+    return formatInZone(epochMs(date), preferencesStore.zone, { dateStyle: 'medium', timeStyle: 'medium' }, locale.value)
 }
 
 // Format log as compact single-line logfmt style

@@ -31,6 +31,7 @@ import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
 import { useDashboardsStore, DEFAULT_DASHBOARD_CACHE_TTL_SECONDS } from "@/stores/dashboards";
 import { useMetaStore } from "@/stores/meta";
+import { usePreferencesStore } from "@/stores/preferences";
 import {
   normalizeDashboardLayout,
   cellRect,
@@ -48,7 +49,7 @@ import {
 } from "@/utils/dashboardPanels";
 import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
 import { QUICK_RANGES } from "@/lib/quickRanges";
-import { windowLabel } from "@/utils/timeWindow";
+import { epochMs, formatInZone, windowLabel } from "@/utils/timeWindow";
 
 const { t, locale } = useI18n();
 
@@ -56,6 +57,7 @@ const route = useRoute();
 const router = useRouter();
 const store = useDashboardsStore();
 const metaStore = useMetaStore();
+const preferencesStore = usePreferencesStore();
 
 // Grid geometry. 12 columns; each layout row is ROW_HEIGHT px tall.
 const ROW_HEIGHT_PX = 60;
@@ -412,7 +414,9 @@ const updatedLabel = computed(() => {
   const ts = store.current?.updated_at;
   if (!ts) return "";
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(locale.value);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : formatInZone(epochMs(d), preferencesStore.zone, { dateStyle: "medium", timeStyle: "medium" }, locale.value);
 });
 
 const creatorLabel = computed(
