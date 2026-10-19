@@ -1,14 +1,19 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp, nextTick } from "vue";
 import { i18n } from "@/i18n";
-import { epochMs, formatWallClock, parseZoneId, resolveWindow, type ResolvedWindow, type TimeWindow } from "@/utils/timeWindow";
+import { epochMs, formatWallClock, parseZoneId, resolveWindow, type ResolvedWindow, type TimeWindow, type ZoneId } from "@/utils/timeWindow";
 import DateTimePicker from "../DateTimePicker.vue";
 
 // The browser runs in another zone than the picker, so browser-zone parsing shows up.
 process.env.TZ = "Asia/Kolkata";
 
-const newYork = parseZoneId("America/New_York");
-if (!newYork) throw new Error("no zone data");
+function zone(name: string): ZoneId {
+  const parsed = parseZoneId(name);
+  if (!parsed) throw new Error(`no zone data for ${name}`);
+  return parsed;
+}
+
+const newYork = zone("America/New_York");
 
 let unmount: (() => void) | undefined;
 
@@ -16,6 +21,7 @@ afterEach(() => {
   unmount?.();
   unmount = undefined;
   document.body.innerHTML = "";
+  localStorage.clear();
 });
 
 // A run months before the test clock, so a picker that resolves its own "now" shows up.
@@ -89,12 +95,36 @@ describe("DateTimePicker", () => {
 
   it("toggles by the zone preference, even when the browser zone is UTC", async () => {
     const window: TimeWindow = { kind: "relative", spec: "15m" };
-    const utc = parseZoneId("UTC");
-    if (!utc) throw new Error("no zone data");
-    const { zones } = await openPicker(window, resolveWindow(window, utc, anchor), "local");
+    const { zones } = await openPicker(window, resolveWindow(window, zone("UTC"), anchor), "local");
 
     button("Local").click();
     expect(zones).toEqual(["utc"]);
+  });
+
+  it("reopens a recent range at the same instants after the zone changes", async () => {
+    const window: TimeWindow = { kind: "absolute", start: epochMs(Date.parse("2026-11-01T05:30:00Z")), end: epochMs(Date.parse("2026-11-01T08:00:00Z")) };
+    const first = await openPicker(window);
+    const from = document.body.querySelector<HTMLInputElement>("input.font-mono");
+    if (!from) throw new Error("no from input");
+    from.value = "2026-10-31 22:00:00";
+    from.dispatchEvent(new Event("input"));
+    await nextTick();
+    button("Apply time range").click();
+    const saved = { kind: "absolute", start: Date.parse("2026-11-01T02:00:00Z"), end: window.end };
+    expect(first.emitted).toEqual([saved]);
+    unmount?.();
+    document.body.innerHTML = "";
+
+    const utc = zone("UTC");
+    const reopened = await openPicker(window, resolveWindow(window, utc, anchor), "utc");
+    button("2026-11-01 02:00:00 to 2026-11-01 08:00:00").click();
+    expect(reopened.emitted).toEqual([saved]);
+  });
+
+  it("drops recent ranges stored as zone-less text", async () => {
+    localStorage.setItem("logchef_recent_ranges", JSON.stringify([{ from: "2026-10-31 22:00:00", to: "2026-11-01 03:00:00", label: "x" }]));
+    await openPicker({ kind: "relative", spec: "15m" });
+    expect(document.body.textContent).not.toContain("Recent");
   });
 
   it("emits a quick range as a relative window", async () => {

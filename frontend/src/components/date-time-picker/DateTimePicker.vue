@@ -53,10 +53,38 @@ const quickRangeSearch = ref("");
 // Today in the picker's zone focuses the calendars.
 const todayDate = computed(() => today(props.resolved.zone));
 
-// Recently used absolute ranges (stored in localStorage)
-const recentRanges = ref<Array<{ from: string; to: string; label: string }>>(
-  JSON.parse(localStorage.getItem("logchef_recent_ranges") || "[]")
-);
+// Recently used absolute ranges, stored as instants and shown in the current zone.
+// Older entries stored zone-less wall-clock text and are dropped.
+const RECENT_RANGES_KEY = "logchef_recent_ranges";
+type RecentRange = { version: 2; start: EpochMs; end: EpochMs };
+
+function isRecentRange(value: unknown): value is RecentRange {
+  if (typeof value !== "object" || value === null) return false;
+  const { version, start, end } = value as Record<string, unknown>;
+  return version === 2 && Number.isFinite(start) && Number.isFinite(end);
+}
+
+function loadRecentRanges(): RecentRange[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(RECENT_RANGES_KEY) || "[]");
+    return Array.isArray(stored) ? stored.filter(isRecentRange) : [];
+  } catch {
+    return [];
+  }
+}
+
+const recentRanges = ref<RecentRange[]>(loadRecentRanges());
+
+function rememberRange(start: EpochMs, end: EpochMs) {
+  const others = recentRanges.value.filter((r) => r.start !== start || r.end !== end);
+  recentRanges.value = [{ version: 2 as const, start, end }, ...others].slice(0, 5);
+  localStorage.setItem(RECENT_RANGES_KEY, JSON.stringify(recentRanges.value));
+}
+
+function recentRangeLabel(range: RecentRange): string {
+  const { zone } = props.resolved;
+  return t("time.range", { from: formatWallClock(range.start, zone), to: formatWallClock(range.end, zone) });
+}
 
 // Draft text for the absolute inputs, and the instants the text was written from.
 // Applying text the user did not edit keeps the window, or the instant of an
@@ -169,31 +197,15 @@ function applyAbsoluteRange() {
     return;
   }
 
-  // Save to recent ranges
-  const rangeEntry = {
-    from,
-    to,
-    label: `${formatWallClock(start, props.resolved.zone)} to ${formatWallClock(end, props.resolved.zone)}`,
-  };
-
-  // Add to recent, avoiding duplicates
-  const existingIndex = recentRanges.value.findIndex(
-    r => r.from === rangeEntry.from && r.to === rangeEntry.to
-  );
-  if (existingIndex !== -1) {
-    recentRanges.value.splice(existingIndex, 1);
-  }
-  recentRanges.value.unshift(rangeEntry);
-  recentRanges.value = recentRanges.value.slice(0, 5); // Keep only 5 recent
-  localStorage.setItem("logchef_recent_ranges", JSON.stringify(recentRanges.value));
-
+  rememberRange(start, end);
   emit("update:modelValue", { kind: "absolute", start, end });
   showDatePicker.value = false;
 }
 
-function applyRecentRange(range: { from: string; to: string }) {
-  draftState.value = { from: range.from, to: range.to };
-  applyAbsoluteRange();
+function applyRecentRange(range: RecentRange) {
+  rememberRange(range.start, range.end);
+  emit("update:modelValue", { kind: "absolute", start: range.start, end: range.end });
+  showDatePicker.value = false;
 }
 
 function handleCalendarSelect(type: 'from' | 'to', date: DateValue | undefined | null) {
@@ -211,7 +223,7 @@ function handleCalendarSelect(type: 'from' | 'to', date: DateValue | undefined |
 
 function clearRecentRanges() {
   recentRanges.value = [];
-  localStorage.removeItem("logchef_recent_ranges");
+  localStorage.removeItem(RECENT_RANGES_KEY);
 }
 
 // Display text for trigger button
@@ -355,7 +367,7 @@ defineExpose({
                   class="w-full text-left text-xs p-1.5 hover:bg-muted rounded truncate"
                   @click="applyRecentRange(range)"
                 >
-                  {{ t('time.range', { from: range.from, to: range.to }) }}
+                  {{ recentRangeLabel(range) }}
                 </button>
               </div>
             </div>
