@@ -102,8 +102,10 @@ type turnRun struct {
 	tools     *toolbox
 	messages  []ai.ChatMessage
 	toolCalls int
-	nextID    EvidenceID
-	usage     ai.ChatUsage
+	// refusedTools is set when the tool limit refused a call.
+	refusedTools bool
+	nextID       EvidenceID
+	usage        ai.ChatUsage
 }
 
 // Run runs one turn and passes its events to emit, in order. The last event
@@ -191,10 +193,10 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 			// calls run.
 			return StopMaxTokens, nil
 		}
-		if limit != "" {
-			return limit, nil
-		}
 		uses := resp.ToolUses()
+		if limit != "" {
+			return r.finish(limit, resp)
+		}
 		if len(uses) == 0 {
 			return StopEnd, nil
 		}
@@ -224,10 +226,34 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 	}
 }
 
+// finish ends a turn whose last model call came after a turn limit. The
+// tool limit is the stop reason only when it refused a call the model asked
+// for; a turn that used exactly its tool calls and then answered ended
+// normally.
+func (r *turnRun) finish(limit StopReason, resp ai.ChatResponse) (StopReason, error) {
+	if !hasText(resp) {
+		return "", &failure{message: "Ask Chef reached a turn limit before it wrote an answer. Try a narrower question.", err: fmt.Errorf("no answer after the %s limit", limit)}
+	}
+	if limit == StopToolLimit && !r.refusedTools && len(resp.ToolUses()) == 0 {
+		return StopEnd, nil
+	}
+	return limit, nil
+}
+
+func hasText(resp ai.ChatResponse) bool {
+	for _, block := range resp.Blocks {
+		if text, ok := block.(ai.TextBlock); ok && strings.TrimSpace(text.Text) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 // runTool runs one tool call and returns the result for the model. Every
 // call gets a result, because the model API needs one for each tool use.
 func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) ai.ToolResultBlock {
 	if r.toolCalls >= maxToolCalls {
+		r.refusedTools = true
 		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: this turn has used all its tool calls]", IsError: true}
 	}
 	r.toolCalls++

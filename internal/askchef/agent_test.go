@@ -550,6 +550,49 @@ func TestTurnStopsAtToolLimit(t *testing.T) {
 	}
 }
 
+func TestTurnToolLimitLabel(t *testing.T) {
+	batch := func(prefix string, n int) ai.ChatResponse {
+		var uses []ai.ChatBlock
+		for i := range n {
+			uses = append(uses, toolUse(prefix+string(rune('a'+i)), "get_sources", map[string]any{}))
+		}
+		return reply(uses...)
+	}
+
+	t.Run("a turn that used exactly its tool calls and answered ends normally", func(t *testing.T) {
+		w := newWorld(t)
+		chat := &scriptedChat{replies: []ai.ChatResponse{batch("one-", 6), batch("two-", 6), reply(ai.TextBlock{Text: "All checked."})}}
+		events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+		done, ok := events[len(events)-1].(askchef.Done)
+		if !ok || done.StopReason != askchef.StopEnd || done.ToolCalls != 12 {
+			t.Fatalf("last event = %+v, want done with end after 12 calls", events[len(events)-1])
+		}
+	})
+	t.Run("a final call that asks for more tools hit the limit", func(t *testing.T) {
+		w := newWorld(t)
+		chat := &scriptedChat{replies: []ai.ChatResponse{
+			batch("one-", 6), batch("two-", 6),
+			reply(ai.TextBlock{Text: "Partly checked."}, toolUse("late", "get_sources", map[string]any{})),
+		}}
+		events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+		if done, ok := events[len(events)-1].(askchef.Done); !ok || done.StopReason != askchef.StopToolLimit {
+			t.Fatalf("last event = %+v, want done with tool_limit", events[len(events)-1])
+		}
+	})
+	t.Run("a final call with no text is an error, not an empty answer", func(t *testing.T) {
+		w := newWorld(t)
+		chat := &scriptedChat{replies: []ai.ChatResponse{batch("one-", 6), batch("two-", 7), reply(ai.TextBlock{Text: "  "})}}
+		events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+		failure, ok := events[len(events)-1].(askchef.Failure)
+		if !ok || !strings.Contains(failure.Message, "before it wrote an answer") {
+			t.Fatalf("last event = %+v, want an error about the missing answer", events[len(events)-1])
+		}
+	})
+}
+
 func TestTurnReportsToolFailuresToTheModel(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
