@@ -12,24 +12,24 @@ export interface ExploreWindow {
   query?: string;
 }
 
-// Explorer route query for a source, a window in Unix ms, and an optional query.
+// Explorer route query for a source, a window in Unix ms, and a query. The
+// query is always named, even when empty, so the Explorer opens exactly it
+// instead of the user's saved draft.
 export function exploreWindowQuery(target: ExploreWindow): Record<string, string> {
-  const query: Record<string, string> = {
+  const mode = target.mode ?? "logchefql";
+  return {
     team: String(target.teamId),
     source: String(target.sourceId),
     start: String(target.start),
     end: String(target.end),
+    mode,
+    [mode === "native" ? "sql" : "q"]: target.query?.trim() ?? "",
   };
-  const text = target.query?.trim();
-  if (target.mode && text) {
-    query.mode = target.mode;
-    query[target.mode === "native" ? "sql" : "q"] = text;
-  }
-  return query;
 }
 
 // The window of the evaluation that produced a history entry. Native alerts hold
-// an aggregate query, so only a condition alert carries its query over.
+// an aggregate query, so only a condition alert carries its query over; a
+// native alert opens its window with no filter.
 export function alertHistoryWindow(alert: AlertQueryFields, entry: Pick<AlertHistoryEntry, "triggered_at">, teamId: number): ExploreWindow {
   const end = Date.parse(entry.triggered_at);
   const condition = alert.editor_mode === "condition" ? alert.condition_json?.trim() : "";

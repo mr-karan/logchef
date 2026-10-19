@@ -609,6 +609,44 @@ describe("explore store", () => {
     });
   });
 
+  describe("links that name their query", () => {
+    function saveDraft() {
+      mocks.teamsState.currentTeamId = 1;
+      const ctx = useContextStore();
+      ctx.selectTeam(1);
+      ctx.selectSource(10);
+      const store = useExploreStore();
+      store.setRelativeTimeRange("7d");
+      store.setLogchefqlCode('level="debug"');
+      setActivePinia(createPinia());
+      mocks.teamsState.currentTeamId = 1;
+      useContextStore().selectTeam(1);
+    }
+
+    it("opens an explicitly empty query and the link's window, not the saved draft", () => {
+      saveDraft();
+      const store = useExploreStore();
+
+      const result = store.initializeFromUrl({ team: "1", source: "10", start: "1000", end: "2000", mode: "logchefql", q: "" });
+
+      expect(store.logchefqlCode).toBe("");
+      expect(store.activeMode).toBe("logchefql");
+      expect(store.selectedRelativeTime).toBeNull();
+      expect(store.urlQueryParameters).toMatchObject({ start: "1000", end: "2000" });
+      expect(result.shouldExecute).toBe(true);
+    });
+
+    it("still restores the draft when the link names no query", () => {
+      saveDraft();
+      const store = useExploreStore();
+
+      store.initializeFromUrl({ team: "1", source: "10" });
+
+      expect(store.logchefqlCode).toBe('level="debug"');
+      expect(store.selectedRelativeTime).toBe("7d");
+    });
+  });
+
   // ---------------------------------------------------------------------------
   // #105 — hydrated saved-query content must land in the editor slot matching
   // the resolved (possibly coerced) active mode, not the query's raw language,
