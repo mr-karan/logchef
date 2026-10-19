@@ -748,3 +748,84 @@ func TestTurnStopsWhenTheClientIsGone(t *testing.T) {
 		t.Fatalf("events = %v, want no done after the client left", eventNames(events))
 	}
 }
+
+// A turn runs through the OpenAI-compatible adapter against an
+// OpenRouter-style event stream, from tool call to cited answer.
+func TestTurnRunsThroughOpenAIChat(t *testing.T) {
+	w := newWorld(t)
+	input, err := json.Marshal(w.fieldValuesInput())
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The arguments arrive as two JSON string fragments.
+	half := len(input) / 2
+	first, err := json.Marshal(string(input[:half]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := json.Marshal(string(input[half:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunk := func(delta, finish string) string {
+		return `data: {"id":"gen-1","object":"chat.completion.chunk","choices":[{"index":0,"delta":` + delta + `,"finish_reason":` + finish + `}]}` + "\n\n"
+	}
+	usage := `data: {"id":"gen-1","object":"chat.completion.chunk","choices":[],"usage":{"prompt_tokens":100,"completion_tokens":10}}` + "\n\n"
+	streams := []string{
+		": OPENROUTER PROCESSING\n\n" +
+			chunk(`{"role":"assistant","content":"Checking services."}`, "null") +
+			chunk(`{"tool_calls":[{"index":0,"id":"toolu_01","type":"function","function":{"name":"get_field_values","arguments":""}}]}`, "null") +
+			chunk(`{"tool_calls":[{"index":0,"function":{"arguments":`+string(first)+`}}]}`, "null") +
+			chunk(`{"tool_calls":[{"index":0,"function":{"arguments":`+string(second)+`}}]}`, "null") +
+			chunk(`{}`, `"tool_calls"`) + usage + "data: [DONE]\n\n",
+		chunk(`{"content":"The errors come from api [E1]."}`, "null") + chunk(`{}`, `"stop"`) + usage + "data: [DONE]\n\n",
+	}
+	var (
+		mu     sync.Mutex
+		bodies []map[string]any
+	)
+	model := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decoding model request: %v", err)
+		}
+		mu.Lock()
+		call := len(bodies)
+		bodies = append(bodies, body)
+		mu.Unlock()
+		rw.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(rw, streams[min(call, len(streams)-1)])
+	}))
+	t.Cleanup(model.Close)
+	chat, err := ai.NewOpenAIChat(model.URL, "test-key")
+	if err != nil {
+		t.Fatalf("NewOpenAIChat: %v", err)
+	}
+
+	events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+	wantNames := []string{"text", "tool_start", "tool_end", "text", "done"}
+	if got := eventNames(events); !slices.Equal(got, wantNames) {
+		t.Fatalf("events = %v, want %v", got, wantNames)
+	}
+	if end := events[2].(askchef.ToolEnd); !end.OK || len(end.Evidence) != 1 || end.Evidence[0].ID != 1 || end.Evidence[0].Summary != "values of service" {
+		t.Fatalf("tool_end = %+v, want evidence E1", end)
+	}
+	if text := events[3].(askchef.Text); text.Delta != "The errors come from api [E1]." {
+		t.Fatalf("answer = %q", text.Delta)
+	}
+	if done := events[4].(askchef.Done); done.StopReason != askchef.StopEnd || done.ToolCalls != 1 || done.InputTokens != 200 || done.OutputTokens != 20 {
+		t.Fatalf("done = %+v", done)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(bodies) != 2 {
+		t.Fatalf("model calls = %d, want 2", len(bodies))
+	}
+	messages := bodies[1]["messages"].([]any)
+	result := messages[len(messages)-1].(map[string]any)
+	if result["role"] != "tool" || result["tool_call_id"] != "toolu_01" || !strings.HasPrefix(result["content"].(string), "[evidence E1]\n") {
+		t.Fatalf("tool result sent to the model = %#v", result)
+	}
+}

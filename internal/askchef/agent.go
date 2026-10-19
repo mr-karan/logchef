@@ -50,7 +50,8 @@ func limitNote(limit StopReason) string {
 	return "[This turn has used " + used + ". Do not call tools. Answer now from the results above, and list what you could not check under **Not established**.]"
 }
 
-// ChatModel streams one model call. ai.BedrockChat implements it.
+// ChatModel streams one model call. ai.BedrockChat and ai.OpenAIChat
+// implement it.
 type ChatModel interface {
 	Stream(ctx context.Context, req ai.ChatRequest, onText func(string)) (ai.ChatResponse, error)
 }

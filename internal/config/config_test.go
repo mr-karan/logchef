@@ -530,3 +530,26 @@ func TestLoad_NonCanonicalOriginErrorNamesCanonicalForm(t *testing.T) {
 		}
 	}
 }
+
+func TestAIConfigAskChefEnabled(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  AIConfig
+		want bool
+	}{
+		{"bedrock", AIConfig{Enabled: true, Provider: "bedrock", AskChefModel: "global.anthropic.claude-haiku-5-5"}, true},
+		{"openai with key", AIConfig{Enabled: true, Provider: "openai", APIKey: "test-key", AskChefModel: "anthropic/claude-haiku-5.5"}, true},
+		{"default provider with key", AIConfig{Enabled: true, APIKey: "test-key", AskChefModel: "gpt-5.5"}, true},
+		{"openai without key", AIConfig{Enabled: true, Provider: "openai", AskChefModel: "anthropic/claude-haiku-5.5"}, false},
+		{"no ask chef model", AIConfig{Enabled: true, Provider: "openai", APIKey: "test-key"}, false},
+		{"ai disabled", AIConfig{Provider: "bedrock", AskChefModel: "global.anthropic.claude-haiku-5-5"}, false},
+		{"unknown provider", AIConfig{Enabled: true, Provider: "gemini", APIKey: "test-key", AskChefModel: "x"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.AskChefEnabled(); got != tt.want {
+				t.Fatalf("AskChefEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
