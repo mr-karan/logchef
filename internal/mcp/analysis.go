@@ -202,7 +202,7 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 				resp, err := t.fieldValues(ctx, src, fieldName, fieldType, params.Query, start, end, limit)
 				if err != nil {
 					// One failed field does not fail the others.
-					fieldResults[i].Error = t.queryError("top values of "+fieldName, err).Error()
+					fieldResults[i].Error = err.Error()
 					return
 				}
 				values := make([]FieldValue, len(resp.Values))
