@@ -86,6 +86,13 @@ func NewServer(deps Deps) http.Handler {
 	)
 }
 
+// NewToolServer returns the MCP server for callers in this process, such as
+// Ask Chef. Each call's context must carry a Principal (WithPrincipal), so
+// every tool keeps its scope filter, deadline, admission and error rules.
+func NewToolServer(deps Deps) *server.MCPServer {
+	return newMCPServer(deps)
+}
+
 func newMCPServer(deps Deps) *server.MCPServer {
 	t := &tools{deps: deps}
 	s := server.NewMCPServer("logchef", deps.Version,
