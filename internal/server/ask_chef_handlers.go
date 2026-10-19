@@ -84,7 +84,7 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 
 	var alert *askchef.AlertContext
 	if ref := req.View.Alert; ref != nil {
-		alert, err = askchef.LoadAlertContext(ctx, s.sqlite, s.log, p, req.SourceID, *ref, s.config.Alerts.HistoryLimit)
+		alert, err = askchef.LoadAlertContext(ctx, s.sqlite, s.log, p, req.SourceID, *ref)
 		switch {
 		case err == nil:
 		case errors.Is(err, core.ErrAlertNotFound):

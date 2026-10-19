@@ -680,6 +680,10 @@ WHERE alert_id = $1 AND status = 'triggered'
 ORDER BY triggered_at DESC, id DESC
 LIMIT 1;
 
+-- name: GetAlertHistoryEntry :one
+SELECT * FROM alert_history
+WHERE id = $1 AND alert_id = $2;
+
 -- name: ListAlertHistory :many
 SELECT * FROM alert_history
 WHERE alert_id = $1

@@ -142,6 +142,9 @@ type AlertStore interface {
 	MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error
 	InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error)
+	// GetAlertHistoryEntry returns models.ErrNotFound when the alert has no
+	// entry with that ID.
+	GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error)
 	ResolveAlertHistory(ctx context.Context, historyID int64, message string) error
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)

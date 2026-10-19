@@ -182,6 +182,18 @@ func (db *DB) GetLatestUnresolvedAlertHistory(ctx context.Context, alertID model
 	return alertHistoryFromSQLC(row)
 }
 
+// GetAlertHistoryEntry fetches one history entry of an alert.
+func (db *DB) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error) {
+	row, err := db.readQueries.GetAlertHistoryEntry(ctx, sqlc.GetAlertHistoryEntryParams{ID: historyID, AlertID: int64(alertID)})
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, models.ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to get alert history entry: %w", err)
+	}
+	return alertHistoryFromSQLC(row)
+}
+
 // ResolveAlertHistory marks a history entry as resolved with an optional message.
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
 	if _, err := db.writeQueries.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{

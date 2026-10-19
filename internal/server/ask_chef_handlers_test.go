@@ -512,20 +512,36 @@ func TestMetaReportsAskChef(t *testing.T) {
 }
 
 func TestAskChefTurnFromAnAlertEntry(t *testing.T) {
-	env := newAskChefEnv(t, askChefConfig("anthropic.claude-haiku"), &echoChat{})
-	value := 23.0
-	entry, err := env.db.InsertAlertHistory(context.Background(), env.alert, models.AlertStatusTriggered, &value, "fired", nil)
-	if err != nil {
-		t.Fatalf("InsertAlertHistory: %v", err)
+	cfg := askChefConfig("anthropic.claude-haiku")
+	cfg.Alerts.HistoryLimit = 1
+	env := newAskChefEnv(t, cfg, &echoChat{})
+	insert := func(alert models.AlertID) int64 {
+		value := 23.0
+		entry, err := env.db.InsertAlertHistory(context.Background(), alert, models.AlertStatusTriggered, &value, "fired", nil)
+		if err != nil {
+			t.Fatalf("InsertAlertHistory: %v", err)
+		}
+		return entry.ID
 	}
-	resp := env.mustPost(env.body(func(b map[string]any) {
-		ctx := b["context"].(map[string]any)
-		ctx["kind"], ctx["alert_id"], ctx["alert_history_id"] = "alert", env.alert, entry.ID
-	}))
+	ask := func(historyID int64) turnResponse {
+		return env.mustPost(env.body(func(b map[string]any) {
+			ctx := b["context"].(map[string]any)
+			ctx["kind"], ctx["alert_id"], ctx["alert_history_id"] = "alert", env.alert, historyID
+		}))
+	}
+	// The older entry is past the configured history limit, and is still found.
+	older := insert(env.alert)
+	insert(env.alert)
+	otherAlertEntry := insert(env.other)
+
+	resp := ask(older)
 	if resp.status != http.StatusOK {
 		t.Fatalf("status = %d: %s", resp.status, resp.body)
 	}
 	if names, _ := readFrames(t, resp.body); names[len(names)-1] != "done" {
 		t.Fatalf("events = %v", names)
+	}
+	if resp := ask(otherAlertEntry); resp.status != http.StatusNotFound {
+		t.Fatalf("entry of another alert: status = %d, want 404", resp.status)
 	}
 }

@@ -772,6 +772,13 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil || len(hist) != 1 {
 		t.Fatalf("ListAlertHistory: %v / %d", err, len(hist))
 	}
+	entry, err := s.GetAlertHistoryEntry(ctx, a.ID, hist[0].ID)
+	if err != nil || entry.ID != hist[0].ID || entry.AlertID != a.ID || entry.Value == nil || *entry.Value != val {
+		t.Fatalf("GetAlertHistoryEntry = %+v, %v; want entry %d", entry, err, hist[0].ID)
+	}
+	if _, err := s.GetAlertHistoryEntry(ctx, a.ID+1, hist[0].ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetAlertHistoryEntry(other alert) err = %v, want ErrNotFound", err)
+	}
 
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
 		t.Fatalf("DeleteAlert: %v", err)

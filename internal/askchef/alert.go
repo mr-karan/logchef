@@ -27,8 +27,8 @@ type AlertContext struct {
 
 // LoadAlertContext reads the alert of ref after checking that p can see it
 // and that it watches sourceID. An alert p cannot see returns
-// core.ErrAlertNotFound. historyLimit bounds the entries searched.
-func LoadAlertContext(ctx context.Context, db store.StoreOps, log *slog.Logger, p access.Principal, sourceID models.SourceID, ref AlertRef, historyLimit int) (*AlertContext, error) {
+// core.ErrAlertNotFound.
+func LoadAlertContext(ctx context.Context, db store.StoreOps, log *slog.Logger, p access.Principal, sourceID models.SourceID, ref AlertRef) (*AlertContext, error) {
 	alert, err := core.GetAlertForPrincipal(ctx, db, log, p, ref.AlertID)
 	if err != nil {
 		return nil, err
@@ -40,15 +40,13 @@ func LoadAlertContext(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 	if ref.HistoryID == 0 {
 		return alertCtx, nil
 	}
-	entries, err := core.ListAlertHistory(ctx, db, alert.ID, historyLimit)
+	entry, err := db.GetAlertHistoryEntry(ctx, alert.ID, ref.HistoryID)
+	if errors.Is(err, models.ErrNotFound) {
+		return nil, ErrAlertEntryNotFound
+	}
 	if err != nil {
 		return nil, err
 	}
-	for _, entry := range entries {
-		if entry.ID == ref.HistoryID {
-			alertCtx.Entry = entry
-			return alertCtx, nil
-		}
-	}
-	return nil, ErrAlertEntryNotFound
+	alertCtx.Entry = entry
+	return alertCtx, nil
 }
