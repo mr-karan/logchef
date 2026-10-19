@@ -1439,6 +1439,7 @@
   "askChef.stopToolLimit": "Stopped at the tool call limit",
   "askChef.stopDeadline": "Stopped at the time limit",
   "askChef.stopMaxTokens": "Answer cut off at the length limit",
+  "askChef.stopBudget": "Stopped at the token budget",
   "askChef.stopPreempted": "Stopped because you asked a newer question",
   "askChef.evidence": "Evidence · click to open in Explorer",
   "askChef.openEvidence": "Open evidence {id} in Explorer",

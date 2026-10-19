@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/mark3labs/mcp-go/server"
 
@@ -33,12 +34,21 @@ const (
 	maxOutputTokens    = 2048
 	maxToolResultBytes = 12 * 1024
 	maxErrorChars      = 300
+	// maxInputTokens is the input token budget of a turn, summed over its
+	// model calls. Every call resends the whole conversation.
+	maxInputTokens = 300_000
 )
 
-// toolLimitNote follows the results of the call that used the last tool
-// call. Bedrock needs the tool config while the history holds tool blocks,
-// so the model still sees the tools; the loop runs none after this.
-var toolLimitNote = fmt.Sprintf("[This turn has used all %d tool calls. Do not call tools. Answer now from the results above, and list what you could not check under **Not established**.]", maxToolCalls)
+// limitNote follows the tool results once a turn limit stops tool calls.
+// Bedrock needs the tool config while the history holds tool blocks, so the
+// model still sees the tools; the loop runs none after this.
+func limitNote(limit StopReason) string {
+	used := fmt.Sprintf("all %d tool calls", maxToolCalls)
+	if limit == StopBudget {
+		used = "its token budget"
+	}
+	return "[This turn has used " + used + ". Do not call tools. Answer now from the results above, and list what you could not check under **Not established**.]"
+}
 
 // ChatModel streams one model call. ai.BedrockChat implements it.
 type ChatModel interface {
@@ -157,8 +167,10 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 	defer tools.close()
 	r.tools = tools
 
+	// limit is set once a turn limit stops tool calls. The model call after
+	// that is the last one.
+	var limit StopReason
 	for {
-		final := r.toolCalls >= maxToolCalls
 		resp, err := r.agent.chat.Stream(ctx, ai.ChatRequest{
 			Model:     r.agent.model,
 			System:    system,
@@ -179,8 +191,8 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 			// calls run.
 			return StopMaxTokens, nil
 		}
-		if final {
-			return StopToolLimit, nil
+		if limit != "" {
+			return limit, nil
 		}
 		uses := resp.ToolUses()
 		if len(uses) == 0 {
@@ -188,15 +200,25 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 		}
 
 		r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleAssistant, Blocks: resp.Blocks})
+		if r.usage.InputTokens >= maxInputTokens {
+			limit = StopBudget
+		}
 		results := make([]ai.ChatBlock, 0, len(uses)+1)
 		for _, use := range uses {
+			if limit == StopBudget {
+				results = append(results, ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: this turn has used its token budget]", IsError: true})
+				continue
+			}
 			results = append(results, r.runTool(ctx, use))
 		}
 		if err := ctx.Err(); err != nil {
 			return "", err
 		}
-		if r.toolCalls >= maxToolCalls {
-			results = append(results, ai.TextBlock{Text: toolLimitNote})
+		if limit == "" && r.toolCalls >= maxToolCalls {
+			limit = StopToolLimit
+		}
+		if limit != "" {
+			results = append(results, ai.TextBlock{Text: limitNote(limit)})
 		}
 		r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleUser, Blocks: results})
 	}
@@ -240,15 +262,28 @@ func (r *turnRun) read(use ai.ToolUseBlock, result string) toolReading {
 			reading = got
 		}
 	}
-	if reading.evidence == nil {
-		reading.evidence = []Evidence{}
-	}
-	for i := range reading.evidence {
-		reading.evidence[i].ID = r.nextID
-		reading.evidence[i].Tool = use.Name
+	evidence := make([]Evidence, 0, len(reading.evidence))
+	for _, e := range reading.evidence {
+		e.Tool = use.Name
+		e.Summary = clip(e.Summary, maxEvidenceSummaryChars)
+		if err := e.check(); err != nil {
+			r.log.Warn("ask chef dropped tool evidence", "tool", use.Name, "error", err)
+			continue
+		}
+		e.ID = r.nextID
 		r.nextID++
+		evidence = append(evidence, e)
 	}
+	reading.evidence = evidence
 	return reading
+}
+
+// clip cuts s to at most limit characters.
+func clip(s string, limit int) string {
+	if utf8.RuneCountInString(s) <= limit {
+		return s
+	}
+	return string([]rune(s)[:limit])
 }
 
 // evidenceMarker heads a tool result with the IDs the answer may cite. A call

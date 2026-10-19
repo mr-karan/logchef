@@ -76,7 +76,7 @@ describe("createAskChefStreamParser", () => {
     const parser = createAskChefStreamParser();
     const done = (stop_reason: string) => frame("done", { stop_reason, tool_calls: 0, input_tokens: 0, output_tokens: 0, duration_ms: 1 });
 
-    for (const reason of ["end", "tool_limit", "deadline", "max_tokens", "preempted"]) {
+    for (const reason of ["end", "tool_limit", "deadline", "max_tokens", "budget", "preempted"]) {
       expect(parser.push(done(reason))).toMatchObject([{ type: "done", stop_reason: reason }]);
     }
     expect(() => parser.push(done("bored"))).toThrow(AskChefError);

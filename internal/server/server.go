@@ -452,9 +452,11 @@ func (s *Server) setupRoutes() {
 	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
 	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
 
-	// Ask Chef: browser session only. The handler checks team and source
-	// access, and a new turn preempts the user's running turn.
-	api.Post(askChefTurnsPath, s.requireSession, s.handleAskChefTurn)
+	// Ask Chef: browser session only, rate-limited per user like the query
+	// routes. The handler checks team and source access, and a new turn
+	// preempts the user's running turn.
+	askChefOps := api.Group("/ask-chef", s.requireSession)
+	registerLimited(askChefOps, fiber.MethodPost, "/turns", queryLimiter, s.handleAskChefTurn)
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin

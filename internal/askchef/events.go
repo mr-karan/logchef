@@ -14,6 +14,8 @@ const (
 	// StopMaxTokens means the model hit its output limit, so the answer is
 	// cut off.
 	StopMaxTokens StopReason = "max_tokens"
+	// StopBudget means the turn used its input token budget.
+	StopBudget StopReason = "budget"
 	// StopPreempted means a newer turn from the same user replaced this one.
 	StopPreempted StopReason = "preempted"
 )

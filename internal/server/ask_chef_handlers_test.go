@@ -272,6 +272,14 @@ func TestAskChefTurnRefusals(t *testing.T) {
 				ctx["kind"], ctx["alert_id"] = "alert", e.other
 			})
 		}, want: http.StatusBadRequest},
+		{name: "body over the route limit", body: func(e *askChefEnv) []byte {
+			return e.body(func(b map[string]any) { b["padding"] = strings.Repeat("x", askchef.MaxRequestBytes) })
+		}, want: http.StatusRequestEntityTooLarge},
+		{name: "evidence query over its limit", body: func(e *askChefEnv) []byte {
+			return e.body(func(b map[string]any) {
+				b["evidence"] = []map[string]any{{"id": "E1", "tool": "query_logchefql", "mode": "logchefql", "query": strings.Repeat("x", 4001)}}
+			})
+		}, want: http.StatusBadRequest},
 		{name: "unknown alert history entry", body: func(e *askChefEnv) []byte {
 			return e.body(func(b map[string]any) {
 				ctx := b["context"].(map[string]any)
@@ -456,6 +464,19 @@ func waitFor(t *testing.T, ok func() bool) {
 			t.Fatal("condition not met within 5s")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestAskChefTurnsShareTheQueryRateLimit(t *testing.T) {
+	cfg := askChefConfig("anthropic.claude-haiku")
+	cfg.RateLimit = config.RateLimitConfig{Enabled: true, QueryPerUserPerMinute: 1}
+	env := newAskChefEnv(t, cfg, &echoChat{})
+
+	if resp := env.mustPost(env.body(nil)); resp.status != http.StatusOK {
+		t.Fatalf("first turn status = %d, want 200", resp.status)
+	}
+	if resp := env.mustPost(env.body(nil)); resp.status != http.StatusTooManyRequests {
+		t.Fatalf("second turn status = %d, want 429", resp.status)
 	}
 }
 

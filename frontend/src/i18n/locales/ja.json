@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "ツール呼び出しの上限で停止しました",
   "askChef.stopDeadline": "時間の上限で停止しました",
   "askChef.stopMaxTokens": "回答が長さの上限で途切れました",
+  "askChef.stopBudget": "トークン予算の上限で停止しました",
   "askChef.stopPreempted": "新しい質問をしたため停止しました",
   "askChef.evidence": "根拠 · クリックしてエクスプローラーで開く",
   "askChef.openEvidence": "根拠 {id} をエクスプローラーで開く",

@@ -13,10 +13,17 @@ import (
 
 // Request limits from the API contract.
 const (
+	// MaxRequestBytes bounds a turn request body. It is above any request
+	// that keeps the field limits below with realistic text.
+	MaxRequestBytes  = 1 << 20
 	maxHistoryItems  = 20
 	maxHistoryChars  = 8000
 	maxEvidenceItems = 50
 	maxMessageChars  = 4000
+	// Evidence fields come back from the client, and the system prompt
+	// repeats them, so each is bounded.
+	maxEvidenceQueryChars   = 4000
+	maxEvidenceSummaryChars = 300
 )
 
 // Request is a validated turn request.
@@ -190,8 +197,8 @@ func checkEvidence(evidence []Evidence) error {
 		if e.ID < 1 {
 			return invalid("evidence[%d].id is required", i)
 		}
-		if _, ok := parseQueryMode(string(e.Mode)); !ok {
-			return invalid(`evidence[%d].mode must be "logchefql" or "native"`, i)
+		if err := e.check(); err != nil {
+			return invalid("evidence[%d]: %v", i, err)
 		}
 	}
 	return nil

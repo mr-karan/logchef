@@ -123,7 +123,11 @@ func TestParseRequestRejectsInvalidInput(t *testing.T) {
 		{"evidence id zero", set("evidence", []map[string]any{{"id": "E0", "mode": "native"}})},
 		{"evidence id signed", set("evidence", []map[string]any{{"id": "E-2", "mode": "native"}})},
 		{"evidence without id", set("evidence", []map[string]any{{"mode": "native"}})},
-		{"evidence mode", set("evidence", []map[string]any{{"id": "E1", "mode": "sql"}})},
+		{"evidence mode", set("evidence", []map[string]any{{"id": "E1", "tool": "compare_windows", "mode": "sql"}})},
+		{"evidence tool reads no logs", set("evidence", []map[string]any{{"id": "E1", "tool": "get_sources", "mode": "logchefql"}})},
+		{"evidence tool unknown", set("evidence", []map[string]any{{"id": "E1", "tool": strings.Repeat("t", 65), "mode": "logchefql"}})},
+		{"evidence query too long", set("evidence", []map[string]any{{"id": "E1", "tool": "compare_windows", "mode": "logchefql", "query": strings.Repeat("é", 4001)}})},
+		{"evidence summary too long", set("evidence", []map[string]any{{"id": "E1", "tool": "compare_windows", "mode": "logchefql", "summary": strings.Repeat("é", 301)}})},
 		{"unknown kind", contextField("kind", "dashboard")},
 		{"unknown mode", contextField("mode", "sql")},
 		{"missing start", contextField("start", nil)},
@@ -142,6 +146,12 @@ func TestParseRequestRejectsInvalidInput(t *testing.T) {
 	}
 	if _, err := askchef.ParseRequest(validBody(t, set("message", strings.Repeat("é", 4000)))); err != nil {
 		t.Fatalf("a 4000-character message was rejected: %v", err)
+	}
+	atLimit := set("evidence", []map[string]any{{
+		"id": "E1", "tool": "top_values", "mode": "logchefql", "query": strings.Repeat("é", 4000), "summary": strings.Repeat("é", 300),
+	}})
+	if _, err := askchef.ParseRequest(validBody(t, atLimit)); err != nil {
+		t.Fatalf("evidence at its limits was rejected: %v", err)
 	}
 }
 

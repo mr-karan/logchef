@@ -60,6 +60,9 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 	if mediaType, _, _ := strings.Cut(c.Get(fiber.HeaderContentType), ";"); !strings.EqualFold(strings.TrimSpace(mediaType), fiber.MIMEApplicationJSON) {
 		return SendErrorWithType(c, fiber.StatusUnsupportedMediaType, "Content-Type must be application/json", models.ValidationErrorType)
 	}
+	if len(c.Body()) > askchef.MaxRequestBytes {
+		return SendErrorWithType(c, fiber.StatusRequestEntityTooLarge, "Request body is too large", models.ValidationErrorType)
+	}
 	req, err := askchef.ParseRequest(c.Body())
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)

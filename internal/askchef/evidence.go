@@ -3,8 +3,10 @@ package askchef
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -65,4 +67,23 @@ type Evidence struct {
 	StartMS int64  `json:"start"`
 	EndMS   int64  `json:"end"`
 	Summary string `json:"summary"`
+}
+
+// check reports why e cannot be evidence: a tool that reads no logs, an
+// unknown mode, or a field over its limit. The server's own evidence and
+// the client's prior evidence meet the same rules.
+func (e Evidence) check() error {
+	if allowedTools[e.Tool].read == nil {
+		return fmt.Errorf("tool %q does not produce evidence", e.Tool)
+	}
+	if _, ok := parseQueryMode(string(e.Mode)); !ok {
+		return errors.New(`mode must be "logchefql" or "native"`)
+	}
+	if utf8.RuneCountInString(e.Query) > maxEvidenceQueryChars {
+		return fmt.Errorf("query is longer than %d characters", maxEvidenceQueryChars)
+	}
+	if utf8.RuneCountInString(e.Summary) > maxEvidenceSummaryChars {
+		return fmt.Errorf("summary is longer than %d characters", maxEvidenceSummaryChars)
+	}
+	return nil
 }
