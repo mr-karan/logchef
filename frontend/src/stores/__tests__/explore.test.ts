@@ -674,6 +674,18 @@ describe("explore store", () => {
       expect(store2.logchefqlCode).toBe('level="error"');
       expect(store2.activeMode).toBe("logchefql");
     });
+
+    it("saves no window the user never chose", () => {
+      mocks.teamsState.currentTeamId = 1;
+      const ctx = useContextStore();
+      ctx.selectTeam(1);
+      ctx.selectSource(10);
+
+      useExploreStore().setLogchefqlCode('level="error"');
+
+      const draft = JSON.parse(localStorage.getItem("logchef.explore.draft.1.10") ?? "{}");
+      expect(draft).toMatchObject({ version: 2, logchefqlCode: 'level="error"', window: null });
+    });
   });
 
   describe("links that name their query", () => {

@@ -127,8 +127,8 @@ vi.mock("@/stores/explore", () => ({
     activeMode: "logchefql",
     logchefqlCode: 'level="info"',
     nativeQuery: "",
-    selectedRelativeTime: null,
-    timeRange: null,
+    hasWindow: false,
+    window: { kind: "relative", spec: "15m" },
     limit: 100,
   }),
 }));
@@ -206,6 +206,36 @@ describe("SaveQueryModal submission lock", () => {
     releaseSave.value?.();
     await nextTick();
     expect(host.querySelector('button[type="submit"]')?.hasAttribute("disabled")).toBe(false);
+    app.unmount();
+  });
+
+  it("saves no time range when neither the Explorer nor the query has one", async () => {
+    const payloads: Array<{ query_content: string }> = [];
+    const Harness = defineComponent({
+      components: { SaveQueryModal },
+      setup() {
+        return {
+          onSave: (payload: { query_content: string }) => payloads.push(payload),
+          queryContent: JSON.stringify(queryContentFixture),
+        };
+      },
+      template: `<SaveQueryModal :is-open="true" :query-content="queryContent" query-type="logchefql" @save="onSave" />`,
+    });
+    const app = createApp(Harness);
+    app.use(i18n);
+    app.mount(host);
+    await nextTick();
+
+    const name = host.querySelector<HTMLInputElement>("#name");
+    if (!name) throw new Error("name input was not rendered");
+    name.value = "no window";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    await nextTick();
+    host.querySelector("form")?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await nextTick();
+
+    expect(payloads).toHaveLength(1);
+    expect(JSON.parse(payloads[0].query_content)).toMatchObject({ version: 2, timeRange: null });
     app.unmount();
   });
 });

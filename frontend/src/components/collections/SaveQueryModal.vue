@@ -36,7 +36,6 @@ import { useToast } from '@/composables/useToast';
 import { storeToRefs } from "pinia";
 import { getExploreModeForQueryLanguage, getQueryLanguageLabel, resolveSavedQueryMetadata, type ExploreMode } from '@/lib/queryMetadata';
 import type { SavedQueryTimeRange } from '@/api/savedQueries';
-import { epochMs, type TimeWindow } from '@/utils/timeWindow';
 import { encodeStoredRange } from '@/utils/timeWindowCodec';
 
 const { t } = useI18n();
@@ -403,9 +402,9 @@ function prepareQueryContent(saveTimestamp: boolean): string {
         // Keep the originally saved time range: editing from Collections, or a
         // metadata-only edit (from the persisted record, not the live-editor `content`).
         const original = useLiveExploreState ? content : originalSavedContent;
-        stored = original.timeRange
-          ? { version: typeof original.version === 'number' ? original.version : 1, timeRange: original.timeRange }
-          : encodeStoredRange(lastHourWindow());
+        if (original.timeRange) {
+          stored = { version: typeof original.version === 'number' ? original.version : 1, timeRange: original.timeRange };
+        }
       }
     }
 
@@ -426,7 +425,7 @@ function prepareQueryContent(saveTimestamp: boolean): string {
   } catch (error) {
     console.error('Error preparing query content:', error);
 
-    const fallback = saveTimestamp ? encodeStoredRange(exploreStore.window) : { version: 2, timeRange: null };
+    const fallback = saveTimestamp && exploreStore.hasWindow ? encodeStoredRange(exploreStore.window) : { version: 2, timeRange: null };
 
     return JSON.stringify({
       version: fallback.version,
@@ -437,11 +436,6 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       variables: allVariables?.value || []
     });
   }
-}
-
-function lastHourWindow(): TimeWindow {
-  const end = Date.now();
-  return { kind: 'absolute', start: epochMs(end - 3_600_000), end: epochMs(end) };
 }
 
 // Handle form submission

@@ -4,7 +4,8 @@ import { CalendarDateTime, toZoned } from "@internationalized/date";
 import type { SavedQueryTimeRange } from "@/api/savedQueries";
 import { epochMs, parseZoneId, relativeWindow, zoneFromPreference, type EpochMs, type TimeWindow, type ZoneId } from "./timeWindow";
 
-export type DraftTime = { version: 2; window: TimeWindow };
+// A draft saved before the Explorer opened a window has none.
+export type DraftTime = { version: 2; window: TimeWindow | null };
 
 type StoredRangeOrigin =
   | { format: "saved-query"; version: number; prefZone: ZoneId }

@@ -274,7 +274,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   const sourceId = computed(() => contextStore.sourceId || 0);
   const hasValidSource = computed(() => !!sourceId.value);
-  const hasValidTimeRange = computed(() => state.data.value.window !== null);
+  const hasWindow = computed(() => state.data.value.window !== null);
 
   // The instant "now" means for a relative window. A run re-anchors it, so the
   // log query, histogram and Ask Chef all read one resolved window.
@@ -291,7 +291,7 @@ export const useExploreStore = defineStore("explore", () => {
     anchor.value = epochMs(Date.now());
   }
   const canExecuteQuery = computed(() => {
-    if (!hasValidSource.value || !hasValidTimeRange.value) {
+    if (!hasValidSource.value || !hasWindow.value) {
       return false;
     }
     return true;
@@ -357,7 +357,7 @@ export const useExploreStore = defineStore("explore", () => {
     const { activeMode, nativeQuery, logchefqlCode, limit } = state.data.value;
     const draft: ExploreDraft = {
       version: 2,
-      window: timeWindow.value,
+      window: state.data.value.window,
       mode: activeMode,
       nativeQuery,
       logchefqlCode,
@@ -449,7 +449,7 @@ export const useExploreStore = defineStore("explore", () => {
   const _buildDisplaySql = () => {
     const { logchefqlCode, limit } = state.data.value;
 
-    if (!hasValidTimeRange.value) {
+    if (!hasWindow.value) {
       return null;
     }
 
@@ -807,7 +807,7 @@ export const useExploreStore = defineStore("explore", () => {
       _updateLastExecutedState();
     }
 
-    const hasRequiredParams = !!(sourceId.value && hasValidTimeRange.value);
+    const hasRequiredParams = !!(sourceId.value && hasWindow.value);
     const hasQueryContent = state.data.value.activeMode === 'native' ? !!state.data.value.nativeQuery : true;
 
     return { needsResolve: false, shouldExecute: hasRequiredParams && hasQueryContent };
@@ -980,7 +980,7 @@ export const useExploreStore = defineStore("explore", () => {
   function resetQueryContentForSourceChange() {
     _clearQueryContent();
 
-    if (hasValidTimeRange.value) {
+    if (hasWindow.value) {
       const sourceDetails = sourcesStore.currentSourceDetails;
       
       if (supportsClickHouseSQLForSource(sourceDetails)) {
@@ -1070,7 +1070,7 @@ export const useExploreStore = defineStore("explore", () => {
 
       const executionSnapshot = captureExecutionState();
       const optimizer = getVictoriaLogsOptimizer(sourceDetails);
-      if (optimizer && hasValidTimeRange.value) {
+      if (optimizer && hasWindow.value) {
         const { getVariablesForApi } = useVariables();
         state.data.value.logs = [];
         state.data.value.columns = [];
@@ -1718,7 +1718,7 @@ export const useExploreStore = defineStore("explore", () => {
     queryTimeout: computed(() => state.data.value.queryTimeout),
     window: timeWindow,
     resolved,
-    hasWindow: hasValidTimeRange,
+    hasWindow,
     filterConditions: computed(() => state.data.value.filterConditions),
     nativeQuery: computed(() => state.data.value.nativeQuery),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
