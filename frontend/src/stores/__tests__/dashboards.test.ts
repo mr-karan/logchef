@@ -4,6 +4,11 @@ import { setActivePinia, createPinia } from "pinia";
 // Mock the dashboards API module so the store's CRUD + panel-execution paths
 // resolve deterministically without touching the network. The store imports
 // `dashboardsApi` and `dashboardPanelApi` from here; types are erased at compile.
+// The browser zone is not the preference zone, so a browser-zone read shows up.
+vi.hoisted(() => {
+  process.env.TZ = "Asia/Kolkata";
+});
+
 const mocks = vi.hoisted(() => ({
   list: vi.fn(),
   get: vi.fn(),
@@ -35,6 +40,7 @@ vi.mock("@/api/dashboards", () => ({
 import { useDashboardsStore } from "../dashboards";
 import type { Dashboard, DashboardPanel, DashboardPanels } from "@/api/dashboards";
 import { epochMs } from "@/utils/timeWindow";
+import { usePreferencesStore } from "@/stores/preferences";
 
 function emptyPanels(): DashboardPanels {
   return { version: 1, layout: [], panels: [] };
@@ -308,88 +314,57 @@ describe("dashboards store — edit mode / dirty guard", () => {
   });
 });
 
-describe("dashboards store — panel time params (issue #80: logchefql timezone shift)", () => {
+describe("dashboards store — panel time params", () => {
   beforeEach(() => {
     setActivePinia(createPinia());
     vi.clearAllMocks();
     mocks.logchefqlQuery.mockResolvedValue({ status: "success", data: { logs: [], columns: [] } });
     mocks.histogram.mockResolvedValue({ status: "success", data: { data: [], granularity: "1m" } });
     mocks.logsQuery.mockResolvedValue({ status: "success", data: { data: [], columns: [] } });
-  });
-
-  const RFC3339 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
-  const SQL_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-
-  it("sends a UTC SQL-datetime string paired with timezone: UTC to logchefql/query", async () => {
-    const store = await loadEditableDashboard();
-    store.enterEdit();
-    store.upsertDraftPanel(tablePanel());
-
-    expect(mocks.logchefqlQuery).toHaveBeenCalledTimes(1);
-    // dashboardPanelApi.logchefqlQuery(teamId, sourceId, body, signal)
-    const [, , body] = mocks.logchefqlQuery.mock.calls[0];
-    // The server's ClickHouse compiler only accepts "YYYY-MM-DD HH:MM:SS" here
-    // (it rejects RFC3339 with a 400). Since that string carries no offset,
-    // it must always be paired with timezone: "UTC" — sending the viewer's
-    // real IANA zone here (as the histogram/logs-query paths correctly do)
-    // would shift the query window by that zone's offset. This was the bug.
-    expect(body.start_time).toMatch(SQL_DATETIME);
-    expect(body.end_time).toMatch(SQL_DATETIME);
-    expect(body.timezone).toBe("UTC");
-  });
-
-  it("sends a UTC SQL-datetime string paired with timezone: UTC to logchefql/translate", async () => {
     mocks.translate.mockResolvedValue({
       status: "success",
       data: { valid: true, sql: "", full_sql: "SELECT 1", conditions: [], fields_used: [] },
     });
-    const store = await loadEditableDashboard();
-    store.enterEdit();
-    store.upsertDraftPanel({
-      id: "p2",
-      title: "Rate",
-      type: "timeseries",
-      team_id: 1,
-      source_id: 1,
-      query: "",
-      query_language: "logchefql",
-      options: {},
-    });
-
-    expect(mocks.translate).toHaveBeenCalledTimes(1);
-    // dashboardPanelApi.translate(teamId, sourceId, body, signal)
-    const [, , body] = mocks.translate.mock.calls[0];
-    expect(body.start_time).toMatch(SQL_DATETIME);
-    expect(body.end_time).toMatch(SQL_DATETIME);
-    expect(body.timezone).toBe("UTC");
   });
 
-  it("still sends RFC3339 to logs/histogram and logs/query (unaffected by this fix)", async () => {
+  // 250 ms and 999 ms catch a bound truncated to whole seconds.
+  const window = {
+    kind: "absolute",
+    start: epochMs(Date.parse("2026-10-19T04:00:00.250Z")),
+    end: epochMs(Date.parse("2026-10-19T05:00:00.999Z")),
+  } as const;
+
+  async function runEveryPanelType() {
     const store = await loadEditableDashboard();
+    usePreferencesStore().preferences.timezone = "utc";
+    store.setWindow(window);
     store.enterEdit();
-    store.upsertDraftPanel({ ...tablePanel("p3"), query_language: "clickhouse-sql" });
+    store.upsertDraftPanel(tablePanel("logchefql-table"));
+    store.upsertDraftPanel({ ...tablePanel("sql-table"), query_language: "clickhouse-sql" });
+    store.upsertDraftPanel({ ...tablePanel("logchefql-series"), type: "timeseries", options: {} });
+    await vi.waitFor(() => expect(store.getPanelState("logchefql-series").status).toBe("empty"));
+    return store;
+  }
 
-    expect(mocks.logsQuery).toHaveBeenCalledTimes(1);
-    const [, , sqlBody] = mocks.logsQuery.mock.calls[0];
-    expect(sqlBody.start_time).toMatch(RFC3339);
-    expect(sqlBody.end_time).toMatch(RFC3339);
+  it("sends every panel request the same exact bounds in the preference zone", async () => {
+    await runEveryPanelType();
 
-    store.upsertDraftPanel({
-      id: "p4",
-      title: "Rate",
-      type: "timeseries",
-      team_id: 1,
-      source_id: 1,
-      query: "SELECT 1",
-      query_language: "clickhouse-sql",
-      options: {},
+    const bodies = [mocks.logchefqlQuery, mocks.logsQuery, mocks.translate, mocks.histogram].map((mock) => {
+      expect(mock).toHaveBeenCalledTimes(1);
+      return mock.mock.calls[0][2];
     });
-    // Timeseries panels resolve their native query via an async helper before
-    // calling the histogram endpoint, so the call lands a microtask later.
-    await vi.waitFor(() => expect(mocks.histogram).toHaveBeenCalledTimes(1));
-    const [, , histBody] = mocks.histogram.mock.calls[0];
-    expect(histBody.start_time).toMatch(RFC3339);
-    expect(histBody.end_time).toMatch(RFC3339);
+    for (const body of bodies) {
+      expect(body).toMatchObject({ start_time: "2026-10-19T04:00:00.250Z", end_time: "2026-10-19T05:00:00.999Z", timezone: "UTC" });
+    }
+  });
+
+  it("labels a timeseries panel in the zone its query ran in", async () => {
+    const store = await runEveryPanelType();
+    mocks.histogram.mockResolvedValue({ status: "success", data: { data: [{ bucket: "2026-10-19T04:00:00Z", log_count: 1 }], granularity: "1m" } });
+    store.upsertDraftPanel({ ...tablePanel("filled-series"), type: "timeseries", options: {} });
+    await vi.waitFor(() => expect(store.getPanelState("filled-series").status).toBe("success"));
+
+    expect(store.getPanelState("filled-series").timeseries?.range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
   });
 });
 

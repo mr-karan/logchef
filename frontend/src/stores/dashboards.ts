@@ -19,7 +19,15 @@ import {
 import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
-import { epochMs, parseRelativeSpec, relativeWindow, resolveWindow, type TimeWindow } from "@/utils/timeWindow";
+import {
+  epochMs,
+  parseRelativeSpec,
+  relativeWindow,
+  resolveWindow,
+  toRfc3339,
+  type ResolvedWindow,
+  type TimeWindow,
+} from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
 import { isCanceledError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
@@ -47,19 +55,6 @@ const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
 // comes from the server's dashboard_cache.default_ttl_seconds (see meta store);
 // this constant is only the last-resort display fallback.
 export const DEFAULT_DASHBOARD_CACHE_TTL_SECONDS = 600;
-// Panel queries run in the viewer's browser timezone (falling back to UTC if
-// it can't be resolved). This used to be hardcoded to UTC because the
-// VictoriaLogs histogram path mis-formatted a non-UTC zone as an
-// `offset=+05:30` clock string where VictoriaLogs expects a duration,
-// causing a 400; that's fixed in internal/victorialogs/querying.go.
-const PANEL_QUERY_TIMEZONE = (() => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-})();
-
 export type PanelStatus = "idle" | "loading" | "success" | "empty" | "error" | "locked";
 
 export interface PanelColumn {
@@ -75,7 +70,7 @@ export interface PanelState {
     granularity: string | null;
     groupBy: string | null;
     notice: string | null;
-    range: { start: number; end: number };
+    range: ResolvedWindow;
   };
   stat?: {
     value: number;
@@ -91,10 +86,6 @@ export interface PanelState {
   };
 }
 
-export interface EffectiveRange {
-  start: number; // epoch ms
-  end: number; // epoch ms
-}
 
 interface DashboardsState {
   dashboards: Dashboard[];
@@ -104,7 +95,7 @@ interface DashboardsState {
   // The range actually EXECUTED by the most recent refresh (snapped/moving),
   // for toolbar display. Distinct from `effectiveRange` (the user's SELECTED
   // range). null until the first refresh runs.
-  appliedRange: EffectiveRange | null;
+  appliedRange: ResolvedWindow | null;
   refreshIntervalMs: number;
   // Edit mode. `editDraft` is the working copy of the panel blob being mutated;
   // `editSnapshotJson` is the JSON of the blob at the moment Edit was entered,
@@ -149,26 +140,6 @@ function stableStringify(value: unknown): string {
   }
   return JSON.stringify(value);
 }
-
-// A UTC instant as RFC3339 (histogram + logs/query endpoint contract).
-function msToRfc3339(ms: number): string {
-  return new Date(ms).toISOString();
-}
-
-// A UTC instant as "YYYY-MM-DD HH:MM:SS" for the logchefql translate/query
-// endpoints, which read it in the request's timezone (always UTC here).
-function msToSqlDateTime(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
-}
-
-// Because msToSqlDateTime always emits a UTC wall-clock string, the timezone
-// used to interpret it must always be UTC too — sending the viewer's real
-// IANA zone here (as PANEL_QUERY_TIMEZONE does for the RFC3339 endpoints)
-// would tell the server to parse a UTC string as if it were local time in
-// that zone, shifting the query window by the zone's offset. This is the
-// bug this fix addresses: non-UTC viewers previously got a shifted window on
-// the two logchefql endpoints.
-const LOGCHEFQL_TIME_TIMEZONE = "UTC";
 
 function isAbort(err: unknown): boolean {
   return (
@@ -312,25 +283,23 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     return stableStringify(draft) !== state.data.value.editSnapshotJson;
   });
 
-  const effectiveRange = computed<EffectiveRange>(() => {
-    const { start, end } = resolveWindow(state.data.value.window, preferencesStore.zone, epochMs(Date.now()));
-    return { start, end };
-  });
+  const effectiveRange = computed<ResolvedWindow>(() =>
+    resolveWindow(state.data.value.window, preferencesStore.zone, epochMs(Date.now())),
+  );
 
   // Resolve the range to EXECUTE for a refresh, anchored on a caller-supplied
   // `nowMs` (captured once per refresh — do NOT read the memoized effectiveRange
   // here, that's what freezes `now`). Classifies the current selection, resolves
   // the unsnapped base range in the preference zone, then delegates the
   // snap/moving-window decision to the pure resolveAppliedRange.
-  function computeAppliedRange(nowMs: number, effTtlSeconds: number): EffectiveRange {
+  function computeAppliedRange(nowMs: number, effTtlSeconds: number): ResolvedWindow {
     const window = state.data.value.window;
-    const { start, end } = resolveWindow(window, preferencesStore.zone, epochMs(nowMs));
-    if (window.kind === "absolute") {
-      return resolveAppliedRange({ kind: "absolute", baseStart: start, baseEnd: end, durationMs: 0, effTtlSeconds, nowMs });
-    }
+    const { start, end, zone } = resolveWindow(window, preferencesStore.zone, epochMs(nowMs));
     // today/yesterday are calendar-boundary presets — never snapped.
-    const kind = parseRelativeSpec(window.spec)?.kind === "calendar" ? "calendar" : "rolling";
-    return resolveAppliedRange({ kind, baseStart: start, baseEnd: end, durationMs: end - start, effTtlSeconds, nowMs });
+    const kind =
+      window.kind === "absolute" ? "absolute" : parseRelativeSpec(window.spec)?.kind === "calendar" ? "calendar" : "rolling";
+    const applied = resolveAppliedRange({ kind, baseStart: start, baseEnd: end, durationMs: end - start, effTtlSeconds, nowMs });
+    return { start: epochMs(applied.start), end: epochMs(applied.end), zone };
   }
 
   function getPanelState(panelId: string): PanelState {
@@ -456,7 +425,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // silently breaking VictoriaLogs panels — see #119 A4.)
   async function resolveNativeQuery(
     panel: DashboardPanel,
-    range: EffectiveRange,
+    range: ResolvedWindow,
     signal: AbortSignal
   ): Promise<{ query: string; language: PanelQueryLanguage }> {
     if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
@@ -467,9 +436,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       panel.source_id,
       {
         query: panel.query,
-        start_time: msToSqlDateTime(range.start),
-        end_time: msToSqlDateTime(range.end),
-        timezone: LOGCHEFQL_TIME_TIMEZONE,
+        start_time: toRfc3339(range.start),
+        end_time: toRfc3339(range.end),
+        timezone: range.zone,
         limit: panel.options?.limit,
       },
       signal
@@ -495,14 +464,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   async function fetchPanelData(
     panel: DashboardPanel,
-    range: EffectiveRange,
+    range: ResolvedWindow,
     signal: AbortSignal,
     // Result-cache directive attached to the (cacheable) panel request bodies.
     // Undefined => caching off for this refresh; the `cache` field is omitted.
     cache?: CacheDirective
   ): Promise<PanelState> {
-    const startIso = msToRfc3339(range.start);
-    const endIso = msToRfc3339(range.end);
+    const startIso = toRfc3339(range.start);
+    const endIso = toRfc3339(range.end);
 
     if (panel.type === "timeseries" || panel.type === "stat" || panel.type === "breakdown") {
       const groupBy = panel.type === "timeseries" || panel.type === "breakdown" ? panel.options?.group_by?.trim() || undefined : undefined;
@@ -521,7 +490,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         group_by: groupBy,
         start_time: startIso,
         end_time: endIso,
-        timezone: PANEL_QUERY_TIMEZONE,
+        timezone: range.zone,
         query_language: nativeLanguage,
         ...(cache ? { cache } : {}),
       };
@@ -545,7 +514,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
           granularity: data?.granularity ?? null,
           groupBy: groupBy ?? null,
           notice: data?.notice ?? null,
-          range: { start: range.start, end: range.end },
+          range,
         },
       };
     }
@@ -561,7 +530,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         limit,
         start_time: startIso,
         end_time: endIso,
-        timezone: PANEL_QUERY_TIMEZONE,
+        timezone: range.zone,
         query_language: panel.query_language,
         ...(cache ? { cache } : {}),
       };
@@ -579,9 +548,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       panel.source_id,
       {
         query: panel.query,
-        start_time: msToSqlDateTime(range.start),
-        end_time: msToSqlDateTime(range.end),
-        timezone: LOGCHEFQL_TIME_TIMEZONE,
+        start_time: toRfc3339(range.start),
+        end_time: toRfc3339(range.end),
+        timezone: range.zone,
         limit,
         ...(cache ? { cache } : {}),
       },
@@ -597,7 +566,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   async function executePanel(
     panel: DashboardPanel,
-    range: EffectiveRange,
+    range: ResolvedWindow,
     signal: AbortSignal,
     cache?: CacheDirective
   ) {

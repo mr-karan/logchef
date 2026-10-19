@@ -59,6 +59,7 @@ import {
 } from "@/utils/histogram-chart";
 import type { HistogramData } from "@/services/HistogramService";
 import { usePreferencesStore } from "@/stores/preferences";
+import type { ResolvedWindow } from "@/utils/timeWindow";
 
 const { t } = useI18n();
 const preferencesStore = usePreferencesStore();
@@ -78,20 +79,12 @@ interface Props {
   /** Bar render mode. Only meaningful when chart is 'bars'. Absent defaults to 'stacked'. */
   barMode?: "stacked" | "grouped";
   /**
-   * The panel's requested query time range (epoch ms), when the caller has
-   * it available. When provided, the chart's x-domain and axis/tooltip time
-   * formatting use this instead of the first/last returned bucket - so
-   * missing leading/trailing empty buckets (ClickHouse only returns buckets
-   * that matched at least one log) don't shrink the visible window down to
-   * just the populated data.
-   *
-   * NOTE for callers: this prop is currently unused by DashboardPanel.vue,
-   * which doesn't have the requested range plumbed through PanelState yet -
-   * wiring that up is out of scope here (DashboardPanel.vue/store are owned
-   * elsewhere), but doing so is required to actually fix the shrinking-window
-   * behavior end to end.
+   * The panel's queried window and the zone it ran in. The chart's x-domain
+   * and labels use it instead of the first/last returned bucket, so missing
+   * leading/trailing empty buckets (ClickHouse only returns buckets that
+   * matched at least one log) don't shrink the visible window.
    */
-  range?: { start: number; end: number } | null;
+  range?: ResolvedWindow | null;
 }
 const props = withDefaults(defineProps<Props>(), {
   granularity: null,
@@ -101,14 +94,11 @@ const props = withDefaults(defineProps<Props>(), {
   range: null,
 });
 
-function isValidRange(range: Props["range"]): range is { start: number; end: number } {
-  return (
-    !!range &&
-    Number.isFinite(range.start) &&
-    Number.isFinite(range.end) &&
-    range.end > range.start
-  );
-}
+// A queried window wide enough to plot. Zero-width falls back to the data.
+const plotRange = computed(() => {
+  const range = props.range;
+  return range && Number.isFinite(range.start) && Number.isFinite(range.end) && range.end > range.start ? range : null;
+});
 
 // 'line' is the default render style when the panel hasn't set one explicitly.
 const effectiveChart = computed<"bars" | "line" | "area">(() => props.chart ?? "line");
@@ -139,15 +129,14 @@ const crosshairYProps = computed(() =>
 );
 
 const chartRange = computed(() => {
-  if (isValidRange(props.range)) {
-    return { start: props.range.start, end: props.range.end, zone: preferencesStore.zone };
-  }
+  if (plotRange.value) return plotRange.value;
+  const zone = props.range?.zone ?? preferencesStore.zone;
   if (!chartModel.value.rows.length) {
-    return { start: Date.now() - chartModel.value.bucketWidthMs, end: Date.now(), zone: preferencesStore.zone };
+    return { start: Date.now() - chartModel.value.bucketWidthMs, end: Date.now(), zone };
   }
   const first = chartModel.value.rows[0];
   const last = chartModel.value.rows[chartModel.value.rows.length - 1];
-  return { start: first.ts, end: last.bucketEndTs, zone: preferencesStore.zone };
+  return { start: first.ts, end: last.bucketEndTs, zone };
 });
 
 // Explicit x-domain for the chart canvas itself (not just tick/tooltip
@@ -155,7 +144,7 @@ const chartRange = computed(() => {
 // own min/max ts, so missing leading/trailing empty buckets shrink the
 // visible plotted window even though chartRange above "knows" the real range.
 const xDomain = computed<[number, number] | undefined>(() =>
-  isValidRange(props.range) ? [props.range.start, props.range.end] : undefined
+  plotRange.value ? [plotRange.value.start, plotRange.value.end] : undefined
 );
 
 function buildTooltipHtml(datum: HistogramChartRow): string {
