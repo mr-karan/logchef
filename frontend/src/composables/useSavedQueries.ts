@@ -12,10 +12,20 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
-import { CalendarDateTime } from '@internationalized/date'
-import { calendarDateTimeToTimestamp } from '@/utils/time'
+import { getLocalTimeZone, CalendarDateTime, type DateValue } from '@internationalized/date'
 import type { Source } from "@/api/sources";
 import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
+
+function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
+  if (!dateTime) return null;
+  try {
+    const date = dateTime.toDate(getLocalTimeZone());
+    return date.getTime();
+  } catch (e) {
+    console.error("Error converting DateValue to timestamp:", e);
+    return null;
+  }
+}
 
 export function useSavedQueries(
     queries?: Ref<SavedQuery[] | undefined>,
@@ -512,12 +522,11 @@ export function useSavedQueries(
 
     newQuery.limit = exploreStore.limit.toString();
 
-    const range = exploreStore.timeRange;
-    if (range) {
-      // URL start and end are the instants the Explorer queries.
-      const timezone = exploreStore.getTimezoneIdentifier();
-      newQuery.start_time = calendarDateTimeToTimestamp(range.start, timezone).toString();
-      newQuery.end_time = calendarDateTimeToTimestamp(range.end, timezone).toString();
+    const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
+    const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
+    if (startTime !== null && endTime !== null) {
+      newQuery.start_time = startTime.toString();
+      newQuery.end_time = endTime.toString();
     }
 
     newQuery.mode = exploreStore.activeMode;

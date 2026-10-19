@@ -20,7 +20,6 @@ import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
 import { parseRelativeTimeString, calendarDateTimeToTimestamp } from "@/utils/time";
-import { getLocalTimeZone } from "@internationalized/date";
 import { isCanceledError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
 
@@ -326,8 +325,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       try {
         const { start, end } = parseRelativeTimeString(rel);
         return {
-          start: calendarDateTimeToTimestamp(start, getLocalTimeZone()),
-          end: calendarDateTimeToTimestamp(end, getLocalTimeZone()),
+          start: calendarDateTimeToTimestamp(start),
+          end: calendarDateTimeToTimestamp(end),
         };
       } catch {
         // fall through to absolute/default
@@ -338,8 +337,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     }
     const { start, end } = parseRelativeTimeString(DEFAULT_RELATIVE_TIME);
     return {
-      start: calendarDateTimeToTimestamp(start, getLocalTimeZone()),
-      end: calendarDateTimeToTimestamp(end, getLocalTimeZone()),
+      start: calendarDateTimeToTimestamp(start),
+      end: calendarDateTimeToTimestamp(end),
     };
   });
 
@@ -363,7 +362,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const rel = state.data.value.timeRelative ?? DEFAULT_RELATIVE_TIME;
     const parse = (s: string) => {
       const { start, end } = parseRelativeTimeString(s);
-      return { start: calendarDateTimeToTimestamp(start, getLocalTimeZone()), end: calendarDateTimeToTimestamp(end, getLocalTimeZone()) };
+      return { start: calendarDateTimeToTimestamp(start), end: calendarDateTimeToTimestamp(end) };
     };
     // today/yesterday are calendar-boundary presets — never snapped.
     const kind: "calendar" | "rolling" = rel === "today" || rel === "yesterday" ? "calendar" : "rolling";

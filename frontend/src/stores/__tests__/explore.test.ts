@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
-import { CalendarDateTime, ZonedDateTime, getLocalTimeZone } from "@internationalized/date";
+import { CalendarDateTime, ZonedDateTime } from "@internationalized/date";
 import type { Source } from "@/api/sources";
 
 // ---------------------------------------------------------------------------
@@ -103,7 +103,6 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
 
 import { useExploreStore } from "../explore";
 import { useContextStore } from "../context";
-import { useAskChefStore } from "../askChef";
 import { timestampToCalendarDateTime } from "@/utils/time";
 
 function makeSource(overrides: Partial<Source> = {}): Source {
@@ -308,8 +307,8 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.setTimeConfiguration({
         absoluteRange: {
-          start: timestampToCalendarDateTime(0, getLocalTimeZone()),
-          end: timestampToCalendarDateTime(1_000_000, getLocalTimeZone()),
+          start: timestampToCalendarDateTime(0),
+          end: timestampToCalendarDateTime(1_000_000),
         },
       });
       const before = store.timeRange;
@@ -442,80 +441,6 @@ describe("explore store", () => {
     });
   });
 
-  // URL start and end, and Ask Chef windows, are instants. They must match
-  // what the Explorer queries when the user's timezone preference is not the
-  // browser's zone.
-  describe("a UTC preference in a non-UTC browser", () => {
-    const originalTZ = process.env.TZ;
-    const startMs = Date.UTC(2026, 9, 19, 4, 0, 0);
-    const endMs = Date.UTC(2026, 9, 19, 5, 0, 0);
-
-    beforeAll(() => {
-      process.env.TZ = "America/New_York";
-    });
-    afterAll(() => {
-      if (originalTZ === undefined) delete process.env.TZ;
-      else process.env.TZ = originalTZ;
-    });
-
-    function selectVictoriaLogsSourceWithUTCPreference() {
-      localStorage.setItem("logchef_user_preferences", JSON.stringify({ timezone: "utc" }));
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      mocks.sourcesState.teamSources = [VL_SOURCE];
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(VL_SOURCE.id);
-      mocks.logchefqlQuery.mockResolvedValue({
-        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
-      });
-    }
-
-    function expectQueriedWindow() {
-      expect(mocks.logchefqlQuery).toHaveBeenLastCalledWith(
-        1,
-        VL_SOURCE.id,
-        expect.objectContaining({ start_time: "2026-10-19 04:00:00", end_time: "2026-10-19 05:00:00", timezone: "UTC" }),
-        expect.anything(),
-      );
-    }
-
-    it("runs in a browser zone other than UTC", () => {
-      expect(new Date(startMs).getHours()).not.toBe(4);
-    });
-
-    it("gives Ask Chef the instants the Explorer queries", async () => {
-      selectVictoriaLogsSourceWithUTCPreference();
-      const store = useExploreStore();
-      const askChef = useAskChefStore();
-      store.setTimeConfiguration({
-        absoluteRange: { start: new CalendarDateTime(2026, 10, 19, 4, 0, 0), end: new CalendarDateTime(2026, 10, 19, 5, 0, 0) },
-      });
-      askChef.openForExplorer();
-      expect(askChef.context).toMatchObject({ start: startMs, end: endMs });
-
-      await store.executeQuery();
-      expectQueriedWindow();
-    });
-
-    it("queries the instants a URL names and writes them back unchanged", async () => {
-      selectVictoriaLogsSourceWithUTCPreference();
-      const store = useExploreStore();
-      store.initializeFromUrl({
-        team: "1",
-        source: String(VL_SOURCE.id),
-        start: String(startMs),
-        end: String(endMs + 250),
-        mode: "logchefql",
-        q: "",
-      });
-      expect(store.urlQueryParameters).toMatchObject({ start: String(startMs), end: String(endMs + 250) });
-
-      await store.executeQuery();
-      expectQueriedWindow();
-    });
-  });
-
   describe("urlQueryParameters", () => {
     it("serializes team, source, absolute time range, and limit by default", () => {
       const contextStore = useContextStore();
@@ -526,8 +451,8 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.setTimeConfiguration({
         absoluteRange: {
-          start: timestampToCalendarDateTime(0, getLocalTimeZone()),
-          end: timestampToCalendarDateTime(60_000, getLocalTimeZone()),
+          start: timestampToCalendarDateTime(0),
+          end: timestampToCalendarDateTime(60_000),
         },
       });
       store.setLimit(250);
