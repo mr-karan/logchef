@@ -365,3 +365,41 @@ func TestNewOpenAIChatNeedsAnAPIKey(t *testing.T) {
 		t.Fatal("NewOpenAIChat accepted an empty API key")
 	}
 }
+
+func TestOpenAIProviderComplete(t *testing.T) {
+	stub := &openRouterStub{}
+	baseURL := stub.start(t, http.StatusOK, "application/json",
+		`{"id":"gen-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"SELECT 1"},"finish_reason":"stop"}]}`)
+	provider, err := NewProvider(t.Context(), ProviderConfig{Provider: ProviderOpenAI, APIKey: "test-key", BaseURL: baseURL}, testLogger())
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+
+	text, err := provider.Complete(t.Context(), CompletionRequest{System: "Write SQL.", User: "count rows", Model: "gpt-4o", MaxTokens: 1024, Temperature: 0.5})
+	if err != nil || text != "SELECT 1" {
+		t.Fatalf("Complete = %q, %v", text, err)
+	}
+	want := map[string]any{
+		"model": "gpt-4o",
+		"messages": []any{
+			map[string]any{"role": "system", "content": "Write SQL."},
+			map[string]any{"role": "user", "content": "count rows"},
+		},
+		"max_completion_tokens": float64(1024),
+		"temperature":           0.5,
+	}
+	if got := stub.body(0); !reflect.DeepEqual(got, want) {
+		t.Fatalf("request = %#v, want %#v", got, want)
+	}
+}
+
+func TestOpenAIProviderErrorResponse(t *testing.T) {
+	baseURL := (&openRouterStub{}).start(t, http.StatusUnauthorized, "application/json", `{"error":{"message":"No auth credentials found","code":401}}`)
+	provider, err := NewProvider(t.Context(), ProviderConfig{Provider: ProviderOpenAI, APIKey: "test-key", BaseURL: baseURL}, testLogger())
+	if err != nil {
+		t.Fatalf("NewProvider: %v", err)
+	}
+	if _, err := provider.Complete(t.Context(), CompletionRequest{User: "count rows", Model: "gpt-4o"}); err == nil || !strings.Contains(err.Error(), "401: No auth credentials found") {
+		t.Fatalf("Complete error = %v", err)
+	}
+}

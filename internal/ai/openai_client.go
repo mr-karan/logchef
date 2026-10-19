@@ -17,8 +17,9 @@ const DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 
 // Body size bounds of the chat completions client.
 const (
-	maxOpenAIErrorBody  = 8 << 10
-	maxOpenAIStreamLine = 1 << 20
+	maxOpenAIErrorBody    = 8 << 10
+	maxOpenAIResponseBody = 4 << 20
+	maxOpenAIStreamLine   = 1 << 20
 )
 
 // openAIClient calls the chat completions API of OpenAI or of a compatible
@@ -132,6 +133,29 @@ func statusError(resp *http.Response) error {
 		message = body.Error.Message
 	}
 	return fmt.Errorf("status %d: %s", resp.StatusCode, message)
+}
+
+// complete runs one chat completion without streaming and returns the text.
+func (c *openAIClient) complete(ctx context.Context, body openAIChatRequest) (string, error) {
+	resp, err := c.post(ctx, body)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	var out struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxOpenAIResponseBody)).Decode(&out); err != nil {
+		return "", fmt.Errorf("decoding chat completions response: %w", err)
+	}
+	if len(out.Choices) == 0 {
+		return "", errors.New("chat completions response has no choices")
+	}
+	return out.Choices[0].Message.Content, nil
 }
 
 // openAIChunk is one streamed chat.completion.chunk.

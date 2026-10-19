@@ -22,11 +22,12 @@ require (
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.3.7
 	github.com/mark3labs/mcp-go v1.1.1
-	github.com/sashabaranov/go-openai v1.42.1
+	github.com/pelletier/go-toml/v2 v2.4.3
 	github.com/shopspring/decimal v1.4.0
 	github.com/swaggo/swag v1.16.6
 	github.com/valyala/fasthttp v1.74.0
 	github.com/zitadel/oidc/v3 v3.51.13
+	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/crypto v0.57.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.23.0
@@ -88,7 +89,6 @@ require (
 	github.com/muhlemmer/httpforwarded v0.1.0 // indirect
 	github.com/ncruces/go-strftime v1.0.0 // indirect
 	github.com/paulmach/orb v0.13.0 // indirect
-	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/philhofer/fwd v1.2.0 // indirect
 	github.com/pierrec/lz4/v4 v4.1.30 // indirect
 	github.com/remyoudompheng/bigfft v0.0.0-20230129092748-24d4a6f8daec // indirect
@@ -107,7 +107,6 @@ require (
 	go.opentelemetry.io/otel v1.46.0 // indirect
 	go.opentelemetry.io/otel/metric v1.46.0 // indirect
 	go.opentelemetry.io/otel/trace v1.46.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/net v0.59.0 // indirect
 	golang.org/x/sys v0.48.0 // indirect
