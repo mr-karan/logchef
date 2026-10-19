@@ -35,7 +35,8 @@ const promptEvidence = `<evidence>
 // log in the window unless the model gives them a filter.
 const promptFieldCounts = `<field_counts>
 - get_field_values, top_values and get_all_field_dimensions count every log row in the window unless you give them query.
-- To count values in errors, or in any other subset of logs, pass the LogchefQL filter that selects the subset as query. For a question about the current query, pass the current query.
+- To count values in errors, or in any other subset of logs, pass the LogchefQL filter that selects the subset as query.
+- For a question about the current query: when the query mode is logchefql, pass the current query as query. When the query mode is native, the current query is not LogchefQL, so write a LogchefQL filter that selects the same logs, or list the subset count under **Not established**.
 - Never present a count over all logs as a count of a subset. The evidence header says "over all logs" when a count has no filter.
 </field_counts>`
 
