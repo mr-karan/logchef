@@ -444,9 +444,11 @@ describe("explore store", () => {
 
   describe("Ask Chef context window", () => {
     // A zone no test machine runs in, so a browser-zone conversion shows up.
+    // Ask Chef reads its window before the query runs: watchers left by
+    // earlier tests reset the context store while the query is awaited.
     const timezone = "Pacific/Chatham";
 
-    beforeEach(() => {
+    function exploreVictoriaLogs() {
       mocks.teamsState.currentTeamId = 1;
       mocks.sourcesState.currentSourceDetails = VL_SOURCE;
       mocks.sourcesState.teamSources = [VL_SOURCE];
@@ -456,7 +458,10 @@ describe("explore store", () => {
       mocks.logchefqlQuery.mockResolvedValue({
         data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
       });
-    });
+      const store = useExploreStore();
+      store.setTimezoneIdentifier(timezone);
+      return store;
+    }
 
     async function logQueryWindow(): Promise<{ start: number; end: number }> {
       await useExploreStore().executeQuery();
@@ -466,32 +471,26 @@ describe("explore store", () => {
     }
 
     it("is the window the log query reads for an absolute range", async () => {
-      const store = useExploreStore();
-      store.setTimezoneIdentifier(timezone);
-      store.setTimeConfiguration({
+      exploreVictoriaLogs().setTimeConfiguration({
         absoluteRange: { start: new CalendarDateTime(2026, 8, 8, 10, 0, 0), end: new CalendarDateTime(2026, 8, 8, 10, 15, 0) },
       });
 
-      const window = await logQueryWindow();
       const askChef = useAskChefStore();
       askChef.openForExplorer();
 
-      expect(askChef.context).toMatchObject(window);
+      expect(askChef.context).toMatchObject(await logQueryWindow());
     });
 
     it("is the window the log query reads for a relative range", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-08-08T10:00:00Z"));
       try {
-        const store = useExploreStore();
-        store.setTimezoneIdentifier(timezone);
-        store.setRelativeTimeRange("1h");
+        exploreVictoriaLogs().setRelativeTimeRange("1h");
 
-        const window = await logQueryWindow();
         const askChef = useAskChefStore();
         askChef.openForExplorer();
 
-        expect(askChef.context).toMatchObject(window);
+        expect(askChef.context).toMatchObject(await logQueryWindow());
       } finally {
         vi.useRealTimers();
       }
