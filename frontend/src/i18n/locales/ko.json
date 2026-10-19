@@ -698,6 +698,8 @@
   "dashboards.duplicateSkipsLockedPanels": "패널 {count}개가 접근할 수 없는 소스를 사용하므로 복사되지 않습니다.",
   "alerts.searchAlerts": "알림 검색…",
   "alerts.noMatches": "\"{search}\"와 일치하는 알림이 없습니다",
+  "alerts.viewLogs": "로그 보기",
+  "alerts.viewLogsNoTeam": "이 알림의 소스가 있는 팀에 속해 있지 않습니다.",
   "dashboards.defaultRange": "열 때 범위",
   "dashboards.defaultRangeNone": "사용자 범위",
   "dashboards.defaultRangeHint": "이 대시보드를 열 때 적용되는 시간 범위"

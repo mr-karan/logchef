@@ -698,6 +698,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} panel usa una fuente a la que no tienes acceso. No se copiará. | {count} paneles usan fuentes a las que no tienes acceso. No se copiarán.",
   "alerts.searchAlerts": "Buscar alertas…",
   "alerts.noMatches": "Ninguna alerta coincide con \"{search}\"",
+  "alerts.viewLogs": "Ver logs",
+  "alerts.viewLogsNoTeam": "Ninguno de tus equipos tiene la fuente de esta alerta.",
   "dashboards.defaultRange": "Abre con",
   "dashboards.defaultRangeNone": "Rango del usuario",
   "dashboards.defaultRangeHint": "Rango de tiempo con el que se abre este dashboard"

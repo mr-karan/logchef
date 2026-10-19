@@ -1409,6 +1409,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} panel uses a source you cannot access. It will not be copied. | {count} panels use sources you cannot access. They will not be copied.",
   "alerts.searchAlerts": "Search alerts…",
   "alerts.noMatches": "No alerts match \"{search}\"",
+  "alerts.viewLogs": "View logs",
+  "alerts.viewLogsNoTeam": "You are not in a team that has this alert's source.",
   "access.removeMember": "Remove member",
   "access.removeMemberTitle": "Remove team member?",
   "access.removeMemberConfirmation": "Remove {name} from {team}?",

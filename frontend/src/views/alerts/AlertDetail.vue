@@ -4,7 +4,7 @@ import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
 
 import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
-import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History } from "lucide-vue-next";
+import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,9 +14,12 @@ import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
 import { useContextStore } from "@/stores/context";
 import { useMetaStore } from "@/stores/meta";
+import { useTeamsStore } from "@/stores/teams";
+import { useToast } from "@/composables/useToast";
+import { alertHistoryExploreQuery } from "@/utils/alertExplore";
 import AlertForm from "@/components/alerts/AlertForm.vue";
 import { EmptyState, LoadingState } from "@/components/layout";
-import type { Alert, UpdateAlertRequest } from "@/api/alerts";
+import type { Alert, AlertHistoryEntry, UpdateAlertRequest } from "@/api/alerts";
 
 const { t, locale } = useI18n();
 
@@ -27,6 +30,8 @@ const alertsStore = useAlertsStore();
 const alertHistoryStore = useAlertHistoryStore();
 const contextStore = useContextStore();
 const metaStore = useMetaStore();
+const teamsStore = useTeamsStore();
+const { toast } = useToast();
 
 const alertId = computed(() => Number(route.params.alertID));
 const currentTab = ref<"edit" | "history">("edit");
@@ -80,6 +85,37 @@ async function handleDelete() {
   if (result.success) {
     goBack();
   }
+}
+
+// Alerts are not team-scoped, but Explorer needs a team that has the source.
+// The current team is tried first, since it usually has it.
+async function findTeamWithSource(sourceId: number): Promise<number | null> {
+  if (!teamsStore.userTeams.length) {
+    await teamsStore.loadUserTeams();
+  }
+  const teamIds = new Set([currentTeamId.value, ...teamsStore.userTeams.map((team) => team.id)]);
+  for (const teamId of teamIds) {
+    if (teamId == null) continue;
+    if (!teamsStore.getTeamSources(teamId).length) {
+      await teamsStore.listTeamSources(teamId);
+    }
+    if (teamsStore.getTeamSources(teamId).some((source) => source.id === sourceId)) {
+      return teamId;
+    }
+  }
+  return null;
+}
+
+async function viewLogs(entry: AlertHistoryEntry) {
+  // The alerts list can reload while teams load, so keep this alert.
+  const current = alert.value;
+  if (!current) return;
+  const teamId = await findTeamWithSource(current.source_id);
+  if (teamId == null) {
+    toast({ title: t("alerts.viewLogsNoTeam"), variant: "destructive" });
+    return;
+  }
+  router.push({ name: "LogExplorer", query: alertHistoryExploreQuery(current, entry, teamId) });
 }
 
 async function loadHistory() {
@@ -268,15 +304,25 @@ onMounted(async () => {
                       </div>
                     </div>
 
-                    <!-- Resolve Button -->
-                    <Button
-                      v-if="entry.status === 'triggered' && !entry.resolved_at"
-                      variant="outline"
-                      size="sm"
-                      @click="handleResolve(entry.id, 'Manually resolved')"
-                    >
-                      {{ t('ui.resolve') }}
-                    </Button>
+                    <div class="flex items-center gap-2">
+                      <Button
+                        v-if="entry.status !== 'error'"
+                        variant="ghost"
+                        size="sm"
+                        @click="viewLogs(entry)"
+                      >
+                        <ScrollText class="mr-1.5 h-4 w-4" />
+                        {{ t('alerts.viewLogs') }}
+                      </Button>
+                      <Button
+                        v-if="entry.status === 'triggered' && !entry.resolved_at"
+                        variant="outline"
+                        size="sm"
+                        @click="handleResolve(entry.id, 'Manually resolved')"
+                      >
+                        {{ t('ui.resolve') }}
+                      </Button>
+                    </div>
                   </div>
 
                   <!-- Resolution Info -->

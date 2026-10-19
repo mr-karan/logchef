@@ -698,6 +698,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} पैनल ऐसे सोर्स का उपयोग करता है जिसकी आपके पास पहुँच नहीं है। इसे कॉपी नहीं किया जाएगा। | {count} पैनल ऐसे सोर्स का उपयोग करते हैं जिनकी आपके पास पहुँच नहीं है। इन्हें कॉपी नहीं किया जाएगा।",
   "alerts.searchAlerts": "अलर्ट खोजें…",
   "alerts.noMatches": "\"{search}\" से कोई अलर्ट मेल नहीं खाता",
+  "alerts.viewLogs": "लॉग देखें",
+  "alerts.viewLogsNoTeam": "आप किसी ऐसी टीम में नहीं हैं जिसके पास इस अलर्ट का सोर्स हो।",
   "dashboards.defaultRange": "इसके साथ खुलता है",
   "dashboards.defaultRangeNone": "दर्शक की सीमा",
   "dashboards.defaultRangeHint": "यह डैशबोर्ड किस समय सीमा के साथ खुलता है"

@@ -1409,6 +1409,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} 个面板使用了你无权访问的数据源，不会被复制。",
   "alerts.searchAlerts": "搜索告警…",
   "alerts.noMatches": "没有与“{search}”匹配的告警",
+  "alerts.viewLogs": "查看日志",
+  "alerts.viewLogsNoTeam": "你所在的团队都没有此告警的数据源。",
   "access.removeMember": "移除成员",
   "access.removeMemberTitle": "移除团队成员？",
   "access.removeMemberConfirmation": "将 {name} 从 {team} 中移除？",

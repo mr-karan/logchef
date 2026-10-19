@@ -698,6 +698,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} 個面板使用了你無權存取的資料來源，不會被複製。",
   "alerts.searchAlerts": "搜尋警示…",
   "alerts.noMatches": "沒有符合「{search}」的警示",
+  "alerts.viewLogs": "檢視日誌",
+  "alerts.viewLogsNoTeam": "你所在的團隊都沒有此告警的資料來源。",
   "dashboards.defaultRange": "開啟時",
   "dashboards.defaultRangeNone": "沿用目前範圍",
   "dashboards.defaultRangeHint": "開啟此儀表板時使用的時間範圍"

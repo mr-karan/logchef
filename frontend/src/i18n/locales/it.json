@@ -698,6 +698,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} pannello usa una sorgente a cui non hai accesso. Non verrà copiato. | {count} pannelli usano sorgenti a cui non hai accesso. Non verranno copiati.",
   "alerts.searchAlerts": "Cerca alert…",
   "alerts.noMatches": "Nessun alert corrisponde a \"{search}\"",
+  "alerts.viewLogs": "Vedi log",
+  "alerts.viewLogsNoTeam": "Nessuno dei tuoi team ha la sorgente di questo alert.",
   "dashboards.defaultRange": "Si apre con",
   "dashboards.defaultRangeNone": "Intervallo dell'utente",
   "dashboards.defaultRangeHint": "Intervallo di tempo con cui si apre questa dashboard"

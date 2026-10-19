@@ -698,6 +698,8 @@
   "dashboards.duplicateSkipsLockedPanels": "{count} Panel nutzt eine Quelle, auf die du keinen Zugriff hast. Es wird nicht kopiert. | {count} Panels nutzen Quellen, auf die du keinen Zugriff hast. Sie werden nicht kopiert.",
   "alerts.searchAlerts": "Alerts durchsuchen…",
   "alerts.noMatches": "Keine Alerts für „{search}“",
+  "alerts.viewLogs": "Logs anzeigen",
+  "alerts.viewLogsNoTeam": "Keines Ihrer Teams hat die Quelle dieses Alerts.",
   "dashboards.defaultRange": "Öffnet mit",
   "dashboards.defaultRangeNone": "Bereich des Betrachters",
   "dashboards.defaultRangeHint": "Zeitraum, mit dem dieses Dashboard geöffnet wird"
