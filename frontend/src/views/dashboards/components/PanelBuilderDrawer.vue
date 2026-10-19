@@ -30,6 +30,7 @@ import {
   parseRelativeTimeString,
   calendarDateTimeToTimestamp,
 } from "@/utils/time";
+import { getLocalTimeZone } from "@internationalized/date";
 import type {
   DashboardPanel as PanelModel,
   DashboardPanelOptions,
@@ -303,8 +304,8 @@ const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
 const pickerModel = computed<DateRange>(() => {
   const range = store.effectiveRange;
   return {
-    start: timestampToCalendarDateTime(range.start),
-    end: timestampToCalendarDateTime(range.end),
+    start: timestampToCalendarDateTime(range.start, getLocalTimeZone()),
+    end: timestampToCalendarDateTime(range.end, getLocalTimeZone()),
   } as DateRange;
 });
 
@@ -323,7 +324,7 @@ function handleRangeChange(value: any) {
     }
   }
   if (value?.start && value?.end) {
-    store.setAbsoluteRange(calendarDateTimeToTimestamp(value.start), calendarDateTimeToTimestamp(value.end));
+    store.setAbsoluteRange(calendarDateTimeToTimestamp(value.start, getLocalTimeZone()), calendarDateTimeToTimestamp(value.end, getLocalTimeZone()));
   }
 }
 

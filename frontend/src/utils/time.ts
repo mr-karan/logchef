@@ -1,26 +1,14 @@
-import { now, getLocalTimeZone, CalendarDateTime, type DateValue } from '@internationalized/date';
+import { now, getLocalTimeZone, CalendarDateTime, fromDate, toCalendarDateTime, type DateValue } from '@internationalized/date';
 
-export function timestampToCalendarDateTime(timestamp: number): CalendarDateTime {
-  const date = new Date(timestamp);
-  return new CalendarDateTime(
-    date.getFullYear(),
-    date.getMonth() + 1,
-    date.getDate(),
-    date.getHours(),
-    date.getMinutes(),
-    date.getSeconds()
-  );
+// The wall-clock fields that a Unix ms instant shows in timeZone.
+export function timestampToCalendarDateTime(timestamp: number, timeZone: string): CalendarDateTime {
+  return toCalendarDateTime(fromDate(new Date(timestamp), timeZone));
 }
 
-export function calendarDateTimeToTimestamp(dt: DateValue): number {
-  return new Date(
-    dt.year,
-    dt.month - 1,
-    dt.day,
-    'hour' in dt ? dt.hour : 0,
-    'minute' in dt ? dt.minute : 0,
-    'second' in dt ? dt.second : 0
-  ).getTime();
+// The Unix ms instant of a date value's wall-clock fields in timeZone. A zoned
+// value is already an instant and ignores timeZone.
+export function calendarDateTimeToTimestamp(dt: DateValue, timeZone: string): number {
+  return dt.toDate(timeZone).getTime();
 }
 
 /**

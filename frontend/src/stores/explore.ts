@@ -355,8 +355,8 @@ export const useExploreStore = defineStore("explore", () => {
     let absoluteEnd: number | null = null;
 
     if (!selectedRelativeTime && timeRange) {
-      absoluteStart = calendarDateTimeToTimestamp(timeRange.start);
-      absoluteEnd = calendarDateTimeToTimestamp(timeRange.end);
+      absoluteStart = calendarDateTimeToTimestamp(timeRange.start, getLocalTimeZone());
+      absoluteEnd = calendarDateTimeToTimestamp(timeRange.end, getLocalTimeZone());
     }
 
     const draft: ExploreDraft = {
@@ -410,8 +410,8 @@ export const useExploreStore = defineStore("explore", () => {
         state.data.value.timeRange = { start, end };
       } else if (draft.absoluteStart && draft.absoluteEnd) {
         state.data.value.timeRange = {
-          start: timestampToCalendarDateTime(draft.absoluteStart),
-          end: timestampToCalendarDateTime(draft.absoluteEnd),
+          start: timestampToCalendarDateTime(draft.absoluteStart, getLocalTimeZone()),
+          end: timestampToCalendarDateTime(draft.absoluteEnd, getLocalTimeZone()),
         };
         state.data.value.selectedRelativeTime = null;
       }
@@ -435,8 +435,8 @@ export const useExploreStore = defineStore("explore", () => {
     let absoluteEnd: number | null = null;
 
     if (!selectedRelativeTime && timeRange) {
-      absoluteStart = calendarDateTimeToTimestamp(timeRange.start);
-      absoluteEnd = calendarDateTimeToTimestamp(timeRange.end);
+      absoluteStart = calendarDateTimeToTimestamp(timeRange.start, getLocalTimeZone());
+      absoluteEnd = calendarDateTimeToTimestamp(timeRange.end, getLocalTimeZone());
     }
 
     return JSON.stringify({
@@ -576,8 +576,8 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     if (!selectedRelativeTime && timeRange) {
-      const currentStart = calendarDateTimeToTimestamp(timeRange.start);
-      const currentEnd = calendarDateTimeToTimestamp(timeRange.end);
+      const currentStart = calendarDateTimeToTimestamp(timeRange.start, getLocalTimeZone());
+      const currentEnd = calendarDateTimeToTimestamp(timeRange.end, getLocalTimeZone());
 
       if (currentStart !== savedQuerySnapshot.absoluteStart || currentEnd !== savedQuerySnapshot.absoluteEnd) {
         return true;
@@ -629,26 +629,10 @@ export const useExploreStore = defineStore("explore", () => {
     if (selectedRelativeTime) {
       params.t = selectedRelativeTime;
     } else if (timeRange) {
-      const startTimestamp = new Date(
-        timeRange.start.year,
-        timeRange.start.month - 1,
-        timeRange.start.day,
-        'hour' in timeRange.start ? timeRange.start.hour : 0,
-        'minute' in timeRange.start ? timeRange.start.minute : 0,
-        'second' in timeRange.start ? timeRange.start.second : 0
-      ).getTime();
-
-      const endTimestamp = new Date(
-        timeRange.end.year,
-        timeRange.end.month - 1,
-        timeRange.end.day,
-        'hour' in timeRange.end ? timeRange.end.hour : 0,
-        'minute' in timeRange.end ? timeRange.end.minute : 0,
-        'second' in timeRange.end ? timeRange.end.second : 0
-      ).getTime();
-
-      params.start = startTimestamp.toString();
-      params.end = endTimestamp.toString();
+      // URL start and end are the instants the Explorer queries.
+      const timezone = getTimezoneIdentifier();
+      params.start = calendarDateTimeToTimestamp(timeRange.start, timezone).toString();
+      params.end = calendarDateTimeToTimestamp(timeRange.end, timezone).toString();
     }
 
     params.limit = limit.toString();
@@ -841,9 +825,12 @@ export const useExploreStore = defineStore("explore", () => {
         const endTs = parseInt(endParam, 10);
 
         if (!isNaN(startTs) && !isNaN(endTs)) {
+          // URL start and end are instants. The Explorer shows and queries
+          // them in its timezone.
+          const timezone = getTimezoneIdentifier();
           state.data.value.timeRange = {
-            start: timestampToCalendarDateTime(startTs),
-            end: timestampToCalendarDateTime(endTs)
+            start: timestampToCalendarDateTime(startTs, timezone),
+            end: timestampToCalendarDateTime(endTs, timezone)
           };
           state.data.value.selectedRelativeTime = null;
         }
@@ -967,8 +954,8 @@ export const useExploreStore = defineStore("explore", () => {
         absoluteEnd = content.timeRange.absolute.end;
 
         state.data.value.timeRange = {
-          start: timestampToCalendarDateTime(content.timeRange.absolute.start),
-          end: timestampToCalendarDateTime(content.timeRange.absolute.end)
+          start: timestampToCalendarDateTime(content.timeRange.absolute.start, getLocalTimeZone()),
+          end: timestampToCalendarDateTime(content.timeRange.absolute.end, getLocalTimeZone())
         };
         state.data.value.selectedRelativeTime = null;
       } else {
@@ -1042,8 +1029,8 @@ export const useExploreStore = defineStore("explore", () => {
         state.data.value.timeRange = { start, end };
       } else if (absolute?.start && absolute?.end) {
         state.data.value.timeRange = {
-          start: timestampToCalendarDateTime(absolute.start),
-          end: timestampToCalendarDateTime(absolute.end),
+          start: timestampToCalendarDateTime(absolute.start, getLocalTimeZone()),
+          end: timestampToCalendarDateTime(absolute.end, getLocalTimeZone()),
         };
         state.data.value.selectedRelativeTime = null;
       } else if (!state.data.value.timeRange) {
@@ -1734,8 +1721,8 @@ export const useExploreStore = defineStore("explore", () => {
     } else if (timeRange) {
       payload.time_range = {
         absolute: {
-          start: calendarDateTimeToTimestamp(timeRange.start),
-          end: calendarDateTimeToTimestamp(timeRange.end),
+          start: calendarDateTimeToTimestamp(timeRange.start, getLocalTimeZone()),
+          end: calendarDateTimeToTimestamp(timeRange.end, getLocalTimeZone()),
         },
       };
     }

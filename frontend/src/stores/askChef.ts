@@ -189,12 +189,14 @@ export const useAskChefStore = defineStore("askChef", () => {
     if (!range) return null;
     const mode = explore.activeMode;
     const query = (mode === "native" ? explore.nativeQuery : explore.logchefqlCode).trim();
+    // The instants the Explorer queries, in the timezone that send passes on.
+    const timezone = explore.getTimezoneIdentifier();
     return {
       subject: { kind: "explorer" },
       teamId,
       sourceId: explore.sourceId,
-      start: calendarDateTimeToTimestamp(range.start),
-      end: calendarDateTimeToTimestamp(range.end),
+      start: calendarDateTimeToTimestamp(range.start, timezone),
+      end: calendarDateTimeToTimestamp(range.end, timezone),
       mode,
       ...(query ? { query } : {}),
     };

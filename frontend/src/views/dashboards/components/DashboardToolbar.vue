@@ -18,6 +18,7 @@ import {
   parseRelativeTimeString,
   calendarDateTimeToTimestamp,
 } from "@/utils/time";
+import { getLocalTimeZone } from "@internationalized/date";
 
 const { t } = useI18n();
 
@@ -39,8 +40,8 @@ const refreshLabel = computed(
 const pickerModel = computed<DateRange>(() => {
   const range = store.effectiveRange;
   return {
-    start: timestampToCalendarDateTime(range.start),
-    end: timestampToCalendarDateTime(range.end),
+    start: timestampToCalendarDateTime(range.start, getLocalTimeZone()),
+    end: timestampToCalendarDateTime(range.end, getLocalTimeZone()),
   } as DateRange;
 });
 
@@ -80,8 +81,8 @@ function handleRangeChange(value: any) {
   }
   if (value?.start && value?.end) {
     store.setAbsoluteRange(
-      calendarDateTimeToTimestamp(value.start),
-      calendarDateTimeToTimestamp(value.end)
+      calendarDateTimeToTimestamp(value.start, getLocalTimeZone()),
+      calendarDateTimeToTimestamp(value.end, getLocalTimeZone())
     );
   }
 }
