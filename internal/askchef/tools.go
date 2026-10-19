@@ -94,13 +94,18 @@ func rowsSummary(rows int, truncated bool) string {
 	return fmt.Sprintf("%d rows", rows)
 }
 
-// fieldsSummary names the fields a call read values of.
-func fieldsSummary(fields []string) string {
+// fieldsSummary names the fields a call read values of, and the logs it
+// counted them over.
+func fieldsSummary(fields []string, query string) string {
 	const shown = 5
-	if len(fields) <= shown {
-		return "values of " + strings.Join(fields, ", ")
+	names := strings.Join(fields, ", ")
+	if len(fields) > shown {
+		names = fmt.Sprintf("%s and %d more", strings.Join(fields[:shown], ", "), len(fields)-shown)
 	}
-	return fmt.Sprintf("values of %s and %d more", strings.Join(fields[:shown], ", "), len(fields)-shown)
+	if strings.TrimSpace(query) == "" {
+		return "values of " + names + " over all logs"
+	}
+	return "values of " + names + " over the logs matching the query"
 }
 
 func readQueryLogchefQL(input json.RawMessage, result string) (toolReading, error) {
@@ -139,10 +144,11 @@ func readCompareWindows(input json.RawMessage, result string) (toolReading, erro
 	return reading, nil
 }
 
-// fieldValuesReading is the reading of a field value tool, given the fields
-// it read. These tools take no filter, so the evidence query is empty: all
-// logs in the window. A call that read no field gives no evidence.
-func fieldValuesReading(teamID, sourceID int, start, end string, fields []string) (toolReading, error) {
+// fieldValuesReading is the reading of a field value tool, given its filter
+// and the fields it read. The evidence query is the filter, and an empty
+// filter means all logs in the window. A call that read no field gives no
+// evidence.
+func fieldValuesReading(teamID, sourceID int, start, end, query string, fields []string) (toolReading, error) {
 	if len(fields) == 0 {
 		return toolReading{summary: "no field values read"}, nil
 	}
@@ -150,10 +156,10 @@ func fieldValuesReading(teamID, sourceID int, start, end string, fields []string
 	if err != nil {
 		return toolReading{}, err
 	}
-	summary := fieldsSummary(fields)
+	summary := fieldsSummary(fields, query)
 	return toolReading{summary: summary, evidence: []Evidence{{
 		TeamID: models.TeamID(teamID), SourceID: models.SourceID(sourceID), Mode: ModeLogchefQL,
-		StartMS: startMS, EndMS: endMS, Summary: summary,
+		Query: query, StartMS: startMS, EndMS: endMS, Summary: summary,
 	}}}, nil
 }
 
@@ -162,7 +168,7 @@ func readFieldValues(input json.RawMessage, result string) (toolReading, error) 
 	if err != nil {
 		return toolReading{}, err
 	}
-	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, []string{res.FieldName})
+	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, params.Query, []string{res.FieldName})
 }
 
 func readTopValues(input json.RawMessage, result string) (toolReading, error) {
@@ -176,7 +182,7 @@ func readTopValues(input json.RawMessage, result string) (toolReading, error) {
 			fields = append(fields, f.FieldName)
 		}
 	}
-	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, fields)
+	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, params.Query, fields)
 }
 
 // readAllFieldDimensions reads the dimensions map, which holds only the
@@ -186,7 +192,7 @@ func readAllFieldDimensions(input json.RawMessage, result string) (toolReading, 
 	if err != nil {
 		return toolReading{}, err
 	}
-	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, slices.Sorted(maps.Keys(res)))
+	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, params.Query, slices.Sorted(maps.Keys(res)))
 }
 
 // capResult cuts a tool result to maxToolResultBytes on a character

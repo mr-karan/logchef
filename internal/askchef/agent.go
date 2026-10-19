@@ -313,12 +313,9 @@ func clip(s string, limit int) string {
 	return string([]rune(s)[:limit])
 }
 
-// evidenceMarker heads a tool result with the IDs the answer may cite. A call
-// with several windows names what each ID covers.
+// evidenceMarker heads a tool result with the IDs the answer may cite and
+// what each ID covers, such as which logs a field count is over.
 func evidenceMarker(evidence []Evidence) string {
-	if len(evidence) == 1 {
-		return "[evidence " + evidence[0].ID.String() + "]"
-	}
 	parts := make([]string, len(evidence))
 	for i, e := range evidence {
 		parts[i] = e.ID.String() + " = " + e.Summary

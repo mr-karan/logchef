@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -24,6 +26,7 @@ type GetFieldValuesParams struct {
 	FieldType string `json:"field_type" jsonschema:"ClickHouse column type (e.g. String or LowCardinality(String))"`
 	StartTime string `json:"start_time" jsonschema:"Start time (RFC3339)"`
 	EndTime   string `json:"end_time" jsonschema:"End time (RFC3339)"`
+	Query     string `json:"query,omitempty" jsonschema:"Optional LogchefQL filter (e.g. level=error). Counts only the matching logs. Empty counts every log in the window."`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Max values to return (default 20 max 100)"`
 }
 
@@ -61,24 +64,32 @@ func parseTimeRange(startRaw, endRaw string) (start, end time.Time, err error) {
 	return start, end, nil
 }
 
-// fieldValues reads one field's values for an already authorized source. The
-// caller must hold an admission slot: get_field_values admits each call, and
-// top_values runs every field under its one slot.
-func (t *tools) fieldValues(ctx context.Context, src access.AuthorizedSource, fieldName, fieldType, start, end string, limit int) (*core.FieldValuesResult, error) {
-	if fieldName == "" || fieldType == "" {
-		return nil, t.storeError("get field values failed", fmt.Errorf("%w: field_name and field_type are required", errInvalidArgument))
+// checkFieldFilter checks a field value tool's LogchefQL filter the way the
+// LogchefQL query tools check theirs. An empty filter matches every log.
+func (t *tools) checkFieldFilter(ctx context.Context, src access.AuthorizedSource, query string) error {
+	if strings.TrimSpace(query) == "" {
+		return nil
 	}
-	startTime, endTime, err := parseTimeRange(start, end)
-	if err != nil {
-		return nil, t.storeError("get field values failed", err)
-	}
+	ctx, cancel := context.WithTimeout(ctx, core.SchemaTimeout)
+	defer cancel()
+	_, err := core.CompileLogchefQL(ctx, t.deps.Datasources, src, datasource.LogchefQLCompileRequest{Query: query})
+	return err
+}
+
+// fieldValues reads one field's values for an already authorized source,
+// over the logs that query matches. The caller must hold an admission slot
+// and have checked query: get_field_values admits each call, and top_values
+// runs every field under its one slot.
+func (t *tools) fieldValues(ctx context.Context, src access.AuthorizedSource, fieldName, fieldType, query string, start, end time.Time, limit int) (*core.FieldValuesResult, error) {
 	ctx, cancel := context.WithTimeout(ctx, core.FieldValuesTimeout)
 	defer cancel()
 	result, err := core.GetFieldValues(ctx, t.deps.Datasources, src, core.FieldValuesParams{
 		FieldName: fieldName,
 		FieldType: fieldType,
-		StartTime: startTime,
-		EndTime:   endTime,
+		Language:  models.QueryLanguageLogchefQL,
+		QueryText: query,
+		StartTime: start,
+		EndTime:   end,
 		Timezone:  "UTC",
 		Limit:     limit,
 	})
@@ -102,10 +113,20 @@ func (t *tools) handleGetFieldValues(ctx context.Context, _ mcp.CallToolRequest,
 	if err != nil {
 		return t.errorResult(t.storeError("get field values failed", err)), nil
 	}
+	if params.FieldName == "" || params.FieldType == "" {
+		return t.errorResult(t.storeError("get field values failed", fmt.Errorf("%w: field_name and field_type are required", errInvalidArgument))), nil
+	}
+	start, end, err := parseTimeRange(params.StartTime, params.EndTime)
+	if err != nil {
+		return t.errorResult(t.storeError("get field values failed", err)), nil
+	}
 	var result *core.FieldValuesResult
 	err = t.admit(ctx, QueryClassPreview, src, "get_field_values: "+params.FieldName, func(ctx context.Context, _ string) error {
+		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
+			return t.queryError("get field values failed", err)
+		}
 		var err error
-		result, err = t.fieldValues(ctx, src, params.FieldName, params.FieldType, params.StartTime, params.EndTime, limit)
+		result, err = t.fieldValues(ctx, src, params.FieldName, params.FieldType, params.Query, start, end, limit)
 		return err
 	})
 	if err != nil {
@@ -229,7 +250,7 @@ func jsonTextResult(value any) (*mcp.CallToolResult, error) {
 
 func (t *tools) addInvestigateTools(s *server.MCPServer) {
 	fieldValuesTool := mcp.NewTool("get_field_values",
-		mcp.WithDescription("Get the top distinct values for a specific field in a time range. Useful for exploring dimensions (e.g. top severity levels, service names, status codes) before writing queries."),
+		mcp.WithDescription("Get the top distinct values for a specific field in a time range, with counts. Counts every log in the window unless query filters them. Useful for exploring dimensions (e.g. top severity levels, service names, status codes) before writing queries."),
 		mcp.WithInputSchema[GetFieldValuesParams](),
 		mcp.WithTitleAnnotation("Get Field Values"),
 		readOnlyTool,

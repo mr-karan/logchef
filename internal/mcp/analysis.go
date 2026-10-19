@@ -36,6 +36,7 @@ type TopValuesParams struct {
 	Fields    []string `json:"fields" jsonschema:"List of field names to get top values for"`
 	StartTime string   `json:"start_time" jsonschema:"Start time (RFC3339)"`
 	EndTime   string   `json:"end_time" jsonschema:"End time (RFC3339)"`
+	Query     string   `json:"query,omitempty" jsonschema:"Optional LogchefQL filter (e.g. level=error). Counts only the matching logs. Empty counts every log in the window."`
 	Limit     int      `json:"limit,omitempty" jsonschema:"Max values per field (default 10 max 50)"`
 }
 
@@ -164,12 +165,19 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 	if err != nil {
 		return TopValuesResult{}, t.storeError("top values", err)
 	}
+	start, end, err := parseTimeRange(params.StartTime, params.EndTime)
+	if err != nil {
+		return TopValuesResult{}, t.storeError("top values", err)
+	}
 
 	// The whole operation (schema plus every field query) holds one
 	// preview admission slot, and at most topValuesWorkers field queries
 	// run at once inside it.
 	fieldResults := make([]FieldTopValues, len(fields))
 	err = t.admit(ctx, QueryClassPreview, src, "top_values: "+strings.Join(fields, ", "), func(ctx context.Context, _ string) error {
+		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
+			return t.queryError("top values", err)
+		}
 		schema, err := t.sourceSchema(ctx, params.TeamID, params.SourceID)
 		if err != nil {
 			return err
@@ -191,7 +199,7 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 			wg.Go(func() {
 				workers <- struct{}{}
 				defer func() { <-workers }()
-				resp, err := t.fieldValues(ctx, src, fieldName, fieldType, params.StartTime, params.EndTime, limit)
+				resp, err := t.fieldValues(ctx, src, fieldName, fieldType, params.Query, start, end, limit)
 				if err != nil {
 					// One failed field does not fail the others.
 					fieldResults[i].Error = t.queryError("top values of "+fieldName, err).Error()
@@ -241,7 +249,7 @@ func (t *tools) addAnalysisTools(s *server.MCPServer) {
 	s.AddTool(compareWindowsTool, mcp.NewStructuredToolHandler(t.handleCompareWindows))
 
 	topValuesTool := mcp.NewTool("top_values",
-		mcp.WithDescription("Get the top distinct values for multiple fields in one call. Fetches the schema to determine field types, then queries each field's top values. Useful for quickly exploring the dimensions of a log source."),
+		mcp.WithDescription("Get the top distinct values for multiple fields in one call, with counts. Counts every log in the window unless query filters them. Fetches the schema to determine field types, then queries each field's top values. Useful for quickly exploring the dimensions of a log source."),
 		mcp.WithInputSchema[TopValuesParams](),
 		mcp.WithOutputSchema[TopValuesResult](),
 		mcp.WithTitleAnnotation("Top Field Values"),

@@ -174,32 +174,15 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	// ClickHouse bakes the time range into the SQL. For VictoriaLogs the
 	// LogsQL query carries no time range, so the parsed window goes to
 	// QueryLogs separately.
-	compiled, compileErr := ds.CompileLogchefQL(ctx, src.SourceID(), datasource.LogchefQLCompileRequest{
+	compiled, err := CompileLogchefQL(ctx, ds, src, datasource.LogchefQLCompileRequest{
 		Query:     query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
 		Timezone:  req.Timezone,
 		Limit:     req.Limit,
 	})
-	if compiled == nil {
-		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
-			return nil, ErrLogchefQLNotSupported
-		}
-		return nil, &LogchefQLCompileError{Err: compileErr}
-	}
-	if compileErr != nil {
-		message := compileErr.Error()
-		if compiled.Error != nil {
-			message = compiled.Error.Error()
-		}
-		return nil, &QueryRequestError{Message: message}
-	}
-	if !compiled.Valid {
-		message := "invalid LogchefQL query"
-		if compiled.Error != nil {
-			message = compiled.Error.Error()
-		}
-		return nil, &QueryRequestError{Message: message}
+	if err != nil {
+		return nil, err
 	}
 
 	params := datasource.QueryRequest{
@@ -221,6 +204,33 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 		params.EndTime = endTime
 	}
 	return &PreparedLogchefQL{Source: source, Compiled: compiled, Params: params}, nil
+}
+
+// CompileLogchefQL compiles a LogchefQL query for src. A query that does not
+// compile is a QueryRequestError that carries the parse error.
+func CompileLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	compiled, compileErr := ds.CompileLogchefQL(ctx, src.SourceID(), req)
+	if compiled == nil {
+		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
+			return nil, ErrLogchefQLNotSupported
+		}
+		return nil, &LogchefQLCompileError{Err: compileErr}
+	}
+	if compileErr != nil {
+		message := compileErr.Error()
+		if compiled.Error != nil {
+			message = compiled.Error.Error()
+		}
+		return nil, &QueryRequestError{Message: message}
+	}
+	if !compiled.Valid {
+		message := "invalid LogchefQL query"
+		if compiled.Error != nil {
+			message = compiled.Error.Error()
+		}
+		return nil, &QueryRequestError{Message: message}
+	}
+	return compiled, nil
 }
 
 // RunLogchefQL prepares and runs a LogchefQL query with no streaming. One

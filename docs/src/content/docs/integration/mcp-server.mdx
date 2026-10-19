@@ -93,9 +93,9 @@ Logs are untrusted text. A log line can contain instructions aimed at an assista
 
 | Tool | Description |
 |------|-------------|
-| `get_field_values` | Top distinct values for one field in a time range |
-| `get_all_field_dimensions` | Top values for all low-cardinality fields in one call |
-| `top_values` | Top values for several fields in one call (up to 20 fields) |
+| `get_field_values` | Top distinct values for one field in a time range, optionally over the logs a LogchefQL `query` matches |
+| `get_all_field_dimensions` | Top values for all low-cardinality fields in one call, optionally filtered by `query` |
+| `top_values` | Top values for several fields in one call (up to 20 fields), optionally filtered by `query` |
 | `compare_windows` | Run the same LogchefQL filter in two time windows and compare the samples |
 | `open_investigation` | Open the [investigation panel](#investigation-panel) |
 

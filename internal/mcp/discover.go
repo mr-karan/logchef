@@ -20,6 +20,7 @@ type GetAllFieldDimensionsParams struct {
 	StartTime string `json:"start_time" jsonschema:"Start time (RFC3339)"`
 	EndTime   string `json:"end_time" jsonschema:"End time (RFC3339)"`
 	Timezone  string `json:"timezone,omitempty" jsonschema:"Timezone (default UTC)"`
+	Query     string `json:"query,omitempty" jsonschema:"Optional LogchefQL filter (e.g. level=error). Counts only the matching logs. Empty counts every log in the window."`
 	Limit     int    `json:"limit,omitempty" jsonschema:"Max values per field (default 10 max 100)"`
 }
 
@@ -50,10 +51,15 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 	}
 	var result map[string]*core.FieldValuesResult
 	err = t.admit(ctx, QueryClassPreview, src, "get_all_field_dimensions", func(ctx context.Context, _ string) error {
+		if err := t.checkFieldFilter(ctx, src, params.Query); err != nil {
+			return err
+		}
 		ctx, cancel := context.WithTimeout(ctx, core.FieldValuesTimeout)
 		defer cancel()
 		var err error
 		result, err = core.GetAllFieldValues(ctx, t.deps.Datasources, src, core.AllFieldValuesParams{
+			Language:  models.QueryLanguageLogchefQL,
+			QueryText: params.Query,
 			StartTime: startTime,
 			EndTime:   endTime,
 			Timezone:  timezone,
@@ -69,7 +75,7 @@ func (t *tools) handleGetAllFieldDimensions(ctx context.Context, _ mcp.CallToolR
 
 func (t *tools) addDiscoverTools(s *server.MCPServer) {
 	dimensionsTool := mcp.NewTool("get_all_field_dimensions",
-		mcp.WithDescription("Get top values for all LowCardinality fields in one call. Returns a map of field names to their top values with counts. Much faster than calling get_field_values for each field individually. Use this for initial source exploration to understand what dimensions exist."),
+		mcp.WithDescription("Get top values for all LowCardinality fields in one call. Returns a map of field names to their top values with counts. Counts every log in the window unless query filters them. Much faster than calling get_field_values for each field individually. Use this for initial source exploration to understand what dimensions exist."),
 		mcp.WithInputSchema[GetAllFieldDimensionsParams](),
 		mcp.WithTitleAnnotation("Get All Field Dimensions"),
 		readOnlyTool,

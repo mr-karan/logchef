@@ -292,7 +292,7 @@ func TestTurnRunsToolsAndStreamsEvidence(t *testing.T) {
 		Tool: "get_field_values", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
 		StartMS: time.Date(2026, 10, 19, 4, 0, 0, 0, time.UTC).UnixMilli(),
 		EndMS:   time.Date(2026, 10, 19, 5, 0, 0, 0, time.UTC).UnixMilli(),
-		Summary: "values of service",
+		Summary: "values of service over all logs",
 	}
 	for i, end := range toolEnds(events) {
 		want := window
@@ -307,7 +307,7 @@ func TestTurnRunsToolsAndStreamsEvidence(t *testing.T) {
 	}
 
 	results := toolResults(chat.request(1))
-	if len(results) != 2 || !strings.HasPrefix(results[0].Text, "[evidence E4]\n") || !strings.HasPrefix(results[1].Text, "[evidence E5]\n") {
+	if len(results) != 2 || !strings.HasPrefix(results[0].Text, "[evidence E4 = values of service over all logs]\n") || !strings.HasPrefix(results[1].Text, "[evidence E5 = values of service over all logs]\n") {
 		t.Fatalf("tool results sent to the model = %+v", results)
 	}
 	if !strings.Contains(results[0].Text, `"api"`) {
@@ -338,7 +338,7 @@ func TestTurnEvidenceIsWhatRan(t *testing.T) {
 					"start_time": "2026-10-19 09:30:00", "end_time": "2026-10-19 10:30:00", "timezone": "Asia/Kolkata"}
 			},
 			summary: "2 rows",
-			marker:  "[evidence E1]\n",
+			marker:  "[evidence E1 = 2 rows]\n",
 			want: func(w *world) []askchef.Evidence {
 				return []askchef.Evidence{{ID: 1, Tool: "query_logchefql", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
 					Query: `level="error"`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "2 rows"}}
@@ -369,11 +369,40 @@ func TestTurnEvidenceIsWhatRan(t *testing.T) {
 				return map[string]any{"team_id": w.team, "source_id": w.source, "fields": []string{"level", "level"},
 					"start_time": "2026-10-19T04:00:00Z", "end_time": "2026-10-19T05:00:00Z"}
 			},
-			summary: "values of level",
-			marker:  "[evidence E1]\n",
+			summary: "values of level over all logs",
+			marker:  "[evidence E1 = values of level over all logs]\n",
 			want: func(w *world) []askchef.Evidence {
 				return []askchef.Evidence{{ID: 1, Tool: "top_values", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
-					StartMS: at(4, 0), EndMS: at(5, 0), Summary: "values of level"}}
+					StartMS: at(4, 0), EndMS: at(5, 0), Summary: "values of level over all logs"}}
+			},
+		},
+		{
+			name: "top_values with a filter reads the logs it matches",
+			tool: "top_values",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "fields": []string{"level"}, "query": `level="error"`,
+					"start_time": "2026-10-19T04:00:00Z", "end_time": "2026-10-19T05:00:00Z"}
+			},
+			summary: "values of level over the logs matching the query",
+			marker:  "[evidence E1 = values of level over the logs matching the query]\n",
+			want: func(w *world) []askchef.Evidence {
+				return []askchef.Evidence{{ID: 1, Tool: "top_values", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
+					Query: `level="error"`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "values of level over the logs matching the query"}}
+			},
+		},
+		{
+			name: "get_field_values with a filter reads the logs it matches",
+			tool: "get_field_values",
+			input: func(w *world) map[string]any {
+				input := w.fieldValuesInput()
+				input["query"] = `level="error"`
+				return input
+			},
+			summary: "values of service over the logs matching the query",
+			marker:  "[evidence E1 = values of service over the logs matching the query]\n",
+			want: func(w *world) []askchef.Evidence {
+				return []askchef.Evidence{{ID: 1, Tool: "get_field_values", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
+					Query: `level="error"`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "values of service over the logs matching the query"}}
 			},
 		},
 	} {
@@ -419,8 +448,8 @@ func TestTurnEvidenceOnlyForFieldsRead(t *testing.T) {
 			name:    "top_values with a read, a failed and an unknown field",
 			tool:    "top_values",
 			input:   map[string]any{"fields": []string{"broken", "level", "nope"}},
-			summary: "values of level",
-			want:    []string{"values of level"},
+			summary: "values of level over all logs",
+			want:    []string{"values of level over all logs"},
 		},
 		{
 			name:    "get_all_field_dimensions with no dimensions",
@@ -535,7 +564,7 @@ func TestTurnCapsLargeToolResults(t *testing.T) {
 		t.Fatalf("results = %+v", results)
 	}
 	text := results[0].Text
-	if len(text) > 12*1024+100 || !strings.Contains(text, "[result cut: showing the first ") || !strings.HasPrefix(text, "[evidence E1]") {
+	if len(text) > 12*1024+100 || !strings.Contains(text, "[result cut: showing the first ") || !strings.HasPrefix(text, "[evidence E1 = ") {
 		t.Fatalf("result sent to the model is %d bytes and ends %q", len(text), text[max(0, len(text)-80):])
 	}
 }
@@ -876,7 +905,7 @@ func TestTurnRunsThroughOpenAIChat(t *testing.T) {
 	if got := eventNames(events); !slices.Equal(got, wantNames) {
 		t.Fatalf("events = %v, want %v", got, wantNames)
 	}
-	if end := events[2].(askchef.ToolEnd); !end.OK || len(end.Evidence) != 1 || end.Evidence[0].ID != 1 || end.Evidence[0].Summary != "values of service" {
+	if end := events[2].(askchef.ToolEnd); !end.OK || len(end.Evidence) != 1 || end.Evidence[0].ID != 1 || end.Evidence[0].Summary != "values of service over all logs" {
 		t.Fatalf("tool_end = %+v, want evidence E1", end)
 	}
 	if text := events[3].(askchef.Text); text.Delta != "The errors come from api [E1]." {
@@ -893,7 +922,7 @@ func TestTurnRunsThroughOpenAIChat(t *testing.T) {
 	}
 	messages := bodies[1]["messages"].([]any)
 	result := messages[len(messages)-1].(map[string]any)
-	if result["role"] != "tool" || result["tool_call_id"] != "toolu_01" || !strings.HasPrefix(result["content"].(string), "[evidence E1]\n") {
+	if result["role"] != "tool" || result["tool_call_id"] != "toolu_01" || !strings.HasPrefix(result["content"].(string), "[evidence E1 = values of service over all logs]\n") {
 		t.Fatalf("tool result sent to the model = %#v", result)
 	}
 }

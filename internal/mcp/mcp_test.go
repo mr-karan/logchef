@@ -864,12 +864,13 @@ func TestInvestigationUIDomain(t *testing.T) {
 }
 
 // fieldBackend is a VictoriaLogs stand-in that knows fields f0..f29 and
-// records the field value queries it receives.
+// records the field value queries it receives and the filters they carry.
 type fieldBackend struct {
 	mu       sync.Mutex
 	inFlight int
 	peak     int
 	queried  map[string]int
+	filters  []string
 }
 
 func newFieldBackend(t *testing.T) (backend *fieldBackend, url string) {
@@ -891,12 +892,18 @@ func newFieldBackend(t *testing.T) (backend *fieldBackend, url string) {
 			b.inFlight++
 			b.peak = max(b.peak, b.inFlight)
 			b.queried[r.Form.Get("field")]++
+			b.filters = append(b.filters, r.Form.Get("query"))
 			b.mu.Unlock()
 			time.Sleep(100 * time.Millisecond)
 			b.mu.Lock()
 			b.inFlight--
 			b.mu.Unlock()
 			_, _ = rw.Write([]byte(`{"values":[{"value":"v","hits":3}]}`))
+		case "/select/logsql/facets":
+			b.mu.Lock()
+			b.filters = append(b.filters, r.Form.Get("query"))
+			b.mu.Unlock()
+			_, _ = rw.Write([]byte(`{"facets":[{"field_name":"f1","values":[{"field_value":"v","hits":3}]}]}`))
 		default:
 			http.NotFound(rw, r)
 		}
@@ -995,6 +1002,55 @@ func TestTopValuesBoundsItsFanOut(t *testing.T) {
 			t.Fatalf("field queries ran after a refused admission: %v", queried)
 		}
 	})
+}
+
+func (b *fieldBackend) sentFilters() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return slices.Clone(b.filters)
+}
+
+// The field value tools count only the logs their LogchefQL filter matches,
+// and refuse a filter that does not parse before any backend work.
+func TestFieldValueToolsFilterLogs(t *testing.T) {
+	t.Parallel()
+	tools := map[string]map[string]any{
+		"top_values":               {"fields": []string{"f1"}},
+		"get_field_values":         {"field_name": "f1", "field_type": "String"},
+		"get_all_field_dimensions": {},
+	}
+	for name, args := range tools {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			for _, tc := range []struct {
+				query, sent string
+			}{
+				{query: "", sent: "*"},
+				{query: `f1="v"`, sent: `f1:="v"`},
+				{query: "f1=", sent: ""},
+			} {
+				backend, url := newFieldBackend(t)
+				w := newWorld(t)
+				source := w.victoriaLogsSource(t, url)
+				input := map[string]any{
+					"team_id": w.team, "source_id": source.ID, "query": tc.query,
+					"start_time": "2026-10-01T00:00:00Z", "end_time": "2026-10-01T01:00:00Z",
+				}
+				maps.Copy(input, args)
+				result := callTool(t, w.server(), session(w.member), name, input)
+				sent := backend.sentFilters()
+				if tc.sent == "" {
+					if !result.IsError || !strings.Contains(result.text(), "unexpected token") || len(sent) != 0 {
+						t.Fatalf("query %q: result %s, backend filters %q, want a parse error and no backend call", tc.query, result.text(), sent)
+					}
+					continue
+				}
+				if result.IsError || !slices.Equal(sent, []string{tc.sent}) {
+					t.Fatalf("query %q: result %s, backend filters %q, want %q", tc.query, result.text(), sent, tc.sent)
+				}
+			}
+		})
+	}
 }
 
 // top_values marks each field it did not read, so a caller can tell a field
