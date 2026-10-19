@@ -89,7 +89,13 @@ describe("relative specs", () => {
   it("accepts durations and calendar days, and rejects anything else", () => {
     expect(relativeWindow("15m")).toEqual({ kind: "relative", spec: "15m" });
     expect(relativeWindow("yesterday")).toEqual({ kind: "relative", spec: "yesterday" });
-    for (const bad of ["", "0m", "15", "15s", "now-1h", "Today"]) expect(relativeWindow(bad), bad).toBeNull();
+    for (const bad of ["", "0m", "00h", "15", "15s", "now-1h", "Today", "-5m", "9999999999w"]) expect(relativeWindow(bad), bad).toBeNull();
+  });
+
+  it("accepts any positive amount that older links and drafts stored, in canonical form", () => {
+    expect(relativeWindow("10080m")).toEqual({ kind: "relative", spec: "10080m" });
+    expect(relativeWindow("015m")).toEqual({ kind: "relative", spec: "15m" });
+    expect(resolveWindow(relative("10080m"), UTC, at("2026-10-19T04:00:00Z")).start).toBe(at("2026-10-12T04:00:00Z"));
   });
 
   it("labels durations and leaves calendar and absolute windows to their range", () => {

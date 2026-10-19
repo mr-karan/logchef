@@ -42,7 +42,9 @@ export interface WindowLabelMessage {
 
 const UTC = "UTC" as ZoneId;
 const UNIT_MS: Record<DurationUnit, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
-const DURATION_PATTERN = /^([1-9]\d{0,3})([mhdw])$/;
+const DURATION_PATTERN = /^(\d+)([mhdw])$/;
+// A century back from any anchor is still a valid Date.
+const MAX_DURATION_MS = 100 * 365.25 * UNIT_MS.d;
 const WALL_CLOCK_PATTERN =
   /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/i;
 
@@ -70,12 +72,17 @@ export function parseRelativeSpec(text: string): RelativeSpec | null {
   if (text === "today" || text === "yesterday") return { kind: "calendar", day: text };
   const match = DURATION_PATTERN.exec(text);
   if (!match) return null;
-  return { kind: "duration", amount: Number(match[1]), unit: match[2] as DurationUnit };
+  const amount = Number(match[1]);
+  const unit = match[2] as DurationUnit;
+  if (amount < 1 || amount * UNIT_MS[unit] > MAX_DURATION_MS) return null;
+  return { kind: "duration", amount, unit };
 }
 
-/** Checks the text, then builds a relative window. Returns null for unknown text. */
+/** Checks the text, then builds a relative window with its canonical spec. Returns null for unknown text. */
 export function relativeWindow(text: string): TimeWindow | null {
-  return parseRelativeSpec(text) ? { kind: "relative", spec: text } : null;
+  const spec = parseRelativeSpec(text);
+  if (!spec) return null;
+  return { kind: "relative", spec: spec.kind === "calendar" ? spec.day : `${spec.amount}${spec.unit}` };
 }
 
 /** The label message for a duration window. Calendar and absolute windows return null; show their range instead. */

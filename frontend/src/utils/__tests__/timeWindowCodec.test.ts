@@ -67,6 +67,8 @@ describe("draft codec", () => {
 
   it("reads a v1 relative draft, and rejects unknown versions", () => {
     expect(decodeDraftWindow({ version: 1, relativeTime: "yesterday" }, UTC)).toEqual({ kind: "relative", spec: "yesterday" });
+    expect(decodeDraftWindow({ version: 1, relativeTime: "10080m" }, UTC)).toEqual({ kind: "relative", spec: "10080m" });
+    expect(decodeWindowFromUrl({ t: "0m" })).toBeNull();
     expect(decodeDraftWindow({ version: 3, window: FOLD }, UTC)).toBeNull();
     expect(decodeDraftWindow("nope", UTC)).toBeNull();
   });
