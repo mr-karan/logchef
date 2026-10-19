@@ -55,9 +55,7 @@ var allowedTools = map[string]allowedTool{
 
 // decodeCall decodes a call's input and result into the MCP tool's own
 // parameter and result types, which also generate its schemas.
-func decodeCall[P, R any](input json.RawMessage, result string) (P, R, error) {
-	var params P
-	var res R
+func decodeCall[P, R any](input json.RawMessage, result string) (params P, res R, err error) {
 	if err := json.Unmarshal(input, &params); err != nil {
 		return params, res, fmt.Errorf("decoding tool input: %w", err)
 	}
@@ -68,7 +66,7 @@ func decodeCall[P, R any](input json.RawMessage, result string) (P, R, error) {
 }
 
 // logchefQLWindow parses a window the way the LogchefQL tools run it.
-func logchefQLWindow(start, end, timezone string) (int64, int64, error) {
+func logchefQLWindow(start, end, timezone string) (startMS, endMS int64, err error) {
 	s, e, err := core.ParseLogchefQLTimeRange(start, end, timezone)
 	if err != nil {
 		return 0, 0, err
@@ -77,7 +75,7 @@ func logchefQLWindow(start, end, timezone string) (int64, int64, error) {
 }
 
 // rfc3339Window parses a window the way the field value tools run it.
-func rfc3339Window(start, end string) (int64, int64, error) {
+func rfc3339Window(start, end string) (startMS, endMS int64, err error) {
 	s, err := time.Parse(time.RFC3339, start)
 	if err != nil {
 		return 0, 0, err

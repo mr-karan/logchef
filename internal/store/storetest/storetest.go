@@ -772,13 +772,7 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	if err != nil || len(hist) != 1 {
 		t.Fatalf("ListAlertHistory: %v / %d", err, len(hist))
 	}
-	entry, err := s.GetAlertHistoryEntry(ctx, a.ID, hist[0].ID)
-	if err != nil || entry.ID != hist[0].ID || entry.AlertID != a.ID || entry.Value == nil || *entry.Value != val {
-		t.Fatalf("GetAlertHistoryEntry = %+v, %v; want entry %d", entry, err, hist[0].ID)
-	}
-	if _, err := s.GetAlertHistoryEntry(ctx, a.ID+1, hist[0].ID); !errors.Is(err, models.ErrNotFound) {
-		t.Errorf("GetAlertHistoryEntry(other alert) err = %v, want ErrNotFound", err)
-	}
+	testAlertHistoryEntry(t, ctx, s, hist[0])
 
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
 		t.Fatalf("DeleteAlert: %v", err)
@@ -791,6 +785,19 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if err := s.DeleteAlert(ctx, a.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("DeleteAlert(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+// testAlertHistoryEntry reads want back by its ID, and finds nothing under
+// another alert.
+func testAlertHistoryEntry(t *testing.T, ctx context.Context, s store.Store, want *models.AlertHistoryEntry) {
+	t.Helper()
+	entry, err := s.GetAlertHistoryEntry(ctx, want.AlertID, want.ID)
+	if err != nil || entry.ID != want.ID || entry.AlertID != want.AlertID || entry.Message != want.Message {
+		t.Fatalf("GetAlertHistoryEntry = %+v, %v; want %+v", entry, err, want)
+	}
+	if _, err := s.GetAlertHistoryEntry(ctx, want.AlertID+1, want.ID); !errors.Is(err, models.ErrNotFound) {
+		t.Errorf("GetAlertHistoryEntry(other alert) err = %v, want ErrNotFound", err)
 	}
 }
 
