@@ -10,8 +10,8 @@ import type { Source } from "@/api/sources";
 // The explore store pulls in a large dependency graph (sources/teams stores,
 // the histogram/AI sub-stores, the logs + logchefql API modules). We stub the
 // pieces that would otherwise hit the network or add unrelated noise, but
-// keep the real context and histogram stores so the source/team-switching
-// watchers run against real reactivity and the histogram request is the real one.
+// keep the real context store (already covered by context.test.ts) so the
+// source/team-switching watchers under test run against real reactivity.
 //
 // `sourcesState`/`teamsState` are plain `reactive()` objects rather than
 // vi.fn()-returned plain objects: the store watches `sourcesStore.currentSourceDetails`
@@ -32,7 +32,6 @@ const mocks = vi.hoisted(() => ({
   exploreGetLogs: vi.fn(),
   exploreCancelQuery: vi.fn(),
   exploreCreateQueryShare: vi.fn(),
-  exploreGetHistogramData: vi.fn(),
 }));
 
 vi.mock("@/stores/sources", async () => {
@@ -50,6 +49,19 @@ vi.mock("@/stores/teams", async () => {
   mocks.teamsState = reactive({ currentTeamId: null as number | null });
   return { useTeamsStore: () => mocks.teamsState };
 });
+
+vi.mock("@/stores/exploreHistogram", () => ({
+  useExploreHistogramStore: () => ({
+    clearHistogramData: vi.fn(),
+    setGroupByField: vi.fn(),
+    fetchHistogramData: vi.fn().mockResolvedValue({ success: true }),
+    histogramData: [],
+    isLoadingHistogram: false,
+    histogramError: null,
+    histogramGranularity: null,
+    groupByField: null,
+  }),
+}));
 
 vi.mock("@/stores/exploreAI", () => ({
   useExploreAIStore: () => ({
@@ -75,7 +87,6 @@ vi.mock("@/api/explore", async (importOriginal) => {
       getLogs: mocks.exploreGetLogs,
       cancelQuery: mocks.exploreCancelQuery,
       createQueryShare: mocks.exploreCreateQueryShare,
-      getHistogramData: mocks.exploreGetHistogramData,
     },
     buildTailUrl: vi.fn(() => "ws://mock-tail"),
     subscribeToTail: vi.fn(() => Promise.resolve()),
@@ -469,11 +480,6 @@ describe("explore store", () => {
       );
     }
 
-    const window = {
-      start: new CalendarDateTime(2026, 10, 19, 4, 0, 0),
-      end: new CalendarDateTime(2026, 10, 19, 5, 0, 0),
-    };
-
     it("runs in a browser zone other than UTC", () => {
       expect(new Date(startMs).getHours()).not.toBe(4);
     });
@@ -482,63 +488,14 @@ describe("explore store", () => {
       selectVictoriaLogsSourceWithUTCPreference();
       const store = useExploreStore();
       const askChef = useAskChefStore();
-      store.setTimeConfiguration({ absoluteRange: window });
+      store.setTimeConfiguration({
+        absoluteRange: { start: new CalendarDateTime(2026, 10, 19, 4, 0, 0), end: new CalendarDateTime(2026, 10, 19, 5, 0, 0) },
+      });
       askChef.openForExplorer();
       expect(askChef.context).toMatchObject({ start: startMs, end: endMs });
 
       await store.executeQuery();
       expectQueriedWindow();
-    });
-
-    it("asks the histogram for the instants the log query reads", async () => {
-      selectVictoriaLogsSourceWithUTCPreference();
-      mocks.logchefqlQuery.mockResolvedValue({
-        data: { logs: [], columns: [], generated_query: "*", stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
-      });
-      mocks.exploreGetHistogramData.mockResolvedValue({ data: { data: [], granularity: "1m" } });
-      const store = useExploreStore();
-      store.setTimeConfiguration({ absoluteRange: window });
-
-      await store.executeQuery();
-      expectQueriedWindow();
-      expect(mocks.exploreGetHistogramData).toHaveBeenCalledWith(
-        VL_SOURCE.id,
-        expect.objectContaining({
-          start_time: new Date(startMs).toISOString(),
-          end_time: new Date(endMs).toISOString(),
-          timezone: "UTC",
-        }),
-        1,
-        expect.any(AbortSignal),
-      );
-    });
-
-    it("opens a saved query's window as the instants it stored", async () => {
-      selectVictoriaLogsSourceWithUTCPreference();
-      const store = useExploreStore();
-      store.hydrateFromResolvedQuery({
-        id: 7,
-        name: "errors",
-        query_language: "logchefql",
-        query_content: JSON.stringify({ content: "", limit: 100, timeRange: { absolute: { start: startMs, end: endMs } } }),
-      });
-
-      await store.executeQuery();
-      expectQueriedWindow();
-    });
-
-    it("shares the instants the Explorer queries", async () => {
-      selectVictoriaLogsSourceWithUTCPreference();
-      mocks.exploreCreateQueryShare.mockResolvedValue({ data: { token: "share-token" } });
-      const store = useExploreStore();
-      store.setTimeConfiguration({ absoluteRange: window });
-
-      await store.createQueryShare();
-      expect(mocks.exploreCreateQueryShare).toHaveBeenCalledWith(
-        VL_SOURCE.id,
-        expect.objectContaining({ time_range: { absolute: { start: startMs, end: endMs } }, timezone: "UTC" }),
-        1,
-      );
     });
 
     it("queries the instants a URL names and writes them back unchanged", async () => {

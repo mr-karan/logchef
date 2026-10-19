@@ -39,7 +39,6 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { generateCliCommand } from "@/utils/cliCommand";
-import { calendarDateTimeToTimestamp } from "@/utils/time";
 
 // Type alias for backwards compatibility
 type QueryCondition = FilterCondition;
@@ -713,6 +712,19 @@ onBeforeRouteLeave(() => {
   exploreStore.stopLiveTail();
 });
 
+const calendarDatePartToDate = (value: any) => {
+  if (!value) return undefined;
+
+  return new Date(
+    value.year,
+    value.month - 1,
+    value.day,
+    "hour" in value ? value.hour : 0,
+    "minute" in value ? value.minute : 0,
+    "second" in value ? value.second : 0
+  );
+};
+
 const copyTextWithFallback = async (text: string) => {
   if (navigator.clipboard?.writeText) {
     try {
@@ -754,7 +766,6 @@ const handleCopyCliCommand = async () => {
 
   try {
     const timeRange = exploreStore.timeRange;
-    const timezone = exploreStore.getTimezoneIdentifier();
     const command = generateCliCommand({
       teamId: currentTeamId.value,
       sourceId: currentSourceId.value,
@@ -764,8 +775,8 @@ const handleCopyCliCommand = async () => {
           ? exploreStore.logchefqlCode
           : exploreStore.nativeQuery,
       relativeTime: exploreStore.selectedRelativeTime || undefined,
-      absoluteStart: timeRange ? new Date(calendarDateTimeToTimestamp(timeRange.start, timezone)) : undefined,
-      absoluteEnd: timeRange ? new Date(calendarDateTimeToTimestamp(timeRange.end, timezone)) : undefined,
+      absoluteStart: calendarDatePartToDate(timeRange?.start),
+      absoluteEnd: calendarDatePartToDate(timeRange?.end),
       limit: exploreStore.limit,
       timeout: exploreStore.queryTimeout,
     });

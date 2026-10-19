@@ -1,7 +1,13 @@
 import { computed } from 'vue';
 import { useExploreStore } from '@/stores/explore';
-import { type DateValue, toCalendarDateTime } from '@internationalized/date';
-import { calendarDateTimeToTimestamp, relativeTimeToLabel, timestampToCalendarDateTime } from '@/utils/time';
+import {
+  CalendarDateTime,
+  getLocalTimeZone,
+  type DateValue,
+  toCalendarDateTime,
+  fromDate
+} from '@internationalized/date';
+import { relativeTimeToLabel } from '@/utils/time';
 
 /**
  * Composable for handling time range functionality including
@@ -9,6 +15,40 @@ import { calendarDateTimeToTimestamp, relativeTimeToLabel, timestampToCalendarDa
  */
 export function useTimeRange() {
   const exploreStore = useExploreStore();
+
+  // Time range helpers
+  const calendarDateTimeToTimestamp = (dateTime: DateValue | null | undefined): number | null => {
+    if (!dateTime) return null;
+    try {
+      // Convert any DateValue to JS Date object using the local timezone
+      const date = dateTime.toDate(getLocalTimeZone());
+      return date.getTime();
+    } catch (e) {
+      console.error("Error converting DateValue to timestamp:", e);
+      return null;
+    }
+  };
+
+  const timestampToCalendarDateTime = (timestamp: number | null): CalendarDateTime | null => {
+    if (timestamp === null) return null;
+    try {
+      const date = new Date(timestamp);
+      if (isNaN(date.getTime())) return null;
+      // Construct CalendarDateTime directly from JS Date parts
+      return new CalendarDateTime(
+        date.getFullYear(),
+        date.getMonth() + 1, // JS month is 0-indexed
+        date.getDate(),
+        date.getHours(),
+        date.getMinutes(),
+        date.getSeconds(),
+        date.getMilliseconds()
+      );
+    } catch (e) {
+      console.error("Error converting timestamp to CalendarDateTime:", e);
+      return null;
+    }
+  };
 
   // Get current time range from store
   const timeRange = computed({
@@ -77,24 +117,23 @@ export function useTimeRange() {
   // Handle histogram time range zooming
   const handleHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
     try {
-      const timezone = exploreStore.getTimezoneIdentifier();
       const currentRange = exploreStore.timeRange;
       if (currentRange) {
-        const currentStart = calendarDateTimeToTimestamp(currentRange.start, timezone);
-        const currentEnd = calendarDateTimeToTimestamp(currentRange.end, timezone);
+        const currentStart = calendarDateTimeToTimestamp(currentRange.start);
+        const currentEnd = calendarDateTimeToTimestamp(currentRange.end);
         const newStart = range.start.getTime();
         const newEnd = range.end.getTime();
 
-        const isSameRange = Math.abs(currentStart - newStart) < 1000 &&
-                            Math.abs(currentEnd - newEnd) < 1000;
+        const isSameRange = Math.abs((currentStart || 0) - newStart) < 1000 &&
+                            Math.abs((currentEnd || 0) - newEnd) < 1000;
 
         if (isSameRange) {
           return false;
         }
       }
 
-      const start = timestampToCalendarDateTime(range.start.getTime(), timezone);
-      const end = timestampToCalendarDateTime(range.end.getTime(), timezone);
+      const start = toCalendarDateTime(fromDate(range.start, getLocalTimeZone()));
+      const end = toCalendarDateTime(fromDate(range.end, getLocalTimeZone()));
 
       exploreStore.setTimeConfiguration({
         absoluteRange: { start, end }
@@ -124,6 +163,8 @@ export function useTimeRange() {
 
   return {
     timeRange,
+    calendarDateTimeToTimestamp,
+    timestampToCalendarDateTime,
     formatSqlDateTime,
     applyRelativeTimeRange,
     quickRangeLabelToRelativeTime,

@@ -29,7 +29,6 @@ import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 import { asClickHouseConnection } from '@/api/sources';
 import { useExploreStore } from '@/stores/explore';
-import { calendarDateTimeToTimestamp } from '@/utils/time';
 import { useVariableStore } from '@/stores/variables';
 import { useRoute } from 'vue-router';
 import { TOAST_DURATION } from '@/lib/constants';
@@ -401,11 +400,10 @@ function prepareQueryContent(saveTimestamp: boolean): string {
           if (exploreStore.selectedRelativeTime) {
             timeRangeValue = { relative: exploreStore.selectedRelativeTime };
           } else {
-            const timezone = exploreStore.getTimezoneIdentifier();
             timeRangeValue = {
               absolute: {
-                start: exploreStore.timeRange ? calendarDateTimeToTimestamp(exploreStore.timeRange.start, timezone) : Date.now() - 3600000,
-                end: exploreStore.timeRange ? calendarDateTimeToTimestamp(exploreStore.timeRange.end, timezone) : Date.now()
+                start: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.start) : Date.now() - 3600000,
+                end: exploreStore.timeRange ? getTimestampFromDateValue(exploreStore.timeRange.end) : Date.now()
               }
             };
           }
@@ -476,6 +474,41 @@ function prepareQueryContent(saveTimestamp: boolean): string {
       variables: allVariables?.value || []
     });
   }
+}
+
+// Helper function to convert DateValue to timestamp
+function getTimestampFromDateValue(dateValue: any): number {
+  if (!dateValue) return Date.now();
+
+  try {
+    // Handle CalendarDateTime objects
+    if (dateValue.year && dateValue.month && dateValue.day) {
+      const date = new Date(
+        dateValue.year,
+        dateValue.month - 1,
+        dateValue.day,
+        'hour' in dateValue ? dateValue.hour : 0,
+        'minute' in dateValue ? dateValue.minute : 0,
+        'second' in dateValue ? dateValue.second : 0
+      );
+      return date.getTime();
+    }
+
+    // Handle Date objects or timestamps
+    if (dateValue instanceof Date) {
+      return dateValue.getTime();
+    }
+
+    // Handle timestamp numbers
+    if (typeof dateValue === 'number') {
+      return dateValue;
+    }
+  } catch (e) {
+    console.error("Error converting date value to timestamp:", e);
+  }
+
+  // Fallback
+  return Date.now();
 }
 
 // Handle form submission

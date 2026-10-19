@@ -11,11 +11,6 @@ export function calendarDateTimeToTimestamp(dt: DateValue, timeZone: string): nu
   return dt.toDate(timeZone).getTime();
 }
 
-// The ISO 8601 UTC string of a date value's wall-clock fields in timeZone.
-export function calendarDateTimeToISOString(dt: DateValue, timeZone: string): string {
-  return new Date(calendarDateTimeToTimestamp(dt, timeZone)).toISOString();
-}
-
 /**
  * Parses a relative time string like "15m", "1h", "1d" and returns start/end DateValues
  * @param relativeTimeString The relative time string (e.g., "15m", "1h", "1d")

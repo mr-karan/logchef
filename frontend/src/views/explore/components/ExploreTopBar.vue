@@ -12,7 +12,6 @@ import { useToast } from '@/composables/useToast'
 import { useLimitOptions } from '@/composables/useLimitOptions'
 import { TOAST_DURATION } from '@/lib/constants'
 import { generateCliCommand } from '@/utils/cliCommand'
-import { calendarDateTimeToTimestamp } from '@/utils/time'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -161,7 +160,6 @@ function copyCliCommand() {
   }
 
   const tr = exploreStore.timeRange
-  const timezone = exploreStore.getTimezoneIdentifier()
   const command = generateCliCommand({
     teamId: props.currentTeamId,
     sourceId: props.currentSourceId,
@@ -171,8 +169,26 @@ function copyCliCommand() {
         ? exploreStore.logchefqlCode
         : exploreStore.nativeQuery,
     relativeTime: exploreStore.selectedRelativeTime || undefined,
-    absoluteStart: tr ? new Date(calendarDateTimeToTimestamp(tr.start, timezone)) : undefined,
-    absoluteEnd: tr ? new Date(calendarDateTimeToTimestamp(tr.end, timezone)) : undefined,
+    absoluteStart: tr?.start
+      ? new Date(
+          tr.start.year,
+          tr.start.month - 1,
+          tr.start.day,
+          'hour' in tr.start ? tr.start.hour : 0,
+          'minute' in tr.start ? tr.start.minute : 0,
+          'second' in tr.start ? tr.start.second : 0
+        )
+      : undefined,
+    absoluteEnd: tr?.end
+      ? new Date(
+          tr.end.year,
+          tr.end.month - 1,
+          tr.end.day,
+          'hour' in tr.end ? tr.end.hour : 0,
+          'minute' in tr.end ? tr.end.minute : 0,
+          'second' in tr.end ? tr.end.second : 0
+        )
+      : undefined,
     limit: exploreStore.limit,
     timeout: exploreStore.queryTimeout,
   })

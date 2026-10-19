@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
-import { calendarDateTimeToISOString } from '@/utils/time'
+import { getLocalTimeZone } from '@internationalized/date'
 import { cn } from '@/lib/utils'
 import { useVariables } from '@/composables/useVariables'
 import { useFieldValuesLoader } from '@/composables/useFieldValuesLoader'
@@ -205,10 +205,13 @@ const getTimeRangeForApi = () => {
   }
   
   try {
-    const timezone = exploreStore.getTimezoneIdentifier()
-    return {
-      startTime: calendarDateTimeToISOString(timeRange.start, timezone),
-      endTime: calendarDateTimeToISOString(timeRange.end, timezone)
+    // Convert DateValue to JS Date using the local timezone, then to ISO8601
+    const startDate = timeRange.start.toDate(getLocalTimeZone())
+    const endDate = timeRange.end.toDate(getLocalTimeZone())
+    
+    return { 
+      startTime: startDate.toISOString(),
+      endTime: endDate.toISOString()
     }
   } catch {
     return null
