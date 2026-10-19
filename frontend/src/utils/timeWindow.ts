@@ -43,7 +43,8 @@ export interface WindowLabelMessage {
 const UTC = "UTC" as ZoneId;
 const UNIT_MS: Record<DurationUnit, number> = { m: 60_000, h: 3_600_000, d: 86_400_000, w: 604_800_000 };
 const DURATION_PATTERN = /^([1-9]\d{0,3})([mhdw])$/;
-const WALL_CLOCK_PATTERN = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/;
+const WALL_CLOCK_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(?:\s*(Z|[+-]\d{2}:?\d{2}))?$/i;
 
 export function epochMs(value: number | Date): EpochMs {
   const ms = typeof value === "number" ? value : value.getTime();
@@ -144,26 +145,33 @@ export function formatWallClock(ms: EpochMs, zone: ZoneId): string {
   return folded ? `${text} ${formatOffset(offset)}` : text;
 }
 
-function parseOffset(text: string): number {
-  if (text === "Z") return 0;
+function parseOffset(text: string): number | null {
+  if (text.toUpperCase() === "Z") return 0;
   const sign = text.startsWith("-") ? -1 : 1;
   const digits = text.slice(1).replace(":", "");
-  return sign * (Number(digits.slice(0, 2)) * 60 + Number(digits.slice(2))) * 60_000;
+  const [hours, minutes] = [Number(digits.slice(0, 2)), Number(digits.slice(2))];
+  if (hours > 23 || minutes > 59) return null;
+  return sign * (hours * 60 + minutes) * 60_000;
 }
 
-/** The inverse of formatWallClock. A gap time moves forward. A fold time without an offset takes the earlier instant. */
+/**
+ * The inverse of formatWallClock. Text with an offset (a fold suffix, Z or a
+ * pasted RFC3339 time) is that exact instant in any zone. Plain text is wall
+ * clock in the zone: a gap time moves forward, and a fold time takes the earlier instant.
+ */
 export function parseWallClock(text: string, zone: ZoneId): EpochMs | null {
   const match = WALL_CLOCK_PATTERN.exec(text.trim());
   if (!match) return null;
   const [year, month, day, hour, minute, second] = match.slice(1, 7).map((part) => Number(part ?? 0));
+  const millisecond = Number((match[7] ?? "").padEnd(3, "0").slice(0, 3));
   if (month < 1 || month > 12 || hour > 23 || minute > 59 || second > 59) return null;
-  const fields = new CalendarDateTime(year, month, day, hour, minute, second);
+  const fields = new CalendarDateTime(year, month, day, hour, minute, second, millisecond);
   if (fields.day !== day) return null;
-  const offsetText = match[7];
+  const offsetText = match[8];
   if (offsetText === undefined) return epochMs(toZoned(fields, zone, "compatible").toDate());
   const offset = parseOffset(offsetText);
-  const candidate = [toZoned(fields, zone, "earlier"), toZoned(fields, zone, "later")].find((z) => z.offset === offset);
-  return candidate ? epochMs(candidate.toDate()) : null;
+  if (offset === null) return null;
+  return epochMs(toZoned(fields, UTC).toDate().getTime() - offset);
 }
 
 export function formatInZone(ms: EpochMs, zone: ZoneId, opts: Intl.DateTimeFormatOptions, locale?: string): string {

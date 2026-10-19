@@ -135,8 +135,21 @@ describe("wall clock text", () => {
     expect(parseWallClock("2026-03-08 02:30:00", NEW_YORK)).toBe(at("2026-03-08T07:30:00Z"));
   });
 
-  it("rejects malformed text, impossible dates, and offsets the zone never has", () => {
-    for (const bad of ["", "yesterday", "2026-02-30 00:00:00", "2026-13-01 00:00", "2026-10-19 24:00", "2026-11-01 01:30:00 +02:00"]) {
+  it("reads text with an explicit offset as that exact instant, in any zone", () => {
+    for (const z of [UTC, NEW_YORK, zone("Asia/Kolkata")]) {
+      expect(parseWallClock("2026-10-19T04:00:00Z", z)).toBe(at("2026-10-19T04:00:00Z"));
+      expect(parseWallClock("2026-10-19T09:30:00.250+05:30", z)).toBe(at("2026-10-19T04:00:00.250Z"));
+      expect(parseWallClock("2026-11-01 01:30:00 +02:00", z)).toBe(at("2026-10-31T23:30:00Z"));
+    }
+  });
+
+  it("keeps fractional seconds of plain text in the given zone", () => {
+    expect(parseWallClock("2026-10-19 00:00:00.5", NEW_YORK)).toBe(at("2026-10-19T04:00:00.500Z"));
+    expect(parseWallClock("2026-10-19 04:00:00.123456789", UTC)).toBe(at("2026-10-19T04:00:00.123Z"));
+  });
+
+  it("rejects malformed text and impossible dates", () => {
+    for (const bad of ["", "yesterday", "2026-02-30 00:00:00", "2026-13-01 00:00", "2026-10-19 24:00", "2026-10-19 04:00:00.", "2026-10-19 04:00:00 +24:00"]) {
       expect(parseWallClock(bad, NEW_YORK), bad).toBeNull();
     }
   });
