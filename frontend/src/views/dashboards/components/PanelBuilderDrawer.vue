@@ -339,7 +339,8 @@ function onOpenChange(value: boolean) {
           <div class="ml-auto flex items-center gap-2">
             <DateTimePicker
               :model-value="store.window"
-              :zone="preferencesStore.zone"
+              :resolved="store.effectiveRange"
+              :zone-preference="preferencesStore.preferences.timezone"
               @update:model-value="store.setWindow"
               @update:zone-preference="preferencesStore.updatePreferences({ timezone: $event })"
             />

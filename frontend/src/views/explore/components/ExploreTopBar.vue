@@ -213,7 +213,8 @@ defineExpose({
               <DateTimePicker
                 ref="dateTimePickerRef"
                 :model-value="exploreStore.window"
-                :zone="exploreStore.resolved.zone"
+                :resolved="exploreStore.resolved"
+                :zone-preference="preferencesStore.preferences.timezone"
                 :disabled="true"
                 class="opacity-50 pointer-events-none"
               />
@@ -228,7 +229,8 @@ defineExpose({
         v-else
         ref="dateTimePickerRef"
         :model-value="exploreStore.window"
-        :zone="exploreStore.resolved.zone"
+        :resolved="exploreStore.resolved"
+        :zone-preference="preferencesStore.preferences.timezone"
         @update:model-value="exploreStore.setWindow"
         @update:zone-preference="handleZonePreferenceChange"
       />

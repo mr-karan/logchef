@@ -16,11 +16,10 @@ import {
   epochMs,
   formatWallClock,
   parseWallClock,
-  resolveWindow,
   windowLabel,
   type EpochMs,
+  type ResolvedWindow,
   type TimeWindow,
-  type ZoneId,
 } from "@/utils/timeWindow";
 import { useI18n } from "vue-i18n";
 
@@ -28,7 +27,9 @@ const { t, locale } = useI18n();
 
 interface Props {
   modelValue: TimeWindow;
-  zone: ZoneId;
+  /** The window as the owner resolved it. The picker shows these instants in its zone. */
+  resolved: ResolvedWindow;
+  zonePreference: "utc" | "local";
   class?: string;
   disabled?: boolean;
 }
@@ -50,7 +51,7 @@ const showToCalendar = ref(false);
 const quickRangeSearch = ref("");
 
 // Today in the picker's zone focuses the calendars.
-const todayDate = computed(() => today(props.zone));
+const todayDate = computed(() => today(props.resolved.zone));
 
 // Recently used absolute ranges (stored in localStorage)
 const recentRanges = ref<Array<{ from: string; to: string; label: string }>>(
@@ -58,9 +59,10 @@ const recentRanges = ref<Array<{ from: string; to: string; label: string }>>(
 );
 
 // Draft text for the absolute inputs, and the instants the text was written from.
-// Applying text the user did not edit emits those instants unchanged.
+// Applying text the user did not edit keeps the window, or the instant of an
+// unedited wall-clock bound. A "now-15m" bound has no fixed instant.
 const draftState = ref({ from: "now-1h", to: "now" });
-let shownInstants: { from: string; to: string; start: EpochMs; end: EpochMs } | null = null;
+let shown: { from: string; to: string; start: EpochMs | null; end: EpochMs | null } | null = null;
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME_NO_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/;
@@ -83,20 +85,15 @@ const filteredQuickRanges = computed(() => {
 
 const selectedQuickRange = computed(() => (props.modelValue.kind === "relative" ? props.modelValue.spec : null));
 
-// Sync the draft text with the window and zone it shows.
+// Sync the draft text with the window and the instants it resolved to.
 watch(
-  () => [props.modelValue, props.zone] as const,
-  ([window, zone]) => {
-    if (window.kind === "relative" && windowLabel(window) && /^\d+[mhd]$/.test(window.spec)) {
-      draftState.value = { from: `now-${window.spec}`, to: "now" };
-      shownInstants = null;
-      return;
-    }
-    const { start, end } = resolveWindow(window, zone, epochMs(Date.now()));
-    const from = formatWallClock(start, zone);
-    const to = formatWallClock(end, zone);
+  () => [props.modelValue, props.resolved] as const,
+  ([window, { start, end, zone }]) => {
+    const isDuration = window.kind === "relative" && /^\d+[mhd]$/.test(window.spec);
+    const from = isDuration ? `now-${window.spec}` : formatWallClock(start, zone);
+    const to = isDuration ? "now" : formatWallClock(end, zone);
     draftState.value = { from, to };
-    shownInstants = window.kind === "absolute" ? { from, to, start, end } : null;
+    shown = isDuration ? { from, to, start: null, end: null } : { from, to, start, end };
   },
   { immediate: true }
 );
@@ -146,7 +143,7 @@ function parseInput(input: string, nowMs: number): EpochMs | null {
   if (trimmed === "now") return epochMs(nowMs);
   const relativeMatch = trimmed.match(/^now-(\d+)(m|h|d)$/);
   if (relativeMatch) return epochMs(nowMs - Number(relativeMatch[1]) * NOW_UNIT_MS[relativeMatch[2]]);
-  return parseWallClock(normalizeAbsoluteInput(input), props.zone);
+  return parseWallClock(normalizeAbsoluteInput(input), props.resolved.zone);
 }
 
 function applyQuickRange(range: QuickRange) {
@@ -159,9 +156,14 @@ function applyAbsoluteRange() {
   normalizeDraftInput("to");
 
   const { from, to } = draftState.value;
+  if (props.modelValue.kind === "relative" && shown?.from === from && shown.to === to) {
+    emit("update:modelValue", props.modelValue);
+    showDatePicker.value = false;
+    return;
+  }
   const nowMs = Date.now();
-  const start = shownInstants?.from === from ? shownInstants.start : parseInput(from, nowMs);
-  const end = shownInstants?.to === to ? shownInstants.end : parseInput(to, nowMs);
+  const start = (shown?.from === from ? shown.start : null) ?? parseInput(from, nowMs);
+  const end = (shown?.to === to ? shown.end : null) ?? parseInput(to, nowMs);
 
   if (start === null || end === null || start > end) {
     return;
@@ -171,7 +173,7 @@ function applyAbsoluteRange() {
   const rangeEntry = {
     from,
     to,
-    label: `${formatWallClock(start, props.zone)} to ${formatWallClock(end, props.zone)}`,
+    label: `${formatWallClock(start, props.resolved.zone)} to ${formatWallClock(end, props.resolved.zone)}`,
   };
 
   // Add to recent, avoiding duplicates
@@ -216,8 +218,8 @@ function clearRecentRanges() {
 const triggerDisplayText = computed(() => {
   const label = windowLabel(props.modelValue);
   if (label) return t(label.key, { count: label.count }, label.count);
-  const { start, end } = resolveWindow(props.modelValue, props.zone, epochMs(Date.now()));
-  return `${formatWallClock(start, props.zone)} - ${formatWallClock(end, props.zone)}`;
+  const { start, end, zone } = props.resolved;
+  return `${formatWallClock(start, zone)} - ${formatWallClock(end, zone)}`;
 });
 
 // Function to open the date picker programmatically
@@ -225,8 +227,8 @@ function openDatePicker() {
   showDatePicker.value = true;
 }
 
-const isUtc = computed(() => props.zone === "UTC");
-const timezoneDisplay = computed(() => (isUtc.value ? "UTC" : t("time.browser", { zone: props.zone })));
+const isUtc = computed(() => props.zonePreference === "utc");
+const timezoneDisplay = computed(() => (isUtc.value ? "UTC" : t("time.browser", { zone: props.resolved.zone })));
 
 function toggleZonePreference() {
   emit("update:zonePreference", isUtc.value ? "local" : "utc");

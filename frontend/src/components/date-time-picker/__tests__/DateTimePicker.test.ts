@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createApp, nextTick } from "vue";
 import { i18n } from "@/i18n";
-import { epochMs, parseZoneId, type TimeWindow } from "@/utils/timeWindow";
+import { epochMs, formatWallClock, parseZoneId, resolveWindow, type ResolvedWindow, type TimeWindow } from "@/utils/timeWindow";
 import DateTimePicker from "../DateTimePicker.vue";
 
 // The browser runs in another zone than the picker, so browser-zone parsing shows up.
@@ -18,9 +18,19 @@ afterEach(() => {
   document.body.innerHTML = "";
 });
 
-async function openPicker(window: TimeWindow) {
+// A run months before the test clock, so a picker that resolves its own "now" shows up.
+const anchor = epochMs(Date.parse("2026-03-02T15:00:00Z"));
+
+async function openPicker(window: TimeWindow, resolved: ResolvedWindow = resolveWindow(window, newYork, anchor), zonePreference = "local") {
   const emitted: TimeWindow[] = [];
-  const app = createApp(DateTimePicker, { modelValue: window, zone: newYork, "onUpdate:modelValue": (next: TimeWindow) => emitted.push(next) });
+  const zones: string[] = [];
+  const app = createApp(DateTimePicker, {
+    modelValue: window,
+    resolved,
+    zonePreference,
+    "onUpdate:modelValue": (next: TimeWindow) => emitted.push(next),
+    "onUpdate:zonePreference": (next: string) => zones.push(next),
+  });
   const host = document.createElement("div");
   document.body.appendChild(host);
   app.use(i18n).mount(host);
@@ -28,7 +38,7 @@ async function openPicker(window: TimeWindow) {
   host.querySelector("button")?.click();
   await nextTick();
   await nextTick();
-  return emitted;
+  return { emitted, zones };
 }
 
 function button(text: string): HTMLButtonElement {
@@ -41,7 +51,7 @@ describe("DateTimePicker", () => {
   it("emits the instants it received when applied unchanged, even in a DST fold", async () => {
     // Starts at the second 01:30 of the New York fall-back day, with milliseconds.
     const window: TimeWindow = { kind: "absolute", start: epochMs(Date.parse("2026-11-01T06:30:00.250Z")), end: epochMs(Date.parse("2026-11-01T07:15:00.999Z")) };
-    const emitted = await openPicker(window);
+    const { emitted } = await openPicker(window);
 
     const from = document.body.querySelector<HTMLInputElement>("input.font-mono");
     expect(from?.value).toBe("2026-11-01 01:30:00 -05:00");
@@ -52,7 +62,7 @@ describe("DateTimePicker", () => {
 
   it("reads an edited fold time by its offset, in the picker's zone", async () => {
     const window: TimeWindow = { kind: "absolute", start: epochMs(Date.parse("2026-11-01T05:30:00Z")), end: epochMs(Date.parse("2026-11-01T08:00:00Z")) };
-    const emitted = await openPicker(window);
+    const { emitted } = await openPicker(window);
 
     const from = document.body.querySelector<HTMLInputElement>("input.font-mono");
     if (!from) throw new Error("no from input");
@@ -64,8 +74,31 @@ describe("DateTimePicker", () => {
     expect(emitted).toEqual([{ kind: "absolute", start: Date.parse("2026-11-01T06:30:00Z"), end: window.end }]);
   });
 
+  it("keeps a relative window when applied unchanged, and shows the instants it was resolved to", async () => {
+    const window: TimeWindow = { kind: "relative", spec: "today" };
+    const resolved = resolveWindow(window, newYork, anchor);
+    const range = `${formatWallClock(resolved.start, newYork)} - ${formatWallClock(resolved.end, newYork)}`;
+    expect(range).toBe("2026-03-02 00:00:00 - 2026-03-02 10:00:00");
+
+    const { emitted } = await openPicker(window, resolved);
+    expect(document.body.querySelector("button")?.textContent?.trim()).toBe(range);
+    button("Apply time range").click();
+
+    expect(emitted).toEqual([{ kind: "relative", spec: "today" }]);
+  });
+
+  it("toggles by the zone preference, even when the browser zone is UTC", async () => {
+    const window: TimeWindow = { kind: "relative", spec: "15m" };
+    const utc = parseZoneId("UTC");
+    if (!utc) throw new Error("no zone data");
+    const { zones } = await openPicker(window, resolveWindow(window, utc, anchor), "local");
+
+    button("Local").click();
+    expect(zones).toEqual(["utc"]);
+  });
+
   it("emits a quick range as a relative window", async () => {
-    const emitted = await openPicker({ kind: "relative", spec: "15m" });
+    const { emitted } = await openPicker({ kind: "relative", spec: "15m" });
     button("Last 6 hours").click();
     expect(emitted).toEqual([{ kind: "relative", spec: "6h" }]);
   });
