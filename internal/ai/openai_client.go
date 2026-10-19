@@ -16,9 +16,11 @@ import (
 // DefaultOpenAIBaseURL is the endpoint used when no base URL is configured.
 const DefaultOpenAIBaseURL = "https://api.openai.com/v1"
 
-// openAIResponseHeaderTimeout bounds the wait for a response's headers. A
-// streamed body has no total timeout: the caller's context bounds it.
-const openAIResponseHeaderTimeout = 30 * time.Second
+// openAIStreamHeaderTimeout bounds the wait for a streamed response's headers.
+// A streamed body has no total timeout: the caller's context bounds it. A
+// non-streamed reply sends its headers only after generation, so only the
+// caller's context bounds it.
+const openAIStreamHeaderTimeout = 30 * time.Second
 
 // Body size bounds of the chat completions client.
 const (
@@ -30,9 +32,10 @@ const (
 // openAIClient calls the chat completions API of OpenAI or of a compatible
 // endpoint such as OpenRouter.
 type openAIClient struct {
-	url    string
-	apiKey string
-	http   *http.Client
+	url        string
+	apiKey     string
+	http       *http.Client
+	streamHTTP *http.Client
 }
 
 func newOpenAIClient(baseURL, apiKey string) (*openAIClient, error) {
@@ -42,13 +45,18 @@ func newOpenAIClient(baseURL, apiKey string) (*openAIClient, error) {
 	if baseURL == "" {
 		baseURL = DefaultOpenAIBaseURL
 	}
-	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.ResponseHeaderTimeout = openAIResponseHeaderTimeout
 	return &openAIClient{
-		url:    strings.TrimSuffix(baseURL, "/") + "/chat/completions",
-		apiKey: apiKey,
-		http:   &http.Client{Transport: transport},
+		url:        strings.TrimSuffix(baseURL, "/") + "/chat/completions",
+		apiKey:     apiKey,
+		http:       &http.Client{},
+		streamHTTP: &http.Client{Transport: headerTimeoutTransport(openAIStreamHeaderTimeout)},
 	}, nil
+}
+
+func headerTimeoutTransport(timeout time.Duration) *http.Transport {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = timeout
+	return transport
 }
 
 type openAIChatRequest struct {
@@ -121,7 +129,11 @@ func (c *openAIClient) post(ctx context.Context, encoded []byte, streaming bool)
 	if streaming {
 		req.Header.Set("Accept", "text/event-stream")
 	}
-	resp, err := c.http.Do(req)
+	client := c.http
+	if streaming {
+		client = c.streamHTTP
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
 	}

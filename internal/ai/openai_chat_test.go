@@ -1,6 +1,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // openRouterStub serves one canned response to every chat completions call
@@ -507,5 +509,30 @@ func TestOpenAIProviderErrorResponse(t *testing.T) {
 	}
 	if _, err := provider.Complete(t.Context(), CompletionRequest{User: "count rows", Model: "gpt-4o"}); err == nil || !strings.Contains(err.Error(), "401: No auth credentials found") {
 		t.Fatalf("Complete error = %v", err)
+	}
+}
+
+// A non-streamed reply sends its headers only after generation, so the
+// streaming header timeout must not cut it short.
+func TestOpenAIHeaderTimeoutAppliesOnlyToStreaming(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		rw.Header().Set("Content-Type", "application/json")
+		_, _ = rw.Write([]byte(`{"choices":[{"message":{"role":"assistant","content":"SELECT 1"}}]}`))
+	}))
+	t.Cleanup(srv.Close)
+
+	client, err := newOpenAIClient(srv.URL, "test-key")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.streamHTTP = &http.Client{Transport: headerTimeoutTransport(50 * time.Millisecond)}
+
+	text, err := client.complete(context.Background(), openAIChatRequest{Model: "m"})
+	if err != nil || text != "SELECT 1" {
+		t.Fatalf("complete = %q, %v; want the slow non-streamed reply", text, err)
+	}
+	if _, err := client.stream(context.Background(), openAIChatRequest{Model: "m"}, func(openAIChunk) {}); err == nil {
+		t.Fatal("stream succeeded; want the header timeout to cut it")
 	}
 }
