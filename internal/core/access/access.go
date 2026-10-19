@@ -23,7 +23,17 @@ const (
 	AuthSession AuthMethod = iota + 1
 	AuthAPIToken
 	AuthOAuth
+	// AuthAssistant is Ask Chef acting for a signed-in user.
+	AuthAssistant
 )
+
+// assistantScopes are the read scopes the Ask Chef tools need.
+var assistantScopes = []models.TokenScope{
+	models.TokenScopeTeamsRead,
+	models.TokenScopeSourcesRead,
+	models.TokenScopeLogsRead,
+	models.TokenScopeAlertsRead,
+}
 
 var (
 	// ErrInsufficientScope means the credential does not grant the scope, or
@@ -76,14 +86,21 @@ func OAuthPrincipal(user *models.User, grantID models.OAuthGrantID, clientID mod
 	}
 }
 
+// AssistantPrincipal builds the principal Ask Chef uses for user. It holds
+// only read scopes and never passes RequireGlobalAdmin, so it reaches only
+// the teams the user is a member of.
+func AssistantPrincipal(user *models.User) Principal {
+	return Principal{User: user, Method: AuthAssistant, scopes: slices.Clone(assistantScopes)}
+}
+
 // Scopes returns a copy of the credential's scopes. It is nil for sessions.
 func (p Principal) Scopes() []models.TokenScope {
 	return slices.Clone(p.scopes)
 }
 
 // Require returns ErrInsufficientScope unless the principal holds scope.
-// Sessions hold every scope. API tokens also honor the "*" scope. OAuth grants
-// never contain "*", so only an exact match counts. Any other method is denied.
+// Sessions hold every scope. API tokens also honor the "*" scope. OAuth and
+// assistant principals need an exact match. Any other method is denied.
 func (p Principal) Require(scope models.TokenScope) error {
 	switch p.Method {
 	case AuthSession:
@@ -92,7 +109,7 @@ func (p Principal) Require(scope models.TokenScope) error {
 		if slices.Contains(p.scopes, scope) || slices.Contains(p.scopes, models.TokenScopeAll) {
 			return nil
 		}
-	case AuthOAuth:
+	case AuthOAuth, AuthAssistant:
 		if slices.Contains(p.scopes, scope) {
 			return nil
 		}
@@ -101,10 +118,10 @@ func (p Principal) Require(scope models.TokenScope) error {
 }
 
 // RequireGlobalAdmin returns ErrGlobalAdminRequired unless the user is a
-// global admin. It does not check scope. An OAuth principal is never a global
-// admin, whatever the user's role.
+// global admin. It does not check scope. An OAuth or assistant principal is
+// never a global admin, whatever the user's role.
 func (p Principal) RequireGlobalAdmin() error {
-	if p.Method == AuthOAuth || p.User == nil || p.User.Role != models.UserRoleAdmin {
+	if p.Method == AuthOAuth || p.Method == AuthAssistant || p.User == nil || p.User.Role != models.UserRoleAdmin {
 		return ErrGlobalAdminRequired
 	}
 	return nil
@@ -124,7 +141,8 @@ func (a AuthorizedSource) SourceID() models.SourceID { return a.sourceID }
 func (a AuthorizedSource) UserID() models.UserID     { return a.userID }
 
 // AuthorizeTeam checks team membership, then scope. Global admins pass the
-// membership check, except through OAuth. Every call reads the database; nothing is cached.
+// membership check, except through OAuth or the assistant. Every call reads
+// the database; nothing is cached.
 func AuthorizeTeam(ctx context.Context, db store.StoreOps, p Principal, teamID models.TeamID, scope models.TokenScope) error {
 	if err := requireTeamMember(ctx, db, p, teamID); err != nil {
 		return err
@@ -135,8 +153,8 @@ func AuthorizeTeam(ctx context.Context, db store.StoreOps, p Principal, teamID m
 // AuthorizeTeamSource checks team membership, then the team-source link, then
 // scope. This is the order the HTTP middleware has always applied, so the
 // error a caller sees for a request with several faults does not change.
-// Global admins pass the membership check, except through OAuth, but still
-// need the link.
+// Global admins pass the membership check, except through OAuth or the
+// assistant, but still need the link.
 func AuthorizeTeamSource(ctx context.Context, db store.StoreOps, p Principal, teamID models.TeamID, sourceID models.SourceID, scope models.TokenScope) (AuthorizedSource, error) {
 	if err := requireTeamMember(ctx, db, p, teamID); err != nil {
 		return AuthorizedSource{}, err
@@ -158,8 +176,8 @@ func requireTeamMember(ctx context.Context, db store.StoreOps, p Principal, team
 	if p.User == nil {
 		return ErrNotTeamMember
 	}
-	// Global admins skip membership, except through OAuth: delegated access is
-	// limited to the user's own memberships.
+	// Global admins skip membership, except through OAuth or the assistant:
+	// delegated access is limited to the user's own memberships.
 	if p.RequireGlobalAdmin() == nil {
 		return nil
 	}
