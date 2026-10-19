@@ -227,7 +227,7 @@ export const useAskChefStore = defineStore("askChef", () => {
     const message = text.trim().slice(0, MAX_MESSAGE_LENGTH);
     if (!message || !context.value || session.value.status.kind === "streaming") return;
 
-    const request = buildTurnRequest(context.value, session.value, message, Intl.DateTimeFormat().resolvedOptions().timeZone);
+    const request = buildTurnRequest(context.value, session.value, message, useExploreStore().getTimezoneIdentifier());
     session.value.transcript.push({ role: "user", text: message }, { role: "assistant", steps: [], text: "", evidenceIds: [], done: null });
     session.value.status = { kind: "streaming" };
     const turn = new AbortController();

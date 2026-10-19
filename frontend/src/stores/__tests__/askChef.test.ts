@@ -257,6 +257,21 @@ describe("useAskChefStore", () => {
     expect(store.transcript[1]).toMatchObject({ role: "assistant", text: "Errors rose" });
   });
 
+  it("sends UTC when the user prefers UTC times, like the Explorer", async () => {
+    localStorage.setItem("logchef_user_preferences", JSON.stringify({ timezone: "utc" }));
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([frame("done", { stop_reason: "end", tool_calls: 0, input_tokens: 0, output_tokens: 0, duration_ms: 1 })]));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const store = useAskChefStore();
+      store.investigateAlert(alert, entry, 1);
+      await vi.waitFor(() => expect(store.status).toEqual({ kind: "idle" }));
+    } finally {
+      localStorage.removeItem("logchef_user_preferences");
+    }
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1].body))).toMatchObject({ timezone: "UTC" });
+  });
+
   it("switches to disabled when the server has Ask Chef off (404)", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(404, "not found")));
     const store = useAskChefStore();
