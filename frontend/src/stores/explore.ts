@@ -282,6 +282,10 @@ export const useExploreStore = defineStore("explore", () => {
   const timeWindow = computed<TimeWindow>(() => state.data.value.window ?? DEFAULT_WINDOW);
   const resolved = computed<ResolvedWindow>(() => resolveWindow(timeWindow.value, preferencesStore.zone, anchor.value));
 
+  // Load paths run their own query, so only a user's window choice bumps this
+  // revision, which re-runs even an unchanged window through the auto-run watcher.
+  const windowRevision = ref(0);
+
   function assignWindow(window: TimeWindow) {
     state.data.value.window = window;
     anchor.value = epochMs(Date.now());
@@ -639,6 +643,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   function setWindow(window: TimeWindow) {
     assignWindow(window);
+    windowRevision.value++;
     clearSavedQueryIfDirty();
     clearShareSelectionIfDirty();
     persistDraft();
@@ -942,6 +947,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   function resetQueryToDefaults() {
     assignWindow(DEFAULT_WINDOW);
+    windowRevision.value++;
     state.data.value.limit = 100;
 
     _clearQueryContent();
@@ -1649,17 +1655,17 @@ export const useExploreStore = defineStore("explore", () => {
   );
   
   watch(
-    () => [sourcesStore.currentSourceDetails, state.data.value.window, anchor.value] as const,
-    ([newDetails, window, anchorMs]) => {
+    () => [sourcesStore.currentSourceDetails, windowRevision.value] as const,
+    ([newDetails, revision], [, previousRevision]) => {
       if (!newDetails?.id || !newDetails.is_connected) return;
-      if (!window) return;
+      if (!state.data.value.window) return;
 
-      // The anchor is part of the key, so choosing the same relative range again re-runs it.
-      const execKey = `${newDetails.id}-${JSON.stringify(window)}-${anchorMs}`;
+      const execKey = `${newDetails.id}-${revision}`;
       if (execKey === lastAutoExecKey) return;
 
-      // Skip if a query was already executed (e.g., by URL state initialization)
-      if (state.data.value.hasExecutedQuery && lastAutoExecKey === null) {
+      // Skip if a query was already executed (e.g., by URL state initialization),
+      // unless the user just chose a window.
+      if (state.data.value.hasExecutedQuery && lastAutoExecKey === null && revision === previousRevision) {
         lastAutoExecKey = execKey;
         return;
       }

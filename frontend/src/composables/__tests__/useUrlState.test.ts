@@ -104,26 +104,46 @@ describe("Explorer history navigation", () => {
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidence.q });
   }
 
+  // Each navigation runs exactly one query, and nothing aborts it.
+  async function expectOneRun(query: ReturnType<typeof vi.spyOn>, navigate: () => Promise<unknown>, store: ReturnType<typeof useExploreStore>) {
+    const before = query.mock.calls.length;
+    await navigate();
+    await settle(store);
+    const calls = query.mock.calls.slice(before);
+    expect(calls).toHaveLength(1);
+    expect((calls[0][3] as { signal: AbortSignal }).signal.aborted).toBe(false);
+  }
+
   it("reopens each evidence link on Back and Forward instead of the saved draft", async () => {
     const { router, store, query } = await mountExplorer();
     await settle(store);
 
-    await router.push({ path: "/logs/explore", query: evidenceA });
-    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
     expectOpen(router, store, query, evidenceA);
 
-    await router.push({ path: "/logs/explore", query: evidenceB });
-    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
     expectOpen(router, store, query, evidenceB);
 
-    router.back();
-    await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceA.start));
-    await settle(store);
+    await expectOneRun(query, async () => {
+      router.back();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceA.start));
+    }, store);
     expectOpen(router, store, query, evidenceA);
 
-    router.forward();
-    await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceB.start));
-    await settle(store);
+    await expectOneRun(query, async () => {
+      router.forward();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceB.start));
+    }, store);
     expectOpen(router, store, query, evidenceB);
+  });
+
+  it("re-runs when the user chooses the same relative range again", async () => {
+    const { router, store, query } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+
+    await expectOneRun(query, async () => store.setWindow({ kind: "relative", spec: "15m" }), store);
+    await expectOneRun(query, async () => store.setWindow({ kind: "relative", spec: "15m" }), store);
+    expect(router.currentRoute.value.query).toMatchObject({ t: "15m", q: evidenceA.q });
   });
 });
