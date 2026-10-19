@@ -2,7 +2,6 @@ package ai
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -113,16 +112,9 @@ func (a *openAIAccumulator) response() (ChatResponse, error) {
 	}
 	slices.SortFunc(a.calls, func(x, y *streamedToolCall) int { return x.index - y.index })
 	for _, call := range a.calls {
-		input := json.RawMessage(call.arguments.String())
-		if len(input) == 0 {
-			input = json.RawMessage(`{}`)
+		if use, ok := streamedToolUse(call.id, call.name, call.arguments.String(), stop); ok {
+			resp.Blocks = append(resp.Blocks, use)
 		}
-		// A message cut off by max_tokens can end inside a tool call. Its
-		// input is not JSON, and sending it back would fail the next call.
-		if !isJSONObject(input) {
-			continue
-		}
-		resp.Blocks = append(resp.Blocks, ToolUseBlock{ID: call.id, Name: call.name, Input: input})
 	}
 	return resp, nil
 }

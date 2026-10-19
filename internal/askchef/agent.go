@@ -207,6 +207,9 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 			return limit, nil
 		}
 		if len(uses) == 0 {
+			if !hasText(resp) {
+				return "", &failure{message: "Ask Chef got an empty answer from the model. Try again.", err: errors.New("model ended the turn with no text and no tool calls")}
+			}
 			return StopEnd, nil
 		}
 
@@ -257,7 +260,15 @@ func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) (result ai.T
 	callID := "c" + strconv.Itoa(r.toolCalls)
 	r.send(ToolStart{CallID: callID, Tool: use.Name})
 
-	text, err := r.tools.call(ctx, use.Name, use.Input)
+	var (
+		text string
+		err  error
+	)
+	if use.InvalidInput {
+		err = errors.New("arguments were not valid JSON")
+	} else {
+		text, err = r.tools.call(ctx, use.Name, use.Input)
+	}
 	if ctx.Err() != nil {
 		// A cancelled turn did not fail this call. converse ends the turn.
 		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: the turn was cancelled]", IsError: true}, false

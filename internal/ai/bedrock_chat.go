@@ -142,16 +142,9 @@ func (a *streamAccumulator) response() (ChatResponse, error) {
 		b := a.blocks[i]
 		switch {
 		case b.toolUseID != "":
-			input := json.RawMessage(b.input.String())
-			if len(input) == 0 {
-				input = json.RawMessage(`{}`)
+			if use, ok := streamedToolUse(b.toolUseID, b.toolName, b.input.String(), a.stopReason); ok {
+				resp.Blocks = append(resp.Blocks, use)
 			}
-			// A message cut off by max_tokens can end inside a tool call. Its
-			// input is not JSON, and sending it back would fail the next call.
-			if !isJSONObject(input) {
-				continue
-			}
-			resp.Blocks = append(resp.Blocks, ToolUseBlock{ID: b.toolUseID, Name: b.toolName, Input: input})
 		case b.text.Len() > 0:
 			resp.Blocks = append(resp.Blocks, TextBlock{Text: b.text.String()})
 		}

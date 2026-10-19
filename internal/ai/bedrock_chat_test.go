@@ -156,6 +156,28 @@ func TestBedrockChatStreamDropsCutOffToolCall(t *testing.T) {
 	}
 }
 
+// A tool call with arguments that are not JSON, in a message that was not
+// cut off, is kept with an empty input and marked, so the model hears why.
+func TestBedrockChatStreamMarksInvalidToolArguments(t *testing.T) {
+	var sent *bedrockruntime.ConverseStreamInput
+	chat := scriptedBedrock(&sent, nil,
+		toolStart(0, "tu-1", "query_logchefql"),
+		toolDelta(0, `{"query":"level=`),
+		messageStop(types.StopReasonToolUse),
+	)
+	resp, err := chat.Stream(context.Background(), ChatRequest{Model: "m"}, func(string) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	want := []ChatBlock{ToolUseBlock{ID: "tu-1", Name: "query_logchefql", Input: json.RawMessage(`{}`), InvalidInput: true}}
+	if !reflect.DeepEqual(resp.Blocks, want) {
+		t.Fatalf("blocks = %#v, want %#v", resp.Blocks, want)
+	}
+	if _, err := converseStreamInput(ChatRequest{Messages: []ChatMessage{{Role: ChatRoleAssistant, Blocks: resp.Blocks}}}); err != nil {
+		t.Fatalf("the marked call does not convert back: %v", err)
+	}
+}
+
 func TestBedrockChatStreamFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

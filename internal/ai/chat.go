@@ -31,6 +31,9 @@ type ToolUseBlock struct {
 	ID    string
 	Name  string
 	Input json.RawMessage
+	// InvalidInput marks a call whose arguments were not a JSON object.
+	// Input is then {}, and the caller answers the call with an error.
+	InvalidInput bool
 }
 
 // ToolResultBlock answers the ToolUseBlock with the same ID.
@@ -81,6 +84,24 @@ type ChatResponse struct {
 	Blocks     []ChatBlock
 	StopReason ChatStopReason
 	Usage      ChatUsage
+}
+
+// streamedToolUse builds a tool call from its streamed arguments. Arguments
+// that are not a JSON object were cut off when the message hit its output
+// limit, and then the call is dropped. Otherwise the call is kept and
+// marked, so the model can be told and retry.
+func streamedToolUse(id, name, arguments string, stop ChatStopReason) (ToolUseBlock, bool) {
+	input := json.RawMessage(arguments)
+	if len(input) == 0 {
+		input = json.RawMessage(`{}`)
+	}
+	if isJSONObject(input) {
+		return ToolUseBlock{ID: id, Name: name, Input: input}, true
+	}
+	if stop == ChatStopMaxTokens {
+		return ToolUseBlock{}, false
+	}
+	return ToolUseBlock{ID: id, Name: name, Input: json.RawMessage(`{}`), InvalidInput: true}, true
 }
 
 // ToolUses returns the tool calls in the response, in order.

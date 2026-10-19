@@ -303,6 +303,26 @@ func TestOpenAIChatLengthStopsAtMaxTokens(t *testing.T) {
 	}
 }
 
+// A tool call with arguments that are not JSON, in a message that was not
+// cut off, is kept with an empty input and marked, so the model hears why.
+func TestOpenAIChatMarksInvalidToolArguments(t *testing.T) {
+	chat := (&openRouterStub{}).streamOf(t,
+		toolCallChunk(0, "toolu_01", "query_logchefql", `{"query":"level=`),
+		chunk(`{"role":"assistant","content":""}`, "tool_calls"),
+		usageChunk(500, 20),
+		done,
+	)
+
+	resp, _, err := streamText(t, chat)
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	want := []ChatBlock{ToolUseBlock{ID: "toolu_01", Name: "query_logchefql", Input: json.RawMessage(`{}`), InvalidInput: true}}
+	if !reflect.DeepEqual(resp.Blocks, want) {
+		t.Fatalf("blocks = %+v, want %+v", resp.Blocks, want)
+	}
+}
+
 func TestOpenAIChatContentFilterStop(t *testing.T) {
 	chat := (&openRouterStub{}).streamOf(t, textChunk("I"), chunk(`{"role":"assistant","content":""}`, "content_filter"), done)
 	resp, _, err := streamText(t, chat)

@@ -749,6 +749,42 @@ func TestTurnReportsToolFailuresToTheModel(t *testing.T) {
 	}
 }
 
+// A tool call whose arguments were not JSON runs nothing. The model hears
+// why, so it can retry.
+func TestTurnAnswersInvalidToolArgumentsWithAnError(t *testing.T) {
+	w := newWorld(t)
+	chat := &scriptedChat{replies: []ai.ChatResponse{
+		reply(ai.ToolUseBlock{ID: "tu-1", Name: "get_field_values", Input: json.RawMessage(`{}`), InvalidInput: true}),
+		reply(ai.TextBlock{Text: "The call failed, so this is **Not established**."}),
+	}}
+	events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+	ends := toolEnds(events)
+	if len(ends) != 1 || ends[0].OK || ends[0].Summary != "arguments were not valid JSON" {
+		t.Fatalf("tool_end = %+v, want one failed call that names the invalid arguments", ends)
+	}
+	results := toolResults(chat.request(1))
+	if len(results) != 1 || !results[0].IsError || results[0].Text != "[tool did not complete: arguments were not valid JSON]" {
+		t.Fatalf("result sent to the model = %+v", results)
+	}
+	if w.backend.fieldQueries.Load() != 0 {
+		t.Fatal("a call with invalid arguments reached the backend")
+	}
+	if done, ok := events[len(events)-1].(askchef.Done); !ok || done.StopReason != askchef.StopEnd {
+		t.Fatalf("last event = %+v, want done with end", events[len(events)-1])
+	}
+}
+
+// A final message with no text and no tool calls is not an answer.
+func TestTurnEmptyAnswerEndsWithError(t *testing.T) {
+	w := newWorld(t)
+	events := w.run(t, &scriptedChat{replies: []ai.ChatResponse{reply(ai.TextBlock{Text: "  "})}}, access.AssistantPrincipal(w.member), w.request())
+
+	if failure, ok := events[len(events)-1].(askchef.Failure); !ok || failure.Message == "" {
+		t.Fatalf("last event = %+v, want an error", events[len(events)-1])
+	}
+}
+
 // A global admin has no bypass through Ask Chef: tools reach only the teams
 // the user belongs to.
 func TestTurnToolsFollowTeamMembership(t *testing.T) {
