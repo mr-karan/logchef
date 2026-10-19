@@ -46,6 +46,20 @@
           </Tooltip>
         </TooltipProvider>
 
+        <Button
+          v-if="metaStore.askChefEnabled"
+          variant="outline"
+          size="sm"
+          class="h-7 gap-1.5"
+          :class="{ 'bg-accent': askChef.open }"
+          :title="t('askChef.toggle')"
+          :aria-pressed="askChef.open"
+          @click="askChef.open ? askChef.close() : askChef.openForExplorer()"
+        >
+          <span class="text-violet-600" aria-hidden="true">✦</span>
+          <span class="text-xs font-medium hidden sm:inline">{{ t('askChef.title') }}</span>
+        </Button>
+
         <!-- Query History Button (server-backed, cross-device) -->
         <QueryHistoryPanel />
 
@@ -471,6 +485,7 @@ import {
 import { logchefqlApi } from "@/api/logchefql";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
+import { useAskChefStore } from "@/stores/askChef";
 import { useMetaStore } from "@/stores/meta";
 import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
@@ -554,6 +569,7 @@ const emit = defineEmits<{
 const isDark = useDark();
 const exploreStore = useExploreStore();
 const metaStore = useMetaStore();
+const askChef = useAskChefStore();
 const variableStore = useVariableStore();
 const teamsStore = useTeamsStore();
 const { convertVariables } = useVariables();

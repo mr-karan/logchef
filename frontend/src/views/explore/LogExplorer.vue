@@ -54,6 +54,7 @@ import WindowedSearchPanel from "./components/WindowedSearchPanel.vue";
 import { useExploreWindowedStore } from '@/stores/exploreWindowed';
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
+import AskChefDrawer from "@/components/ask-chef/AskChefDrawer.vue";
 
 const { t } = useI18n();
 
@@ -1557,6 +1558,8 @@ onMounted(async () => {
               </div>
             </div>
           </div>
+
+          <AskChefDrawer />
         </div>
 
         <!-- Save Query Modal -->
