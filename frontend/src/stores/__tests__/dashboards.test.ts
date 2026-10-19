@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 
 // Mock the dashboards API module so the store's CRUD + panel-execution paths
@@ -41,6 +41,12 @@ import { useDashboardsStore } from "../dashboards";
 import type { Dashboard, DashboardPanel, DashboardPanels } from "@/api/dashboards";
 import { epochMs } from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
+
+// Tear each test's store down as the dashboard view does on unmount, so a
+// pending refresh cannot fire into the next test's mocks.
+afterEach(() => {
+  useDashboardsStore().clearCurrent();
+});
 
 function emptyPanels(): DashboardPanels {
   return { version: 1, layout: [], panels: [] };
@@ -349,9 +355,10 @@ describe("dashboards store — panel time params", () => {
   it("sends every panel request the same exact bounds in the preference zone", async () => {
     await runEveryPanelType();
 
-    const bodies = [mocks.logchefqlQuery, mocks.logsQuery, mocks.translate, mocks.histogram].map((mock) => {
-      expect(mock).toHaveBeenCalledTimes(1);
-      return mock.mock.calls[0][2];
+    // A debounced refresh after setWindow may run the draft panels a second time.
+    const bodies = [mocks.logchefqlQuery, mocks.logsQuery, mocks.translate, mocks.histogram].flatMap((mock) => {
+      expect(mock).toHaveBeenCalled();
+      return mock.mock.calls.map((call) => call[2]);
     });
     for (const body of bodies) {
       expect(body).toMatchObject({ start_time: "2026-10-19T04:00:00.250Z", end_time: "2026-10-19T05:00:00.999Z", timezone: "UTC" });
