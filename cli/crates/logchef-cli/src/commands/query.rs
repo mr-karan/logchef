@@ -35,13 +35,13 @@ pub struct QueryArgs {
     #[arg(long, short = 's')]
     since: Option<String>,
 
-    /// Absolute start time (YYYY-MM-DD HH:MM:SS), interpreted as wall-clock
-    /// in the effective timezone. Requires --to.
+    /// Absolute start time. YYYY-MM-DD HH:MM:SS is wall-clock in the
+    /// effective timezone. An RFC3339 instant (2026-10-19T04:00:00Z) is
+    /// passed to the server unchanged and needs no timezone. Requires --to.
     #[arg(long)]
     from: Option<String>,
 
-    /// Absolute end time (YYYY-MM-DD HH:MM:SS), interpreted as wall-clock
-    /// in the effective timezone. Requires --from.
+    /// Absolute end time, in the same forms as --from. Requires --from.
     #[arg(long)]
     to: Option<String>,
 
@@ -568,4 +568,22 @@ fn prompt_query_interactive() -> Result<String> {
         .prompt()
         .context("Failed to read query")?;
     Ok(query)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_time_range_passes_rfc3339_bounds_through() {
+        let range = parse_time_range(
+            "15m",
+            Some("2026-10-19T04:00:00.250Z"),
+            Some("2026-10-19T05:00:00+05:30"),
+            Some("America/New_York"),
+        )
+        .unwrap();
+        assert_eq!(range.start, "2026-10-19T04:00:00.250Z");
+        assert_eq!(range.end, "2026-10-19T05:00:00+05:30");
+    }
 }
