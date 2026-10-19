@@ -721,6 +721,7 @@
   "askChef.stopped": "Interrotto",
   "askChef.stopToolLimit": "Interrotto al limite di chiamate a strumenti",
   "askChef.stopDeadline": "Interrotto al limite di tempo",
+  "askChef.stopMaxTokens": "Risposta troncata al limite di lunghezza",
   "askChef.evidence": "Prove · clicca per aprire in Explorer",
   "askChef.openEvidence": "Apri la prova {id} in Explorer",
   "askChef.suggestCompare": "Confronta con la finestra precedente",

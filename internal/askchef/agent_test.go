@@ -573,6 +573,39 @@ func TestTurnToolsFollowTeamMembership(t *testing.T) {
 	}
 }
 
+func TestTurnFollowsTheModelStopReason(t *testing.T) {
+	cut := reply(ai.TextBlock{Text: "Errors rose because"}, toolUse("tu-1", "get_sources", map[string]any{}))
+	cut.StopReason = ai.ChatStopMaxTokens
+	filtered := reply(ai.TextBlock{Text: "Partial"})
+	filtered.StopReason = ai.ChatStopContentFiltered
+	guarded := reply()
+	guarded.StopReason = ai.ChatStopGuardrailIntervened
+
+	t.Run("max_tokens ends the turn as cut off and runs no tool", func(t *testing.T) {
+		w := newWorld(t)
+		chat := &scriptedChat{replies: []ai.ChatResponse{cut}}
+		events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+		if got, want := eventNames(events), []string{"text", "done"}; !slices.Equal(got, want) {
+			t.Fatalf("events = %v, want %v", got, want)
+		}
+		if done := events[1].(askchef.Done); done.StopReason != askchef.StopMaxTokens || done.ToolCalls != 0 {
+			t.Fatalf("done = %+v, want max_tokens with no tool calls", done)
+		}
+	})
+	for name, resp := range map[string]ai.ChatResponse{"content_filtered": filtered, "guardrail_intervened": guarded} {
+		t.Run(name+" ends the turn with an error", func(t *testing.T) {
+			w := newWorld(t)
+			events := w.run(t, &scriptedChat{replies: []ai.ChatResponse{resp}}, access.AssistantPrincipal(w.member), w.request())
+
+			failure, ok := events[len(events)-1].(askchef.Failure)
+			if !ok || !strings.Contains(failure.Message, "content filter") {
+				t.Fatalf("last event = %+v, want a content filter error", events[len(events)-1])
+			}
+		})
+	}
+}
+
 func TestTurnModelFailureEndsWithError(t *testing.T) {
 	w := newWorld(t)
 	chat := &scriptedChat{err: errors.New("ThrottlingException: secret upstream detail")}

@@ -721,6 +721,7 @@
   "askChef.stopped": "Detenido",
   "askChef.stopToolLimit": "Detenido en el límite de llamadas a herramientas",
   "askChef.stopDeadline": "Detenido en el límite de tiempo",
+  "askChef.stopMaxTokens": "Respuesta cortada en el límite de longitud",
   "askChef.evidence": "Evidencia · haz clic para abrir en el Explorador",
   "askChef.openEvidence": "Abrir la evidencia {id} en el Explorador",
   "askChef.suggestCompare": "Comparar con la ventana anterior",

@@ -86,7 +86,7 @@ type streamBlock struct {
 
 type streamAccumulator struct {
 	blocks     map[int32]*streamBlock
-	stopReason string
+	stopReason ChatStopReason
 	usage      ChatUsage
 }
 
@@ -119,7 +119,7 @@ func (a *streamAccumulator) add(event types.ConverseStreamOutput, onText func(st
 			a.block(e.Value.ContentBlockIndex).input.WriteString(aws.ToString(delta.Value.Input))
 		}
 	case *types.ConverseStreamOutputMemberMessageStop:
-		a.stopReason = string(e.Value.StopReason)
+		a.stopReason = ChatStopReason(e.Value.StopReason)
 	case *types.ConverseStreamOutputMemberMetadata:
 		if usage := e.Value.Usage; usage != nil {
 			a.usage = ChatUsage{InputTokens: int(aws.ToInt32(usage.InputTokens)), OutputTokens: int(aws.ToInt32(usage.OutputTokens))}
@@ -146,12 +146,22 @@ func (a *streamAccumulator) response() (ChatResponse, error) {
 			if len(input) == 0 {
 				input = json.RawMessage(`{}`)
 			}
+			// A message cut off by max_tokens can end inside a tool call. Its
+			// input is not JSON, and sending it back would fail the next call.
+			if !isJSONObject(input) {
+				continue
+			}
 			resp.Blocks = append(resp.Blocks, ToolUseBlock{ID: b.toolUseID, Name: b.toolName, Input: input})
 		case b.text.Len() > 0:
 			resp.Blocks = append(resp.Blocks, TextBlock{Text: b.text.String()})
 		}
 	}
 	return resp, nil
+}
+
+func isJSONObject(raw json.RawMessage) bool {
+	var object map[string]json.RawMessage
+	return json.Unmarshal(raw, &object) == nil && object != nil
 }
 
 func converseStreamInput(req ChatRequest) (*bedrockruntime.ConverseStreamInput, error) {

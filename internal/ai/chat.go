@@ -66,11 +66,20 @@ type ChatUsage struct {
 	OutputTokens int
 }
 
+// ChatStopReason says why the model stopped. The values are Bedrock's; the
+// constants are the reasons callers act on.
+type ChatStopReason string
+
+const (
+	ChatStopMaxTokens           ChatStopReason = "max_tokens"
+	ChatStopContentFiltered     ChatStopReason = "content_filtered"
+	ChatStopGuardrailIntervened ChatStopReason = "guardrail_intervened"
+)
+
 // ChatResponse is the assistant message of one model call.
 type ChatResponse struct {
-	Blocks []ChatBlock
-	// StopReason is the provider's reason, kept for logs.
-	StopReason string
+	Blocks     []ChatBlock
+	StopReason ChatStopReason
 	Usage      ChatUsage
 }
 

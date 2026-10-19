@@ -721,6 +721,7 @@
   "askChef.stopped": "रोका गया",
   "askChef.stopToolLimit": "टूल कॉल की सीमा पर रोका गया",
   "askChef.stopDeadline": "समय सीमा पर रोका गया",
+  "askChef.stopMaxTokens": "उत्तर लंबाई की सीमा पर कट गया",
   "askChef.evidence": "सबूत · एक्सप्लोरर में खोलने के लिए क्लिक करें",
   "askChef.openEvidence": "सबूत {id} एक्सप्लोरर में खोलें",
   "askChef.suggestCompare": "पिछली समय सीमा से तुलना करें",

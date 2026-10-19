@@ -721,6 +721,7 @@
   "askChef.stopped": "중지됨",
   "askChef.stopToolLimit": "도구 호출 한도에서 중지됨",
   "askChef.stopDeadline": "시간 한도에서 중지됨",
+  "askChef.stopMaxTokens": "답변이 길이 제한에서 잘렸습니다",
   "askChef.evidence": "근거 · 클릭하여 탐색기에서 열기",
   "askChef.openEvidence": "탐색기에서 근거 {id} 열기",
   "askChef.suggestCompare": "이전 구간과 비교",

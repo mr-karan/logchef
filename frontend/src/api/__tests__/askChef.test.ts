@@ -72,6 +72,16 @@ describe("createAskChefStreamParser", () => {
     ]);
   });
 
+  it("accepts every stop reason the server sends and rejects others", () => {
+    const parser = createAskChefStreamParser();
+    const done = (stop_reason: string) => frame("done", { stop_reason, tool_calls: 0, input_tokens: 0, output_tokens: 0, duration_ms: 1 });
+
+    for (const reason of ["end", "tool_limit", "deadline", "max_tokens"]) {
+      expect(parser.push(done(reason))).toMatchObject([{ type: "done", stop_reason: reason }]);
+    }
+    expect(() => parser.push(done("bored"))).toThrow(AskChefError);
+  });
+
   it("rejects malformed JSON in a known event", () => {
     const parser = createAskChefStreamParser();
 

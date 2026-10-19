@@ -1438,6 +1438,7 @@
   "askChef.stopped": "已停止",
   "askChef.stopToolLimit": "已达到工具调用上限，已停止",
   "askChef.stopDeadline": "已达到时间上限，已停止",
+  "askChef.stopMaxTokens": "回答在长度上限处被截断",
   "askChef.evidence": "证据 · 点击在探索器中打开",
   "askChef.openEvidence": "在探索器中打开证据 {id}",
   "askChef.suggestCompare": "与上一个时间窗口比较",

@@ -721,6 +721,7 @@
   "askChef.stopped": "停止しました",
   "askChef.stopToolLimit": "ツール呼び出しの上限で停止しました",
   "askChef.stopDeadline": "時間の上限で停止しました",
+  "askChef.stopMaxTokens": "回答が長さの上限で途切れました",
   "askChef.evidence": "根拠 · クリックしてエクスプローラーで開く",
   "askChef.openEvidence": "根拠 {id} をエクスプローラーで開く",
   "askChef.suggestCompare": "前の期間と比較",

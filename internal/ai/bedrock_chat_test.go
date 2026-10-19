@@ -110,7 +110,7 @@ func TestBedrockChatStreamAssemblesTextAndToolCalls(t *testing.T) {
 	if !reflect.DeepEqual(resp.Blocks, want) {
 		t.Fatalf("blocks = %#v, want %#v", resp.Blocks, want)
 	}
-	if resp.Usage != (ChatUsage{InputTokens: 120, OutputTokens: 30}) || resp.StopReason != "tool_use" {
+	if resp.Usage != (ChatUsage{InputTokens: 120, OutputTokens: 30}) || resp.StopReason != ChatStopReason(types.StopReasonToolUse) {
 		t.Fatalf("usage = %+v stop = %q", resp.Usage, resp.StopReason)
 	}
 
@@ -129,6 +129,30 @@ func TestBedrockChatStreamAssemblesTextAndToolCalls(t *testing.T) {
 	result, ok := sent.Messages[2].Content[0].(*types.ContentBlockMemberToolResult)
 	if !ok || aws.ToString(result.Value.ToolUseId) != "tu-0" || result.Value.Status != types.ToolResultStatusError {
 		t.Fatalf("tool result block = %#v", sent.Messages[2].Content[0])
+	}
+}
+
+// A message cut off by max_tokens can end inside a tool call. That call is
+// dropped, so it never goes back to the model as history.
+func TestBedrockChatStreamDropsCutOffToolCall(t *testing.T) {
+	var sent *bedrockruntime.ConverseStreamInput
+	chat := scriptedBedrock(&sent, nil,
+		textDelta(0, "Checking."),
+		toolStart(1, "tu-1", "get_sources"),
+		toolStart(2, "tu-2", "query_logchefql"),
+		toolDelta(2, `{"query":"level=`),
+		messageStop(types.StopReasonMaxTokens),
+	)
+	resp, err := chat.Stream(context.Background(), ChatRequest{Model: "m"}, func(string) {})
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	want := []ChatBlock{TextBlock{Text: "Checking."}, ToolUseBlock{ID: "tu-1", Name: "get_sources", Input: json.RawMessage(`{}`)}}
+	if !reflect.DeepEqual(resp.Blocks, want) || resp.StopReason != ChatStopMaxTokens {
+		t.Fatalf("blocks = %#v stop = %q, want %#v and max_tokens", resp.Blocks, resp.StopReason, want)
+	}
+	if _, err := converseStreamInput(ChatRequest{Messages: []ChatMessage{{Role: ChatRoleAssistant, Blocks: resp.Blocks}}}); err != nil {
+		t.Fatalf("the kept blocks do not convert back: %v", err)
 	}
 }
 

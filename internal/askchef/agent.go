@@ -162,6 +162,14 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 		}
 		r.usage.InputTokens += resp.Usage.InputTokens
 		r.usage.OutputTokens += resp.Usage.OutputTokens
+		switch resp.StopReason {
+		case ai.ChatStopContentFiltered, ai.ChatStopGuardrailIntervened:
+			return "", &failure{message: "The model's content filter stopped this answer.", err: fmt.Errorf("model stopped: %s", resp.StopReason)}
+		case ai.ChatStopMaxTokens:
+			// A cut-off message can hold a cut-off plan, so none of its tool
+			// calls run.
+			return StopMaxTokens, nil
+		}
 		if final {
 			return StopToolLimit, nil
 		}

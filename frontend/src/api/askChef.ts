@@ -3,7 +3,7 @@ import { createSSEParser } from "@/lib/sse";
 
 export type QueryMode = "logchefql" | "native";
 export type EvidenceId = `E${number}`;
-export type StopReason = "end" | "tool_limit" | "deadline";
+export type StopReason = "end" | "tool_limit" | "deadline" | "max_tokens";
 
 export interface EvidenceRecord {
   id: EvidenceId;
@@ -85,8 +85,10 @@ function isQueryMode(value: unknown): value is QueryMode {
   return value === "logchefql" || value === "native";
 }
 
+const STOP_REASONS: ReadonlySet<unknown> = new Set<StopReason>(["end", "tool_limit", "deadline", "max_tokens"]);
+
 function isStopReason(value: unknown): value is StopReason {
-  return value === "end" || value === "tool_limit" || value === "deadline";
+  return STOP_REASONS.has(value);
 }
 
 function parseEvidence(raw: unknown): EvidenceRecord | null {

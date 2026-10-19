@@ -11,6 +11,9 @@ const (
 	StopEnd       StopReason = "end"
 	StopToolLimit StopReason = "tool_limit"
 	StopDeadline  StopReason = "deadline"
+	// StopMaxTokens means the model hit its output limit, so the answer is
+	// cut off.
+	StopMaxTokens StopReason = "max_tokens"
 )
 
 // ToolStart is sent before a tool runs.
