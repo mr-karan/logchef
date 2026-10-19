@@ -600,6 +600,8 @@ export const useExploreStore = defineStore("explore", () => {
       timeRange,
       limit,
       activeMode,
+      nativeQuery,
+      logchefqlCode,
       selectedRelativeTime,
       selectedQueryId,
       activeShareToken,
@@ -652,9 +654,12 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     params.limit = limit.toString();
-
+    // The query is always written, even when empty, so Back and copied links reopen it.
+    params.mode = activeMode;
     if (activeMode === 'native') {
-      params.mode = 'native';
+      params.sql = nativeQuery;
+    } else {
+      params.q = logchefqlCode;
     }
 
     return params;
@@ -880,17 +885,13 @@ export const useExploreStore = defineStore("explore", () => {
       }
     }
 
-    // A link that names its query, even an empty one, opens exactly that query.
-    const urlNamesQuery = params.q !== undefined || params.sql !== undefined;
-    if (!urlNamesQuery && !queryId && !state.data.value.activeShareToken) {
+    // Only a bare team/source location restores the draft. Any query, mode or
+    // time in the link names what to open, even an empty query.
+    const isBareLocation = Object.entries(params).every(
+      ([key, value]) => value === undefined || key === 'team' || key === 'source'
+    );
+    if (isBareLocation) {
       restoreDraftForCurrentContext();
-    }
-
-    // URL-specified mode wins over draft restoration. When neither q nor sql is
-    // present the active mode should reflect the URL param, not whatever the
-    // last draft wrote.
-    if (params.mode) {
-      state.data.value.activeMode = normalizeModeForSource(normalizeExploreMode(params.mode));
     }
 
     // Ensure variables from SQL are initialized in the variable store.

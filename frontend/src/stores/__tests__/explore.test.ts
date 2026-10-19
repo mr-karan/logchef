@@ -519,7 +519,6 @@ describe("explore store", () => {
       expect(params.start).toBe("0");
       expect(params.end).toBe("60000");
       expect(params.limit).toBe("250");
-      expect(params.mode).toBeUndefined();
     });
 
     it('serializes relative time as "t" instead of start/end', () => {
@@ -537,7 +536,7 @@ describe("explore store", () => {
       expect(params.end).toBeUndefined();
     });
 
-    it("adds mode=native only for the native editor", () => {
+    it("always writes the mode and its query, even when the query is empty", () => {
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
       contextStore.selectSource(10);
@@ -545,10 +544,15 @@ describe("explore store", () => {
       mocks.sourcesState.currentSourceDetails = CH_SOURCE;
 
       const store = useExploreStore();
-      expect(store.urlQueryParameters.mode).toBeUndefined();
+      expect(store.urlQueryParameters).toMatchObject({ mode: "logchefql", q: "" });
+
+      store.setLogchefqlCode('level="error"');
+      expect(store.urlQueryParameters).toMatchObject({ mode: "logchefql", q: 'level="error"' });
 
       store.setActiveMode("native");
-      expect(store.urlQueryParameters.mode).toBe("native");
+      store.setNativeQuery("SELECT 1");
+      expect(store.urlQueryParameters).toMatchObject({ mode: "native", sql: "SELECT 1" });
+      expect(store.urlQueryParameters.q).toBeUndefined();
     });
 
     it("collapses to just team/source/id when a saved query is selected and not diverged", () => {
@@ -690,6 +694,20 @@ describe("explore store", () => {
       expect(store.selectedRelativeTime).toBeNull();
       expect(store.urlQueryParameters).toMatchObject({ start: "1000", end: "2000" });
       expect(result.shouldExecute).toBe(true);
+    });
+
+    it("opens a link that names only a time or a mode without the draft's query", () => {
+      saveDraft();
+      const store = useExploreStore();
+      store.initializeFromUrl({ team: "1", source: "10", t: "1h" });
+      expect(store.logchefqlCode).toBe("");
+      expect(store.selectedRelativeTime).toBe("1h");
+
+      saveDraft();
+      const next = useExploreStore();
+      next.initializeFromUrl({ team: "1", source: "10", mode: "logchefql" });
+      expect(next.logchefqlCode).toBe("");
+      expect(next.selectedRelativeTime).not.toBe("7d");
     });
 
     it("still restores the draft when the link names no query", () => {
