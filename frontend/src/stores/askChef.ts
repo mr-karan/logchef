@@ -15,7 +15,7 @@ import type { Alert, AlertHistoryEntry, AlertThresholdOperator } from "@/api/ale
 import { i18n } from "@/i18n";
 import router from "@/router";
 import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/utils/alertExplore";
-import { calendarDateTimeToTimestamp, parseRelativeTimeString } from "@/utils/time";
+import { parseRelativeTimeString } from "@/utils/time";
 import { useAuthStore } from "./auth";
 import { useExploreStore } from "./explore";
 import { useTeamsStore } from "./teams";
@@ -189,12 +189,14 @@ export const useAskChefStore = defineStore("askChef", () => {
     if (!range) return null;
     const mode = explore.activeMode;
     const query = (mode === "native" ? explore.nativeQuery : explore.logchefqlCode).trim();
+    // The instants the Explorer's log query reads, which converts in its timezone.
+    const timezone = explore.getTimezoneIdentifier();
     return {
       subject: { kind: "explorer" },
       teamId,
       sourceId: explore.sourceId,
-      start: calendarDateTimeToTimestamp(range.start),
-      end: calendarDateTimeToTimestamp(range.end),
+      start: range.start.toDate(timezone).getTime(),
+      end: range.end.toDate(timezone).getTime(),
       mode,
       ...(query ? { query } : {}),
     };

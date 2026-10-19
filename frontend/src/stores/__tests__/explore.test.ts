@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
-import { CalendarDateTime, ZonedDateTime } from "@internationalized/date";
+import { CalendarDateTime, ZonedDateTime, parseDateTime } from "@internationalized/date";
 import type { Source } from "@/api/sources";
 
 // ---------------------------------------------------------------------------
@@ -102,6 +102,7 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
 });
 
 import { useExploreStore } from "../explore";
+import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
 import { timestampToCalendarDateTime } from "@/utils/time";
 
@@ -438,6 +439,62 @@ describe("explore store", () => {
         }),
         expect.anything(),
       );
+    });
+  });
+
+  describe("Ask Chef context window", () => {
+    // A zone no test machine runs in, so a browser-zone conversion shows up.
+    const timezone = "Pacific/Chatham";
+
+    beforeEach(() => {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(VL_SOURCE.id);
+      mocks.logchefqlQuery.mockResolvedValue({
+        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
+      });
+    });
+
+    async function logQueryWindow(): Promise<{ start: number; end: number }> {
+      await useExploreStore().executeQuery();
+      const request = mocks.logchefqlQuery.mock.calls[0][2];
+      const instant = (wallClock: string) => parseDateTime(wallClock.replace(" ", "T")).toDate(request.timezone).getTime();
+      return { start: instant(request.start_time), end: instant(request.end_time) };
+    }
+
+    it("is the window the log query reads for an absolute range", async () => {
+      const store = useExploreStore();
+      store.setTimezoneIdentifier(timezone);
+      store.setTimeConfiguration({
+        absoluteRange: { start: new CalendarDateTime(2026, 8, 8, 10, 0, 0), end: new CalendarDateTime(2026, 8, 8, 10, 15, 0) },
+      });
+
+      const window = await logQueryWindow();
+      const askChef = useAskChefStore();
+      askChef.openForExplorer();
+
+      expect(askChef.context).toMatchObject(window);
+    });
+
+    it("is the window the log query reads for a relative range", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-08T10:00:00Z"));
+      try {
+        const store = useExploreStore();
+        store.setTimezoneIdentifier(timezone);
+        store.setRelativeTimeRange("1h");
+
+        const window = await logQueryWindow();
+        const askChef = useAskChefStore();
+        askChef.openForExplorer();
+
+        expect(askChef.context).toMatchObject(window);
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
