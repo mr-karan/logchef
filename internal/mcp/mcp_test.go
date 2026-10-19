@@ -996,3 +996,26 @@ func TestTopValuesBoundsItsFanOut(t *testing.T) {
 		}
 	})
 }
+
+// top_values marks each field it did not read, so a caller can tell a field
+// with no values from a field that was skipped.
+func TestTopValuesMarksUnreadFields(t *testing.T) {
+	t.Parallel()
+	_, url := newFieldBackend(t)
+	w := newWorld(t)
+	source := w.victoriaLogsSource(t, url)
+	result := callTool(t, w.server(), session(w.member), "top_values", map[string]any{
+		"team_id": w.team, "source_id": source.ID, "fields": []string{"f1", "missing"},
+		"start_time": "2026-10-01T00:00:00Z", "end_time": "2026-10-01T01:00:00Z",
+	})
+	var out TopValuesResult
+	if err := json.Unmarshal(result.StructuredContent, &out); err != nil || result.IsError {
+		t.Fatalf("top_values: %v %s", err, result.text())
+	}
+	if len(out.Fields) != 2 || out.Fields[0].Error != "" || len(out.Fields[0].Values) != 1 {
+		t.Fatalf("read field = %+v, want values and no error", out.Fields)
+	}
+	if out.Fields[1].Error == "" || out.Fields[1].Values != nil {
+		t.Fatalf("unknown field = %+v, want an error and no values", out.Fields[1])
+	}
+}

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -76,8 +77,9 @@ func toolUse(id, name string, input map[string]any) ai.ToolUseBlock {
 	return ai.ToolUseBlock{ID: id, Name: name, Input: encoded}
 }
 
-// logsBackend is a VictoriaLogs stand-in. Field values succeed. Log queries
-// fail unless serveQueries is set, and then return two rows.
+// logsBackend is a VictoriaLogs stand-in. Field values succeed, except for
+// the field "broken". It has no facets. Log queries fail unless
+// serveQueries is set, and then return two rows.
 type logsBackend struct {
 	fieldQueries atomic.Int32
 	serveQueries atomic.Bool
@@ -94,6 +96,10 @@ func newLogsBackend(t *testing.T) *logsBackend {
 		case "/select/logsql/field_values":
 			b.fieldQueries.Add(1)
 			_ = r.ParseForm()
+			if r.Form.Get("field") == "broken" {
+				http.Error(rw, "backend unavailable", http.StatusBadGateway)
+				return
+			}
 			if r.Form.Get("field") == "message" {
 				values := make([]string, 100)
 				for i := range values {
@@ -104,7 +110,9 @@ func newLogsBackend(t *testing.T) *logsBackend {
 			}
 			_, _ = rw.Write([]byte(`{"values":[{"value":"api","hits":7}]}`))
 		case "/select/logsql/field_names":
-			_, _ = rw.Write([]byte(`{"values":[{"value":"_msg","hits":2},{"value":"level","hits":2}]}`))
+			_, _ = rw.Write([]byte(`{"values":[{"value":"_msg","hits":2},{"value":"level","hits":2},{"value":"broken","hits":2}]}`))
+		case "/select/logsql/facets":
+			_, _ = rw.Write([]byte(`{"facets":[]}`))
 		case "/select/logsql/query":
 			if !b.serveQueries.Load() {
 				http.Error(rw, "backend unavailable", http.StatusBadGateway)
@@ -384,6 +392,65 @@ func TestTurnEvidenceIsWhatRan(t *testing.T) {
 			}
 			if results := toolResults(chat.request(1)); len(results) != 1 || !strings.HasPrefix(results[0].Text, tc.marker) {
 				t.Fatalf("tool result = %+v, want prefix %q", results, tc.marker)
+			}
+		})
+	}
+}
+
+// A field value call gives evidence only for the fields it read. A field it
+// skipped or failed to read is not evidence, and no read field means no
+// evidence.
+func TestTurnEvidenceOnlyForFieldsRead(t *testing.T) {
+	window := map[string]any{"start_time": "2026-10-19T04:00:00Z", "end_time": "2026-10-19T05:00:00Z"}
+	for _, tc := range []struct {
+		name    string
+		tool    string
+		input   map[string]any
+		summary string
+		want    []string
+	}{
+		{
+			name:    "top_values with only unknown fields",
+			tool:    "top_values",
+			input:   map[string]any{"fields": []string{"nope", "missing"}},
+			summary: "no field values read",
+		},
+		{
+			name:    "top_values with a read, a failed and an unknown field",
+			tool:    "top_values",
+			input:   map[string]any{"fields": []string{"broken", "level", "nope"}},
+			summary: "values of level",
+			want:    []string{"values of level"},
+		},
+		{
+			name:    "get_all_field_dimensions with no dimensions",
+			tool:    "get_all_field_dimensions",
+			input:   map[string]any{},
+			summary: "no field values read",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			input := map[string]any{"team_id": w.team, "source_id": w.source}
+			maps.Copy(input, window)
+			maps.Copy(input, tc.input)
+			chat := &scriptedChat{replies: []ai.ChatResponse{reply(toolUse("tu-1", tc.tool, input))}}
+			events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+			ends := toolEnds(events)
+			if len(ends) != 1 || !ends[0].OK || ends[0].Summary != tc.summary {
+				t.Fatalf("tool_end = %+v, want ok with summary %q", ends, tc.summary)
+			}
+			var got []string
+			for _, e := range ends[0].Evidence {
+				got = append(got, e.Summary)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("evidence summaries = %q, want %q", got, tc.want)
+			}
+			results := toolResults(chat.request(1))
+			if len(results) != 1 || strings.HasPrefix(results[0].Text, "[evidence") != (len(tc.want) > 0) {
+				t.Fatalf("tool result = %+v, want an evidence marker only with evidence", results)
 			}
 		})
 	}

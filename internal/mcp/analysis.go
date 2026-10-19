@@ -67,6 +67,8 @@ type TopValuesResult struct {
 type FieldTopValues struct {
 	FieldName string       `json:"field_name" jsonschema:"The field name"`
 	Values    []FieldValue `json:"values" jsonschema:"Top values with counts"`
+	// Error is set when the field was not read, and only then.
+	Error string `json:"error,omitempty" jsonschema:"Why this field was not read. Absent when the field was read, even with no values"`
 }
 
 type FieldValue struct {
@@ -183,6 +185,7 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 			fieldResults[i] = FieldTopValues{FieldName: fieldName}
 			fieldType, ok := fieldTypes[fieldName]
 			if !ok {
+				fieldResults[i].Error = "field is not in the source schema"
 				continue
 			}
 			wg.Go(func() {
@@ -190,7 +193,8 @@ func (t *tools) handleTopValues(ctx context.Context, _ mcp.CallToolRequest, para
 				defer func() { <-workers }()
 				resp, err := t.fieldValues(ctx, src, fieldName, fieldType, params.StartTime, params.EndTime, limit)
 				if err != nil {
-					// Non-fatal: skip this field rather than fail the whole request.
+					// One failed field does not fail the others.
+					fieldResults[i].Error = t.queryError("top values of "+fieldName, err).Error()
 					return
 				}
 				values := make([]FieldValue, len(resp.Values))

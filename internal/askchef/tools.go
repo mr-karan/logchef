@@ -139,9 +139,13 @@ func readCompareWindows(input json.RawMessage, result string) (toolReading, erro
 	return reading, nil
 }
 
-// fieldValuesReading is the reading of a field value tool. These tools take
-// no filter, so the evidence query is empty: all logs in the window.
+// fieldValuesReading is the reading of a field value tool, given the fields
+// it read. These tools take no filter, so the evidence query is empty: all
+// logs in the window. A call that read no field gives no evidence.
 func fieldValuesReading(teamID, sourceID int, start, end string, fields []string) (toolReading, error) {
+	if len(fields) == 0 {
+		return toolReading{summary: "no field values read"}, nil
+	}
 	startMS, endMS, err := rfc3339Window(start, end)
 	if err != nil {
 		return toolReading{}, err
@@ -166,13 +170,17 @@ func readTopValues(input json.RawMessage, result string) (toolReading, error) {
 	if err != nil {
 		return toolReading{}, err
 	}
-	fields := make([]string, len(res.Fields))
-	for i, f := range res.Fields {
-		fields[i] = f.FieldName
+	var fields []string
+	for _, f := range res.Fields {
+		if f.Error == "" {
+			fields = append(fields, f.FieldName)
+		}
 	}
 	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, fields)
 }
 
+// readAllFieldDimensions reads the dimensions map, which holds only the
+// fields whose values were read: the datasources leave out a failed field.
 func readAllFieldDimensions(input json.RawMessage, result string) (toolReading, error) {
 	params, res, err := decodeCall[mcp.GetAllFieldDimensionsParams, map[string]*core.FieldValuesResult](input, result)
 	if err != nil {
