@@ -103,10 +103,8 @@ type turnRun struct {
 	tools     *toolbox
 	messages  []ai.ChatMessage
 	toolCalls int
-	// refusedTools is set when the tool limit refused a call.
-	refusedTools bool
-	nextID       EvidenceID
-	usage        ai.ChatUsage
+	nextID    EvidenceID
+	usage     ai.ChatUsage
 }
 
 // Run runs one turn and passes its events to emit, in order. The last event
@@ -171,8 +169,10 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 	r.tools = tools
 
 	// limit is set once a turn limit stops tool calls. The model call after
-	// that is the last one.
+	// that is the last one. refused is set when the tool limit refused a
+	// call the model asked for.
 	var limit StopReason
+	refused := false
 	for {
 		resp, err := r.agent.chat.Stream(ctx, ai.ChatRequest{
 			Model:     r.agent.model,
@@ -196,7 +196,15 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 		}
 		uses := resp.ToolUses()
 		if limit != "" {
-			return r.finish(limit, resp)
+			if !hasText(resp) {
+				return "", &failure{message: "Ask Chef reached a turn limit before it wrote an answer. Try a narrower question.", err: fmt.Errorf("no answer after the %s limit", limit)}
+			}
+			// A turn that used exactly its tool calls and then answered
+			// ended normally.
+			if limit == StopToolLimit && !refused && len(uses) == 0 {
+				return StopEnd, nil
+			}
+			return limit, nil
 		}
 		if len(uses) == 0 {
 			return StopEnd, nil
@@ -212,10 +220,12 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 				results = append(results, ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: this turn has used its token budget]", IsError: true})
 				continue
 			}
-			results = append(results, r.runTool(ctx, use))
+			result, refusedCall := r.runTool(ctx, use)
 			if err := ctx.Err(); err != nil {
 				return "", err
 			}
+			refused = refused || refusedCall
+			results = append(results, result)
 		}
 		if limit == "" && r.toolCalls >= maxToolCalls {
 			limit = StopToolLimit
@@ -227,20 +237,6 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 	}
 }
 
-// finish ends a turn whose last model call came after a turn limit. The
-// tool limit is the stop reason only when it refused a call the model asked
-// for; a turn that used exactly its tool calls and then answered ended
-// normally.
-func (r *turnRun) finish(limit StopReason, resp ai.ChatResponse) (StopReason, error) {
-	if !hasText(resp) {
-		return "", &failure{message: "Ask Chef reached a turn limit before it wrote an answer. Try a narrower question.", err: fmt.Errorf("no answer after the %s limit", limit)}
-	}
-	if limit == StopToolLimit && !r.refusedTools && len(resp.ToolUses()) == 0 {
-		return StopEnd, nil
-	}
-	return limit, nil
-}
-
 func hasText(resp ai.ChatResponse) bool {
 	for _, block := range resp.Blocks {
 		if text, ok := block.(ai.TextBlock); ok && strings.TrimSpace(text.Text) != "" {
@@ -250,12 +246,12 @@ func hasText(resp ai.ChatResponse) bool {
 	return false
 }
 
-// runTool runs one tool call and returns the result for the model. Every
-// call gets a result, because the model API needs one for each tool use.
-func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) ai.ToolResultBlock {
+// runTool runs one tool call and returns the result for the model, and
+// whether the tool limit refused the call. Every call gets a result, because
+// the model API needs one for each tool use.
+func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) (result ai.ToolResultBlock, refused bool) {
 	if r.toolCalls >= maxToolCalls {
-		r.refusedTools = true
-		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: this turn has used all its tool calls]", IsError: true}
+		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: this turn has used all its tool calls]", IsError: true}, true
 	}
 	r.toolCalls++
 	callID := "c" + strconv.Itoa(r.toolCalls)
@@ -264,13 +260,13 @@ func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) ai.ToolResul
 	text, err := r.tools.call(ctx, use.Name, use.Input)
 	if ctx.Err() != nil {
 		// A cancelled turn did not fail this call. converse ends the turn.
-		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: the turn was cancelled]", IsError: true}
+		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: the turn was cancelled]", IsError: true}, false
 	}
 	if err != nil {
 		message := oneLine(err.Error(), maxErrorChars)
 		r.log.Warn("ask chef tool failed", "tool", use.Name, "error", message)
 		r.send(ToolEnd{CallID: callID, OK: false, Summary: message, Evidence: []Evidence{}})
-		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool did not complete: " + message + "]", IsError: true}
+		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool did not complete: " + message + "]", IsError: true}, false
 	}
 
 	reading := r.read(use, text)
@@ -278,7 +274,7 @@ func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) ai.ToolResul
 		text = evidenceMarker(reading.evidence) + "\n" + text
 	}
 	r.send(ToolEnd{CallID: callID, OK: true, Summary: reading.summary, Evidence: reading.evidence})
-	return ai.ToolResultBlock{ToolUseID: use.ID, Text: capResult(text)}
+	return ai.ToolResultBlock{ToolUseID: use.ID, Text: capResult(text)}, false
 }
 
 // read reports what a successful call read and numbers its evidence. A result
