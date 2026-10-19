@@ -21,7 +21,8 @@ export interface EvidenceLookup {
   has(id: EvidenceId): boolean;
 }
 
-const INLINE = /`([^`\n]+)`|\*\*(.+?)\*\*|\[(E\d+)\]/g;
+// A citation is one bracket of evidence IDs, such as [E1] or [E1, E3].
+const INLINE = /`([^`\n]+)`|\*\*(.+?)\*\*|\[(E\d+(?:\s*,\s*E\d+)*)\]/g;
 const BULLET = /^\s*[-*•]\s+(.*)$/;
 const HEADING = /^\s*#{1,6}\s+(.*)$/;
 const NOT_ESTABLISHED = /^\s*(?:#{1,6}\s+)?(?:\*\*)?Not established\b/i;
@@ -38,15 +39,19 @@ function parseInline(text: string, evidence: EvidenceLookup, bold = false): Inli
   let cursor = 0;
   for (const match of text.matchAll(INLINE)) {
     pushText(out, text.slice(cursor, match.index), bold);
-    const [whole, code, strong, id] = match;
+    const [whole, code, strong, ids] = match;
     if (code !== undefined) out.push({ kind: "code", text: code });
     else if (strong !== undefined) {
       for (const token of parseInline(strong, evidence, true)) {
         if (token.kind === "text") pushText(out, token.text, true);
         else out.push(token);
       }
-    } else if (id !== undefined && isEvidenceId(id) && evidence.has(id)) out.push({ kind: "citation", id });
-    else pushText(out, whole, bold);
+    } else if (ids !== undefined) {
+      for (const id of ids.split(",").map((part) => part.trim())) {
+        if (isEvidenceId(id) && evidence.has(id)) out.push({ kind: "citation", id });
+        else pushText(out, `[${id}]`, bold);
+      }
+    } else pushText(out, whole, bold);
     cursor = match.index + whole.length;
   }
   pushText(out, text.slice(cursor), bold);

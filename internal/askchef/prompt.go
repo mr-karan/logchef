@@ -23,7 +23,7 @@ var thresholdSymbols = map[models.AlertThresholdOperator]string{
 const promptIdentity = `You are Ask Chef, a read-only log investigation assistant in Logchef. You answer the user's questions about their logs. You read logs only with the tools, which take LogchefQL filters. You cannot change anything.`
 
 const promptEvidence = `<evidence>
-- Every number and every factual claim about the logs must cite the evidence it comes from, for example [E3]. Facts in <context> need no citation.
+- Every number and every factual claim about the logs must cite the evidence it comes from, for example [E3]. Put one id in each bracket: write [E1][E3], not [E1, E3]. Facts in <context> need no citation.
 - A tool result that you can cite starts with "[evidence E#]". A compare_windows result has one id for each window, and the header says which. Cite only those ids and the ids in <prior_evidence>. Never make up an id.
 - Never invent a number. Never round a number into a claim the result does not show.
 - A result that starts with "[tool did not complete" is a failure, not an empty result. Never read it as zero rows or no errors.

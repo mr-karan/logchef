@@ -37,6 +37,22 @@ describe("parseAnswer", () => {
     ]);
   });
 
+  it("splits a grouped citation into one chip per known ID", () => {
+    expect(parseAnswer("Both rose [E1, E2] and [E2,E9].", known).body).toEqual([
+      {
+        kind: "paragraph",
+        inlines: [
+          text("Both rose "),
+          { kind: "citation", id: "E1" },
+          { kind: "citation", id: "E2" },
+          text(" and "),
+          { kind: "citation", id: "E2" },
+          text("[E9]."),
+        ],
+      },
+    ]);
+  });
+
   it("leaves an unknown evidence ID as literal text", () => {
     expect(parseAnswer("Seen at 06:04 [E9].", known).body).toEqual([{ kind: "paragraph", inlines: [text("Seen at 06:04 [E9].")] }]);
   });
