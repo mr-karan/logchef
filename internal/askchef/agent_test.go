@@ -1,6 +1,7 @@
 package askchef_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -827,5 +828,36 @@ func TestTurnRunsThroughOpenAIChat(t *testing.T) {
 	result := messages[len(messages)-1].(map[string]any)
 	if result["role"] != "tool" || result["tool_call_id"] != "toolu_01" || !strings.HasPrefix(result["content"].(string), "[evidence E1]\n") {
 		t.Fatalf("tool result sent to the model = %#v", result)
+	}
+}
+
+// A turn cancelled during a tool call did not see the tool fail, so no
+// tool_end follows the tool_start and nothing is logged as a tool failure.
+func TestTurnPreemptedDuringAToolCall(t *testing.T) {
+	w := newWorld(t)
+	chat := &scriptedChat{replies: []ai.ChatResponse{
+		reply(toolUse("tu-1", "get_field_values", w.fieldValuesInput()), toolUse("tu-2", "get_field_values", w.fieldValuesInput())),
+	}}
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	agent := askchef.New(askchef.Opts{Tools: mcp.NewToolServer(*w.tools), Chat: chat, Model: "m", Log: log})
+	ctx, preempt := context.WithCancelCause(t.Context())
+	var events []askchef.Event
+	agent.Run(ctx, askchef.Turn{Principal: access.AssistantPrincipal(w.member), Request: w.request()}, func(ev askchef.Event) bool {
+		events = append(events, ev)
+		if _, ok := ev.(askchef.ToolStart); ok {
+			preempt(askchef.ErrPreempted)
+		}
+		return true
+	})
+
+	if got := eventNames(events); !slices.Equal(got, []string{"tool_start", "done"}) {
+		t.Fatalf("events = %v, want tool_start then done", got)
+	}
+	if done := events[1].(askchef.Done); done.StopReason != askchef.StopPreempted || done.ToolCalls != 1 {
+		t.Fatalf("done = %+v, want preempted after one call", done)
+	}
+	if logs.Len() != 0 {
+		t.Fatalf("warnings logged for a cancelled call: %s", logs.String())
 	}
 }

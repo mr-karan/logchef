@@ -213,9 +213,9 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 				continue
 			}
 			results = append(results, r.runTool(ctx, use))
-		}
-		if err := ctx.Err(); err != nil {
-			return "", err
+			if err := ctx.Err(); err != nil {
+				return "", err
+			}
 		}
 		if limit == "" && r.toolCalls >= maxToolCalls {
 			limit = StopToolLimit
@@ -262,6 +262,10 @@ func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) ai.ToolResul
 	r.send(ToolStart{CallID: callID, Tool: use.Name})
 
 	text, err := r.tools.call(ctx, use.Name, use.Input)
+	if ctx.Err() != nil {
+		// A cancelled turn did not fail this call. converse ends the turn.
+		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool not run: the turn was cancelled]", IsError: true}
+	}
 	if err != nil {
 		message := oneLine(err.Error(), maxErrorChars)
 		r.log.Warn("ask chef tool failed", "tool", use.Name, "error", message)
