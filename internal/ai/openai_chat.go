@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -65,9 +66,10 @@ func (c *OpenAIChat) Stream(ctx context.Context, req ChatRequest, onText func(st
 	return acc.response()
 }
 
-// streamedToolCall collects one streamed tool call.
+// streamedToolCall collects one streamed tool call. index is nil when the
+// endpoint sent none.
 type streamedToolCall struct {
-	index     int
+	index     *int
 	id        string
 	name      string
 	arguments strings.Builder
@@ -81,14 +83,14 @@ type openAIAccumulator struct {
 }
 
 // addToolCall adds a delta to the call at index. The first delta of a call
-// carries its id and name; later ones carry argument fragments.
-func (a *openAIAccumulator) addToolCall(index int, id string, fn openAIFunctionCall) {
-	i := slices.IndexFunc(a.calls, func(c *streamedToolCall) bool { return c.index == index })
-	if i < 0 {
-		a.calls = append(a.calls, &streamedToolCall{index: index})
-		i = len(a.calls) - 1
+// carries its id and name; later ones carry argument fragments. A delta with
+// no index, or with an id other than the one at its index, starts a call.
+func (a *openAIAccumulator) addToolCall(index *int, id string, fn openAIFunctionCall) {
+	call := a.lastCallAt(index)
+	if call == nil || (id != "" && call.id != "" && id != call.id) {
+		call = &streamedToolCall{index: index}
+		a.calls = append(a.calls, call)
 	}
-	call := a.calls[i]
 	if id != "" {
 		call.id = id
 	}
@@ -96,6 +98,19 @@ func (a *openAIAccumulator) addToolCall(index int, id string, fn openAIFunctionC
 		call.name = fn.Name
 	}
 	call.arguments.WriteString(fn.Arguments)
+}
+
+// lastCallAt returns the latest call at index, or nil.
+func (a *openAIAccumulator) lastCallAt(index *int) *streamedToolCall {
+	if index == nil {
+		return nil
+	}
+	for _, call := range slices.Backward(a.calls) {
+		if call.index != nil && *call.index == *index {
+			return call
+		}
+	}
+	return nil
 }
 
 func (a *openAIAccumulator) response() (ChatResponse, error) {
@@ -110,9 +125,12 @@ func (a *openAIAccumulator) response() (ChatResponse, error) {
 	if a.text.Len() > 0 {
 		resp.Blocks = append(resp.Blocks, TextBlock{Text: a.text.String()})
 	}
-	slices.SortFunc(a.calls, func(x, y *streamedToolCall) int { return x.index - y.index })
-	for _, call := range a.calls {
-		if use, ok := streamedToolUse(call.id, call.name, call.arguments.String(), stop); ok {
+	for i, call := range a.calls {
+		id := call.id
+		if id == "" {
+			id = "call_" + strconv.Itoa(i+1)
+		}
+		if use, ok := streamedToolUse(id, call.name, call.arguments.String(), stop); ok {
 			resp.Blocks = append(resp.Blocks, use)
 		}
 	}

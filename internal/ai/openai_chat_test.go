@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -225,6 +226,69 @@ func TestOpenAIChatAssemblesParallelToolCalls(t *testing.T) {
 	}
 	if !reflect.DeepEqual(resp, want) {
 		t.Fatalf("response = %+v, want %+v", resp, want)
+	}
+}
+
+// Compatible endpoints do not all stream tool calls the way OpenAI does.
+func TestOpenAIChatAssemblesToolCallsFromLooseDeltas(t *testing.T) {
+	// call is one tool call delta. A nil index or an empty id or name is
+	// left out.
+	call := func(index *int, id, name, arguments string) string {
+		fn := map[string]any{"arguments": arguments}
+		if name != "" {
+			fn["name"] = name
+		}
+		delta := map[string]any{"type": "function", "function": fn}
+		if index != nil {
+			delta["index"] = *index
+		}
+		if id != "" {
+			delta["id"] = id
+		}
+		return chunk(mustJSON(map[string]any{"role": "assistant", "tool_calls": []any{delta}}), "")
+	}
+	zero := new(int)
+	sources, schema := `{}`, `{"team_id":1}`
+	for _, tc := range []struct {
+		name   string
+		deltas []string
+		want   []ChatBlock
+	}{
+		{
+			name:   "no index starts a new call",
+			deltas: []string{call(nil, "toolu_01", "get_sources", sources), call(nil, "toolu_02", "get_source_schema", schema)},
+			want: []ChatBlock{
+				ToolUseBlock{ID: "toolu_01", Name: "get_sources", Input: json.RawMessage(sources)},
+				ToolUseBlock{ID: "toolu_02", Name: "get_source_schema", Input: json.RawMessage(schema)},
+			},
+		},
+		{
+			name:   "a new id at the same index starts a new call",
+			deltas: []string{call(zero, "toolu_01", "get_sources", sources), call(zero, "toolu_02", "get_source_schema", `{"team_id"`), call(zero, "", "", `:1}`)},
+			want: []ChatBlock{
+				ToolUseBlock{ID: "toolu_01", Name: "get_sources", Input: json.RawMessage(sources)},
+				ToolUseBlock{ID: "toolu_02", Name: "get_source_schema", Input: json.RawMessage(schema)},
+			},
+		},
+		{
+			name:   "a call with no id gets one",
+			deltas: []string{call(zero, "", "get_source_schema", `{"team_id"`), call(zero, "", "", `:1}`), call(nil, "", "get_sources", sources)},
+			want: []ChatBlock{
+				ToolUseBlock{ID: "call_1", Name: "get_source_schema", Input: json.RawMessage(schema)},
+				ToolUseBlock{ID: "call_2", Name: "get_sources", Input: json.RawMessage(sources)},
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			events := slices.Concat(tc.deltas, []string{chunk(`{"role":"assistant","content":""}`, "tool_calls"), usageChunk(10, 2), done})
+			resp, _, err := streamText(t, (&openRouterStub{}).streamOf(t, events...))
+			if err != nil {
+				t.Fatalf("Stream: %v", err)
+			}
+			if !reflect.DeepEqual(resp.Blocks, tc.want) {
+				t.Fatalf("blocks = %+v, want %+v", resp.Blocks, tc.want)
+			}
+		})
 	}
 }
 

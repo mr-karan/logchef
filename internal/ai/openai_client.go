@@ -164,7 +164,7 @@ type openAIChunk struct {
 		Delta struct {
 			Content   string `json:"content"`
 			ToolCalls []struct {
-				Index    int                `json:"index"`
+				Index    *int               `json:"index"`
 				ID       string             `json:"id"`
 				Function openAIFunctionCall `json:"function"`
 			} `json:"tool_calls"`
