@@ -39,6 +39,7 @@ export interface MetaResponse {
   dashboard_cache?: DashboardCachePolicy;
   // Present only when the server runs Logchef's OAuth authorization server.
   oauth_issuer?: string;
+  ask_chef_enabled?: boolean;
 }
 
 export const metaApi = {
