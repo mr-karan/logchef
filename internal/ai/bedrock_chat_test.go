@@ -78,6 +78,7 @@ func TestBedrockChatStreamAssemblesTextAndToolCalls(t *testing.T) {
 		toolDelta(1, `{"query":`),
 		toolDelta(1, `"level=\"error\""}`),
 		toolStart(2, "tu-2", "get_source_schema"),
+		textDelta(3, "Checking."),
 		messageStop(types.StopReasonToolUse),
 		usage(120, 30),
 	)
@@ -97,13 +98,14 @@ func TestBedrockChatStreamAssemblesTextAndToolCalls(t *testing.T) {
 		t.Fatalf("Stream: %v", err)
 	}
 
-	if streamed.String() != "Errors rose." {
-		t.Fatalf("streamed text = %q, want %q", streamed.String(), "Errors rose.")
+	if streamed.String() != "Errors rose.Checking." {
+		t.Fatalf("streamed text = %q, want %q", streamed.String(), "Errors rose.Checking.")
 	}
 	want := []ChatBlock{
 		TextBlock{Text: "Errors rose."},
 		ToolUseBlock{ID: "tu-1", Name: "query_logchefql", Input: json.RawMessage(`{"query":"level=\"error\""}`)},
 		ToolUseBlock{ID: "tu-2", Name: "get_source_schema", Input: json.RawMessage(`{}`)},
+		TextBlock{Text: "Checking."},
 	}
 	if !reflect.DeepEqual(resp.Blocks, want) {
 		t.Fatalf("blocks = %#v, want %#v", resp.Blocks, want)
