@@ -190,33 +190,11 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 			estimated = true
 			r.log.Warn("ask chef model reported no token usage, estimating from the request size", "input_tokens", resp.Usage.InputTokens)
 		}
-		switch resp.StopReason {
-		case ai.ChatStopContentFiltered, ai.ChatStopGuardrailIntervened:
-			return "", &failure{message: "The model's content filter stopped this answer.", err: fmt.Errorf("model stopped: %s", resp.StopReason)}
-		case ai.ChatStopMaxTokens:
-			// A cut-off message can hold a cut-off plan, so none of its tool
-			// calls run.
-			return StopMaxTokens, nil
-		}
-		uses := resp.ToolUses()
-		if limit != "" {
-			if !hasText(resp) {
-				return "", &failure{message: "Ask Chef reached a turn limit before it wrote an answer. Try a narrower question.", err: fmt.Errorf("no answer after the %s limit", limit)}
-			}
-			// A turn that used exactly its tool calls and then answered
-			// ended normally.
-			if limit == StopToolLimit && !refused && len(uses) == 0 {
-				return StopEnd, nil
-			}
-			return limit, nil
-		}
-		if len(uses) == 0 {
-			if !hasText(resp) {
-				return "", &failure{message: "Ask Chef got an empty answer from the model. Try again.", err: errors.New("model ended the turn with no text and no tool calls")}
-			}
-			return StopEnd, nil
+		if stop, ends, err := turnEnd(resp, limit, refused); ends {
+			return stop, err
 		}
 
+		uses := resp.ToolUses()
 		r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleAssistant, Blocks: resp.Blocks})
 		if r.usage.InputTokens >= maxInputTokens {
 			limit = StopBudget
@@ -242,6 +220,40 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 		}
 		r.messages = append(r.messages, ai.ChatMessage{Role: ai.ChatRoleUser, Blocks: results})
 	}
+}
+
+// turnEnd decides whether resp ends the turn, and how. limit is the turn
+// limit that stopped tool calls, if any, and refused says whether the tool
+// limit refused a call. A response that does not end the turn has tool
+// calls to run.
+func turnEnd(resp ai.ChatResponse, limit StopReason, refused bool) (stop StopReason, ends bool, err error) {
+	switch resp.StopReason {
+	case ai.ChatStopContentFiltered, ai.ChatStopGuardrailIntervened:
+		return "", true, &failure{message: "The model's content filter stopped this answer.", err: fmt.Errorf("model stopped: %s", resp.StopReason)}
+	case ai.ChatStopMaxTokens:
+		// A cut-off message can hold a cut-off plan, so none of its tool
+		// calls run.
+		return StopMaxTokens, true, nil
+	}
+	calls := len(resp.ToolUses()) > 0
+	if limit != "" {
+		if !hasText(resp) {
+			return "", true, &failure{message: "Ask Chef reached a turn limit before it wrote an answer. Try a narrower question.", err: fmt.Errorf("no answer after the %s limit", limit)}
+		}
+		// A turn that used exactly its tool calls and then answered ended
+		// normally.
+		if limit == StopToolLimit && !refused && !calls {
+			return StopEnd, true, nil
+		}
+		return limit, true, nil
+	}
+	if calls {
+		return "", false, nil
+	}
+	if !hasText(resp) {
+		return "", true, &failure{message: "Ask Chef got an empty answer from the model. Try again.", err: errors.New("model ended the turn with no text and no tool calls")}
+	}
+	return StopEnd, true, nil
 }
 
 func hasText(resp ai.ChatResponse) bool {
