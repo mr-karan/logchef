@@ -67,6 +67,9 @@ type ChatRequest struct {
 type ChatUsage struct {
 	InputTokens  int
 	OutputTokens int
+	// Estimated is set when the endpoint reported no usage. InputTokens is
+	// then estimated from the request size, and OutputTokens is 0.
+	Estimated bool
 }
 
 // ChatStopReason says why the model stopped. The values are Bedrock's; the

@@ -551,6 +551,34 @@ func TestTurnStopsAtTokenBudget(t *testing.T) {
 	}
 }
 
+// An endpoint that reports no usage still spends the token budget, from the
+// adapter's estimate, and the turn says once that it estimated.
+func TestTurnStopsAtTokenBudgetWithEstimatedUsage(t *testing.T) {
+	w := newWorld(t)
+	estimated := func(blocks ...ai.ChatBlock) ai.ChatResponse {
+		return ai.ChatResponse{Blocks: blocks, Usage: ai.ChatUsage{InputTokens: 160_000, Estimated: true}}
+	}
+	chat := &scriptedChat{replies: []ai.ChatResponse{
+		estimated(toolUse("tu-1", "get_sources", map[string]any{})),
+		estimated(toolUse("tu-2", "get_sources", map[string]any{})),
+		estimated(ai.TextBlock{Text: "Here is what I found."}),
+	}}
+	var logs bytes.Buffer
+	agent := askchef.New(askchef.Opts{Tools: mcp.NewToolServer(*w.tools), Chat: chat, Model: "m", Log: slog.New(slog.NewTextHandler(&logs, nil))})
+	var last askchef.Event
+	agent.Run(t.Context(), askchef.Turn{Principal: access.AssistantPrincipal(w.member), Request: w.request()}, func(ev askchef.Event) bool {
+		last = ev
+		return true
+	})
+
+	if done, ok := last.(askchef.Done); !ok || done.StopReason != askchef.StopBudget || done.InputTokens != 480_000 {
+		t.Fatalf("last event = %+v, want done with budget after 480000 input tokens", last)
+	}
+	if n := strings.Count(logs.String(), "level=WARN msg=\"ask chef model reported no token usage"); n != 1 {
+		t.Fatalf("estimate warnings = %d, want 1; logs = %q", n, logs.String())
+	}
+}
+
 func TestTurnCapsLargeToolResults(t *testing.T) {
 	w := newWorld(t)
 	input := w.fieldValuesInput()

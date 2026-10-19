@@ -18,6 +18,7 @@ import (
 type openRouterStub struct {
 	mu     sync.Mutex
 	bodies []map[string]any
+	sizes  []int
 	auth   []string
 }
 
@@ -38,12 +39,17 @@ func (s *openRouterStub) start(t *testing.T, status int, contentType string, res
 			http.NotFound(rw, r)
 			return
 		}
+		raw, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("reading request body: %v", err)
+		}
 		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if err := json.Unmarshal(raw, &body); err != nil {
 			t.Errorf("decoding request body: %v", err)
 		}
 		s.mu.Lock()
 		s.bodies = append(s.bodies, body)
+		s.sizes = append(s.sizes, len(raw))
 		s.auth = append(s.auth, r.Header.Get("Authorization"))
 		call := len(s.bodies) - 1
 		s.mu.Unlock()
@@ -289,6 +295,22 @@ func TestOpenAIChatAssemblesToolCallsFromLooseDeltas(t *testing.T) {
 				t.Fatalf("blocks = %+v, want %+v", resp.Blocks, tc.want)
 			}
 		})
+	}
+}
+
+// An endpoint that sends no usage chunk still gets an input token count, so
+// the caller's token budget applies.
+func TestOpenAIChatEstimatesUsageWhenTheStreamHasNone(t *testing.T) {
+	stub := &openRouterStub{}
+	resp, _, err := streamText(t, stub.streamOf(t, textChunk("Errors rose."), chunk(`{"role":"assistant","content":""}`, "stop"), done))
+	if err != nil {
+		t.Fatalf("Stream: %v", err)
+	}
+	stub.mu.Lock()
+	size := stub.sizes[0]
+	stub.mu.Unlock()
+	if want := (ChatUsage{InputTokens: size / 4, Estimated: true}); resp.Usage != want || want.InputTokens == 0 {
+		t.Fatalf("usage = %+v, want %+v", resp.Usage, want)
 	}
 }
 

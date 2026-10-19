@@ -172,7 +172,7 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 	// that is the last one. refused is set when the tool limit refused a
 	// call the model asked for.
 	var limit StopReason
-	refused := false
+	refused, estimated := false, false
 	for {
 		resp, err := r.agent.chat.Stream(ctx, ai.ChatRequest{
 			Model:     r.agent.model,
@@ -186,6 +186,10 @@ func (r *turnRun) converse(ctx context.Context, system string) (StopReason, erro
 		}
 		r.usage.InputTokens += resp.Usage.InputTokens
 		r.usage.OutputTokens += resp.Usage.OutputTokens
+		if resp.Usage.Estimated && !estimated {
+			estimated = true
+			r.log.Warn("ask chef model reported no token usage, estimating from the request size", "input_tokens", resp.Usage.InputTokens)
+		}
 		switch resp.StopReason {
 		case ai.ChatStopContentFiltered, ai.ChatStopGuardrailIntervened:
 			return "", &failure{message: "The model's content filter stopped this answer.", err: fmt.Errorf("model stopped: %s", resp.StopReason)}

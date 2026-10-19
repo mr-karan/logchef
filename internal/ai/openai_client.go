@@ -94,20 +94,24 @@ type openAIError struct {
 	Message string `json:"message"`
 }
 
-// post sends one chat completions request. It returns the response of a
-// 2xx status; the caller closes its body.
-func (c *openAIClient) post(ctx context.Context, body openAIChatRequest) (*http.Response, error) {
+func encodeRequest(body openAIChatRequest) ([]byte, error) {
 	encoded, err := json.Marshal(body)
 	if err != nil {
 		return nil, fmt.Errorf("encoding chat completions request: %w", err)
 	}
+	return encoded, nil
+}
+
+// post sends one encoded chat completions request. It returns the response
+// of a 2xx status; the caller closes its body.
+func (c *openAIClient) post(ctx context.Context, encoded []byte, streaming bool) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.url, bytes.NewReader(encoded))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("Content-Type", "application/json")
-	if body.Stream {
+	if streaming {
 		req.Header.Set("Accept", "text/event-stream")
 	}
 	resp, err := c.http.Do(req)
@@ -137,7 +141,11 @@ func statusError(resp *http.Response) error {
 
 // complete runs one chat completion without streaming and returns the text.
 func (c *openAIClient) complete(ctx context.Context, body openAIChatRequest) (string, error) {
-	resp, err := c.post(ctx, body)
+	encoded, err := encodeRequest(body)
+	if err != nil {
+		return "", err
+	}
+	resp, err := c.post(ctx, encoded, false)
 	if err != nil {
 		return "", err
 	}
@@ -181,17 +189,25 @@ type openAIChunk struct {
 // stream runs one streamed chat completion and passes each chunk to onChunk.
 // It skips SSE comments, such as OpenRouter's keepalives, and ends at
 // [DONE] or at the end of the body. A chunk that carries an error fails the
-// call.
-func (c *openAIClient) stream(ctx context.Context, body openAIChatRequest, onChunk func(openAIChunk)) error {
+// call. It returns the size of the request body in bytes.
+func (c *openAIClient) stream(ctx context.Context, body openAIChatRequest, onChunk func(openAIChunk)) (int, error) {
 	body.Stream = true
 	body.StreamOptions = &openAIStreamOptions{IncludeUsage: true}
-	resp, err := c.post(ctx, body)
+	encoded, err := encodeRequest(body)
 	if err != nil {
-		return err
+		return 0, err
+	}
+	resp, err := c.post(ctx, encoded, true)
+	if err != nil {
+		return 0, err
 	}
 	defer func() { _ = resp.Body.Close() }()
+	return len(encoded), readStream(resp.Body, onChunk)
+}
 
-	scanner := bufio.NewScanner(resp.Body)
+func readStream(body io.Reader, onChunk func(openAIChunk)) error {
+
+	scanner := bufio.NewScanner(body)
 	scanner.Buffer(make([]byte, 0, 64<<10), maxOpenAIStreamLine)
 	for scanner.Scan() {
 		data, ok := strings.CutPrefix(scanner.Text(), "data:")

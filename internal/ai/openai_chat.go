@@ -43,9 +43,9 @@ func (c *OpenAIChat) Stream(ctx context.Context, req ChatRequest, onText func(st
 		return ChatResponse{}, err
 	}
 	var acc openAIAccumulator
-	err = c.client.stream(ctx, body, func(chunk openAIChunk) {
+	sent, err := c.client.stream(ctx, body, func(chunk openAIChunk) {
 		if chunk.Usage != nil {
-			acc.usage = ChatUsage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
+			acc.usage = &ChatUsage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
 		}
 		for _, choice := range chunk.Choices {
 			if choice.Delta.Content != "" {
@@ -63,7 +63,7 @@ func (c *OpenAIChat) Stream(ctx context.Context, req ChatRequest, onText func(st
 	if err != nil {
 		return ChatResponse{}, fmt.Errorf("openai chat completions API error: %w", err)
 	}
-	return acc.response()
+	return acc.response(sent)
 }
 
 // streamedToolCall collects one streamed tool call. index is nil when the
@@ -79,7 +79,8 @@ type openAIAccumulator struct {
 	text         strings.Builder
 	calls        []*streamedToolCall
 	finishReason string
-	usage        ChatUsage
+	// usage is nil until a chunk reports it.
+	usage *ChatUsage
 }
 
 // addToolCall adds a delta to the call at index. The first delta of a call
@@ -113,7 +114,13 @@ func (a *openAIAccumulator) lastCallAt(index *int) *streamedToolCall {
 	return nil
 }
 
-func (a *openAIAccumulator) response() (ChatResponse, error) {
+// bytesPerToken is the rough request size of one input token, used when a
+// stream reports no usage.
+const bytesPerToken = 4
+
+// response builds the message. requestBytes is the size of the request,
+// which estimates the input tokens when the stream reported no usage.
+func (a *openAIAccumulator) response(requestBytes int) (ChatResponse, error) {
 	if a.finishReason == "" {
 		return ChatResponse{}, errors.New("openai stream ended before the message stopped")
 	}
@@ -121,7 +128,11 @@ func (a *openAIAccumulator) response() (ChatResponse, error) {
 	if !ok {
 		return ChatResponse{}, fmt.Errorf("openai stream stopped with finish_reason %q", a.finishReason)
 	}
-	resp := ChatResponse{StopReason: stop, Usage: a.usage}
+	usage := ChatUsage{InputTokens: requestBytes / bytesPerToken, Estimated: true}
+	if a.usage != nil {
+		usage = *a.usage
+	}
+	resp := ChatResponse{StopReason: stop, Usage: usage}
 	if a.text.Len() > 0 {
 		resp.Blocks = append(resp.Blocks, TextBlock{Text: a.text.String()})
 	}
