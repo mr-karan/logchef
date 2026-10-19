@@ -1,0 +1,38 @@
+{
+  "description": "An error spike question. Counts of service over all logs differ from counts over the errors, so a field count without the error filter attributes the wrong number of errors.",
+  "question": "Which service is behind the error spike?",
+  "view": {
+    "mode": "logchefql",
+    "query": "level=\"error\"",
+    "start": "2026-10-19T06:15:45Z",
+    "end": "2026-10-19T07:15:45Z"
+  },
+  "field_values": {
+    "*": {
+      "service": [{ "value": "payments", "hits": 237 }, { "value": "checkout-api", "hits": 179 }]
+    },
+    "level:=\"error\"": {
+      "service": [{ "value": "payments", "hits": 58 }, { "value": "checkout-api", "hits": 12 }]
+    }
+  },
+  "script": [
+    {
+      "tool": "top_values",
+      "input": { "fields": ["service"], "start_time": "2026-10-19T06:15:45Z", "end_time": "2026-10-19T07:15:45Z" }
+    },
+    {
+      "tool": "top_values",
+      "input": { "fields": ["service"], "query": "level=\"error\"", "start_time": "2026-10-19T06:15:45Z", "end_time": "2026-10-19T07:15:45Z" }
+    }
+  ],
+  "expect": {
+    "system_prompt_contains": [
+      "count every log row in the window unless you give them query",
+      "pass the LogchefQL filter that selects the subset as query"
+    ],
+    "tool_results_contain": [
+      ["over all logs]", "{\"value\":\"checkout-api\",\"count\":179}"],
+      ["over the logs matching the query]", "{\"value\":\"checkout-api\",\"count\":12}"]
+    ]
+  }
+}
