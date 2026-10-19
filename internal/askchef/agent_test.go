@@ -75,10 +75,11 @@ func toolUse(id, name string, input map[string]any) ai.ToolUseBlock {
 	return ai.ToolUseBlock{ID: id, Name: name, Input: encoded}
 }
 
-// logsBackend is a VictoriaLogs stand-in. Field values succeed and log
-// queries fail.
+// logsBackend is a VictoriaLogs stand-in. Field values succeed. Log queries
+// fail unless serveQueries is set, and then return two rows.
 type logsBackend struct {
 	fieldQueries atomic.Int32
+	serveQueries atomic.Bool
 	url          string
 }
 
@@ -101,6 +102,15 @@ func newLogsBackend(t *testing.T) *logsBackend {
 				return
 			}
 			_, _ = rw.Write([]byte(`{"values":[{"value":"api","hits":7}]}`))
+		case "/select/logsql/field_names":
+			_, _ = rw.Write([]byte(`{"values":[{"value":"_msg","hits":2},{"value":"level","hits":2}]}`))
+		case "/select/logsql/query":
+			if !b.serveQueries.Load() {
+				http.Error(rw, "backend unavailable", http.StatusBadGateway)
+				return
+			}
+			_, _ = rw.Write([]byte(`{"_time":"2026-10-19T04:10:00Z","_msg":"boom","level":"error"}` + "\n" +
+				`{"_time":"2026-10-19T04:20:00Z","_msg":"boom","level":"error"}` + "\n"))
 		default:
 			http.Error(rw, "backend unavailable", http.StatusBadGateway)
 		}
@@ -273,13 +283,13 @@ func TestTurnRunsToolsAndStreamsEvidence(t *testing.T) {
 		Tool: "get_field_values", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
 		StartMS: time.Date(2026, 10, 19, 4, 0, 0, 0, time.UTC).UnixMilli(),
 		EndMS:   time.Date(2026, 10, 19, 5, 0, 0, 0, time.UTC).UnixMilli(),
-		Summary: "done",
+		Summary: "values of service",
 	}
 	for i, end := range toolEnds(events) {
 		want := window
 		want.ID = askchef.EvidenceID(4 + i)
-		if !end.OK || end.Evidence == nil || *end.Evidence != want {
-			t.Fatalf("tool_end %d = %+v evidence %+v, want ok with %+v", i, end, end.Evidence, want)
+		if !end.OK || !slices.Equal(end.Evidence, []askchef.Evidence{want}) {
+			t.Fatalf("tool_end %d = %+v, want ok with %+v", i, end, want)
 		}
 	}
 	done := events[len(events)-1].(askchef.Done)
@@ -296,6 +306,85 @@ func TestTurnRunsToolsAndStreamsEvidence(t *testing.T) {
 	}
 	if !strings.Contains(chat.request(0).System, "[E3] compare_windows") {
 		t.Fatal("system prompt does not list the prior evidence")
+	}
+}
+
+// Evidence records the query and window each call ran, read from the tool's
+// result, with one record per compare_windows window.
+func TestTurnEvidenceIsWhatRan(t *testing.T) {
+	at := func(hour, minute int) int64 { return time.Date(2026, 10, 19, hour, minute, 0, 0, time.UTC).UnixMilli() }
+	for _, tc := range []struct {
+		name    string
+		tool    string
+		input   func(w *world) map[string]any
+		summary string
+		marker  string
+		want    func(w *world) []askchef.Evidence
+	}{
+		{
+			name: "query_logchefql with a wall-clock window in the tool timezone",
+			tool: "query_logchefql",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "query": `level="error"`,
+					"start_time": "2026-10-19 09:30:00", "end_time": "2026-10-19 10:30:00", "timezone": "Asia/Kolkata"}
+			},
+			summary: "2 rows",
+			marker:  "[evidence E1]\n",
+			want: func(w *world) []askchef.Evidence {
+				return []askchef.Evidence{{ID: 1, Tool: "query_logchefql", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
+					Query: `level="error"`, StartMS: at(4, 0), EndMS: at(5, 0), Summary: "2 rows"}}
+			},
+		},
+		{
+			name: "compare_windows",
+			tool: "compare_windows",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "query": `level="error"`,
+					"window1_start": "2026-10-19T03:00:00Z", "window1_end": "2026-10-19T03:30:00Z",
+					"window2_start": "2026-10-19T04:00:00Z", "window2_end": "2026-10-19T04:30:00Z"}
+			},
+			summary: "2 rows vs 2 rows",
+			marker:  "[evidence E1 = window 1: 2 rows; E2 = window 2: 2 rows]\n",
+			want: func(w *world) []askchef.Evidence {
+				base := askchef.Evidence{Tool: "compare_windows", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL, Query: `level="error"`}
+				first, second := base, base
+				first.ID, first.StartMS, first.EndMS, first.Summary = 1, at(3, 0), at(3, 30), "window 1: 2 rows"
+				second.ID, second.StartMS, second.EndMS, second.Summary = 2, at(4, 0), at(4, 30), "window 2: 2 rows"
+				return []askchef.Evidence{first, second}
+			},
+		},
+		{
+			name: "top_values reads all logs in its window",
+			tool: "top_values",
+			input: func(w *world) map[string]any {
+				return map[string]any{"team_id": w.team, "source_id": w.source, "fields": []string{"level", "level"},
+					"start_time": "2026-10-19T04:00:00Z", "end_time": "2026-10-19T05:00:00Z"}
+			},
+			summary: "values of level",
+			marker:  "[evidence E1]\n",
+			want: func(w *world) []askchef.Evidence {
+				return []askchef.Evidence{{ID: 1, Tool: "top_values", TeamID: w.team, SourceID: w.source, Mode: askchef.ModeLogchefQL,
+					StartMS: at(4, 0), EndMS: at(5, 0), Summary: "values of level"}}
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.backend.serveQueries.Store(true)
+			chat := &scriptedChat{replies: []ai.ChatResponse{reply(toolUse("tu-1", tc.tool, tc.input(w)))}}
+			events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
+
+			ends := toolEnds(events)
+			if len(ends) != 1 || !ends[0].OK || ends[0].Summary != tc.summary {
+				t.Fatalf("tool_end = %+v, want ok with summary %q", ends, tc.summary)
+			}
+			if want := tc.want(w); !slices.Equal(ends[0].Evidence, want) {
+				t.Fatalf("evidence = %+v, want %+v", ends[0].Evidence, want)
+			}
+			if results := toolResults(chat.request(1)); len(results) != 1 || !strings.HasPrefix(results[0].Text, tc.marker) {
+				t.Fatalf("tool result = %+v, want prefix %q", results, tc.marker)
+			}
+		})
 	}
 }
 
@@ -440,7 +529,7 @@ func TestTurnReportsToolFailuresToTheModel(t *testing.T) {
 			events := w.run(t, chat, access.AssistantPrincipal(w.member), w.request())
 
 			ends := toolEnds(events)
-			if len(ends) != 1 || ends[0].OK || ends[0].Evidence != nil || ends[0].Summary == "" {
+			if len(ends) != 1 || ends[0].OK || len(ends[0].Evidence) != 0 || ends[0].Summary == "" {
 				t.Fatalf("tool_end = %+v, want one failed call with a summary and no evidence", ends)
 			}
 			results := toolResults(chat.request(1))

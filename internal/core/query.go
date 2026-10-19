@@ -213,7 +213,7 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 		QueryTimeout:       timeout,
 	}
 	if compiled.Language == models.QueryLanguageLogsQL {
-		startTime, endTime, err := parseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
+		startTime, endTime, err := ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
 		if err != nil {
 			return nil, &QueryRequestError{Message: err.Error()}
 		}
@@ -473,7 +473,9 @@ func parseHistogramTimeRange(req models.APIHistogramRequest) (startPtr, endPtr *
 	return &startTime, &endTime, nil
 }
 
-func parseLogchefQLTimeRange(startTime, endTime, timezone string) (startPtr, endPtr *time.Time, err error) {
+// ParseLogchefQLTimeRange reads the window of a LogchefQL query: RFC3339, or
+// a wall-clock time in timezone (UTC when empty).
+func ParseLogchefQLTimeRange(startTime, endTime, timezone string) (startPtr, endPtr *time.Time, err error) {
 	locationName := timezone
 	if locationName == "" {
 		locationName = "UTC"

@@ -54,7 +54,7 @@ export interface DoneEvent {
 
 export type AskChefEvent =
   | { type: "tool_start"; call_id: string; tool: string }
-  | { type: "tool_end"; call_id: string; ok: boolean; summary: string; evidence: EvidenceRecord | null }
+  | { type: "tool_end"; call_id: string; ok: boolean; summary: string; evidence: EvidenceRecord[] }
   | { type: "text"; delta: string }
   | DoneEvent
   | { type: "error"; message: string };
@@ -108,8 +108,13 @@ function parsePayload(type: AskChefEvent["type"], raw: Record<string, unknown>):
     case "tool_end": {
       const { call_id, ok, summary } = raw;
       if (typeof call_id !== "string" || typeof ok !== "boolean" || typeof summary !== "string") return null;
-      const evidence = raw.evidence == null ? null : parseEvidence(raw.evidence);
-      if (raw.evidence != null && !evidence) return null;
+      if (!Array.isArray(raw.evidence)) return null;
+      const evidence: EvidenceRecord[] = [];
+      for (const item of raw.evidence) {
+        const record = parseEvidence(item);
+        if (!record) return null;
+        evidence.push(record);
+      }
       return { type, call_id, ok, summary, evidence };
     }
     case "text":

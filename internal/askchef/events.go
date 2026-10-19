@@ -19,13 +19,13 @@ type ToolStart struct {
 	Tool   string `json:"tool"`
 }
 
-// ToolEnd is sent after a tool ran. Evidence is nil when the call read no
-// logs or failed.
+// ToolEnd is sent after a tool ran. Evidence holds one record for each
+// window the call read, and is empty when it read no logs or failed.
 type ToolEnd struct {
-	CallID   string    `json:"call_id"`
-	OK       bool      `json:"ok"`
-	Summary  string    `json:"summary"`
-	Evidence *Evidence `json:"evidence"`
+	CallID   string     `json:"call_id"`
+	OK       bool       `json:"ok"`
+	Summary  string     `json:"summary"`
+	Evidence []Evidence `json:"evidence"`
 }
 
 // Text is a chunk of the answer.

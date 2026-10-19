@@ -100,9 +100,11 @@ export function applyAskChefEvent(session: AskChefSession, event: AskChefEvent):
       const index = turn.steps.findIndex((s) => s.callId === step.callId);
       if (index === -1) turn.steps.push(step);
       else turn.steps[index] = step;
-      if (event.type === "tool_end" && event.evidence) {
-        session.evidence.set(event.evidence.id, event.evidence);
-        if (!turn.evidenceIds.includes(event.evidence.id)) turn.evidenceIds.push(event.evidence.id);
+      if (event.type === "tool_end") {
+        for (const record of event.evidence) {
+          session.evidence.set(record.id, record);
+          if (!turn.evidenceIds.includes(record.id)) turn.evidenceIds.push(record.id);
+        }
       }
       return;
     }

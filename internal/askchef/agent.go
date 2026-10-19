@@ -199,22 +199,52 @@ func (r *turnRun) runTool(ctx context.Context, use ai.ToolUseBlock) ai.ToolResul
 	if err != nil {
 		message := oneLine(err.Error(), maxErrorChars)
 		r.log.Warn("ask chef tool failed", "tool", use.Name, "error", message)
-		r.send(ToolEnd{CallID: callID, OK: false, Summary: message})
+		r.send(ToolEnd{CallID: callID, OK: false, Summary: message, Evidence: []Evidence{}})
 		return ai.ToolResultBlock{ToolUseID: use.ID, Text: "[tool did not complete: " + message + "]", IsError: true}
 	}
 
-	tool := allowedTools[use.Name]
-	summary := tool.summary(text)
-	var evidence *Evidence
-	if e, ok := tool.evidenceFor(use.Name, use.Input); ok {
-		e.ID = r.nextID
-		e.Summary = summary
-		r.nextID++
-		evidence = &e
-		text = "[evidence " + e.ID.String() + "]\n" + text
+	reading := r.read(use, text)
+	if len(reading.evidence) > 0 {
+		text = evidenceMarker(reading.evidence) + "\n" + text
 	}
-	r.send(ToolEnd{CallID: callID, OK: true, Summary: summary, Evidence: evidence})
+	r.send(ToolEnd{CallID: callID, OK: true, Summary: reading.summary, Evidence: reading.evidence})
 	return ai.ToolResultBlock{ToolUseID: use.ID, Text: capResult(text)}
+}
+
+// read reports what a successful call read and numbers its evidence. A result
+// it cannot read gives no evidence, so the answer cannot cite the call.
+func (r *turnRun) read(use ai.ToolUseBlock, result string) toolReading {
+	reading := toolReading{summary: "done"}
+	if read := allowedTools[use.Name].read; read != nil {
+		got, err := read(use.Input, result)
+		if err != nil {
+			r.log.Warn("ask chef could not read tool evidence", "tool", use.Name, "error", err)
+		} else {
+			reading = got
+		}
+	}
+	if reading.evidence == nil {
+		reading.evidence = []Evidence{}
+	}
+	for i := range reading.evidence {
+		reading.evidence[i].ID = r.nextID
+		reading.evidence[i].Tool = use.Name
+		r.nextID++
+	}
+	return reading
+}
+
+// evidenceMarker heads a tool result with the IDs the answer may cite. A call
+// with several windows names what each ID covers.
+func evidenceMarker(evidence []Evidence) string {
+	if len(evidence) == 1 {
+		return "[evidence " + evidence[0].ID.String() + "]"
+	}
+	parts := make([]string, len(evidence))
+	for i, e := range evidence {
+		parts[i] = e.ID.String() + " = " + e.Summary
+	}
+	return "[evidence " + strings.Join(parts, "; ") + "]"
 }
 
 // conversation turns the history and the new message into model messages.

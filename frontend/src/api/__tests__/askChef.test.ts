@@ -21,7 +21,7 @@ function frame(type: string, data: unknown): string {
 describe("createAskChefStreamParser", () => {
   it("emits an event only once a frame split across chunks is complete", () => {
     const parser = createAskChefStreamParser();
-    const wire = frame("tool_end", { call_id: "c1", ok: true, summary: "23 vs 3", evidence });
+    const wire = frame("tool_end", { call_id: "c1", ok: true, summary: "23 vs 3", evidence: [evidence] });
 
     const events: AskChefEvent[] = [];
     for (const chunk of [wire.slice(0, 7), wire.slice(7, 40), wire.slice(40, -1)]) {
@@ -30,7 +30,7 @@ describe("createAskChefStreamParser", () => {
     expect(events).toEqual([]);
 
     expect(parser.push(wire.slice(-1))).toEqual([
-      { type: "tool_end", call_id: "c1", ok: true, summary: "23 vs 3", evidence },
+      { type: "tool_end", call_id: "c1", ok: true, summary: "23 vs 3", evidence: [evidence] },
     ]);
   });
 
@@ -58,8 +58,17 @@ describe("createAskChefStreamParser", () => {
   it("accepts a tool_end without evidence", () => {
     const parser = createAskChefStreamParser();
 
-    expect(parser.push(frame("tool_end", { call_id: "c2", ok: false, summary: "query failed", evidence: null }))).toEqual([
-      { type: "tool_end", call_id: "c2", ok: false, summary: "query failed", evidence: null },
+    expect(parser.push(frame("tool_end", { call_id: "c2", ok: false, summary: "query failed", evidence: [] }))).toEqual([
+      { type: "tool_end", call_id: "c2", ok: false, summary: "query failed", evidence: [] },
+    ]);
+  });
+
+  it("accepts a tool_end with one record per window", () => {
+    const parser = createAskChefStreamParser();
+    const second = { ...evidence, id: "E2", start: 3000, end: 4000 };
+
+    expect(parser.push(frame("tool_end", { call_id: "c1", ok: true, summary: "3 rows vs 5 rows", evidence: [evidence, second] }))).toEqual([
+      { type: "tool_end", call_id: "c1", ok: true, summary: "3 rows vs 5 rows", evidence: [evidence, second] },
     ]);
   });
 
@@ -72,7 +81,7 @@ describe("createAskChefStreamParser", () => {
   it("rejects a known event whose payload has the wrong shape", () => {
     const parser = createAskChefStreamParser();
 
-    expect(() => parser.push(frame("tool_end", { call_id: "c1", ok: true, summary: "x", evidence: { ...evidence, id: "X1" } }))).toThrow(
+    expect(() => parser.push(frame("tool_end", { call_id: "c1", ok: true, summary: "x", evidence: [{ ...evidence, id: "X1" }] }))).toThrow(
       AskChefError
     );
     expect(() => parser.push(frame("text", { delta: 4 }))).toThrow(AskChefError);

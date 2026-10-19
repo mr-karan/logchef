@@ -15,7 +15,7 @@ import (
 
 func TestParseLogchefQLTimeRange(t *testing.T) {
 	t.Run("accepts legacy picker format", func(t *testing.T) {
-		start, end, err := parseLogchefQLTimeRange("2026-04-08 00:00:00", "2026-04-08 01:00:00", "UTC")
+		start, end, err := ParseLogchefQLTimeRange("2026-04-08 00:00:00", "2026-04-08 01:00:00", "UTC")
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -28,7 +28,7 @@ func TestParseLogchefQLTimeRange(t *testing.T) {
 	})
 
 	t.Run("accepts iso8601 timestamps", func(t *testing.T) {
-		start, end, err := parseLogchefQLTimeRange("2026-04-08T00:00:00Z", "2026-04-08T01:00:00Z", "UTC")
+		start, end, err := ParseLogchefQLTimeRange("2026-04-08T00:00:00Z", "2026-04-08T01:00:00Z", "UTC")
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}

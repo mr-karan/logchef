@@ -49,8 +49,8 @@ describe("applyAskChefEvent", () => {
     const session = streamingSession();
     applyAskChefEvent(session, { type: "tool_start", call_id: "c1", tool: "compare_windows" });
     applyAskChefEvent(session, { type: "tool_start", call_id: "c2", tool: "top_values" });
-    applyAskChefEvent(session, { type: "tool_end", call_id: "c1", ok: true, summary: "23 vs 3", evidence: null });
-    applyAskChefEvent(session, { type: "tool_end", call_id: "c2", ok: false, summary: "query failed", evidence: null });
+    applyAskChefEvent(session, { type: "tool_end", call_id: "c1", ok: true, summary: "23 vs 3", evidence: [] });
+    applyAskChefEvent(session, { type: "tool_end", call_id: "c2", ok: false, summary: "query failed", evidence: [] });
 
     expect(assistantTurn(session).steps).toEqual([
       { callId: "c1", tool: "compare_windows", status: "ok", summary: "23 vs 3" },
@@ -69,10 +69,11 @@ describe("applyAskChefEvent", () => {
 
   it("puts evidence in the ledger and on the turn that produced it", () => {
     const session = streamingSession();
-    applyAskChefEvent(session, { type: "tool_end", call_id: "c1", ok: true, summary: "23 vs 3", evidence: evidence(4) });
+    applyAskChefEvent(session, { type: "tool_end", call_id: "c1", ok: true, summary: "23 vs 3", evidence: [evidence(4), evidence(5)] });
 
     expect(session.evidence.get("E4")).toEqual(evidence(4));
-    expect(assistantTurn(session).evidenceIds).toEqual(["E4"]);
+    expect(session.evidence.get("E5")).toEqual(evidence(5));
+    expect(assistantTurn(session).evidenceIds).toEqual(["E4", "E5"]);
   });
 
   it("returns to idle on done and keeps the summary on the turn", () => {
@@ -113,7 +114,7 @@ describe("buildTurnRequest", () => {
 
   it("sends finished exchanges as history and every known evidence record", () => {
     const session = streamingSession();
-    applyAskChefEvent(session, { type: "tool_end", call_id: "c1", ok: true, summary: "x", evidence: evidence(1) });
+    applyAskChefEvent(session, { type: "tool_end", call_id: "c1", ok: true, summary: "x", evidence: [evidence(1)] });
     applyAskChefEvent(session, { type: "text", delta: "It fired [E1]." });
     applyAskChefEvent(session, done);
     session.transcript.push({ role: "user", text: "Which hosts?" }, { role: "assistant", steps: [], text: "", evidenceIds: [], done: null });
@@ -209,7 +210,7 @@ describe("useAskChefStore", () => {
   it("investigates an alert and streams the answer into the transcript", async () => {
     const wire =
       frame("tool_start", { call_id: "c1", tool: "compare_windows" }) +
-      frame("tool_end", { call_id: "c1", ok: true, summary: "23 vs 3", evidence: evidence(1) }) +
+      frame("tool_end", { call_id: "c1", ok: true, summary: "23 vs 3", evidence: [evidence(1)] }) +
       frame("text", { delta: "Errors rose 7.7x [E1]." }) +
       frame("done", { stop_reason: "end", tool_calls: 1, input_tokens: 1, output_tokens: 1, duration_ms: 6200 });
     const fetchMock = vi.fn().mockResolvedValue(sseResponse([wire.slice(0, 50), wire.slice(50, 51), wire.slice(51)]));

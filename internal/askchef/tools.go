@@ -5,7 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -15,32 +16,24 @@ import (
 	"github.com/mark3labs/mcp-go/server"
 
 	"github.com/mr-karan/logchef/internal/ai"
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/mcp"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// evidenceRule says where a tool's input holds the query and the time window
-// of the logs it read.
-type evidenceRule struct {
-	mode QueryMode
-	// queryField is empty when the tool takes no filter, which reads all logs.
-	queryField string
-	// windows are start and end input fields. The evidence window spans all
-	// of them.
-	windows [][2]string
-}
-
 // allowedTool is a tool Ask Chef may call.
 type allowedTool struct {
-	// evidence is nil when the tool reads no logs.
-	evidence  *evidenceRule
-	summarize func(result string) string
+	// read reports what a successful call read. It is nil for a tool that
+	// reads no logs.
+	read func(input json.RawMessage, result string) (toolReading, error)
 }
 
-var (
-	startEndWindow = [][2]string{{"start_time", "end_time"}}
-	compareWindows = [][2]string{{"window1_start", "window1_end"}, {"window2_start", "window2_end"}}
-)
+// toolReading is what one successful call read: a step summary, and the
+// evidence of each window it queried, without IDs.
+type toolReading struct {
+	summary  string
+	evidence []Evidence
+}
 
 // allowedTools is every MCP tool Ask Chef may call. The model never sees or
 // runs a tool that is missing here, such as the open_investigation UI tool.
@@ -53,111 +46,141 @@ var allowedTools = map[string]allowedTool{
 	"get_log_context":          {},
 	"list_alerts":              {},
 	"get_alert_history":        {},
-	"query_logchefql":          {evidence: &evidenceRule{mode: ModeLogchefQL, queryField: "query", windows: startEndWindow}, summarize: summarizeRows},
-	"compare_windows":          {evidence: &evidenceRule{mode: ModeLogchefQL, queryField: "query", windows: compareWindows}, summarize: summarizeCompare},
-	"get_field_values":         {evidence: &evidenceRule{mode: ModeLogchefQL, windows: startEndWindow}},
-	"top_values":               {evidence: &evidenceRule{mode: ModeLogchefQL, windows: startEndWindow}},
-	"get_all_field_dimensions": {evidence: &evidenceRule{mode: ModeLogchefQL, windows: startEndWindow}},
+	"query_logchefql":          {read: readQueryLogchefQL},
+	"compare_windows":          {read: readCompareWindows},
+	"get_field_values":         {read: readFieldValues},
+	"top_values":               {read: readTopValues},
+	"get_all_field_dimensions": {read: readAllFieldDimensions},
 }
 
-// evidenceFor returns the evidence of a successful call, without ID and
-// summary. It returns false when the tool reads no logs or the input has no
-// team, source or parseable window.
-func (t allowedTool) evidenceFor(tool string, input json.RawMessage) (Evidence, bool) {
-	rule := t.evidence
-	if rule == nil {
-		return Evidence{}, false
+// decodeCall decodes a call's input and result into the MCP tool's own
+// parameter and result types, which also generate its schemas.
+func decodeCall[P, R any](input json.RawMessage, result string) (P, R, error) {
+	var params P
+	var res R
+	if err := json.Unmarshal(input, &params); err != nil {
+		return params, res, fmt.Errorf("decoding tool input: %w", err)
 	}
-	var args map[string]any
-	if err := json.Unmarshal(input, &args); err != nil {
-		return Evidence{}, false
+	if err := json.Unmarshal([]byte(result), &res); err != nil {
+		return params, res, fmt.Errorf("decoding tool result: %w", err)
 	}
-	teamID, okTeam := positiveInt(args["team_id"])
-	sourceID, okSource := positiveInt(args["source_id"])
-	if !okTeam || !okSource {
-		return Evidence{}, false
+	return params, res, nil
+}
+
+// logchefQLWindow parses a window the way the LogchefQL tools run it.
+func logchefQLWindow(start, end, timezone string) (int64, int64, error) {
+	s, e, err := core.ParseLogchefQLTimeRange(start, end, timezone)
+	if err != nil {
+		return 0, 0, err
 	}
-	loc := time.UTC
-	if tz, _ := args["timezone"].(string); tz != "" {
-		var err error
-		if loc, err = time.LoadLocation(tz); err != nil {
-			return Evidence{}, false
+	return s.UnixMilli(), e.UnixMilli(), nil
+}
+
+// rfc3339Window parses a window the way the field value tools run it.
+func rfc3339Window(start, end string) (int64, int64, error) {
+	s, err := time.Parse(time.RFC3339, start)
+	if err != nil {
+		return 0, 0, err
+	}
+	e, err := time.Parse(time.RFC3339, end)
+	if err != nil {
+		return 0, 0, err
+	}
+	return s.UnixMilli(), e.UnixMilli(), nil
+}
+
+func rowsSummary(rows int, truncated bool) string {
+	if truncated {
+		return fmt.Sprintf("%d rows (truncated)", rows)
+	}
+	return fmt.Sprintf("%d rows", rows)
+}
+
+// fieldsSummary names the fields a call read values of.
+func fieldsSummary(fields []string) string {
+	const shown = 5
+	if len(fields) <= shown {
+		return "values of " + strings.Join(fields, ", ")
+	}
+	return fmt.Sprintf("values of %s and %d more", strings.Join(fields[:shown], ", "), len(fields)-shown)
+}
+
+func readQueryLogchefQL(input json.RawMessage, result string) (toolReading, error) {
+	params, res, err := decodeCall[mcp.QueryLogchefQLParams, mcp.QueryResult](input, result)
+	if err != nil {
+		return toolReading{}, err
+	}
+	start, end, err := logchefQLWindow(res.StartTime, res.EndTime, params.Timezone)
+	if err != nil {
+		return toolReading{}, err
+	}
+	summary := rowsSummary(res.RowCount, res.Stats.Truncated)
+	return toolReading{summary: summary, evidence: []Evidence{{
+		TeamID: models.TeamID(res.TeamID), SourceID: models.SourceID(res.SourceID), Mode: ModeLogchefQL,
+		Query: params.Query, StartMS: start, EndMS: end, Summary: summary,
+	}}}, nil
+}
+
+func readCompareWindows(input json.RawMessage, result string) (toolReading, error) {
+	params, res, err := decodeCall[mcp.CompareWindowsParams, mcp.CompareWindowsResult](input, result)
+	if err != nil {
+		return toolReading{}, err
+	}
+	reading := toolReading{summary: fmt.Sprintf("%d rows vs %d rows", res.Window1.RowCount, res.Window2.RowCount)}
+	for i, w := range []mcp.WindowResult{res.Window1, res.Window2} {
+		start, end, err := logchefQLWindow(w.Start, w.End, params.Timezone)
+		if err != nil {
+			return toolReading{}, err
 		}
+		reading.evidence = append(reading.evidence, Evidence{
+			TeamID: models.TeamID(params.TeamID), SourceID: models.SourceID(params.SourceID), Mode: ModeLogchefQL,
+			Query: params.Query, StartMS: start, EndMS: end,
+			Summary: fmt.Sprintf("window %d: %s", i+1, rowsSummary(w.RowCount, w.Truncated)),
+		})
 	}
-	var start, end time.Time
-	for _, fields := range rule.windows {
-		s, okStart := parseToolTime(args[fields[0]], loc)
-		e, okEnd := parseToolTime(args[fields[1]], loc)
-		if !okStart || !okEnd {
-			return Evidence{}, false
-		}
-		if start.IsZero() || s.Before(start) {
-			start = s
-		}
-		if e.After(end) {
-			end = e
-		}
-	}
-	query, _ := args[rule.queryField].(string)
-	return Evidence{
-		Tool:     tool,
-		TeamID:   models.TeamID(teamID),
-		SourceID: models.SourceID(sourceID),
-		Mode:     rule.mode,
-		Query:    query,
-		StartMS:  start.UnixMilli(),
-		EndMS:    end.UnixMilli(),
-	}, true
+	return reading, nil
 }
 
-func (t allowedTool) summary(result string) string {
-	if t.summarize == nil {
-		return "done"
+// fieldValuesReading is the reading of a field value tool. These tools take
+// no filter, so the evidence query is empty: all logs in the window.
+func fieldValuesReading(teamID, sourceID int, start, end string, fields []string) (toolReading, error) {
+	startMS, endMS, err := rfc3339Window(start, end)
+	if err != nil {
+		return toolReading{}, err
 	}
-	return t.summarize(result)
+	summary := fieldsSummary(fields)
+	return toolReading{summary: summary, evidence: []Evidence{{
+		TeamID: models.TeamID(teamID), SourceID: models.SourceID(sourceID), Mode: ModeLogchefQL,
+		StartMS: startMS, EndMS: endMS, Summary: summary,
+	}}}, nil
 }
 
-func positiveInt(v any) (int, bool) {
-	f, ok := v.(float64)
-	if !ok || f < 1 || f > math.MaxInt32 || f != math.Trunc(f) {
-		return 0, false
+func readFieldValues(input json.RawMessage, result string) (toolReading, error) {
+	params, res, err := decodeCall[mcp.GetFieldValuesParams, core.FieldValuesResult](input, result)
+	if err != nil {
+		return toolReading{}, err
 	}
-	return int(f), true
+	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, []string{res.FieldName})
 }
 
-// parseToolTime reads a time the way the tools do: RFC3339, or
-// "YYYY-MM-DD HH:MM:SS" in the tool's timezone.
-func parseToolTime(v any, loc *time.Location) (time.Time, bool) {
-	raw, _ := v.(string)
-	if raw == "" {
-		return time.Time{}, false
+func readTopValues(input json.RawMessage, result string) (toolReading, error) {
+	params, res, err := decodeCall[mcp.TopValuesParams, mcp.TopValuesResult](input, result)
+	if err != nil {
+		return toolReading{}, err
 	}
-	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-		return t, true
+	fields := make([]string, len(res.Fields))
+	for i, f := range res.Fields {
+		fields[i] = f.FieldName
 	}
-	if t, err := time.ParseInLocation(time.DateTime, raw, loc); err == nil {
-		return t, true
-	}
-	return time.Time{}, false
+	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, fields)
 }
 
-func summarizeRows(result string) string {
-	var r mcp.QueryResult
-	if err := json.Unmarshal([]byte(result), &r); err != nil {
-		return "done"
+func readAllFieldDimensions(input json.RawMessage, result string) (toolReading, error) {
+	params, res, err := decodeCall[mcp.GetAllFieldDimensionsParams, map[string]*core.FieldValuesResult](input, result)
+	if err != nil {
+		return toolReading{}, err
 	}
-	if r.Stats.Truncated {
-		return fmt.Sprintf("%d rows (truncated)", r.RowCount)
-	}
-	return fmt.Sprintf("%d rows", r.RowCount)
-}
-
-func summarizeCompare(result string) string {
-	var r mcp.CompareWindowsResult
-	if err := json.Unmarshal([]byte(result), &r); err != nil {
-		return "done"
-	}
-	return fmt.Sprintf("%d rows vs %d rows", r.Window1.RowCount, r.Window2.RowCount)
+	return fieldValuesReading(params.TeamID, params.SourceID, params.StartTime, params.EndTime, slices.Sorted(maps.Keys(res)))
 }
 
 // capResult cuts a tool result to maxToolResultBytes on a character
