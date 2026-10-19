@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "टूल कॉल की सीमा पर रोका गया",
   "askChef.stopDeadline": "समय सीमा पर रोका गया",
   "askChef.stopMaxTokens": "उत्तर लंबाई की सीमा पर कट गया",
+  "askChef.stopPreempted": "रोका गया, क्योंकि आपने नया प्रश्न पूछा",
   "askChef.evidence": "सबूत · एक्सप्लोरर में खोलने के लिए क्लिक करें",
   "askChef.openEvidence": "सबूत {id} एक्सप्लोरर में खोलें",
   "askChef.suggestCompare": "पिछली समय सीमा से तुलना करें",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "आगे का सवाल पूछें…",
   "askChef.send": "भेजें",
   "askChef.stop": "रोकें",
-  "askChef.busy": "Ask Chef पहले से किसी दूसरे सवाल का जवाब दे रहा है। उसके पूरा होने का इंतज़ार करें, फिर दोबारा कोशिश करें।",
   "askChef.failed": "Ask Chef जवाब नहीं दे सका। दोबारा कोशिश करें।",
   "askChef.disabled": "इस सर्वर पर Ask Chef बंद है।"
 }

@@ -1439,6 +1439,7 @@
   "askChef.stopToolLimit": "Stopped at the tool call limit",
   "askChef.stopDeadline": "Stopped at the time limit",
   "askChef.stopMaxTokens": "Answer cut off at the length limit",
+  "askChef.stopPreempted": "Stopped because you asked a newer question",
   "askChef.evidence": "Evidence · click to open in Explorer",
   "askChef.openEvidence": "Open evidence {id} in Explorer",
   "askChef.suggestCompare": "Compare with the previous window",
@@ -1448,7 +1449,6 @@
   "askChef.placeholderFollowUp": "Ask a follow-up…",
   "askChef.send": "Send",
   "askChef.stop": "Stop",
-  "askChef.busy": "Ask Chef is already answering another question. Wait for it to finish, then try again.",
   "askChef.failed": "Ask Chef could not answer. Try again.",
   "askChef.disabled": "Ask Chef is turned off on this server."
 }

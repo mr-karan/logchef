@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "Interrompido no limite de chamadas de ferramentas",
   "askChef.stopDeadline": "Interrompido no limite de tempo",
   "askChef.stopMaxTokens": "Resposta cortada no limite de tamanho",
+  "askChef.stopPreempted": "Interrompida porque você fez uma pergunta mais recente",
   "askChef.evidence": "Evidências · clique para abrir no Explorador",
   "askChef.openEvidence": "Abrir a evidência {id} no Explorador",
   "askChef.suggestCompare": "Comparar com a janela anterior",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "Faça uma pergunta de acompanhamento…",
   "askChef.send": "Enviar",
   "askChef.stop": "Parar",
-  "askChef.busy": "O Ask Chef já está respondendo outra pergunta. Aguarde terminar e tente de novo.",
   "askChef.failed": "O Ask Chef não conseguiu responder. Tente de novo.",
   "askChef.disabled": "O Ask Chef está desativado neste servidor."
 }

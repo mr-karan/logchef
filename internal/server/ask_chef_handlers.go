@@ -2,9 +2,7 @@ package server
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -42,10 +40,11 @@ func (s *Server) newAskChef(chat askchef.ChatModel) *askchef.Agent {
 }
 
 // handleAskChefTurn answers one question with Ask Chef. It validates the
-// request, checks team and source access with the user's assistant principal
-// and allows one turn per user, all before the stream starts, so those
-// failures are normal JSON errors. The stream carries tool_start, tool_end,
-// text, done and error events.
+// request and checks team and source access with the user's assistant
+// principal before the stream starts, so those failures are normal JSON
+// errors. A user runs one turn at a time: a new turn preempts the running
+// one. The stream carries tool_start, tool_end, text, done and error events,
+// and heartbeat comments.
 //
 // POST /api/v1/ask-chef/turns
 func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
@@ -97,9 +96,9 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 		}
 	}
 
-	if _, busy := s.askChefTurns.LoadOrStore(user.ID, struct{}{}); busy {
-		s.log.Info("ask chef turn refused: another turn is running", "user_id", user.ID)
-		return SendErrorWithType(c, fiber.StatusConflict, "Ask Chef is already answering another question", models.ConflictErrorType)
+	turnCtx, cancelTurn, preempted := s.askChefTurns.start(ctx, user.ID, askChefTurnLease)
+	if preempted {
+		s.log.Info("ask chef turn preempted by a newer turn", "user_id", user.ID)
 	}
 
 	c.Status(fiber.StatusOK)
@@ -113,21 +112,11 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 	agent := s.askChef
 	turn := askchef.Turn{Principal: p, Request: req, Alert: alert}
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
-		defer s.askChefTurns.Delete(user.ID)
-		agent.Run(ctx, turn, func(ev askchef.Event) bool { return writeSSEEvent(w, ev) })
+		defer cancelTurn(nil)
+		stream := &askChefStream{w: w, cancel: cancelTurn}
+		stopHeartbeat := stream.heartbeat(turnCtx, askChefHeartbeat)
+		defer stopHeartbeat()
+		agent.Run(turnCtx, turn, stream.event)
 	})
 	return nil
-}
-
-// writeSSEEvent writes and flushes one event. It returns false when the
-// client is gone.
-func writeSSEEvent(w *bufio.Writer, ev askchef.Event) bool {
-	data, err := json.Marshal(ev)
-	if err != nil {
-		return false
-	}
-	if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", ev.Name(), data); err != nil {
-		return false
-	}
-	return w.Flush() == nil
 }

@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -309,41 +311,151 @@ func TestAskChefTurnRefusals(t *testing.T) {
 	}
 }
 
-func TestAskChefAllowsOneTurnPerUser(t *testing.T) {
+func TestAskChefNewTurnPreemptsRunningTurn(t *testing.T) {
 	chat := &echoChat{started: make(chan struct{}, 1), gate: make(chan struct{})}
 	env := newAskChefEnv(t, askChefConfig("anthropic.claude-haiku"), chat)
-
-	body := env.body(nil)
-	first := make(chan turnResponse, 1)
-	go func() {
-		resp, err := env.post(env.session, "application/json", body)
-		if err != nil {
-			t.Errorf("first turn: %v", err)
+	reached := func(turn string) {
+		t.Helper()
+		select {
+		case <-chat.started:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("the %s turn never reached the model", turn)
 		}
-		first <- resp
-	}()
-	select {
-	case <-chat.started:
-	case <-time.After(5 * time.Second):
-		t.Fatal("the first turn never reached the model")
+	}
+	post := func(name string) chan turnResponse {
+		out := make(chan turnResponse, 1)
+		go func() {
+			resp, err := env.post(env.session, "application/json", env.body(nil))
+			if err != nil {
+				t.Errorf("%s turn: %v", name, err)
+			}
+			out <- resp
+		}()
+		return out
 	}
 
-	if resp := env.mustPost(body); resp.status != http.StatusConflict {
-		t.Fatalf("second turn status = %d, want 409", resp.status)
+	first := post("first")
+	reached("first")
+	second := post("second")
+	reached("second")
+
+	resp := <-first
+	names, data := readFrames(t, resp.body)
+	if resp.status != http.StatusOK || names[len(names)-1] != "done" || !strings.Contains(string(data[len(data)-1]), `"stop_reason":"preempted"`) {
+		t.Fatalf("first turn: status %d events %v last %s, want done with preempted", resp.status, names, data[len(data)-1])
 	}
 
 	close(chat.gate)
-	resp := <-first
-	if resp.status != http.StatusOK {
-		t.Fatalf("first turn status = %d: %s", resp.status, resp.body)
+	resp = <-second
+	names, data = readFrames(t, resp.body)
+	if resp.status != http.StatusOK || !strings.Contains(string(data[len(data)-1]), `"stop_reason":"end"`) {
+		t.Fatalf("second turn: status %d events %v, want an answer", resp.status, names)
 	}
-	if names, _ := readFrames(t, resp.body); names[len(names)-1] != "done" {
-		t.Fatalf("first turn events = %v", names)
-	}
+	waitFor(t, func() bool {
+		env.srv.askChefTurns.mu.Lock()
+		defer env.srv.askChefTurns.mu.Unlock()
+		return len(env.srv.askChefTurns.running) == 0
+	})
+}
 
-	go func() { <-chat.started }()
-	if resp := env.mustPost(body); resp.status != http.StatusOK {
-		t.Fatalf("turn after the first ended: status = %d, want 200", resp.status)
+// A preempted turn's cleanup must not remove the turn that replaced it.
+func TestAskChefTurnsPreemptWithToken(t *testing.T) {
+	var turns askChefTurns
+	first, _, preempted := turns.start(t.Context(), 7, time.Minute)
+	if preempted {
+		t.Fatal("the first turn preempted nothing, but start says it did")
+	}
+	second, cancelSecond, preempted := turns.start(t.Context(), 7, time.Minute)
+	if !preempted {
+		t.Fatal("start did not report the preemption")
+	}
+	<-first.Done()
+	if !errors.Is(context.Cause(first), askchef.ErrPreempted) {
+		t.Fatalf("first turn cause = %v, want ErrPreempted", context.Cause(first))
+	}
+	running := func() int {
+		turns.mu.Lock()
+		defer turns.mu.Unlock()
+		return len(turns.running)
+	}
+	if second.Err() != nil || running() != 1 {
+		t.Fatalf("second turn err = %v, running = %d, want the second turn registered", second.Err(), running())
+	}
+	cancelSecond(nil)
+	waitFor(t, func() bool { return running() == 0 })
+}
+
+// A turn whose stream writer never runs still leaves the registry at its
+// lease.
+func TestAskChefTurnsReleaseAtLease(t *testing.T) {
+	var turns askChefTurns
+	ctx, _, _ := turns.start(t.Context(), 7, 10*time.Millisecond)
+	<-ctx.Done()
+	waitFor(t, func() bool {
+		turns.mu.Lock()
+		defer turns.mu.Unlock()
+		return len(turns.running) == 0
+	})
+}
+
+type failingWriter struct{}
+
+func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("connection reset") }
+
+func TestAskChefStreamCancelsTheTurnWhenAWriteFails(t *testing.T) {
+	t.Run("event", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		stream := &askChefStream{w: bufio.NewWriter(failingWriter{}), cancel: cancel}
+		if stream.event(askchef.Text{Delta: "x"}) {
+			t.Fatal("event reported success on a failed write")
+		}
+		if !errors.Is(context.Cause(ctx), errAskChefClientGone) {
+			t.Fatalf("cause = %v, want errAskChefClientGone", context.Cause(ctx))
+		}
+	})
+	t.Run("heartbeat", func(t *testing.T) {
+		ctx, cancel := context.WithCancelCause(t.Context())
+		stream := &askChefStream{w: bufio.NewWriter(failingWriter{}), cancel: cancel}
+		stop := stream.heartbeat(ctx, time.Millisecond)
+		defer stop()
+		select {
+		case <-ctx.Done():
+		case <-time.After(5 * time.Second):
+			t.Fatal("a failed heartbeat did not cancel the turn")
+		}
+		if !errors.Is(context.Cause(ctx), errAskChefClientGone) {
+			t.Fatalf("cause = %v, want errAskChefClientGone", context.Cause(ctx))
+		}
+	})
+}
+
+func TestAskChefStreamHeartbeat(t *testing.T) {
+	var out bytes.Buffer
+	stream := &askChefStream{w: bufio.NewWriter(&out), cancel: func(error) {}}
+	stop := stream.heartbeat(t.Context(), time.Millisecond)
+	waitFor(t, func() bool {
+		stream.mu.Lock()
+		defer stream.mu.Unlock()
+		return strings.Count(out.String(), ": ping\n\n") >= 2
+	})
+	stop()
+	if !stream.event(askchef.Text{Delta: "x"}) {
+		t.Fatal("event failed")
+	}
+	pings, ok := strings.CutSuffix(out.String(), "event: text\ndata: {\"delta\":\"x\"}\n\n")
+	if !ok || strings.ReplaceAll(pings, ": ping\n\n", "") != "" {
+		t.Fatalf("stream = %q, want pings and then the event", out.String())
+	}
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !ok() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition not met within 5s")
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 

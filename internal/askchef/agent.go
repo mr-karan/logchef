@@ -20,10 +20,16 @@ import (
 	"github.com/mr-karan/logchef/internal/mcp"
 )
 
+// TurnTimeout bounds one turn.
+const TurnTimeout = 120 * time.Second
+
+// ErrPreempted is the cancel cause of a turn that a newer turn from the same
+// user replaced.
+var ErrPreempted = errors.New("a newer turn replaced this turn")
+
 // Turn limits.
 const (
 	maxToolCalls       = 12
-	turnTimeout        = 120 * time.Second
 	maxOutputTokens    = 2048
 	maxToolResultBytes = 12 * 1024
 	maxErrorChars      = 300
@@ -91,11 +97,12 @@ type turnRun struct {
 }
 
 // Run runs one turn and passes its events to emit, in order. The last event
-// is Done or Failure, unless the turn is cancelled. emit returns false when
-// the client is gone, which cancels the turn.
+// is Done or Failure, unless the turn is cancelled. A turn cancelled with
+// ErrPreempted ends with Done. emit returns false when the client is gone,
+// which cancels the turn.
 func (a *Agent) Run(ctx context.Context, turn Turn, emit func(Event) bool) {
 	started := time.Now()
-	ctx, cancel := context.WithTimeout(mcp.WithPrincipal(ctx, turn.Principal), turnTimeout)
+	ctx, cancel := context.WithTimeout(mcp.WithPrincipal(ctx, turn.Principal), TurnTimeout)
 	defer cancel()
 
 	run := &turnRun{
@@ -118,6 +125,8 @@ func (a *Agent) Run(ctx context.Context, turn Turn, emit func(Event) bool) {
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		stop = StopDeadline
+	case errors.Is(context.Cause(ctx), ErrPreempted):
+		stop = StopPreempted
 	case ctx.Err() != nil:
 		run.log.Info("ask chef turn cancelled", logAttrs...)
 		return

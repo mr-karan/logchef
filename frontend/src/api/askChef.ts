@@ -3,7 +3,7 @@ import { createSSEParser } from "@/lib/sse";
 
 export type QueryMode = "logchefql" | "native";
 export type EvidenceId = `E${number}`;
-export type StopReason = "end" | "tool_limit" | "deadline" | "max_tokens";
+export type StopReason = "end" | "tool_limit" | "deadline" | "max_tokens" | "preempted";
 
 export interface EvidenceRecord {
   id: EvidenceId;
@@ -59,8 +59,8 @@ export type AskChefEvent =
   | DoneEvent
   | { type: "error"; message: string };
 
-// busy is the server's 409 (a turn is already running), disabled its 404.
-export type AskChefErrorReason = "busy" | "disabled" | "failed" | "protocol";
+// disabled is the server's 404.
+export type AskChefErrorReason = "disabled" | "failed" | "protocol";
 
 export class AskChefError extends Error {
   constructor(public reason: AskChefErrorReason, message: string) {
@@ -85,7 +85,7 @@ function isQueryMode(value: unknown): value is QueryMode {
   return value === "logchefql" || value === "native";
 }
 
-const STOP_REASONS: ReadonlySet<unknown> = new Set<StopReason>(["end", "tool_limit", "deadline", "max_tokens"]);
+const STOP_REASONS: ReadonlySet<unknown> = new Set<StopReason>(["end", "tool_limit", "deadline", "max_tokens", "preempted"]);
 
 function isStopReason(value: unknown): value is StopReason {
   return STOP_REASONS.has(value);
@@ -181,7 +181,6 @@ export function createAskChefStreamParser(): AskChefStreamParser {
 async function readError(response: Response): Promise<AskChefError> {
   const body: unknown = await response.json().catch(() => null);
   const message = isRecord(body) && typeof body.message === "string" ? body.message : `Ask Chef request failed (${response.status})`;
-  if (response.status === 409) return new AskChefError("busy", message);
   if (response.status === 404) return new AskChefError("disabled", message);
   return new AskChefError("failed", message);
 }

@@ -1439,6 +1439,7 @@
   "askChef.stopToolLimit": "已达到工具调用上限，已停止",
   "askChef.stopDeadline": "已达到时间上限，已停止",
   "askChef.stopMaxTokens": "回答在长度上限处被截断",
+  "askChef.stopPreempted": "因你提出了新问题而停止",
   "askChef.evidence": "证据 · 点击在探索器中打开",
   "askChef.openEvidence": "在探索器中打开证据 {id}",
   "askChef.suggestCompare": "与上一个时间窗口比较",
@@ -1448,7 +1449,6 @@
   "askChef.placeholderFollowUp": "继续提问…",
   "askChef.send": "发送",
   "askChef.stop": "停止",
-  "askChef.busy": "Ask Chef 正在回答另一个问题。请等待其完成后重试。",
   "askChef.failed": "Ask Chef 无法回答。请重试。",
   "askChef.disabled": "此服务器已关闭 Ask Chef。"
 }

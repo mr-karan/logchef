@@ -43,6 +43,7 @@ const stopNote = computed(() => {
   if (reason === "tool_limit") return t("askChef.stopToolLimit");
   if (reason === "deadline") return t("askChef.stopDeadline");
   if (reason === "max_tokens") return t("askChef.stopMaxTokens");
+  if (reason === "preempted") return t("askChef.stopPreempted");
   return "";
 });
 

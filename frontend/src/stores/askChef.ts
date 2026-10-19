@@ -158,7 +158,6 @@ export function buildTurnRequest(context: AskChefContext, session: AskChefSessio
 function failureStatus(err: unknown): AskChefStatus {
   if (err instanceof AskChefError) {
     if (err.reason === "disabled") return { kind: "disabled" };
-    if (err.reason === "busy") return { kind: "error", message: i18n.global.t("askChef.busy") };
     return { kind: "error", message: err.message };
   }
   return { kind: "error", message: i18n.global.t("askChef.failed") };

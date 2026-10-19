@@ -71,8 +71,7 @@ type Server struct {
 	version       string
 	dashCache     *dashcache.Cache // per-dashboard TTL result cache
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
-	// askChefTurns holds the user IDs with a running Ask Chef turn.
-	askChefTurns sync.Map
+	askChefTurns  askChefTurns
 
 	stop chan struct{} // closed by Shutdown to stop background maintenance loops
 	// cancelRequests cancels the base context every request runs on (see
@@ -454,7 +453,7 @@ func (s *Server) setupRoutes() {
 	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
 
 	// Ask Chef: browser session only. The handler checks team and source
-	// access, and allows one running turn per user.
+	// access, and a new turn preempts the user's running turn.
 	api.Post(askChefTurnsPath, s.requireSession, s.handleAskChefTurn)
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source

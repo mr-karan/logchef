@@ -243,15 +243,18 @@ describe("useAskChefStore", () => {
     expect(store.evidence.get("E1")).toEqual(evidence(1));
   });
 
-  it("reports a running turn (409) inline and drops the empty answer", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(409, "a turn is already running")));
+  it("ends a turn that a newer turn preempted without an error", async () => {
+    const wire =
+      frame("text", { delta: "Errors rose" }) +
+      frame("done", { stop_reason: "preempted", tool_calls: 0, input_tokens: 1, output_tokens: 1, duration_ms: 900 });
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(sseResponse([wire])));
     const store = useAskChefStore();
 
     store.investigateAlert(alert, entry, 1);
-    await vi.waitFor(() => expect(store.status.kind).toBe("error"));
+    await vi.waitFor(() => expect(store.transcript[1]).toMatchObject({ done: { stop_reason: "preempted" } }));
 
-    expect(store.status).toEqual({ kind: "error", message: "Ask Chef is already answering another question. Wait for it to finish, then try again." });
-    expect(store.transcript).toEqual([{ role: "user", text: "Why did this fire?" }]);
+    expect(store.status).toEqual({ kind: "idle" });
+    expect(store.transcript[1]).toMatchObject({ role: "assistant", text: "Errors rose" });
   });
 
   it("switches to disabled when the server has Ask Chef off (404)", async () => {

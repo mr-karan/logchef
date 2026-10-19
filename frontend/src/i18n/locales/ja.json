@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "ツール呼び出しの上限で停止しました",
   "askChef.stopDeadline": "時間の上限で停止しました",
   "askChef.stopMaxTokens": "回答が長さの上限で途切れました",
+  "askChef.stopPreempted": "新しい質問をしたため停止しました",
   "askChef.evidence": "根拠 · クリックしてエクスプローラーで開く",
   "askChef.openEvidence": "根拠 {id} をエクスプローラーで開く",
   "askChef.suggestCompare": "前の期間と比較",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "続けて質問…",
   "askChef.send": "送信",
   "askChef.stop": "停止",
-  "askChef.busy": "Ask Chef は別の質問に回答中です。完了してから再試行してください。",
   "askChef.failed": "Ask Chef は回答できませんでした。再試行してください。",
   "askChef.disabled": "このサーバーでは Ask Chef が無効です。"
 }

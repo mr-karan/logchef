@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "Interrotto al limite di chiamate a strumenti",
   "askChef.stopDeadline": "Interrotto al limite di tempo",
   "askChef.stopMaxTokens": "Risposta troncata al limite di lunghezza",
+  "askChef.stopPreempted": "Interrotta perché hai fatto una domanda più recente",
   "askChef.evidence": "Prove · clicca per aprire in Explorer",
   "askChef.openEvidence": "Apri la prova {id} in Explorer",
   "askChef.suggestCompare": "Confronta con la finestra precedente",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "Fai una domanda di approfondimento…",
   "askChef.send": "Invia",
   "askChef.stop": "Interrompi",
-  "askChef.busy": "Ask Chef sta già rispondendo a un'altra domanda. Attendi che finisca, poi riprova.",
   "askChef.failed": "Ask Chef non è riuscito a rispondere. Riprova.",
   "askChef.disabled": "Ask Chef è disattivato su questo server."
 }

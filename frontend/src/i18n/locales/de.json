@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "Beim Limit für Tool-Aufrufe gestoppt",
   "askChef.stopDeadline": "Beim Zeitlimit gestoppt",
   "askChef.stopMaxTokens": "Antwort an der Längengrenze abgeschnitten",
+  "askChef.stopPreempted": "Angehalten, weil Sie eine neuere Frage gestellt haben",
   "askChef.evidence": "Belege · zum Öffnen im Explorer klicken",
   "askChef.openEvidence": "Beleg {id} im Explorer öffnen",
   "askChef.suggestCompare": "Mit dem vorherigen Zeitfenster vergleichen",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "Folgefrage stellen…",
   "askChef.send": "Senden",
   "askChef.stop": "Stoppen",
-  "askChef.busy": "Ask Chef beantwortet bereits eine andere Frage. Warten Sie, bis sie fertig ist, und versuchen Sie es dann erneut.",
   "askChef.failed": "Ask Chef konnte nicht antworten. Versuchen Sie es erneut.",
   "askChef.disabled": "Ask Chef ist auf diesem Server deaktiviert."
 }

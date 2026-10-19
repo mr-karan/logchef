@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "已達到工具呼叫上限，已停止",
   "askChef.stopDeadline": "已達到時間上限，已停止",
   "askChef.stopMaxTokens": "回答在長度上限處被截斷",
+  "askChef.stopPreempted": "因你提出了新問題而停止",
   "askChef.evidence": "證據 · 點擊在探索器中開啟",
   "askChef.openEvidence": "在探索器中開啟證據 {id}",
   "askChef.suggestCompare": "與上一個時間窗口比較",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "繼續提問…",
   "askChef.send": "傳送",
   "askChef.stop": "停止",
-  "askChef.busy": "Ask Chef 正在回答另一個問題。請等待其完成後重試。",
   "askChef.failed": "Ask Chef 無法回答。請重試。",
   "askChef.disabled": "此伺服器已關閉 Ask Chef。"
 }

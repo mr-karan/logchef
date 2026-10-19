@@ -14,6 +14,8 @@ const (
 	// StopMaxTokens means the model hit its output limit, so the answer is
 	// cut off.
 	StopMaxTokens StopReason = "max_tokens"
+	// StopPreempted means a newer turn from the same user replaced this one.
+	StopPreempted StopReason = "preempted"
 )
 
 // ToolStart is sent before a tool runs.

@@ -722,6 +722,7 @@
   "askChef.stopToolLimit": "도구 호출 한도에서 중지됨",
   "askChef.stopDeadline": "시간 한도에서 중지됨",
   "askChef.stopMaxTokens": "답변이 길이 제한에서 잘렸습니다",
+  "askChef.stopPreempted": "새 질문을 해서 중지되었습니다",
   "askChef.evidence": "근거 · 클릭하여 탐색기에서 열기",
   "askChef.openEvidence": "탐색기에서 근거 {id} 열기",
   "askChef.suggestCompare": "이전 구간과 비교",
@@ -731,7 +732,6 @@
   "askChef.placeholderFollowUp": "추가 질문하기…",
   "askChef.send": "보내기",
   "askChef.stop": "중지",
-  "askChef.busy": "Ask Chef가 이미 다른 질문에 답하고 있습니다. 끝날 때까지 기다린 후 다시 시도하세요.",
   "askChef.failed": "Ask Chef가 답하지 못했습니다. 다시 시도하세요.",
   "askChef.disabled": "이 서버에서는 Ask Chef가 꺼져 있습니다."
 }
