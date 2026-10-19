@@ -1,5 +1,4 @@
 {
-  "description": "An error spike question. Counts of service over all logs differ from counts over the errors, so a field count without the error filter attributes the wrong number of errors.",
   "question": "Which service is behind the error spike?",
   "view": {
     "mode": "logchefql",

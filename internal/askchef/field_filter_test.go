@@ -20,14 +20,12 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// evalScenario is one investigation in testdata/evals: the user's question
-// and view, the field values a VictoriaLogs backend serves for each LogsQL
-// filter, and a scripted run of the model. The deterministic test replays
-// the script. A real-model eval can give the same scenario to a live model.
-type evalScenario struct {
-	Description string `json:"description"`
-	Question    string `json:"question"`
-	View        struct {
+// fieldFilterScenario is one investigation in testdata/field_filters: the
+// user's question and view, the field values a VictoriaLogs backend serves
+// for each LogsQL filter, and the tool calls a scripted model makes.
+type fieldFilterScenario struct {
+	Question string `json:"question"`
+	View     struct {
 		Mode  askchef.QueryMode `json:"mode"`
 		Query string            `json:"query"`
 		Start time.Time         `json:"start"`
@@ -51,13 +49,13 @@ type evalScenario struct {
 	} `json:"expect"`
 }
 
-func loadEvalScenario(t *testing.T, path string) evalScenario {
+func loadFieldFilterScenario(t *testing.T, path string) fieldFilterScenario {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var s evalScenario
+	var s fieldFilterScenario
 	if err := json.Unmarshal(data, &s); err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
@@ -69,7 +67,7 @@ func loadEvalScenario(t *testing.T, path string) evalScenario {
 
 // serveFieldValues is a VictoriaLogs stand-in that answers field value
 // queries from the scenario. A filter the scenario does not list fails.
-func (s evalScenario) serveFieldValues(t *testing.T) string {
+func (s fieldFilterScenario) serveFieldValues(t *testing.T) string {
 	t.Helper()
 	fields := map[string]bool{}
 	for _, byField := range s.FieldValues {
@@ -111,7 +109,7 @@ func (w *world) addSource(t *testing.T, url string) models.SourceID {
 	if err != nil {
 		t.Fatal(err)
 	}
-	source := &models.Source{Name: "eval-logs", SourceType: models.SourceTypeVictoriaLogs, MetaTSField: "_time", ConnectionConfig: conn}
+	source := &models.Source{Name: "scenario-logs", SourceType: models.SourceTypeVictoriaLogs, MetaTSField: "_time", ConnectionConfig: conn}
 	if err := w.db.CreateSource(ctx, source); err != nil {
 		t.Fatalf("CreateSource: %v", err)
 	}
@@ -124,17 +122,18 @@ func (w *world) addSource(t *testing.T, url string) models.SourceID {
 	return source.ID
 }
 
-// TestEvalScenarios replays each scenario's scripted model run against its
-// stubbed backend. It checks what the model is told, not what a model
-// answers.
-func TestEvalScenarios(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("testdata", "evals", "*.json"))
+// TestFieldToolFiltersAndEvidenceHeaders runs each scenario's tool calls
+// through the field tools against its stubbed backend. It checks that a
+// filter reaches the backend and that the system prompt and evidence headers
+// tell the model which logs each count covers.
+func TestFieldToolFiltersAndEvidenceHeaders(t *testing.T) {
+	paths, err := filepath.Glob(filepath.Join("testdata", "field_filters", "*.json"))
 	if err != nil || len(paths) == 0 {
-		t.Fatalf("no eval scenarios: %v", err)
+		t.Fatalf("no field filter scenarios: %v", err)
 	}
 	for _, path := range paths {
 		t.Run(strings.TrimSuffix(filepath.Base(path), ".json"), func(t *testing.T) {
-			s := loadEvalScenario(t, path)
+			s := loadFieldFilterScenario(t, path)
 			w := newWorld(t)
 			source := w.addSource(t, s.serveFieldValues(t))
 
