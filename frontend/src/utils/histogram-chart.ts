@@ -1,5 +1,6 @@
 import type { ChartConfig } from "@/components/ui/chart";
 import type { HistogramData } from "@/services/HistogramService";
+import { epochMs, formatInZone, isSameZonedDay, type ZoneId } from "@/utils/timeWindow";
 
 export interface HistogramChartSeries {
   key: string;
@@ -136,51 +137,44 @@ export function formatCompactCount(value: number): string {
   return `${(Math.round(value / 100_000_000) / 10).toLocaleString()}B`;
 }
 
+/** A chart's time range plus the zone its labels render in. */
+export interface HistogramLabelRange {
+  start: number;
+  end: number;
+  zone: ZoneId;
+}
+
+function showsDate(range: HistogramLabelRange): boolean {
+  return range.end - range.start >= 86_400_000 || !isSameZonedDay(epochMs(range.start), epochMs(range.end), range.zone);
+}
+
 export function formatHistogramTimestamp(
   timestamp: number | Date,
-  range: { start: number; end: number },
+  range: HistogramLabelRange,
   granularity?: string | null,
 ): string {
-  const value = timestamp instanceof Date ? timestamp : new Date(timestamp);
   const showSeconds = granularity?.endsWith("s") ?? false;
-  const rangeStart = new Date(range.start);
-  const rangeEnd = new Date(range.end);
-  const showDate =
-    range.end - range.start >= 86_400_000 ||
-    rangeStart.toDateString() !== rangeEnd.toDateString();
-
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    ...(showDate ? { month: "short", day: "2-digit" } : {}),
+  return formatInZone(epochMs(timestamp), range.zone, {
+    ...(showsDate(range) ? { month: "short", day: "2-digit" } : {}),
     hour: "2-digit",
     minute: "2-digit",
     ...(showSeconds ? { second: "2-digit" } : {}),
     hour12: false,
   });
-
-  return formatter.format(value);
 }
 
 /** Tooltip-specific formatter: always includes HH:MM:SS for precise identification. */
 export function formatTooltipTimestamp(
   timestamp: number | Date,
-  range: { start: number; end: number },
+  range: HistogramLabelRange,
 ): string {
-  const value = timestamp instanceof Date ? timestamp : new Date(timestamp);
-  const rangeStart = new Date(range.start);
-  const rangeEnd = new Date(range.end);
-  const showDate =
-    range.end - range.start >= 86_400_000 ||
-    rangeStart.toDateString() !== rangeEnd.toDateString();
-
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    ...(showDate ? { month: "short", day: "2-digit" } : {}),
+  return formatInZone(epochMs(timestamp), range.zone, {
+    ...(showsDate(range) ? { month: "short", day: "2-digit" } : {}),
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
     hour12: false,
   });
-
-  return formatter.format(value);
 }
 
 // Insert zero-count rows for every missing time bucket between the first and

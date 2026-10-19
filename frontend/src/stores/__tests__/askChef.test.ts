@@ -10,6 +10,7 @@ import { applyAskChefEvent, buildTurnRequest, newSession, useAskChefStore, type 
 import { useAuthStore } from "../auth";
 import { useContextStore } from "../context";
 import { useExploreStore } from "../explore";
+import { zoneFromPreference } from "@/utils/timeWindow";
 
 vi.mock("@/api/auth", () => ({
   authApi: { localLogin: vi.fn(), getSession: vi.fn(), logout: vi.fn() },
@@ -101,6 +102,7 @@ describe("buildTurnRequest", () => {
     sourceId: 3,
     start: 1000,
     end: 2000,
+    zone: zoneFromPreference("utc"),
     mode: "logchefql",
     query: 'level="error"',
     subject: {

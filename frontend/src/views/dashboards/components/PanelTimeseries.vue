@@ -58,8 +58,10 @@ import {
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
 import type { HistogramData } from "@/services/HistogramService";
+import { usePreferencesStore } from "@/stores/preferences";
 
 const { t } = useI18n();
+const preferencesStore = usePreferencesStore();
 
 // A prop-driven timeseries panel. It reuses the same chart model + unovis stacked
 // bar the explorer histogram uses, but takes its data via props (the explorer's
@@ -138,14 +140,14 @@ const crosshairYProps = computed(() =>
 
 const chartRange = computed(() => {
   if (isValidRange(props.range)) {
-    return { start: props.range.start, end: props.range.end };
+    return { start: props.range.start, end: props.range.end, zone: preferencesStore.zone };
   }
   if (!chartModel.value.rows.length) {
-    return { start: Date.now() - chartModel.value.bucketWidthMs, end: Date.now() };
+    return { start: Date.now() - chartModel.value.bucketWidthMs, end: Date.now(), zone: preferencesStore.zone };
   }
   const first = chartModel.value.rows[0];
   const last = chartModel.value.rows[chartModel.value.rows.length - 1];
-  return { start: first.ts, end: last.bucketEndTs };
+  return { start: first.ts, end: last.bucketEndTs, zone: preferencesStore.zone };
 });
 
 // Explicit x-domain for the chart canvas itself (not just tick/tooltip

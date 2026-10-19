@@ -16,8 +16,10 @@ import { i18n } from "@/i18n";
 import router from "@/router";
 import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/utils/alertExplore";
 import { parseRelativeTimeString } from "@/utils/time";
+import type { ZoneId } from "@/utils/timeWindow";
 import { useAuthStore } from "./auth";
 import { useExploreStore } from "./explore";
+import { usePreferencesStore } from "./preferences";
 import { useTeamsStore } from "./teams";
 
 const MAX_HISTORY_ITEMS = 20;
@@ -38,7 +40,8 @@ export type AskChefSubject =
       thresholdValue: number;
     };
 
-export type AskChefContext = ExploreWindow & { subject: AskChefSubject };
+// `zone` is the zone the context's times are shown in.
+export type AskChefContext = ExploreWindow & { subject: AskChefSubject; zone: ZoneId };
 
 export type ToolStep = { callId: string; tool: string } & (
   | { status: "running" }
@@ -200,6 +203,7 @@ export const useAskChefStore = defineStore("askChef", () => {
       sourceId: explore.sourceId,
       start: range.start.toDate(timezone).getTime(),
       end: range.end.toDate(timezone).getTime(),
+      zone: usePreferencesStore().zone,
       mode,
       ...(query ? { query } : {}),
     };
@@ -258,6 +262,7 @@ export const useAskChefStore = defineStore("askChef", () => {
     clearConversation();
     pinned.value = {
       ...alertHistoryWindow(alert, entry, teamId),
+      zone: usePreferencesStore().zone,
       subject: {
         kind: "alert",
         alertId: alert.id,

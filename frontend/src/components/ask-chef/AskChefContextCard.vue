@@ -5,6 +5,7 @@ import type { AlertThresholdOperator } from "@/api/alerts";
 import type { AskChefContext } from "@/stores/askChef";
 import { useSourcesStore } from "@/stores/sources";
 import { useTeamsStore } from "@/stores/teams";
+import { epochMs, formatInZone, isSameZonedDay } from "@/utils/timeWindow";
 
 const props = defineProps<{ context: AskChefContext }>();
 
@@ -23,12 +24,13 @@ const sourceLabel = computed(() => {
 });
 
 function formatTime(ms: number, withDate: boolean): string {
-  return new Date(ms).toLocaleString(locale.value, withDate ? { dateStyle: "medium", timeStyle: "short" } : { timeStyle: "short" });
+  const opts: Intl.DateTimeFormatOptions = withDate ? { dateStyle: "medium", timeStyle: "short" } : { timeStyle: "short" };
+  return formatInZone(epochMs(ms), props.context.zone, opts, locale.value);
 }
 
 const windowLabel = computed(() => {
-  const { start, end } = props.context;
-  const sameDay = new Date(start).toDateString() === new Date(end).toDateString();
+  const { start, end, zone } = props.context;
+  const sameDay = isSameZonedDay(epochMs(start), epochMs(end), zone);
   return `${formatTime(start, true)} – ${formatTime(end, !sameDay)}`;
 });
 
