@@ -2,7 +2,6 @@ import { ref, computed } from 'vue';
 import { useExploreStore } from '@/stores/explore';
 import { useSourcesStore } from '@/stores/sources';
 import { useTeamsStore } from '@/stores/teams';
-import { QueryService } from '@/services/QueryService';
 import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
 import { logchefqlApi } from '@/api/logchefql';
@@ -231,32 +230,6 @@ export function useQuery() {
     }
   };
 
-  // Translate LogchefQL to SQL - delegates to QueryService (synchronous fallback)
-  const translateLogchefQLToSQL = (logchefqlQuery: string) => {
-    try {
-      const sourceDetails = sourcesStore.currentSourceDetails;
-      if (!sourceDetails) {
-        throw new Error('No source selected');
-      }
-
-      const params = {
-        tableName: sourcesStore.getCurrentSourceTableName || '',
-        tsField: sourceDetails._meta_ts_field || 'timestamp',
-        window: exploreStore.resolved,
-        limit: exploreStore.limit,
-        logchefqlQuery
-      };
-
-      return QueryService.translateLogchefQLToSQL(params);
-    } catch (error) {
-      return {
-        success: false,
-        sql: '',
-        error: error instanceof Error ? error.message : 'Failed to translate LogchefQL'
-      };
-    }
-  };
-
   // Prepare query for execution - now uses SqlManager
   const prepareQueryForExecution = async () => {
     try {
@@ -375,7 +348,6 @@ export function useQuery() {
     handleTimeRangeUpdate,
     handleLimitUpdate,
     generateDefaultSQL,
-    translateLogchefQLToSQL,
     prepareQueryForExecution,
     executeQuery
   };
