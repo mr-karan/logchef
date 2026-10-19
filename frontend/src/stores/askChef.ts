@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import {
   AskChefError,
   evidenceNumber,
@@ -16,6 +16,7 @@ import { i18n } from "@/i18n";
 import router from "@/router";
 import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/utils/alertExplore";
 import { calendarDateTimeToTimestamp, parseRelativeTimeString } from "@/utils/time";
+import { useAuthStore } from "./auth";
 import { useExploreStore } from "./explore";
 import { useTeamsStore } from "./teams";
 
@@ -276,6 +277,17 @@ export const useAskChefStore = defineStore("askChef", () => {
     clearConversation();
     context.value = explorerContext() ?? context.value;
   }
+
+  // A conversation belongs to the user who had it, so logout or a new login ends it.
+  watch(
+    () => useAuthStore().user?.id,
+    () => {
+      clearConversation();
+      context.value = null;
+      open.value = false;
+    },
+    { flush: "sync" }
+  );
 
   function openEvidence(id: EvidenceId) {
     const record = session.value.evidence.get(id);

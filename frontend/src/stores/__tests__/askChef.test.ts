@@ -2,8 +2,15 @@ import { createPinia, setActivePinia } from "pinia";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Alert, AlertHistoryEntry } from "@/api/alerts";
+import { authApi } from "@/api/auth";
 import type { EvidenceRecord } from "@/api/askChef";
+import type { User } from "@/types";
 import { applyAskChefEvent, buildTurnRequest, newSession, useAskChefStore, type AskChefContext, type AskChefSession } from "../askChef";
+import { useAuthStore } from "../auth";
+
+vi.mock("@/api/auth", () => ({
+  authApi: { localLogin: vi.fn(), getSession: vi.fn(), logout: vi.fn() },
+}));
 
 function evidence(n: number): EvidenceRecord {
   return {
@@ -285,5 +292,80 @@ describe("useAskChefStore", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(store.status).toEqual({ kind: "idle" });
+  });
+});
+
+// A fetch that streams one tool_start and then hangs until its signal aborts.
+function hangingTurn(onAbort: () => void) {
+  return vi.fn((_url: string, init: RequestInit) => {
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode(frame("tool_start", { call_id: "c1", tool: "top_values" })));
+        init.signal?.addEventListener("abort", () => {
+          onAbort();
+          controller.error(new DOMException("aborted", "AbortError"));
+        });
+      },
+    });
+    return Promise.resolve(new Response(body, { status: 200 }));
+  });
+}
+
+describe("useAskChefStore and the signed-in user", () => {
+  function user(id: string): User {
+    return { id, email: `user${id}@example.com`, full_name: `User ${id}`, role: "member", status: "active", account_type: "human", created_at: "", updated_at: "" };
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    vi.mocked(authApi.localLogin).mockResolvedValue({ status: "success", data: null });
+    vi.mocked(authApi.logout).mockResolvedValue({ status: "success", data: undefined });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.resetAllMocks();
+  });
+
+  async function signIn(id: string) {
+    vi.mocked(authApi.getSession).mockResolvedValueOnce({ status: "success", data: { user: user(id), session: { id: "s", user_id: id, expires_at: "", created_at: "" } } });
+    await useAuthStore().localLogin(`user${id}@example.com`, "secret");
+  }
+
+  async function startTurn(store: ReturnType<typeof useAskChefStore>, onAbort: () => void) {
+    vi.stubGlobal("fetch", hangingTurn(onAbort));
+    store.investigateAlert(alert, entry, 1);
+    await vi.waitFor(() => expect(store.transcript[1]).toMatchObject({ steps: [{ callId: "c1", status: "running" }] }));
+  }
+
+  function expectCleared(store: ReturnType<typeof useAskChefStore>) {
+    expect(store.transcript).toEqual([]);
+    expect(store.evidence.size).toBe(0);
+    expect(store.status).toEqual({ kind: "idle" });
+    expect(store.context).toBeNull();
+    expect(store.open).toBe(false);
+  }
+
+  it("aborts and clears the conversation when another user signs in", async () => {
+    await signIn("1");
+    const store = useAskChefStore();
+    let aborted = false;
+    await startTurn(store, () => (aborted = true));
+
+    await signIn("2");
+
+    expect(aborted).toBe(true);
+    expectCleared(store);
+  });
+
+  it("aborts and clears the conversation on logout", async () => {
+    await signIn("1");
+    const store = useAskChefStore();
+    let aborted = false;
+    await startTurn(store, () => (aborted = true));
+
+    await useAuthStore().logout();
+
+    expect(aborted).toBe(true);
+    expectCleared(store);
   });
 });
