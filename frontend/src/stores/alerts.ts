@@ -1,8 +1,7 @@
-import { computed, watch } from "vue";
+import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type Alert, type CreateAlertRequest, type UpdateAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
-import { useContextStore } from "./context";
 import { useMetaStore } from "./meta";
 
 interface AlertsState {
@@ -21,16 +20,6 @@ export const useAlertsStore = defineStore("alerts", () => {
     alerts: [],
     selectedAlertId: null,
   });
-
-  const contextStore = useContextStore();
-
-  watch(
-    [() => contextStore.teamId, () => contextStore.sourceId],
-    () => {
-      state.data.value.alerts = [];
-      state.data.value.selectedAlertId = null;
-    }
-  );
 
   const alerts = computed(() => state.data.value.alerts);
   const selectedAlertId = computed(() => state.data.value.selectedAlertId);

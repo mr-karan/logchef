@@ -112,8 +112,7 @@ watch(
 
 onMounted(async () => {
   if (!alert.value) {
-    // Cross-team alert listing: pull whatever is visible to the user.
-    await alertsStore.fetchAlerts(undefined, currentSourceId.value ?? undefined);
+    await alertsStore.refreshAlert(undefined, undefined, alertId.value);
   }
   if (route.query.tab === "history") {
     currentTab.value = "history";
