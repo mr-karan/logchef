@@ -993,6 +993,39 @@ func TestTurnRunsThroughOpenAIChat(t *testing.T) {
 
 // A turn cancelled during a tool call did not see the tool fail, so no
 // tool_end follows the tool_start and nothing is logged as a tool failure.
+// A model stream still sending when the turn deadline passes ends the turn
+// as deadline, not as a model failure.
+func TestTurnStreamCutByTheDeadlineEndsAsDeadline(t *testing.T) {
+	w := newWorld(t)
+	model := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rw.Header().Set("Content-Type", "text/event-stream")
+		_, _ = io.WriteString(rw, `data: {"choices":[{"index":0,"delta":{"content":"Errors rose"},"finish_reason":null}]}`+"\n\n")
+		rw.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(model.Close)
+	chat, err := ai.NewOpenAIChat(model.URL, "test-key")
+	if err != nil {
+		t.Fatalf("NewOpenAIChat: %v", err)
+	}
+	agent := askchef.New(askchef.Opts{Tools: mcp.NewToolServer(*w.tools), Chat: chat, Model: "m", Log: discardLogger()})
+	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	defer cancel()
+
+	var events []askchef.Event
+	agent.Run(ctx, askchef.Turn{Principal: access.AssistantPrincipal(w.member), Request: w.request()}, func(ev askchef.Event) bool {
+		events = append(events, ev)
+		return true
+	})
+
+	if got, want := eventNames(events), []string{"text", "done"}; !slices.Equal(got, want) {
+		t.Fatalf("events = %v, want %v", got, want)
+	}
+	if done := events[1].(askchef.Done); done.StopReason != askchef.StopDeadline {
+		t.Fatalf("done = %+v, want deadline", done)
+	}
+}
+
 func TestTurnPreemptedDuringAToolCall(t *testing.T) {
 	w := newWorld(t)
 	chat := &scriptedChat{replies: []ai.ChatResponse{

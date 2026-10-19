@@ -10,10 +10,15 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // DefaultOpenAIBaseURL is the endpoint used when no base URL is configured.
 const DefaultOpenAIBaseURL = "https://api.openai.com/v1"
+
+// openAIResponseHeaderTimeout bounds the wait for a response's headers. A
+// streamed body has no total timeout: the caller's context bounds it.
+const openAIResponseHeaderTimeout = 30 * time.Second
 
 // Body size bounds of the chat completions client.
 const (
@@ -37,10 +42,12 @@ func newOpenAIClient(baseURL, apiKey string) (*openAIClient, error) {
 	if baseURL == "" {
 		baseURL = DefaultOpenAIBaseURL
 	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = openAIResponseHeaderTimeout
 	return &openAIClient{
 		url:    strings.TrimSuffix(baseURL, "/") + "/chat/completions",
 		apiKey: apiKey,
-		http:   &http.Client{Timeout: DefaultTimeout},
+		http:   &http.Client{Transport: transport},
 	}, nil
 }
 
@@ -140,7 +147,10 @@ func statusError(resp *http.Response) error {
 }
 
 // complete runs one chat completion without streaming and returns the text.
+// It takes at most DefaultTimeout.
 func (c *openAIClient) complete(ctx context.Context, body openAIChatRequest) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, DefaultTimeout)
+	defer cancel()
 	encoded, err := encodeRequest(body)
 	if err != nil {
 		return "", err
