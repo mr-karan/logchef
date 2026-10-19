@@ -13,7 +13,8 @@ import {
 } from "@/api/askChef";
 import type { Alert, AlertHistoryEntry, AlertThresholdOperator } from "@/api/alerts";
 import { i18n } from "@/i18n";
-import { alertHistoryWindow, type ExploreWindow } from "@/utils/alertExplore";
+import router from "@/router";
+import { alertHistoryWindow, evidenceExploreQuery, type ExploreWindow } from "@/utils/alertExplore";
 import { calendarDateTimeToTimestamp, parseRelativeTimeString } from "@/utils/time";
 import { useExploreStore } from "./explore";
 import { useTeamsStore } from "./teams";
@@ -276,8 +277,11 @@ export const useAskChefStore = defineStore("askChef", () => {
     context.value = explorerContext() ?? context.value;
   }
 
-  function showEvidence(id: EvidenceId) {
+  function openEvidence(id: EvidenceId) {
+    const record = session.value.evidence.get(id);
+    if (!record) return;
     activeEvidenceId.value = id;
+    void router.push({ name: "LogExplorer", query: evidenceExploreQuery(record) });
   }
 
   return {
@@ -293,6 +297,6 @@ export const useAskChefStore = defineStore("askChef", () => {
     investigateAlert,
     stop,
     reset,
-    showEvidence,
+    openEvidence,
   };
 });
