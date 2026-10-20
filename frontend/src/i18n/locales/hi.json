@@ -703,6 +703,7 @@
   "dashboards.defaultRange": "इसके साथ खुलता है",
   "dashboards.defaultRangeNone": "दर्शक की सीमा",
   "dashboards.defaultRangeHint": "यह डैशबोर्ड किस समय सीमा के साथ खुलता है",
+  "dashboards.openPanelInExplorer": "एक्सप्लोरर में खोलें",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "नई चैट",
   "askChef.close": "Ask Chef बंद करें",

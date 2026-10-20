@@ -703,6 +703,7 @@
   "dashboards.defaultRange": "열 때 범위",
   "dashboards.defaultRangeNone": "사용자 범위",
   "dashboards.defaultRangeHint": "이 대시보드를 열 때 적용되는 시간 범위",
+  "dashboards.openPanelInExplorer": "탐색기에서 열기",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "새 채팅",
   "askChef.close": "Ask Chef 닫기",

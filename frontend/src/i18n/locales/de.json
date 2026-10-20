@@ -703,6 +703,7 @@
   "dashboards.defaultRange": "Öffnet mit",
   "dashboards.defaultRangeNone": "Bereich des Betrachters",
   "dashboards.defaultRangeHint": "Zeitraum, mit dem dieses Dashboard geöffnet wird",
+  "dashboards.openPanelInExplorer": "Im Explorer öffnen",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Neuer Chat",
   "askChef.close": "Ask Chef schließen",

@@ -373,6 +373,14 @@ describe("dashboards store — panel time params", () => {
 
     expect(store.getPanelState("filled-series").timeseries?.range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
   });
+
+  // #137 — the title link opens the window a panel's shown result ran over.
+  it("records the window each panel result ran over", async () => {
+    const store = await runEveryPanelType();
+
+    expect(store.getPanelState("logchefql-table").range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
+    expect(store.getPanelState("logchefql-series").range).toEqual({ start: window.start, end: window.end, zone: "UTC" });
+  });
 });
 
 describe("dashboards store — #119/#120 hardening", () => {
