@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -151,22 +153,24 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 }
 
 // discoverProvider fetches the OIDC discovery document, retrying with backoff
-// until retry.maxWait elapses. An issuer mismatch is a config error and is
-// not retried.
+// until retry.maxWait elapses. Failures that cannot recover by waiting (bad
+// URL, most 4xx, invalid metadata, issuer mismatch) return at once.
 func discoverProvider(ctx context.Context, providerURL string, retry discoveryRetry, log *slog.Logger) (*oidc.Provider, error) {
 	ctx, cancel := context.WithTimeout(ctx, retry.maxWait)
 	defer cancel()
 
 	backoff := retry.initialBackoff
 	for attempt := 1; ; attempt++ {
+		transport := &discoveryTransport{}
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, retry.attemptTimeout)
+		attemptCtx = oidc.ClientContext(attemptCtx, &http.Client{Transport: transport})
 		provider, err := oidc.NewProvider(attemptCtx, providerURL)
 		cancelAttempt()
 		if err == nil {
 			return provider, nil
 		}
 
-		if _, ok := errors.AsType[*oidc.IssuerMismatchError](err); ok {
+		if !transport.retryable() {
 			return nil, fmt.Errorf("error discovering OIDC provider %s: %w", providerURL, err)
 		}
 		if ctx.Err() != nil {
@@ -180,6 +184,40 @@ func discoverProvider(ctx context.Context, providerURL string, retry discoveryRe
 		case <-time.After(backoff):
 		}
 		backoff = min(backoff*2, retry.maxBackoff)
+	}
+}
+
+// discoveryTransport records whether the discovery request went out and its
+// response status, so a booting IdP can be told apart from a broken config.
+// go-oidc keeps this client for later JWKS fetches, hence the atomics.
+type discoveryTransport struct {
+	sent   atomic.Bool
+	status atomic.Int64
+}
+
+func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.sent.Store(true)
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	if resp != nil {
+		t.status.Store(int64(resp.StatusCode))
+	}
+	return resp, err
+}
+
+// retryable reports whether a failed attempt may succeed later: no response
+// (connection, TLS, timeout), 5xx, 408, 429, or a 404 from a reverse proxy
+// whose route to the IdP is not registered yet.
+func (t *discoveryTransport) retryable() bool {
+	if !t.sent.Load() {
+		return false
+	}
+	switch status := t.status.Load(); {
+	case status == 0, status >= 500:
+		return true
+	case status == http.StatusNotFound, status == http.StatusRequestTimeout, status == http.StatusTooManyRequests:
+		return true
+	default:
+		return false
 	}
 }
 
