@@ -115,16 +115,17 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
 	a.Datasources.Register(victorialogs.NewProvider(a.Logger))
 
-	// Initialize OIDC Provider.
-	// This is optional; if OIDC is not configured, auth features relying on it might be disabled.
-	oidcProvider, err := auth.NewOIDCProvider(ctx, &a.Config.OIDC, a.Logger)
-	if err != nil {
-		if errors.Is(err, auth.ErrOIDCProviderNotConfigured) {
-			a.Logger.Warn("OIDC provider not configured, skipping OIDC setup")
-			// oidcProvider will be nil; dependent features should handle this.
-		} else {
+	// OIDC is optional only with local auth and no provider_url (enforced by
+	// config validation). Once configured, a failed discovery aborts startup so
+	// the supervisor restarts us instead of silently dropping SSO.
+	var oidcProvider *auth.OIDCProvider
+	if a.Config.OIDC.ProviderURL != "" {
+		oidcProvider, err = auth.NewOIDCProvider(ctx, &a.Config.OIDC, a.Logger)
+		if err != nil {
 			return fmt.Errorf("failed to initialize OIDC provider: %w", err)
 		}
+	} else {
+		a.Logger.Info("OIDC not configured, using local auth only")
 	}
 
 	// The OAuth authorization server exists only when enabled; nil otherwise.

@@ -20,16 +20,15 @@ import (
 
 // Define OIDC/Auth specific errors.
 var (
-	ErrSessionNotFound           = errors.New("session not found") // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
-	ErrSessionExpired            = errors.New("session expired")   // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
-	ErrUserNotFound              = errors.New("user not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
-	ErrTeamNotFound              = errors.New("team not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
-	ErrUnauthorizedUser          = errors.New("unauthorized user")
-	ErrUserInactive              = errors.New("user inactive")
-	ErrOIDCProviderNotConfigured = errors.New("OIDC provider not configured")
-	ErrOIDCInvalidToken          = errors.New("invalid OIDC token")
-	ErrOIDCEmailNotVerified      = errors.New("email not verified")
-	ErrAdminNotFound             = errors.New("admin not found") // May not be needed if admin check moves to core
+	ErrSessionNotFound      = errors.New("session not found") // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
+	ErrSessionExpired       = errors.New("session expired")   // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
+	ErrUserNotFound         = errors.New("user not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
+	ErrTeamNotFound         = errors.New("team not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
+	ErrUnauthorizedUser     = errors.New("unauthorized user")
+	ErrUserInactive         = errors.New("user inactive")
+	ErrOIDCInvalidToken     = errors.New("invalid OIDC token")
+	ErrOIDCEmailNotVerified = errors.New("email not verified")
+	ErrAdminNotFound        = errors.New("admin not found") // May not be needed if admin check moves to core
 )
 
 // OIDCClaims represents the claims extracted from an OIDC ID token.
@@ -81,33 +80,34 @@ type OIDCProvider struct {
 	allowedIssuers []string
 }
 
-// NewOIDCProvider initializes an OIDCProvider based on the provided configuration.
-// It requires explicit AuthURL and TokenURL, but uses ProviderURL for discovery
-// to set up the ID token verifier.
+// discoveryRetry bounds how long startup waits for the IdP discovery endpoint.
+type discoveryRetry struct {
+	attemptTimeout time.Duration
+	maxWait        time.Duration
+	initialBackoff time.Duration
+	maxBackoff     time.Duration
+}
+
+// defaultDiscoveryRetry rides out an IdP that starts a little after Logchef
+// (host reboot, compose ordering) without hanging startup indefinitely.
+var defaultDiscoveryRetry = discoveryRetry{
+	attemptTimeout: 10 * time.Second,
+	maxWait:        60 * time.Second,
+	initialBackoff: time.Second,
+	maxBackoff:     10 * time.Second,
+}
+
+// NewOIDCProvider initializes an OIDCProvider from a validated OIDC config.
+// It uses the explicit AuthURL and TokenURL for the OAuth flow and discovers
+// ProviderURL to set up the ID token verifier, retrying while the IdP is
+// unreachable.
 func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.Logger) (*OIDCProvider, error) {
+	log.Info("using explicit OIDC endpoints", "auth_url", oidcCfg.AuthURL, "token_url", oidcCfg.TokenURL)
+	endpoint := oauth2.Endpoint{AuthURL: oidcCfg.AuthURL, TokenURL: oidcCfg.TokenURL}
 
-	var provider *oidc.Provider
-	var err error
-	var endpoint oauth2.Endpoint
-
-	if oidcCfg.AuthURL != "" && oidcCfg.TokenURL != "" {
-		log.Info("using explicit OIDC endpoints", "auth_url", oidcCfg.AuthURL, "token_url", oidcCfg.TokenURL)
-		endpoint = oauth2.Endpoint{AuthURL: oidcCfg.AuthURL, TokenURL: oidcCfg.TokenURL}
-		// ProviderURL is still needed for discovery to set up the verifier.
-		if oidcCfg.ProviderURL == "" {
-			log.Error("provider_url is required for OIDC discovery even with explicit endpoints")
-			return nil, fmt.Errorf("%w: provider_url is required", ErrOIDCProviderNotConfigured)
-		}
-		log.Info("using provider URL for OIDC discovery", "provider_url", oidcCfg.ProviderURL)
-		provider, err = oidc.NewProvider(ctx, oidcCfg.ProviderURL)
-		if err != nil {
-			log.Error("failed to create OIDC provider for verification", "error", err, "provider_url", oidcCfg.ProviderURL)
-			return nil, fmt.Errorf("%w: %w", ErrOIDCProviderNotConfigured, err)
-		}
-	} else {
-		// Explicit endpoints are required.
-		log.Error("missing required OIDC configuration: auth_url and token_url")
-		return nil, ErrOIDCProviderNotConfigured
+	provider, err := discoverProvider(ctx, oidcCfg.ProviderURL, defaultDiscoveryRetry, log)
+	if err != nil {
+		return nil, err
 	}
 
 	oauthConf := &oauth2.Config{
@@ -148,6 +148,39 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 		oidcCfg:        oidcCfg,
 		allowedIssuers: allowedIssuers,
 	}, nil
+}
+
+// discoverProvider fetches the OIDC discovery document, retrying with backoff
+// until retry.maxWait elapses. An issuer mismatch is a config error and is
+// not retried.
+func discoverProvider(ctx context.Context, providerURL string, retry discoveryRetry, log *slog.Logger) (*oidc.Provider, error) {
+	ctx, cancel := context.WithTimeout(ctx, retry.maxWait)
+	defer cancel()
+
+	backoff := retry.initialBackoff
+	for attempt := 1; ; attempt++ {
+		attemptCtx, cancelAttempt := context.WithTimeout(ctx, retry.attemptTimeout)
+		provider, err := oidc.NewProvider(attemptCtx, providerURL)
+		cancelAttempt()
+		if err == nil {
+			return provider, nil
+		}
+
+		if _, ok := errors.AsType[*oidc.IssuerMismatchError](err); ok {
+			return nil, fmt.Errorf("error discovering OIDC provider %s: %w", providerURL, err)
+		}
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("error discovering OIDC provider %s after %d attempts: %w", providerURL, attempt, err)
+		}
+
+		log.Warn("OIDC discovery failed, retrying", "provider_url", providerURL, "attempt", attempt, "retry_in", backoff.String(), "error", err)
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("error discovering OIDC provider %s after %d attempts: %w", providerURL, attempt, err)
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, retry.maxBackoff)
+	}
 }
 
 // normalizeIssuers trims blanks and drops empty entries from the configured
