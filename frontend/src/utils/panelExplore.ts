@@ -25,10 +25,11 @@ export function panelExploreQuery(panel: PanelQueryFields, window: Pick<Resolved
   });
 }
 
-// The part of a LogsQL query before its first pipe. A "|" inside a quoted
-// string or regex is part of the filter.
+// The part of a LogsQL query before its first top-level pipe. A "|" inside a
+// quoted string, a regex, or a parenthesized subquery is part of the filter.
 function logsqlFilter(query: string): string {
   let quote: string | null = null;
+  let depth = 0;
   for (let i = 0; i < query.length; i++) {
     const ch = query[i];
     if (quote) {
@@ -36,7 +37,11 @@ function logsqlFilter(query: string): string {
       else if (ch === quote) quote = null;
     } else if (ch === '"' || ch === "'" || ch === "`") {
       quote = ch;
-    } else if (ch === "|") {
+    } else if (ch === "(") {
+      depth++;
+    } else if (ch === ")") {
+      depth = Math.max(0, depth - 1);
+    } else if (ch === "|" && depth === 0) {
       return query.slice(0, i).trim();
     }
   }

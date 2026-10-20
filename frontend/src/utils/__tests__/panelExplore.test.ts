@@ -40,6 +40,12 @@ describe("panelExploreQuery", () => {
   it.each([
     ["drops pipes a stat panel ignores", "stat", 'error | stats count()', "error"],
     ["keeps a pipe inside quotes", "timeseries", '_msg:"a|b" | sort by (_time)', '_msg:"a|b"'],
+    [
+      "keeps a pipe inside a subquery",
+      "stat",
+      "user_id:in(level:error | fields user_id) | stats count()",
+      "user_id:in(level:error | fields user_id)",
+    ],
     ["opens a pipes-only filter as match-all", "breakdown", "| stats count()", "*"],
     ["keeps the full query for a table panel", "table", "error | sort by (_time)", "error | sort by (_time)"],
   ] as const)("%s", (_name, type, text, want) => {
