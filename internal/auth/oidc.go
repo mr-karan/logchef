@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"slices"
@@ -187,12 +188,14 @@ func discoverProvider(ctx context.Context, providerURL string, retry discoveryRe
 	}
 }
 
-// discoveryTransport records whether the discovery request went out and its
-// response status, so a booting IdP can be told apart from a broken config.
-// go-oidc keeps this client for later JWKS fetches, hence the atomics.
+// discoveryTransport records whether the discovery request went out, its
+// response status, and whether reading the body failed, so a booting IdP can
+// be told apart from a broken config. go-oidc keeps this client for later JWKS
+// fetches, hence the atomics.
 type discoveryTransport struct {
-	sent   atomic.Bool
-	status atomic.Int64
+	sent       atomic.Bool
+	status     atomic.Int64
+	readFailed atomic.Bool
 }
 
 func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -200,16 +203,20 @@ func (t *discoveryTransport) RoundTrip(req *http.Request) (*http.Response, error
 	resp, err := http.DefaultTransport.RoundTrip(req)
 	if resp != nil {
 		t.status.Store(int64(resp.StatusCode))
+		resp.Body = &discoveryBody{ReadCloser: resp.Body, failed: &t.readFailed}
 	}
 	return resp, err
 }
 
 // retryable reports whether a failed attempt may succeed later: no response
-// (connection, TLS, timeout), 5xx, 408, 429, or a 404 from a reverse proxy
-// whose route to the IdP is not registered yet.
+// or a body cut off (connection, TLS, timeout), 5xx, 408, 429, or a 404 from a
+// reverse proxy whose route to the IdP is not registered yet.
 func (t *discoveryTransport) retryable() bool {
 	if !t.sent.Load() {
 		return false
+	}
+	if t.readFailed.Load() {
+		return true
 	}
 	switch status := t.status.Load(); {
 	case status == 0, status >= 500:
@@ -219,6 +226,21 @@ func (t *discoveryTransport) retryable() bool {
 	default:
 		return false
 	}
+}
+
+// discoveryBody flags a body read that fails before EOF. go-oidc formats that
+// error with %v, so the error chain cannot tell it apart from bad metadata.
+type discoveryBody struct {
+	io.ReadCloser
+	failed *atomic.Bool
+}
+
+func (b *discoveryBody) Read(p []byte) (int, error) {
+	n, err := b.ReadCloser.Read(p)
+	if err != nil && !errors.Is(err, io.EOF) {
+		b.failed.Store(true)
+	}
+	return n, err
 }
 
 // normalizeIssuers trims blanks and drops empty entries from the configured

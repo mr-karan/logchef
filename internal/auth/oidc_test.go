@@ -173,6 +173,41 @@ func TestDiscoverProvider(t *testing.T) {
 		}
 	})
 
+	t.Run("retries a discovery body cut off after a 200", func(t *testing.T) {
+		t.Parallel()
+		var hits atomic.Int32
+		var srv *httptest.Server
+		srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if hits.Add(1) == 1 {
+				// Promise a long body, send a fragment, then drop the connection.
+				conn, buf, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					t.Errorf("hijack: %v", err)
+					return
+				}
+				_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000\r\n\r\n{\"issuer\":")
+				_ = buf.Flush()
+				_ = conn.Close()
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"issuer":                 srv.URL,
+				"authorization_endpoint": srv.URL + "/auth",
+				"token_endpoint":         srv.URL + "/token",
+				"jwks_uri":               srv.URL + "/jwks",
+			})
+		}))
+		t.Cleanup(srv.Close)
+
+		if _, err := discoverProvider(context.Background(), srv.URL, retry, log); err != nil {
+			t.Fatalf("discoverProvider: %v", err)
+		}
+		if got := hits.Load(); got != 2 {
+			t.Fatalf("discovery requests = %d, want 2", got)
+		}
+	})
+
 	t.Run("gives up after maxWait", func(t *testing.T) {
 		t.Parallel()
 		srv, hits := newIDP(t, 1<<30, http.StatusServiceUnavailable, "")
