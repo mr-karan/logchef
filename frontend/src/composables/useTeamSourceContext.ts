@@ -125,6 +125,10 @@ export function useTeamSourceContext() {
     }
 
     await waitForTeamSources(teamId, maxWaitMs)
+    // A newer selection moved to another team while this one waited.
+    if (currentTeamId.value !== teamId) {
+      return null
+    }
 
     const resolvedSourceId = resolveSourceId(teamId, requestedSourceId)
     if (!resolvedSourceId) {
