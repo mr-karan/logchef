@@ -32,7 +32,7 @@ func TestTokenAuthenticationCoalescesBlockedWrites(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, err := sql.Open("sqlite", path)
+	raw, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)")
 	if err != nil {
 		t.Fatal(err)
 	}
