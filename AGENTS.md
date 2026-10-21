@@ -36,7 +36,7 @@ rfcs/, plans/      # design docs
 ```bash
 just build               # full build: frontend dist first, then backend (embeds dist)
 just build-backend       # backend only (skip when only Go changed; runs sqlc-generate)
-just run                 # build + run with config.toml (override: just CONFIG=x.toml run)
+just run                 # build + run with dev/config.toml (override: just CONFIG=x.toml run)
 just check               # REQUIRED before committing: fmt + vet + lint + sqlc-generate + test
 just test-short          # fast Go tests (no -race, no coverage)
 just sqlc-generate       # regenerate sqlc code (required after touching queries.sql)

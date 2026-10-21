@@ -139,6 +139,7 @@ just dev-test-webhook
 
 | File | Purpose |
 |------|---------|
+| `config.toml` | Logchef config for the dev stack, used by `just run` and `just run-backend` |
 | `docker-compose.yml` | Infrastructure services |
 | `init-clickhouse.sql` | Creates ClickHouse tables |
 | `seed.sh` | Creates the local API user/token and optionally links it to the provisioned dev team |

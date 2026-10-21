@@ -59,9 +59,13 @@ chmod +x logchef
 # Create a basic configuration file
 curl -L -O https://github.com/mr-karan/logchef/raw/main/config.toml
 
-# Edit the config file to match your environment. The quickest path is
-# built-in email + password login: enable [auth.local] and set a bootstrap
-# admin. No external identity provider needed. OIDC/SSO is optional.
+# Set the required secret. Logchef refuses to start while it is empty.
+export LOGCHEF_AUTH__API_TOKEN_SECRET="$(openssl rand -hex 32)"
+
+# Edit the config file to match your environment. Set auth.admin_emails to
+# your own address. The quickest path to a login is built-in email + password
+# login: enable [auth.local] and set a bootstrap admin. No external identity
+# provider needed. OIDC/SSO is optional.
 #
 #   [auth.local]
 #   enabled = true

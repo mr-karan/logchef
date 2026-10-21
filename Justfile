@@ -15,7 +15,8 @@ ldflags := "-s -w -X 'main.buildString=" + build_info + "' -X 'main.versionStrin
 bin := "bin/logchef"
 
 # Config file - can be overridden with 'just CONFIG=other.toml target'
-config := env_var_or_default('CONFIG', 'config.toml')
+# Defaults to the dev config; ../config.toml is the production sample.
+config := env_var_or_default('CONFIG', 'dev/config.toml')
 
 # sqlc command
 sqlc_cmd := "sqlc"
