@@ -79,7 +79,7 @@ func TestQueryMetricsCountFailuresOnce(t *testing.T) {
 			source := &models.Source{Name: t.Name()}
 			client := &Client{metrics: metrics.NewClickHouseMetrics(source), logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			if hookFailure {
-				client.AddQueryHook(failedQueryHook{})
+				client.queryHooks = []QueryHook{failedQueryHook{}}
 			}
 			counter := queryCounter(source, "select", "failure")
 			before := counter.Get()

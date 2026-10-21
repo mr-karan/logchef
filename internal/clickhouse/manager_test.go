@@ -171,9 +171,15 @@ func TestClientRecoversAfterServerRestartClickHouse(t *testing.T) {
 	if err := client.Ping(ctx, "", ""); err == nil {
 		t.Fatal("ping succeeded while the server was down")
 	}
+	if client.flattenedJSON != nil {
+		t.Fatal("capability cache survived a failed ping")
+	}
 	proxy.start()
 	if _, err := client.Query(ctx, "SELECT 1"); err != nil {
 		t.Fatalf("query after restart: %v", err)
+	}
+	if client.flattenedJSON == nil {
+		t.Fatal("query after restart did not detect capabilities")
 	}
 	if err := client.Ping(ctx, "", ""); err != nil {
 		t.Fatalf("ping after restart: %v", err)

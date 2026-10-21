@@ -33,7 +33,8 @@ enables it for result queries on supported servers. The driver's JSON/Dynamic
 decoder needs this format to read shared data. Older servers never receive the
 setting. A failed capability query is not cached and does not block ordinary
 queries. The probe has its own two-second limit and does not inherit source
-row limits. Reconnecting clears the cached capability result.
+row limits. A failed ping clears the cached capability result, since the server
+may come back as another version.
 
 ## Query behavior
 
@@ -105,7 +106,7 @@ with time filters inside SQL can still omit a separate request time range.
 The `clickhouse-integration` CI job runs real-server tests on 23.7.4.5,
 24.1.2.5, and 26.8.2.7. Native JSON cases run on the modern server. Legacy
 strings, nullable values, arrays, maps, decimals, timestamps, field discovery,
-histograms, schema inspection, cancellation, and reconnect tests run on all
+histograms, schema inspection, cancellation, and restart-recovery tests run on all
 three versions.
 
 Run the same tests against a disposable local server:
