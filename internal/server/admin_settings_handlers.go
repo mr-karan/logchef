@@ -53,10 +53,11 @@ func (s *Server) handleListSettings(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
 	}
 
+	reveal := c.Locals("auth_method") == "session"
 	// Group settings by category
 	categoriesMap := make(map[string][]SystemSettingResponse)
 	for i := range settings {
-		response := s.settingToResponse(c, settings[i])
+		response := settingToResponse(reveal, settings[i])
 		categoriesMap[settings[i].Category] = append(categoriesMap[settings[i].Category], response)
 	}
 
@@ -86,9 +87,10 @@ func (s *Server) handleListSettingsByCategory(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
 	}
 
+	reveal := c.Locals("auth_method") == "session"
 	var response []SystemSettingResponse
 	for i := range settings {
-		response = append(response, s.settingToResponse(c, settings[i]))
+		response = append(response, settingToResponse(reveal, settings[i]))
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)
@@ -107,9 +109,10 @@ func (s *Server) handleGetSetting(c fiber.Ctx) error {
 		s.log.Error("failed to get setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve setting")
 	}
+	reveal := c.Locals("auth_method") == "session"
 	for _, setting := range settings {
 		if setting.Key == key {
-			response := s.settingToResponse(c, setting)
+			response := settingToResponse(reveal, setting)
 			return SendSuccess(c, fiber.StatusOK, fiber.Map{"key": key, "value": response.Value})
 		}
 	}
@@ -187,7 +190,7 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 }
 
 // settingToResponse converts a database setting to API response format.
-func (s *Server) settingToResponse(c fiber.Ctx, setting *models.SystemSetting) SystemSettingResponse {
+func settingToResponse(reveal bool, setting *models.SystemSetting) SystemSettingResponse {
 	response := SystemSettingResponse{
 		Key:         setting.Key,
 		Value:       setting.Value,
@@ -202,7 +205,7 @@ func (s *Server) settingToResponse(c fiber.Ctx, setting *models.SystemSetting) S
 	// Mask sensitive values in responses.
 	if response.IsSensitive && response.Value != "" {
 		response.MaskedValue = "********"
-		if c.Locals("auth_method") != "session" {
+		if !reveal {
 			response.Value = response.MaskedValue
 		}
 	}

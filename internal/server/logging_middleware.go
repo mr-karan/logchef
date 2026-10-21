@@ -47,7 +47,8 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// Build canonical log line — one line per request with all useful context
 		attrs := []slog.Attr{
 			slog.String("method", c.Method()),
-			slog.String("path", c.Route().Path),
+			slog.String("route", c.Route().Path),
+			slog.String("path", redactedRequestPath(c)),
 			slog.Int("status", status),
 			slog.Int64("duration_ms", duration.Milliseconds()),
 		}
@@ -80,4 +81,15 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 
 		return chainErr
 	}
+}
+
+func redactedRequestPath(c fiber.Ctx) string {
+	segments := strings.Split(c.Path(), "/")
+	route := strings.Split(c.Route().Path, "/")
+	for i := len(segments) - 1; i >= 0; i-- {
+		if (i > 0 && strings.EqualFold(segments[i-1], "query-shares")) || (i < len(route) && route[i] == ":token") {
+			segments[i] = models.RedactShareToken(segments[i])
+		}
+	}
+	return strings.Join(segments, "/")
 }

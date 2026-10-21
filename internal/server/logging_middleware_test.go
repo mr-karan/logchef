@@ -78,6 +78,7 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 			Message    string `json:"msg"`
 			Method     string `json:"method"`
 			Path       string `json:"path"`
+			Route      string `json:"route"`
 			Status     int    `json:"status"`
 			DurationMS *int64 `json:"duration_ms"`
 			TeamID     string `json:"team_id"`
@@ -88,23 +89,23 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 		}
 		if record.Message == "request error" {
 			foundError = true
-			if record.Path != "/logging-errors/:token" {
+			if record.Route != "/logging-errors/:token" {
 				t.Error("error log does not use the route template")
 			}
 		}
 		if record.Message != "http" {
 			continue
 		}
-		wantStatus, ok := wantRoutes[record.Path]
+		wantStatus, ok := wantRoutes[record.Route]
 		if !ok || record.Status != wantStatus || record.Method == "" || record.DurationMS == nil {
-			t.Errorf("unexpected request log metadata for route %q", record.Path)
+			t.Errorf("unexpected request log metadata for route %q", record.Route)
 		}
-		if record.Path == "/api/v1/teams/:teamID/sources/:sourceID/query-shares" {
+		if record.Route == "/api/v1/teams/:teamID/sources/:sourceID/query-shares" {
 			if record.TeamID != fmt.Sprint(team.ID) || record.SourceID != fmt.Sprint(source.ID) {
 				t.Error("request log lacks team and source IDs")
 			}
 		}
-		delete(wantRoutes, record.Path)
+		delete(wantRoutes, record.Route)
 	}
 	if len(wantRoutes) != 0 || !foundError {
 		t.Error("expected request or error logs are missing")
@@ -170,19 +171,121 @@ func TestFailureLogsExcludeCredentials(t *testing.T) {
 				var record struct {
 					Message string `json:"msg"`
 					Path    string `json:"path"`
+					Route   string `json:"route"`
 				}
 				if err := decoder.Decode(&record); err != nil {
 					t.Fatal(err)
 				}
 				if record.Message == tt.message {
 					found = true
-					if record.Path != route {
+					if record.Route != route {
 						t.Error("failure log does not use the route template")
 					}
 				}
 			}
 			if !found {
 				t.Errorf("missing %q log", tt.message)
+			}
+		})
+	}
+}
+
+func TestRequestLogsRetainRedactedPaths(t *testing.T) {
+	for _, tt := range []struct {
+		path, wantPath string
+		status         int
+	}{
+		{"/api/v1/unknown-path?code=secret-query", "/api/v1/unknown-path", http.StatusNotFound},
+		{"/api/v1/admin/settings?code=secret-query", "/api/v1/admin/settings", http.StatusUnauthorized},
+		{"/api/v1/query-shares/12345678-secret-token", "/api/v1/query-shares/12345678", http.StatusUnauthorized},
+		{"/api/v1/query-shares/12345678-secret-token/typo?code=secret-query", "/api/v1/query-shares/12345678/typo", http.StatusNotFound},
+		{"/api/v1/QUERY-SHARES/12345678-secret-token/typo", "/api/v1/QUERY-SHARES/12345678/typo", http.StatusNotFound},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			s := New(ServerOptions{Config: &config.Config{}, SQLite: newServerTestDB(t), Logger: logger, FS: http.Dir(t.TempDir())})
+			t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+			resp, err := s.app.Test(httptest.NewRequest(http.MethodGet, tt.path, http.NoBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tt.status {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, tt.status)
+			}
+			if strings.Contains(logs.String(), "12345678-secret-token") || strings.Contains(logs.String(), "secret-query") {
+				t.Error("logs contain credentials")
+			}
+			found := false
+			decoder := json.NewDecoder(strings.NewReader(logs.String()))
+			for decoder.More() {
+				var record struct {
+					Message string `json:"msg"`
+					Path    string `json:"path"`
+					Route   string `json:"route"`
+				}
+				if err := decoder.Decode(&record); err != nil {
+					t.Fatal(err)
+				}
+				if record.Message == "http" {
+					found = true
+					if record.Path != tt.wantPath || record.Route == "" {
+						t.Errorf("path = %q, route = %q, want redacted path %q and route", record.Path, record.Route, tt.wantPath)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("no HTTP log")
+			}
+		})
+	}
+}
+
+func TestAuthMiddlewareRedactsSessionCookies(t *testing.T) {
+	for _, state := range []string{"missing", "expired", "database_error"} {
+		t.Run(state, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+			db, err := sqlite.New(context.Background(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "sessions.db")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			const cookie = "12345678-secret-session-cookie"
+			if state == "expired" {
+				user := mkTestUser(t, db, "session-logs@example.com", models.UserRoleMember)
+				if err := db.CreateSession(context.Background(), &models.Session{ID: models.SessionID(cookie), UserID: user.ID, ExpiresAt: time.Now().Add(-time.Hour)}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			s := New(ServerOptions{Config: &config.Config{}, SQLite: db, Logger: logger, FS: http.Dir(t.TempDir())})
+			t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+			if state == "database_error" {
+				if err := db.Close(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			logs.Reset()
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/settings", http.NoBody)
+			req.AddCookie(&http.Cookie{Name: sessionCookieName, Value: cookie})
+			resp, err := s.app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			want := http.StatusUnauthorized
+			if state == "database_error" {
+				want = http.StatusInternalServerError
+			}
+			if resp.StatusCode != want {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, want)
+			}
+			if strings.Contains(logs.String(), cookie) {
+				t.Error("auth logs contain session cookie")
+			}
+			if !strings.Contains(logs.String(), `"session_id":"12345678..."`) {
+				t.Error("auth logs lack redacted session ID")
 			}
 		})
 	}

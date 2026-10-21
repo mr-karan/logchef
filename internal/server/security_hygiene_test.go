@@ -3,18 +3,22 @@ package server
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -154,7 +158,7 @@ func TestSettingsRejectNonPositiveDurations(t *testing.T) {
 
 func TestManagedGuardsFailClosed(t *testing.T) {
 	for _, kind := range []string{"source", "team"} {
-		for _, state := range []string{"unmanaged", "managed", "database_error"} {
+		for _, state := range []string{"unmanaged", "managed", "database_error", "missing"} {
 			t.Run(kind+"/"+state, func(t *testing.T) {
 				db := newServerTestDB(t)
 				owner := mkTestUser(t, db, "guard-owner@example.com", models.UserRoleMember)
@@ -184,15 +188,27 @@ func TestManagedGuardsFailClosed(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				if state == "missing" {
+					id = 999999
+				}
 				mutated := false
 				app := fiber.New()
-				app.Put(path, guard, func(c fiber.Ctx) error { mutated = true; return c.SendStatus(http.StatusNoContent) })
+				app.Put(path, guard, func(c fiber.Ctx) error {
+					if state == "missing" {
+						return c.SendStatus(http.StatusNotFound)
+					}
+					mutated = true
+					return c.SendStatus(http.StatusNoContent)
+				})
 				resp, err := app.Test(httptest.NewRequest(http.MethodPut, fmt.Sprintf("/%d", id), http.NoBody))
 				if err != nil {
 					t.Fatal(err)
 				}
 				defer resp.Body.Close()
 				want := http.StatusNoContent
+				if state == "missing" {
+					want = http.StatusNotFound
+				}
 				if state == "managed" {
 					want = http.StatusForbidden
 				}
@@ -248,5 +264,105 @@ func TestCredentialErrorsDoNotLeakInHandlerLogs(t *testing.T) {
 				t.Error("handler log lacks credential prefix")
 			}
 		})
+	}
+}
+
+func TestSettingsPreserveSensitivityOnUpdate(t *testing.T) {
+	e := newCollectionRouteEnv(t)
+	admin := mkTestUser(t, e.s.sqlite, "sensitive-admin@example.com", models.UserRoleAdmin)
+	token := e.token(admin, models.TokenScopeSettingsRead, models.TokenScopeSettingsWrite)
+	for _, key := range []string{"ai.api_key", "alerts.smtp_password", "custom.secret"} {
+		t.Run(key, func(t *testing.T) {
+			if key == "custom.secret" {
+				if err := e.s.sqlite.UpsertSetting(context.Background(), key, "old-secret", "string", "ai", "", true); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for _, sensitivity := range []string{"", `,"is_sensitive":false`} {
+				e.expect(token, http.MethodPut, "/api/v1/admin/settings/"+key, `{"value":"new-secret-value","value_type":"string","category":"ai"`+sensitivity+`}`, http.StatusOK)
+				body := e.expect(token, http.MethodGet, "/api/v1/admin/settings/"+key, "", http.StatusOK)
+				if strings.Contains(string(body), "new-secret-value") || !strings.Contains(string(body), "********") {
+					t.Error("token can read updated secret")
+				}
+				settings, err := e.s.sqlite.ListSettings(context.Background())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for _, setting := range settings {
+					if setting.Key == key && !setting.IsSensitive {
+						t.Error("updated setting lost sensitivity")
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestTestEmailRequiresBrowserSession(t *testing.T) {
+	e := newCollectionRouteEnv(t)
+	e.cfg.Alerts.Enabled = true
+	admin := mkTestUser(t, e.s.sqlite, "email-admin@example.com", models.UserRoleAdmin)
+	token := e.token(admin, models.TokenScopeSettingsWrite)
+	e.expect(token, http.MethodPost, "/api/v1/admin/settings/test-email", `{}`, http.StatusUnauthorized)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/test-email", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.AddCookie(sessionCookie(t, e.s.sqlite, admin))
+	resp, err := e.s.app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("session status = %d, want unconfigured SMTP 400", resp.StatusCode)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(body, []byte("SMTP is not configured")) {
+		t.Fatal("browser session did not reach SMTP configuration check")
+	}
+}
+
+func TestMissingManagedResourcesReturnNotFound(t *testing.T) {
+	s := newAuthzTestServer(t)
+	e := &collectionRouteEnv{t: t, s: s, cfg: s.config}
+	admin := mkTestUser(t, e.s.sqlite, "missing-admin@example.com", models.UserRoleAdmin)
+	token := e.token(admin, models.TokenScopeTeamsWrite, models.TokenScopeSourcesWrite)
+	for _, path := range []string{"/api/v1/admin/teams/999999", "/api/v1/admin/sources/999999"} {
+		e.expect(token, http.MethodDelete, path, "", http.StatusNotFound)
+	}
+}
+
+func TestLegacySettingsRemainSensitive(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "legacy.db")
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db, err := sqlite.New(ctx, sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: path}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = raw.Close() })
+	for _, key := range []string{"ai.api_key", "alerts.smtp_password"} {
+		if _, err := raw.ExecContext(ctx, `INSERT INTO system_settings (key, value, value_type, category, is_sensitive) VALUES (?, 'legacy-secret-value', 'string', ?, 0) ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_sensitive = 0`, key, strings.Split(key, ".")[0]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := &config.Config{Auth: config.AuthConfig{APITokenSecret: authzTestTokenSecret}}
+	s := New(ServerOptions{Config: cfg, SQLite: db, Logger: logger, FS: http.Dir(t.TempDir())})
+	t.Cleanup(func() { _ = s.Shutdown(ctx) })
+	e := &collectionRouteEnv{t: t, s: s, cfg: cfg}
+	admin := mkTestUser(t, db, "legacy-admin@example.com", models.UserRoleAdmin)
+	token := e.token(admin, models.TokenScopeSettingsRead)
+	for _, path := range []string{"/api/v1/admin/settings", "/api/v1/admin/settings/category/ai", "/api/v1/admin/settings/category/alerts", "/api/v1/admin/settings/ai.api_key", "/api/v1/admin/settings/alerts.smtp_password"} {
+		body := e.expect(token, http.MethodGet, path, "", http.StatusOK)
+		if strings.Contains(string(body), "legacy-secret-value") || !strings.Contains(string(body), "********") {
+			t.Errorf("legacy secret exposed at %s", path)
+		}
 	}
 }

@@ -128,7 +128,7 @@ func New(opts ServerOptions) *Server {
 				code = e.Code // Use Fiber's error code if available.
 			}
 			// Log the internal error details.
-			log.Error("request error", "path", c.Route().Path, "method", c.Method(), "error", err.Error())
+			log.Error("request error", "route", c.Route().Path, "path", redactedRequestPath(c), "method", c.Method(), "error", err.Error())
 			// Return a standardized JSON error response to the client.
 			return SendError(c, code, err.Error()) // Assumes SendError is defined elsewhere.
 		},
@@ -226,7 +226,7 @@ func recoverMiddleware(log *slog.Logger) fiber.Handler {
 		EnableStackTrace: true,
 		StackTraceHandler: func(c fiber.Ctx, panicValue any) {
 			log.Error("panic recovered",
-				"path", c.Route().Path,
+				"route", c.Route().Path, "path", redactedRequestPath(c),
 				"method", c.Method(),
 				"panic", panicValue,
 				"stack", string(debug.Stack()),
@@ -355,7 +355,7 @@ func (s *Server) setupRoutes() {
 	admin.Get("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsRead), s.handleGetSetting)
 	admin.Put("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleUpdateSetting)
 	admin.Delete("/settings/:key", s.requireTokenScope(models.TokenScopeSettingsWrite), s.handleDeleteSetting)
-	admin.Post("/settings/test-email", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestEmail)
+	admin.Post("/settings/test-email", s.requireSession, s.requireAlertsEnabled, s.handleTestEmail)
 	admin.Post("/settings/test-webhook", s.requireTokenScope(models.TokenScopeSettingsWrite), s.requireAlertsEnabled, s.handleTestWebhook)
 
 	// --- Team Routes (Access controlled by team membership) ---

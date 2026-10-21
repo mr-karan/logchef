@@ -14,6 +14,9 @@ import (
 func (db *DB) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error) {
 	managed, err := db.readQueries.IsSourceManaged(ctx, int64(id))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, models.ErrNotFound
+		}
 		return false, err
 	}
 	return managed == 1, nil
@@ -23,6 +26,9 @@ func (db *DB) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, er
 func (db *DB) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error) {
 	managed, err := db.readQueries.IsTeamManaged(ctx, int64(id))
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return false, models.ErrNotFound
+		}
 		return false, err
 	}
 	return managed == 1, nil

@@ -25,6 +25,8 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
+	t.Run("SettingsDurationFallback", func(t *testing.T) { testSettingsDurationFallback(t, ctx, s) })
+	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
 	t.Run("Dashboards", func(t *testing.T) { testDashboards(t, ctx, s) })
@@ -227,6 +229,48 @@ func testSessions(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if _, err := s.GetSession(ctx, expired.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("expired session should be swept, got err: %v", err)
+	}
+}
+
+func testSettingsDurationFallback(t *testing.T, ctx context.Context, s store.Store) {
+	for _, value := range []string{"0s", "-1h", "invalid", "3m"} {
+		if err := s.UpsertSetting(ctx, "alerts.request_timeout", value, "duration", "alerts", "", false); err != nil {
+			t.Fatal(err)
+		}
+		want := 5 * time.Second
+		if value == "3m" {
+			want = 3 * time.Minute
+		}
+		if got := s.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second); got != want {
+			t.Errorf("duration %q = %v, want %v", value, got, want)
+		}
+	}
+}
+
+func testSettingsSensitivity(t *testing.T, ctx context.Context, s store.Store) {
+	for _, key := range []string{"ai.api_key", "alerts.smtp_password", "custom.secret"} {
+		if err := s.UpsertSetting(ctx, key, "old", "string", "ai", "", key == "custom.secret"); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.UpsertSetting(ctx, key, "new", "string", "ai", "", false); err != nil {
+			t.Fatal(err)
+		}
+		settings, err := s.ListSettings(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		found := false
+		for _, setting := range settings {
+			if setting.Key == key {
+				found = true
+				if !setting.IsSensitive {
+					t.Errorf("%s is not sensitive", key)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("missing setting %s", key)
+		}
 	}
 }
 
@@ -829,6 +873,12 @@ func testUserPreferences(t *testing.T, ctx context.Context, s store.Store) {
 }
 
 func testProvisioning(t *testing.T, ctx context.Context, s store.Store) {
+	if _, err := s.IsSourceManaged(ctx, 999999); !models.IsNotFound(err) {
+		t.Errorf("missing source error = %v, want ErrNotFound", err)
+	}
+	if _, err := s.IsTeamManaged(ctx, 999999); !models.IsNotFound(err) {
+		t.Errorf("missing team error = %v, want ErrNotFound", err)
+	}
 	u := mkUser(t, ctx, s, "managed@test.dev")
 	if managed, err := s.IsUserManaged(ctx, u.ID); err != nil || managed {
 		t.Errorf("IsUserManaged(new) = %v / %v, want false", managed, err)

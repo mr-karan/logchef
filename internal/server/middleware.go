@@ -264,6 +264,9 @@ func (s *Server) requireSourceNotManaged(c fiber.Ctx) error {
 		return c.Next() // let handler deal with bad ID
 	}
 	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
+	if models.IsNotFound(err) {
+		return c.Next()
+	}
 	if err != nil {
 		s.log.Error("failed to check source provisioning status", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError,
@@ -288,6 +291,9 @@ func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 		return c.Next()
 	}
 	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
+	if models.IsNotFound(err) {
+		return c.Next()
+	}
 	if err != nil {
 		s.log.Error("failed to check team provisioning status", "error", err, "team_id", teamID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError,
@@ -446,7 +452,7 @@ func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
 func (s *Server) authorizedSource(c fiber.Ctx) (src access.AuthorizedSource, ok bool) {
 	src, ok = c.Locals(authorizedSourceKey).(access.AuthorizedSource)
 	if !ok {
-		s.log.Error("route reached handler without source authorization", "path", c.Route().Path)
+		s.log.Error("route reached handler without source authorization", "route", c.Route().Path, "path", redactedRequestPath(c))
 		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Authorization context missing", models.GeneralErrorType)
 	}
 	return src, ok
