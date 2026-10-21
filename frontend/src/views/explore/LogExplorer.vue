@@ -55,6 +55,7 @@ import { useExploreWindowedStore } from '@/stores/exploreWindowed';
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
 import AskChefDrawer from "@/components/ask-chef/AskChefDrawer.vue";
+import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 
 const { t } = useI18n();
 
@@ -1319,7 +1320,8 @@ onMounted(async () => {
             @field-click="handleFieldClick"
           />
 
-          <div class="flex-1 flex flex-col h-full min-w-0 overflow-hidden">
+          <ResizablePanelGroup direction="horizontal" auto-save-id="explore-ask-chef" class="min-w-0 flex-1">
+          <ResizablePanel id="explore-main" :order="1" class="flex flex-col h-full min-w-0 overflow-hidden">
             <!-- Query Editor Section -->
             <div class="px-4 py-3">
               <!-- Loading indicator during context changes -->
@@ -1557,9 +1559,10 @@ onMounted(async () => {
                   @open-date-picker="openDatePicker" />
               </div>
             </div>
-          </div>
+          </ResizablePanel>
 
           <AskChefDrawer />
+          </ResizablePanelGroup>
         </div>
 
         <!-- Save Query Modal -->
