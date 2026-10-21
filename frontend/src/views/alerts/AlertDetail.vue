@@ -2,7 +2,7 @@
 import { useI18n } from "vue-i18n";
 import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
 
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { ArrowLeft, Bell, Trash2, CheckCircle2, AlertCircle, AlertTriangle, Clock, History, ScrollText } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
@@ -45,7 +45,7 @@ function formatEventTime(timestamp: string): string {
 }
 
 const alertId = computed(() => Number(route.params.alertID));
-const currentTab = ref<"edit" | "history">("edit");
+const currentTab = ref<"edit" | "history">(route.query.tab === "history" ? "history" : "edit");
 const showDeleteDialog = ref(false);
 
 const alert = computed(() => {
@@ -159,19 +159,19 @@ watch(
     if (tab === "history" && !historyEntries.value.length) {
       await loadHistory();
     }
-  },
-  { immediate: true }
+  }
 );
 
-onMounted(async () => {
+watch(alertId, (id) => {
+  alertHistoryStore.setCurrentContext(id || null);
+  if (!id) return;
   if (!alert.value) {
-    await alertsStore.refreshAlert(undefined, undefined, alertId.value);
+    void alertsStore.refreshAlert(undefined, undefined, id);
   }
-  if (route.query.tab === "history") {
-    currentTab.value = "history";
-    await loadHistory();
+  if (currentTab.value === "history") {
+    void loadHistory();
   }
-});
+}, { immediate: true });
 </script>
 
 <template>

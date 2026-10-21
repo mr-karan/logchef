@@ -82,6 +82,8 @@ onScopeDispose(() => { contextRequestId++ })
 async function loadContextLogs() {
     const requestId = ++contextRequestId
     loadingMore.value = null
+    isLoading.value = false
+    contextLogs.value = null
     const tsValue = getTimestamp(props.log)
     
     if (!tsValue) {
@@ -115,7 +117,6 @@ async function loadContextLogs() {
     }
 
     // Reset state before loading
-    contextLogs.value = null
     isLoading.value = true
     noMoreBefore.value = false
     noMoreAfter.value = false

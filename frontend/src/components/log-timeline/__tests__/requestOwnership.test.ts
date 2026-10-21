@@ -12,16 +12,16 @@ function context(message: string) {
 describe('log context request ownership', () => {
   let network: ReturnType<typeof controlledApi>
   let unmount: () => void
-  let state: { isOpen: boolean; log: { timestamp: string } }
+  let state: { isOpen: boolean; log: Record<string, string>; sourceId: string; teamId: number }
   const closed = vi.fn()
   beforeEach(() => {
     network = controlledApi()
     closed.mockClear()
-    state = reactive({ isOpen: true, log: { timestamp: '2026-01-01T00:00:00Z' } })
+    state = reactive({ isOpen: true, log: { timestamp: '2026-01-01T00:00:00Z' }, sourceId: '1', teamId: 1 })
     const host = document.createElement('div')
     document.body.appendChild(host)
     const app = createApp({ render: () => h(LogTimelineModal, {
-      ...state, teamId: 1, sourceId: '1', 'onUpdate:isOpen': closed,
+      ...state, 'onUpdate:isOpen': closed,
     }) })
     app.use(createPinia()).use(i18n).mount(host)
     unmount = () => { app.unmount(); host.remove() }
@@ -49,6 +49,39 @@ describe('log context request ownership', () => {
     expect(document.body.textContent).toContain('Current context')
     expect(document.body.textContent).not.toContain('Stale context')
     expect(closed).not.toHaveBeenCalled()
+  })
+
+  describe.each(['timestamp', 'source', 'team'])('missing %s', missing => {
+    function clearInput() {
+      if (missing === 'timestamp') state.log = { message: 'No timestamp' }
+      if (missing === 'source') state.sourceId = ''
+      if (missing === 'team') state.teamId = 0
+    }
+
+    it('clears the skeleton and discards a pending context response', async () => {
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+      expect(document.querySelector('[data-slot="skeleton"]')).not.toBeNull()
+      clearInput()
+      await nextTick()
+      expect(document.querySelector('[data-slot="skeleton"]')).toBeNull()
+      network.requests[0].succeed(context('Stale context'))
+      await new Promise(resolve => setTimeout(resolve, 0))
+      await nextTick()
+      expect(document.body.textContent).not.toContain('Stale context')
+      expect(document.querySelector('[data-slot="skeleton"]')).toBeNull()
+      expect(network.requests).toHaveLength(1)
+    })
+
+    it('clears previously loaded context', async () => {
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+      network.requests[0].succeed(context('Previous context'))
+      await vi.waitFor(() => expect(document.body.textContent).toContain('Previous context'))
+      clearInput()
+      await nextTick()
+      expect(document.body.textContent).not.toContain('Previous context')
+      expect(document.querySelector('[data-slot="skeleton"]')).toBeNull()
+      expect(network.requests).toHaveLength(1)
+    })
   })
 
   it('does not append old pagination into a newly opened row', async () => {
