@@ -150,6 +150,17 @@ describe('contextRouterGuard', () => {
     expect(listUserTeams).not.toHaveBeenCalled()
   })
 
+  it('leaves a navigation within Explorer to Explorer', async () => {
+    await signIn('member')
+    const explore = (source: string) => router.resolve({ name: 'LogExplorer', query: { team: '2', source } })
+    await contextRouterGuard(explore('20'), library())
+    expect(useContextStore().sourceId).toBe(20)
+
+    await contextRouterGuard(explore('21'), explore('20'))
+
+    expect(useContextStore().sourceId).toBe(20)
+  })
+
   it('keeps a global admin on a persisted team outside their memberships', async () => {
     await signIn('admin')
     persistContext(14, { 14: 140 })
