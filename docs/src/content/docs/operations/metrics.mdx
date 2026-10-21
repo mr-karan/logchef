@@ -33,15 +33,15 @@ Monitor web interface performance and usage patterns.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_http_requests_total` | Total HTTP requests | Counter | `method`, `endpoint`, `status`, `user_email`, `user_role` |
+| `logchef_http_requests_total` | Total HTTP requests | Counter | `method`, `endpoint`, `status`, `user_role` |
 | `logchef_http_request_duration_seconds` | HTTP request latency distribution | Histogram | `method`, `endpoint` |
 | `logchef_http_response_size_bytes` | HTTP response size distribution | Histogram | `method`, `endpoint` |
-| `logchef_http_errors_total` | HTTP errors by type | Counter | `method`, `endpoint`, `error_type`, `status`, `user_email`, `user_role` |
+| `logchef_http_errors_total` | HTTP errors by type | Counter | `method`, `endpoint`, `error_type`, `status`, `user_role` |
 | `logchef_http_active_requests` | Currently active HTTP requests | Gauge | - |
 
 **Key Use Cases:**
 - Identify slow endpoints with `logchef_http_request_duration_seconds`
-- Monitor error rates by endpoint and user
+- Monitor error rates by endpoint and role
 - Track API usage patterns across teams
 - Set up alerts for high error rates or latency spikes
 
@@ -51,9 +51,9 @@ Track database query execution and performance patterns.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_query_total` | Total queries executed | Counter | `source_id`, `source_name`, `database`, `table`, `query_type`, `result`, `user_email`, `user_role` |
-| `logchef_query_duration_seconds` | Query execution time distribution | Histogram | `source_name`, `database`, `table` |
-| `logchef_query_rows_returned` | Distribution of rows returned | Histogram | `source_name`, `database`, `table` |
+| `logchef_query_total` | Total queries executed | Counter | `source_id`, `source_name`, `database`, `table`, `query_type`, `result` |
+| `logchef_query_duration_seconds` | Query execution time distribution | Histogram | `source_id`, `source_name`, `database`, `table` |
+| `logchef_query_rows_returned` | Distribution of rows returned | Histogram | `source_id`, `source_name`, `database`, `table` |
 | `logchef_query_timeouts_total` | Query timeouts by source | Counter | `source_id`, `source_name`, `database`, `table`, `query_type` |
 | `logchef_query_errors_total` | Query errors by type | Counter | `source_id`, `source_name`, `database`, `table`, `error_type` |
 
@@ -73,9 +73,9 @@ Monitor login attempts and session management.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_auth_attempts_total` | Authentication attempts | Counter | `method`, `result`, `user_email`, `user_role` |
-| `logchef_session_operations_total` | Session operations (create, validate, destroy) | Counter | `operation`, `result`, `user_email`, `user_role` |
-| `logchef_api_token_operations_total` | API token operations | Counter | `operation`, `result`, `user_email`, `user_role`, `token_name` |
+| `logchef_auth_attempts_total` | Authentication attempts | Counter | `method`, `result`, `user_role` |
+| `logchef_session_operations_total` | Session operations (create, validate, destroy) | Counter | `operation`, `result`, `user_role` |
+| `logchef_api_token_operations_total` | API token operations | Counter | `operation`, `result`, `user_role`, `token_name` |
 | `logchef_active_sessions` | Currently active sessions | Gauge | - |
 | `logchef_active_users` | Currently active users | Gauge | - |
 
@@ -95,13 +95,13 @@ Track access control failures and permission violations.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_authorization_failures_total` | Authorization failures | Counter | `endpoint`, `reason`, `user_email`, `user_role` |
+| `logchef_authorization_failures_total` | Authorization failures | Counter | `endpoint`, `reason`, `user_role` |
 
 **Failure Reasons:** `insufficient_role`, `team_access_denied`, `source_access_denied`, `token_expired`
 
 **Key Use Cases:**
 - Monitor access control violations
-- Identify users attempting unauthorized access
+- Identify roles hitting unauthorized endpoints
 - Track permission boundary effectiveness
 
 ## ClickHouse Metrics
@@ -123,9 +123,9 @@ Track multi-tenant usage and resource access patterns.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_team_operations_total` | Team management operations | Counter | `team_id`, `team_name`, `operation`, `result`, `user_email`, `user_role` |
-| `logchef_source_operations_total` | Source management operations | Counter | `source_id`, `source_name`, `database`, `table`, `operation`, `result`, `user_email`, `user_role` |
-| `logchef_collection_operations_total` | Saved query collection operations | Counter | `source_name`, `team_name`, `operation`, `result`, `collection_name`, `user_email`, `user_role` |
+| `logchef_team_operations_total` | Team management operations | Counter | `team_id`, `team_name`, `operation`, `result`, `user_role` |
+| `logchef_source_operations_total` | Source management operations | Counter | `source_id`, `source_name`, `database`, `table`, `operation`, `result`, `user_role` |
+| `logchef_collection_operations_total` | Saved query collection operations | Counter | `source_name`, `team_name`, `operation`, `result`, `collection_name`, `user_role` |
 
 **Operations:** `create`, `update`, `delete`, `list`, `get`
 
@@ -140,7 +140,7 @@ Monitor AI-powered feature usage and performance.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_ai_operations_total` | AI operations (SQL generation, suggestions) | Counter | `source_name`, `database`, `table`, `operation`, `result`, `user_email`, `user_role` |
+| `logchef_ai_operations_total` | AI operations (SQL generation, suggestions) | Counter | `source_name`, `database`, `table`, `operation`, `result`, `user_role` |
 | `logchef_ai_duration_seconds` | AI operation latency distribution | Histogram | `source_name`, `operation` |
 
 **AI Operations:** `sql_generation`, `field_suggestion`, `query_explanation`
@@ -148,7 +148,7 @@ Monitor AI-powered feature usage and performance.
 **Key Use Cases:**
 - Track AI feature adoption and success rates
 - Monitor AI operation performance and latency
-- Identify popular AI features by source/user
+- Identify popular AI features by source
 
 ## Histogram Metrics
 
@@ -156,7 +156,7 @@ Monitor histogram generation for log data visualization.
 
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
-| `logchef_histogram_total` | Histogram generation operations | Counter | `source_id`, `source_name`, `database`, `table`, `result`, `user_email`, `user_role` |
+| `logchef_histogram_total` | Histogram generation operations | Counter | `source_id`, `source_name`, `database`, `table`, `result`, `user_role` |
 | `logchef_histogram_duration_seconds` | Histogram generation latency | Histogram | `source_name`, `database`, `table` |
 
 **Key Use Cases:**
@@ -174,13 +174,13 @@ rate(logchef_query_duration_seconds_sum[5m]) / rate(logchef_query_duration_secon
 rate(logchef_query_total{result="success"}[5m]) / rate(logchef_query_total[5m])
 ```
 
-### Track User Activity
+### Track Activity
 ```promql
-# Most active users by query volume
-topk(10, sum by (user_email) (rate(logchef_query_total[1h])))
+# Query volume by source
+topk(10, sum by (source_name) (rate(logchef_query_total[1h])))
 
-# Authentication failure rate by user
-rate(logchef_auth_attempts_total{result="failure"}[5m]) by (user_email)
+# Authentication failure rate by role
+sum by (user_role) (rate(logchef_auth_attempts_total{result="failure"}[5m]))
 ```
 
 ### Monitor HTTP Performance

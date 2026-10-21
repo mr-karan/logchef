@@ -61,7 +61,7 @@ func TestQueryProgressOverflow(t *testing.T) {
 }
 
 func queryCounter(source *models.Source, queryType, result string) *vmmetrics.Counter {
-	return vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q,user_email="",user_role=""}`,
+	return vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_query_total{source_id="%d",source_name=%q,database=%q,table=%q,query_type=%q,result=%q}`,
 		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, queryType, result))
 }
 

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -212,6 +213,8 @@ func (m *Manager) RemoveSource(sourceID models.SourceID) error {
 	delete(m.health, sourceID)
 	m.healthMux.Unlock()
 	m.clientsMux.Unlock()
+
+	metrics.RemoveSourceSeries(sourceID)
 
 	if exists && client != nil {
 		if err := client.Close(); err != nil {
