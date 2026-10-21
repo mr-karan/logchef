@@ -75,7 +75,11 @@ func TestManagerRemoveSourceLeavesNoSeriesAfterInFlightWork(t *testing.T) {
 		_, _ = client.Query(context.Background(), "SELECT 1")
 	}()
 	<-hook.entered
-	go func() { _ = client.Ping(context.Background(), "", "") }()
+	pingDone := make(chan struct{})
+	go func() {
+		defer close(pingDone)
+		_ = client.Ping(context.Background(), "", "")
+	}()
 	<-dialed
 
 	if err := m.RemoveSource(source.ID); err != nil {
@@ -83,6 +87,7 @@ func TestManagerRemoveSourceLeavesNoSeriesAfterInFlightWork(t *testing.T) {
 	}
 	close(hook.release)
 	<-queryDone
+	<-pingDone
 
 	var buf bytes.Buffer
 	vm.WritePrometheus(&buf, false)
