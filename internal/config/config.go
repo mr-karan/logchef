@@ -527,6 +527,8 @@ func Load(path string) (*Config, error) {
 			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
 		}
 		log.Printf("loaded configuration from file: %s", path)
+	} else {
+		log.Printf("no config file, using environment variables only")
 	}
 
 	// Load environment variables with the prefix LOGCHEF_.
@@ -828,8 +830,8 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 
 // defaultConfig returns the configuration every key falls back to. Load
 // unmarshals the file and environment over it, so an explicit zero in a file
-// overrides a default and an absent key keeps it. Slice defaults are not set
-// here because unmarshaling over a non-empty slice would merge, not replace.
+// overrides a default and an absent key keeps it. Unmarshaling replaces a
+// slice, so an explicit empty list clears its default.
 func defaultConfig() Config {
 	secureCookie := defaultServerSecureCookie
 	return Config{
@@ -840,6 +842,7 @@ func defaultConfig() Config {
 			SecureCookie:      &secureCookie,
 			ProxyHeader:       defaultProxyHeader,
 		},
+		OIDC:     OIDCConfig{Scopes: slices.Clone(defaultOIDCScopes)},
 		Database: DatabaseConfig{Driver: defaultDatabaseDriver},
 		SQLite:   SQLiteConfig{Path: defaultSQLitePath},
 		Postgres: PostgresConfig{
@@ -913,25 +916,32 @@ func defaultConfig() Config {
 	}
 }
 
-// normalize resolves what defaultConfig cannot express: slice defaults,
-// defaults that depend on other keys, values where zero or less is invalid
-// and falls back to the default, and cross-field limits. It uses k only where
-// an explicit value differs from an absent one.
+// hasKey reports whether k holds key, ignoring case like Unmarshal does.
+func hasKey(k *koanf.Koanf, key string) bool {
+	for _, have := range k.Keys() {
+		if strings.EqualFold(have, key) {
+			return true
+		}
+	}
+	return false
+}
+
+// normalize resolves what defaultConfig cannot express: defaults that depend
+// on other keys, values where zero or less is invalid and falls back to the
+// default, and cross-field limits. It uses k only where an explicit value
+// differs from an absent one.
 func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key table
 	cfg.Database.Driver = strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
-	if !k.Exists("oidc.scopes") {
-		cfg.OIDC.Scopes = append([]string(nil), defaultOIDCScopes...)
-	}
 
 	// Default the model to gpt-4o only for the OpenAI provider — "gpt-4o" is not
 	// a valid Bedrock model id, so leaving it empty lets validateConfig fail fast
 	// and require an explicit Bedrock model id.
-	if !k.Exists("ai.model") && cfg.AI.Provider != "bedrock" {
+	if !hasKey(k, "ai.model") && cfg.AI.Provider != "bedrock" {
 		cfg.AI.Model = defaultAIModel
 	}
 
 	// query.max_limit is the deprecated alias of query.max_preview_limit.
-	if !k.Exists("query.max_preview_limit") && cfg.Query.MaxLimit > 0 {
+	if !hasKey(k, "query.max_preview_limit") && cfg.Query.MaxLimit > 0 {
 		cfg.Query.MaxPreviewLimit = cfg.Query.MaxLimit
 	}
 	if cfg.Query.MaxLimit == 0 {

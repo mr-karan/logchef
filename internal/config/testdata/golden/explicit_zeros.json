@@ -4,7 +4,7 @@
     "Host": "",
     "FrontendURL": "",
     "HTTPServerTimeout": 0,
-    "SecureCookie": true,
+    "SecureCookie": false,
     "TrustedProxies": null,
     "ProxyHeader": "X-Forwarded-For",
     "PublicURL": "",
@@ -14,7 +14,7 @@
     "Driver": "sqlite"
   },
   "SQLite": {
-    "Path": "local.db"
+    "Path": ""
   },
   "Postgres": {
     "DSN": "",
@@ -69,7 +69,7 @@
     }
   },
   "Logging": {
-    "Level": "info"
+    "Level": ""
   },
   "AI": {
     "Provider": "",

@@ -82,7 +82,14 @@ func TestLoad_Golden(t *testing.T) {
 port = 0
 host = ""
 http_server_timeout = "0s"
+secure_cookie = false
 proxy_header = "  "
+
+[sqlite]
+path = ""
+
+[logging]
+level = ""
 
 [postgres]
 max_open_conns = 0
@@ -206,6 +213,25 @@ model = "example.model-v1:0"
 ` + goldenAuthKeys + `
 `
 
+	const capitalized = `
+[Server]
+Port = 9001
+Secure_Cookie = false
+
+[AI]
+Model = ""
+
+[Query]
+Max_Limit = 700
+Max_Preview_Limit = 0
+
+[OIDC]
+` + goldenOIDCKeys + `Scopes = ["openid"]
+
+[auth]
+` + goldenAuthKeys + `
+`
+
 	tests := []struct {
 		name string
 		path func(t *testing.T) string
@@ -216,6 +242,7 @@ model = "example.model-v1:0"
 		{"negatives_and_empties", func(t *testing.T) string { return writeRawConfig(t, negatives) }},
 		{"legacy_max_limit_alias", func(t *testing.T) string { return writeConfig(t, legacyAlias) }},
 		{"customized", func(t *testing.T) string { return writeRawConfig(t, customized) }},
+		{"capitalized_keys", func(t *testing.T) string { return writeRawConfig(t, capitalized) }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -227,4 +254,37 @@ model = "example.model-v1:0"
 			assertGolden(t, tt.name, cfg)
 		})
 	}
+}
+
+func TestLoad_GoldenEnvOnly(t *testing.T) {
+	clearLogchefEnv(t)
+	for k, v := range map[string]string{
+		"LOGCHEF_AUTH__ADMIN_EMAILS":                 "admin@example.com",
+		"LOGCHEF_AUTH__API_TOKEN_SECRET":             "0123456789abcdef0123456789abcdef",
+		"LOGCHEF_AUTH__SESSION_DURATION":             "0s",
+		"LOGCHEF_OIDC__PROVIDER_URL":                 "http://localhost/dex",
+		"LOGCHEF_OIDC__AUTH_URL":                     "http://localhost/dex/auth",
+		"LOGCHEF_OIDC__TOKEN_URL":                    "http://localhost/dex/token",
+		"LOGCHEF_OIDC__CLIENT_ID":                    "logchef",
+		"LOGCHEF_OIDC__REDIRECT_URL":                 "http://localhost/callback",
+		"LOGCHEF_SERVER__PORT":                       "0",
+		"LOGCHEF_SERVER__SECURE_COOKIE":              "false",
+		"LOGCHEF_SQLITE__PATH":                       "",
+		"LOGCHEF_ALERTS__ENABLED":                    "false",
+		"LOGCHEF_ALERTS__HISTORY_LIMIT":              "0",
+		"LOGCHEF_AI__MODEL":                          "",
+		"LOGCHEF_QUERY__MAX_PREVIEW_LIMIT":           "0",
+		"LOGCHEF_QUERY__DEFAULT_TIMEOUT_SECONDS":     "45",
+		"LOGCHEF_RATE_LIMIT__ENABLED":                "false",
+		"LOGCHEF_RATE_LIMIT__AUTH_GLOBAL_PER_MINUTE": "0",
+		"LOGCHEF_DASHBOARD_CACHE__ENABLED":           "false",
+		"LOGCHEF_TAIL__LOOKBACK_MARGIN":              "0s",
+	} {
+		t.Setenv(k, v)
+	}
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	assertGolden(t, "env_only", cfg)
 }

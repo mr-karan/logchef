@@ -1,0 +1,154 @@
+{
+  "Server": {
+    "Port": 0,
+    "Host": "0.0.0.0",
+    "FrontendURL": "",
+    "HTTPServerTimeout": 900000000000,
+    "SecureCookie": false,
+    "TrustedProxies": null,
+    "ProxyHeader": "X-Forwarded-For",
+    "PublicURL": "",
+    "BrowserURL": ""
+  },
+  "Database": {
+    "Driver": "sqlite"
+  },
+  "SQLite": {
+    "Path": ""
+  },
+  "Postgres": {
+    "DSN": "",
+    "MaxOpenConns": 25,
+    "MaxIdleConns": 5,
+    "ConnMaxLifetime": 1800000000000
+  },
+  "Clickhouse": {
+    "Host": "",
+    "Port": 0,
+    "Database": "",
+    "Username": "",
+    "Password": ""
+  },
+  "OIDC": {
+    "ProviderURL": "http://localhost/dex",
+    "AuthURL": "http://localhost/dex/auth",
+    "TokenURL": "http://localhost/dex/token",
+    "ClientID": "logchef",
+    "ClientSecret": "",
+    "RedirectURL": "http://localhost/callback",
+    "Scopes": [
+      "openid",
+      "email",
+      "profile"
+    ],
+    "SkipEmailVerifiedCheck": false,
+    "AllowedIssuers": null
+  },
+  "Auth": {
+    "AdminEmails": [
+      "admin@example.com"
+    ],
+    "SessionDuration": 0,
+    "MaxConcurrentSessions": 1,
+    "APITokenSecret": "0123456789abcdef0123456789abcdef",
+    "DefaultTokenExpiry": 7776000000000000,
+    "Local": {
+      "Enabled": false,
+      "AdminEmail": "",
+      "AdminPassword": ""
+    },
+    "AutoProvision": {
+      "Enabled": false,
+      "AllowedDomains": null,
+      "DefaultTeamIDs": null
+    },
+    "OAuth": {
+      "Enabled": false,
+      "Clients": null,
+      "MCPAllowedOrigins": null
+    }
+  },
+  "Logging": {
+    "Level": "info"
+  },
+  "AI": {
+    "Provider": "",
+    "Region": "",
+    "APIKey": "",
+    "Model": "",
+    "MaxTokens": 1024,
+    "Temperature": 0.1,
+    "ReasoningEffort": "",
+    "Enabled": true,
+    "BaseURL": "https://api.openai.com/v1",
+    "AskChefModel": ""
+  },
+  "Alerts": {
+    "Enabled": false,
+    "EvaluationInterval": 60000000000,
+    "DefaultLookback": 300000000000,
+    "HistoryLimit": 0
+  },
+  "Query": {
+    "MaxLimit": 0,
+    "DefaultPreviewLimit": 1000,
+    "MaxPreviewLimit": 100000,
+    "MaxResponseBytes": 67108864,
+    "DefaultTimeoutSeconds": 45,
+    "MaxTimeoutSeconds": 300,
+    "MCPCallTimeoutSeconds": 60,
+    "MaxConcurrentPerUser": 3,
+    "MaxConcurrentGlobal": 30
+  },
+  "Export": {
+    "MaxRows": 1000000,
+    "DefaultTimeoutSeconds": 120,
+    "MaxTimeoutSeconds": 600,
+    "MaxConcurrentPerUser": 1,
+    "MaxConcurrentGlobal": 5,
+    "ArtifactTTL": 86400000000000,
+    "Formats": [
+      "csv",
+      "ndjson"
+    ]
+  },
+  "Tail": {
+    "PollInterval": 2000000000,
+    "MaxPerUser": 2,
+    "MaxGlobal": 20,
+    "SessionTTL": 840000000000,
+    "MaxRowsPerSec": 100,
+    "LookbackMargin": 0
+  },
+  "Shares": {
+    "DefaultTTL": 2592000000000000,
+    "MaxQueryTextBytes": 1048576
+  },
+  "RateLimit": {
+    "Enabled": false,
+    "AuthPerIPPerMinute": 20,
+    "AuthGlobalPerMinute": 0,
+    "QueryPerUserPerMinute": 120
+  },
+  "DashboardCache": {
+    "Enabled": false,
+    "DefaultTTL": 600000000000,
+    "MaxTTL": 3600000000000,
+    "MaxBytes": 67108864,
+    "MaxEntryBytes": 4194304,
+    "MaxEntries": 1024,
+    "MaxConcurrentFills": 8
+  },
+  "Provisioning": {
+    "File": "",
+    "ManageSources": false,
+    "ManageTeams": false,
+    "Prune": false,
+    "DryRun": false
+  },
+  "Demo": {
+    "ReadOnly": false,
+    "ShowLoginCredentials": false,
+    "ProvisioningToken": ""
+  }
+}

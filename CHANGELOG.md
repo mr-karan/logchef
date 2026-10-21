@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Startup now fails when a config file passed with `--config` is missing or
+  malformed, and when the default `config.toml` is malformed. Before, the
+  server ignored the problem and ran on defaults.
+- Config keys are matched case-insensitively. A key such as `[Server] Port`
+  now takes effect. Before, some keys ignored it and fell back to defaults.
+
 ## [2.4.0] - 2026-10-13
 
 VictoriaLogs windowed search is opt-in. Enable it in the source form or
