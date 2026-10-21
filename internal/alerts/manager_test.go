@@ -164,8 +164,10 @@ func TestManagerDeliveryRetries(t *testing.T) {
 		{name: "successful first attempt", succeedAt: 1, wantAttempts: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db, alert, logger := newManagerTestAlert(t)
+			db, alert, _ := newManagerTestAlert(t)
 			ctx := t.Context()
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
 			attempts := 0
 			var historyID int64
 			if tc.legacy {
@@ -194,6 +196,13 @@ func TestManagerDeliveryRetries(t *testing.T) {
 			}
 			if attempts != tc.wantAttempts {
 				t.Errorf("delivery attempts = %d, want %d", attempts, tc.wantAttempts)
+			}
+			wantExhausted := 0
+			if tc.succeedAt == 0 {
+				wantExhausted = 1
+			}
+			if got := countLogs(t, &logs, "alert delivery retries exhausted"); got != wantExhausted {
+				t.Errorf("exhaustion log count = %d, want %d", got, wantExhausted)
 			}
 			history, err := db.ListAlertHistory(ctx, alert.ID, 10)
 			if err != nil || len(history) != 1 {
@@ -227,17 +236,66 @@ func TestManagerStopTwice(t *testing.T) {
 	m.Stop()
 }
 
-func TestManagerDeliveryHistoryWriteFailures(t *testing.T) {
+type logRecord struct {
+	Level     string         `json:"level"`
+	Message   string         `json:"msg"`
+	AlertID   models.AlertID `json:"alert_id"`
+	HistoryID int64          `json:"history_id"`
+	Attempts  int            `json:"attempts"`
+}
+
+func decodeLogs(t *testing.T, logs *bytes.Buffer, msg string) []logRecord {
+	t.Helper()
+	var matched []logRecord
+	decoder := json.NewDecoder(bytes.NewReader(logs.Bytes()))
+	for {
+		var record logRecord
+		if err := decoder.Decode(&record); err != nil {
+			if errors.Is(err, io.EOF) {
+				return matched
+			}
+			t.Fatal(err)
+		}
+		if record.Message == msg {
+			matched = append(matched, record)
+		}
+	}
+}
+
+func countLogs(t *testing.T, logs *bytes.Buffer, msg string) int {
+	t.Helper()
+	return len(decodeLogs(t, logs, msg))
+}
+
+// failHistoryWrites installs a trigger that rejects the matching alert_history
+// writes and returns a function that removes it.
+func failHistoryWrites(t *testing.T, path, event string) (restore func()) {
+	t.Helper()
+	ctx := t.Context()
+	control, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = control.Close() })
+	if _, err := control.ExecContext(ctx, "CREATE TRIGGER fail_history_write "+event+" BEGIN SELECT RAISE(FAIL, 'history write unavailable'); END"); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if _, err := control.ExecContext(ctx, "DROP TRIGGER fail_history_write"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestManagerReservationWriteFailureSendsNothing(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		seed      bool
-		trigger   string
-		wantSends int
+		name  string
+		seed  bool
+		event string
 	}{
-		{name: "initial reservation", trigger: "BEFORE INSERT ON alert_history", wantSends: 0},
-		{name: "retry reservation", seed: true, trigger: "BEFORE UPDATE OF payload_json ON alert_history", wantSends: 0},
-		{name: "delivery outcome", trigger: `BEFORE UPDATE OF payload_json ON alert_history
-			WHEN json_extract(NEW.payload_json, '$.delivery_attempts') = json_extract(OLD.payload_json, '$.delivery_attempts')`, wantSends: 3},
+		{name: "initial reservation", event: "BEFORE INSERT ON alert_history"},
+		{name: "retry reservation", seed: true, event: "BEFORE UPDATE OF payload_json ON alert_history"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "alerts.db")
@@ -250,83 +308,76 @@ func TestManagerDeliveryHistoryWriteFailures(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			control, err := sql.Open("sqlite", path)
-			if err != nil {
-				t.Fatal(err)
-			}
-			t.Cleanup(func() { _ = control.Close() })
-			if _, err := control.ExecContext(ctx, "CREATE TRIGGER fail_history_write "+tc.trigger+" BEGIN SELECT RAISE(FAIL, 'history write unavailable'); END"); err != nil {
-				t.Fatal(err)
-			}
+			restore := failHistoryWrites(t, path, tc.event)
 			sends := 0
-			sender := alertSenderFunc(func(_ context.Context, _ AlertNotification) error {
+			sender := alertSenderFunc(func(context.Context, AlertNotification) error {
 				sends++
-				entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
-				if err != nil {
-					t.Errorf("history at send = %v, want persisted reservation", err)
-				} else if got := entry.Payload["delivery_attempts"]; got != float64(sends) {
-					t.Errorf("reserved attempts at send = %v, want %d", got, sends)
-				}
 				return errors.New("outbound delivery unavailable")
 			})
-			var logs bytes.Buffer
-			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 			for range 8 {
 				m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
 				if err := m.handleTriggered(ctx, alert, 12); err != nil {
 					t.Fatal(err)
 				}
 			}
-			if sends != tc.wantSends {
-				t.Errorf("sends during history write failures = %d, want %d", sends, tc.wantSends)
+			if sends != 0 {
+				t.Errorf("sends while the reservation write fails = %d, want 0", sends)
 			}
-			if tc.wantSends == 3 {
-				entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
-				if err != nil || entry.Payload["delivery_attempts"] != float64(3) {
-					t.Fatalf("persisted attempts = %+v, %v; want 3", entry, err)
-				}
-				count := 0
-				decoder := json.NewDecoder(&logs)
-				for {
-					var record struct {
-						Level     string         `json:"level"`
-						Message   string         `json:"msg"`
-						AlertID   models.AlertID `json:"alert_id"`
-						HistoryID int64          `json:"history_id"`
-						Attempts  int            `json:"attempts"`
-					}
-					if err := decoder.Decode(&record); err != nil {
-						if errors.Is(err, io.EOF) {
-							break
-						}
-						t.Fatal(err)
-					}
-					if record.Message == "alert delivery retries exhausted" {
-						count++
-						if record.Level != "ERROR" || record.AlertID != alert.ID || record.HistoryID != entry.ID || record.Attempts != 3 {
-							t.Errorf("exhaustion log = %+v, want error with alert %d, history %d, 3 attempts", record, alert.ID, entry.ID)
-						}
-					}
-				}
-				if count != 1 {
-					t.Errorf("exhaustion log count = %d, want 1", count)
-				}
-			}
-			if _, err := control.ExecContext(ctx, "DROP TRIGGER fail_history_write"); err != nil {
+
+			restore()
+			sender = alertSenderFunc(func(context.Context, AlertNotification) error {
+				sends++
+				return nil
+			})
+			m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+			if err := m.handleTriggered(ctx, alert, 12); err != nil {
 				t.Fatal(err)
 			}
-			if tc.wantSends == 0 {
-				m := NewManager(Options{DB: db, Logger: logger, Sender: alertSenderFunc(func(context.Context, AlertNotification) error {
-					sends++
-					return nil
-				})})
-				if err := m.handleTriggered(ctx, alert, 12); err != nil {
-					t.Fatal(err)
-				}
-				if sends != 1 {
-					t.Errorf("sends after history writes recover = %d, want 1", sends)
-				}
+			if sends != 1 {
+				t.Errorf("sends after the reservation write recovers = %d, want 1", sends)
 			}
 		})
+	}
+}
+
+func TestManagerOutcomeWriteFailureStopsAtMaxAttempts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.db")
+	db, alert, _ := newManagerTestAlertAtPath(t, path)
+	ctx := t.Context()
+	failHistoryWrites(t, path, `BEFORE UPDATE OF payload_json ON alert_history
+		WHEN json_extract(NEW.payload_json, '$.delivery_attempts') = json_extract(OLD.payload_json, '$.delivery_attempts')`)
+	sends := 0
+	sender := alertSenderFunc(func(context.Context, AlertNotification) error {
+		sends++
+		entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+		if err != nil {
+			t.Errorf("history at send = %v, want persisted reservation", err)
+		} else if got := entry.Payload["delivery_attempts"]; got != float64(sends) {
+			t.Errorf("reserved attempts at send = %v, want %d", got, sends)
+		}
+		return errors.New("outbound delivery unavailable")
+	})
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	for range 8 {
+		m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+		if err := m.handleTriggered(ctx, alert, 12); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sends != maxDeliveryAttempts {
+		t.Errorf("sends while the outcome write fails = %d, want %d", sends, maxDeliveryAttempts)
+	}
+	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+	if err != nil || entry.Payload["delivery_attempts"] != float64(maxDeliveryAttempts) {
+		t.Fatalf("persisted attempts = %+v, %v; want %d", entry, err, maxDeliveryAttempts)
+	}
+	exhausted := decodeLogs(t, &logs, "alert delivery retries exhausted")
+	if len(exhausted) != 1 {
+		t.Fatalf("exhaustion log count = %d, want 1", len(exhausted))
+	}
+	if got := exhausted[0]; got.Level != "ERROR" || got.AlertID != alert.ID || got.HistoryID != entry.ID || got.Attempts != maxDeliveryAttempts {
+		t.Errorf("exhaustion log = %+v, want error with alert %d, history %d, %d attempts", got, alert.ID, entry.ID, maxDeliveryAttempts)
 	}
 }

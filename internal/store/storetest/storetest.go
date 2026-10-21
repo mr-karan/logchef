@@ -775,7 +775,7 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListAlertHistory: %v / %d", err, len(hist))
 	}
 	testAlertHistoryEntry(t, ctx, s, hist[0])
-	t.Run("PruneAlertHistoryPreservesFiring", func(t *testing.T) { testAlertHistoryPruning(t, ctx, s, a.ID) })
+	t.Run("PruneAlertHistoryPreservesFiring", func(t *testing.T) { testAlertHistoryPruning(t, ctx, s, src.ID) })
 
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
 		t.Fatalf("DeleteAlert: %v", err)
@@ -942,8 +942,19 @@ func testWithTxNoNesting(t *testing.T, ctx context.Context, s store.Store) {
 	}
 }
 
-func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, sourceID models.SourceID) {
 	t.Helper()
+	alert := &models.Alert{
+		SourceID: sourceID, Name: "prune fixture", Query: "SELECT count() FROM logs",
+		QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
+		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true,
+		ThresholdOperator: models.AlertThresholdGreaterThan, ThresholdValue: 10,
+		Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
+	}
+	if err := s.CreateAlert(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	alertID := alert.ID
 	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{
 		"delivery_attempts": 3, "delivery_failed": true,
 	})
@@ -964,8 +975,8 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, a
 		t.Fatalf("unresolved history after pruning = %+v, %v; want firing entry %d with 3 attempts", latest, err, entry.ID)
 	}
 	history, err := s.ListAlertHistory(ctx, alertID, 10)
-	if err != nil || len(history) != keep+2 {
-		t.Fatalf("history after pruning = %d entries, %v; want 2 unresolved and %d recent entries", len(history), err, keep)
+	if err != nil || len(history) != keep+1 {
+		t.Fatalf("history after pruning = %d entries, %v; want the firing entry and %d recent entries", len(history), err, keep)
 	}
 	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved"); err != nil {
 		t.Fatal(err)
