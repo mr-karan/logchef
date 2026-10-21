@@ -7,12 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Breaking change: blocks without variables, such as `[[ AND active = true ]]`,
+  keep their brackets to preserve SQL arrays. Remove the brackets or add a
+  variable to migrate existing queries.
+
 ### Fixed
 - Escape template values and field names for SQL, LogsQL, and LogchefQL to keep
   quotes and backslashes from changing query structure.
-- Recognize optional blocks by balanced brackets and an unquoted variable,
-  using each query language's string and comment syntax. Ignore variables in
-  comments and preserve SQL arrays that do not meet the optional-block rule.
+- Recognize optional blocks by balanced brackets and a variable, including
+  quoted variables, using each query language's string and comment syntax.
+  Ignore variables in comments and preserve SQL arrays that do not meet the
+  optional-block rule.
+- Process optional blocks in streaming and background exports when no variables
+  are supplied, matching Explore queries.
 
 ## [2.4.0] - 2026-10-13
 

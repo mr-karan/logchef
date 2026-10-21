@@ -23,7 +23,7 @@ func TestDialectScannerRegressions(t *testing.T) {
 		{"sql block comment", `SELECT 1 [[ WHERE 0 /* {{ignored}} */ AND {{v}} = 'safe' ]]`, `SELECT 1  WHERE 0 /* {{ignored}} */ AND 'safe' = 'safe' `, template.SubstituteVariables},
 		{"sql line comment", "SELECT 1 [[ WHERE 0 AND {{v}} = 'safe' -- {{ignored}}\n]]", "SELECT 1  WHERE 0 AND 'safe' = 'safe' -- {{ignored}}\n", template.SubstituteVariables},
 		{"sql quoted brackets", `SELECT '[[{{v}}]]'`, `SELECT '[[safe]]'`, template.SubstituteVariables},
-		{"sql quoted dependency only", `SELECT [[ '{{v}}' ]]`, `SELECT [[ 'safe' ]]`, template.SubstituteVariables},
+		{"sql quoted dependency only", `SELECT [[ '{{v}}' ]]`, `SELECT  'safe' `, template.SubstituteVariables},
 		{"sql comment dependency only", "SELECT [[ 1 -- {{ignored}}\n]]", "SELECT [[ 1 -- {{ignored}}\n]]", template.SubstituteVariables},
 		{"logs path", `path:/api/* level:={{v}}`, `path:/api/* level:="safe"`, template.SubstituteLogsQLVariables},
 		{"logs dash", `service:my--svc level:={{v}}`, `service:my--svc level:="safe"`, template.SubstituteLogsQLVariables},
@@ -52,5 +52,38 @@ func TestOptionalBlocksWithNoValues(t *testing.T) {
 		if err != nil || got != "* " {
 			t.Fatalf("got %q, %v", got, err)
 		}
+	}
+}
+
+func TestQuotedOptionalBlocks(t *testing.T) {
+	tests := []struct {
+		name, query, empty, supplied string
+		substitute                   func(string, []template.Variable) (string, error)
+	}{
+		{"sql", `SELECT 1 WHERE 1=1 [[AND msg LIKE '%{{x}}%']]`, `SELECT 1 WHERE 1=1 `, `SELECT 1 WHERE 1=1 AND msg LIKE '%safe%'`, template.SubstituteVariables},
+		{"logsql", `* [[msg:"{{x}}"]]`, `* `, `* msg:"safe"`, template.SubstituteLogsQLVariables},
+		{"logchefql", `level=info [[and msg~"{{x}}"]]`, `level=info `, `level=info and msg~"safe"`, template.SubstituteLogchefQLVariables},
+	}
+	for _, tt := range tests {
+		for _, value := range []string{"", "safe"} {
+			t.Run(tt.name+"/"+value, func(t *testing.T) {
+				want := tt.empty
+				if value != "" {
+					want = tt.supplied
+				}
+				got, err := tt.substitute(tt.query, []template.Variable{{Name: "x", Type: template.TypeString, Value: value}})
+				t.Logf("value=%q query=%q error=%v", value, got, err)
+				if err != nil || got != want {
+					t.Fatalf("got %q, %v; want %q", got, err, want)
+				}
+			})
+		}
+		t.Run(tt.name+"/absent", func(t *testing.T) {
+			got, err := tt.substitute(tt.query, nil)
+			t.Logf("absent query=%q error=%v", got, err)
+			if err != nil || got != tt.empty {
+				t.Fatalf("got %q, %v; want %q", got, err, tt.empty)
+			}
+		})
 	}
 }

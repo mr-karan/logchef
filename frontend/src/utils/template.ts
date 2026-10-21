@@ -57,10 +57,14 @@ function optionalClauseEnd(query: string, start: number, dialect: TemplateDialec
     return -1;
 }
 
-function hasUnquotedVariable(content: string, dialect: TemplateDialect): boolean {
+function hasVariable(content: string, dialect: TemplateDialect): boolean {
     for (let i = 0; i < content.length; i++) {
         const end = quotedOrCommentEnd(content, i, dialect);
-        if (end > i) { i = end - 1; continue; }
+        if (end > i) {
+            if ("'\"`$".includes(content[i]) && variablePattern().test(content.slice(i, end))) return true;
+            i = end - 1;
+            continue;
+        }
         if (content.startsWith('{{', i) && variablePattern().exec(content.slice(i))?.index === 0) return true;
     }
     return false;
@@ -85,7 +89,7 @@ export function extractTemplateVariables(query: string, dialect: TemplateDialect
             }
             if ((dialect !== 'clickhouse-sql' || arrayDepth === 0) && content.startsWith('[[', i)) {
                 const blockEnd = optionalClauseEnd(content, i + 2, dialect);
-                if (blockEnd >= 0 && hasUnquotedVariable(content.slice(i + 2, blockEnd), dialect)) {
+                if (blockEnd >= 0 && hasVariable(content.slice(i + 2, blockEnd), dialect)) {
                     scan(content.slice(i + 2, blockEnd), true);
                     i = blockEnd + 2;
                     continue;

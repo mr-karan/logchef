@@ -78,7 +78,6 @@ func optionalClauseEnd(query string, start int, dialect Dialect) int {
 
 func optionalVariables(content string, dialect Dialect) ([]string, bool) {
 	var names []string
-	unquoted := false
 	for i := 0; i < len(content); {
 		if end := quotedOrCommentEnd(content, i, dialect); end > i {
 			if strings.ContainsRune("'\"`$", rune(content[i])) {
@@ -93,14 +92,13 @@ func optionalVariables(content string, dialect Dialect) ([]string, bool) {
 			match := variablePattern.FindStringSubmatchIndex(content[i:])
 			if len(match) > 0 && match[0] == 0 {
 				names = append(names, content[i+match[2]:i+match[3]])
-				unquoted = true
 				i += match[1]
 				continue
 			}
 		}
 		i++
 	}
-	return names, unquoted
+	return names, len(names) > 0
 }
 
 func quotedOrCommentEnd(query string, start int, dialect Dialect) int {

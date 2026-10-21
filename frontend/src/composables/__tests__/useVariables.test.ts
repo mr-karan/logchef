@@ -34,7 +34,7 @@ describe('extractVariablesWithOptional', () => {
 describe('optional block scanner regressions', () => {
   it.each([
     ["SELECT '[[{{v}}]]'", [{ name: 'v', isOptional: false }]],
-    ["SELECT [[ '{{v}}' ]]", [{ name: 'v', isOptional: false }]],
+    ["SELECT [[ '{{v}}' ]]", [{ name: 'v', isOptional: true }]],
     ['SELECT [[{{v}}],[3]]', [{ name: 'v', isOptional: false }]],
     ['SELECT [[ {{v}} ]', [{ name: 'v', isOptional: false }]],
     ['WHERE [[ host = {{v}} ]]', [{ name: 'v', isOptional: true }]],
@@ -195,5 +195,25 @@ describe('useVariables', () => {
       expect(result.hasVariables).toBe(false)
       expect(result.missingValues).toEqual([])
     })
+  })
+})
+
+describe('quoted optional variable validation', () => {
+  beforeEach(() => setActivePinia(createPinia()))
+
+  it.each([
+    ['clickhouse-sql', "SELECT 1 WHERE 1=1 [[AND msg LIKE '%{{x}}%']]"],
+    ['logsql', '* [[msg:"{{x}}"]]'],
+    ['logchefql', 'level=info [[and msg~"{{x}}"]]'],
+  ] satisfies [TemplateDialect, string][])('validates %s with empty and supplied values', (dialect, query) => {
+    const { ensureVariablesFromSql, validateVariablesForSql, getVariablesForApi } = useVariables()
+    const store = useVariableStore()
+    ensureVariablesFromSql(query, dialect)
+    expect(extractVariablesWithOptional(query, dialect)).toEqual([{ name: 'x', isOptional: true }])
+    for (const value of ['', 'safe']) {
+      store.upsertVariable({ name: 'x', type: 'text', label: 'x', inputType: 'input', value, isOptional: true })
+      expect(validateVariablesForSql(query, dialect)).toEqual({ hasVariables: true, missingValues: [] })
+      expect(getVariablesForApi()).toEqual([{ name: 'x', type: 'text', value }])
+    }
   })
 })

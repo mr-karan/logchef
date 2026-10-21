@@ -265,22 +265,18 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 		return
 	}
 
-	processedSQL := req.RawSQL
-	if len(req.Variables) > 0 {
-		vars := make([]template.Variable, len(req.Variables))
-		for i, v := range req.Variables {
-			vars[i] = template.Variable{
-				Name:  v.Name,
-				Type:  template.VariableType(v.Type),
-				Value: v.Value,
-			}
+	vars := make([]template.Variable, len(req.Variables))
+	for i, v := range req.Variables {
+		vars[i] = template.Variable{
+			Name:  v.Name,
+			Type:  template.VariableType(v.Type),
+			Value: v.Value,
 		}
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
-		if err != nil {
-			s.failExportJob(bgCtx, jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
-			return
-		}
-		processedSQL = substituted
+	}
+	processedSQL, err := template.SubstituteVariables(req.RawSQL, vars)
+	if err != nil {
+		s.failExportJob(bgCtx, jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
+		return
 	}
 
 	source, err := s.sqlite.GetSource(bgCtx, sourceID)
