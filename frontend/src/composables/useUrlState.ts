@@ -496,25 +496,31 @@ export function useUrlState(): UrlStateReturn {
         return;
       }
 
-      const teamId = teamSourceContext.resolveTeamId(teamSourceContext.parseId(normalized.team));
-      if (teamId) {
-        const resolvedSourceId = await applyContextSelection(teamId, teamSourceContext.parseId(normalized.source));
-        normalized.team = String(teamId);
-        normalized.source = resolvedSourceId ? String(resolvedSourceId) : undefined;
+      exploreStore.holdAutoRun(true);
+      let result: ReturnType<typeof exploreStore.initializeFromUrl>;
+      try {
+        const teamId = teamSourceContext.resolveTeamId(teamSourceContext.parseId(normalized.team));
+        if (teamId) {
+          const resolvedSourceId = await applyContextSelection(teamId, teamSourceContext.parseId(normalized.source));
+          normalized.team = String(teamId);
+          normalized.source = resolvedSourceId ? String(resolvedSourceId) : undefined;
+        }
+
+        if (normalized.id) {
+          return;
+        }
+
+        if (normalized.share) {
+          exploreStore.holdAutoRun(false);
+          await initialize();
+          return;
+        }
+
+        result = exploreStore.initializeFromUrl(normalized, { updateLastExecutedState: false });
+        await waitForReadiness();
+      } finally {
+        exploreStore.holdAutoRun(false);
       }
-
-      if (normalized.id) {
-        return;
-      }
-
-      if (normalized.share) {
-        await initialize();
-        return;
-      }
-
-      const result = exploreStore.initializeFromUrl(normalized, { updateLastExecutedState: false });
-
-      await waitForReadiness();
 
       if (result.shouldExecute) {
         exploreStore.executeQuery().catch(err => {
