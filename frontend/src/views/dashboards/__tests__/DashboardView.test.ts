@@ -87,7 +87,9 @@ describe("DashboardView discard confirmation", () => {
   });
 
   it("confirms in-app Back once before leaving the dashboard", async () => {
-    host.querySelector<HTMLButtonElement>("button")?.click();
+    const back = host.querySelector<HTMLButtonElement>('button[aria-label="Back to dashboards"]');
+    if (!back) throw new Error("Back button was not rendered");
+    back.click();
     await settle();
     expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
     expect(router.currentRoute.value.path).toBe("/dashboards/1");

@@ -44,19 +44,20 @@ describe("SaveQueryModal initialization", () => {
     host.remove();
   });
 
-  async function mountModal(prop: "editData" | "initialData") {
+  async function mountModal() {
     const data = ref(query(true));
+    const isOpen = ref(true);
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/", component: { template: "<div />" } }] });
     await router.push("/");
     app = createApp(defineComponent({
       components: { SaveQueryModal },
-      setup: () => ({ data, binding: prop }),
-      template: '<SaveQueryModal :is-open="true" :is-edit-mode="true" v-bind="{ [binding]: data }" />',
+      setup: () => ({ data, isOpen }),
+      template: '<SaveQueryModal :is-open="isOpen" :edit-data="data" />',
     }));
     app.use(createPinia()).use(i18n).use(router);
     app.mount(host);
     await nextTick();
-    return data;
+    return { data, isOpen };
   }
 
   function checkbox() {
@@ -65,8 +66,8 @@ describe("SaveQueryModal initialization", () => {
     return control;
   }
 
-  it.each(["editData", "initialData"] as const)("turns off the timestamp when %s changes to a query without a range", async (prop) => {
-    const data = await mountModal(prop);
+  it("turns off the timestamp when editData changes to a query without a range", async () => {
+    const { data } = await mountModal();
     expect(checkbox().getAttribute("aria-checked")).toBe("true");
     data.value = query(false);
     await nextTick();
@@ -76,8 +77,21 @@ describe("SaveQueryModal initialization", () => {
     expect(checkbox().getAttribute("aria-checked")).toBe("true");
   });
 
+  it("preserves edits when the open prop changes on the same instance", async () => {
+    const { isOpen } = await mountModal();
+    const name = document.querySelector<HTMLInputElement>("#name");
+    if (!name) throw new Error("query name was not rendered");
+    name.value = "My edit";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    isOpen.value = false;
+    await nextTick();
+    isOpen.value = true;
+    await nextTick();
+    expect(document.querySelector<HTMLInputElement>("#name")?.value).toBe("My edit");
+  });
+
   it("shows initial values before metadata loads and preserves edits when loading finishes", async () => {
-    await mountModal("editData");
+    await mountModal();
     const name = document.querySelector<HTMLInputElement>("#name");
     if (!name) throw new Error("query name was not rendered");
     expect(name.value).toBe("Saved query");

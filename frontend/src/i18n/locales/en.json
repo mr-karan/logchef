@@ -1061,8 +1061,6 @@
   "access.editUserDescription": "Make changes to the user's profile here.",
   "access.roleEditor": "Editor",
   "access.teamNameRequired": "Team name is required",
-  "access.removeTeamMemberFailed": "Failed to remove team member.",
-  "access.removeTeamMemberUnexpected": "An unexpected error occurred while trying to remove the team member.",
   "access.invalidTeamID": "Invalid team ID: {id}",
   "access.loadTeamFailed": "An error occurred while loading team data. Please try again.",
   "access.loadingTeamSettings": "Loading team settings...",

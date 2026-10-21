@@ -445,8 +445,8 @@ export function buildHistogramTooltip({
       ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);"><span>${escapeHtml(totalLabel)}</span><strong>${totalCount.toLocaleString()}</strong></div>`
       : "";
 
-  return `<div style="min-width:150px;padding:0.5rem 0.65rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
-    <div style="margin-bottom:0.35rem;font-size:0.75rem;font-weight:600;">${timeLabel}</div>
+  return `<div style="min-width:160px;padding:0.625rem 0.75rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
+    <div style="margin-bottom:0.375rem;font-size:0.75rem;font-weight:600;">${timeLabel}</div>
     ${totalHtml}
     <div style="display:flex;flex-direction:column;gap:0.25rem;">${seriesHtml}</div>
   </div>`;

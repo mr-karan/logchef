@@ -1061,8 +1061,6 @@
   "access.editUserDescription": "在此处修改用户个人资料。",
   "access.roleEditor": "编辑者",
   "access.teamNameRequired": "必须填写团队名称",
-  "access.removeTeamMemberFailed": "移除团队成员失败。",
-  "access.removeTeamMemberUnexpected": "移除团队成员时发生意外错误。",
   "access.invalidTeamID": "团队 ID 无效：{id}",
   "access.loadTeamFailed": "加载团队数据时出错，请重试。",
   "access.loadingTeamSettings": "正在加载团队设置…",

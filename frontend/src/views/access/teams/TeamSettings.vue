@@ -331,7 +331,7 @@ watch(teamId, async (id, _previousId, onCleanup) => {
         if (!active) return
         await teamsStore.getTeam(id)
 
-        // Load team-specific data in parallel
+        if (!active) return
         await Promise.all([
             teamsStore.listTeamMembers(id),
             teamsStore.listTeamSources(id)

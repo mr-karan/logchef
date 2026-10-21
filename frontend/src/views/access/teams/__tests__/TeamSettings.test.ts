@@ -17,6 +17,8 @@ const server = {
   members,
   removeMemberFails: false,
   requests,
+  heldTeamId: 0,
+  releaseTeam: () => {},
 };
 
 function member(teamId: number, userId: number, email: string): TeamMember {
@@ -48,7 +50,12 @@ function respond(method: string, url: string): Envelope {
 
 vi.mock("@/api/apiUtils", () => ({
   apiClient: {
-    get: async (url: string) => respond("get", url),
+    get: async (url: string) => {
+      if (url === `/teams/${server.heldTeamId}`) {
+        await new Promise<void>((resolve) => { server.releaseTeam = resolve; });
+      }
+      return respond("get", url);
+    },
     post: async (url: string) => respond("post", url),
     put: async (url: string) => respond("put", url),
     delete: async (url: string) => respond("delete", url),
@@ -80,6 +87,7 @@ describe("TeamSettings", () => {
   beforeEach(async () => {
     server.members = { 1: [member(1, 10, "a@example.com")], 2: [member(2, 20, "b@example.com")] };
     server.removeMemberFails = false;
+    server.heldTeamId = 0;
     server.requests = [];
     toasts.length = 0;
     host = document.createElement("div");
@@ -115,6 +123,19 @@ describe("TeamSettings", () => {
     expect(host.textContent).toContain("Beta");
     expect(host.textContent).toContain("b@example.com");
     expect(host.textContent).not.toContain("a@example.com");
+  });
+
+  it("does not load members or sources after a team request is superseded", async () => {
+    server.heldTeamId = 2;
+    await router.push("/admin/teams/2");
+    await settle();
+    await router.push("/admin/teams/1");
+    await settle();
+    server.releaseTeam();
+    await settle();
+
+    expect(server.requests).not.toContain("get /teams/2/members");
+    expect(server.requests).not.toContain("get /teams/2/sources");
   });
 
   it("shows one error toast when member removal fails", async () => {
