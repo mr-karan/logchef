@@ -2,8 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
@@ -14,10 +12,7 @@ import (
 func (db *DB) GetUserPreferencesJSON(ctx context.Context, userID models.UserID) (string, error) {
 	row, err := db.readQueries.GetUserPreferences(ctx, int64(userID))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", fmt.Errorf("failed to get user preferences for user %d: %w", userID, err)
+		return "", fmt.Errorf("failed to get user preferences for user %d: %w", userID, translateNotFound(err))
 	}
 
 	return row.PreferencesJson, nil

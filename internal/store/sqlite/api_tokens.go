@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -44,11 +43,7 @@ func (db *DB) CreateAPIToken(ctx context.Context, token *models.APIToken) (int, 
 func (db *DB) GetAPIToken(ctx context.Context, id int) (*models.APIToken, error) {
 	row, err := db.readQueries.GetAPIToken(ctx, int64(id))
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound
-		}
-		db.log.Error("failed to get API token from db", "error", err, "token_id", id)
-		return nil, fmt.Errorf("failed to get API token: %w", err)
+		return nil, fmt.Errorf("failed to get API token: %w", translateNotFound(err))
 	}
 	return apiTokenToModel(row), nil
 }
@@ -57,11 +52,7 @@ func (db *DB) GetAPIToken(ctx context.Context, id int) (*models.APIToken, error)
 func (db *DB) GetAPITokenByHash(ctx context.Context, tokenHash string) (*models.APIToken, error) {
 	row, err := db.readQueries.GetAPITokenByHash(ctx, tokenHash)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound
-		}
-		db.log.Error("failed to get API token by hash from db", "error", err)
-		return nil, fmt.Errorf("failed to get API token by hash: %w", err)
+		return nil, fmt.Errorf("failed to get API token by hash: %w", translateNotFound(err))
 	}
 	return apiTokenToModel(row), nil
 }

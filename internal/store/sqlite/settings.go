@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -16,10 +15,7 @@ import (
 func (db *DB) GetSetting(ctx context.Context, key string) (string, error) {
 	setting, err := db.readQueries.GetSystemSetting(ctx, key)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", ErrNotFound
-		}
-		return "", fmt.Errorf("failed to get setting %s: %w", key, err)
+		return "", fmt.Errorf("failed to get setting %s: %w", key, translateNotFound(err))
 	}
 	return setting.Value, nil
 }

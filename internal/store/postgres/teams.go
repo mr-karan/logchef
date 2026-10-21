@@ -114,6 +114,7 @@ func (s *Store) ListTeams(ctx context.Context) ([]*models.Team, error) {
 			Name:        row.Name,
 			Description: textStr(row.Description),
 			MemberCount: int(row.MemberCount),
+			Managed:     row.Managed,
 			Timestamps:  models.Timestamps{CreatedAt: row.CreatedAt.Time, UpdatedAt: row.UpdatedAt.Time},
 		})
 	}

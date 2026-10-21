@@ -64,11 +64,11 @@ func (db *DB) CreateSavedQuery(ctx context.Context, sourceID models.SourceID, cr
 	return db.GetSavedQuery(ctx, int(id))
 }
 
-// GetSavedQuery returns a saved query by id, or ErrQueryNotFound if missing.
+// GetSavedQuery returns a saved query by id, or models.ErrNotFound if missing.
 func (db *DB) GetSavedQuery(ctx context.Context, queryID int) (*models.SavedQuery, error) {
 	row, err := db.readQueries.GetSavedQuery(ctx, int64(queryID))
 	if err != nil {
-		return nil, handleNotFoundError(err, fmt.Sprintf("getting saved query id %d", queryID))
+		return nil, fmt.Errorf("getting saved query id %d: %w", queryID, translateNotFound(err))
 	}
 	return mapSavedQueryRow(row), nil
 }

@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
@@ -74,17 +73,10 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 
 	sourceRow, err := db.readQueries.GetSource(ctx, int64(id))
 	if err != nil {
-		// Use handleNotFoundError for consistent not-found error mapping.
-		return nil, handleNotFoundError(err, fmt.Sprintf("getting source id %d", id))
+		return nil, fmt.Errorf("getting source id %d: %w", id, translateNotFound(err))
 	}
 
-	// Map sqlc result to domain model.
-	source := mapSourceRowToModel(&sourceRow)
-	if source == nil {
-		// This case should ideally be covered by handleNotFoundError, but as a safeguard:
-		return nil, fmt.Errorf("internal error: source row for id %d mapped to nil", id)
-	}
-	return source, nil
+	return mapSourceRowToModel(&sourceRow), nil
 }
 
 // GetSourceByIdentityKey retrieves a single source by its provider-computed identity key.
@@ -92,20 +84,10 @@ func (db *DB) GetSource(ctx context.Context, id models.SourceID) (*models.Source
 func (db *DB) GetSourceByIdentityKey(ctx context.Context, identityKey string) (*models.Source, error) {
 	sourceRow, err := db.readQueries.GetSourceByIdentityKey(ctx, identityKey)
 	if err != nil {
-		// Explicitly map ErrNoRows to models.ErrNotFound for clarity.
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound // Use the model-defined error
-		}
-		db.log.Error("failed to get source by identity key from db", "error", err, "identity_key", identityKey)
-		return nil, fmt.Errorf("error getting source by identity key: %w", err)
+		return nil, fmt.Errorf("error getting source by identity key: %w", translateNotFound(err))
 	}
 
-	// Map sqlc result to domain model.
-	source := mapSourceRowToModel(&sourceRow)
-	if source == nil {
-		return nil, fmt.Errorf("internal error: source row for identity %s mapped to nil", identityKey)
-	}
-	return source, nil
+	return mapSourceRowToModel(&sourceRow), nil
 }
 
 // ListSources retrieves all source records from the database, ordered by creation date.

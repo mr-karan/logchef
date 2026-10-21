@@ -22,6 +22,8 @@ func Run(t *testing.T, s store.Store) {
 
 	t.Run("Users", func(t *testing.T) { testUsers(t, ctx, s) })
 	t.Run("UserPasswordHash", func(t *testing.T) { testUserPasswordHash(t, ctx, s) })
+	t.Run("TeamMapping", func(t *testing.T) { testTeamMapping(t, ctx, s) })
+	t.Run("GetNotFound", func(t *testing.T) { testGetNotFound(t, ctx, s) })
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
