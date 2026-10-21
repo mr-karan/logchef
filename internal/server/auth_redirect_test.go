@@ -1,19 +1,21 @@
 package server
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/core"
 )
 
 // TestIsSafeLocalPath covers the open-redirect guard (#89): only local absolute
@@ -51,13 +53,12 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 		err  error
 		code string
 	}{
+		{"IdP access denied", errAccessDenied, "access_denied"},
+		{"invalid state", errInvalidState, "session_expired"},
 		{"unauthorized", auth.ErrUnauthorizedUser, "unauthorized"},
 		{"inactive", auth.ErrUserInactive, "user_inactive"},
 		{"invalid token", auth.ErrOIDCInvalidToken, "invalid_token"},
 		{"unverified email", auth.ErrOIDCEmailNotVerified, "email_not_verified"},
-		{"missing session", core.ErrSessionNotFound, "session_not_found"},
-		{"expired session", core.ErrSessionExpired, "session_expired"},
-		{"missing user", core.ErrUserNotFound, "user_not_found"},
 		{"unknown error", errors.New("unexpected failure"), "auth_error"},
 	}
 	for _, tc := range cases {
@@ -131,6 +132,60 @@ func TestRedirectToFrontendRejectsOpenRedirect(t *testing.T) {
 			defer resp.Body.Close()
 			if got := resp.Header.Get("Location"); got != tc.wantLocation {
 				t.Errorf("Location = %q, want %q", got, tc.wantLocation)
+			}
+		})
+	}
+}
+
+func TestHandleCallbackErrors(t *testing.T) {
+	t.Parallel()
+	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
+	expiredState := fmt.Sprintf("state.nonce.%d", time.Now().Add(-10*time.Minute).Unix())
+	cases := []struct {
+		name   string
+		query  string
+		cookie string
+		code   string
+	}{
+		{"IdP access denied", "error=access_denied&error_description=provider-detail&state=" + state, state, "access_denied"},
+		{"IdP server error", "error=server_error&error_description=provider-detail&state=" + state, state, "auth_error"},
+		{"missing state cookie", "code=code&state=" + state, "", "session_expired"},
+		{"mismatched state cookie", "code=code&state=other", state, "session_expired"},
+		{"missing state parameter", "code=code", state, "session_expired"},
+		{"expired state cookie", "code=code&state=" + expiredState, expiredState, "session_expired"},
+		{"malformed state cookie", "code=code&state=malformed", "malformed", "session_expired"},
+		{"invalid state timestamp", "code=code&state=state.nonce.invalid", "state.nonce.invalid", "session_expired"},
+		{"missing code", "state=" + state, state, "auth_error"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var logs bytes.Buffer
+			s := &Server{
+				log:          slog.New(slog.NewTextHandler(&logs, nil)),
+				config:       &config.Config{Server: config.ServerConfig{FrontendURL: "https://logchef.example/"}},
+				oidcProvider: &auth.OIDCProvider{},
+			}
+			app := fiber.New()
+			app.Get("/api/v1/auth/callback", s.handleCallback)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?"+tc.query, http.NoBody)
+			if tc.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: stateCookieName, Value: tc.cookie})
+			}
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusTemporaryRedirect {
+				t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTemporaryRedirect)
+			}
+			want := "https://logchef.example/auth/login?error=" + tc.code
+			if got := resp.Header.Get("Location"); got != want {
+				t.Errorf("Location = %q, want %q", got, want)
+			}
+			if strings.Contains(tc.query, "error_description=") && !strings.Contains(logs.String(), "error_description=provider-detail") {
+				t.Error("IdP error description missing from server log")
 			}
 		})
 	}

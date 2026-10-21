@@ -920,7 +920,6 @@
   "pages.loginInactive": "您的账户已停用。请联系管理员。",
   "pages.loginEmailNotVerified": "您的电子邮件地址尚未验证。请在身份提供商处完成验证后重试。",
   "pages.loginSessionExpired": "身份验证会话已过期，请重试。",
-  "pages.loginInvalidRequest": "身份验证请求无效，请重试。",
   "pages.loginFailed": "身份验证失败，请重试。",
   "pages.unexpectedError": "发生意外错误",
   "pages.enterEmailPassword": "请输入电子邮件和密码。",

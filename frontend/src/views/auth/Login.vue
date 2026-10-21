@@ -58,13 +58,12 @@ const errorMessage = computed(() => {
   if (!code) return null
   if (typeof code !== 'string') return t('pages.unexpectedError')
   const messages: Record<string, string> = {
+    access_denied: t('pages.loginUnauthorized'),
     unauthorized: t('pages.loginUnauthorized'),
     user_inactive: t('pages.loginInactive'),
     invalid_token: t('pages.loginFailed'),
     email_not_verified: t('pages.loginEmailNotVerified'),
-    session_not_found: t('pages.loginSessionExpired'),
     session_expired: t('pages.loginSessionExpired'),
-    user_not_found: t('pages.loginUnauthorized'),
     auth_error: t('pages.unexpectedError'),
   }
   return Object.hasOwn(messages, code) ? messages[code] : t('pages.unexpectedError')

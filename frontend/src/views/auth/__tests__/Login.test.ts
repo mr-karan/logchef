@@ -19,13 +19,12 @@ async function renderLogin(query: string) {
 
 describe('login error messages', () => {
   it.each([
+    ['access_denied', 'Access denied. Please contact your administrator to request access.'],
     ['unauthorized', 'Access denied. Please contact your administrator to request access.'],
     ['user_inactive', 'Your account is inactive. Please contact your administrator.'],
     ['invalid_token', 'Authentication failed. Please try again.'],
     ['email_not_verified', 'Your email address is not verified. Please verify it with your identity provider and try again.'],
-    ['session_not_found', 'Authentication session expired. Please try again.'],
     ['session_expired', 'Authentication session expired. Please try again.'],
-    ['user_not_found', 'Access denied. Please contact your administrator to request access.'],
     ['auth_error', 'An unexpected error occurred'],
     ['unknown_error', 'An unexpected error occurred'],
     ['toString', 'An unexpected error occurred'],
