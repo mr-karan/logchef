@@ -12,6 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useAlertHistoryStore } from "@/stores/alertHistory";
+import { useAskChefStore } from "@/stores/askChef";
 import { useContextStore } from "@/stores/context";
 import { useMetaStore } from "@/stores/meta";
 import { useTeamsStore } from "@/stores/teams";
@@ -30,6 +31,7 @@ const alertsStore = useAlertsStore();
 const alertHistoryStore = useAlertHistoryStore();
 const contextStore = useContextStore();
 const metaStore = useMetaStore();
+const askChef = useAskChefStore();
 const teamsStore = useTeamsStore();
 const { toast } = useToast();
 
@@ -106,16 +108,22 @@ async function findTeamWithSource(sourceId: number): Promise<number | null> {
   return null;
 }
 
-async function viewLogs(entry: AlertHistoryEntry) {
+async function viewLogs(entry: AlertHistoryEntry): Promise<{ alert: Alert; teamId: number } | null> {
   // The alerts list can reload while teams load, so keep this alert.
   const current = alert.value;
-  if (!current) return;
+  if (!current) return null;
   const teamId = await findTeamWithSource(current.source_id);
   if (teamId == null) {
     toast({ title: t("alerts.viewLogsNoTeam"), variant: "destructive" });
-    return;
+    return null;
   }
-  router.push({ name: "LogExplorer", query: alertHistoryExploreQuery(current, entry, teamId) });
+  const failure = await router.push({ name: "LogExplorer", query: alertHistoryExploreQuery(current, entry, teamId) });
+  return failure ? null : { alert: current, teamId };
+}
+
+async function investigate(entry: AlertHistoryEntry) {
+  const opened = await viewLogs(entry);
+  if (opened) askChef.investigateAlert(opened.alert, entry, opened.teamId);
 }
 
 async function loadHistory() {
@@ -313,6 +321,15 @@ onMounted(async () => {
                       >
                         <ScrollText class="mr-1.5 h-4 w-4" />
                         {{ t('alerts.viewLogs') }}
+                      </Button>
+                      <Button
+                        v-if="entry.status !== 'error' && metaStore.askChefEnabled"
+                        variant="ghost"
+                        size="sm"
+                        @click="investigate(entry)"
+                      >
+                        <span class="mr-1.5 text-violet-600" aria-hidden="true">✦</span>
+                        {{ t('askChef.investigate') }}
                       </Button>
                       <Button
                         v-if="entry.status === 'triggered' && !entry.resolved_at"

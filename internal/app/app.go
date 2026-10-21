@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/ai"
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -191,6 +192,22 @@ func (a *App) Initialize(ctx context.Context) error {
 		Logger:        a.Logger,
 		BuildInfo:     a.BuildInfo,
 		Version:       a.Version,
+	}
+	if a.Config.AI.AskChefEnabled() {
+		if a.Config.AI.Provider == ai.ProviderBedrock {
+			chat, err := ai.NewBedrockChat(ctx, a.Config.AI.Region)
+			if err != nil {
+				return fmt.Errorf("error initializing Ask Chef: %w", err)
+			}
+			serverOpts.AskChefChat = chat
+		} else {
+			chat, err := ai.NewOpenAIChat(a.Config.AI.BaseURL, a.Config.AI.APIKey)
+			if err != nil {
+				return fmt.Errorf("error initializing Ask Chef: %w", err)
+			}
+			serverOpts.AskChefChat = chat
+		}
+		a.Logger.Info("ask chef enabled", "provider", a.Config.AI.Provider, "model", a.Config.AI.AskChefModel)
 	}
 	a.server = server.New(serverOpts) //nolint:contextcheck // starts an app-lifetime cleanup janitor with its own timeout context; no request ctx to propagate
 

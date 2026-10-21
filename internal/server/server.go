@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/askchef"
 	"github.com/mr-karan/logchef/internal/auth"
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/clickhouse"
@@ -47,6 +48,9 @@ type ServerOptions struct {
 	Logger        *slog.Logger
 	BuildInfo     string
 	Version       string
+
+	// AskChefChat is the model of Ask Chef; nil disables Ask Chef.
+	AskChefChat askchef.ChatModel
 }
 
 // Server represents the core HTTP server, encapsulating the Fiber app instance
@@ -66,6 +70,8 @@ type Server struct {
 	buildInfo     string
 	version       string
 	dashCache     *dashcache.Cache // per-dashboard TTL result cache
+	askChef       *askchef.Agent   // nil when Ask Chef is disabled
+	askChefTurns  askChefTurns
 
 	stop chan struct{} // closed by Shutdown to stop background maintenance loops
 	// cancelRequests cancels the base context every request runs on (see
@@ -137,7 +143,7 @@ func New(opts ServerOptions) *Server {
 		// SSE streams (live tail) must not be buffered/compressed: the compressor
 		// holds the whole body, which never completes for an open stream.
 		Next: func(c fiber.Ctx) bool {
-			return strings.HasSuffix(c.Path(), "/logs/tail")
+			return strings.HasSuffix(c.Path(), "/logs/tail") || strings.HasSuffix(c.Path(), askChefTurnsPath)
 		},
 		Level: compress.LevelBestSpeed, // Prioritize speed over maximum compression
 	})) // Compress responses
@@ -180,6 +186,7 @@ func New(opts ServerOptions) *Server {
 		log.Warn("web UI unavailable", "error", err)
 	}
 	s.indexHTML = indexHTML
+	s.askChef = s.newAskChef(opts.AskChefChat)
 
 	// Register all application routes.
 	s.setupRoutes()
@@ -444,6 +451,12 @@ func (s *Server) setupRoutes() {
 	// Field value exploration for sidebar
 	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetAllFieldValues)         // Get all LowCardinality field values
 	registerLimited(teamSourceOps, fiber.MethodGet, "/fields/:fieldName/values", queryLimiter, s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleGetFieldValues) // Get values for a specific field
+
+	// Ask Chef: browser session only, rate-limited per user like the query
+	// routes. The handler checks team and source access, and a new turn
+	// preempts the user's running turn.
+	askChefOps := api.Group("/ask-chef", s.requireSession)
+	registerLimited(askChefOps, fiber.MethodPost, "/turns", queryLimiter, s.handleAskChefTurn)
 
 	// Alerts (cross-team, source-scoped). Visibility: any user with source
 	// access via any team. Edit/delete/resolve: creator + global admin

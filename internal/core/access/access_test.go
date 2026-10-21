@@ -34,6 +34,7 @@ func TestPrincipalRequire(t *testing.T) {
 		{"oauth without scope", OAuthPrincipal(nil, 1, "c", []models.TokenScope{models.TokenScopeSourcesRead}), false},
 		{"oauth wildcard is not a grant", OAuthPrincipal(nil, 1, "c", []models.TokenScope{models.TokenScopeAll}), false},
 		{"oauth with no scopes", OAuthPrincipal(nil, 1, "c", nil), false},
+		{"assistant holds logs:read", AssistantPrincipal(&models.User{}), true},
 		{"zero method", Principal{User: &models.User{Role: models.UserRoleAdmin}}, false},
 		{"unknown method", Principal{Method: AuthMethod(99), scopes: []models.TokenScope{models.TokenScopeLogsRead}}, false},
 	} {
@@ -90,6 +91,41 @@ func TestRequireGlobalAdminRejectsOAuth(t *testing.T) {
 	}
 	if err := APITokenPrincipal(admin, allToken).RequireGlobalAdmin(); err != nil {
 		t.Fatalf("PAT admin: %v", err)
+	}
+}
+
+// Ask Chef reads only: it holds no write, admin or token scope.
+func TestAssistantPrincipalScopes(t *testing.T) {
+	t.Parallel()
+	p := AssistantPrincipal(&models.User{Role: models.UserRoleAdmin})
+	for _, tc := range []struct {
+		scope models.TokenScope
+		ok    bool
+	}{
+		{models.TokenScopeTeamsRead, true},
+		{models.TokenScopeSourcesRead, true},
+		{models.TokenScopeLogsRead, true},
+		{models.TokenScopeAlertsRead, true},
+		{models.TokenScopeAll, false},
+		{models.TokenScopeAlertsWrite, false},
+		{models.TokenScopeSavedQueriesWrite, false},
+		{models.TokenScopeSourcesWrite, false},
+		{models.TokenScopeTokensRead, false},
+		{models.TokenScopeSettingsRead, false},
+		{models.TokenScopeUsersRead, false},
+	} {
+		t.Run(string(tc.scope), func(t *testing.T) {
+			err := p.Require(tc.scope)
+			if tc.ok && err != nil {
+				t.Fatalf("Require(%s) = %v, want nil", tc.scope, err)
+			}
+			if !tc.ok && !errors.Is(err, ErrInsufficientScope) {
+				t.Fatalf("Require(%s) = %v, want ErrInsufficientScope", tc.scope, err)
+			}
+		})
+	}
+	if err := p.RequireGlobalAdmin(); !errors.Is(err, ErrGlobalAdminRequired) {
+		t.Fatalf("assistant admin: RequireGlobalAdmin = %v, want ErrGlobalAdminRequired", err)
 	}
 }
 
@@ -174,6 +210,8 @@ func TestAuthorizeTeamSource(t *testing.T) {
 		{"non-member", SessionPrincipal(f.outsider), f.team, ErrNotTeamMember},
 		{"team without the source", SessionPrincipal(f.member), f.bareTeam, ErrSourceNotInTeam},
 		{"global admin, team without the source", SessionPrincipal(f.admin), f.bareTeam, ErrSourceNotInTeam},
+		{"assistant for a member", AssistantPrincipal(f.member), f.team, nil},
+		{"assistant for a global admin outside the team", AssistantPrincipal(f.admin), f.team, ErrNotTeamMember},
 		{"token without scope", APITokenPrincipal(f.member, noLogs), f.team, ErrInsufficientScope},
 		{"oauth without scope", Principal{User: f.member, Method: AuthOAuth}, f.team, ErrInsufficientScope},
 		{"unknown method", Principal{User: f.admin}, f.team, ErrInsufficientScope},
@@ -230,6 +268,7 @@ func TestAuthorizeTeam(t *testing.T) {
 		{"member", SessionPrincipal(f.member), nil},
 		{"global admin outside the team", SessionPrincipal(f.admin), nil},
 		{"non-member", SessionPrincipal(f.outsider), ErrNotTeamMember},
+		{"assistant for a global admin outside the team", AssistantPrincipal(f.admin), ErrNotTeamMember},
 		{"token without scope", APITokenPrincipal(f.member, noSources), ErrInsufficientScope},
 		{"unknown method", Principal{User: f.member}, ErrInsufficientScope},
 	} {

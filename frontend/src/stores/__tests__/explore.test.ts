@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
-import { CalendarDateTime, ZonedDateTime } from "@internationalized/date";
+import { CalendarDateTime, ZonedDateTime, parseDateTime } from "@internationalized/date";
 import type { Source } from "@/api/sources";
 
 // ---------------------------------------------------------------------------
@@ -102,6 +102,7 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
 });
 
 import { useExploreStore } from "../explore";
+import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
 import { timestampToCalendarDateTime } from "@/utils/time";
 
@@ -441,6 +442,61 @@ describe("explore store", () => {
     });
   });
 
+  describe("Ask Chef context window", () => {
+    // A zone no test machine runs in, so a browser-zone conversion shows up.
+    // Ask Chef reads its window before the query runs: watchers left by
+    // earlier tests reset the context store while the query is awaited.
+    const timezone = "Pacific/Chatham";
+
+    function exploreVictoriaLogs() {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+      mocks.sourcesState.teamSources = [VL_SOURCE];
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(VL_SOURCE.id);
+      mocks.logchefqlQuery.mockResolvedValue({
+        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
+      });
+      const store = useExploreStore();
+      store.setTimezoneIdentifier(timezone);
+      return store;
+    }
+
+    async function logQueryWindow(): Promise<{ start: number; end: number }> {
+      await useExploreStore().executeQuery();
+      const request = mocks.logchefqlQuery.mock.calls[0][2];
+      const instant = (wallClock: string) => parseDateTime(wallClock.replace(" ", "T")).toDate(request.timezone).getTime();
+      return { start: instant(request.start_time), end: instant(request.end_time) };
+    }
+
+    it("is the window the log query reads for an absolute range", async () => {
+      exploreVictoriaLogs().setTimeConfiguration({
+        absoluteRange: { start: new CalendarDateTime(2026, 8, 8, 10, 0, 0), end: new CalendarDateTime(2026, 8, 8, 10, 15, 0) },
+      });
+
+      const askChef = useAskChefStore();
+      askChef.openForExplorer();
+
+      expect(askChef.context).toMatchObject(await logQueryWindow());
+    });
+
+    it("is the window the log query reads for a relative range", async () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-08-08T10:00:00Z"));
+      try {
+        exploreVictoriaLogs().setRelativeTimeRange("1h");
+
+        const askChef = useAskChefStore();
+        askChef.openForExplorer();
+
+        expect(askChef.context).toMatchObject(await logQueryWindow());
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  });
+
   describe("urlQueryParameters", () => {
     it("serializes team, source, absolute time range, and limit by default", () => {
       const contextStore = useContextStore();
@@ -606,6 +662,44 @@ describe("explore store", () => {
 
       expect(store2.logchefqlCode).toBe('level="error"');
       expect(store2.activeMode).toBe("logchefql");
+    });
+  });
+
+  describe("links that name their query", () => {
+    function saveDraft() {
+      mocks.teamsState.currentTeamId = 1;
+      const ctx = useContextStore();
+      ctx.selectTeam(1);
+      ctx.selectSource(10);
+      const store = useExploreStore();
+      store.setRelativeTimeRange("7d");
+      store.setLogchefqlCode('level="debug"');
+      setActivePinia(createPinia());
+      mocks.teamsState.currentTeamId = 1;
+      useContextStore().selectTeam(1);
+    }
+
+    it("opens an explicitly empty query and the link's window, not the saved draft", () => {
+      saveDraft();
+      const store = useExploreStore();
+
+      const result = store.initializeFromUrl({ team: "1", source: "10", start: "1000", end: "2000", mode: "logchefql", q: "" });
+
+      expect(store.logchefqlCode).toBe("");
+      expect(store.activeMode).toBe("logchefql");
+      expect(store.selectedRelativeTime).toBeNull();
+      expect(store.urlQueryParameters).toMatchObject({ start: "1000", end: "2000" });
+      expect(result.shouldExecute).toBe(true);
+    });
+
+    it("still restores the draft when the link names no query", () => {
+      saveDraft();
+      const store = useExploreStore();
+
+      store.initializeFromUrl({ team: "1", source: "10" });
+
+      expect(store.logchefqlCode).toBe('level="debug"');
+      expect(store.selectedRelativeTime).toBe("7d");
     });
   });
 

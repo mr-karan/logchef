@@ -32,8 +32,9 @@ func (s *Server) handleGetMeta(c fiber.Ctx) error {
 		oidcIssuer = s.oidcProvider.GetIssuer()
 	}
 	meta := metaResponse{
-		MetaResponse: core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil),
-		UIURL:        uiURL(&s.config.Server),
+		MetaResponse:   core.BuildMeta(s.config, s.version, oidcIssuer, s.oidcProvider != nil),
+		UIURL:          uiURL(&s.config.Server),
+		AskChefEnabled: s.askChef != nil,
 	}
 	if s.oauth != nil {
 		meta.OAuthIssuer = s.oauth.Issuer()
@@ -44,10 +45,12 @@ func (s *Server) handleGetMeta(c fiber.Ctx) error {
 // metaResponse adds the HTTP-only fields to the shared metadata. A CLI that
 // sees oauth_issuer logs in through Logchef OAuth, and builds browser links
 // (for example the log explorer) on ui_url instead of the API URL it uses.
+// The web UI shows Ask Chef only when ask_chef_enabled is true.
 type metaResponse struct {
 	core.MetaResponse
-	OAuthIssuer string `json:"oauth_issuer,omitempty"`
-	UIURL       string `json:"ui_url,omitempty"`
+	OAuthIssuer    string `json:"oauth_issuer,omitempty"`
+	UIURL          string `json:"ui_url,omitempty"`
+	AskChefEnabled bool   `json:"ask_chef_enabled"`
 }
 
 // uiURL is the base URL of the web UI: server.frontend_url when set (it may

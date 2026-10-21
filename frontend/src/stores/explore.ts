@@ -865,23 +865,24 @@ export const useExploreStore = defineStore("explore", () => {
       const mode = normalizeModeForSource(normalizeExploreMode(params.mode));
       state.data.value.activeMode = mode;
 
-      if (mode === 'logchefql' && params.q) {
+      if (mode === 'logchefql' && params.q !== undefined) {
         state.data.value.logchefqlCode = params.q;
-      } else if (mode === 'native' && params.sql) {
+      } else if (mode === 'native' && params.sql !== undefined) {
         state.data.value.nativeQuery = params.sql;
       }
     } else {
-      if (params.q) {
+      if (params.q !== undefined) {
         state.data.value.activeMode = normalizeModeForSource('logchefql');
         state.data.value.logchefqlCode = params.q;
-      } else if (params.sql) {
+      } else if (params.sql !== undefined) {
         state.data.value.activeMode = normalizeModeForSource('native');
         state.data.value.nativeQuery = params.sql;
       }
     }
 
-    const hasLegacyUrlQuery = !!(params.q || params.sql);
-    if (!hasLegacyUrlQuery && !queryId && !state.data.value.activeShareToken) {
+    // A link that names its query, even an empty one, opens exactly that query.
+    const urlNamesQuery = params.q !== undefined || params.sql !== undefined;
+    if (!urlNamesQuery && !queryId && !state.data.value.activeShareToken) {
       restoreDraftForCurrentContext();
     }
 

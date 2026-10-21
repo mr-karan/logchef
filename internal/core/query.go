@@ -174,13 +174,42 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 	// ClickHouse bakes the time range into the SQL. For VictoriaLogs the
 	// LogsQL query carries no time range, so the parsed window goes to
 	// QueryLogs separately.
-	compiled, compileErr := ds.CompileLogchefQL(ctx, src.SourceID(), datasource.LogchefQLCompileRequest{
+	compiled, err := CompileLogchefQL(ctx, ds, src, datasource.LogchefQLCompileRequest{
 		Query:     query,
 		StartTime: req.StartTime,
 		EndTime:   req.EndTime,
 		Timezone:  req.Timezone,
 		Limit:     req.Limit,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	params := datasource.QueryRequest{
+		ExtraStreamFilters: req.ExtraStreamFilters,
+		RawQuery:           compiled.Query,
+		Timezone:           req.Timezone,
+		Limit:              req.Limit,
+		DefaultLimit:       cfg.DefaultPreviewLimit,
+		MaxLimit:           cfg.MaxPreviewLimit,
+		MaxResponseBytes:   cfg.MaxResponseBytes,
+		QueryTimeout:       timeout,
+	}
+	if compiled.Language == models.QueryLanguageLogsQL {
+		startTime, endTime, err := ParseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
+		if err != nil {
+			return nil, &QueryRequestError{Message: err.Error()}
+		}
+		params.StartTime = startTime
+		params.EndTime = endTime
+	}
+	return &PreparedLogchefQL{Source: source, Compiled: compiled, Params: params}, nil
+}
+
+// CompileLogchefQL compiles a LogchefQL query for src. A query that does not
+// compile is a QueryRequestError that carries the parse error.
+func CompileLogchefQL(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req datasource.LogchefQLCompileRequest) (*datasource.CompiledLogchefQL, error) {
+	compiled, compileErr := ds.CompileLogchefQL(ctx, src.SourceID(), req)
 	if compiled == nil {
 		if errors.Is(compileErr, datasource.ErrOperationNotSupported) {
 			return nil, ErrLogchefQLNotSupported
@@ -201,26 +230,7 @@ func PrepareLogchefQLQuery(ctx context.Context, ds *datasource.Service, cfg conf
 		}
 		return nil, &QueryRequestError{Message: message}
 	}
-
-	params := datasource.QueryRequest{
-		ExtraStreamFilters: req.ExtraStreamFilters,
-		RawQuery:           compiled.Query,
-		Timezone:           req.Timezone,
-		Limit:              req.Limit,
-		DefaultLimit:       cfg.DefaultPreviewLimit,
-		MaxLimit:           cfg.MaxPreviewLimit,
-		MaxResponseBytes:   cfg.MaxResponseBytes,
-		QueryTimeout:       timeout,
-	}
-	if compiled.Language == models.QueryLanguageLogsQL {
-		startTime, endTime, err := parseLogchefQLTimeRange(req.StartTime, req.EndTime, req.Timezone)
-		if err != nil {
-			return nil, &QueryRequestError{Message: err.Error()}
-		}
-		params.StartTime = startTime
-		params.EndTime = endTime
-	}
-	return &PreparedLogchefQL{Source: source, Compiled: compiled, Params: params}, nil
+	return compiled, nil
 }
 
 // RunLogchefQL prepares and runs a LogchefQL query with no streaming. One
@@ -473,7 +483,9 @@ func parseHistogramTimeRange(req models.APIHistogramRequest) (startPtr, endPtr *
 	return &startTime, &endTime, nil
 }
 
-func parseLogchefQLTimeRange(startTime, endTime, timezone string) (startPtr, endPtr *time.Time, err error) {
+// ParseLogchefQLTimeRange reads the window of a LogchefQL query: RFC3339, or
+// a wall-clock time in timezone (UTC when empty).
+func ParseLogchefQLTimeRange(startTime, endTime, timezone string) (startPtr, endPtr *time.Time, err error) {
 	locationName := timezone
 	if locationName == "" {
 		locationName = "UTC"

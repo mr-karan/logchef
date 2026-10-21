@@ -24,6 +24,63 @@ interface UrlStateReturn {
   selectSource: (sourceId: number) => Promise<void>;
 }
 
+export function normalizeQueryParams(query: Record<string, unknown>): Record<string, string | undefined> {
+  const normalized: Record<string, string | undefined> = {};
+
+  const getValue = (key: string) => {
+    const value = query[key];
+    if (Array.isArray(value)) {
+      const first = value[0];
+      return first === undefined || first === null || first === '' ? undefined : String(first);
+    }
+    if (value === undefined || value === null || value === '') {
+      return undefined;
+    }
+    return String(value);
+  };
+
+  const team = getValue('team');
+  if (team) normalized.team = team;
+  const source = getValue('source');
+  if (source) normalized.source = source;
+
+  const relativeTime = getValue('t') ?? getValue('time');
+  if (relativeTime) normalized.t = relativeTime;
+
+  const start = getValue('start') ?? getValue('start_time');
+  if (start) normalized.start = start;
+  const end = getValue('end') ?? getValue('end_time');
+  if (end) normalized.end = end;
+
+  const limit = getValue('limit');
+  if (limit) normalized.limit = limit;
+
+  const mode = getValue('mode');
+  if (mode) {
+    normalized.mode = normalizeExploreMode(mode);
+  }
+
+  // An empty q or sql is kept: the link names an empty query, so the draft
+  // must not replace it.
+  const getText = (key: string) => {
+    const value = query[key];
+    const first = Array.isArray(value) ? value[0] : value;
+    return typeof first === 'string' ? first : undefined;
+  };
+  const q = getText('q');
+  if (q !== undefined) normalized.q = q;
+  const sql = getText('sql');
+  if (sql !== undefined) normalized.sql = sql;
+
+  const id = getValue('id');
+  if (id) normalized.id = id;
+
+  const share = getValue('share');
+  if (share) normalized.share = share;
+
+  return normalized;
+}
+
 export function useUrlState(): UrlStateReturn {
   const route = useRoute();
   const router = useRouter();
@@ -60,56 +117,6 @@ export function useUrlState(): UrlStateReturn {
     }
 
     return parsed;
-  }
-
-  function normalizeQueryParams(query: Record<string, unknown>): Record<string, string | undefined> {
-    const normalized: Record<string, string | undefined> = {};
-
-    const getValue = (key: string) => {
-      const value = query[key];
-      if (Array.isArray(value)) {
-        const first = value[0];
-        return first === undefined || first === null || first === '' ? undefined : String(first);
-      }
-      if (value === undefined || value === null || value === '') {
-        return undefined;
-      }
-      return String(value);
-    };
-
-    const team = getValue('team');
-    if (team) normalized.team = team;
-    const source = getValue('source');
-    if (source) normalized.source = source;
-
-    const relativeTime = getValue('t') ?? getValue('time');
-    if (relativeTime) normalized.t = relativeTime;
-
-    const start = getValue('start') ?? getValue('start_time');
-    if (start) normalized.start = start;
-    const end = getValue('end') ?? getValue('end_time');
-    if (end) normalized.end = end;
-
-    const limit = getValue('limit');
-    if (limit) normalized.limit = limit;
-
-    const mode = getValue('mode');
-    if (mode) {
-      normalized.mode = normalizeExploreMode(mode);
-    }
-
-    const q = getValue('q');
-    if (q) normalized.q = q;
-    const sql = getValue('sql');
-    if (sql) normalized.sql = sql;
-
-    const id = getValue('id');
-    if (id) normalized.id = id;
-
-    const share = getValue('share');
-    if (share) normalized.share = share;
-
-    return normalized;
   }
 
   function buildQueryKey(query: Record<string, string | undefined>): string {

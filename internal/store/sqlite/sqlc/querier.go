@@ -127,6 +127,7 @@ type Querier interface {
 	// Get an API token by its hash (for authentication)
 	GetAPITokenByHash(ctx context.Context, tokenHash string) (ApiToken, error)
 	GetAlert(ctx context.Context, id int64) (Alert, error)
+	GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryEntryParams) (AlertHistory, error)
 	// Look up a collection by id with direct member, shared team, and item counts
 	GetCollection(ctx context.Context, id int64) (GetCollectionRow, error)
 	// Look up a single membership row

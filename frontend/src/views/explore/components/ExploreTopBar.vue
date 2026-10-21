@@ -3,6 +3,8 @@ import { useI18n } from "vue-i18n";
 
 import { computed, ref } from 'vue'
 import { useExploreStore } from '@/stores/explore'
+import { useAskChefStore } from '@/stores/askChef'
+import { useMetaStore } from '@/stores/meta'
 import { useTimeRange } from '@/composables/useTimeRange'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -47,6 +49,8 @@ const { t } = useI18n();
 
 const { toast } = useToast()
 const exploreStore = useExploreStore()
+const askChef = useAskChefStore()
+const metaStore = useMetaStore()
 
 type TeamOption = UserTeamMembership | TeamWithMemberCount
 
@@ -308,10 +312,19 @@ defineExpose({
 
     <!-- Right: Actions -->
     <div class="flex items-center gap-1">
-      <!-- Last run indicator -->
-      <div v-if="exploreStore.lastExecutionTimestamp" class="text-xs text-muted-foreground mr-2 hidden sm:block">
-        {{ new Date(exploreStore.lastExecutionTimestamp).toLocaleTimeString() }}
-      </div>
+      <Button
+        v-if="metaStore.askChefEnabled"
+        variant="ghost"
+        size="sm"
+        class="h-7 gap-1.5 px-2"
+        :class="{ 'bg-accent': askChef.open }"
+        :title="t('askChef.toggle')"
+        :aria-pressed="askChef.open"
+        @click="askChef.open ? askChef.close() : askChef.openForExplorer()"
+      >
+        <span class="text-violet-600" aria-hidden="true">✦</span>
+        <span class="text-xs font-medium hidden sm:inline">{{ t('askChef.title') }}</span>
+      </Button>
 
       <!-- Copy CLI Command Button -->
       <TooltipProvider>

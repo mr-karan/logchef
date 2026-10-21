@@ -27,6 +27,7 @@ interface MetaState {
   dashboardCachePolicy: DashboardCachePolicy | null;
   // Logchef OAuth issuer; null when the server has OAuth disabled.
   oauthIssuer: string | null;
+  askChefEnabled: boolean;
   isInitialized: boolean;
 }
 
@@ -75,6 +76,7 @@ export const useMetaStore = defineStore("meta", () => {
     demoLoginCredentials: null,
     dashboardCachePolicy: null,
     oauthIssuer: null,
+    askChefEnabled: false,
     isInitialized: false,
   });
 
@@ -93,6 +95,7 @@ export const useMetaStore = defineStore("meta", () => {
   const demoLoginCredentials = computed(() => state.data.value.demoLoginCredentials);
   const dashboardCachePolicy = computed(() => state.data.value.dashboardCachePolicy);
   const oauthIssuer = computed(() => state.data.value.oauthIssuer);
+  const askChefEnabled = computed(() => state.data.value.askChefEnabled);
   const isInitialized = computed(() => state.data.value.isInitialized);
   const error = computed(() => state.error.value);
 
@@ -124,6 +127,7 @@ export const useMetaStore = defineStore("meta", () => {
               state.data.value.demoLoginCredentials = parseDemoLoginCredentials(response.demo_login_credentials);
               state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
               state.data.value.oauthIssuer = response.oauth_issuer || null;
+              state.data.value.askChefEnabled = response.ask_chef_enabled === true;
               state.data.value.isInitialized = true;
             }
           },
@@ -155,6 +159,7 @@ export const useMetaStore = defineStore("meta", () => {
     state.data.value.demoLoginCredentials = null;
     state.data.value.dashboardCachePolicy = null;
     state.data.value.oauthIssuer = null;
+    state.data.value.askChefEnabled = false;
     state.data.value.isInitialized = false;
   }
 
@@ -173,6 +178,7 @@ export const useMetaStore = defineStore("meta", () => {
     demoLoginCredentials,
     dashboardCachePolicy,
     oauthIssuer,
+    askChefEnabled,
     isInitialized,
     error,
     loadMeta,

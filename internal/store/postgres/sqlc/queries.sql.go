@@ -1355,6 +1355,33 @@ func (q *Queries) GetAlert(ctx context.Context, id int64) (Alert, error) {
 	return i, err
 }
 
+const getAlertHistoryEntry = `-- name: GetAlertHistoryEntry :one
+SELECT id, alert_id, status, triggered_at, resolved_at, value, message, payload_json, created_at FROM alert_history
+WHERE id = $1 AND alert_id = $2
+`
+
+type GetAlertHistoryEntryParams struct {
+	ID      int64 `json:"id"`
+	AlertID int64 `json:"alert_id"`
+}
+
+func (q *Queries) GetAlertHistoryEntry(ctx context.Context, arg GetAlertHistoryEntryParams) (AlertHistory, error) {
+	row := q.db.QueryRow(ctx, getAlertHistoryEntry, arg.ID, arg.AlertID)
+	var i AlertHistory
+	err := row.Scan(
+		&i.ID,
+		&i.AlertID,
+		&i.Status,
+		&i.TriggeredAt,
+		&i.ResolvedAt,
+		&i.Value,
+		&i.Message,
+		&i.PayloadJson,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getCollection = `-- name: GetCollection :one
 SELECT
     c.id,

@@ -122,3 +122,28 @@ describe('useMetaStore alertsEnabled capability', () => {
     expect(store.demoLoginCredentials).toBeNull()
   })
 })
+
+describe('useMetaStore askChefEnabled capability', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    vi.clearAllMocks()
+  })
+
+  it('stays disabled when an older server omits the field', async () => {
+    vi.mocked(metaApi.getMeta).mockResolvedValueOnce(okResponse())
+
+    const store = useMetaStore()
+    await store.loadMeta()
+
+    expect(store.askChefEnabled).toBe(false)
+  })
+
+  it('turns on when the server advertises it', async () => {
+    vi.mocked(metaApi.getMeta).mockResolvedValueOnce(okResponse({ ask_chef_enabled: true }))
+
+    const store = useMetaStore()
+    await store.loadMeta()
+
+    expect(store.askChefEnabled).toBe(true)
+  })
+})

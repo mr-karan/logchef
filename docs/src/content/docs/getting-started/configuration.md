@@ -576,7 +576,47 @@ reasoning_effort = "high"
 max_tokens = 4096
 ```
 
-**Note:** After first boot, changes to `[ai]` section in `config.toml` are ignored. Manage settings via the UI.
+**Ask Chef.** Ask Chef is the read-only investigation assistant in the Explorer.
+It runs on the Bedrock provider or on any OpenAI-compatible endpoint (OpenAI,
+OpenRouter, or a local server). It is built for Claude Haiku 5.5, and it needs a
+model that supports tool calls. Set `ask_chef_model` to the model. It reuses
+`enabled`, `provider` and the provider's credentials above. An empty
+`ask_chef_model` disables Ask Chef. Unlike the settings in the Admin UI,
+`ask_chef_model` is read from `config.toml` (or `LOGCHEF_AI__ASK_CHEF_MODEL`) on
+every start.
+
+Bedrock (a Bedrock model id or inference profile):
+```toml
+[ai]
+enabled = true
+provider = "bedrock"
+region = "us-east-1"
+model = "anthropic.claude-3-5-sonnet-20241022-v2:0"
+ask_chef_model = ""  # Bedrock model id for Ask Chef; empty disables it
+```
+
+OpenRouter (or another OpenAI-compatible endpoint). Ask Chef needs an API key:
+with an empty `api_key` it stays disabled. Do not put the key in `config.toml`;
+set `LOGCHEF_AI__API_KEY` in the environment instead.
+```toml
+[ai]
+enabled = true
+provider = "openai"
+base_url = "https://openrouter.ai/api/v1"
+ask_chef_model = "anthropic/claude-haiku-5.5"
+```
+
+`api_key` and `base_url` are seeded into the database on first boot, like the
+rest of `[ai]`. On an existing install, `LOGCHEF_AI__API_KEY` and `base_url` in
+`config.toml` have no effect: set the API key and base URL in the AI tab of
+**Administration → System Settings**, then restart Logchef. Ask Chef reads them
+at startup.
+
+Ask Chef asks the model for no reasoning (`reasoning_effort = "none"`) and caps
+each answer with `max_completion_tokens`. A model or endpoint that rejects either
+parameter fails every Ask Chef answer with an error.
+
+**Note:** After first boot, changes to `[ai]` section in `config.toml` are ignored, except `ask_chef_model`. Manage settings via the UI.
 
 ### Alerting
 

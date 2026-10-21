@@ -183,6 +183,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getAlertStmt, err = db.PrepareContext(ctx, getAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query GetAlert: %w", err)
 	}
+	if q.getAlertHistoryEntryStmt, err = db.PrepareContext(ctx, getAlertHistoryEntry); err != nil {
+		return nil, fmt.Errorf("error preparing query GetAlertHistoryEntry: %w", err)
+	}
 	if q.getCollectionStmt, err = db.PrepareContext(ctx, getCollection); err != nil {
 		return nil, fmt.Errorf("error preparing query GetCollection: %w", err)
 	}
@@ -778,6 +781,11 @@ func (q *Queries) Close() error {
 	if q.getAlertStmt != nil {
 		if cerr := q.getAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getAlertStmt: %w", cerr)
+		}
+	}
+	if q.getAlertHistoryEntryStmt != nil {
+		if cerr := q.getAlertHistoryEntryStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getAlertHistoryEntryStmt: %w", cerr)
 		}
 	}
 	if q.getCollectionStmt != nil {
@@ -1417,6 +1425,7 @@ type Queries struct {
 	getAPITokenStmt                            *sql.Stmt
 	getAPITokenByHashStmt                      *sql.Stmt
 	getAlertStmt                               *sql.Stmt
+	getAlertHistoryEntryStmt                   *sql.Stmt
 	getCollectionStmt                          *sql.Stmt
 	getCollectionMemberStmt                    *sql.Stmt
 	getDashboardStmt                           *sql.Stmt
@@ -1585,6 +1594,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getAPITokenStmt:                            q.getAPITokenStmt,
 		getAPITokenByHashStmt:                      q.getAPITokenByHashStmt,
 		getAlertStmt:                               q.getAlertStmt,
+		getAlertHistoryEntryStmt:                   q.getAlertHistoryEntryStmt,
 		getCollectionStmt:                          q.getCollectionStmt,
 		getCollectionMemberStmt:                    q.getCollectionMemberStmt,
 		getDashboardStmt:                           q.getDashboardStmt,
