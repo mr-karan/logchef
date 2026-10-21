@@ -139,6 +139,10 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "invalid request body")
 	}
 
+	if !s.allowSettingWrite(c, key, req.IsSensitive) {
+		return nil
+	}
+
 	// Validate the setting value based on its type
 	if err := s.validateSettingValue(req.Value, req.ValueType); err != nil {
 		return SendError(c, fiber.StatusBadRequest, fmt.Sprintf("invalid value: %v", err))
@@ -180,6 +184,10 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
+	if !s.allowSettingWrite(c, key, false) {
+		return nil
+	}
+
 	if err := s.sqlite.DeleteSetting(c.Context(), key); err != nil {
 		s.log.Error("failed to delete setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to delete setting")
@@ -187,6 +195,31 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 
 	s.log.Info("setting deleted", "key", key, "user", user.Email)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "setting deleted successfully"})
+}
+
+func (s *Server) allowSettingWrite(c fiber.Ctx, key string, sensitive bool) bool {
+	if c.Locals("auth_method") == "session" {
+		return true
+	}
+	if !sensitive && !models.IsSessionOnlySetting(key) {
+		settings, err := s.sqlite.ListSettings(c.Context())
+		if err != nil {
+			s.log.Error("failed to authorize setting write", "key", key, "error", err)
+			s.sendLoadFailure(c, fiber.StatusInternalServerError, "failed to retrieve setting", models.GeneralErrorType)
+			return false
+		}
+		for _, setting := range settings {
+			if setting.Key == key {
+				sensitive = setting.IsSensitive
+				break
+			}
+		}
+		if !sensitive {
+			return true
+		}
+	}
+	s.sendLoadFailure(c, fiber.StatusForbidden, "This setting requires a browser session", models.AuthorizationErrorType)
+	return false
 }
 
 // settingToResponse converts a database setting to API response format.

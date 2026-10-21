@@ -26,3 +26,16 @@ func IsSensitiveSetting(key string) bool {
 		return false
 	}
 }
+
+// IsSessionOnlySetting reports whether a key contains a secret or selects its destination.
+func IsSessionOnlySetting(key string) bool {
+	if IsSensitiveSetting(key) {
+		return true
+	}
+	switch key {
+	case "alerts.smtp_host", "alerts.smtp_port", "alerts.smtp_security", "alerts.tls_insecure_skip_verify", "ai.base_url":
+		return true
+	default:
+		return false
+	}
+}

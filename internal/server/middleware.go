@@ -452,7 +452,7 @@ func (s *Server) requireTeamHasSource(scope models.TokenScope) fiber.Handler {
 func (s *Server) authorizedSource(c fiber.Ctx) (src access.AuthorizedSource, ok bool) {
 	src, ok = c.Locals(authorizedSourceKey).(access.AuthorizedSource)
 	if !ok {
-		s.log.Error("route reached handler without source authorization", "route", c.Route().Path, "path", redactedRequestPath(c))
+		s.log.Error("route reached handler without source authorization", "route", redactedRequestPath(c), "path", redactedRequestPath(c))
 		_ = SendErrorWithType(c, fiber.StatusInternalServerError, "Authorization context missing", models.GeneralErrorType)
 	}
 	return src, ok

@@ -47,7 +47,7 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// Build canonical log line — one line per request with all useful context
 		attrs := []slog.Attr{
 			slog.String("method", c.Method()),
-			slog.String("route", c.Route().Path),
+			slog.String("route", redactedRequestPath(c)),
 			slog.String("path", redactedRequestPath(c)),
 			slog.Int("status", status),
 			slog.Int64("duration_ms", duration.Milliseconds()),
@@ -59,6 +59,9 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		}
 
 		// Resource context from path params
+		if token := c.Params("token"); token != "" {
+			attrs = append(attrs, slog.String("token", models.RedactShareToken(token)))
+		}
 		if teamID := c.Params("teamID"); teamID != "" {
 			attrs = append(attrs, slog.String("team_id", teamID))
 		}
@@ -84,12 +87,9 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 }
 
 func redactedRequestPath(c fiber.Ctx) string {
-	segments := strings.Split(c.Path(), "/")
-	route := strings.Split(c.Route().Path, "/")
-	for i := len(segments) - 1; i >= 0; i-- {
-		if (i > 0 && strings.EqualFold(segments[i-1], "query-shares")) || (i < len(route) && route[i] == ":token") {
-			segments[i] = models.RedactShareToken(segments[i])
-		}
+	route := c.Route()
+	if route.Path == "" || c.IsMiddleware() || strings.Contains(route.Path, "*") {
+		return "<unmatched>"
 	}
-	return strings.Join(segments, "/")
+	return route.Path
 }

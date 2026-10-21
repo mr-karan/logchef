@@ -54,6 +54,7 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 		t.Fatal("create response has no share token")
 	}
 	e.expect(apiCredential, http.MethodGet, "/api/v1/query-shares/"+share.Token, "", http.StatusOK)
+	e.expect(apiCredential, http.MethodGet, "/api/v1/query-shares%2F"+share.Token, "", http.StatusNotFound)
 	const code = "secret-oauth-code"
 	const state = "secret-oauth-state"
 	e.expect("", http.MethodGet, "/api/v1/auth/callback?code="+code+"&state="+state, "", http.StatusInternalServerError)
@@ -66,6 +67,7 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 		}
 	}
 	wantRoutes := map[string]int{
+		"<unmatched>": http.StatusNotFound,
 		"/api/v1/teams/:teamID/sources/:sourceID/query-shares": http.StatusCreated,
 		"/api/v1/query-shares/:token":                          http.StatusOK,
 		"/api/v1/auth/callback":                                http.StatusInternalServerError,
@@ -83,6 +85,7 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 			DurationMS *int64 `json:"duration_ms"`
 			TeamID     string `json:"team_id"`
 			SourceID   string `json:"source_id"`
+			Token      string `json:"token"`
 		}
 		if err := decoder.Decode(&record); err != nil {
 			t.Fatal(err)
@@ -104,6 +107,9 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 			if record.TeamID != fmt.Sprint(team.ID) || record.SourceID != fmt.Sprint(source.ID) {
 				t.Error("request log lacks team and source IDs")
 			}
+		}
+		if record.Route == "/api/v1/query-shares/:token" && record.Token != share.Token[:8] {
+			t.Error("share log lacks redacted token prefix")
 		}
 		delete(wantRoutes, record.Route)
 	}
@@ -191,17 +197,19 @@ func TestFailureLogsExcludeCredentials(t *testing.T) {
 }
 
 func TestRequestLogsRetainRedactedPaths(t *testing.T) {
-	for _, tt := range []struct {
+	for i, tt := range []struct {
 		path, wantPath string
 		status         int
 	}{
-		{"/api/v1/unknown-path?code=secret-query", "/api/v1/unknown-path", http.StatusNotFound},
-		{"/api/v1/admin/settings?code=secret-query", "/api/v1/admin/settings", http.StatusUnauthorized},
-		{"/api/v1/query-shares/12345678-secret-token", "/api/v1/query-shares/12345678", http.StatusUnauthorized},
-		{"/api/v1/query-shares/12345678-secret-token/typo?code=secret-query", "/api/v1/query-shares/12345678/typo", http.StatusNotFound},
-		{"/api/v1/QUERY-SHARES/12345678-secret-token/typo", "/api/v1/QUERY-SHARES/12345678/typo", http.StatusNotFound},
+		{"/api/v1/query-shares%2F12345678-secret-token", "<unmatched>", http.StatusNotFound},
+		{"/api/v1/unknown/12345678-secret-token", "<unmatched>", http.StatusNotFound},
+		{"/api/v1/unknown-path?code=secret-query", "<unmatched>", http.StatusNotFound},
+		{"/api/v1/admin/settings?code=secret-query", "<unmatched>", http.StatusUnauthorized},
+		{"/api/v1/query-shares/12345678-secret-token", "<unmatched>", http.StatusUnauthorized},
+		{"/api/v1/query-shares/12345678-secret-token/typo?code=secret-query", "<unmatched>", http.StatusNotFound},
+		{"/api/v1/QUERY-SHARES/12345678-secret-token/typo", "<unmatched>", http.StatusNotFound},
 	} {
-		t.Run(tt.path, func(t *testing.T) {
+		t.Run(fmt.Sprint(i), func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 			s := New(ServerOptions{Config: &config.Config{}, SQLite: newServerTestDB(t), Logger: logger, FS: http.Dir(t.TempDir())})
@@ -227,6 +235,9 @@ func TestRequestLogsRetainRedactedPaths(t *testing.T) {
 				}
 				if err := decoder.Decode(&record); err != nil {
 					t.Fatal(err)
+				}
+				if record.Path != "" && record.Path != tt.wantPath {
+					t.Errorf("%s log path = %q, want %q", record.Message, record.Path, tt.wantPath)
 				}
 				if record.Message == "http" {
 					found = true
@@ -288,5 +299,48 @@ func TestAuthMiddlewareRedactsSessionCookies(t *testing.T) {
 				t.Error("auth logs lack redacted session ID")
 			}
 		})
+	}
+}
+
+func TestUnmatchedErrorHandlerLogsExcludePaths(t *testing.T) {
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	s := New(ServerOptions{Config: &config.Config{}, SQLite: newServerTestDB(t), Logger: logger, FS: http.Dir(t.TempDir())})
+	t.Cleanup(func() { _ = s.Shutdown(context.Background()) })
+	const secret = "unmatched-secret-path-segment"
+	resp, err := s.app.Test(httptest.NewRequest(http.MethodPost, "/unknown/"+secret, http.NoBody))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Fatalf("status = %d, want 405", resp.StatusCode)
+	}
+	if strings.Contains(logs.String(), secret) {
+		t.Error("unmatched request secret appears in logs")
+	}
+	found := false
+	decoder := json.NewDecoder(strings.NewReader(logs.String()))
+	for decoder.More() {
+		var record struct {
+			Message string `json:"msg"`
+			Path    string `json:"path"`
+			Error   string `json:"error"`
+		}
+		if err := decoder.Decode(&record); err != nil {
+			t.Fatal(err)
+		}
+		if record.Message == "request error" {
+			found = true
+			if record.Path != "<unmatched>" {
+				t.Errorf("error log path = %q, want unmatched placeholder", record.Path)
+			}
+			if record.Error != "Method Not Allowed" {
+				t.Errorf("error log message = %q, want Method Not Allowed", record.Error)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("missing error-handler log")
 	}
 }

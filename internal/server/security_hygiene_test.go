@@ -270,7 +270,8 @@ func TestCredentialErrorsDoNotLeakInHandlerLogs(t *testing.T) {
 func TestSettingsPreserveSensitivityOnUpdate(t *testing.T) {
 	e := newCollectionRouteEnv(t)
 	admin := mkTestUser(t, e.s.sqlite, "sensitive-admin@example.com", models.UserRoleAdmin)
-	token := e.token(admin, models.TokenScopeSettingsRead, models.TokenScopeSettingsWrite)
+	token := e.token(admin, models.TokenScopeSettingsRead)
+	cookie := sessionCookie(t, e.s.sqlite, admin)
 	for _, key := range []string{"ai.api_key", "alerts.smtp_password", "custom.secret"} {
 		t.Run(key, func(t *testing.T) {
 			if key == "custom.secret" {
@@ -279,7 +280,17 @@ func TestSettingsPreserveSensitivityOnUpdate(t *testing.T) {
 				}
 			}
 			for _, sensitivity := range []string{"", `,"is_sensitive":false`} {
-				e.expect(token, http.MethodPut, "/api/v1/admin/settings/"+key, `{"value":"new-secret-value","value_type":"string","category":"ai"`+sensitivity+`}`, http.StatusOK)
+				req := httptest.NewRequest(http.MethodPut, "/api/v1/admin/settings/"+key, strings.NewReader(`{"value":"new-secret-value","value_type":"string","category":"ai"`+sensitivity+`}`))
+				req.Header.Set("Content-Type", "application/json")
+				req.AddCookie(cookie)
+				resp, err := e.s.app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				resp.Body.Close()
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("session update status = %d, want 200", resp.StatusCode)
+				}
 				body := e.expect(token, http.MethodGet, "/api/v1/admin/settings/"+key, "", http.StatusOK)
 				if strings.Contains(string(body), "new-secret-value") || !strings.Contains(string(body), "********") {
 					t.Error("token can read updated secret")
@@ -331,6 +342,9 @@ func TestMissingManagedResourcesReturnNotFound(t *testing.T) {
 	token := e.token(admin, models.TokenScopeTeamsWrite, models.TokenScopeSourcesWrite)
 	for _, path := range []string{"/api/v1/admin/teams/999999", "/api/v1/admin/sources/999999"} {
 		e.expect(token, http.MethodDelete, path, "", http.StatusNotFound)
+		if strings.Contains(path, "/sources/") {
+			e.expect(token, http.MethodPut, path, `{}`, http.StatusNotFound)
+		}
 	}
 }
 
@@ -364,5 +378,66 @@ func TestLegacySettingsRemainSensitive(t *testing.T) {
 		if strings.Contains(string(body), "legacy-secret-value") || !strings.Contains(string(body), "********") {
 			t.Errorf("legacy secret exposed at %s", path)
 		}
+	}
+}
+
+func TestSettingsSecretDestinationsRequireSession(t *testing.T) {
+	s := newAuthzTestServer(t)
+	admin := mkTestUser(t, s.sqlite, "destination-admin@example.com", models.UserRoleAdmin)
+	token := apiToken(t, s, admin, models.TokenScopeSettingsWrite)
+	cookie := sessionCookie(t, s.sqlite, admin)
+	for _, setting := range []struct{ key, value, valueType string }{
+		{"alerts.smtp_host", "smtp.example.com", "string"},
+		{"alerts.smtp_port", "465", "number"},
+		{"alerts.smtp_security", "tls", "string"},
+		{"alerts.tls_insecure_skip_verify", "true", "boolean"},
+		{"ai.base_url", "https://ai.example.com", "string"},
+		{"ai.api_key", "fixture-key", "string"},
+		{"custom.secret", "fixture-key", "string"},
+	} {
+		t.Run(setting.key, func(t *testing.T) {
+			ctx := context.Background()
+			category, _, _ := strings.Cut(setting.key, ".")
+			if category == "custom" {
+				category = "ai"
+			}
+			if err := s.sqlite.UpsertSetting(ctx, setting.key, "original", setting.valueType, category, "", setting.key == "custom.secret"); err != nil {
+				t.Fatal(err)
+			}
+			body := fmt.Sprintf(`{"value":%q,"value_type":%q,"category":%q}`, setting.value, setting.valueType, category)
+			for _, principal := range []string{"token", "session"} {
+				for _, method := range []string{http.MethodPut, http.MethodDelete} {
+					req := httptest.NewRequest(method, "/api/v1/admin/settings/"+setting.key, strings.NewReader(body))
+					req.Header.Set("Content-Type", "application/json")
+					if principal == "token" {
+						req.Header.Set("Authorization", "Bearer "+token)
+					} else {
+						req.AddCookie(cookie)
+					}
+					resp, err := s.app.Test(req)
+					if err != nil {
+						t.Fatal(err)
+					}
+					resp.Body.Close()
+					want := http.StatusForbidden
+					if principal == "session" {
+						want = http.StatusOK
+					}
+					if resp.StatusCode != want {
+						t.Errorf("%s %s status = %d, want %d", principal, method, resp.StatusCode, want)
+					}
+					saved, err := s.sqlite.GetSetting(ctx, setting.key)
+					if principal == "token" && (err != nil || saved != "original") {
+						t.Error("token modified session-only setting")
+					}
+					if principal == "session" && method == http.MethodDelete && err == nil {
+						t.Error("session delete was not persisted")
+					}
+					if principal == "session" && method == http.MethodPut && (err != nil || saved != setting.value) {
+						t.Error("session update was not persisted")
+					}
+				}
+			}
+		})
 	}
 }
