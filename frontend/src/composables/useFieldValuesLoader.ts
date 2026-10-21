@@ -72,27 +72,30 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
     try {
       await runFieldLoad(async () => {
         if (controller.signal.aborted) return
+        let response: Awaited<ReturnType<typeof sourcesApi.getFieldValues>>
         try {
-          const response = await sourcesApi.getFieldValues(
+          response = await sourcesApi.getFieldValues(
             teamId, sourceId, fieldName, fieldType,
             timeRange.startTime, timeRange.endTime,
             opts.timezone, opts.limit || 10,
             filterQueryLanguage, filterQuery, filterVariables,
             controller.signal,
           )
-          if (controller.signal.aborted || !response.data) return
-
-          setFieldState(fieldName, { status: 'loaded', values: response.data })
-          useFieldValuesStore().populateFromFetch(
-            teamId, sourceId, fieldName,
-            timeRange.startTime, timeRange.endTime,
-            filterQuery, response.data,
-          )
         } catch {
           if (!controller.signal.aborted) {
             setFieldState(fieldName, { status: 'error', error: 'Failed to load' })
           }
+          return
         }
+
+        if (controller.signal.aborted) return
+        if (!response.data) {
+          setFieldState(fieldName, { status: 'error', error: 'Failed to load' })
+          return
+        }
+
+        setFieldState(fieldName, { status: 'loaded', values: response.data })
+        useFieldValuesStore().populateFromFetch(sourceId, fieldName, response.data)
       })
     } finally {
       if (abortControllers.get(fieldName) === controller) {

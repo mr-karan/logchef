@@ -15,11 +15,11 @@ function result(value: string): FieldValuesResult {
 beforeEach(() => setActivePinia(createPinia()))
 
 describe('field values cache', () => {
-  it('retains only the newest result per source and field across time ranges', () => {
+  it('retains only the newest result per source and field across refreshes', () => {
     const store = useFieldValuesStore()
     for (let range = 0; range < 50; range++) {
       for (let field = 0; field < 200; field++) {
-        store.populateFromFetch(1, 2, `field${field}`, `start${range}`, `end${range}`, `q${range}`, result(`value${range}`))
+        store.populateFromFetch(2, `field${field}`, result(`value${range}`))
       }
     }
     expect(store.entries.size).toBe(200)
@@ -34,15 +34,12 @@ describe('field values cache', () => {
     const summary = computed(() => store.getFieldSummary(2, 'level'))
     expect(values.value).toBeNull()
     expect(summary.value).toBeNull()
-    store.populateFromFetch(1, 2, 'level', 's', 'e', '', result('first'))
+    store.populateFromFetch(2, 'level', result('first'))
     expect(values.value?.values[1].value).toBe('first')
     expect(summary.value).toEqual({ type: 'String', totalDistinct: 2, isLowCardinality: true })
-    store.populateFromFetch(1, 3, 'level', 's', 'e', '', result('different source'))
-    store.populateFromFetch(1, 2, 'level', 's2', 'e2', 'query', result('latest'))
+    store.populateFromFetch(3, 'level', result('different source'))
+    store.populateFromFetch(2, 'level', result('latest'))
     expect(store.entries.size).toBe(2)
-    expect(store.entries.get('2|level')).toMatchObject({
-      teamId: 1, startTime: 's2', endTime: 'e2', contextQuery: 'query',
-    })
     expect(values.value?.values[1].value).toBe('latest')
     expect(store.findCachedValues(3, 'level')?.values[1].value).toBe('different source')
   })

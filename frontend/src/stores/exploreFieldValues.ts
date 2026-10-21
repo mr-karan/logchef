@@ -2,15 +2,6 @@ import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import type { FieldValuesResult } from '@/api/sources'
 
-export interface FieldValuesCacheEntry {
-  result: FieldValuesResult
-  fetchedAt: number
-  teamId: number
-  startTime: string
-  endTime: string
-  contextQuery: string
-}
-
 export interface FieldSummary {
   type: string
   totalDistinct: number
@@ -18,26 +9,17 @@ export interface FieldSummary {
 }
 
 export const useFieldValuesStore = defineStore('exploreFieldValues', () => {
-  const entries = ref<Map<string, FieldValuesCacheEntry>>(new Map())
+  const entries = ref<Map<string, FieldValuesResult>>(new Map())
 
   function fieldKey(sourceId: number, fieldName: string): string {
     return `${sourceId}|${fieldName}`
   }
 
   function populateFromFetch(
-    teamId: number, sourceId: number, fieldName: string,
-    startTime: string, endTime: string, logchefql: string,
-    result: FieldValuesResult,
+    sourceId: number, fieldName: string, result: FieldValuesResult,
   ): void {
     result.values.sort((a, b) => b.count - a.count)
-    entries.value.set(fieldKey(sourceId, fieldName), {
-      result,
-      fetchedAt: Date.now(),
-      teamId,
-      startTime,
-      endTime,
-      contextQuery: logchefql,
-    })
+    entries.value.set(fieldKey(sourceId, fieldName), result)
   }
 
   function getFieldSummary(sourceId: number, fieldName: string): FieldSummary | null {
@@ -50,7 +32,7 @@ export const useFieldValuesStore = defineStore('exploreFieldValues', () => {
   }
 
   function findCachedValues(sourceId: number, fieldName: string): FieldValuesResult | null {
-    return entries.value.get(fieldKey(sourceId, fieldName))?.result ?? null
+    return entries.value.get(fieldKey(sourceId, fieldName)) ?? null
   }
 
   return {

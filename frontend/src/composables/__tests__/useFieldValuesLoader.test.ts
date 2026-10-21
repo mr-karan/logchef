@@ -7,7 +7,7 @@ import { useFieldValuesStore } from '@/stores/exploreFieldValues'
 import { useFieldValuesLoader, type LoaderOptions } from '../useFieldValuesLoader'
 
 const originalAdapter = api.defaults.adapter
-let requests: Array<{ config: InternalAxiosRequestConfig; complete: (value?: string) => void; fail: () => void }>
+let requests: Array<{ config: InternalAxiosRequestConfig; complete: (value?: string | null) => void; fail: () => void }>
 let active: number
 let maxActive: number
 let ignoreAbort: boolean
@@ -26,7 +26,7 @@ beforeEach(() => {
         config,
         complete(value = 'ok') {
           resolve({ config, status: 200, statusText: 'OK', headers: {}, data: {
-            status: 'success', data: {
+            status: 'success', data: value === null ? null : {
               field_name: 'level', field_type: 'String', total_distinct: 1,
               is_low_cardinality: true, values: [{ value, count: 1 }],
             },
@@ -68,6 +68,25 @@ describe('field values loader', () => {
     expect(loader.isAnyLoading.value).toBe(false)
     if (cancel === 'clearCache') expect(loader.fieldStates.value.size).toBe(0)
     expect(useFieldValuesStore().entries.size).toBe(0)
+  })
+
+  it('settles a successful response without data as an error and permits retry', async () => {
+    const loader = useFieldValuesLoader(loaderOptions())
+    const load = loader.loadField('level', 'String')
+    await vi.waitFor(() => expect(requests).toHaveLength(1))
+    requests[0].complete(null)
+    await load
+    expect(loader.getFieldState('level').status).toBe('error')
+    expect(loader.isAnyLoading.value).toBe(false)
+    expect(useFieldValuesStore().findCachedValues(2, 'level')).toBeNull()
+
+    const retry = loader.loadField('level', 'String')
+    await vi.waitFor(() => expect(requests).toHaveLength(2))
+    requests[1].complete('retried')
+    await retry
+    expect(loader.getFieldState('level').status).toBe('loaded')
+    expect(loader.fieldValues.value.level.values[0].value).toBe('retried')
+    expect(loader.isAnyLoading.value).toBe(false)
   })
 
   it('shares four slots across progressive batches and individual loads', async () => {
