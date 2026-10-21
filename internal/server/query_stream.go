@@ -21,6 +21,8 @@ import (
 // ("data" for /logs/query, "logs" for /logchefql/query). The generated* fields
 // are emitted only for the LogchefQL endpoint (includeGenerated).
 type queryStreamConfig struct {
+	failure           string
+	operation         string
 	logsKey           string
 	includeGenerated  bool
 	generatedSQL      string
@@ -131,7 +133,7 @@ func (w *queryStreamWriter) WriteError(streamErr error) error {
 	}
 	if !w.begun {
 		w.closed = true
-		response := classifyQueryError(streamErr, logsQueryFailure, "Log querying")
+		response := classifyQueryError(streamErr, w.cfg.failure, w.cfg.operation)
 		payload := map[string]any{
 			"status":     "error",
 			"message":    response.message,
@@ -201,7 +203,7 @@ func (w *queryStreamWriter) closeEnvelope(stats models.QueryStats, streamErr err
 	}
 
 	if streamErr != nil {
-		if err := w.writeStringField("error", classifyQueryError(streamErr, logsQueryFailure, "Log querying").message); err != nil {
+		if err := w.writeStringField("error", classifyQueryError(streamErr, w.cfg.failure, w.cfg.operation).message); err != nil {
 			return err
 		}
 	}
@@ -254,10 +256,6 @@ func (s *Server) streamPreviewQuery(
 	historyQueryText string,
 	historyLanguage models.QueryLanguage,
 ) error {
-	failure, operation := logsQueryFailure, "Log querying"
-	if cfg.includeGenerated {
-		failure, operation = logchefQLQueryFailure, "LogchefQL querying"
-	}
 	queryID := uuid.New().String()
 	streamCtx, cancel := context.WithCancel(c.Context())
 	if err := queryTracker.StartQueryWithID(
@@ -289,11 +287,11 @@ func (s *Server) streamPreviewQuery(
 		writer := newQueryStreamWriter(output, cfg, queryID)
 		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, params, writer)
 		if err != nil {
-			s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", logMode)
 			if !writer.begun {
 				_ = producer.CloseWithError(err)
 				return
 			}
+			s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", logMode)
 			_ = writer.WriteError(err)
 			return
 		}
@@ -322,7 +320,7 @@ func (s *Server) streamPreviewQuery(
 		_ = reader.Close()
 		cancel()
 		<-done
-		return s.sendQueryError(c, sourceID, err, failure, operation)
+		return s.sendQueryError(c, sourceID, err, cfg.failure, cfg.operation)
 	}
 	c.Status(fiber.StatusOK)
 	c.Set("Content-Type", "application/json; charset=utf-8")

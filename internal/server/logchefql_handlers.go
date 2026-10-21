@@ -190,7 +190,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 
 	prepared, err := core.PrepareLogchefQLQuery(c.Context(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
+		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 	}
 	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
 	executableQuery := compiled.Query
@@ -232,6 +232,8 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	if source.IsClickHouse() {
 		cfg := queryStreamConfig{
 			logsKey:           "logs",
+			failure:           logchefQLQueryFailure,
+			operation:         logchefQLQueryOperation,
 			includeGenerated:  true,
 			generatedSQL:      executableQuery,
 			generatedQuery:    executableQuery,
@@ -248,7 +250,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 				return err
 			} else if err != nil {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "logchefql")
-				return s.writeDashboardStreamError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
+				return s.writeDashboardStreamError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, queryParams,
@@ -282,7 +284,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
+			return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 		}
 	}
 
@@ -313,7 +315,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	// Execute via core function
 	result, err := core.QueryLogs(queryCtx, s.datasources, src, queryParams)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
+		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, logchefQLQueryOperation)
 	}
 
 	// Log successful query execution

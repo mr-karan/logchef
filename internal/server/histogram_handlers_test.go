@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	ch "github.com/ClickHouse/clickhouse-go/v2"
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -98,6 +99,9 @@ func TestHistogramErrorResponses(t *testing.T) {
 		{"validation cause", fmt.Errorf("%s: %w", internalDetail, &datasource.ValidationError{Field: "window", Message: "invalid histogram window", Err: errors.New(internalDetail)}), fiber.StatusBadRequest, "invalid histogram window"},
 		{"admission", &QueryAdmissionError{Message: "Too many active preview queries"}, fiber.StatusTooManyRequests, "Too many active preview queries"},
 		{"canceled fill", fmt.Errorf("provider: %w", context.Canceled), fiber.StatusRequestTimeout, "Request cancelled"},
+		{"server timeout", fmt.Errorf("query: %w", &ch.Exception{Code: 159, Message: internalDetail}), fiber.StatusRequestTimeout, "Request timed out"},
+		{"socket timeout", fmt.Errorf("query: %w", &ch.Exception{Code: 209, Message: internalDetail}), fiber.StatusRequestTimeout, "Request timed out"},
+		{"memory limit", &ch.Exception{Code: 241, Message: internalDetail}, fiber.StatusInternalServerError, histogramFailure},
 		{"fill deadline", context.DeadlineExceeded, fiber.StatusRequestTimeout, "Request timed out"},
 		{"untyped invalid error", fmt.Errorf("invalid response: %s", internalDetail), fiber.StatusInternalServerError, histogramFailure},
 	} {

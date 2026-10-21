@@ -1,11 +1,13 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -175,7 +177,17 @@ func TestErrorResponses(t *testing.T) {
 		{
 			name: "histogram window the datasource rejects", method: http.MethodPost, path: sourcePath + "/logs/histogram",
 			body:   `{"query_text":"*","window":"2x",` + window + `}`,
-			status: fiber.StatusBadRequest, message: "invalid histogram window: use a positive duration such as 1m",
+			status: fiber.StatusBadRequest, message: "invalid histogram window: use a positive duration such as 1h30m, or a single day or week value such as 1d",
+		},
+		{
+			name: "compound histogram window", method: http.MethodPost, path: sourcePath + "/logs/histogram",
+			body:   `{"query_text":"*","window":"1d12h",` + window + `}`,
+			status: fiber.StatusBadRequest, message: "invalid histogram window: use a positive duration such as 1h30m, or a single day or week value such as 1d",
+		},
+		{
+			name: "year histogram window", method: http.MethodPost, path: sourcePath + "/logs/histogram",
+			body:   `{"query_text":"*","window":"1y",` + window + `}`,
+			status: fiber.StatusBadRequest, message: "invalid histogram window: use a positive duration such as 1h30m, or a single day or week value such as 1d",
 		},
 		{
 			name: "ClickHouse histogram window that does not exist", method: http.MethodPost, path: chSourcePath + "/logs/histogram",
@@ -334,10 +346,15 @@ func TestDeadClickHouseQueryResponse(t *testing.T) {
 	}
 	env := newErrorResponseServer(t, vlUpstream)
 	configureErrorResponseClickHouse(t, env, addr)
+	var logs bytes.Buffer
+	env.s.log = slog.New(slog.NewTextHandler(&logs, nil))
 	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.chSource)
 	got := doAuthzRequest(t, env.s, http.MethodPost, path, `{"query_text":"SELECT 1"}`, withSession(env.cookie))
 	if got.status != 500 || got.message != logsQueryFailure {
 		t.Fatalf("status=%d message=%q, want 500 with generic message", got.status, got.message)
+	}
+	if count := strings.Count(logs.String(), "level=ERROR"); count != 1 {
+		t.Fatalf("failure logged %d times, want once", count)
 	}
 }
 
@@ -359,8 +376,58 @@ func TestVictoriaLogsQueryFailureResponse(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.vlSource)
-	got := doAuthzRequest(t, env.s, http.MethodPost, path, `{"query_text":"* | no_such_pipe_for_test"}`, withSession(env.cookie))
-	if got.status != 400 || !strings.Contains(got.message, "no_such_pipe_for_test") || strings.Contains(got.message, "remoteAddr") || strings.Contains(got.message, "requestURI") || strings.Contains(got.message, "127.0.0.1") {
-		t.Fatalf("status=%d message=%q, want a cleaned parse reason", got.status, got.message)
+
+	for _, query := range []string{"* | no_such_pipe_for_test", `_msg:"` + strings.Repeat("x", 244) + `" | stats countt()`} {
+		t.Run(fmt.Sprintf("length=%d", len(query)), func(t *testing.T) {
+			body, err := json.Marshal(map[string]string{"query_text": query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := doAuthzRequest(t, env.s, http.MethodPost, path, string(body), withSession(env.cookie))
+			reason := "no_such_pipe_for_test"
+			if strings.Contains(query, "countt") {
+				reason = `unknown stats func "countt"`
+			}
+			t.Logf("query length=%d status=%d message=%q", len(query), got.status, got.message)
+			if got.status != 400 || !strings.Contains(got.message, reason) || strings.Contains(got.message, "remoteAddr") || strings.Contains(got.message, "requestURI") || strings.Contains(got.message, "127.0.0.1") {
+				t.Fatalf("want 400 with cleaned parse reason %q", reason)
+			}
+		})
+	}
+}
+
+func TestClickHouseResourceFailureResponses(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR for read-only ClickHouse checks")
+	}
+	env := newErrorResponseServer(t, vlUpstream)
+	configureErrorResponseClickHouse(t, env, addr)
+	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.chSource)
+	for _, tc := range []struct {
+		name, query string
+		status      int
+		reason      string
+	}{
+		{"timeout", "SELECT sleep(3) SETTINGS max_execution_time=1", 408, "Request timed out"},
+		{"rows", "SELECT number FROM numbers(100) SETTINGS max_result_rows=1, result_overflow_mode='throw'", 400, "max rows"},
+		{"bytes", "SELECT number FROM numbers(100) SETTINGS max_result_bytes=1, result_overflow_mode='throw'", 400, "max bytes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			env.s.log = slog.New(slog.NewTextHandler(&logs, nil))
+			body, err := json.Marshal(map[string]string{"query_text": tc.query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := doAuthzRequest(t, env.s, http.MethodPost, path, string(body), withSession(env.cookie))
+			t.Logf("status=%d message=%q", got.status, got.message)
+			if got.status != tc.status || !strings.Contains(got.message, tc.reason) {
+				t.Errorf("want %d with %q", tc.status, tc.reason)
+			}
+			if count := strings.Count(logs.String(), "level=ERROR"); count > 1 {
+				t.Errorf("failure logged %d times, want at most once", count)
+			}
+		})
 	}
 }

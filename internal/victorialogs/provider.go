@@ -15,7 +15,6 @@ import (
 	"sync"
 	"time"
 	"unicode"
-	"unicode/utf8"
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -645,7 +644,7 @@ func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaL
 	}
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	detail := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"))
+	detail := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"), form.Get("query"))
 	if detail != "" {
 		detail = ": " + detail
 	}
@@ -678,12 +677,12 @@ func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaL
 	}
 }
 
-func sanitizeVictoriaLogsValidationBody(body []byte, contentType string) string {
+func sanitizeVictoriaLogsValidationBody(body []byte, contentType, query string) string {
 	mediaType, _, err := mime.ParseMediaType(contentType)
-	if err != nil || mediaType != "text/plain" || !utf8.Valid(body) {
+	if err != nil || mediaType != "text/plain" {
 		return ""
 	}
-	text := strings.TrimSpace(string(body))
+	text := strings.TrimSpace(strings.ToValidUTF8(string(body), ""))
 	if strings.HasPrefix(text, "remoteAddr:") {
 		_, remainder, ok := strings.Cut(text, "; requestURI:")
 		if !ok {
@@ -694,6 +693,7 @@ func sanitizeVictoriaLogsValidationBody(body []byte, contentType string) string 
 			return ""
 		}
 	}
+	text = strings.TrimPrefix(strings.TrimSpace(text), "cannot parse `query` arg ["+query+"]: ")
 	text = strings.Join(strings.Fields(text), " ")
 	if strings.ContainsFunc(text, unicode.IsControl) {
 		return ""

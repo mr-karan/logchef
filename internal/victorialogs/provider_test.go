@@ -866,6 +866,7 @@ func TestRejectedQueryDiagnostics(t *testing.T) {
 		{"html", "text/html", "<html>internal gateway details</html>", "Invalid query or query parameters"},
 		{"json", "application/json", `{"internal":"details"}`, "Invalid query or query parameters"},
 		{"bounded", "text/plain", strings.Repeat("界", 300), strings.Repeat("界", 240) + "..."},
+		{"split rune", "text/plain", "unknown stats func \"countt\"; " + strings.Repeat("界", 1400), "unknown stats func \"countt\"; " + strings.Repeat("界", 240-len(`unknown stats func "countt"; `)) + "..."},
 		{"malformed prefix", "text/plain", "remoteAddr: 127.0.0.1:1234", "Invalid query or query parameters"},
 		{"control characters", "text/plain", "invalid\x00query", "Invalid query or query parameters"},
 	} {
@@ -884,7 +885,7 @@ func TestRejectedQueryDiagnostics(t *testing.T) {
 			p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
 			_, err = p.QueryLogs(t.Context(), source, datasource.QueryRequest{RawQuery: "* | invalid"})
 			validation, ok := errors.AsType[*datasource.ValidationError](err)
-			if !ok || validation.Message != tc.message || validation.Err == nil || !strings.Contains(validation.Err.Error(), tc.body) {
+			if !ok || validation.Message != tc.message || validation.Err == nil || !strings.Contains(validation.Err.Error(), tc.body[:min(len(tc.body), 4096)]) {
 				t.Fatalf("error=%#v, want safe message %q and original cause", err, tc.message)
 			}
 		})
@@ -898,7 +899,7 @@ func TestHistogramRejectsInvalidWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
-	for _, window := range []string{"2x", "0s", "-1m", "NaNd", "Infw", "1e99d"} {
+	for _, window := range []string{"1d12h", "1y", "2x", "0s", "-1m", "NaNd", "Infw", "1e99d"} {
 		t.Run(window, func(t *testing.T) {
 			_, err := p.Histogram(t.Context(), source, datasource.HistogramRequest{Window: window})
 			validation, ok := errors.AsType[*datasource.ValidationError](err)

@@ -207,7 +207,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 
 	params, err := core.PrepareSQLQuery(s.config.Query, req)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
 	}
 	processedQuery := params.RawQuery
 
@@ -217,10 +217,10 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
 	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
 	}
 	if err := datasource.ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
 	}
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
 	// cache key is computed from the finalized (post-substitution) executable
@@ -255,7 +255,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	}
 
 	if source.IsClickHouse() {
-		cfg := queryStreamConfig{logsKey: "data"}
+		cfg := queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation}
 		// OOM guardrail: only the dashboard-directive path buffers (bounded by
 		// max_entry_bytes); on overflow the fill errors and we fall through to the
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
@@ -265,7 +265,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 				return err
 			} else if err != nil {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "sql")
-				return s.writeDashboardStreamError(c, sourceID, err, logsQueryFailure, "Log querying")
+				return s.writeDashboardStreamError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
@@ -294,7 +294,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
+			return s.sendQueryError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
 		}
 	}
 
@@ -325,7 +325,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// Execute query via core function with cancellable context.
 	result, err := core.QueryLogs(queryCtx, s.datasources, src, params)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
 	}
 
 	// Log successful query execution

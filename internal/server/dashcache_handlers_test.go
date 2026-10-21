@@ -226,13 +226,13 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 						t.Fatalf("error type=%v, want %s", uncached.body["error_type"], wantErrorType)
 					}
 					if failure.partial {
-						data, ok := uncached.body["data"].(map[string]any)
-						if !ok || data["error"] != logsQueryFailure {
-							t.Fatalf("missing partial-stream error: %v", uncached.body)
-						}
-						logsKey := "data"
+						logsKey, wantFailure := "data", logsQueryFailure
 						if endpoint == "logchefql" {
-							logsKey = "logs"
+							logsKey, wantFailure = "logs", logchefQLQueryFailure
+						}
+						data, ok := uncached.body["data"].(map[string]any)
+						if !ok || data["error"] != wantFailure {
+							t.Fatalf("missing partial-stream error: %v", uncached.body)
 						}
 						rows, ok := data[logsKey].([]any)
 						if !ok || len(rows) != 1 {

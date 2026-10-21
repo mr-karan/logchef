@@ -180,7 +180,7 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 	defer func() {
 		if c.metrics != nil {
 			c.metrics.RecordQueryMetrics(metrics.DetermineQueryType(query), err == nil,
-				time.Since(start), result.rowsReturned, metrics.DetermineErrorType(err), isTimeoutError(err))
+				time.Since(start), result.rowsReturned, metrics.DetermineErrorType(err), IsTimeoutError(err))
 		}
 	}()
 
@@ -206,7 +206,7 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 		hook.AfterQuery(ctx, query, err, duration)
 	}
 
-	return classifyQueryError(err)
+	return publicQueryError(err)
 }
 
 // Close terminates the underlying database connection with a timeout.

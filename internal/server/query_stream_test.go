@@ -18,7 +18,7 @@ func drainWriter(t *testing.T, run func(w *queryStreamWriter)) map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
-	w := newQueryStreamWriter(bw, queryStreamConfig{logsKey: "data"}, "qid-1")
+	w := newQueryStreamWriter(bw, queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation}, "qid-1")
 	run(w)
 	if err := bw.Flush(); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -260,6 +260,48 @@ func TestQueryStreamDiagnostics(t *testing.T) {
 					}
 				} else if body["message"] != tc.message || body["error_type"] != string(tc.errorType) {
 					t.Fatalf("body=%v", body)
+				}
+			})
+		}
+	}
+}
+
+func TestLogchefQLStreamFailureMessages(t *testing.T) {
+	for _, begun := range []bool{false, true} {
+		for _, tc := range []struct {
+			name    string
+			err     error
+			message string
+		}{
+			{"driver", errors.New("private driver error"), logchefQLQueryFailure},
+			{"unsupported", datasource.ErrOperationNotSupported, "LogchefQL querying is not supported for this source type yet"},
+		} {
+			t.Run(fmt.Sprintf("%s/begun=%t", tc.name, begun), func(t *testing.T) {
+				var buf bytes.Buffer
+				w := newQueryStreamWriter(bufio.NewWriter(&buf), queryStreamConfig{logsKey: "logs", includeGenerated: true, failure: logchefQLQueryFailure, operation: logchefQLQueryOperation}, "query-id")
+				if begun {
+					if err := w.Begin(nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := w.WriteError(tc.err); err != nil {
+					t.Fatal(err)
+				}
+				var body struct {
+					Message string `json:"message"`
+					Data    struct {
+						Error string `json:"error"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(buf.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				got := body.Message
+				if begun {
+					got = body.Data.Error
+				}
+				if got != tc.message {
+					t.Fatalf("message=%q, want %q", got, tc.message)
 				}
 			})
 		}

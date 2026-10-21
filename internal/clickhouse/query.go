@@ -370,20 +370,8 @@ const (
 	chExceptionSocketTimeout   int32 = 209 // SOCKET_TIMEOUT: the connection's socket timed out mid-query.
 )
 
-// isTimeoutError reports whether err represents a query timeout, so the
-// query metrics can distinguish timeouts from other kinds of failures. It
-// checks, in order:
-//   - the Go context deadline (queryTimeoutGrace backstop) expiring, surfaced
-//     as context.DeadlineExceeded anywhere in the error chain;
-//   - ClickHouse itself reporting the query was aborted for taking too long
-//     (*clickhouse.Exception with code 159 TIMEOUT_EXCEEDED or 209
-//     SOCKET_TIMEOUT);
-//   - the underlying net.Conn reporting a read/write timeout.
-//
-// A plain context.Canceled (e.g. the caller/request going away) is
-// deliberately not treated as a timeout — that's a cancellation, not a
-// deadline being hit.
-func isTimeoutError(err error) bool {
+// IsTimeoutError reports whether a context, ClickHouse, or network error indicates a timeout.
+func IsTimeoutError(err error) bool {
 	if err == nil {
 		return false
 	}

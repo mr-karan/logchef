@@ -12,6 +12,11 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+const (
+	logsQueryOperation      = "Log querying"
+	logchefQLQueryOperation = "LogchefQL querying"
+)
+
 type queryErrorResponse struct {
 	status    int
 	message   string
@@ -31,7 +36,7 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 		return queryErrorResponse{fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType}
 	case errors.Is(err, context.Canceled):
 		return queryErrorResponse{fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType}
-	case errors.Is(err, context.DeadlineExceeded):
+	case clickhouse.IsTimeoutError(err):
 		return queryErrorResponse{fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType}
 	case errors.Is(err, core.ErrSourceNotFound), errors.Is(err, models.ErrNotFound):
 		return queryErrorResponse{fiber.StatusNotFound, "Source not found", models.NotFoundErrorType}

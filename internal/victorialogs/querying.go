@@ -345,7 +345,7 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	window := defaultWindow(req.Window)
 	duration, err := parseHistogramWindow(window)
 	if err != nil || duration <= 0 {
-		return nil, &datasource.ValidationError{Field: "window", Message: "invalid histogram window: use a positive duration such as 1m"}
+		return nil, &datasource.ValidationError{Field: "window", Message: "invalid histogram window: use a positive duration such as 1h30m, or a single day or week value such as 1d"}
 	}
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
@@ -1064,7 +1064,7 @@ func (p *Provider) doFormRequest(ctx context.Context, conn models.VictoriaLogsCo
 		// VictoriaLogs answers 400 when it cannot parse the query or its
 		// arguments; that reason is the caller's to fix.
 		if resp.StatusCode == http.StatusBadRequest {
-			message := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"))
+			message := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"), form.Get("query"))
 			if message == "" {
 				message = "Invalid query or query parameters"
 			}
