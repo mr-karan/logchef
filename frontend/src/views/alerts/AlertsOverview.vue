@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { normalizeDateString } from "@/utils/format";
 import { useI18n } from "vue-i18n";
 import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
 
@@ -134,13 +135,12 @@ function confirmDelete(alert: Alert) {
 
 async function handleDelete() {
   if (!alertToDelete.value) return;
-  // Alerts are no longer team-scoped — the API ignores teamId/sourceId.
-  await alertsStore.deleteAlert(undefined, undefined, alertToDelete.value.id);
+  await alertsStore.deleteAlert(alertToDelete.value.id);
   alertToDelete.value = null;
 }
 
 async function toggleAlert(alert: Alert) {
-  await alertsStore.toggleAlertActivity(undefined, undefined, alert.id, !alert.is_active);
+  await alertsStore.toggleAlertActivity(alert.id, !alert.is_active);
 }
 
 function openHistory(alert: Alert) {
@@ -154,7 +154,7 @@ function duplicateAlert(alert: Alert) {
 async function retryLoad() {
   // sourceId is optional — without one the API returns every alert the
   // caller can see across all their team-mediated sources.
-  await alertsStore.fetchAlerts(undefined, currentSourceId.value ?? undefined);
+  await alertsStore.fetchAlerts(currentSourceId.value ?? undefined);
 }
 
 function refreshAlerts() {
@@ -203,7 +203,7 @@ function formatThreshold(alert: Alert) {
 }
 
 function formatDate(dateStr: string): string {
-  const normalizedDateStr = dateStr.includes('T') || dateStr.includes('Z') || dateStr.includes('+') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
+  const normalizedDateStr = normalizeDateString(dateStr);
   const date = new Date(normalizedDateStr);
   if (Number.isNaN(date.getTime())) return dateStr;
   return formatInZone(epochMs(date), preferencesStore.zone, { month: "short", day: "numeric", year: "numeric" }, locale.value);
@@ -211,7 +211,7 @@ function formatDate(dateStr: string): string {
 
 function formatRelativeTime(dateStr: string | null | undefined): string {
   if (!dateStr || dateStr === "") return t('ui.never');
-  const normalizedDateStr = dateStr.includes('T') || dateStr.includes('Z') || dateStr.includes('+') ? dateStr : dateStr.replace(' ', 'T') + 'Z';
+  const normalizedDateStr = normalizeDateString(dateStr);
   const date = new Date(normalizedDateStr);
   if (isNaN(date.getTime())) return t('ui.never');
   const now = new Date();
@@ -237,7 +237,7 @@ async function handleContextChange(teamId: number | null, sourceId: number | nul
     return;
   }
   if (teamId && sourceId) {
-    await alertsStore.fetchAlerts(teamId, sourceId);
+    await alertsStore.fetchAlerts(sourceId);
   } else {
     alertsStore.clearAlerts();
   }

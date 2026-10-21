@@ -40,7 +40,7 @@ import {
   buildHistogramTooltip,
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import { usePreferencesStore } from "@/stores/preferences";
 import type { ResolvedWindow } from "@/utils/timeWindow";
 
@@ -51,7 +51,7 @@ const preferencesStore = usePreferencesStore();
 // bar the explorer histogram uses, but takes its data via props (the explorer's
 // LogHistogram reads straight from the explore store, so it can't be shared here).
 interface Props {
-  buckets: HistogramData[];
+  buckets: HistogramDataPoint[];
   granularity?: string | null;
   groupBy?: string | null;
   /** Non-fatal backend notice, such as a grouped-series cap. */

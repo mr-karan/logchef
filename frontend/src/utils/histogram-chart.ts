@@ -1,6 +1,6 @@
 import { escapeHtml } from "@/lib/html";
 import type { ChartConfig } from "@/components/ui/chart";
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import { epochMs, formatInZone, isSameZonedDay, type ZoneId } from "@/utils/timeWindow";
 
 export interface HistogramChartSeries {
@@ -234,7 +234,7 @@ function inferBucketWidthMs(sortedTimestamps: number[], fallback = 60_000): numb
 }
 
 export function buildHistogramChartModel(
-  buckets: HistogramData[],
+  buckets: HistogramDataPoint[],
   granularity?: string | null,
   forceGrouped = false,
 ): HistogramChartModel {

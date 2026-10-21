@@ -18,8 +18,8 @@ describe('alert request ownership', () => {
 
   it('keeps the latest source list after an older source responds', async () => {
     const store = useAlertsStore()
-    const old = store.fetchAlerts(undefined, 1)
-    const current = store.fetchAlerts(undefined, 2)
+    const old = store.fetchAlerts(1)
+    const current = store.fetchAlerts(2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))
     network.requests[1].succeed([alert(2)])
     await current
@@ -31,7 +31,7 @@ describe('alert request ownership', () => {
 
   it('does not repopulate a cleared alert list', async () => {
     const store = useAlertsStore()
-    const pending = store.fetchAlerts(undefined, 1)
+    const pending = store.fetchAlerts(1)
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     store.clearAlerts()
     network.requests[0].succeed([alert(1)])
@@ -65,7 +65,7 @@ describe('alert request ownership', () => {
   it.each(['list', 'history'] as const)('does not publish an old %s failure after the newer request succeeds', async kind => {
     const store = kind === 'list' ? useAlertsStore() : useAlertHistoryStore()
     const load = kind === 'list'
-      ? (id: number) => useAlertsStore().fetchAlerts(undefined, id)
+      ? (id: number) => useAlertsStore().fetchAlerts(id)
       : (id: number) => useAlertHistoryStore().loadHistory(id)
     const old = load(1)
     const current = load(2)
@@ -84,7 +84,7 @@ describe('alert request ownership', () => {
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     network.requests[0].succeed([history(1)])
     await initial
-    const resolving = store.resolveAlert(undefined, undefined, 1, {})
+    const resolving = store.resolveAlert(1, {})
     const current = store.loadHistory(2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(3))
     network.requests[2].succeed([history(2)])

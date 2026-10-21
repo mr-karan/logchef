@@ -79,7 +79,7 @@ export interface TokenScopePreset {
   scopes: TokenScope[];
 }
 
-export const LOGS_VIEWER_SCOPES: TokenScope[] = [
+const LOGS_VIEWER_SCOPES: TokenScope[] = [
   "profile:read",
   "sources:read",
   "logs:read",
@@ -87,7 +87,7 @@ export const LOGS_VIEWER_SCOPES: TokenScope[] = [
   "collections:read",
 ];
 
-export const LOGS_ANALYST_SCOPES: TokenScope[] = [
+const LOGS_ANALYST_SCOPES: TokenScope[] = [
   ...LOGS_VIEWER_SCOPES,
   "saved_queries:write",
   "collections:write",
@@ -95,7 +95,7 @@ export const LOGS_ANALYST_SCOPES: TokenScope[] = [
   "query_shares:write",
 ];
 
-export const ALERTS_MANAGER_SCOPES: TokenScope[] = [
+const ALERTS_MANAGER_SCOPES: TokenScope[] = [
   "profile:read",
   "sources:read",
   "logs:read",
@@ -104,7 +104,7 @@ export const ALERTS_MANAGER_SCOPES: TokenScope[] = [
   "alerts:write",
 ];
 
-export const SOURCE_ADMIN_SCOPES: TokenScope[] = [
+const SOURCE_ADMIN_SCOPES: TokenScope[] = [
   "profile:read",
   "sources:read",
   "sources:write",

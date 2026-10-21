@@ -13,16 +13,7 @@ export interface APIErrorResponse {
   _toastShown?: boolean;
 }
 
-export type APIResponse<T = any> = APISuccessResponse<T> | APIErrorResponse;
-
-/**
- * Team information
- */
-export interface Team {
-  id: number;
-  name: string;
-  description?: string;
-}
+export type APIResponse<T = unknown> = APISuccessResponse<T> | APIErrorResponse;
 
 /**
  * Query content structure

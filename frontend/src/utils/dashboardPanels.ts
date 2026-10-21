@@ -1,4 +1,4 @@
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import type {
   DashboardLayoutItem,
   DashboardPanel,
@@ -115,7 +115,7 @@ export function normalizeDashboardLayout(
  * derives its single big number: the total match count over the window. Grouped
  * buckets (multiple rows per timestamp) all contribute to the total.
  */
-export function sumHistogramCounts(buckets: HistogramData[] | null | undefined): number {
+export function sumHistogramCounts(buckets: HistogramDataPoint[] | null | undefined): number {
   if (!buckets || buckets.length === 0) {
     return 0;
   }

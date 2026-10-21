@@ -1,3 +1,4 @@
+import { normalizeDateString } from "@/utils/format";
 import type { QueryHistoryRecord } from "@/api/explore";
 import { getExploreModeForQueryLanguage } from "@/lib/queryMetadata";
 import { epochMs, formatInZone, type ZoneId } from "@/utils/timeWindow";
@@ -38,10 +39,7 @@ export function buildHistoryRerunQuery(entry: QueryHistoryRecord): Record<string
  * as ISO strings.
  */
 export function formatHistoryTimeAgo(createdAt: string, zone: ZoneId, nowMs: number = Date.now(), locale = "en"): string {
-  const normalized =
-    createdAt.includes("T") || createdAt.includes("Z") || createdAt.includes("+")
-      ? createdAt
-      : createdAt.replace(" ", "T") + "Z";
+  const normalized = normalizeDateString(createdAt);
 
   const then = new Date(normalized).getTime();
   if (Number.isNaN(then)) {

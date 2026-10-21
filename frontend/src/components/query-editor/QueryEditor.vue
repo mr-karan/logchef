@@ -828,9 +828,9 @@ const submitQuery = async () => {
       mode: props.activeMode,
       isUserInput: true,
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error("Error validating or submitting query:", e);
-    validationError.value = e.message || "Error preparing query";
+    validationError.value = (e && typeof e === "object" && "message" in e && typeof e.message === "string" ? e.message : "") || "Error preparing query";
   }
 };
 

@@ -23,7 +23,7 @@ const isDebugLoggingEnabled =
  * @param message Primary message
  * @param args Additional arguments to log
  */
-export function debug(namespace: string, message: string, ...args: any[]): void {
+export function debug(namespace: string, message: string, ...args: unknown[]): void {
   if (isDebugLoggingEnabled) {
     console.log(`[${namespace}]`, message, ...args);
   }
@@ -35,7 +35,7 @@ export function debug(namespace: string, message: string, ...args: any[]): void 
  * @param message Primary error message
  * @param args Additional arguments to log
  */
-export function error(namespace: string, message: string, ...args: any[]): void {
+export function error(namespace: string, message: string, ...args: unknown[]): void {
   console.error(`[${namespace}]`, message, ...args);
 }
 
@@ -45,6 +45,6 @@ export function error(namespace: string, message: string, ...args: any[]): void 
  * @param message Primary warning message
  * @param args Additional arguments to log
  */
-export function warn(namespace: string, message: string, ...args: any[]): void {
+export function warn(namespace: string, message: string, ...args: unknown[]): void {
   console.warn(`[${namespace}]`, message, ...args);
 }

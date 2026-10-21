@@ -1,5 +1,5 @@
 import { apiClient } from "./apiUtils";
-import type { Team } from "./types";
+import type { Team } from "./teams";
 import type { QueryLanguage } from "@/lib/queryMetadata";
 import type { TemplateVariable } from "@/api/logchefql";
 
@@ -127,11 +127,11 @@ export interface ColumnInfo {
 
 export interface SourceWithTeamsResponse {
   source: Source;
-  teams: Team[];
+  teams: (Pick<Team, "id" | "name"> & Partial<Pick<Team, "description">>)[];
 }
 
 export interface SourceWithTeams extends Source {
-  teams: Team[];
+  teams: SourceWithTeamsResponse["teams"];
 }
 
 export interface CreateSourcePayload {

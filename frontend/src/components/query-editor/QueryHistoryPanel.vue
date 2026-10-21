@@ -135,8 +135,8 @@ async function loadHistory() {
     } else {
       error.value = response.message || "Failed to load query history.";
     }
-  } catch (err: any) {
-    error.value = err?.message || "Failed to load query history.";
+  } catch (err: unknown) {
+    error.value = (err && typeof err === "object" && "message" in err && typeof err.message === "string" ? err.message : "") || "Failed to load query history.";
   } finally {
     isLoading.value = false;
   }

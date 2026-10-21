@@ -84,8 +84,8 @@ async function loadActivity() {
     } else {
       error.value = response.message || t("admin.queryActivityLoadFailed");
     }
-  } catch (err: any) {
-    error.value = err?.message || t("admin.queryActivityLoadFailed");
+  } catch (err: unknown) {
+    error.value = (err && typeof err === "object" && "message" in err && typeof err.message === "string" ? err.message : "") || t("admin.queryActivityLoadFailed");
   } finally {
     isLoading.value = false;
   }
@@ -101,8 +101,8 @@ async function loadStats() {
     } else {
       statsError.value = response.message || t("admin.usageStatsLoadFailed");
     }
-  } catch (err: any) {
-    statsError.value = err?.message || t("admin.usageStatsLoadFailed");
+  } catch (err: unknown) {
+    statsError.value = (err && typeof err === "object" && "message" in err && typeof err.message === "string" ? err.message : "") || t("admin.usageStatsLoadFailed");
   } finally {
     statsLoading.value = false;
   }

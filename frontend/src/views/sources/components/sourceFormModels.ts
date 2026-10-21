@@ -61,7 +61,7 @@ export interface VictoriaLogsSourceFormState {
   streamFields: string;
 }
 
-export const clickHouseSchemaTemplate = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
+const clickHouseSchemaTemplate = `CREATE TABLE IF NOT EXISTS {{database_name}}.{{table_name}}
 (
     timestamp DateTime64(3) CODEC(DoubleDelta, LZ4),
     trace_id String CODEC(ZSTD(1)),
@@ -86,7 +86,7 @@ ORDER BY (namespace, service_name, timestamp)
 TTL toDateTime(timestamp) + INTERVAL {{ttl_day}} DAY
 SETTINGS index_granularity = 8192, ttl_only_drop_parts = 1;`;
 
-export function createDefaultClickHouseSettingsState(): ClickHouseSettingsFormState {
+function createDefaultClickHouseSettingsState(): ClickHouseSettingsFormState {
   return {
     maxExecutionTime: "",
     maxResultRows: "",
@@ -172,7 +172,7 @@ function parseNonNegativeSetting(value: string): number | undefined {
 // Build the optional per-source ClickHouse query settings, omitting any blank
 // sub-field. Returns undefined when nothing is set so `settings` is omitted
 // from the connection entirely (matching Go's `omitempty`).
-export function buildClickHouseSettings(
+function buildClickHouseSettings(
   state: ClickHouseSettingsFormState
 ): ClickHouseQuerySettings | undefined {
   const settings: ClickHouseQuerySettings = {};
