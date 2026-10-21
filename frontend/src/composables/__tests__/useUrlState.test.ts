@@ -39,6 +39,9 @@ const source: Source = {
   is_connected: true,
 };
 const otherSource: Source = { ...source, id: 4, name: "cart-logs", connection: { host: "", database: "logs", table_name: "cart" } };
+const sqlOnlySource: Source = { ...source, id: 5, name: "audit-logs", query_languages: ["clickhouse-sql"] };
+
+const sourceById = (id: number) => [source, otherSource, sqlOnlySource].find((s) => s.id === id) ?? source;
 
 // Two evidence chips, as Ask Chef pushes them, with whole-second instants.
 const evidenceA = exploreWindowQuery({ teamId: 1, sourceId: 3, start: Date.UTC(2026, 9, 19, 4), end: Date.UTC(2026, 9, 19, 5), query: 'level="error"' });
@@ -57,9 +60,9 @@ describe("Explorer history navigation", () => {
 
   async function mountExplorer() {
     vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team]) as never);
-    vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source, otherSource]) as never);
+    vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source, otherSource, sqlOnlySource]) as never);
     vi.spyOn(sourcesApi, "getTeamSource").mockImplementation(
-      (_teamId: number, sourceId: number) => ok(sourceId === otherSource.id ? otherSource : source) as never,
+      (_teamId: number, sourceId: number) => ok(sourceById(sourceId)) as never,
     );
     const query = vi.spyOn(logchefqlApi, "query").mockReturnValue(
       ok({ logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 }, generated_sql: "SELECT 1" }) as never,
@@ -143,7 +146,7 @@ describe("Explorer history navigation", () => {
     expectOpen(router, store, query, evidenceB);
   });
 
-  it("runs one query when Explorer opens", async () => {
+  it("runs one query when URL state initializes", async () => {
     const { store, query } = await mountExplorer();
     await settle(store);
     expect(query).toHaveBeenCalledTimes(1);
@@ -195,7 +198,7 @@ describe("Explorer history navigation", () => {
     const otherLoaded = new Promise<void>((resolve) => { releaseOther = resolve; });
     vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
       if (sourceId === otherSource.id) await otherLoaded;
-      return ok(sourceId === otherSource.id ? otherSource : source) as never;
+      return ok(sourceById(sourceId)) as never;
     });
 
     await expectOneRun(query, async () => {
@@ -207,6 +210,43 @@ describe("Explorer history navigation", () => {
       await vi.waitFor(() => expect(store.sourceId).toBe(source.id));
     }, store);
     expectOpen(router, store, query, evidenceA);
+  });
+
+  it("opens the last of two quick links when the first source is still loading", async () => {
+    const { router, store, query } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+
+    let releaseOther: () => void = () => {};
+    const otherLoaded = new Promise<void>((resolve) => { releaseOther = resolve; });
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
+      if (sourceId === otherSource.id) await otherLoaded;
+      return ok(sourceById(sourceId)) as never;
+    });
+
+    await expectOneRun(query, async () => {
+      await router.push({ path: "/logs/explore", query: evidenceOther });
+      await vi.waitFor(() => expect(router.currentRoute.value.query.limit).toBeDefined());
+      await router.push({ path: "/logs/explore", query: evidenceB });
+      releaseOther();
+      await vi.waitFor(() => expect(store.sourceId).toBe(source.id));
+    }, store);
+    expectOpen(router, store, query, evidenceB);
+  });
+
+  it("pushes the mode the picked source supports", async () => {
+    const { router, store, query, urlState } = await mountExplorer();
+    await settle(store);
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      return ok(sourceById(sourceId)) as never;
+    });
+
+    await urlState.selectSource(sqlOnlySource.id);
+    await vi.waitFor(() => expect(store.activeMode).toBe("native"));
+    await settle(store);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(router.currentRoute.value.query).toMatchObject({ source: String(sqlOnlySource.id), mode: "native" });
   });
 
   it("re-runs when the user chooses the same relative range again", async () => {
