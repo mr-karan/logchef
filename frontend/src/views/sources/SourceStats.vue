@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
 import { computed, onMounted, ref, watch } from 'vue'
-import { storeToRefs } from 'pinia'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from '@/composables/useToast'
 import ErrorAlert from '@/components/ui/ErrorAlert.vue'
@@ -20,9 +19,9 @@ const router = useRouter()
 const { t } = useI18n()
 const sourcesStore = useSourcesStore()
 const { toast } = useToast()
-const { error: storeError } = storeToRefs(sourcesStore)
 
 const selectedSourceId = ref<string>('')
+const failedInspectionSourceId = ref<string | null>(null)
 
 const selectedSource = computed(() => {
   if (!selectedSourceId.value) {
@@ -47,17 +46,24 @@ const activityError = computed(() => selectedSourceId.value ? sourcesStore.getSo
 const isLoadingActivity = computed(() => sourcesStore.isLoadingOperation(`getSourceActivity-${selectedSourceId.value}`))
 
 const inspectionError = computed(() => {
-  const hasInspection = !!inspection.value
-  if (!isLoadingInspection.value && storeError.value && selectedSourceId.value && !hasInspection) {
-    return t('sources.inspectionLoadFailed')
+  if (isLoadingInspection.value || inspection.value || failedInspectionSourceId.value !== selectedSourceId.value) {
+    return null
   }
-  return null
+  return t('sources.inspectionLoadFailed')
 })
+
+async function loadSourceInspection(sourceId: string, refresh: boolean) {
+  failedInspectionSourceId.value = null
+  const result = await sourcesStore.getSourceInspection(Number(sourceId), refresh)
+  if (!result.success) {
+    failedInspectionSourceId.value = sourceId
+  }
+}
 
 async function fetchSourceData(refresh = false) {
   if (!selectedSourceId.value) return
   await Promise.allSettled([
-    sourcesStore.getSourceInspection(Number(selectedSourceId.value)),
+    loadSourceInspection(selectedSourceId.value, false),
     sourcesStore.getSourceActivity(Number(selectedSourceId.value), refresh),
   ])
 }
@@ -76,7 +82,7 @@ async function fetchSourceInspection() {
     return
   }
 
-  await sourcesStore.getSourceInspection(Number(selectedSourceId.value), true)
+  await loadSourceInspection(selectedSourceId.value, true)
 }
 
 function syncRouteSelection(sourceId: string) {

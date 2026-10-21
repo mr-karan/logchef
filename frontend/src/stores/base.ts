@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import type { Ref } from "vue";
+import type { ComputedRef, Ref } from "vue";
 import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
@@ -12,8 +12,8 @@ export interface BaseState<T> {
 }
 
 export function useBaseStore<T>(initialState: T): BaseState<T> & {
-  isLoading: Ref<boolean>;
-  loadingStates: Ref<Record<string, boolean>>;
+  isLoading: ComputedRef<boolean>;
+  loadingStates: ComputedRef<Readonly<Record<string, boolean>>>;
   withLoading: <R>(key: string, fn: () => Promise<R>) => Promise<R>;
   isLoadingOperation: (key: string) => boolean;
   startLoading: (key: string) => void;

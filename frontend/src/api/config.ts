@@ -78,13 +78,13 @@ api.interceptors.response.use(
       // 1. We're not on the login page already
       // 2. This isn't the first session check when the app loads
       const showSessionToast = !isOnLoginPage && !isInitialSessionCheck;
+      const sessionError = {
+        status: "error",
+        message: "Your session has expired. Please log in again.",
+        error_type: "AuthenticationError",
+        _toastShown: showSessionToast,
+      };
       if (showSessionToast) {
-        // Create a custom error object with the specific message and error type
-        const sessionError = {
-          status: "error",
-          message: "Your session has expired. Please log in again.",
-          error_type: "AuthenticationError",
-        };
         showErrorToast(sessionError);
       }
 
@@ -94,7 +94,7 @@ api.interceptors.response.use(
         query: { redirect: currentPath },
         replace: true // Replace current history entry to avoid navigation issues after login
       });
-      return Promise.reject(showSessionToast ? { ...errorResponse, _toastShown: true } : errorResponse);
+      return Promise.reject(sessionError);
     }
 
     // Handle CSRF token errors (must be checked BEFORE generic 403 handler)
