@@ -391,6 +391,14 @@ type QueryShare struct {
 	CreatedByName  string          `json:"created_by_name,omitempty"`
 }
 
+// shareTokenLogPrefix is how much of a share token may appear in logs.
+const shareTokenLogPrefix = 8
+
+// RedactShareToken returns a log-safe prefix of a share token.
+func RedactShareToken(token string) string {
+	return token[:min(len(token), shareTokenLogPrefix)]
+}
+
 // QuerySharePayload is the client-owned, durable state for a shared ad hoc query.
 type QuerySharePayload struct {
 	Version   int                  `json:"version"`

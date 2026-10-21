@@ -110,7 +110,7 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	tokenPrefix := token[:min(len(token), 8)]
+	tokenPrefix := models.RedactShareToken(token)
 	share, err := s.sqlite.GetQueryShare(c.Context(), token)
 	if err != nil {
 		if models.IsNotFound(err) {

@@ -39,3 +39,19 @@ func opener(path string) storetest.Opener {
 		return s
 	}
 }
+
+// TestShareLogRedaction asserts share error logs never carry the full token.
+func TestShareLogRedaction(t *testing.T) {
+	storetest.RunShareLogRedaction(t, func(t *testing.T, logger *slog.Logger) store.Store {
+		t.Helper()
+		s, err := sqlite.New(context.Background(), sqlite.Options{
+			Logger: logger,
+			Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "share-logs.db")},
+		})
+		if err != nil {
+			t.Fatalf("sqlite.New: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	})
+}

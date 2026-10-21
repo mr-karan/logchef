@@ -39,7 +39,7 @@ func (db *DB) GetQueryShare(ctx context.Context, token string) (*models.QuerySha
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, models.ErrNotFound
 		}
-		db.log.Error("failed to get query share", "error", err, "token", token)
+		db.log.Error("failed to get query share", "error", err, "token_prefix", models.RedactShareToken(token))
 		return nil, fmt.Errorf("error getting query share: %w", err)
 	}
 
@@ -70,7 +70,7 @@ func (db *DB) TouchQueryShare(ctx context.Context, token string, accessedAt time
 		LastAccessedAt: sql.NullTime{Time: accessedAt, Valid: true},
 		Token:          token,
 	}); err != nil {
-		db.log.Error("failed to touch query share", "error", err, "token", token)
+		db.log.Error("failed to touch query share", "error", err, "token_prefix", models.RedactShareToken(token))
 		return fmt.Errorf("error touching query share: %w", err)
 	}
 	return nil
@@ -82,7 +82,7 @@ func (db *DB) DeleteQueryShare(ctx context.Context, token string) error {
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.ErrNotFound
 		}
-		db.log.Error("failed to delete query share", "error", err, "token", token)
+		db.log.Error("failed to delete query share", "error", err, "token_prefix", models.RedactShareToken(token))
 		return fmt.Errorf("error deleting query share: %w", err)
 	}
 	return nil
