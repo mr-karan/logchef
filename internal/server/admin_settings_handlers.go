@@ -325,8 +325,8 @@ func validateOptionalURL(value string) error {
 	if err != nil {
 		return fmt.Errorf("invalid URL format")
 	}
-	if parsedURL.Scheme != "" && parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
-		return fmt.Errorf("URL must use http or https scheme")
+	if (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Hostname() == "" {
+		return fmt.Errorf("URL must be an absolute http or https URL with a host")
 	}
 	return nil
 }
