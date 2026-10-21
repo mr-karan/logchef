@@ -32,7 +32,7 @@ function setup(source: Pick<Source, 'source_type'> | null = { source_type: 'clic
     defaultSize: 150,
   }))
   if (!state) throw new Error('Column state scope did not run')
-  return { input, ...state }
+  return { input, scope, ...state }
 }
 
 async function persist() {
@@ -90,6 +90,33 @@ describe('useColumnState', () => {
     expect(second.columnOrder.value).toEqual(first.columnOrder.value)
     expect(second.columnSizing.value).toEqual(first.columnSizing.value)
     expect(second.columnVisibility.value).toEqual(first.columnVisibility.value)
+  })
+
+  it('persists a resize when the scope stops before the debounce expires', async () => {
+    const first = setup()
+    first.columnSizing.value.status = 312
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(100)
+    first.scope.stop()
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? '{}').columnSizing?.status).toBe(312)
+    expect(setup().columnSizing.value.status).toBe(312)
+  })
+
+  it('flushes the old key before restoring state for a new key', async () => {
+    const state = setup()
+    state.columnSizing.value.status = 312
+    await nextTick()
+    state.input.sourceId = 'source-b'
+    await nextTick()
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? '{}').columnSizing?.status).toBe(312)
+    expect(state.columnSizing.value.status).toBe(150)
+    state.columnSizing.value.status = 450
+    await persist()
+    expect(JSON.parse(localStorage.getItem(storageKey) ?? '{}').columnSizing.status).toBe(312)
+    expect(JSON.parse(localStorage.getItem('logchef-tableState-7-source-b') ?? '{}').columnSizing.status).toBe(450)
+    state.input.sourceId = 'source-a'
+    await nextTick()
+    expect(state.columnSizing.value.status).toBe(312)
   })
 
   it('retains saved entries absent from the current result and appends new fields', () => {
@@ -210,7 +237,7 @@ describe('useColumnState', () => {
     expect(state.columnVisibility.value.message).toBe(true)
   })
 
-  it.each(['{broken', 'null', '{"columnOrder":"message"}', '{"columnSizing":{"status":"wide"}}'])('falls back to defaults for invalid saved state %s', (saved) => {
+  it.each(['{broken', 'null', '{"columnOrder":"message"}', '{"columnOrder":["status","timestamp","message"],"columnSizing":{"status":"wide"}}'])('falls back to defaults for invalid saved state %s', (saved) => {
     vi.spyOn(console, 'error').mockImplementation(() => {})
     localStorage.setItem(storageKey, saved)
     expect(setup().columnOrder.value).toEqual(['timestamp', 'message', 'status'])

@@ -19,22 +19,10 @@
     border: 1px solid #e5e7eb;
 }
 
-.dark[data-logchef-table] .http-method-utility {
-    background-color: #374151;
-    color: #d1d5db;
-    border: 1px solid #4b5563;
-}
-
 [data-logchef-table] .http-method-get {
     background-color: #ecfccb;
     color: #4d7c0f;
     border-color: #a3e635;
-}
-
-.dark[data-logchef-table] .http-method-get {
-    background-color: #365314;
-    color: #d9f99d;
-    border-color: #4d7c0f;
 }
 
 [data-logchef-table] .http-method-post {
@@ -43,22 +31,10 @@
     border-color: #67e8f9;
 }
 
-.dark[data-logchef-table] .http-method-post {
-    background-color: #164e63;
-    color: #a5f3fc;
-    border-color: #155e75;
-}
-
 [data-logchef-table] .http-method-put {
     background-color: #fef3c7;
     color: #92400e;
     border-color: #fcd34d;
-}
-
-.dark[data-logchef-table] .http-method-put {
-    background-color: #78350f;
-    color: #fde68a;
-    border-color: #92400e;
 }
 
 [data-logchef-table] .http-method-delete {
@@ -67,22 +43,10 @@
     border-color: #fca5a5;
 }
 
-.dark[data-logchef-table] .http-method-delete {
-    background-color: #7f1d1d;
-    color: #fecaca;
-    border-color: #991b1b;
-}
-
 [data-logchef-table] .http-method-head {
     background-color: #e0e7ff;
     color: #3730a3;
     border-color: #a5b4fc;
-}
-
-.dark[data-logchef-table] .http-method-head {
-    background-color: #312e81;
-    color: #c7d2fe;
-    border-color: #3730a3;
 }
 
 [data-logchef-table] .status-code {
@@ -116,22 +80,10 @@
     border: 1px solid #7dd3fc;
 }
 
-.dark[data-logchef-table] .status-info {
-    background-color: #0c4a6e;
-    color: #bae6fd;
-    border: 1px solid #0284c7;
-}
-
 [data-logchef-table] .status-success {
     background-color: #dcfce7;
     color: #166534;
     border: 1px solid #86efac;
-}
-
-.dark[data-logchef-table] .status-success {
-    background-color: #14532d;
-    color: #bbf7d0;
-    border: 1px solid #16a34a;
 }
 
 [data-logchef-table] .status-redirect {
@@ -140,32 +92,14 @@
     border: 1px solid #fde047;
 }
 
-.dark[data-logchef-table] .status-redirect {
-    background-color: #713f12;
-    color: #fef08a;
-    border: 1px solid #ca8a04;
-}
-
 [data-logchef-table] .status-error {
     background-color: #fee2e2;
     color: #b91c1c;
     border: 1px solid #fca5a5;
 }
 
-.dark[data-logchef-table] .status-error {
-    background-color: #7f1d1d;
-    color: #fecaca;
-    border: 1px solid #ef4444;
-}
-
 [data-logchef-table] .status-server {
     background-color: #ffe4e6;
     color: #be123c;
     border: 1px solid #fda4af;
-}
-
-.dark[data-logchef-table] .status-server {
-    background-color: #881337;
-    color: #fecdd3;
-    border: 1px solid #e11d48;
 }
