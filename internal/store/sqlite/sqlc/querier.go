@@ -344,6 +344,8 @@ type Querier interface {
 	UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// Record a login without rewriting the rest of the user row
+	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// Insert or update user preferences
 	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error

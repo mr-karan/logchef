@@ -4976,6 +4976,21 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 	return err
 }
 
+const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
+UPDATE users SET last_login_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+type UpdateUserLastLoginParams struct {
+	LastLoginAt sql.NullTime `json:"last_login_at"`
+	ID          int64        `json:"id"`
+}
+
+// Record a login without rewriting the rest of the user row
+func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
+	_, err := q.exec(ctx, q.updateUserLastLoginStmt, updateUserLastLogin, arg.LastLoginAt, arg.ID)
+	return err
+}
+
 const upsertSystemSetting = `-- name: UpsertSystemSetting :exec
 INSERT INTO system_settings (key, value, value_type, category, description, is_sensitive, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))

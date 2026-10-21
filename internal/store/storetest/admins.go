@@ -4,101 +4,87 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+const adminRemovalRounds = 25
+
 func testConcurrentAdminRemovals(t *testing.T, s store.Store) {
-	for _, operation := range []string{"demote", "deactivate", "delete"} {
-		t.Run(operation, func(t *testing.T) {
-			testConcurrentAdminRemoval(t, s, operation)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	removals := map[string]func(ctx context.Context, id models.UserID) error{
+		"demote": func(ctx context.Context, id models.UserID) error {
+			return core.UpdateUser(ctx, s, log, id, models.User{Role: models.UserRoleMember})
+		},
+		"deactivate": func(ctx context.Context, id models.UserID) error {
+			return core.UpdateUser(ctx, s, log, id, models.User{Status: models.UserStatusInactive})
+		},
+		"delete": func(ctx context.Context, id models.UserID) error {
+			return core.DeleteUser(ctx, s, log, id)
+		},
+	}
+	for name, remove := range removals {
+		t.Run(name, func(t *testing.T) {
+			for round := range adminRemovalRounds {
+				testConcurrentAdminRemoval(t, s, fmt.Sprintf("%s-%d", name, round), remove)
+			}
 		})
 	}
 }
 
-func testConcurrentAdminRemoval(t *testing.T, s store.Store, operation string) {
+func testConcurrentAdminRemoval(t *testing.T, s store.Store, label string, remove func(context.Context, models.UserID) error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+	before, err := s.CountAdminUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
 	admins := make([]*models.User, 2)
+	defer func() {
+		for _, admin := range admins {
+			if admin != nil {
+				_ = s.DeleteUser(ctx, admin.ID)
+			}
+		}
+	}()
 	for i := range admins {
-		admins[i] = mkUser(t, ctx, s, fmt.Sprintf("%s-%d@test.dev", operation, i))
-		admins[i].Role = models.UserRoleAdmin
-		if err := s.UpdateUser(ctx, admins[i]); err != nil {
+		user := &models.User{Email: fmt.Sprintf("%s-%d@test.dev", label, i), FullName: "Admin", Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+		if err := s.CreateUser(ctx, user); err != nil {
 			t.Fatal(err)
 		}
-		id := admins[i].ID
-		t.Cleanup(func() { _ = s.DeleteUser(context.Background(), id) })
+		admins[i] = user
 	}
 
-	lastAdmin := errors.New("last active admin")
-	remove := func(tx store.StoreOps, user *models.User) error {
-		switch operation {
-		case "demote":
-			user.Role = models.UserRoleMember
-		case "deactivate":
-			user.Status = models.UserStatusInactive
-		case "delete":
-			return tx.DeleteUser(ctx, user.ID)
+	start := make(chan struct{})
+	results := make(chan error, len(admins))
+	for _, admin := range admins {
+		go func() {
+			<-start
+			results <- remove(ctx, admin.ID)
+		}()
+	}
+	close(start)
+	removed := 0
+	for range admins {
+		switch err := <-results; {
+		case err == nil:
+			removed++
+		case !errors.Is(err, core.ErrCannotDeleteLastAdmin):
+			t.Fatalf("%s: unexpected error: %v", label, err)
 		}
-		return tx.UpdateUser(ctx, user)
 	}
-	counted := make(chan struct{})
-	release := make(chan struct{})
-	first := make(chan error, 1)
-	go func() {
-		first <- s.WithTx(ctx, func(tx store.StoreOps) error {
-			count, err := tx.CountAdminUsers(ctx)
-			close(counted)
-			if err != nil {
-				return err
-			}
-			select {
-			case <-release:
-			case <-ctx.Done():
-				return ctx.Err()
-			}
-			if count <= 1 {
-				return lastAdmin
-			}
-			return remove(tx, admins[0])
-		})
-	}()
-	select {
-	case <-counted:
-	case err := <-first:
-		t.Fatalf("first transaction did not reach the admin count: %v", err)
+
+	after, err := s.CountAdminUsers(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-	second := make(chan error, 1)
-	go func() {
-		second <- s.WithTx(ctx, func(tx store.StoreOps) error {
-			count, err := tx.CountAdminUsers(ctx)
-			if err != nil {
-				return err
-			}
-			if count <= 1 {
-				return lastAdmin
-			}
-			return remove(tx, admins[1])
-		})
-	}()
-	var secondErr error
-	select {
-	case secondErr = <-second:
-		close(release)
-	case <-time.After(200 * time.Millisecond):
-		close(release)
-		secondErr = <-second
-	}
-	if err := <-first; err != nil {
-		t.Errorf("first removal: %v", err)
-	}
-	if !errors.Is(secondErr, lastAdmin) {
-		t.Errorf("second removal = %v, want last-admin rejection", secondErr)
-	}
-	if count, err := s.CountAdminUsers(ctx); err != nil || count != 1 {
-		t.Errorf("active admins = %d, error = %v, want 1", count, err)
+	if want := max(before, 1); after != want || after != before+len(admins)-removed {
+		t.Fatalf("%s: active admins before = %d, removed = %d, after = %d, want %d", label, before, removed, after, want)
 	}
 }

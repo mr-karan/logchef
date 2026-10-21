@@ -58,12 +58,20 @@ type UserPreferenceStore interface {
 type UserStore interface {
 	CreateUser(ctx context.Context, user *models.User) error
 	GetUser(ctx context.Context, id models.UserID) (*models.User, error)
+	// GetUserForUpdate reads a user and, inside WithTx, blocks other full-row
+	// writers of that user until the transaction ends.
+	GetUserForUpdate(ctx context.Context, id models.UserID) (*models.User, error)
 	GetUserByEmail(ctx context.Context, email string) (*models.User, error)
 	UpdateUser(ctx context.Context, user *models.User) error
+	// UpdateUserLastLogin sets only last_login_at, so a login never rewrites
+	// a concurrent role or status change.
+	UpdateUserLastLogin(ctx context.Context, id models.UserID, at time.Time) error
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
-	// CountAdminUsers serializes active-admin changes when called inside WithTx.
 	CountAdminUsers(ctx context.Context) (int, error)
+	// LockAdminInvariant serializes, until the enclosing WithTx ends, every
+	// change that could remove the last active admin.
+	LockAdminInvariant(ctx context.Context) error
 	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
 	// local email+password authentication.
 	SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error

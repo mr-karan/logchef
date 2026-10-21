@@ -37,7 +37,7 @@ type Querier interface {
 	ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (pgtype.Int8, error)
 	// Rotation claim. Exactly one concurrent caller gets the row.
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
-	// Lock in ID order so concurrent removals preserve an active admin.
+	// Count active admin users
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.
@@ -169,6 +169,8 @@ type Querier interface {
 	GetUser(ctx context.Context, id int64) (User, error)
 	// Get a user by email
 	GetUserByEmail(ctx context.Context, email string) (User, error)
+	// Get a user by ID and lock the row until the transaction ends
+	GetUserForUpdate(ctx context.Context, id int64) (User, error)
 	// User Preferences
 	// Get user preferences by user ID
 	GetUserPreferences(ctx context.Context, userID int64) (UserPreference, error)
@@ -264,6 +266,8 @@ type Querier interface {
 	ListUserTeams(ctx context.Context, userID int64) ([]Team, error)
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
+	// Hold a transaction-scoped advisory lock
+	LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
@@ -341,6 +345,8 @@ type Querier interface {
 	UpdateTeamMemberRole(ctx context.Context, arg UpdateTeamMemberRoleParams) error
 	// Update a user
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
+	// Record a login without rewriting the rest of the user row
+	UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error
 	UpsertSystemSetting(ctx context.Context, arg UpsertSystemSettingParams) error
 	// Insert or update user preferences
 	UpsertUserPreferences(ctx context.Context, arg UpsertUserPreferencesParams) error

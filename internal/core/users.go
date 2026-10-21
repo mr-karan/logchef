@@ -262,13 +262,17 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 		return err
 	}
 
+	// Decide from the request alone so the advisory lock is always taken
+	// before the row lock and never after a stale read.
+	mayRemoveAdmin := updateData.Role == models.UserRoleMember || updateData.Status == models.UserStatusInactive
 	var deactivated bool
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		count, err := tx.CountAdminUsers(ctx)
-		if err != nil {
-			return fmt.Errorf("error counting admin users: %w", err)
+		if mayRemoveAdmin {
+			if err := tx.LockAdminInvariant(ctx); err != nil {
+				return err
+			}
 		}
-		existing, err := tx.GetUser(ctx, userID)
+		existing, err := tx.GetUserForUpdate(ctx, userID)
 		if err != nil {
 			if models.IsNotFound(err) {
 				return ErrUserNotFound
@@ -276,7 +280,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 			return fmt.Errorf("error getting user for update: %w", err)
 		}
 
-		wasActiveAdmin := existing.Role == models.UserRoleAdmin && existing.Status == models.UserStatusActive
+		wasActiveAdmin := isActiveAdmin(existing)
 		updated, deactivating, err := applyUserUpdates(existing, updateData)
 		if err != nil {
 			return err
@@ -284,8 +288,10 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 		if !updated {
 			return nil
 		}
-		if wasActiveAdmin && (existing.Role != models.UserRoleAdmin || existing.Status != models.UserStatusActive) && count <= 1 {
-			return ErrCannotDeleteLastAdmin
+		if wasActiveAdmin && !isActiveAdmin(existing) {
+			if err := ensureAnotherActiveAdmin(ctx, tx); err != nil {
+				return err
+			}
 		}
 
 		existing.UpdatedAt = time.Now().UTC()
@@ -340,15 +346,23 @@ func applyUserUpdates(existing *models.User, updateData models.User) (updated, d
 		deactivating = toInactive
 	}
 
-	if updateData.LastLoginAt != nil {
-		loginTimeUTC := updateData.LastLoginAt.UTC()
-		if existing.LastLoginAt == nil || !loginTimeUTC.Equal(existing.LastLoginAt.UTC()) {
-			existing.LastLoginAt = &loginTimeUTC
-			updated = true
-		}
-	}
-
 	return updated, deactivating, nil
+}
+
+func isActiveAdmin(user *models.User) bool {
+	return user.Role == models.UserRoleAdmin && user.Status == models.UserStatusActive
+}
+
+// ensureAnotherActiveAdmin must run under LockAdminInvariant.
+func ensureAnotherActiveAdmin(ctx context.Context, tx store.StoreOps) error {
+	count, err := tx.CountAdminUsers(ctx)
+	if err != nil {
+		return fmt.Errorf("error counting admin users: %w", err)
+	}
+	if count <= 1 {
+		return ErrCannotDeleteLastAdmin
+	}
+	return nil
 }
 
 func applyRoleUpdate(existing *models.User, updateData models.User) (bool, error) {
@@ -382,9 +396,8 @@ func applyStatusUpdate(existing *models.User, updateData models.User) (changed, 
 // transaction so a deleted user can never be left with a live session.
 func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		count, err := tx.CountAdminUsers(ctx)
-		if err != nil {
-			return fmt.Errorf("error counting admin users: %w", err)
+		if err := tx.LockAdminInvariant(ctx); err != nil {
+			return err
 		}
 		existing, err := tx.GetUser(ctx, id)
 		if err != nil {
@@ -393,8 +406,10 @@ func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models
 			}
 			return fmt.Errorf("error checking existing user: %w", err)
 		}
-		if existing.Role == models.UserRoleAdmin && existing.Status == models.UserStatusActive && count <= 1 {
-			return ErrCannotDeleteLastAdmin
+		if isActiveAdmin(existing) {
+			if err := ensureAnotherActiveAdmin(ctx, tx); err != nil {
+				return err
+			}
 		}
 		if err := tx.DeleteUser(ctx, id); err != nil {
 			return fmt.Errorf("error deleting user: %w", err)

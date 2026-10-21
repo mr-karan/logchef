@@ -504,6 +504,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.updateUserStmt, err = db.PrepareContext(ctx, updateUser); err != nil {
 		return nil, fmt.Errorf("error preparing query UpdateUser: %w", err)
 	}
+	if q.updateUserLastLoginStmt, err = db.PrepareContext(ctx, updateUserLastLogin); err != nil {
+		return nil, fmt.Errorf("error preparing query UpdateUserLastLogin: %w", err)
+	}
 	if q.upsertSystemSettingStmt, err = db.PrepareContext(ctx, upsertSystemSetting); err != nil {
 		return nil, fmt.Errorf("error preparing query UpsertSystemSetting: %w", err)
 	}
@@ -1318,6 +1321,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing updateUserStmt: %w", cerr)
 		}
 	}
+	if q.updateUserLastLoginStmt != nil {
+		if cerr := q.updateUserLastLoginStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing updateUserLastLoginStmt: %w", cerr)
+		}
+	}
 	if q.upsertSystemSettingStmt != nil {
 		if cerr := q.upsertSystemSettingStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing upsertSystemSettingStmt: %w", cerr)
@@ -1532,6 +1540,7 @@ type Queries struct {
 	updateTeamStmt                             *sql.Stmt
 	updateTeamMemberRoleStmt                   *sql.Stmt
 	updateUserStmt                             *sql.Stmt
+	updateUserLastLoginStmt                    *sql.Stmt
 	upsertSystemSettingStmt                    *sql.Stmt
 	upsertUserPreferencesStmt                  *sql.Stmt
 	userHasSourceAccessStmt                    *sql.Stmt
@@ -1701,6 +1710,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		updateTeamStmt:                             q.updateTeamStmt,
 		updateTeamMemberRoleStmt:                   q.updateTeamMemberRoleStmt,
 		updateUserStmt:                             q.updateUserStmt,
+		updateUserLastLoginStmt:                    q.updateUserLastLoginStmt,
 		upsertSystemSettingStmt:                    q.upsertSystemSettingStmt,
 		upsertUserPreferencesStmt:                  q.upsertUserPreferencesStmt,
 		userHasSourceAccessStmt:                    q.userHasSourceAccessStmt,
