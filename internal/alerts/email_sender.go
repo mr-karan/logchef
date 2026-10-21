@@ -75,38 +75,44 @@ func NewEmailSender(opts EmailSenderOptions) *EmailSender {
 	}
 }
 
-func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) error {
-	if len(notification.RecipientUserIDs) == 0 && len(notification.RecipientEmails) == 0 && notification.RecipientResolutionErr == "" {
-		return nil
-	}
-	if notification.RecipientResolutionErr != "" {
-		return fmt.Errorf("recipient resolution failed: %s", notification.RecipientResolutionErr)
-	}
-	if len(notification.RecipientEmails) == 0 {
-		if len(notification.RecipientUserIDs) > 0 {
-			return fmt.Errorf("no valid email recipients resolved")
+func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
+	var results DeliveryResults
+	resolutionTarget := deliveryTargetID("email", "recipient-resolution")
+	if notification.selects(resolutionTarget) {
+		var err error
+		switch {
+		case notification.RecipientResolutionErr != "":
+			err = fmt.Errorf("recipient resolution failed: %s", notification.RecipientResolutionErr)
+		case len(notification.RecipientUserIDs) > 0 && len(notification.RecipientEmails) == 0 && len(notification.MissingRecipientUserIDs) == 0:
+			err = fmt.Errorf("no valid email recipients resolved")
 		}
-		return nil
-	}
-	if s.host == "" || s.port == 0 || s.from == "" {
-		return fmt.Errorf("smtp is not configured")
-	}
-
-	recipients := uniqueEmails(notification.RecipientEmails)
-	var errs []string
-	for _, recipient := range recipients {
-		message := s.buildMessage(notification, recipient)
-		if err := s.sendEmail(ctx, recipient, message); err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", recipient, err))
+		if err != nil {
+			results = append(results, DeliveryResult{Target: resolutionTarget, Err: err})
 		}
 	}
-	if len(notification.MissingRecipientUserIDs) > 0 {
-		errs = append(errs, fmt.Sprintf("missing recipient user IDs: %v", notification.MissingRecipientUserIDs))
+	for _, id := range notification.MissingRecipientUserIDs {
+		target := emailUserTarget(id)
+		if notification.selects(target) {
+			results = append(results, DeliveryResult{Target: target, Err: fmt.Errorf("missing recipient user ID: %d", id)})
+		}
 	}
-	if len(errs) > 0 {
-		return fmt.Errorf("email delivery failed: %s", strings.Join(errs, "; "))
+	for _, recipient := range uniqueEmails(notification.RecipientEmails) {
+		target := notification.emailTarget(recipient)
+		if !notification.selects(target) {
+			continue
+		}
+		var err error
+		if s.host == "" || s.port == 0 || s.from == "" {
+			err = fmt.Errorf("smtp is not configured")
+		} else {
+			err = s.sendEmail(ctx, recipient, s.buildMessage(notification, recipient))
+		}
+		if err != nil {
+			err = fmt.Errorf("email delivery failed: %s: %w", recipient, err)
+		}
+		results = append(results, DeliveryResult{Target: target, Err: err})
 	}
-	return nil
+	return results
 }
 
 func (s *EmailSender) buildMessage(notification AlertNotification, recipient string) []byte {

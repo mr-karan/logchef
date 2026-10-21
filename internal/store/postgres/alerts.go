@@ -6,6 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -189,14 +190,18 @@ func (s *Store) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID
 
 // ResolveAlertHistory marks a history entry resolved with an optional message.
 func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
-	if _, err := s.q.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{
-		Message: text(message),
-		ID:      historyID,
-	}); err != nil {
+	if s.pool != nil {
+		return s.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
+	}
+	alertID, err := s.q.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{Message: text(message), ID: historyID})
+	if err != nil {
 		if notFound(err) {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if err := s.q.MarkAlertResolved(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to mark alert resolved: %w", err)
 	}
 	return nil
 }

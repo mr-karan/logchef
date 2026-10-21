@@ -149,8 +149,8 @@ func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
 
 type alertSenderFunc func(context.Context, AlertNotification) error
 
-func (f alertSenderFunc) Send(ctx context.Context, notification AlertNotification) error {
-	return f(ctx, notification)
+func (f alertSenderFunc) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
+	return DeliveryResults{{Target: deliveryTargetID("test", "target"), Err: f(ctx, notification)}}
 }
 
 func TestManagerDeliveryRetries(t *testing.T) {

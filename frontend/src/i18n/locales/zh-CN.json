@@ -1452,5 +1452,7 @@
   "askChef.send": "发送",
   "askChef.stop": "停止",
   "askChef.failed": "Ask Chef 无法回答。请重试。",
-  "askChef.disabled": "此服务器已关闭 Ask Chef。"
+  "askChef.disabled": "此服务器已关闭 Ask Chef。",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

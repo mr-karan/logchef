@@ -5,6 +5,23 @@ import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
 import type { APIErrorResponse } from "@/api/types";
 
+const legacyDeliveryAttemptLimit = 3;
+
+export interface AlertDeliveryFailure {
+  message: string;
+  retriesExhausted: boolean;
+}
+
+export function alertDeliveryFailure(entry: AlertHistoryEntry): AlertDeliveryFailure | null {
+  const payload = entry.payload;
+  const message = typeof payload?.delivery_error === "string" ? payload.delivery_error : "";
+  if (payload?.delivery_failed !== true && !message) return null;
+  const retriesExhausted = typeof payload?.delivery_retries_exhausted === "boolean"
+    ? payload.delivery_retries_exhausted
+    : typeof payload?.delivery_attempts === "number" && payload.delivery_attempts >= legacyDeliveryAttemptLimit;
+  return { message, retriesExhausted };
+}
+
 interface AlertHistoryState {
   entries: AlertHistoryEntry[];
   currentAlertId: number | null;
@@ -18,7 +35,10 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     limit: 100,
   });
 
-  const entries = computed(() => state.data.value.entries);
+  const entries = computed(() => state.data.value.entries.map((entry) => ({
+    ...entry,
+    deliveryFailure: alertDeliveryFailure(entry),
+  })));
   const currentAlertId = computed(() => state.data.value.currentAlertId);
   const hasHistory = computed(() => entries.value.length > 0);
 

@@ -735,5 +735,7 @@
   "askChef.send": "傳送",
   "askChef.stop": "停止",
   "askChef.failed": "Ask Chef 無法回答。請重試。",
-  "askChef.disabled": "此伺服器已關閉 Ask Chef。"
+  "askChef.disabled": "此伺服器已關閉 Ask Chef。",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

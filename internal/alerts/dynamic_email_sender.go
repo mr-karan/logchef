@@ -28,7 +28,7 @@ func NewDynamicEmailSender(settings SettingsReader, logger *slog.Logger) *Dynami
 	}
 }
 
-func (d *DynamicEmailSender) Send(ctx context.Context, notification AlertNotification) error {
+func (d *DynamicEmailSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
 	opts := EmailSenderOptions{
 		Host:          d.settings.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
 		Port:          d.settings.GetIntSetting(ctx, "alerts.smtp_port", 587),

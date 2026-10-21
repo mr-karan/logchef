@@ -4021,6 +4021,15 @@ func (q *Queries) MarkAlertEvaluated(ctx context.Context, id int64) error {
 	return err
 }
 
+const markAlertResolved = `-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?
+`
+
+func (q *Queries) MarkAlertResolved(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.markAlertResolvedStmt, markAlertResolved, id)
+	return err
+}
+
 const markAlertTriggered = `-- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',
@@ -4271,7 +4280,7 @@ SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
 WHERE id = ?
-RETURNING id
+RETURNING alert_id
 `
 
 type ResolveAlertHistoryParams struct {
@@ -4281,9 +4290,9 @@ type ResolveAlertHistoryParams struct {
 
 func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error) {
 	row := q.queryRow(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var alert_id int64
+	err := row.Scan(&alert_id)
+	return alert_id, err
 }
 
 const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows

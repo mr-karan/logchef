@@ -107,7 +107,7 @@ func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
 	}
 }
 
-func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification) error {
+func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
 	if len(notification.WebhookURLs) == 0 {
 		return nil
 	}
@@ -133,60 +133,65 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 		GeneratorURL:      notification.GeneratorURL,
 		Message:           notification.Message,
 	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal webhook payload: %w", err)
-	}
-
-	var errs []string
+	body, marshalErr := json.Marshal(payload)
+	var results DeliveryResults
 	for index, destination := range notification.WebhookURLs {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		target := deliveryTargetID("webhook", destination)
+		if !notification.selects(target) {
+			continue
 		}
-		request, err := http.NewRequestWithContext(ctx, http.MethodPost, destination, bytes.NewReader(body))
+		err := marshalErr
+		if err == nil {
+			err = s.sendWebhook(ctx, notification.AlertName, index, destination, body)
+		}
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("webhook %d: invalid URL", index+1))
-			continue
+			err = fmt.Errorf("webhook delivery failed: %w", err)
 		}
-		if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
-			errs = append(errs, fmt.Sprintf("webhook %d: only http and https URLs are allowed", index+1))
-			continue
-		}
-		request.Header.Set("Content-Type", "application/json")
-		response, err := s.client.Do(request)
-		if err != nil {
-			if errors.Is(err, context.Canceled) {
-				return context.Canceled
-			}
-			if denied, ok := errors.AsType[*webhookDestinationDeniedError](err); ok {
-				s.logger.Warn("webhook destination blocked by policy", "rule", notification.AlertName, "resolved_ip", denied.ip.String())
-			}
-			errs = append(errs, fmt.Sprintf("webhook %d: %v", index+1, sanitizeWebhookTransportError(err)))
-			continue
-		}
-		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, maxWebhookResponseBytes+1))
-		_ = response.Body.Close()
-		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
-			if readErr != nil {
-				errs = append(errs, fmt.Sprintf("webhook %d: status %d (body read error: %v)", index+1, response.StatusCode, sanitizeWebhookTransportError(readErr)))
-				continue
-			}
-			excerpt := strings.TrimSpace(strings.ToValidUTF8(string(responseBody), "?"))
-			if len(responseBody) > maxWebhookResponseBytes {
-				const marker = " [truncated]"
-				limit := min(len(excerpt), maxWebhookResponseBytes-len(marker))
-				for !utf8.ValidString(excerpt[:limit]) {
-					limit--
-				}
-				excerpt = excerpt[:limit] + marker
-			}
-			s.logger.Warn("webhook delivery failed", "webhook", index+1, "status", response.StatusCode, "response_excerpt", excerpt)
-			detail := fmt.Sprintf("webhook %d: status %d", index+1, response.StatusCode)
-			errs = append(errs, detail)
-		}
+		results = append(results, DeliveryResult{Target: target, Err: err})
 	}
-	if len(errs) > 0 {
-		return boundedDeliveryError(fmt.Errorf("webhook delivery failed: %s", strings.Join(errs, "; ")))
+	return results
+}
+
+func (s *WebhookSender) sendWebhook(ctx context.Context, alertName string, index int, destination string, body []byte) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, destination, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("webhook %d: invalid URL", index+1)
+	}
+	if request.URL.Scheme != "http" && request.URL.Scheme != "https" {
+		return fmt.Errorf("webhook %d: only http and https URLs are allowed", index+1)
+	}
+	request.Header.Set("Content-Type", "application/json")
+	response, err := s.client.Do(request)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return context.Canceled
+		}
+		if denied, ok := errors.AsType[*webhookDestinationDeniedError](err); ok {
+			s.logger.Warn("webhook destination blocked by policy", "rule", alertName, "resolved_ip", denied.ip.String())
+		}
+		return fmt.Errorf("webhook %d: %w", index+1, sanitizeWebhookTransportError(err))
+	}
+	responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, maxWebhookResponseBytes+1))
+	_ = response.Body.Close()
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		if readErr != nil {
+			return fmt.Errorf("webhook %d: status %d (body read error: %w)", index+1, response.StatusCode, sanitizeWebhookTransportError(readErr))
+		}
+		excerpt := strings.TrimSpace(strings.ToValidUTF8(string(responseBody), "?"))
+		if len(responseBody) > maxWebhookResponseBytes {
+			const marker = " [truncated]"
+			limit := min(len(excerpt), maxWebhookResponseBytes-len(marker))
+			for !utf8.ValidString(excerpt[:limit]) {
+				limit--
+			}
+			excerpt = excerpt[:limit] + marker
+		}
+		s.logger.Warn("webhook delivery failed", "webhook", index+1, "status", response.StatusCode, "response_excerpt", excerpt)
+		detail := fmt.Sprintf("webhook %d: status %d", index+1, response.StatusCode)
+		return errors.New(detail)
 	}
 	return nil
 }

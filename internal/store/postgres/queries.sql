@@ -672,7 +672,7 @@ SET status = 'resolved',
     resolved_at = now(),
     message = $1
 WHERE id = $2
-RETURNING id;
+RETURNING alert_id;
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
@@ -1312,3 +1312,6 @@ WHERE NOT EXISTS (
     WHERE live.grant_id = oauth_refresh_tokens.grant_id
       AND live.expires_at > sqlc.arg(now)::timestamptz
 );
+
+-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = $1;

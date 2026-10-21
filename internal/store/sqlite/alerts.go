@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/alertjson"
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -204,14 +205,18 @@ func (db *DB) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, 
 
 // ResolveAlertHistory marks a history entry as resolved with an optional message.
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
-	if _, err := db.writeQueries.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{
-		Message: nullString(message),
-		ID:      historyID,
-	}); err != nil {
+	if !db.inTx {
+		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
+	}
+	alertID, err := db.writeQueries.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{Message: nullString(message), ID: historyID})
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if err := db.writeQueries.MarkAlertResolved(ctx, alertID); err != nil {
+		return fmt.Errorf("failed to mark alert resolved: %w", err)
 	}
 	return nil
 }

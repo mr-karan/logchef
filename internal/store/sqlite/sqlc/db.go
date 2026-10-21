@@ -390,6 +390,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
 	}
+	if q.markAlertResolvedStmt, err = db.PrepareContext(ctx, markAlertResolved); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkAlertResolved: %w", err)
+	}
 	if q.markAlertTriggeredStmt, err = db.PrepareContext(ctx, markAlertTriggered); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertTriggered: %w", err)
 	}
@@ -1131,6 +1134,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing markAlertEvaluatedStmt: %w", cerr)
 		}
 	}
+	if q.markAlertResolvedStmt != nil {
+		if cerr := q.markAlertResolvedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markAlertResolvedStmt: %w", cerr)
+		}
+	}
 	if q.markAlertTriggeredStmt != nil {
 		if cerr := q.markAlertTriggeredStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing markAlertTriggeredStmt: %w", cerr)
@@ -1502,6 +1510,7 @@ type Queries struct {
 	listUserTeamsStmt                          *sql.Stmt
 	listUsersStmt                              *sql.Stmt
 	markAlertEvaluatedStmt                     *sql.Stmt
+	markAlertResolvedStmt                      *sql.Stmt
 	markAlertTriggeredStmt                     *sql.Stmt
 	pruneAlertHistoryStmt                      *sql.Stmt
 	pruneExpiredQuerySharesStmt                *sql.Stmt
@@ -1672,6 +1681,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUserTeamsStmt:                          q.listUserTeamsStmt,
 		listUsersStmt:                              q.listUsersStmt,
 		markAlertEvaluatedStmt:                     q.markAlertEvaluatedStmt,
+		markAlertResolvedStmt:                      q.markAlertResolvedStmt,
 		markAlertTriggeredStmt:                     q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:                      q.pruneAlertHistoryStmt,
 		pruneExpiredQuerySharesStmt:                q.pruneExpiredQuerySharesStmt,

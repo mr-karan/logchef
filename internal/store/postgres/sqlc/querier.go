@@ -265,6 +265,7 @@ type Querier interface {
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
+	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares

@@ -252,18 +252,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	}
 	alreadyActive := err == nil && prevHistory != nil
 
-	deliveryAttempts := 0
-	shouldRetryDelivery := false
-	if alreadyActive {
-		// Legacy history entries have already had at least one delivery attempt.
-		deliveryAttempts = 1
-		if attempts, ok := prevHistory.Payload["delivery_attempts"].(float64); ok {
-			deliveryAttempts = int(attempts)
-		}
-		if deliveryFailed, ok := prevHistory.Payload["delivery_failed"].(bool); ok && deliveryFailed {
-			shouldRetryDelivery = deliveryAttempts < maxDeliveryAttempts
-		}
-	}
+	deliveryAttempts, shouldRetryDelivery := deliveryRetryState(prevHistory)
 
 	if markErr := m.db.MarkAlertTriggered(ctx, alert.ID); markErr != nil {
 		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
@@ -287,14 +276,28 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	valueCopy := value
 	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
 
-	deliveryAttempts++
-	historyPayload := map[string]any{
-		"labels":            copyStringMap(labels),
-		"annotations":       copyStringMap(annotations),
-		"status":            string(models.AlertStatusTriggered),
-		"delivery_failed":   true,
-		"delivery_attempts": deliveryAttempts,
+	notificationHistory := prevHistory
+	if notificationHistory == nil {
+		notificationHistory = &models.AlertHistoryEntry{TriggeredAt: time.Now().UTC(), Message: message}
 	}
+	notification := m.buildNotification(ctx, alert, notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
+	if shouldRetryDelivery {
+		notification.deliveryTargets = pendingDeliveryTargets(prevHistory.Payload)
+	}
+	deliveryAttempts++
+	historyPayload := make(map[string]any)
+	if prevHistory != nil {
+		maps.Copy(historyPayload, prevHistory.Payload)
+	}
+	maps.Copy(historyPayload, map[string]any{
+		"labels":                     copyStringMap(labels),
+		"annotations":                copyStringMap(annotations),
+		"status":                     string(models.AlertStatusTriggered),
+		"delivery_failed":            true,
+		"delivery_attempts":          deliveryAttempts,
+		"delivery_pending":           notification.targetIDs(),
+		"delivery_retries_exhausted": deliveryAttempts >= maxDeliveryAttempts,
+	})
 
 	history := prevHistory
 	if shouldRetryDelivery {
@@ -314,7 +317,12 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		}
 	}
 
-	deliveryErr := m.sendNotification(ctx, alert, history, labels, annotations, models.AlertStatusTriggered, value)
+	notification.TriggeredAt = history.TriggeredAt
+	results := m.sender.Send(ctx, notification)
+	deliveryErr := results.Err()
+	historyPayload["delivery_pending"] = results.failedTargets()
+	historyPayload["delivery_retries_exhausted"] = deliveryErr != nil && deliveryAttempts >= maxDeliveryAttempts
+	delete(historyPayload, "delivery_error")
 	historyPayload["delivery_failed"] = deliveryErr != nil
 	if deliveryErr != nil {
 		historyPayload["delivery_error"] = deliveryErr.Error()
@@ -430,11 +438,11 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 	}
 
 	notification := m.buildNotification(ctx, alert, history, labels, annotations, status, value)
-	return boundedDeliveryError(m.sender.Send(ctx, notification))
+	return m.sender.Send(ctx, notification).Err()
 }
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
-	recipientEmails, missingRecipients := m.resolveRecipientEmails(ctx, alert)
+	recipientEmails, missingRecipients, recipientTargets := m.resolveRecipientEmails(ctx, alert)
 	sourceName := labels["source"]
 
 	return AlertNotification{
@@ -460,19 +468,21 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Message:                 history.Message,
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
 		RecipientEmails:         recipientEmails,
+		recipientTargets:        recipientTargets,
 		MissingRecipientUserIDs: missingRecipients,
 		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
 }
 
-func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID) {
+func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, targets map[string]DeliveryTargetID) {
 	if alert == nil || len(alert.RecipientUserIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Recipients are users (not team-scoped). Resolve each by id directly.
 	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
 	emails := make([]string, 0, len(alert.RecipientUserIDs))
+	targets = make(map[string]DeliveryTargetID)
 	missing := make([]models.UserID, 0)
 	for _, userID := range alert.RecipientUserIDs {
 		user, err := m.db.GetUser(ctx, userID)
@@ -490,9 +500,10 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 		}
 		seen[email] = struct{}{}
 		emails = append(emails, email)
+		targets[email] = emailUserTarget(userID)
 	}
 
-	return emails, missing
+	return emails, missing, targets
 }
 
 func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {
@@ -514,7 +525,7 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 
 type noopSender struct{}
 
-func (noopSender) Send(_ context.Context, _ AlertNotification) error {
+func (noopSender) Send(_ context.Context, _ AlertNotification) DeliveryResults {
 	return nil
 }
 
