@@ -5,22 +5,6 @@ export interface APISuccessResponse<T> {
   data: T | null;
 }
 
-export interface APIListResponse<T> {
-  status: "success";
-  data: T[];
-  count?: number;
-  total?: number;
-  page?: number;
-  per_page?: number;
-}
-
-export interface APIPaginatedResponse<T> extends APIListResponse<T> {
-  count: number;
-  total: number;
-  page: number;
-  per_page: number;
-}
-
 export interface APIErrorResponse {
   status: "error";
   message: string;

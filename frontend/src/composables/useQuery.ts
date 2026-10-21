@@ -2,7 +2,6 @@ import { ref, computed } from 'vue';
 import { useExploreStore } from '@/stores/explore';
 import { useSourcesStore } from '@/stores/sources';
 import { useTeamsStore } from '@/stores/teams';
-import { SqlManager } from '@/services/SqlManager';
 import { getErrorMessage } from '@/api/types';
 import { logchefqlApi } from '@/api/logchefql';
 import { useVariables } from "@/composables/useVariables";
@@ -11,14 +10,6 @@ import { toRfc3339 } from '@/utils/timeWindow';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'native';
-
-// Interface for tracking why a query is dirty (used in computed)
-interface DirtyStateReason {
-  timeRangeChanged: boolean;
-  limitChanged: boolean;
-  queryChanged: boolean;
-  modeChanged: boolean;
-}
 
 /**
  * Refactored query management composable that delegates most logic to the explore store
@@ -31,7 +22,6 @@ export function useQuery() {
   const { convertVariables, getVariablesForApi } = useVariables();
   // Local state that isn't persisted in the store
   const queryError = ref<string>('');
-  const sqlWarnings = ref<string[]>([]);
 
   // Computed query content
   const logchefQuery = computed({
@@ -50,11 +40,6 @@ export function useQuery() {
     set: (value: EditorMode) => exploreStore.setActiveMode(value)
   });
 
-  // Current query based on active mode
-  const currentQuery = computed(() =>
-      activeMode.value === 'logchefql' ? logchefQuery.value : sqlQuery.value
-  );
-
   // Source and execution state - delegate to store with enhanced loading checks
   const canExecuteQuery = computed(() => {
     // Use the store's enhanced canExecuteQuery which includes loading state checks
@@ -64,40 +49,6 @@ export function useQuery() {
   const isExecutingQuery = computed(() =>
       exploreStore.isLoadingOperation('executeQuery')
   );
-
-  // Check if query state is dirty using store's computed property
-  const isDirty = computed(() => exploreStore.isQueryStateDirty);
-
-  // Get dirtyReason from the store's computed property
-  const dirtyReason = computed((): DirtyStateReason => {
-    const dirtyState: DirtyStateReason = {
-      timeRangeChanged: false,
-      limitChanged: false,
-      queryChanged: false,
-      modeChanged: false
-    };
-
-    // Only populate if we can get the info from the store
-    if (exploreStore.lastExecutedState) {
-      // Time range changed
-      dirtyState.timeRangeChanged = JSON.stringify(exploreStore.window) !== exploreStore.lastExecutedState.window;
-
-      // Limit changed
-      dirtyState.limitChanged = exploreStore.limit !== exploreStore.lastExecutedState.limit;
-
-      // Mode changed
-      dirtyState.modeChanged = exploreStore.lastExecutedState.mode !== exploreStore.activeMode;
-
-      // Query content changed
-      if (exploreStore.activeMode === 'logchefql') {
-        dirtyState.queryChanged = exploreStore.logchefqlCode !== exploreStore.lastExecutedState.logchefqlQuery;
-      } else {
-        dirtyState.queryChanged = exploreStore.sqlForExecution !== exploreStore.lastExecutedState.sqlQuery;
-      }
-    }
-
-    return dirtyState;
-  });
 
   // Validate LogchefQL query via backend API
   const validateLogchefQL = async (query: string): Promise<{ valid: boolean; error?: string }> => {
@@ -195,41 +146,6 @@ export function useQuery() {
     // No need to modify the LogchefQL query itself
   };
 
-  // Handle limit update
-  // NOTE: In SQL mode, we do NOT modify the user's raw SQL
-  // Users have full control over their LIMIT clause
-  const handleLimitUpdate = () => {
-    // In SQL mode, user has full control - don't modify their query
-    if (exploreStore.activeMode === 'native') {
-      return;
-    }
-  };
-
-  // Generate default SQL - now uses SqlManager
-  const generateDefaultSQL = () => {
-    try {
-      const sourceDetails = sourcesStore.currentSourceDetails;
-      if (!sourceDetails) {
-        throw new Error('No source selected');
-      }
-
-      const params = {
-        tableName: sourcesStore.getCurrentSourceTableName || '',
-        tsField: sourceDetails._meta_ts_field || 'timestamp',
-        window: exploreStore.resolved,
-        limit: exploreStore.limit,
-      };
-
-      return SqlManager.generateDefaultSql(params);
-    } catch (error) {
-      return {
-        success: false,
-        sql: '',
-        error: error instanceof Error ? error.message : 'Failed to generate SQL'
-      };
-    }
-  };
-
   // Prepare query for execution - now uses SqlManager
   const prepareQueryForExecution = async () => {
     try {
@@ -273,7 +189,6 @@ export function useQuery() {
         // Validation above is the only client-side preflight needed here; trying
         // to generate ClickHouse SQL would reject VictoriaLogs sources because
         // they intentionally have no database/table coordinates.
-        sqlWarnings.value = [];
         queryError.value = '';
         return {
           success: true,
@@ -332,13 +247,9 @@ export function useQuery() {
     logchefQuery,
     sqlQuery,
     activeMode,
-    currentQuery,
 
     // State
     queryError,
-    sqlWarnings,
-    isDirty,
-    dirtyReason,
     isExecutingQuery,
     canExecuteQuery,
 
@@ -346,8 +257,6 @@ export function useQuery() {
     changeMode,
     validateLogchefQL,
     handleTimeRangeUpdate,
-    handleLimitUpdate,
-    generateDefaultSQL,
     prepareQueryForExecution,
     executeQuery
   };

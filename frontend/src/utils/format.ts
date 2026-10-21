@@ -95,22 +95,3 @@ export function getSourceConnectionDetails(source: Source): SourceConnectionDeta
 
   return [];
 }
-
-/**
- * Format a source's display name with optional schema type
- * @param source - The source object containing connection info
- * @param includeSchema - Whether to include the schema type in parentheses
- * @returns Formatted source name string with optional schema type
- */
-export function formatSourceNameWithSchema(
-  source: Source,
-  includeSchema = true
-): string {
-  const baseName = formatSourceName(source);
-  const connection = source.connection as Record<string, unknown>;
-  const tableName = typeof connection.table_name === "string" ? connection.table_name : null;
-
-  return includeSchema && source.source_type === "clickhouse" && tableName
-    ? `${baseName} (${tableName})`
-    : baseName;
-}
