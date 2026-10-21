@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -106,21 +107,21 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 	}
 	for _, query := range []string{
 		"DROP TABLE x",
-		"INSERT INTO x SELECT 1",
-		"/* c */ DROP TABLE x",
-		"SYSTEM SHUTDOWN",
-		"OPTIMIZE TABLE x",
-		"KILL QUERY WHERE 1",
 		"SELECT 1; DROP TABLE x",
+		// Valid ClickHouse that Explore's raw SQL path also rejects.
+		"SELECT count() FROM logs # comment",
+		"SELECT /* a /* b */ c */ count() FROM logs",
+		"WITH RECURSIVE t AS (SELECT 1 AS n UNION ALL SELECT n + 1 FROM t WHERE n < 3) SELECT count() FROM t",
+		"SELECT count() FILTER (WHERE status >= 500) FROM logs",
 	} {
 		t.Run(query, func(t *testing.T) {
 			badRequest := newTestCreateAlertRequest()
 			badRequest.Query = query
-			if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, badRequest); !errors.Is(err, ErrInvalidAlertConfiguration) {
-				t.Errorf("CreateAlert() error = %v, want ErrInvalidAlertConfiguration", err)
+			if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, badRequest); !isInvalidAlertQuery(err) {
+				t.Errorf("CreateAlert() error = %v, want invalid alert query", err)
 			}
-			if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &query}); !errors.Is(err, ErrInvalidAlertConfiguration) {
-				t.Errorf("UpdateAlert() error = %v, want ErrInvalidAlertConfiguration", err)
+			if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &query}); !isInvalidAlertQuery(err) {
+				t.Errorf("UpdateAlert() error = %v, want invalid alert query", err)
 			}
 			stored, err := db.GetAlert(ctx, alert.ID)
 			if err != nil {
@@ -130,6 +131,12 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 				t.Errorf("stored query = %q, want %q", stored.Query, req.Query)
 			}
 		})
+	}
+
+	blank := newTestCreateAlertRequest()
+	blank.Query = "   "
+	if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, blank); err == nil || !strings.Contains(err.Error(), "query is required for native alerts") {
+		t.Errorf("CreateAlert(blank query) error = %v, want query is required", err)
 	}
 
 	for _, aggregate := range []string{"count(*)", "sum(`duration`)", "avg(`duration`)", "min(`duration`)", "max(`duration`)"} {
@@ -147,6 +154,54 @@ func TestClickHouseAlertQueryValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestUpdateAlertWithUnparseableStoredQuery(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	owner := newTestUser(t, db, "legacy-owner@example.com", "Owner")
+	source := newTestSource(t, db, "legacy-alerts")
+	ds := datasource.NewService(db, log)
+	ds.Register(datasource.NewClickHouseProvider(nil, log))
+
+	legacyQuery := "SELECT count() FROM logs # saved before validation"
+	alert := &models.Alert{
+		SourceID:          source.ID,
+		Name:              "legacy",
+		QueryLanguage:     models.QueryLanguageClickHouseSQL,
+		EditorMode:        models.AlertEditorModeNative,
+		Query:             legacyQuery,
+		LookbackSeconds:   300,
+		ThresholdOperator: models.AlertThresholdGreaterThan,
+		ThresholdValue:    10,
+		FrequencySeconds:  60,
+		Severity:          models.AlertSeverityWarning,
+		IsActive:          true,
+		CreatedBy:         &owner.ID,
+	}
+	if err := db.CreateAlert(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+
+	inactive := false
+	renamed := "legacy (paused)"
+	updated, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Name: &renamed, IsActive: &inactive, Query: &legacyQuery})
+	if err != nil {
+		t.Fatalf("UpdateAlert(pause, unchanged query) error = %v", err)
+	}
+	if updated.IsActive || updated.Name != renamed || updated.Query != legacyQuery {
+		t.Errorf("UpdateAlert() = active %v name %q query %q", updated.IsActive, updated.Name, updated.Query)
+	}
+
+	edited := "SELECT count() FROM logs # edited"
+	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &edited}); !isInvalidAlertQuery(err) {
+		t.Errorf("UpdateAlert(changed query) error = %v, want invalid alert query", err)
+	}
+}
+
+func isInvalidAlertQuery(err error) bool {
+	return errors.Is(err, ErrInvalidAlertConfiguration) && strings.Contains(err.Error(), "invalid alert query")
 }
 
 // TestCreateAlertFullLifecycle exercises CreateAlert -> GetAlert -> UpdateAlert

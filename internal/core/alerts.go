@@ -143,7 +143,7 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	if ds == nil {
 		return fmt.Errorf("datasource service is required")
 	}
-	if err := ds.ValidateAlertSupport(ctx, sourceID, queryLanguage, editorMode, alert.Query); err != nil {
+	if err := ds.ValidateAlertSupport(ctx, sourceID, queryLanguage, editorMode); err != nil {
 		return err
 	}
 
@@ -220,6 +220,9 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 	if err := validateAlertModel(ctx, ds, sourceID, alert); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
+	if err := datasource.ValidateAlertQuery(alert.QueryLanguage, alert.Query); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
 
 	if err := db.CreateAlert(ctx, alert); err != nil {
 		log.Error("failed to create alert", "source_id", sourceID, "error", err)
@@ -257,6 +260,7 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		return nil, fmt.Errorf("failed to load alert: %w", err)
 	}
 
+	previous := *existing
 	if err := applyAlertUpdates(existing, req); err != nil {
 		return nil, err
 	}
@@ -272,6 +276,14 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 	}
 	if err := validateAlertModel(ctx, ds, existing.SourceID, existing); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+	// An unchanged query skips the SQL check so owners can still pause, rename
+	// or delete an alert whose stored query the parser rejects. Evaluation
+	// still refuses to run it.
+	if existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode {
+		if err := datasource.ValidateAlertQuery(existing.QueryLanguage, existing.Query); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+		}
 	}
 
 	if err := db.UpdateAlert(ctx, existing); err != nil {
@@ -491,6 +503,9 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		Severity:          models.AlertSeverityWarning,
 	}
 	if err := validateAlertModel(ctx, ds, sourceID, tempAlert); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
+	}
+	if err := datasource.ValidateAlertQuery(tempAlert.QueryLanguage, tempAlert.Query); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 

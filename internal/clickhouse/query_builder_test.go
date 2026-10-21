@@ -284,3 +284,33 @@ func TestQueryBuilderPreservesSQLLiteralsAndIdentifiers(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatSelectQuery(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{query: "SELECT count() AS value FROM logs -- trailing", want: "SELECT count() AS value FROM logs"},
+		{query: "/* /* */ SELECT '*/ SELECT 42 AS value -- '", want: "SELECT '*/ SELECT 42 AS value -- '"},
+	} {
+		got, err := FormatSelectQuery(tc.query)
+		if err != nil || got != tc.want {
+			t.Errorf("FormatSelectQuery(%q) = %q, %v; want %q", tc.query, got, err, tc.want)
+		}
+	}
+
+	for _, query := range []string{
+		"",
+		"DROP TABLE x",
+		"INSERT INTO x SELECT 1",
+		"/* c */ DROP TABLE x",
+		"SYSTEM SHUTDOWN",
+		"OPTIMIZE TABLE x",
+		"KILL QUERY WHERE 1",
+		"SELECT 1; DROP TABLE x",
+	} {
+		if got, err := FormatSelectQuery(query); err == nil {
+			t.Errorf("FormatSelectQuery(%q) = %q, want error", query, got)
+		}
+	}
+}

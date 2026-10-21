@@ -78,10 +78,15 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 	return result.SQL, nil
 }
 
-// ValidateSelectQuery accepts a single SELECT statement without rewriting it.
-func ValidateSelectQuery(rawSQL string) error {
-	_, err := parseSelectQuery(rawSQL)
-	return err
+// FormatSelectQuery parses a single SELECT statement and renders it from the
+// AST, so the caller executes exactly what was validated rather than raw text
+// whose comments ClickHouse may tokenize differently.
+func FormatSelectQuery(rawSQL string) (string, error) {
+	selectQuery, err := parseSelectQuery(rawSQL)
+	if err != nil {
+		return "", err
+	}
+	return formatSQL(selectQuery), nil
 }
 
 func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
@@ -299,28 +304,10 @@ func legacyDefaultLimit(maxLimit int) int {
 
 // RemoveLimitClause parses the SQL and removes any LIMIT clause.
 func (qb *QueryBuilder) RemoveLimitClause(rawSQL string) (string, error) {
-	parser := clickhouseparser.NewParser(rawSQL)
-	stmts, err := parser.ParseStmts()
+	selectQuery, err := parseSelectQuery(rawSQL)
 	if err != nil {
-		return "", fmt.Errorf("invalid SQL syntax: %w", err)
+		return "", err
 	}
-
-	if len(stmts) == 0 {
-		return "", fmt.Errorf("no SQL statements found")
-	}
-	if len(stmts) > 1 {
-		return "", fmt.Errorf("multiple SQL statements are not supported")
-	}
-
-	stmt := stmts[0]
-	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
-	if !ok {
-		return "", fmt.Errorf("only SELECT queries are supported")
-	}
-
 	selectQuery.Limit = nil
-
-	result := formatSQL(stmt)
-
-	return result, nil
+	return formatSQL(selectQuery), nil
 }

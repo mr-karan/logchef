@@ -616,6 +616,23 @@ func hasLeadingTimestampSortKey(info *clickhouse.TableInfo, timestamp string) bo
 	return strings.Trim(strings.TrimSpace(info.SortKeys[0]), "`") == strings.Trim(strings.TrimSpace(timestamp), "`")
 }
 
+// Alerts read a single value; these bounds stop a query such as
+// SELECT * FROM logs from buffering the whole table.
+const (
+	alertMaxRows          = 100
+	alertMaxResponseBytes = 1 << 20
+)
+
+// formatAlertQuery is the one ClickHouse alert SQL check, shared by save-time
+// validation and evaluation so both accept and run the same statement.
+func formatAlertQuery(raw string) (string, error) {
+	query, err := clickhouse.FormatSelectQuery(raw)
+	if err != nil {
+		return "", &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
+	return query, nil
+}
+
 func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.Source, req AlertQueryRequest) (*models.QueryResult, error) {
 	if source == nil {
 		return nil, fmt.Errorf("source is required")
@@ -623,8 +640,9 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageClickHouseSQL {
 		return nil, fmt.Errorf("clickhouse alerts require %q, got %q", models.QueryLanguageClickHouseSQL, language)
 	}
-	if err := clickhouse.ValidateSelectQuery(req.Query); err != nil {
-		return nil, &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	query, err := formatAlertQuery(req.Query)
+	if err != nil {
+		return nil, err
 	}
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds
@@ -636,7 +654,11 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
-	return client.QueryWithTimeout(ctx, req.Query, req.QueryTimeout)
+	return client.QueryWithOptions(ctx, query, clickhouse.QueryOptions{
+		TimeoutSeconds:   req.QueryTimeout,
+		MaxRows:          alertMaxRows,
+		MaxResponseBytes: alertMaxResponseBytes,
+	})
 }
 
 func (p *ClickHouseProvider) InitializeSource(ctx context.Context, source *models.Source) error {

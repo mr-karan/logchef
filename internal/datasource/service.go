@@ -10,7 +10,6 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -189,7 +188,7 @@ func (s *Service) ValidateSavedQuerySupport(ctx context.Context, sourceID models
 	return nil
 }
 
-func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.SourceID, language models.QueryLanguage, mode models.AlertEditorMode, query string) error {
+func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.SourceID, language models.QueryLanguage, mode models.AlertEditorMode) error {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
 		return err
@@ -205,13 +204,16 @@ func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.Sour
 		return fmt.Errorf("%s does not support alert editor mode %q", source.SourceType, normalizedMode)
 	}
 
-	if normalizedLanguage == models.QueryLanguageClickHouseSQL {
-		if err := clickhouse.ValidateSelectQuery(query); err != nil {
-			return &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
-		}
-	}
-
 	return nil
+}
+
+// ValidateAlertQuery rejects alert SQL that EvaluateAlert would refuse to run.
+func ValidateAlertQuery(language models.QueryLanguage, query string) error {
+	if models.NormalizeQueryLanguage(language) != models.QueryLanguageClickHouseSQL {
+		return nil
+	}
+	_, err := formatAlertQuery(query)
+	return err
 }
 
 func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, req QueryRequest) (*models.QueryResult, error) {
