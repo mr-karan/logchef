@@ -825,7 +825,7 @@ func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
 }
 
 // Finding #18: lifecycle operations for the same source ID must be serialised so
-// concurrent init/remove/health calls cannot deadlock or interleave unsafely.
+// concurrent init/remove/status-check calls cannot deadlock or interleave unsafely.
 func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 	t.Parallel()
 
@@ -836,10 +836,9 @@ func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 50 {
-		wg.Add(4)
+		wg.Add(3)
 		go func() { defer wg.Done(); _ = provider.InitializeSource(context.Background(), source) }()
 		go func() { defer wg.Done(); _ = provider.RemoveSource(source.ID) }()
-		go func() { defer wg.Done(); _ = provider.GetSourceHealth(context.Background(), source.ID) }()
 		go func() { defer wg.Done(); _ = provider.CheckSourceConnectionStatus(context.Background(), source) }()
 	}
 	wg.Wait()

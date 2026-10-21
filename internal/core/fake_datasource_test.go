@@ -89,10 +89,6 @@ func (f *fakeProvider) RemoveSource(models.SourceID) error { return nil }
 
 func (f *fakeProvider) CheckSourceConnectionStatus(context.Context, *models.Source) bool { return true }
 
-func (f *fakeProvider) GetSourceHealth(context.Context, models.SourceID) models.SourceHealth {
-	return models.SourceHealth{}
-}
-
 // newFakeDatasourceService returns a *datasource.Service backed by db with a
 // fakeProvider registered for clickhouse (the default source type when a test
 // source is created without one). queryLanguages/savedQueryModes/alertModes

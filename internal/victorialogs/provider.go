@@ -35,9 +35,6 @@ const (
 	// phase for every call — including the tail connect — without ever
 	// interrupting an already-streaming body.
 	responseHeaderTimeout = 30 * time.Second
-	// healthCacheTTL serves recently-computed health without a live round-trip,
-	// so UI polling on a down source does not multiply blocking calls.
-	healthCacheTTL = 10 * time.Second
 )
 
 // reservedHeaderKeys are HTTP headers the provider computes from validated
@@ -65,13 +62,12 @@ type Provider struct {
 	log     *slog.Logger
 	mu      sync.RWMutex
 	sources map[models.SourceID]models.VictoriaLogsConnectionInfo
-	health  map[models.SourceID]models.SourceHealth
-	// opLocks serialises lifecycle operations (initialize / remove / health
-	// refresh) per source ID. Each of those operations is a read-modify sequence
-	// over the sources+health maps; the maps are individually mutex-guarded, but
-	// without per-ID serialisation two concurrent operations for the SAME source
-	// can interleave and leave stale state (e.g. health cached for a source that
-	// a concurrent remove already deleted).
+	// opLocks serialises lifecycle operations (initialize / remove / status
+	// check) per source ID. Each of those operations is a read-modify sequence
+	// over the sources map; the map is mutex-guarded, but without per-ID
+	// serialisation two concurrent operations for the SAME source can interleave
+	// and leave stale state (e.g. a connection cached for a source that a
+	// concurrent remove already deleted).
 	opLocks      keyedMutex
 	windowLimits map[models.SourceID]*windowLimiter
 }
@@ -120,7 +116,6 @@ func NewProvider(log *slog.Logger) *Provider {
 		client:  &http.Client{Transport: transport},
 		log:     log.With("component", "victorialogs_provider"),
 		sources: make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
-		health:  make(map[models.SourceID]models.SourceHealth),
 	}
 }
 
@@ -305,13 +300,7 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 	p.sources[source.ID] = conn
 	p.mu.Unlock()
 
-	healthy, healthErr := p.checkHealth(ctx, source.ID, conn)
-	p.updateHealth(source.ID, healthy, healthErr)
-	if healthErr != nil {
-		return healthErr
-	}
-
-	return nil
+	return p.checkHealth(ctx, source.ID, conn)
 }
 
 func (p *Provider) RemoveSource(sourceID models.SourceID) error {
@@ -321,7 +310,6 @@ func (p *Provider) RemoveSource(sourceID models.SourceID) error {
 	defer p.mu.Unlock()
 
 	delete(p.sources, sourceID)
-	delete(p.health, sourceID)
 	p.evictIdleWindowLimiter(sourceID)
 	return nil
 }
@@ -335,49 +323,10 @@ func (p *Provider) CheckSourceConnectionStatus(ctx context.Context, source *mode
 
 	conn, err := p.connectionForSource(source)
 	if err != nil {
-		p.updateHealth(source.ID, false, err)
 		return false
 	}
 
-	healthy, healthErr := p.checkHealth(ctx, source.ID, conn)
-	p.updateHealth(source.ID, healthy, healthErr)
-	return healthy
-}
-
-func (p *Provider) GetSourceHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
-	defer p.opLocks.lock(sourceID)()
-
-	p.mu.RLock()
-	conn, ok := p.sources[sourceID]
-	health, hasHealth := p.health[sourceID]
-	p.mu.RUnlock()
-
-	if !ok {
-		if hasHealth {
-			return health
-		}
-		return models.SourceHealth{
-			SourceID:    sourceID,
-			Status:      models.HealthStatusUnhealthy,
-			Error:       "victorialogs source not initialized",
-			LastChecked: time.Now(),
-		}
-	}
-
-	// Serve fresh cached health without a live round-trip, so UI polling on a
-	// down source doesn't stack up blocking checks (each up to the dial /
-	// response-header bounds). Matches the ClickHouse provider serving cached
-	// health.
-	if hasHealth && time.Since(health.LastChecked) < healthCacheTTL {
-		return health
-	}
-
-	healthy, err := p.checkHealth(ctx, sourceID, conn)
-	p.updateHealth(sourceID, healthy, err)
-
-	p.mu.RLock()
-	defer p.mu.RUnlock()
-	return p.health[sourceID]
+	return p.checkHealth(ctx, source.ID, conn) == nil
 }
 
 func (p *Provider) connectionFromConfig(raw json.RawMessage) (models.VictoriaLogsConnectionInfo, error) {
@@ -410,9 +359,9 @@ func (p *Provider) connectionForSource(source *models.Source) (models.VictoriaLo
 	return conn, nil
 }
 
-func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, conn models.VictoriaLogsConnectionInfo) (bool, error) {
+func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, conn models.VictoriaLogsConnectionInfo) error {
 	if strings.TrimSpace(conn.BaseURL) == "" {
-		return false, fmt.Errorf("victorialogs base_url is required")
+		return fmt.Errorf("victorialogs base_url is required")
 	}
 
 	healthCtx := ctx
@@ -424,12 +373,12 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 
 	healthURL, err := url.JoinPath(conn.BaseURL, "/health")
 	if err != nil {
-		return false, fmt.Errorf("invalid victorialogs base_url: %w", err)
+		return fmt.Errorf("invalid victorialogs base_url: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(healthCtx, http.MethodGet, healthURL, http.NoBody)
 	if err != nil {
-		return false, fmt.Errorf("create victorialogs health request: %w", err)
+		return fmt.Errorf("create victorialogs health request: %w", err)
 	}
 
 	applyHeaders(req, conn)
@@ -437,17 +386,16 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 	resp, err := p.client.Do(req)
 	if err != nil {
 		p.log.Warn("victorialogs health check failed", "source_id", sourceID, "error", err)
-		return false, fmt.Errorf("victorialogs health check failed: %w", err)
+		return fmt.Errorf("victorialogs health check failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		err := fmt.Errorf("victorialogs health check returned status %d", resp.StatusCode)
 		p.log.Warn("victorialogs health check returned non-success status", "source_id", sourceID, "status_code", resp.StatusCode)
-		return false, err
+		return fmt.Errorf("victorialogs health check returned status %d", resp.StatusCode)
 	}
 
-	return true, nil
+	return nil
 }
 
 // mergeRedactedConnectionSecrets carries over credentials and custom headers
@@ -565,7 +513,7 @@ func validateVictoriaLogsConnectionConfig(fieldPrefix string, conn models.Victor
 }
 
 func (p *Provider) validateConnectionAccess(ctx context.Context, conn models.VictoriaLogsConnectionInfo) error {
-	if _, err := p.checkHealth(ctx, 0, conn); err != nil {
+	if err := p.checkHealth(ctx, 0, conn); err != nil {
 		return &datasource.ValidationError{Field: "connection.base_url", Message: "Failed to reach the VictoriaLogs server", Err: err}
 	}
 	if err := p.validateQueryAccess(ctx, conn); err != nil {
@@ -684,27 +632,6 @@ func sanitizeVictoriaLogsValidationBody(body []byte) string {
 		trimmed = trimmed[:240] + "..."
 	}
 	return ": " + trimmed
-}
-
-func (p *Provider) updateHealth(sourceID models.SourceID, healthy bool, err error) {
-	status := models.HealthStatusHealthy
-	errMsg := ""
-	if !healthy {
-		status = models.HealthStatusUnhealthy
-		if err != nil {
-			errMsg = err.Error()
-		}
-	}
-
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	p.health[sourceID] = models.SourceHealth{
-		SourceID:    sourceID,
-		Status:      status,
-		Error:       errMsg,
-		LastChecked: time.Now(),
-	}
 }
 
 func applyHeaders(req *http.Request, conn models.VictoriaLogsConnectionInfo) {

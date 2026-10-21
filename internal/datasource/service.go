@@ -35,7 +35,6 @@ type Provider interface {
 	InitializeSource(context.Context, *models.Source) error
 	RemoveSource(models.SourceID) error
 	CheckSourceConnectionStatus(context.Context, *models.Source) bool
-	GetSourceHealth(context.Context, models.SourceID) models.SourceHealth
 }
 
 type Service struct {
@@ -500,25 +499,6 @@ func (s *Service) CheckSourceConnectionStatus(ctx context.Context, source *model
 		return false
 	}
 	return provider.CheckSourceConnectionStatus(ctx, source)
-}
-
-func (s *Service) GetSourceHealth(ctx context.Context, sourceID models.SourceID) (models.SourceHealth, error) {
-	source, err := s.loadSource(ctx, sourceID)
-	if err != nil {
-		return models.SourceHealth{}, err
-	}
-
-	provider, err := s.ProviderForSource(source)
-	if err != nil {
-		return models.SourceHealth{ //nolint:nilerr // an unknown provider is reported as an unhealthy status, not a request error
-			SourceID:    sourceID,
-			Status:      models.HealthStatusUnhealthy,
-			Error:       err.Error(),
-			LastChecked: source.UpdatedAt,
-		}, nil
-	}
-
-	return provider.GetSourceHealth(ctx, sourceID), nil
 }
 
 func (s *Service) ApplySourceMetadata(source *models.Source) error {
