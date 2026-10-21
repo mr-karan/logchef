@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -68,20 +69,20 @@ func TestWindowLimiterResetsAfterWindow(t *testing.T) {
 }
 
 func TestWindowLimiterPrunesStaleKeys(t *testing.T) {
-	l := newWindowLimiter(20*time.Millisecond, 5)
+	l := newWindowLimiter(time.Second, 5)
 	l.Allow("stale")
-	if got := len(l.keys); got != 1 {
-		t.Fatalf("keys after first insert = %d, want 1", got)
+	for i := 1; i < 10_000; i++ {
+		l.Allow(strconv.Itoa(i))
 	}
-	// After the window elapses, a call for a different key should prune the
-	// stale one during its lazy prune pass.
-	time.Sleep(30 * time.Millisecond)
-	l.Allow("fresh")
-	if _, ok := l.keys["stale"]; ok {
-		t.Fatal("stale key was not pruned")
+	if l.Allow("overflow") {
+		t.Fatal("new key admitted at capacity")
 	}
-	if _, ok := l.keys["fresh"]; !ok {
-		t.Fatal("fresh key missing after insert")
+	time.Sleep(1100 * time.Millisecond)
+	if !l.Allow("fresh") {
+		t.Fatal("expired keys did not release capacity")
+	}
+	if !l.Allow("stale") {
+		t.Fatal("expired key did not get a new window")
 	}
 }
 

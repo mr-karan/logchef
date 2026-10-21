@@ -1,6 +1,9 @@
 package auth
 
 import (
+	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -44,5 +47,44 @@ func TestLoginRateLimiter(t *testing.T) {
 	}
 	if !l.Allow("9.9.9.9", "e@example.com") {
 		t.Error("fresh IP should be allowed")
+	}
+}
+
+func TestLoginRateLimiterCapacityPreservesLimits(t *testing.T) {
+	l := NewLoginRateLimiter(time.Hour, 2, 2)
+	for i := range MaxLimiterKeys {
+		key := strconv.Itoa(i)
+		if !l.Allow(key, key+"@example.com") {
+			t.Fatalf("key %d rejected before capacity", i)
+		}
+	}
+	if l.Allow("overflow", "overflow@example.com") {
+		t.Fatal("new identity admitted at capacity")
+	}
+	if !l.Allow("0", "0@example.com") {
+		t.Fatal("tracked identity lost its remaining budget")
+	}
+	if l.Allow("0", "0@example.com") {
+		t.Fatal("tracked identity limit was evicted")
+	}
+}
+
+func TestLoginRateLimiterConcurrentBudget(t *testing.T) {
+	l := NewLoginRateLimiter(time.Minute, 10, 5)
+	var allowed atomic.Int32
+	var calls sync.WaitGroup
+	for range 100 {
+		calls.Go(func() {
+			if l.Allow("ip", "USER@example.com") {
+				allowed.Add(1)
+			}
+		})
+	}
+	calls.Wait()
+	if got := allowed.Load(); got != 5 {
+		t.Fatalf("allowed %d concurrent attempts, want 5", got)
+	}
+	if l.Allow("ip2", "user@example.com") {
+		t.Fatal("email normalization bypassed the shared budget")
 	}
 }
