@@ -654,11 +654,19 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
-	return client.QueryWithOptions(ctx, query, clickhouse.QueryOptions{
+	result, err := client.QueryWithOptions(ctx, query, clickhouse.QueryOptions{
 		TimeoutSeconds:   req.QueryTimeout,
 		MaxRows:          alertMaxRows,
 		MaxResponseBytes: alertMaxResponseBytes,
 	})
+	if err != nil {
+		return nil, err
+	}
+	// An empty truncated result would read as value 0 and drive the alert state.
+	if result.Stats.Truncated && len(result.Logs) == 0 {
+		return nil, fmt.Errorf("alert query's first row exceeds the %d byte result limit", alertMaxResponseBytes)
+	}
+	return result, nil
 }
 
 func (p *ClickHouseProvider) InitializeSource(ctx context.Context, source *models.Source) error {

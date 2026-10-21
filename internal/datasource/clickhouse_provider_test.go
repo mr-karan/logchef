@@ -71,6 +71,31 @@ func TestEvaluateAlertClickHouse(t *testing.T) {
 	if len(result.Logs) != alertMaxRows || !result.Stats.Truncated {
 		t.Fatalf("EvaluateAlert() buffered %d rows (truncated=%v), want %d truncated", len(result.Logs), result.Stats.Truncated, alertMaxRows)
 	}
+
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(10) WHERE number > 100"})
+	if err != nil || len(result.Logs) != 0 || result.Stats.Truncated {
+		t.Fatalf("EvaluateAlert(empty) = %v, %v; want zero rows without error", result, err)
+	}
+
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)"})
+	if err == nil {
+		t.Fatalf("EvaluateAlert(first row over byte limit) = %v, want error instead of an empty result", result.Logs)
+	}
+
+	// The parser keeps these as identifiers while ClickHouse reads an escaped
+	// backtick or a heredoc string, which would run the hidden 42 AS value.
+	for _, query := range []string{
+		"SELECT 'n' AS `\\`, '`, 42 AS value -- '",
+		`SELECT 'n' AS "\", '", 42 AS value -- '`,
+		"SELECT $$ AS a, '$$, 42 AS value -- '",
+	} {
+		t.Run(query, func(t *testing.T) {
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: query})
+			if _, ok := errors.AsType[*ValidationError](err); !ok {
+				t.Fatalf("EvaluateAlert() = %v, %v; want query validation error", result, err)
+			}
+		})
+	}
 }
 
 func TestHasLeadingTimestampSortKey(t *testing.T) {

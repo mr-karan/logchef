@@ -79,8 +79,8 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 }
 
 // FormatSelectQuery parses a single SELECT statement and renders it from the
-// AST, so the caller executes exactly what was validated rather than raw text
-// whose comments ClickHouse may tokenize differently.
+// AST without comments. Literals and identifiers are written back verbatim, so
+// the output runs as parsed only where the parser and ClickHouse lex them alike.
 func FormatSelectQuery(rawSQL string) (string, error) {
 	selectQuery, err := parseSelectQuery(rawSQL)
 	if err != nil {
@@ -111,7 +111,30 @@ func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 	if !ok {
 		return nil, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
 	}
+	if err := checkIdentifiers(selectQuery); err != nil {
+		return nil, err
+	}
 	return selectQuery, nil
+}
+
+// checkIdentifiers rejects names the parser reads as plain identifiers but
+// ClickHouse lexes as \` or \" escapes or as $$ heredoc strings.
+func checkIdentifiers(query *clickhouseparser.SelectQuery) error {
+	var err error
+	clickhouseparser.Walk(query, func(node clickhouseparser.Expr) bool {
+		ident, ok := node.(*clickhouseparser.Ident)
+		if !ok {
+			return true
+		}
+		switch {
+		case ident.QuoteType != clickhouseparser.Unquoted && strings.Contains(ident.Name, `\`):
+			err = fmt.Errorf("backslashes in quoted identifiers are not supported: %q: %w", ident.Name, ErrInvalidQuery)
+		case ident.QuoteType == clickhouseparser.Unquoted && strings.HasPrefix(ident.Name, "$"):
+			err = fmt.Errorf("identifiers starting with $ are not supported: %q: %w", ident.Name, ErrInvalidQuery)
+		}
+		return err == nil
+	})
+	return err
 }
 
 // BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit

@@ -3,9 +3,13 @@ package core
 import (
 	"context"
 	"errors"
+	"os"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -197,6 +201,49 @@ func TestUpdateAlertWithUnparseableStoredQuery(t *testing.T) {
 	edited := "SELECT count() FROM logs # edited"
 	if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &edited}); !isInvalidAlertQuery(err) {
 		t.Errorf("UpdateAlert(changed query) error = %v, want invalid alert query", err)
+	}
+}
+
+func TestTestAlertQueryReportsTruncation(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	db := newTestDB(t)
+	log := discardLogger()
+	source := &models.Source{Name: "truncation", Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "numbers"}}
+	if err := db.CreateSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	manager := clickhouse.NewManager(log)
+	defer manager.Close()
+	if err := manager.AddSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	ds := datasource.NewService(db, log)
+	ds.Register(datasource.NewClickHouseProvider(manager, log))
+	request := func(query string) *models.TestAlertQueryRequest {
+		return &models.TestAlertQueryRequest{
+			QueryLanguage:     models.QueryLanguageClickHouseSQL,
+			EditorMode:        models.AlertEditorModeNative,
+			Query:             query,
+			ThresholdOperator: models.AlertThresholdGreaterThan,
+			ThresholdValue:    10,
+		}
+	}
+
+	resp, err := testAlertQuery(ctx, db, ds, source.ID, request("SELECT number AS value FROM numbers(1000) WHERE number >= 0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(resp.Warnings, "Results were capped at 100 buffered rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).") {
+		t.Errorf("testAlertQuery() warnings = %q, want the 100-row cap reported", resp.Warnings)
+	}
+
+	if resp, err := testAlertQuery(ctx, db, ds, source.ID, request("SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)")); err == nil {
+		t.Errorf("testAlertQuery(first row over byte limit) = %+v, want error", resp)
 	}
 }
 
