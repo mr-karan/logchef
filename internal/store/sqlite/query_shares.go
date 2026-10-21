@@ -23,7 +23,7 @@ func (db *DB) CreateQueryShare(ctx context.Context, share *models.QueryShare) er
 		TeamID:      teamID,
 		CreatedBy:   int64(share.CreatedBy),
 		PayloadJson: string(share.Payload),
-		ExpiresAt:   share.ExpiresAt,
+		ExpiresAt:   share.ExpiresAt.UTC(),
 	})
 	if err != nil {
 		db.log.Error("failed to create query share", "error", err, "source_id", share.SourceID)
@@ -67,7 +67,7 @@ func (db *DB) GetQueryShare(ctx context.Context, token string) (*models.QuerySha
 // TouchQueryShare updates the last access timestamp.
 func (db *DB) TouchQueryShare(ctx context.Context, token string, accessedAt time.Time) error {
 	if err := db.writeQueries.TouchQueryShare(ctx, sqlc.TouchQueryShareParams{
-		LastAccessedAt: sql.NullTime{Time: accessedAt, Valid: true},
+		LastAccessedAt: sql.NullTime{Time: accessedAt.UTC(), Valid: true},
 		Token:          token,
 	}); err != nil {
 		db.log.Error("failed to touch query share", "error", err, "token", token)
@@ -102,7 +102,7 @@ func (db *DB) GetUserTeamForSource(ctx context.Context, userID models.UserID, so
 
 // PruneExpiredQueryShares removes expired query shares.
 func (db *DB) PruneExpiredQueryShares(ctx context.Context, before time.Time) error {
-	if err := db.writeQueries.PruneExpiredQueryShares(ctx, before); err != nil {
+	if err := db.writeQueries.PruneExpiredQueryShares(ctx, before.UTC()); err != nil {
 		db.log.Error("failed to prune expired query shares", "error", err)
 		return fmt.Errorf("error pruning expired query shares: %w", err)
 	}
