@@ -47,7 +47,10 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	// All mutations run in a single transaction. On dry_run we return errDryRun
 	// to roll the whole thing back without surfacing an error.
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		// Lock users first so deletion cannot hold memberships needed by this transaction.
+		// Share the deletion lock because pruning cascades beyond configured users.
+		if err := tx.LockAdminInvariant(ctx); err != nil {
+			return err
+		}
 		usersByEmail, err := loadProvisioningUsers(ctx, tx, cfg)
 		if err != nil {
 			return err

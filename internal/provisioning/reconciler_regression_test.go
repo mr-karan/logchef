@@ -53,11 +53,11 @@ func (s *lookupFailure) GetTeamByName(ctx context.Context, name string) (*models
 	return s.StoreOps.GetTeamByName(ctx, name)
 }
 
-func (s *lookupFailure) LockProvisioningUsers(ctx context.Context, emails, teamNames []string, prune bool) ([]*models.User, error) {
+func (s *lookupFailure) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
 	if s.target == "user" {
 		ctx = canceledLookupContext(ctx)
 	}
-	return s.StoreOps.LockProvisioningUsers(ctx, emails, teamNames, prune)
+	return s.StoreOps.ListUsersForProvisioning(ctx, emails)
 }
 
 func (s *lookupFailure) CreateSource(ctx context.Context, src *models.Source) error {

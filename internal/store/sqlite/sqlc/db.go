@@ -384,8 +384,8 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listUsersStmt, err = db.PrepareContext(ctx, listUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUsers: %w", err)
 	}
-	if q.lockProvisioningUsersStmt, err = db.PrepareContext(ctx, lockProvisioningUsers); err != nil {
-		return nil, fmt.Errorf("error preparing query LockProvisioningUsers: %w", err)
+	if q.listUsersForProvisioningStmt, err = db.PrepareContext(ctx, listUsersForProvisioning); err != nil {
+		return nil, fmt.Errorf("error preparing query ListUsersForProvisioning: %w", err)
 	}
 	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
@@ -1121,9 +1121,9 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listUsersStmt: %w", cerr)
 		}
 	}
-	if q.lockProvisioningUsersStmt != nil {
-		if cerr := q.lockProvisioningUsersStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing lockProvisioningUsersStmt: %w", cerr)
+	if q.listUsersForProvisioningStmt != nil {
+		if cerr := q.listUsersForProvisioningStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listUsersForProvisioningStmt: %w", cerr)
 		}
 	}
 	if q.markAlertEvaluatedStmt != nil {
@@ -1500,7 +1500,7 @@ type Queries struct {
 	listTeamsForUserStmt                       *sql.Stmt
 	listUserTeamsStmt                          *sql.Stmt
 	listUsersStmt                              *sql.Stmt
-	lockProvisioningUsersStmt                  *sql.Stmt
+	listUsersForProvisioningStmt               *sql.Stmt
 	markAlertEvaluatedStmt                     *sql.Stmt
 	markAlertTriggeredStmt                     *sql.Stmt
 	pruneAlertHistoryStmt                      *sql.Stmt
@@ -1670,7 +1670,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listTeamsForUserStmt:                       q.listTeamsForUserStmt,
 		listUserTeamsStmt:                          q.listUserTeamsStmt,
 		listUsersStmt:                              q.listUsersStmt,
-		lockProvisioningUsersStmt:                  q.lockProvisioningUsersStmt,
+		listUsersForProvisioningStmt:               q.listUsersForProvisioningStmt,
 		markAlertEvaluatedStmt:                     q.markAlertEvaluatedStmt,
 		markAlertTriggeredStmt:                     q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:                      q.pruneAlertHistoryStmt,

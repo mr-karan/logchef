@@ -16,9 +16,7 @@ func loadProvisioningUsers(ctx context.Context, tx store.StoreOps, cfg *config.P
 	}
 	emails := make([]string, 0)
 	seen := make(map[string]bool)
-	teamNames := make([]string, 0, len(cfg.Teams))
 	for _, team := range cfg.Teams {
-		teamNames = append(teamNames, team.Name)
 		for _, member := range team.Members {
 			if !seen[member.Email] {
 				emails = append(emails, member.Email)
@@ -26,7 +24,7 @@ func loadProvisioningUsers(ctx context.Context, tx store.StoreOps, cfg *config.P
 			}
 		}
 	}
-	users, err := tx.LockProvisioningUsers(ctx, emails, teamNames, cfg.Prune)
+	users, err := tx.ListUsersForProvisioning(ctx, emails)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load provisioning users: %w", err)
 	}

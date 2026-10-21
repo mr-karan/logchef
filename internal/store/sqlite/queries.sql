@@ -736,15 +736,8 @@ ON CONFLICT(key) DO UPDATE SET
 DELETE FROM system_settings
 WHERE key = ?;
 
--- name: LockProvisioningUsers :many
--- The write transaction already prevents concurrent user deletion.
-SELECT * FROM users
-WHERE (CAST(sqlc.arg(prune) AS INTEGER) = 1 AND id IN (
-    SELECT tm.user_id FROM team_members tm
-    JOIN teams t ON t.id = tm.team_id
-    WHERE t.managed = 1 OR t.name IN (sqlc.slice(team_names))
-)) OR email IN (sqlc.slice(emails))
-ORDER BY id;
+-- name: ListUsersForProvisioning :many
+SELECT * FROM users WHERE email IN (sqlc.slice(emails)) ORDER BY id;
 
 -- name: ListManagedSources :many
 -- Get all sources managed by provisioning config

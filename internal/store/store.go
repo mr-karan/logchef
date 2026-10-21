@@ -69,8 +69,7 @@ type UserStore interface {
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
 	CountAdminUsers(ctx context.Context) (int, error)
-	// LockAdminInvariant serializes, until the enclosing WithTx ends, every
-	// change that could remove the last active admin.
+	// LockAdminInvariant serializes admin removals, user deletions, and provisioning until WithTx ends.
 	LockAdminInvariant(ctx context.Context) error
 	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
 	// local email+password authentication.
@@ -223,8 +222,8 @@ type ProvisioningStore interface {
 
 	ListManagedSources(ctx context.Context) ([]*models.Source, error)
 	ListManagedTeams(ctx context.Context) ([]*models.Team, error)
-	// LockProvisioningUsers locks configured and prune-affected users in ID order.
-	LockProvisioningUsers(ctx context.Context, emails, teamNames []string, prune bool) ([]*models.User, error)
+	// ListUsersForProvisioning loads the users referenced by provisioning.
+	ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error)
 	// GetSourceByNameForProvisioning looks a source up by name (managed or not),
 	// returning models.ErrNotFound when absent.
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error)

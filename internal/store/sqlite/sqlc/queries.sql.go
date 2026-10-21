@@ -3971,40 +3971,18 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const lockProvisioningUsers = `-- name: LockProvisioningUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users
-WHERE (CAST(?1 AS INTEGER) = 1 AND id IN (
-    SELECT tm.user_id FROM team_members tm
-    JOIN teams t ON t.id = tm.team_id
-    WHERE t.managed = 1 OR t.name IN (/*SLICE:team_names*/?)
-)) OR email IN (/*SLICE:emails*/?)
-ORDER BY id
+const listUsersForProvisioning = `-- name: ListUsersForProvisioning :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE email IN (/*SLICE:emails*/?) ORDER BY id
 `
 
-type LockProvisioningUsersParams struct {
-	Prune     int64    `json:"prune"`
-	TeamNames []string `json:"team_names"`
-	Emails    []string `json:"emails"`
-}
-
-// The write transaction already prevents concurrent user deletion.
-func (q *Queries) LockProvisioningUsers(ctx context.Context, arg LockProvisioningUsersParams) ([]User, error) {
-	query := lockProvisioningUsers
+func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error) {
+	query := listUsersForProvisioning
 	var queryParams []interface{}
-	queryParams = append(queryParams, arg.Prune)
-	if len(arg.TeamNames) > 0 {
-		for _, v := range arg.TeamNames {
+	if len(emails) > 0 {
+		for _, v := range emails {
 			queryParams = append(queryParams, v)
 		}
-		query = strings.Replace(query, "/*SLICE:team_names*/?", strings.Repeat(",?", len(arg.TeamNames))[1:], 1)
-	} else {
-		query = strings.Replace(query, "/*SLICE:team_names*/?", "NULL", 1)
-	}
-	if len(arg.Emails) > 0 {
-		for _, v := range arg.Emails {
-			queryParams = append(queryParams, v)
-		}
-		query = strings.Replace(query, "/*SLICE:emails*/?", strings.Repeat(",?", len(arg.Emails))[1:], 1)
+		query = strings.Replace(query, "/*SLICE:emails*/?", strings.Repeat(",?", len(emails))[1:], 1)
 	} else {
 		query = strings.Replace(query, "/*SLICE:emails*/?", "NULL", 1)
 	}

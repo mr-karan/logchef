@@ -3860,37 +3860,12 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const lockAdminInvariant = `-- name: LockAdminInvariant :exec
-SELECT pg_advisory_xact_lock($1)
+const listUsersForProvisioning = `-- name: ListUsersForProvisioning :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE email = ANY($1::text[]) ORDER BY id
 `
 
-// Hold a transaction-scoped advisory lock
-func (q *Queries) LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error {
-	_, err := q.db.Exec(ctx, lockAdminInvariant, pgAdvisoryXactLock)
-	return err
-}
-
-const lockProvisioningUsers = `-- name: LockProvisioningUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users
-WHERE email = ANY($1::text[])
-   OR ($2::boolean AND id IN (
-       SELECT tm.user_id FROM team_members tm
-       JOIN teams t ON t.id = tm.team_id
-       WHERE t.managed OR t.name = ANY($3::text[])
-   ))
-ORDER BY id
-FOR NO KEY UPDATE
-`
-
-type LockProvisioningUsersParams struct {
-	Emails    []string `json:"emails"`
-	Prune     bool     `json:"prune"`
-	TeamNames []string `json:"team_names"`
-}
-
-// Lock users before membership changes to prevent deletion deadlocks.
-func (q *Queries) LockProvisioningUsers(ctx context.Context, arg LockProvisioningUsersParams) ([]User, error) {
-	rows, err := q.db.Query(ctx, lockProvisioningUsers, arg.Emails, arg.Prune, arg.TeamNames)
+func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsersForProvisioning, emails)
 	if err != nil {
 		return nil, err
 	}
@@ -3920,6 +3895,16 @@ func (q *Queries) LockProvisioningUsers(ctx context.Context, arg LockProvisionin
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockAdminInvariant = `-- name: LockAdminInvariant :exec
+SELECT pg_advisory_xact_lock($1)
+`
+
+// Hold a transaction-scoped advisory lock
+func (q *Queries) LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error {
+	_, err := q.db.Exec(ctx, lockAdminInvariant, pgAdvisoryXactLock)
+	return err
 }
 
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec

@@ -735,17 +735,8 @@ ON CONFLICT(key) DO UPDATE SET
 DELETE FROM system_settings
 WHERE key = $1;
 
--- name: LockProvisioningUsers :many
--- Lock users before membership changes to prevent deletion deadlocks.
-SELECT * FROM users
-WHERE email = ANY(sqlc.arg(emails)::text[])
-   OR (sqlc.arg(prune)::boolean AND id IN (
-       SELECT tm.user_id FROM team_members tm
-       JOIN teams t ON t.id = tm.team_id
-       WHERE t.managed OR t.name = ANY(sqlc.arg(team_names)::text[])
-   ))
-ORDER BY id
-FOR NO KEY UPDATE;
+-- name: ListUsersForProvisioning :many
+SELECT * FROM users WHERE email = ANY(sqlc.arg(emails)::text[]) ORDER BY id;
 
 -- name: ListManagedSources :many
 -- Get all sources managed by provisioning config
