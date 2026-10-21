@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// MaxLimiterKeys bounds memory without evicting active limits.
+// MaxLimiterKeys bounds memory by evicting the oldest window to admit new keys.
 const MaxLimiterKeys = 10_000
 
 // WindowLimiter counts requests per key in fixed windows ordered by expiration.
@@ -29,7 +29,7 @@ func NewWindowLimiter(window time.Duration, limit int) *WindowLimiter {
 	return &WindowLimiter{window: window, limit: limit, keys: make(map[string]*list.Element)}
 }
 
-// Allow rejects new keys at capacity so existing limits cannot be bypassed.
+// Allow records an attempt and reports whether the key is within its limit.
 func (l *WindowLimiter) Allow(key string) bool {
 	if key == "" {
 		return true
@@ -54,7 +54,9 @@ func (l *WindowLimiter) Allow(key string) bool {
 		return true
 	}
 	if len(l.keys) >= MaxLimiterKeys {
-		return false
+		head := l.expiry.Front()
+		delete(l.keys, head.Value.(*limiterWindow).key)
+		l.expiry.Remove(head)
 	}
 	l.keys[key] = l.expiry.PushBack(&limiterWindow{key: key, start: now, count: 1})
 	return true

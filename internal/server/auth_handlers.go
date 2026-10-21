@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -154,7 +155,11 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 			errCode = "auth_error"
 		}
 		finalURL = fmt.Sprintf("%s/auth/login?error=%s", targetURL, errCode)
-		s.log.Warn("authentication error during redirect",
+		level := slog.LevelWarn
+		if errCode == "auth_error" {
+			level = slog.LevelError
+		}
+		s.log.Log(c.Context(), level, "authentication error during redirect",
 			"error_code", errCode,
 			"error", err,
 			"provider_error", c.Query("error"),

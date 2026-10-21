@@ -11,10 +11,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func newWindowLimiter(window time.Duration, limit int) *auth.WindowLimiter {
-	return auth.NewWindowLimiter(window, limit)
-}
-
 // tooManyRequests writes the shared 429 response used by both limiter
 // middlewares after recording the rejection metric for scope.
 func tooManyRequests(c fiber.Ctx, scope string) error {
@@ -26,11 +22,11 @@ func tooManyRequests(c fiber.Ctx, scope string) error {
 // client IP within a one-minute window, and optionally enforces a global cap
 // across all clients when globalPerMinute > 0.
 func authRateLimitMiddleware(perIPPerMinute, globalPerMinute int) fiber.Handler {
-	perIP := newWindowLimiter(time.Minute, perIPPerMinute)
+	perIP := auth.NewWindowLimiter(time.Minute, perIPPerMinute)
 
 	var global *auth.WindowLimiter
 	if globalPerMinute > 0 {
-		global = newWindowLimiter(time.Minute, globalPerMinute)
+		global = auth.NewWindowLimiter(time.Minute, globalPerMinute)
 	}
 
 	return func(c fiber.Ctx) error {
@@ -49,7 +45,7 @@ func authRateLimitMiddleware(perIPPerMinute, globalPerMinute int) fiber.Handler 
 // back to the client IP if the user context is somehow absent) and must run
 // after requireAuth so the user is populated.
 func queryRateLimitMiddleware(perUserPerMinute int) fiber.Handler {
-	perUser := newWindowLimiter(time.Minute, perUserPerMinute)
+	perUser := auth.NewWindowLimiter(time.Minute, perUserPerMinute)
 
 	return func(c fiber.Ctx) error {
 		key := c.IP()

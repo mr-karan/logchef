@@ -8,12 +8,14 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+
+	"github.com/mr-karan/logchef/internal/auth"
 )
 
 func BenchmarkWindowLimiter(b *testing.B) {
 	for _, size := range []int{1, 1000, 10000} {
 		b.Run(fmt.Sprint(size), func(b *testing.B) {
-			l := newWindowLimiter(time.Hour, int(^uint(0)>>1))
+			l := auth.NewWindowLimiter(time.Hour, int(^uint(0)>>1))
 			for i := range size {
 				if !l.Allow(fmt.Sprint(i)) {
 					b.Fatal("setup rejected")
@@ -31,7 +33,7 @@ func BenchmarkWindowLimiter(b *testing.B) {
 }
 
 func BenchmarkWindowLimiterHTTP(b *testing.B) {
-	l := newWindowLimiter(time.Hour, int(^uint(0)>>1))
+	l := auth.NewWindowLimiter(time.Hour, int(^uint(0)>>1))
 	for i := range 10000 {
 		if !l.Allow(fmt.Sprint(i)) {
 			b.Fatal("setup rejected")

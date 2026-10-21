@@ -50,7 +50,7 @@ func TestLoginRateLimiter(t *testing.T) {
 	}
 }
 
-func TestLoginRateLimiterCapacityPreservesLimits(t *testing.T) {
+func TestLoginRateLimiterCapacityAdmitsNewIdentities(t *testing.T) {
 	l := NewLoginRateLimiter(time.Hour, 2, 2)
 	for i := range MaxLimiterKeys {
 		key := strconv.Itoa(i)
@@ -58,13 +58,16 @@ func TestLoginRateLimiterCapacityPreservesLimits(t *testing.T) {
 			t.Fatalf("key %d rejected before capacity", i)
 		}
 	}
-	if l.Allow("overflow", "overflow@example.com") {
-		t.Fatal("new identity admitted at capacity")
+	if !l.Allow("overflow", "overflow@example.com") {
+		t.Fatal("new identity rejected at capacity")
 	}
-	if !l.Allow("0", "0@example.com") {
+	if len(l.ips.keys) != MaxLimiterKeys || len(l.emails.keys) != MaxLimiterKeys {
+		t.Fatal("limiter exceeded its memory bound")
+	}
+	if !l.Allow("1", "1@example.com") {
 		t.Fatal("tracked identity lost its remaining budget")
 	}
-	if l.Allow("0", "0@example.com") {
+	if l.Allow("1", "1@example.com") {
 		t.Fatal("tracked identity limit was evicted")
 	}
 }

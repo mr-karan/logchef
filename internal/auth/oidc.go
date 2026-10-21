@@ -52,20 +52,13 @@ func CheckEmailVerified(claims OIDCClaims, skipCheck bool) error {
 
 const oidcRequestTimeout = 10 * time.Second
 
-// callbackTransport restores cancellation that go-oidc strips from JWKS requests.
-type callbackTransport func(*http.Request) (*http.Response, error)
-
-func (t callbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	return t(req)
-}
-
 // OIDCProvider handles OIDC authentication interactions.
 type OIDCProvider struct {
-	provider       *oidc.Provider
-	verifierConfig *oidc.Config
+	verifier       *oidc.IDTokenVerifier
 	oauthConf      *oauth2.Config
 	log            *slog.Logger
 	oidcCfg        *config.OIDCConfig
+	requestTimeout time.Duration
 	// allowedIssuers, when non-empty, is the explicit set of acceptable `iss`
 	// claim values. It is populated only when the operator overrides issuer
 	// validation via config; otherwise it is nil and the go-oidc verifier
@@ -134,11 +127,11 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 	}
 
 	return &OIDCProvider{
-		provider:       provider,
-		verifierConfig: verifierConfig,
+		verifier:       provider.Verifier(verifierConfig),
 		oauthConf:      oauthConf,
 		log:            log,
 		oidcCfg:        oidcCfg,
+		requestTimeout: oidcRequestTimeout,
 		allowedIssuers: allowedIssuers,
 	}, nil
 }
@@ -247,14 +240,7 @@ func normalizeIssuers(issuers []string) []string {
 // in the list. With no allow-list, the go-oidc verifier has already enforced
 // the single discovered issuer.
 func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
-	ctx, cancel := context.WithTimeout(ctx, oidcRequestTimeout)
-	defer cancel()
-	client := &http.Client{Timeout: oidcRequestTimeout, Transport: callbackTransport(func(req *http.Request) (*http.Response, error) {
-		return http.DefaultTransport.RoundTrip(req.WithContext(ctx))
-	})}
-	// A request-scoped key set lets cancellation stop the JWKS fetch itself.
-	verifier := p.provider.VerifierContext(oidc.ClientContext(ctx, client), p.verifierConfig)
-	idToken, err := verifier.Verify(ctx, rawIDToken)
+	idToken, err := p.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return nil, err
 	}
@@ -281,12 +267,11 @@ func (p *OIDCProvider) GetIssuer() string {
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
 func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
-	ctx, cancel := context.WithTimeout(ctx, oidcRequestTimeout)
+	idpCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
 	defer cancel()
-	ctx = oidc.ClientContext(ctx, &http.Client{Timeout: oidcRequestTimeout})
 
 	// Exchange authorization code for OAuth2 tokens.
-	oauth2Token, err := p.oauthConf.Exchange(ctx, code)
+	oauth2Token, err := p.oauthConf.Exchange(idpCtx, code)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
 	}
@@ -296,10 +281,12 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	if !ok {
 		return nil, nil, fmt.Errorf("%w: token response has no id_token", ErrOIDCInvalidToken)
 	}
-	idToken, err := p.verify(ctx, rawIDToken)
+	idToken, err := p.verify(idpCtx, rawIDToken)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)
 	}
+
+	cancel()
 
 	// Extract required claims.
 	var claims OIDCClaims
@@ -309,7 +296,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 
 	// Verify email_verified claim.
 	if err := CheckEmailVerified(claims, p.oidcCfg.SkipEmailVerifiedCheck); err != nil {
-		return nil, nil, err
+		return nil, nil, fmt.Errorf("%w: email=%s", err, claims.Email)
 	}
 
 	// Look up user in the local database.
@@ -324,7 +311,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 				return nil, nil, fmt.Errorf("failed to auto-provision user: %w", provErr)
 			}
 			if !attempted {
-				return nil, nil, ErrUnauthorizedUser
+				return nil, nil, fmt.Errorf("%w: email=%s", ErrUnauthorizedUser, claims.Email)
 			}
 			user = provisioned
 		} else {
@@ -332,7 +319,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		}
 	}
 	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
-		return nil, nil, ErrUserInactive
+		return nil, nil, fmt.Errorf("%w: email=%s", ErrUserInactive, claims.Email)
 	}
 
 	// Update user's last login time (best effort).
@@ -346,7 +333,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	// Create a new application session for the user.
 	session, err := core.CreateSession(ctx, db, log, user.ID, authCfg.SessionDuration, authCfg.MaxConcurrentSessions)
 	if err != nil {
-		return nil, nil, fmt.Errorf("failed to create session: %w", err)
+		return nil, nil, fmt.Errorf("failed to create session for email=%s: %w", claims.Email, err)
 	}
 
 	return user, session, nil

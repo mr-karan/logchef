@@ -70,8 +70,9 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 				if wrapped {
 					loginErr = fmt.Errorf("callback failed: %w", loginErr)
 				}
+				var logs bytes.Buffer
 				s := &Server{
-					log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+					log:    slog.New(slog.NewTextHandler(&logs, nil)),
 					config: &config.Config{Server: config.ServerConfig{FrontendURL: "https://logchef.example/"}},
 				}
 				app := fiber.New()
@@ -85,6 +86,13 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 				defer resp.Body.Close()
 				if resp.StatusCode != http.StatusTemporaryRedirect {
 					t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTemporaryRedirect)
+				}
+				level := "WARN"
+				if tc.code == "auth_error" {
+					level = "ERROR"
+				}
+				if !strings.Contains(logs.String(), "level="+level) {
+					t.Errorf("authentication failure log = %s, want level %s", logs.String(), level)
 				}
 				want := "https://logchef.example/auth/login?error=" + tc.code
 				if got := resp.Header.Get("Location"); got != want {
