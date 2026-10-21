@@ -97,6 +97,7 @@ const baseLayout = computed<DashboardLayoutItem[]>(() =>
   placements.value.map((p) => ({ id: p.panel.id, x: p.x, y: p.y, w: p.w, h: p.h }))
 );
 
+// The drawer edits editDraft by panel id, so there is no panel to pass in or save event to handle.
 const editorOpen = ref(false);
 const editingPanelId = ref<string | null>(null);
 // Tracks a panel created via "Add panel" so a cancel-while-pristine (no
