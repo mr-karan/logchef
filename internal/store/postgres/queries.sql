@@ -195,13 +195,6 @@ WHERE team_id = $2 AND user_id = $3;
 DELETE FROM team_members
 WHERE team_id = $1 AND user_id = $2;
 
--- name: ListTeamMembers :many
--- List all members of a team
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = $1
-ORDER BY tm.created_at;
-
 -- name: ListTeamMembersWithDetails :many
 -- List all members of a team with user details
 SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
@@ -743,6 +736,12 @@ DELETE FROM system_settings
 WHERE key = $1;
 
 -- Provisioning Queries
+
+-- name: ListUsersForProvisioning :many
+SELECT * FROM users
+WHERE email = ANY(sqlc.arg(emails)::text[])
+ORDER BY id
+FOR NO KEY UPDATE;
 
 -- name: ListManagedSources :many
 -- Get all sources managed by provisioning config

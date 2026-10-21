@@ -191,20 +191,6 @@ func (s *Store) RemoveTeamMember(ctx context.Context, teamID models.TeamID, user
 	return nil
 }
 
-// ListTeamMembers retrieves basic membership info for a team.
-func (s *Store) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-	rows, err := s.q.ListTeamMembers(ctx, int64(teamID))
-	if err != nil {
-		s.log.Error("failed to list team members from db", "error", err, "team_id", teamID)
-		return nil, fmt.Errorf("error listing team members: %w", err)
-	}
-	members := make([]*models.TeamMember, 0, len(rows))
-	for _, row := range rows {
-		members = append(members, teamMemberToModel(row))
-	}
-	return members, nil
-}
-
 // ListTeamMembersWithDetails retrieves membership info plus user email/full name.
 func (s *Store) ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
 	rows, err := s.q.ListTeamMembersWithDetails(ctx, int64(teamID))

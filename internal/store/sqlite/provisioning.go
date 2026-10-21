@@ -130,3 +130,20 @@ func (db *DB) SetUserManaged(ctx context.Context, id models.UserID, managed bool
 	}
 	return nil
 }
+
+// ListUsersForProvisioning loads the users referenced by provisioning.
+func (db *DB) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	rows, err := db.readQueries.ListUsersForProvisioning(ctx, emails)
+	if err != nil {
+		return nil, fmt.Errorf("error loading provisioning users: %w", err)
+	}
+	users := make([]*models.User, 0, len(rows))
+	for i := range rows {
+		row := rows[i]
+		users = append(users, mapUserRowToModel(row))
+	}
+	return users, nil
+}

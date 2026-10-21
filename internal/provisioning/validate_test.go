@@ -382,20 +382,20 @@ func TestValidateConfig_SourcesNotManagedTeamRefsIgnored(t *testing.T) {
 	}
 }
 
-func TestResolveSecrets_DefaultMetaTSField(t *testing.T) {
+func TestResolveConfig_DefaultMetaTSField(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
 			{Name: "src1", MetaTSField: ""},
 		},
 	}
-	ResolveSecrets(cfg)
+	ResolveConfig(cfg)
 	if cfg.Sources[0].MetaTSField != "timestamp" {
 		t.Errorf("expected default MetaTSField 'timestamp', got %q", cfg.Sources[0].MetaTSField)
 	}
 }
 
-func TestResolveSecrets_DefaultVictoriaLogsMetaTSField(t *testing.T) {
+func TestResolveConfig_DefaultVictoriaLogsMetaTSField(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageSources: true,
 		Sources: []config.ProvisionSource{
@@ -408,13 +408,13 @@ func TestResolveSecrets_DefaultVictoriaLogsMetaTSField(t *testing.T) {
 			},
 		},
 	}
-	ResolveSecrets(cfg)
+	ResolveConfig(cfg)
 	if cfg.Sources[0].MetaTSField != "_time" {
 		t.Errorf("expected default MetaTSField '_time', got %q", cfg.Sources[0].MetaTSField)
 	}
 }
 
-func TestResolveSecrets_DefaultMemberRole(t *testing.T) {
+func TestResolveConfig_DefaultMemberRole(t *testing.T) {
 	cfg := &config.ProvisioningConfig{
 		ManageTeams: true,
 		Teams: []config.ProvisionTeam{
@@ -426,7 +426,7 @@ func TestResolveSecrets_DefaultMemberRole(t *testing.T) {
 			},
 		},
 	}
-	ResolveSecrets(cfg)
+	ResolveConfig(cfg)
 	if cfg.Teams[0].Members[0].Role != "member" {
 		t.Errorf("expected default role 'member', got %q", cfg.Teams[0].Members[0].Role)
 	}

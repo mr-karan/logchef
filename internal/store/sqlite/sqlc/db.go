@@ -366,9 +366,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listSystemSettingsByCategoryStmt, err = db.PrepareContext(ctx, listSystemSettingsByCategory); err != nil {
 		return nil, fmt.Errorf("error preparing query ListSystemSettingsByCategory: %w", err)
 	}
-	if q.listTeamMembersStmt, err = db.PrepareContext(ctx, listTeamMembers); err != nil {
-		return nil, fmt.Errorf("error preparing query ListTeamMembers: %w", err)
-	}
 	if q.listTeamMembersWithDetailsStmt, err = db.PrepareContext(ctx, listTeamMembersWithDetails); err != nil {
 		return nil, fmt.Errorf("error preparing query ListTeamMembersWithDetails: %w", err)
 	}
@@ -386,6 +383,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listUsersStmt, err = db.PrepareContext(ctx, listUsers); err != nil {
 		return nil, fmt.Errorf("error preparing query ListUsers: %w", err)
+	}
+	if q.listUsersForProvisioningStmt, err = db.PrepareContext(ctx, listUsersForProvisioning); err != nil {
+		return nil, fmt.Errorf("error preparing query ListUsersForProvisioning: %w", err)
 	}
 	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
@@ -1091,11 +1091,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listSystemSettingsByCategoryStmt: %w", cerr)
 		}
 	}
-	if q.listTeamMembersStmt != nil {
-		if cerr := q.listTeamMembersStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listTeamMembersStmt: %w", cerr)
-		}
-	}
 	if q.listTeamMembersWithDetailsStmt != nil {
 		if cerr := q.listTeamMembersWithDetailsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listTeamMembersWithDetailsStmt: %w", cerr)
@@ -1124,6 +1119,11 @@ func (q *Queries) Close() error {
 	if q.listUsersStmt != nil {
 		if cerr := q.listUsersStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listUsersStmt: %w", cerr)
+		}
+	}
+	if q.listUsersForProvisioningStmt != nil {
+		if cerr := q.listUsersForProvisioningStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listUsersForProvisioningStmt: %w", cerr)
 		}
 	}
 	if q.markAlertEvaluatedStmt != nil {
@@ -1494,13 +1494,13 @@ type Queries struct {
 	listSourcesForUserStmt                     *sql.Stmt
 	listSystemSettingsStmt                     *sql.Stmt
 	listSystemSettingsByCategoryStmt           *sql.Stmt
-	listTeamMembersStmt                        *sql.Stmt
 	listTeamMembersWithDetailsStmt             *sql.Stmt
 	listTeamSourcesStmt                        *sql.Stmt
 	listTeamsStmt                              *sql.Stmt
 	listTeamsForUserStmt                       *sql.Stmt
 	listUserTeamsStmt                          *sql.Stmt
 	listUsersStmt                              *sql.Stmt
+	listUsersForProvisioningStmt               *sql.Stmt
 	markAlertEvaluatedStmt                     *sql.Stmt
 	markAlertTriggeredStmt                     *sql.Stmt
 	pruneAlertHistoryStmt                      *sql.Stmt
@@ -1664,13 +1664,13 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listSourcesForUserStmt:                     q.listSourcesForUserStmt,
 		listSystemSettingsStmt:                     q.listSystemSettingsStmt,
 		listSystemSettingsByCategoryStmt:           q.listSystemSettingsByCategoryStmt,
-		listTeamMembersStmt:                        q.listTeamMembersStmt,
 		listTeamMembersWithDetailsStmt:             q.listTeamMembersWithDetailsStmt,
 		listTeamSourcesStmt:                        q.listTeamSourcesStmt,
 		listTeamsStmt:                              q.listTeamsStmt,
 		listTeamsForUserStmt:                       q.listTeamsForUserStmt,
 		listUserTeamsStmt:                          q.listUserTeamsStmt,
 		listUsersStmt:                              q.listUsersStmt,
+		listUsersForProvisioningStmt:               q.listUsersForProvisioningStmt,
 		markAlertEvaluatedStmt:                     q.markAlertEvaluatedStmt,
 		markAlertTriggeredStmt:                     q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:                      q.pruneAlertHistoryStmt,

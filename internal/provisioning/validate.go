@@ -206,14 +206,15 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 		for j, member := range team.Members {
 			memberPrefix := fmt.Sprintf("%s.members[%d]", prefix, j)
 
-			if member.Email == "" {
+			email := strings.ToLower(strings.TrimSpace(member.Email))
+			if email == "" {
 				errs = append(errs, fmt.Sprintf("%s: email is required", memberPrefix))
 				continue
 			}
-			if memberSeen[member.Email] {
+			if memberSeen[email] {
 				errs = append(errs, fmt.Sprintf("%s: duplicate email %q", memberPrefix, member.Email))
 			}
-			memberSeen[member.Email] = true
+			memberSeen[email] = true
 
 			role := strings.ToLower(member.Role)
 			if role == "" {
@@ -227,9 +228,8 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 	return errs
 }
 
-// ResolveSecrets resolves password values from environment variables.
-// Must be called after ValidateConfig.
-func ResolveSecrets(cfg *config.ProvisioningConfig) {
+// ResolveConfig applies defaults, normalizes members, and resolves environment secrets.
+func ResolveConfig(cfg *config.ProvisioningConfig) {
 	for i := range cfg.Sources {
 		source := &cfg.Sources[i]
 		source.SourceType = source.NormalizedSourceType()
@@ -270,8 +270,11 @@ func ResolveSecrets(cfg *config.ProvisioningConfig) {
 	// Default member roles
 	for i := range cfg.Teams {
 		for j := range cfg.Teams[i].Members {
-			if cfg.Teams[i].Members[j].Role == "" {
-				cfg.Teams[i].Members[j].Role = "member"
+			member := &cfg.Teams[i].Members[j]
+			member.Email = strings.ToLower(strings.TrimSpace(member.Email))
+			member.Role = strings.ToLower(member.Role)
+			if member.Role == "" {
+				member.Role = "member"
 			}
 		}
 	}

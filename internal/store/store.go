@@ -223,6 +223,8 @@ type ProvisioningStore interface {
 
 	ListManagedSources(ctx context.Context) ([]*models.Source, error)
 	ListManagedTeams(ctx context.Context) ([]*models.Team, error)
+	// ListUsersForProvisioning locks referenced users in ID order before membership changes.
+	ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error)
 	// GetSourceByNameForProvisioning looks a source up by name (managed or not),
 	// returning models.ErrNotFound when absent.
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error)
@@ -247,7 +249,6 @@ type TeamStore interface {
 	GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error)
 	UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
-	ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 	ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 
 	AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error

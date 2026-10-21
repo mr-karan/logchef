@@ -187,13 +187,6 @@ WHERE team_id = ? AND user_id = ?;
 DELETE FROM team_members
 WHERE team_id = ? AND user_id = ?;
 
--- name: ListTeamMembers :many
--- List all members of a team
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = ?
-ORDER BY tm.created_at;
-
 -- name: ListTeamMembersWithDetails :many
 -- List all members of a team with user details
 SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
@@ -744,6 +737,11 @@ DELETE FROM system_settings
 WHERE key = ?;
 
 -- Provisioning Queries
+
+-- name: ListUsersForProvisioning :many
+SELECT * FROM users
+WHERE email IN (sqlc.slice(emails))
+ORDER BY id;
 
 -- name: ListManagedSources :many
 -- Get all sources managed by provisioning config
