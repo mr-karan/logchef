@@ -41,11 +41,9 @@ func exposition() string {
 
 func TestMetricsCarryNoUserEmail(t *testing.T) {
 	user := &models.User{Email: "alice@example.com", Role: models.UserRoleAdmin}
-	source := &models.Source{ID: 901, Name: "labels-src"}
 
 	RecordHTTPRequest("GET", "/labels-test", 200, time.Millisecond, 10, user)
 	RecordHTTPError("GET", "/labels-test", "internal_error", 500, user)
-	RecordQuery(source, "select", true, time.Millisecond, 3)
 	RecordAuthAttempt("token", true, user)
 	RecordSessionOperation("validate", true, user)
 	RecordAuthorizationFailure("/labels-test", user, "insufficient_role")
@@ -77,12 +75,14 @@ func TestUserMetricsLabelSets(t *testing.T) {
 	}
 }
 
-func TestRecordQueryLabelSet(t *testing.T) {
+func TestClickHouseMetricsLabelSet(t *testing.T) {
 	source := &models.Source{ID: 902, Name: "labelset-src"}
 	source.Connection.Database = "db"
 	source.Connection.TableName = "tbl"
+	m := NewClickHouseMetrics(source)
+	t.Cleanup(m.Unregister)
 
-	RecordQuery(source, "select", true, time.Millisecond, 3)
+	m.RecordQueryMetrics("select", true, time.Millisecond, 3, "", false)
 
 	out := exposition()
 	want := `logchef_query_total{source_id="902",source_name="labelset-src",database="db",table="tbl",query_type="select",result="success"} 1`
@@ -91,26 +91,30 @@ func TestRecordQueryLabelSet(t *testing.T) {
 	}
 }
 
-func TestRemoveSourceSeries(t *testing.T) {
-	doomed := &models.Source{ID: 903, Name: "doomed"}
-	kept := &models.Source{ID: 9030, Name: "kept"}
+func TestClickHouseMetricsUnregister(t *testing.T) {
+	removed := NewClickHouseMetrics(&models.Source{ID: 903, Name: "removed"})
+	kept := NewClickHouseMetrics(&models.Source{ID: 9030, Name: "kept"})
+	t.Cleanup(kept.Unregister)
 
-	for _, src := range []*models.Source{doomed, kept} {
-		RecordQuery(src, "select", true, time.Millisecond, 1)
-		RecordQueryTimeout(src, "select")
-		RecordQueryError(src, "timeout")
-		RecordClickHouseConnectionStatus(src, true)
-		RecordClickHouseValidation(src, true)
-		RecordClickHouseReconnection(src, true)
+	record := func(m *ClickHouseMetrics) {
+		m.RecordQueryMetrics("select", false, time.Millisecond, -1, "timeout", true)
+		m.RecordConnectionValidation(true)
+		m.UpdateConnectionStatus(true)
+	}
+	record(removed)
+	record(kept)
+	if out := exposition(); !strings.Contains(out, `source_id="903"`) {
+		t.Fatalf("series for source not exposed before removal:\n%s", out)
 	}
 
-	RemoveSourceSeries(doomed.ID)
+	removed.Unregister()
+	record(removed)
 
 	out := exposition()
 	if strings.Contains(out, `source_id="903"`) {
 		t.Errorf("series for removed source still exposed:\n%s", out)
 	}
 	if !strings.Contains(out, `source_id="9030"`) {
-		t.Errorf("series for another source whose id shares a prefix was removed")
+		t.Errorf("series for another source were removed")
 	}
 }

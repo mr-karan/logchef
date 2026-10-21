@@ -3,7 +3,7 @@ title: Prometheus Metrics
 description: Logchef's Prometheus metrics for monitoring usage and performance
 ---
 
-Logchef exposes Prometheus metrics covering instance usage, performance, and health: query patterns, user activity, authentication events, and resource use.
+Logchef exposes Prometheus metrics covering instance usage, performance, and health: query patterns, authentication events, and source connectivity.
 
 ## Metrics Endpoint
 
@@ -24,8 +24,6 @@ Logchef emits metrics across several categories:
 - **Authentication Metrics**: Login attempts and session management
 - **Authorization Metrics**: Access control failures and patterns
 - **ClickHouse Metrics**: Database connection and operation health
-- **Team & Source Metrics**: Multi-tenant usage patterns
-- **AI Metrics**: AI-powered feature usage and performance
 
 ## HTTP Metrics
 
@@ -42,7 +40,7 @@ Monitor web interface performance and usage patterns.
 **Key Use Cases:**
 - Identify slow endpoints with `logchef_http_request_duration_seconds`
 - Monitor error rates by endpoint and role
-- Track API usage patterns across teams
+- Track API usage patterns by endpoint
 - Set up alerts for high error rates or latency spikes
 
 ## Query Metrics
@@ -63,7 +61,6 @@ Track database query execution and performance patterns.
 
 **Key Use Cases:**
 - Monitor query performance per source/table
-- Identify users running expensive queries
 - Track query patterns and popular sources
 - Set up alerts for high query failure rates
 
@@ -74,18 +71,15 @@ Monitor login attempts and session management.
 | Metric | Description | Type | Labels |
 |--------|-------------|------|--------|
 | `logchef_auth_attempts_total` | Authentication attempts | Counter | `method`, `result`, `user_role` |
-| `logchef_session_operations_total` | Session operations (create, validate, destroy) | Counter | `operation`, `result`, `user_role` |
-| `logchef_api_token_operations_total` | API token operations | Counter | `operation`, `result`, `user_role`, `token_name` |
-| `logchef_active_sessions` | Currently active sessions | Gauge | - |
-| `logchef_active_users` | Currently active users | Gauge | - |
+| `logchef_session_operations_total` | Session validations | Counter | `operation`, `result`, `user_role` |
 
-**Auth Methods:** `session`, `token`
+**Auth Methods:** `token`, `oauth`, `oauth_mcp`
 
-**Operations:** `create`, `validate`, `destroy`, `renew`
+**Operations:** `validate`
 
 **Key Use Cases:**
 - Monitor authentication failure rates
-- Track session lifecycle and active users
+- Track session validation failures
 - Identify suspicious login patterns
 - Alert on failed authentication spikes
 
@@ -97,7 +91,7 @@ Track access control failures and permission violations.
 |--------|-------------|------|--------|
 | `logchef_authorization_failures_total` | Authorization failures | Counter | `endpoint`, `reason`, `user_role` |
 
-**Failure Reasons:** `insufficient_role`, `team_access_denied`, `source_access_denied`, `token_expired`
+**Failure Reasons:** `insufficient_role`, `insufficient_token_scope`, `oauth_admin_route`
 
 **Key Use Cases:**
 - Monitor access control violations
@@ -116,52 +110,6 @@ Monitor database connection health and operation performance.
 **Key Use Cases:**
 - Monitor ClickHouse connection health per source
 - Set up alerts for database connectivity issues
-
-## Team & Source Metrics
-
-Track multi-tenant usage and resource access patterns.
-
-| Metric | Description | Type | Labels |
-|--------|-------------|------|--------|
-| `logchef_team_operations_total` | Team management operations | Counter | `team_id`, `team_name`, `operation`, `result`, `user_role` |
-| `logchef_source_operations_total` | Source management operations | Counter | `source_id`, `source_name`, `database`, `table`, `operation`, `result`, `user_role` |
-| `logchef_collection_operations_total` | Saved query collection operations | Counter | `source_name`, `team_name`, `operation`, `result`, `collection_name`, `user_role` |
-
-**Operations:** `create`, `update`, `delete`, `list`, `get`
-
-**Key Use Cases:**
-- Track team and source usage patterns
-- Monitor saved query collection adoption
-- Identify most active teams and sources
-
-## AI Metrics
-
-Monitor AI-powered feature usage and performance.
-
-| Metric | Description | Type | Labels |
-|--------|-------------|------|--------|
-| `logchef_ai_operations_total` | AI operations (SQL generation, suggestions) | Counter | `source_name`, `database`, `table`, `operation`, `result`, `user_role` |
-| `logchef_ai_duration_seconds` | AI operation latency distribution | Histogram | `source_name`, `operation` |
-
-**AI Operations:** `sql_generation`, `field_suggestion`, `query_explanation`
-
-**Key Use Cases:**
-- Track AI feature adoption and success rates
-- Monitor AI operation performance and latency
-- Identify popular AI features by source
-
-## Histogram Metrics
-
-Monitor histogram generation for log data visualization.
-
-| Metric | Description | Type | Labels |
-|--------|-------------|------|--------|
-| `logchef_histogram_total` | Histogram generation operations | Counter | `source_id`, `source_name`, `database`, `table`, `result`, `user_role` |
-| `logchef_histogram_duration_seconds` | Histogram generation latency | Histogram | `source_name`, `database`, `table` |
-
-**Key Use Cases:**
-- Monitor histogram generation performance
-- Track visualization feature usage patterns
 
 ## Example Queries
 
@@ -243,11 +191,10 @@ rate(logchef_clickhouse_connection_validation_total{result="failure"}[5m])
 
 Dashboards worth building:
 
-1. **Overview Dashboard**: Key metrics, active users, query volume, error rates
-2. **Performance Dashboard**: Query latency, HTTP response times, histogram generation
-3. **Security Dashboard**: Authentication patterns, authorization failures, user activity
+1. **Overview Dashboard**: Key metrics, query volume, error rates
+2. **Performance Dashboard**: Query latency, HTTP response times
+3. **Security Dashboard**: Authentication patterns, authorization failures
 4. **Source Health Dashboard**: ClickHouse connection status, per-source performance
-5. **User Activity Dashboard**: Top users, team usage patterns, AI feature adoption
 
 ## Next steps
 
