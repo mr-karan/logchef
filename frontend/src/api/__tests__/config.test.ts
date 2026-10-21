@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AxiosError, AxiosHeaders, type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios'
 import { toast } from 'vue-sonner'
-import { api } from '../config'
+import { api, setUnauthorizedHandler, setForbiddenHandler } from '../config'
+import { expireSession } from '../session'
+import { useAuthStore } from '@/stores/auth'
 import { apiClient } from '../apiUtils'
 import { useBaseStore } from '@/stores/base'
 import { hasShownErrorToast } from '@/api/error-handler'
@@ -22,6 +24,9 @@ vi.mock('@/router', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ clearState: vi.fn() }),
 }))
+
+setUnauthorizedHandler(({ toast }) => expireSession({ toast, clearState: useAuthStore().clearState, router }))
+setForbiddenHandler(() => { void router.push({ name: 'Forbidden' }) })
 
 function respondWith(status: number, data: unknown): AxiosAdapter {
   return async (config: InternalAxiosRequestConfig) => {
