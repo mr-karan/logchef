@@ -282,16 +282,69 @@ func TestServiceAccountRoleHTTP(t *testing.T) {
 	if len(accounts) != 1 || accounts[0].Role != models.UserRoleMember {
 		t.Fatalf("service-account creation must produce one member, got %v", accounts)
 	}
-	path := fmt.Sprintf("/api/v1/admin/users/%d", accounts[0].ID)
-	resp = doAuthzRequest(t, s, http.MethodPut, path, `{"role":"admin"}`, auth)
-	if resp.status != fiber.StatusNotFound {
-		t.Fatalf("human-user update status = %d (%q), want 404", resp.status, resp.message)
+}
+
+func TestUserAdminTransitionHTTP(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		scope        models.TokenScope
+		session      bool
+		beforeRole   models.UserRole
+		beforeStatus models.UserStatus
+		body         string
+		want         int
+		afterRole    models.UserRole
+		afterStatus  models.UserStatus
+	}{
+		{"scoped reactivate admin", models.TokenScopeUsersWrite, false, models.UserRoleAdmin, models.UserStatusInactive, `{"status":"active"}`, fiber.StatusForbidden, models.UserRoleAdmin, models.UserStatusInactive},
+		{"scoped reactivate and rename", models.TokenScopeUsersWrite, false, models.UserRoleAdmin, models.UserStatusInactive, `{"status":"active","full_name":"Changed Name"}`, fiber.StatusForbidden, models.UserRoleAdmin, models.UserStatusInactive},
+		{"scoped reactivate and promote", models.TokenScopeUsersWrite, false, models.UserRoleMember, models.UserStatusInactive, `{"status":"active","role":"admin"}`, fiber.StatusForbidden, models.UserRoleMember, models.UserStatusInactive},
+		{"wildcard reactivate admin", models.TokenScopeAll, false, models.UserRoleAdmin, models.UserStatusInactive, `{"status":"active"}`, fiber.StatusOK, models.UserRoleAdmin, models.UserStatusActive},
+		{"session reactivate admin", "", true, models.UserRoleAdmin, models.UserStatusInactive, `{"status":"active"}`, fiber.StatusOK, models.UserRoleAdmin, models.UserStatusActive},
+		{"scoped deactivate admin", models.TokenScopeUsersWrite, false, models.UserRoleAdmin, models.UserStatusActive, `{"status":"inactive"}`, fiber.StatusOK, models.UserRoleAdmin, models.UserStatusInactive},
+		{"scoped edit active admin", models.TokenScopeUsersWrite, false, models.UserRoleAdmin, models.UserStatusActive, `{"full_name":"Changed Name"}`, fiber.StatusOK, models.UserRoleAdmin, models.UserStatusActive},
+		{"scoped keep active admin role", models.TokenScopeUsersWrite, false, models.UserRoleAdmin, models.UserStatusActive, `{"role":"admin","full_name":"Changed Name"}`, fiber.StatusOK, models.UserRoleAdmin, models.UserStatusActive},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAuthzTestServer(t)
+			admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+			target, err := core.CreateUser(context.Background(), s.sqlite, s.log, "target@example.com", "Target User", tc.beforeRole, tc.beforeStatus)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var auth func(*http.Request)
+			if tc.session {
+				auth = withSession(sessionCookie(t, s.sqlite, admin))
+			} else {
+				auth = withBearer(apiToken(t, s, admin, tc.scope))
+			}
+			resp := doAuthzRequest(t, s, http.MethodPut, fmt.Sprintf("/api/v1/admin/users/%d", target.ID), tc.body, auth)
+			if resp.status != tc.want {
+				t.Errorf("status = %d (%q), want %d", resp.status, resp.message, tc.want)
+			}
+			stored, err := core.GetUser(context.Background(), s.sqlite, target.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Role != tc.afterRole || stored.Status != tc.afterStatus {
+				t.Errorf("stored role/status = %s/%s, want %s/%s", stored.Role, stored.Status, tc.afterRole, tc.afterStatus)
+			}
+			wantName := "Target User"
+			if tc.want == fiber.StatusOK && strings.Contains(tc.body, "Changed Name") {
+				wantName = "Changed Name"
+			}
+			if stored.FullName != wantName {
+				t.Errorf("stored name = %q, want %q", stored.FullName, wantName)
+			}
+		})
 	}
-	account, err := core.GetUser(context.Background(), s.sqlite, accounts[0].ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if account.Role != models.UserRoleMember {
-		t.Errorf("stored service-account role = %q, want member", account.Role)
-	}
+
+	t.Run("scoped deactivate last admin", func(t *testing.T) {
+		s := newAuthzTestServer(t)
+		admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+		resp := doAuthzRequest(t, s, http.MethodPut, fmt.Sprintf("/api/v1/admin/users/%d", admin.ID), `{"status":"inactive"}`, withBearer(apiToken(t, s, admin, models.TokenScopeUsersWrite)))
+		if resp.status != fiber.StatusBadRequest || resp.message != core.ErrCannotDeleteLastAdmin.Error() {
+			t.Fatalf("status = %d (%q), want last-admin rejection", resp.status, resp.message)
+		}
+	})
 }

@@ -12,24 +12,36 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-func TestAuthorizeUserRoleGrant(t *testing.T) {
+func TestAuthorizeAdminTransition(t *testing.T) {
+	activeAdmin := models.User{Role: models.UserRoleAdmin, Status: models.UserStatusActive}
+	inactiveAdmin := models.User{Role: models.UserRoleAdmin, Status: models.UserStatusInactive}
+	member := models.User{Role: models.UserRoleMember, Status: models.UserStatusActive}
+	scoped := access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}})
 	for _, tc := range []struct {
 		name      string
 		principal access.Principal
-		role      models.UserRole
+		before    models.User
+		after     models.User
 		denied    bool
 	}{
-		{"scoped admin", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}}), models.UserRoleAdmin, true},
-		{"scoped member", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}}), models.UserRoleMember, false},
-		{"wildcard admin", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAll}}), models.UserRoleAdmin, false},
-		{"session admin", access.SessionPrincipal(nil), models.UserRoleAdmin, false},
-		{"missing token", access.APITokenPrincipal(nil, nil), models.UserRoleAdmin, true},
-		{"unknown method", access.Principal{}, models.UserRoleAdmin, true},
-		{"oauth wildcard", access.OAuthPrincipal(nil, 1, "client", []models.TokenScope{models.TokenScopeAll}), models.UserRoleAdmin, true},
-		{"assistant", access.AssistantPrincipal(nil), models.UserRoleAdmin, true},
+		{"scoped create admin", scoped, models.User{}, activeAdmin, true},
+		{"scoped create member", scoped, models.User{}, member, false},
+		{"scoped promote", scoped, member, activeAdmin, true},
+		{"scoped reactivate", scoped, inactiveAdmin, activeAdmin, true},
+		{"scoped reactivate and promote", scoped, models.User{Role: models.UserRoleMember, Status: models.UserStatusInactive}, activeAdmin, true},
+		{"scoped edit active admin", scoped, activeAdmin, activeAdmin, false},
+		{"scoped deactivate admin", scoped, activeAdmin, inactiveAdmin, false},
+		{"scoped demote admin", scoped, activeAdmin, member, false},
+		{"scoped inactive admin", scoped, member, inactiveAdmin, false},
+		{"wildcard reactivate", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAll}}), inactiveAdmin, activeAdmin, false},
+		{"session reactivate", access.SessionPrincipal(nil), inactiveAdmin, activeAdmin, false},
+		{"missing token", access.APITokenPrincipal(nil, nil), inactiveAdmin, activeAdmin, true},
+		{"unknown method", access.Principal{}, inactiveAdmin, activeAdmin, true},
+		{"oauth wildcard", access.OAuthPrincipal(nil, 1, "client", []models.TokenScope{models.TokenScopeAll}), inactiveAdmin, activeAdmin, true},
+		{"assistant", access.AssistantPrincipal(nil), inactiveAdmin, activeAdmin, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := AuthorizeUserRoleGrant(tc.principal, tc.role)
+			err := AuthorizeAdminTransition(tc.principal, tc.before, tc.after)
 			if (err != nil) != tc.denied {
 				t.Fatalf("authorization error = %v, denied = %t", err, tc.denied)
 			}
@@ -117,7 +129,7 @@ func TestDeactivateUserRevokesSessions(t *testing.T) {
 		t.Fatalf("CreateSession: %v", err)
 	}
 
-	if err := UpdateUser(ctx, db, log, user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if err := UpdateUser(ctx, db, log, access.SessionPrincipal(nil), user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatalf("UpdateUser(deactivate): %v", err)
 	}
 
@@ -144,10 +156,10 @@ func TestDeactivateLastAdminRejected(t *testing.T) {
 	a := newTestAdmin(t, db, "admin-a@example.com")
 	b := newTestAdmin(t, db, "admin-b@example.com")
 
-	if err := UpdateUser(ctx, db, log, a.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if err := UpdateUser(ctx, db, log, access.SessionPrincipal(nil), a.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatalf("deactivating first admin should succeed: %v", err)
 	}
-	if err := UpdateUser(ctx, db, log, b.ID, models.User{Status: models.UserStatusInactive}); !errors.Is(err, ErrCannotDeleteLastAdmin) {
+	if err := UpdateUser(ctx, db, log, access.SessionPrincipal(nil), b.ID, models.User{Status: models.UserStatusInactive}); !errors.Is(err, ErrCannotDeleteLastAdmin) {
 		t.Fatalf("deactivating last admin: err = %v, want ErrCannotDeleteLastAdmin", err)
 	}
 	if n, err := db.CountAdminUsers(ctx); err != nil || n != 1 {
@@ -195,7 +207,7 @@ func TestConcurrentAdminDeactivationKeepsOneAdmin(t *testing.T) {
 	for i := range targets {
 		go func() {
 			defer wg.Done()
-			errs[i] = UpdateUser(ctx, db, log, targets[i], models.User{Status: models.UserStatusInactive})
+			errs[i] = UpdateUser(ctx, db, log, access.SessionPrincipal(nil), targets[i], models.User{Status: models.UserStatusInactive})
 		}()
 	}
 	wg.Wait()
@@ -279,7 +291,7 @@ func TestDemoteAdmin(t *testing.T) {
 			if tc.deactivate {
 				update.Status = models.UserStatusInactive
 			}
-			err := UpdateUser(ctx, db, discardLogger(), admin.ID, update)
+			err := UpdateUser(ctx, db, discardLogger(), access.SessionPrincipal(nil), admin.ID, update)
 			if !errors.Is(err, tc.wantErr) {
 				t.Fatalf("UpdateUser = %v, want %v", err, tc.wantErr)
 			}
@@ -322,7 +334,7 @@ func TestConcurrentAdminDemotionKeepsOneAdmin(t *testing.T) {
 	for i, admin := range admins {
 		go func() {
 			defer wg.Done()
-			errs[i] = UpdateUser(ctx, db, discardLogger(), admin.ID, models.User{Role: models.UserRoleMember})
+			errs[i] = UpdateUser(ctx, db, discardLogger(), access.SessionPrincipal(nil), admin.ID, models.User{Role: models.UserRoleMember})
 		}()
 	}
 	wg.Wait()

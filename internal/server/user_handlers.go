@@ -44,22 +44,22 @@ func (s *Server) handleGetUser(c fiber.Ctx) error {
 func (s *Server) loadHumanUser(c fiber.Ctx) (*models.User, error) {
 	userIDStr := c.Params("userID")
 	if userIDStr == "" {
-		return nil, fiber.NewError(fiber.StatusBadRequest, "User ID is required")
+		return nil, SendError(c, fiber.StatusBadRequest, "User ID is required")
 	}
 	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid user ID format")
+		return nil, SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
 	}
 	user, err := core.GetUser(c.Context(), s.sqlite, userID)
 	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
-			return nil, fiber.NewError(fiber.StatusNotFound, "User not found")
+			return nil, SendError(c, fiber.StatusNotFound, "User not found")
 		}
 		s.log.Error("failed to get user", "error", err, "user_id", userID)
-		return nil, fiber.NewError(fiber.StatusInternalServerError, "Error getting user")
+		return nil, SendError(c, fiber.StatusInternalServerError, "Error getting user")
 	}
 	if user.AccountType == models.UserAccountTypeService {
-		return nil, fiber.NewError(fiber.StatusNotFound, "User not found")
+		return nil, SendError(c, fiber.StatusNotFound, "User not found")
 	}
 	return user, nil
 }
@@ -84,13 +84,14 @@ func (s *Server) handleCreateUser(c fiber.Ctx) error {
 	if role == "" {
 		role = models.UserRoleMember // Default role
 	}
-	if err := core.AuthorizeUserRoleGrant(principalFromLocals(c), role); err != nil {
-		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
-	}
 
 	status := models.UserStatus(req.Status)
 	if status == "" {
 		status = models.UserStatusActive // Default status
+	}
+
+	if err := core.AuthorizeAdminTransition(principalFromLocals(c), models.User{}, models.User{Role: role, Status: status}); err != nil {
+		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 	}
 
 	user, err := core.CreateUser(c.Context(), s.sqlite, s.log, req.Email, req.FullName, role, status)
@@ -142,15 +143,15 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 	if req.Role != nil {
 		updateData.Role = models.UserRole(*req.Role)
 	}
-	if err := core.AuthorizeUserRoleGrant(principalFromLocals(c), updateData.Role); err != nil {
-		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
-	}
 	if req.Status != nil {
 		updateData.Status = models.UserStatus(*req.Status)
 	}
 
-	if err := core.UpdateUser(c.Context(), s.sqlite, s.log, userID, updateData); err != nil {
+	if err := core.UpdateUser(c.Context(), s.sqlite, s.log, principalFromLocals(c), userID, updateData); err != nil {
 		// Handle specific error types from core
+		if errors.Is(err, core.ErrAdminGrantForbidden) {
+			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+		}
 		if errors.Is(err, core.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "User not found")
 		}
