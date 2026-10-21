@@ -91,3 +91,18 @@ func TestLoginRateLimiterConcurrentBudget(t *testing.T) {
 		t.Fatal("email normalization bypassed the shared budget")
 	}
 }
+
+func TestLoginRateLimiterBlockedIPPreservesEmailWindow(t *testing.T) {
+	l := NewLoginRateLimiter(time.Hour, 10, 5)
+	for range 5 {
+		if !l.Allow("victim-ip", "victim@example.com") {
+			t.Fatal("victim budget exhausted early")
+		}
+	}
+	for i := range 10_000 {
+		l.Allow("flood-ip", strconv.Itoa(i)+"@example.com")
+	}
+	if l.Allow("fresh-ip", "victim@example.com") {
+		t.Fatal("blocked IP flood reset victim email limit")
+	}
+}

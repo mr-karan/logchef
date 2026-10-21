@@ -86,7 +86,7 @@ func TestCallbackBoundsUnresponsiveIDP(t *testing.T) {
 			}
 			select {
 			case err := <-result:
-				if !errors.Is(err, ErrOIDCInvalidToken) {
+				if err == nil || errors.Is(err, ErrOIDCInvalidToken) {
 					t.Fatalf("callback error = %v", err)
 				}
 			case <-time.After(time.Second):

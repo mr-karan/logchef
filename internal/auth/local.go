@@ -56,7 +56,5 @@ func NewLoginRateLimiter(window time.Duration, perIP, perEmail int) *LoginRateLi
 func (l *LoginRateLimiter) Allow(ip, email string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	okIP := l.ips.Allow(strings.TrimSpace(ip))
-	okEmail := l.emails.Allow(strings.ToLower(strings.TrimSpace(email)))
-	return okIP && okEmail
+	return l.ips.Allow(strings.TrimSpace(ip)) && l.emails.Allow(strings.ToLower(strings.TrimSpace(email)))
 }

@@ -103,5 +103,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 			}
 		}
 	}
-	t.Logf("session insert failure emitted %d total lines, including shared store and core logs", strings.Count(logs.String(), "\n"))
+	if got := strings.Count(logs.String(), "level=ERROR"); got != 2 {
+		t.Fatalf("session insert failure emitted %d ERROR lines, want 2", got)
+	}
 }

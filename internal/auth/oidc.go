@@ -273,7 +273,11 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	// Exchange authorization code for OAuth2 tokens.
 	oauth2Token, err := p.oauthConf.Exchange(idpCtx, code)
 	if err != nil {
-		return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
+		var rejection *oauth2.RetrieveError
+		if errors.As(err, &rejection) && rejection.Response.StatusCode == http.StatusBadRequest && rejection.ErrorCode == "invalid_grant" {
+			return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
+		}
+		return nil, nil, fmt.Errorf("failed to exchange code for token: %w", err)
 	}
 
 	// Extract and verify the ID Token.
@@ -283,6 +287,10 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	}
 	idToken, err := p.verify(idpCtx, rawIDToken)
 	if err != nil {
+		// go-oidc flattens key-fetch errors with %v at the verifier boundary.
+		if idpCtx.Err() != nil || strings.HasPrefix(err.Error(), "failed to verify signature: fetching keys ") {
+			return nil, nil, fmt.Errorf("failed to verify ID token: %w", err)
+		}
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)
 	}
 
@@ -308,14 +316,14 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		if errors.Is(err, core.ErrUserNotFound) {
 			provisioned, attempted, provErr := autoProvisionUser(ctx, db, log, authCfg.AutoProvision, claims.Email, claims.Name)
 			if provErr != nil {
-				return nil, nil, fmt.Errorf("failed to auto-provision user: %w", provErr)
+				return nil, nil, fmt.Errorf("failed to auto-provision user for email=%s: %w", claims.Email, provErr)
 			}
 			if !attempted {
 				return nil, nil, fmt.Errorf("%w: email=%s", ErrUnauthorizedUser, claims.Email)
 			}
 			user = provisioned
 		} else {
-			return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
+			return nil, nil, fmt.Errorf("failed to lookup user for email=%s: %w", claims.Email, err)
 		}
 	}
 	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
