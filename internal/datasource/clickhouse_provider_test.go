@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -138,5 +139,31 @@ func TestCompileLogchefQLWithoutColumnsDoesNotMutateSource(t *testing.T) {
 	wg.Wait()
 	if source.Columns != nil {
 		t.Fatal("compilation mutated source columns")
+	}
+}
+
+func TestClickHouseProviderSourceMetadata(t *testing.T) {
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	service := NewService(nil, log)
+	service.Register(NewClickHouseProvider(nil, log))
+	source := &models.Source{SourceType: models.SourceTypeClickHouse}
+	if err := service.ApplySourceMetadata(source); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		got, want any
+	}{
+		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL}},
+		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
+		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "ai_sql_generation", "log_context", "exports", "live_tail"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
 	}
 }

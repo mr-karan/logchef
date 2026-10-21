@@ -858,3 +858,30 @@ func TestOrderFieldNamesPrioritizesMetadata(t *testing.T) {
 		t.Fatalf("unexpected ordered fields: got=%v want=%v", got, want)
 	}
 }
+
+func TestProviderSourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	service := datasource.NewService(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	service.Register(newTestProvider(nil))
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs}
+	if err := service.ApplySourceMetadata(source); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		got, want any
+	}{
+		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogsQL}},
+		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
+		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "live_tail", "ai_sql_generation"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
