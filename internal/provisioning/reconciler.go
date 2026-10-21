@@ -48,7 +48,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	// to roll the whole thing back without surfacing an error.
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		// Share the deletion lock because pruning cascades beyond configured users.
-		if err := tx.LockAdminInvariant(ctx); err != nil {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
 		usersByEmail, err := loadProvisioningUsers(ctx, tx, cfg)

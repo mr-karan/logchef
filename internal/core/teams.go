@@ -186,23 +186,30 @@ func UpdateTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID
 }
 
 // DeleteTeam deletes a team and its associations (members, sources, queries).
-func DeleteTeam(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID) error {
-	// Validate team exists
-	_, err := db.GetTeam(ctx, teamID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrTeamNotFound
+func DeleteTeam(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID) error {
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
 		}
-		log.Error("failed to get team for deletion check", "error", err, "team_id", teamID)
-		return fmt.Errorf("error checking existing team: %w", err)
-	}
+		_, err := tx.GetTeam(ctx, teamID)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrTeamNotFound
+			}
+			log.Error("failed to get team for deletion check", "error", err, "team_id", teamID)
+			return fmt.Errorf("error checking existing team: %w", err)
+		}
 
-	log.Warn("deleting team and all associated data", "team_id", teamID)
+		log.Warn("deleting team and all associated data", "team_id", teamID)
 
-	// Delete team (DB constraints should handle cascading deletes for members, sources, queries)
-	if err := db.DeleteTeam(ctx, teamID); err != nil {
-		log.Error("failed to delete team from db", "error", err, "team_id", teamID)
-		return fmt.Errorf("error deleting team: %w", err)
+		if err := tx.DeleteTeam(ctx, teamID); err != nil {
+			log.Error("failed to delete team from db", "error", err, "team_id", teamID)
+			return fmt.Errorf("error deleting team: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 
 	log.Info("team deleted successfully", "team_id", teamID)

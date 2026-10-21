@@ -180,20 +180,30 @@ func UpdateCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 }
 
 // DeleteCollection removes a collection. Owner-only; personal collections are protected.
-func DeleteCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, collectionID int, userID models.UserID) error {
-	collection, role, err := GetCollectionForUser(ctx, db, log, collectionID, userID)
+func DeleteCollection(ctx context.Context, db store.Store, log *slog.Logger, collectionID int, userID models.UserID) error {
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		collection, role, err := GetCollectionForUser(ctx, tx, log, collectionID, userID)
+		if err != nil {
+			return err
+		}
+		if role != models.CollectionRoleOwner {
+			return ErrCollectionForbidden
+		}
+		if collection.IsPersonal {
+			return ErrPersonalCollectionImmutable
+		}
+		if err := tx.DeleteCollection(ctx, collectionID); err != nil {
+			return err
+		}
+		return nil
+	})
 	if err != nil {
 		return err
 	}
-	if role != models.CollectionRoleOwner {
-		return ErrCollectionForbidden
-	}
-	if collection.IsPersonal {
-		return ErrPersonalCollectionImmutable
-	}
-	if err := db.DeleteCollection(ctx, collectionID); err != nil {
-		return err
-	}
+
 	log.Info("collection deleted", "collection_id", collectionID, "user_id", userID)
 	return nil
 }

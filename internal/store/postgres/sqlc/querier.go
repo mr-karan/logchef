@@ -265,7 +265,7 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
 	// Hold a transaction-scoped advisory lock
-	LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error
+	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error

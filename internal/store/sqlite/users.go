@@ -201,8 +201,8 @@ func (db *DB) ListServiceAccounts(ctx context.Context) ([]*models.User, error) {
 	return users, nil
 }
 
-// LockAdminInvariant is a no-op: BEGIN IMMEDIATE already serializes writers.
-func (db *DB) LockAdminInvariant(context.Context) error {
+// LockMembershipWrites is a no-op: BEGIN IMMEDIATE already serializes writers.
+func (db *DB) LockMembershipWrites(context.Context) error {
 	return nil
 }
 

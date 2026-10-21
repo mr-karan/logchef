@@ -181,13 +181,13 @@ func (s *Store) CountAdminUsers(ctx context.Context) (int, error) {
 	return int(count), nil
 }
 
-// adminInvariantLockKey names the advisory lock that guards "at least one active admin".
-const adminInvariantLockKey int64 = 0x6c63_6164_6d69_6e01
+// membershipWritesLockKey names the advisory lock for provisioning, cascading deletes, and admin removals.
+const membershipWritesLockKey int64 = 0x6c63_6164_6d69_6e01
 
-// LockAdminInvariant takes the admin advisory lock, held until the transaction ends.
-func (s *Store) LockAdminInvariant(ctx context.Context) error {
-	if err := s.q.LockAdminInvariant(ctx, adminInvariantLockKey); err != nil {
-		return fmt.Errorf("failed to lock admin invariant: %w", err)
+// LockMembershipWrites holds the membership advisory lock until the transaction ends.
+func (s *Store) LockMembershipWrites(ctx context.Context) error {
+	if err := s.q.LockMembershipWrites(ctx, membershipWritesLockKey); err != nil {
+		return fmt.Errorf("failed to lock membership writes: %w", err)
 	}
 	return nil
 }

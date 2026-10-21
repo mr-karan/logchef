@@ -92,7 +92,7 @@ SELECT * FROM users WHERE account_type = 'service' ORDER BY created_at ASC;
 -- Count active admin users
 SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2;
 
--- name: LockAdminInvariant :exec
+-- name: LockMembershipWrites :exec
 -- Hold a transaction-scoped advisory lock
 SELECT pg_advisory_xact_lock($1);
 

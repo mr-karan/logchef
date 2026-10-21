@@ -275,7 +275,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 	var deactivated bool
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if mayRemoveAdmin {
-			if err := tx.LockAdminInvariant(ctx); err != nil {
+			if err := tx.LockMembershipWrites(ctx); err != nil {
 				return err
 			}
 		}
@@ -360,7 +360,7 @@ func isActiveAdmin(user *models.User) bool {
 	return user.Role == models.UserRoleAdmin && user.Status == models.UserStatusActive
 }
 
-// ensureAnotherActiveAdmin must run under LockAdminInvariant.
+// ensureAnotherActiveAdmin must run under LockMembershipWrites.
 func ensureAnotherActiveAdmin(ctx context.Context, tx store.StoreOps) error {
 	count, err := tx.CountAdminUsers(ctx)
 	if err != nil {
@@ -403,7 +403,7 @@ func applyStatusUpdate(existing *models.User, updateData models.User) (changed, 
 // transaction so a deleted user can never be left with a live session.
 func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		if err := tx.LockAdminInvariant(ctx); err != nil {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
 		existing, err := tx.GetUser(ctx, id)
@@ -441,7 +441,7 @@ func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models
 // DeleteServiceAccount deletes a service principal and its tokens/memberships.
 func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
 	return db.WithTx(ctx, func(tx store.StoreOps) error {
-		if err := tx.LockAdminInvariant(ctx); err != nil {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
 		existing, err := tx.GetUser(ctx, id)

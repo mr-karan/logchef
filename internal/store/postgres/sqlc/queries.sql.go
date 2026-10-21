@@ -3897,13 +3897,13 @@ func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string)
 	return items, nil
 }
 
-const lockAdminInvariant = `-- name: LockAdminInvariant :exec
+const lockMembershipWrites = `-- name: LockMembershipWrites :exec
 SELECT pg_advisory_xact_lock($1)
 `
 
 // Hold a transaction-scoped advisory lock
-func (q *Queries) LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error {
-	_, err := q.db.Exec(ctx, lockAdminInvariant, pgAdvisoryXactLock)
+func (q *Queries) LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error {
+	_, err := q.db.Exec(ctx, lockMembershipWrites, pgAdvisoryXactLock)
 	return err
 }
 
