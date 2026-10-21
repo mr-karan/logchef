@@ -50,23 +50,30 @@ func populateSourceStatuses(ctx context.Context, ds *datasource.Service, sources
 		}
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	// Checks unfinished at the listing deadline remain disconnected.
 	jobs := make(chan *models.Source)
 	var workers sync.WaitGroup
-	for range min(8, len(sources)) {
+	for range min(32, len(sources)) {
 		workers.Go(func() {
 			for source := range jobs {
 				if ctx.Err() != nil {
 					continue
 				}
-				checkCtx, cancel := context.WithTimeout(ctx, time.Second)
-				source.IsConnected = ds.CheckSourceConnectionStatus(checkCtx, source)
-				cancel()
+				source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
 			}
 		})
 	}
 	for _, source := range sources {
 		if source != nil {
-			jobs <- source
+			select {
+			case jobs <- source:
+			case <-ctx.Done():
+				close(jobs)
+				workers.Wait()
+				return nil
+			}
 		}
 	}
 	close(jobs)
@@ -84,7 +91,7 @@ func LoadSource(ctx context.Context, ds *datasource.Service, id models.SourceID)
 		return nil, fmt.Errorf("error getting source: %w", err)
 	}
 	if err := ds.ApplySourceMetadata(source); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("error annotating source features: %w", err)
 	}
 	return source, nil
 }

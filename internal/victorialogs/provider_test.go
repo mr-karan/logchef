@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -907,5 +908,109 @@ func TestHistogramRejectsInvalidWindow(t *testing.T) {
 				t.Fatalf("error=%v, want local window validation", err)
 			}
 		})
+	}
+}
+
+func TestHealthLockWaitRespectsCallerContext(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	provider := newTestProvider(server)
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+	done := make(chan struct{})
+	go func() { defer close(done); provider.CheckSourceConnectionStatus(context.Background(), source) }()
+	<-entered
+	defer func() { close(release); <-done }()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	waiter := make(chan bool, 1)
+	go func() { waiter <- provider.CheckSourceConnectionStatus(ctx, source) }()
+	select {
+	case connected := <-waiter:
+		if connected {
+			t.Error("expired waiter reported connected")
+		}
+	case <-time.After(time.Second):
+		t.Error("health lock waiter ignored caller deadline")
+	}
+	provider.mu.RLock()
+	_, cached := provider.health[source.ID]
+	provider.mu.RUnlock()
+	if cached {
+		t.Error("lock waiter cached a health result")
+	}
+}
+
+func TestHealthCallerCancellationNotCached(t *testing.T) {
+	for _, operation := range []string{"check", "initialize", "get"} {
+		t.Run(operation, func(t *testing.T) {
+			var fail atomic.Bool
+			var calls atomic.Int32
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls.Add(1)
+				if fail.Load() {
+					cancel()
+					<-r.Context().Done()
+					return
+				}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer server.Close()
+			provider := newTestProvider(server)
+			source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+			if operation == "get" {
+				if err := provider.InitializeSource(context.Background(), source); err != nil {
+					t.Fatal(err)
+				}
+				provider.mu.Lock()
+				delete(provider.health, source.ID)
+				provider.mu.Unlock()
+			}
+			fail.Store(true)
+			switch operation {
+			case "check":
+				provider.CheckSourceConnectionStatus(ctx, source)
+			case "initialize":
+				_ = provider.InitializeSource(ctx, source)
+			case "get":
+				provider.GetSourceHealth(ctx, source.ID)
+			}
+			fail.Store(false)
+			health := provider.GetSourceHealth(context.Background(), source.ID)
+			if health.Status != models.HealthStatusHealthy {
+				t.Fatalf("cancelled %s poisoned cache: %+v", operation, health)
+			}
+			if calls.Load() < 2 {
+				t.Errorf("recovery did not make a fresh request: %d", calls.Load())
+			}
+		})
+	}
+}
+
+func TestHealthHTTPFailureCached(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+	provider := newTestProvider(server)
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+	if provider.CheckSourceConnectionStatus(context.Background(), source) {
+		t.Fatal("HTTP failure reported connected")
+	}
+	health := provider.GetSourceHealth(context.Background(), source.ID)
+	if health.Status != models.HealthStatusUnhealthy || calls.Load() != 1 {
+		t.Fatalf("real failure not cached: health=%+v calls=%d", health, calls.Load())
 	}
 }
