@@ -825,26 +825,8 @@ func TestValidate(t *testing.T) {
 	})
 }
 
-// buildFullQuery parses, translates, and builds the executable SQL in one call.
 func buildFullQuery(params QueryBuildParams) (string, error) {
-	start, end, err := prepareTimeRange(params)
-	if err != nil {
-		return "", err
-	}
-
-	pq, parseErr := ParseLogchefQL(params.LogchefQL)
-	if parseErr != nil {
-		return "", convertParticipleError(parseErr)
-	}
-	translateResult := translateAST(ConvertToAST(pq), params.Schema)
-	if !translateResult.Valid {
-		if translateResult.Error != nil {
-			return "", translateResult.Error
-		}
-		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
-	}
-
-	return buildFullQueryFromTranslation(params, start, end, translateResult)
+	return BuildFullQueryFromTranslation(params, Translate(params.LogchefQL, params.Schema))
 }
 
 func TestBuildFullQuery(t *testing.T) {
