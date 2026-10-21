@@ -477,3 +477,63 @@ func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
 		t.Fatal("saved TLS setting did not override option default")
 	}
 }
+
+func TestWebhookTranslationPrefixes(t *testing.T) {
+	for _, address := range []string{
+		"::ffff:0:10.0.0.1",
+		"::ffff:0:127.0.0.1",
+		"::ffff:0:100.64.0.1",
+		"::ffff:0:8.8.8.8",
+		"2001:0:4136:e378:8000:63bf:f5ff:fffe",
+		"2001:0:4136:e378:8000:63bf:80ff:fffe",
+		"2001:0:4136:e378:8000:63bf:f7f7:f7f7",
+	} {
+		t.Run(address, func(t *testing.T) {
+			for _, allowed := range []bool{false, true} {
+				opts := WebhookSenderOptions{Timeout: 50 * time.Millisecond}
+				if allowed {
+					opts.AllowedHosts = webhookTestAllowlist(t, address)
+				}
+				sender := NewWebhookSender(opts)
+				err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{"http://[" + address + "]/"}})
+				sender.client.CloseIdleConnections()
+				blocked := err != nil && strings.Contains(err.Error(), "not allowed")
+				if blocked == allowed {
+					t.Errorf("allowlisted = %t, delivery error = %v; want blocked = %t", allowed, err, !allowed)
+				}
+			}
+		})
+	}
+}
+
+func TestWebhookPolicyDenialLogAndHistory(t *testing.T) {
+	db, alert, logger := newManagerTestAlert(t)
+	var logs bytes.Buffer
+	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+	defer sender.client.CloseIdleConnections()
+	alert.WebhookURLs = []string{"http://127.0.0.1:8888/"}
+	manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
+	if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
+		t.Fatal(err)
+	}
+	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
+	if err != nil || len(history) != 1 {
+		t.Fatalf("history = %v, %v", history, err)
+	}
+	const want = "webhook delivery failed: webhook 1: webhook destination is not allowed"
+	if got := history[0].Payload["delivery_error"]; got != want {
+		t.Errorf("stored delivery error = %v, want %q", got, want)
+	}
+	var entry struct {
+		Level      string `json:"level"`
+		Message    string `json:"msg"`
+		Rule       string `json:"rule"`
+		ResolvedIP string `json:"resolved_ip"`
+	}
+	if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
+		t.Fatalf("want one denial log, got %q: %v", logs.String(), err)
+	}
+	if entry.Level != "WARN" || entry.Message != "webhook destination blocked by policy" || entry.Rule != alert.Name || entry.ResolvedIP != "127.0.0.1" {
+		t.Errorf("denial log = %+v", entry)
+	}
+}

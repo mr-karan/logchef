@@ -115,8 +115,19 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 				if resp.StatusCode != tc.wantStatus {
 					t.Errorf("status = %d, want %d; body = %s", resp.StatusCode, tc.wantStatus, responseBody)
 				}
+				if tc.wantRequests == 0 && strings.Contains(string(responseBody), "127.0.0.1") {
+					t.Errorf("API response leaked resolved IP: %s", responseBody)
+				}
 				if tc.wantRequests == 0 && !strings.Contains(string(responseBody), "not allowed") {
 					t.Errorf("response does not report a blocked destination: %s", responseBody)
+				}
+			}
+			if tc.wantRequests == 0 {
+				if got := strings.Count(logs.String(), `msg="webhook destination blocked by policy"`); got != 2 {
+					t.Errorf("denial logs = %d, want one per request", got)
+				}
+				if !strings.Contains(logs.String(), `level=WARN`) || !strings.Contains(logs.String(), `rule="Test Alert"`) || !strings.Contains(logs.String(), `resolved_ip=127.0.0.1`) {
+					t.Errorf("missing policy denial details in server logs: %s", logs.String())
 				}
 			}
 			if strings.Contains(logs.String(), "secret-userinfo") || strings.Contains(logs.String(), "secret-query") || strings.Contains(logs.String(), "/receiver") {

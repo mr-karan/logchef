@@ -86,7 +86,7 @@ func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
 					}
 					ip := target.Addr()
 					if webhookAddressDenied(ip) {
-						return fmt.Errorf("%w: %s", errWebhookDestinationDenied, ip)
+						return &webhookDestinationDeniedError{ip: ip}
 					}
 					return nil
 				}
@@ -158,6 +158,9 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 			if errors.Is(err, context.Canceled) {
 				return context.Canceled
 			}
+			if denied, ok := errors.AsType[*webhookDestinationDeniedError](err); ok {
+				s.logger.Warn("webhook destination blocked by policy", "rule", notification.AlertName, "resolved_ip", denied.ip.String())
+			}
 			errs = append(errs, fmt.Sprintf("webhook %d: %v", index+1, sanitizeWebhookTransportError(err)))
 			continue
 		}
@@ -190,6 +193,18 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 
 var errWebhookDestinationDenied = errors.New("webhook destination is not allowed")
 
+type webhookDestinationDeniedError struct {
+	ip netip.Addr
+}
+
+func (e *webhookDestinationDeniedError) Error() string {
+	return errWebhookDestinationDenied.Error()
+}
+
+func (e *webhookDestinationDeniedError) Unwrap() error {
+	return errWebhookDestinationDenied
+}
+
 var deniedWebhookPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("0.0.0.0/8"),
 	netip.MustParsePrefix("10.0.0.0/8"),
@@ -206,8 +221,10 @@ var deniedWebhookPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("fc00::/7"),
 	netip.MustParsePrefix("fe80::/10"),
 	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("2001::/32"),
 	netip.MustParsePrefix("2002::/16"),
 	netip.MustParsePrefix("::/96"),
+	netip.MustParsePrefix("::ffff:0:0:0/96"),
 	netip.MustParsePrefix("64:ff9b:1::/48"),
 }
 
