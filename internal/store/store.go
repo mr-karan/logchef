@@ -210,7 +210,6 @@ type QueryShareStore interface {
 type ProvisioningStore interface {
 	IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error)
 	IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error)
-	IsUserManaged(ctx context.Context, id models.UserID) (bool, error)
 
 	ListManagedSources(ctx context.Context) ([]*models.Source, error)
 	ListManagedTeams(ctx context.Context) ([]*models.Team, error)

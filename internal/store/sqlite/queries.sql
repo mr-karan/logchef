@@ -331,14 +331,6 @@ FROM saved_queries sq
 JOIN sources s ON s.id = sq.source_id
 ORDER BY sq.updated_at DESC;
 
--- name: ListAccessibleSourceIDsForUser :many
--- Source IDs the user can reach via any team, used to mark runnable on browse
--- lists without an N+1 access check per row.
-SELECT DISTINCT ts.source_id
-FROM team_sources ts
-JOIN team_members tm ON tm.team_id = ts.team_id
-WHERE tm.user_id = ?;
-
 -- Query Shares
 
 -- name: CreateQueryShare :exec
@@ -749,10 +741,6 @@ SELECT * FROM sources WHERE managed = 1 ORDER BY id;
 -- Get all teams managed by provisioning config
 SELECT * FROM teams WHERE managed = 1 ORDER BY id;
 
--- name: ListManagedUsers :many
--- Get all users managed by provisioning config
-SELECT * FROM users WHERE managed = 1 ORDER BY id;
-
 -- name: SetSourceManaged :exec
 -- Mark a source as managed/unmanaged and set secret_ref
 UPDATE sources SET managed = ?, secret_ref = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
@@ -772,10 +760,6 @@ SELECT managed FROM sources WHERE id = ?;
 -- name: IsTeamManaged :one
 -- Check if a team is managed
 SELECT managed FROM teams WHERE id = ?;
-
--- name: IsUserManaged :one
--- Check if a user is managed
-SELECT managed FROM users WHERE id = ?;
 
 -- name: GetSourceByNameForProvisioning :one
 -- Get source by name for provisioning lookup

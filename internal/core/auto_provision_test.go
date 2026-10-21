@@ -29,8 +29,8 @@ func TestGetOrCreateAutoProvisionedUser_Creates(t *testing.T) {
 	if user.AccountType != models.UserAccountTypeHuman {
 		t.Errorf("account_type = %q, want %q", user.AccountType, models.UserAccountTypeHuman)
 	}
-	if managed, err := db.IsUserManaged(ctx, user.ID); err != nil || managed {
-		t.Errorf("auto-provisioned user must be unmanaged, managed=%v err=%v", managed, err)
+	if user.Managed {
+		t.Error("auto-provisioned user must be unmanaged")
 	}
 }
 

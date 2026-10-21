@@ -26,15 +26,6 @@ func (s *Store) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, erro
 	return managed, nil
 }
 
-// IsUserManaged returns true if the user is managed by provisioning config.
-func (s *Store) IsUserManaged(ctx context.Context, id models.UserID) (bool, error) {
-	managed, err := s.q.IsUserManaged(ctx, int64(id))
-	if err != nil {
-		return false, err
-	}
-	return managed, nil
-}
-
 // ListManagedSources returns all sources currently marked managed.
 func (s *Store) ListManagedSources(ctx context.Context) ([]*models.Source, error) {
 	rows, err := s.q.ListManagedSources(ctx)

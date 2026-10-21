@@ -2260,18 +2260,6 @@ func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (int64, error) {
 	return managed, err
 }
 
-const isUserManaged = `-- name: IsUserManaged :one
-SELECT managed FROM users WHERE id = ?
-`
-
-// Check if a user is managed
-func (q *Queries) IsUserManaged(ctx context.Context, id int64) (int64, error) {
-	row := q.queryRow(ctx, q.isUserManagedStmt, isUserManaged, id)
-	var managed int64
-	err := row.Scan(&managed)
-	return managed, err
-}
-
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
 SELECT id, user_id, name, token_hash, prefix, last_used_at, expires_at, created_at, updated_at, scopes FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC
 `
@@ -2301,38 +2289,6 @@ func (q *Queries) ListAPITokensForUser(ctx context.Context, userID int64) ([]Api
 			return nil, err
 		}
 		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listAccessibleSourceIDsForUser = `-- name: ListAccessibleSourceIDsForUser :many
-SELECT DISTINCT ts.source_id
-FROM team_sources ts
-JOIN team_members tm ON tm.team_id = ts.team_id
-WHERE tm.user_id = ?
-`
-
-// Source IDs the user can reach via any team, used to mark runnable on browse
-// lists without an N+1 access check per row.
-func (q *Queries) ListAccessibleSourceIDsForUser(ctx context.Context, userID int64) ([]int64, error) {
-	rows, err := q.query(ctx, q.listAccessibleSourceIDsForUserStmt, listAccessibleSourceIDsForUser, userID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []int64{}
-	for rows.Next() {
-		var source_id int64
-		if err := rows.Scan(&source_id); err != nil {
-			return nil, err
-		}
-		items = append(items, source_id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -3063,47 +3019,6 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.Managed,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE managed = 1 ORDER BY id
-`
-
-// Get all users managed by provisioning config
-func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.query(ctx, q.listManagedUsersStmt, listManagedUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.FullName,
-			&i.Role,
-			&i.Status,
-			&i.LastLoginAt,
-			&i.LastActiveAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Managed,
-			&i.AccountType,
-			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}

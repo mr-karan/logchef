@@ -282,14 +282,8 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.isTeamManagedStmt, err = db.PrepareContext(ctx, isTeamManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query IsTeamManaged: %w", err)
 	}
-	if q.isUserManagedStmt, err = db.PrepareContext(ctx, isUserManaged); err != nil {
-		return nil, fmt.Errorf("error preparing query IsUserManaged: %w", err)
-	}
 	if q.listAPITokensForUserStmt, err = db.PrepareContext(ctx, listAPITokensForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListAPITokensForUser: %w", err)
-	}
-	if q.listAccessibleSourceIDsForUserStmt, err = db.PrepareContext(ctx, listAccessibleSourceIDsForUser); err != nil {
-		return nil, fmt.Errorf("error preparing query ListAccessibleSourceIDsForUser: %w", err)
 	}
 	if q.listActiveAlertsDueStmt, err = db.PrepareContext(ctx, listActiveAlertsDue); err != nil {
 		return nil, fmt.Errorf("error preparing query ListActiveAlertsDue: %w", err)
@@ -329,9 +323,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.listManagedTeamsStmt, err = db.PrepareContext(ctx, listManagedTeams); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedTeams: %w", err)
-	}
-	if q.listManagedUsersStmt, err = db.PrepareContext(ctx, listManagedUsers); err != nil {
-		return nil, fmt.Errorf("error preparing query ListManagedUsers: %w", err)
 	}
 	if q.listOAuthGrantsForUserStmt, err = db.PrepareContext(ctx, listOAuthGrantsForUser); err != nil {
 		return nil, fmt.Errorf("error preparing query ListOAuthGrantsForUser: %w", err)
@@ -948,19 +939,9 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing isTeamManagedStmt: %w", cerr)
 		}
 	}
-	if q.isUserManagedStmt != nil {
-		if cerr := q.isUserManagedStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing isUserManagedStmt: %w", cerr)
-		}
-	}
 	if q.listAPITokensForUserStmt != nil {
 		if cerr := q.listAPITokensForUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listAPITokensForUserStmt: %w", cerr)
-		}
-	}
-	if q.listAccessibleSourceIDsForUserStmt != nil {
-		if cerr := q.listAccessibleSourceIDsForUserStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listAccessibleSourceIDsForUserStmt: %w", cerr)
 		}
 	}
 	if q.listActiveAlertsDueStmt != nil {
@@ -1026,11 +1007,6 @@ func (q *Queries) Close() error {
 	if q.listManagedTeamsStmt != nil {
 		if cerr := q.listManagedTeamsStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedTeamsStmt: %w", cerr)
-		}
-	}
-	if q.listManagedUsersStmt != nil {
-		if cerr := q.listManagedUsersStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listManagedUsersStmt: %w", cerr)
 		}
 	}
 	if q.listOAuthGrantsForUserStmt != nil {
@@ -1458,9 +1434,7 @@ type Queries struct {
 	insertQueryHistoryStmt                     *sql.Stmt
 	isSourceManagedStmt                        *sql.Stmt
 	isTeamManagedStmt                          *sql.Stmt
-	isUserManagedStmt                          *sql.Stmt
 	listAPITokensForUserStmt                   *sql.Stmt
-	listAccessibleSourceIDsForUserStmt         *sql.Stmt
 	listActiveAlertsDueStmt                    *sql.Stmt
 	listAlertHistoryStmt                       *sql.Stmt
 	listAlertsBySourceStmt                     *sql.Stmt
@@ -1474,7 +1448,6 @@ type Queries struct {
 	listExpiredExportJobPathsStmt              *sql.Stmt
 	listManagedSourcesStmt                     *sql.Stmt
 	listManagedTeamsStmt                       *sql.Stmt
-	listManagedUsersStmt                       *sql.Stmt
 	listOAuthGrantsForUserStmt                 *sql.Stmt
 	listQueryActivityStmt                      *sql.Stmt
 	listQueryHistoryStmt                       *sql.Stmt
@@ -1627,9 +1600,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		insertQueryHistoryStmt:                     q.insertQueryHistoryStmt,
 		isSourceManagedStmt:                        q.isSourceManagedStmt,
 		isTeamManagedStmt:                          q.isTeamManagedStmt,
-		isUserManagedStmt:                          q.isUserManagedStmt,
 		listAPITokensForUserStmt:                   q.listAPITokensForUserStmt,
-		listAccessibleSourceIDsForUserStmt:         q.listAccessibleSourceIDsForUserStmt,
 		listActiveAlertsDueStmt:                    q.listActiveAlertsDueStmt,
 		listAlertHistoryStmt:                       q.listAlertHistoryStmt,
 		listAlertsBySourceStmt:                     q.listAlertsBySourceStmt,
@@ -1643,7 +1614,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listExpiredExportJobPathsStmt:              q.listExpiredExportJobPathsStmt,
 		listManagedSourcesStmt:                     q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                       q.listManagedTeamsStmt,
-		listManagedUsersStmt:                       q.listManagedUsersStmt,
 		listOAuthGrantsForUserStmt:                 q.listOAuthGrantsForUserStmt,
 		listQueryActivityStmt:                      q.listQueryActivityStmt,
 		listQueryHistoryStmt:                       q.listQueryHistoryStmt,

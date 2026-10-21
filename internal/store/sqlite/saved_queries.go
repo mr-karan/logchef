@@ -167,21 +167,6 @@ func (db *DB) ListAllSavedQueries(ctx context.Context) ([]*models.SavedQuery, er
 	return queries, nil
 }
 
-// ListAccessibleSourceIDsForUser returns the set of source IDs the user can reach
-// via any team, for marking `runnable` on browse lists without an N+1 check.
-func (db *DB) ListAccessibleSourceIDsForUser(ctx context.Context, userID models.UserID) (map[models.SourceID]bool, error) {
-	rows, err := db.readQueries.ListAccessibleSourceIDsForUser(ctx, int64(userID))
-	if err != nil {
-		db.log.Error("failed to list accessible source ids", "error", err, "user_id", userID)
-		return nil, fmt.Errorf("error listing accessible source ids: %w", err)
-	}
-	set := make(map[models.SourceID]bool, len(rows))
-	for _, id := range rows {
-		set[models.SourceID(id)] = true
-	}
-	return set, nil
-}
-
 // ListSavedQueriesForUserBySource returns saved queries for one source, scoped to a user's access.
 func (db *DB) ListSavedQueriesForUserBySource(ctx context.Context, userID models.UserID, sourceID models.SourceID) ([]*models.SavedQuery, error) {
 	rows, err := db.readQueries.ListSavedQueriesForUserBySource(ctx, sqlc.ListSavedQueriesForUserBySourceParams{
