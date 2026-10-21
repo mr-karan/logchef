@@ -243,9 +243,13 @@ function formatYAxisTick(value: number | Date) {
   return formatCompactCount(Number(value));
 }
 
-function formatXAxisTick(value: number | Date) {
-  return formatHistogramTimestamp(value, chartRange.value, currentGranularity.value);
-}
+// Unovis redraws the axis only when the formatter itself changes, so build a
+// new one whenever the range or zone does.
+const formatXAxisTick = computed(() => {
+  const range = chartRange.value;
+  const granularity = currentGranularity.value;
+  return (value: number | Date) => formatHistogramTimestamp(value, range, granularity);
+});
 </script>
 
 <template>

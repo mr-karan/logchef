@@ -128,9 +128,10 @@ const crosshairYProps = computed(() =>
     : { y: seriesAccessors.value }
 );
 
+// Labels follow the preference zone; the queried instants do not depend on it.
 const chartRange = computed(() => {
-  if (plotRange.value) return plotRange.value;
-  const zone = props.range?.zone ?? preferencesStore.zone;
+  const zone = preferencesStore.zone;
+  if (plotRange.value) return { ...plotRange.value, zone };
   if (!chartModel.value.rows.length) {
     return { start: Date.now() - chartModel.value.bucketWidthMs, end: Date.now(), zone };
   }
@@ -198,9 +199,13 @@ const tooltipTemplate = computed(() => {
 function formatYAxisTick(value: number | Date) {
   return formatCompactCount(Number(value));
 }
-function formatXAxisTick(value: number | Date) {
-  return formatHistogramTimestamp(value, chartRange.value, props.granularity ?? undefined);
-}
+// Unovis redraws the axis only when the formatter itself changes, so build a
+// new one whenever the range or zone does.
+const formatXAxisTick = computed(() => {
+  const range = chartRange.value;
+  const granularity = props.granularity ?? undefined;
+  return (value: number | Date) => formatHistogramTimestamp(value, range, granularity);
+});
 </script>
 
 <template>
