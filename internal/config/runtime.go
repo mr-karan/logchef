@@ -31,33 +31,31 @@ func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, settings store
 		return &cfg
 	}
 
-	reader := store.SettingsReader{SettingGetter: settings}
-
 	// Override with database settings for runtime-configurable values
 
 	// Alerts configuration (only essential scheduling settings in config struct)
 	// SMTP and delivery settings are read directly from DB by the alerts manager
-	cfg.Alerts.Enabled = reader.GetBoolSetting(ctx, "alerts.enabled", cfg.Alerts.Enabled)
-	cfg.Alerts.EvaluationInterval = reader.GetDurationSetting(ctx, "alerts.evaluation_interval", cfg.Alerts.EvaluationInterval)
-	cfg.Alerts.DefaultLookback = reader.GetDurationSetting(ctx, "alerts.default_lookback", cfg.Alerts.DefaultLookback)
-	cfg.Alerts.HistoryLimit = reader.GetIntSetting(ctx, "alerts.history_limit", cfg.Alerts.HistoryLimit)
+	cfg.Alerts.Enabled = store.GetBoolSetting(ctx, settings, "alerts.enabled", cfg.Alerts.Enabled)
+	cfg.Alerts.EvaluationInterval = store.GetDurationSetting(ctx, settings, "alerts.evaluation_interval", cfg.Alerts.EvaluationInterval)
+	cfg.Alerts.DefaultLookback = store.GetDurationSetting(ctx, settings, "alerts.default_lookback", cfg.Alerts.DefaultLookback)
+	cfg.Alerts.HistoryLimit = store.GetIntSetting(ctx, settings, "alerts.history_limit", cfg.Alerts.HistoryLimit)
 
 	// AI configuration
-	cfg.AI.Enabled = reader.GetBoolSetting(ctx, "ai.enabled", cfg.AI.Enabled)
-	cfg.AI.APIKey = reader.GetSettingWithDefault(ctx, "ai.api_key", cfg.AI.APIKey)
-	cfg.AI.BaseURL = reader.GetSettingWithDefault(ctx, "ai.base_url", cfg.AI.BaseURL)
-	cfg.AI.Model = reader.GetSettingWithDefault(ctx, "ai.model", cfg.AI.Model)
-	cfg.AI.MaxTokens = reader.GetIntSetting(ctx, "ai.max_tokens", cfg.AI.MaxTokens)
-	cfg.AI.Temperature = float32(reader.GetFloat64Setting(ctx, "ai.temperature", float64(cfg.AI.Temperature)))
-	cfg.AI.ReasoningEffort = reader.GetSettingWithDefault(ctx, "ai.reasoning_effort", cfg.AI.ReasoningEffort)
+	cfg.AI.Enabled = store.GetBoolSetting(ctx, settings, "ai.enabled", cfg.AI.Enabled)
+	cfg.AI.APIKey = store.GetSettingWithDefault(ctx, settings, "ai.api_key", cfg.AI.APIKey)
+	cfg.AI.BaseURL = store.GetSettingWithDefault(ctx, settings, "ai.base_url", cfg.AI.BaseURL)
+	cfg.AI.Model = store.GetSettingWithDefault(ctx, settings, "ai.model", cfg.AI.Model)
+	cfg.AI.MaxTokens = store.GetIntSetting(ctx, settings, "ai.max_tokens", cfg.AI.MaxTokens)
+	cfg.AI.Temperature = float32(store.GetFloat64Setting(ctx, settings, "ai.temperature", float64(cfg.AI.Temperature)))
+	cfg.AI.ReasoningEffort = store.GetSettingWithDefault(ctx, settings, "ai.reasoning_effort", cfg.AI.ReasoningEffort)
 
 	// Auth session management
-	cfg.Auth.SessionDuration = reader.GetDurationSetting(ctx, "auth.session_duration", cfg.Auth.SessionDuration)
-	cfg.Auth.MaxConcurrentSessions = reader.GetIntSetting(ctx, "auth.max_concurrent_sessions", cfg.Auth.MaxConcurrentSessions)
-	cfg.Auth.DefaultTokenExpiry = reader.GetDurationSetting(ctx, "auth.default_token_expiry", cfg.Auth.DefaultTokenExpiry)
+	cfg.Auth.SessionDuration = store.GetDurationSetting(ctx, settings, "auth.session_duration", cfg.Auth.SessionDuration)
+	cfg.Auth.MaxConcurrentSessions = store.GetIntSetting(ctx, settings, "auth.max_concurrent_sessions", cfg.Auth.MaxConcurrentSessions)
+	cfg.Auth.DefaultTokenExpiry = store.GetDurationSetting(ctx, settings, "auth.default_token_expiry", cfg.Auth.DefaultTokenExpiry)
 
 	// Server frontend URL
-	frontendURL := reader.GetSettingWithDefault(ctx, "server.frontend_url", cfg.Server.FrontendURL)
+	frontendURL := store.GetSettingWithDefault(ctx, settings, "server.frontend_url", cfg.Server.FrontendURL)
 	if frontendURL != "" {
 		cfg.Server.FrontendURL = frontendURL
 	}

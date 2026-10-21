@@ -9,7 +9,7 @@ import (
 )
 
 type DynamicEmailSender struct {
-	settings store.SettingsReader
+	settings store.SettingGetter
 	logger   *slog.Logger
 }
 
@@ -18,22 +18,22 @@ func NewDynamicEmailSender(settings store.SettingGetter, logger *slog.Logger) *D
 		logger = slog.Default()
 	}
 	return &DynamicEmailSender{
-		settings: store.SettingsReader{SettingGetter: settings},
+		settings: settings,
 		logger:   logger.With("component", "dynamic_email_sender"),
 	}
 }
 
 func (d *DynamicEmailSender) Send(ctx context.Context, notification AlertNotification) error {
 	opts := EmailSenderOptions{
-		Host:          d.settings.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
-		Port:          d.settings.GetIntSetting(ctx, "alerts.smtp_port", 587),
-		Username:      d.settings.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
-		Password:      d.settings.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
-		From:          d.settings.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
-		ReplyTo:       d.settings.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
-		Security:      d.settings.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
-		Timeout:       d.settings.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: d.settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Host:          store.GetSettingWithDefault(ctx, d.settings, "alerts.smtp_host", ""),
+		Port:          store.GetIntSetting(ctx, d.settings, "alerts.smtp_port", 587),
+		Username:      store.GetSettingWithDefault(ctx, d.settings, "alerts.smtp_username", ""),
+		Password:      store.GetSettingWithDefault(ctx, d.settings, "alerts.smtp_password", ""),
+		From:          store.GetSettingWithDefault(ctx, d.settings, "alerts.smtp_from", ""),
+		ReplyTo:       store.GetSettingWithDefault(ctx, d.settings, "alerts.smtp_reply_to", ""),
+		Security:      store.GetSettingWithDefault(ctx, d.settings, "alerts.smtp_security", "starttls"),
+		Timeout:       store.GetDurationSetting(ctx, d.settings, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(ctx, d.settings, "alerts.tls_insecure_skip_verify", false),
 		Logger:        d.logger,
 	}
 	sender := NewEmailSender(opts)

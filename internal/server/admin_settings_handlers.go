@@ -394,17 +394,16 @@ type TestWebhookRequest struct {
 }
 
 func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
-	settings := store.SettingsReader{SettingGetter: s.sqlite}
 	return alerts.EmailSenderOptions{
-		Host:          settings.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
-		Port:          settings.GetIntSetting(ctx, "alerts.smtp_port", 587),
-		Username:      settings.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
-		Password:      settings.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
-		From:          settings.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
-		ReplyTo:       settings.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
-		Security:      settings.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
-		Timeout:       settings.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Host:          store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_host", ""),
+		Port:          store.GetIntSetting(ctx, s.sqlite, "alerts.smtp_port", 587),
+		Username:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_username", ""),
+		Password:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_password", ""),
+		From:          store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_from", ""),
+		ReplyTo:       store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_reply_to", ""),
+		Security:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_security", "starttls"),
+		Timeout:       store.GetDurationSetting(ctx, s.sqlite, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(ctx, s.sqlite, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	}
 }
@@ -507,10 +506,9 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
 
-	settings := store.SettingsReader{SettingGetter: s.sqlite}
 	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       settings.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: settings.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
+		Timeout:       store.GetDurationSetting(c.Context(), s.sqlite, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(c.Context(), s.sqlite, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	})
 

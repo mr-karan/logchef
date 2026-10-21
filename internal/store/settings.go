@@ -11,13 +11,8 @@ type SettingGetter interface {
 	GetSetting(ctx context.Context, key string) (string, error)
 }
 
-// SettingsReader parses settings and falls back to caller-provided defaults.
-type SettingsReader struct {
-	SettingGetter
-}
-
 // GetSettingWithDefault retrieves a setting value or returns the default on a read error.
-func (s SettingsReader) GetSettingWithDefault(ctx context.Context, key, defaultValue string) string {
+func GetSettingWithDefault(ctx context.Context, s SettingGetter, key, defaultValue string) string {
 	value, err := s.GetSetting(ctx, key)
 	if err != nil {
 		return defaultValue
@@ -26,7 +21,7 @@ func (s SettingsReader) GetSettingWithDefault(ctx context.Context, key, defaultV
 }
 
 // GetBoolSetting retrieves a boolean setting value.
-func (s SettingsReader) GetBoolSetting(ctx context.Context, key string, defaultValue bool) bool {
+func GetBoolSetting(ctx context.Context, s SettingGetter, key string, defaultValue bool) bool {
 	value, err := s.GetSetting(ctx, key)
 	if err != nil {
 		return defaultValue
@@ -39,7 +34,7 @@ func (s SettingsReader) GetBoolSetting(ctx context.Context, key string, defaultV
 }
 
 // GetIntSetting retrieves an integer setting value.
-func (s SettingsReader) GetIntSetting(ctx context.Context, key string, defaultValue int) int {
+func GetIntSetting(ctx context.Context, s SettingGetter, key string, defaultValue int) int {
 	value, err := s.GetSetting(ctx, key)
 	if err != nil {
 		return defaultValue
@@ -52,7 +47,7 @@ func (s SettingsReader) GetIntSetting(ctx context.Context, key string, defaultVa
 }
 
 // GetFloat64Setting retrieves a float64 setting value.
-func (s SettingsReader) GetFloat64Setting(ctx context.Context, key string, defaultValue float64) float64 {
+func GetFloat64Setting(ctx context.Context, s SettingGetter, key string, defaultValue float64) float64 {
 	value, err := s.GetSetting(ctx, key)
 	if err != nil {
 		return defaultValue
@@ -64,8 +59,8 @@ func (s SettingsReader) GetFloat64Setting(ctx context.Context, key string, defau
 	return floatVal
 }
 
-// GetDurationSetting retrieves a duration setting value.
-func (s SettingsReader) GetDurationSetting(ctx context.Context, key string, defaultValue time.Duration) time.Duration {
+// GetDurationSetting retrieves a duration setting value; zero and negative values fall back to the default.
+func GetDurationSetting(ctx context.Context, s SettingGetter, key string, defaultValue time.Duration) time.Duration {
 	value, err := s.GetSetting(ctx, key)
 	if err != nil {
 		return defaultValue

@@ -9,7 +9,7 @@ import (
 )
 
 type DynamicWebhookSender struct {
-	settings store.SettingsReader
+	settings store.SettingGetter
 	logger   *slog.Logger
 }
 
@@ -18,15 +18,15 @@ func NewDynamicWebhookSender(settings store.SettingGetter, logger *slog.Logger) 
 		logger = slog.Default()
 	}
 	return &DynamicWebhookSender{
-		settings: store.SettingsReader{SettingGetter: settings},
+		settings: settings,
 		logger:   logger.With("component", "dynamic_webhook_sender"),
 	}
 }
 
 func (d *DynamicWebhookSender) Send(ctx context.Context, notification AlertNotification) error {
 	opts := WebhookSenderOptions{
-		Timeout:       d.settings.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: d.settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Timeout:       store.GetDurationSetting(ctx, d.settings, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(ctx, d.settings, "alerts.tls_insecure_skip_verify", false),
 		Logger:        d.logger,
 	}
 	sender := NewWebhookSender(opts)
