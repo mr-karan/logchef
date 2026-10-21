@@ -209,10 +209,10 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 						// A caller that went away is not a server failure.
 						wantStatus = http.StatusRequestTimeout
 						wantErrorType = models.ExternalServiceErrorType
-					case failure.name == "unsupported" || (endpoint == "logs" && failure.name == "validation"):
+					case failure.name == "unsupported" || failure.name == "validation":
 						wantStatus = http.StatusBadRequest
 						wantErrorType = models.ValidationErrorType
-					case endpoint == "logs" && failure.name == "source missing":
+					case failure.name == "source missing":
 						wantStatus = http.StatusNotFound
 						wantErrorType = models.NotFoundErrorType
 					}

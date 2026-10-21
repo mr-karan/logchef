@@ -183,34 +183,38 @@ func (qt *QueryTracker) Cleanup() {
 	}
 }
 
-// sendQueryRequestError writes a 400 for a core.QueryRequestError.
-func sendQueryRequestError(c fiber.Ctx, err error) error {
-	return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-}
+const logsQueryFailure = "Failed to query logs"
 
-func (s *Server) handleLogsQueryError(c fiber.Ctx, sourceID models.SourceID, err error) error {
+// sendQueryError writes the response for an error from preparing or running a
+// query. failure is the message for an error the caller cannot fix; its detail
+// goes to the log only, since driver and upstream text can name hosts and users.
+func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error, failure string) error {
+	if reqErr, ok := errors.AsType[*core.QueryRequestError](err); ok {
+		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
+	}
 	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	}
+	switch {
 	// A cached fill surfaces the caller's own cancellation, which the explorer
 	// and dashboard both trigger on every re-query. That is not a failure.
-	if errors.Is(err, context.Canceled) {
+	case errors.Is(err, context.Canceled):
 		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
+	case errors.Is(err, context.DeadlineExceeded):
 		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, core.ErrSourceNotFound) {
+	case errors.Is(err, core.ErrSourceNotFound):
 		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+	case errors.Is(err, core.ErrLogchefQLNotSupported):
+		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
+	case errors.Is(err, datasource.ErrOperationNotSupported):
+		return SendErrorWithType(c, fiber.StatusBadRequest, "This operation is not supported for this source type yet", models.ValidationErrorType)
+	case errors.Is(err, models.ErrHistogramBudgetExceeded):
+		return SendErrorWithType(c, fiber.StatusBadRequest, models.ErrHistogramBudgetExceeded.Error(), models.ValidationErrorType)
+	case datasource.IsValidationError(err):
+		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	if errors.Is(err, datasource.ErrOperationNotSupported) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
-	}
-	if datasource.IsValidationError(err) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, fmt.Sprintf("Invalid request: %v", err), models.ValidationErrorType)
-	}
-	s.log.Error("failed to query logs", "error", err, "source_id", sourceID)
-	return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to query logs: %v", err), models.DatabaseErrorType)
+	s.log.Error("query failed", "error", err, "source_id", sourceID, "path", c.Path())
+	return SendErrorWithType(c, fiber.StatusInternalServerError, failure, models.DatabaseErrorType)
 }
 
 // handleQueryLogs handles requests to query logs for a specific source.
@@ -235,7 +239,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 
 	params, err := core.PrepareSQLQuery(s.config.Query, req)
 	if err != nil {
-		return sendQueryRequestError(c, err)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
 	}
 	processedQuery := params.RawQuery
 
@@ -245,14 +249,10 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
 	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
 	}
 	if err := datasource.ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
-		return s.handleLogsQueryError(c, sourceID, err)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
 	}
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
 	// cache key is computed from the finalized (post-substitution) executable
@@ -326,7 +326,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.handleLogsQueryError(c, sourceID, err)
+			return s.sendQueryError(c, sourceID, err, logsQueryFailure)
 		}
 	}
 
@@ -357,7 +357,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// Execute query via core function with cancellable context.
 	result, err := core.QueryLogs(queryCtx, s.datasources, src, params)
 	if err != nil {
-		return s.handleLogsQueryError(c, sourceID, err)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
 	}
 
 	// Log successful query execution

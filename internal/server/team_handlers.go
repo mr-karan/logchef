@@ -61,8 +61,8 @@ func (s *Server) handleCreateTeam(c fiber.Ctx) error {
 		if errors.Is(err, core.ErrTeamAlreadyExists) {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
-		if errors.Is(err, &core.ValidationError{}) { // Check for core validation errors
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
 		s.log.Error("failed to create team", "error", err, "name", req.Name)
 		return SendError(c, fiber.StatusInternalServerError, "Error creating team")
@@ -108,8 +108,8 @@ func (s *Server) handleUpdateTeam(c fiber.Ctx) error {
 		if errors.Is(err, core.ErrTeamAlreadyExists) {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
-		if errors.Is(err, &core.ValidationError{}) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
 		}
 		s.log.Error("failed to update team", "error", err, "team_id", teamID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to update team")
@@ -189,7 +189,7 @@ func (s *Server) handleAddTeamMember(c fiber.Ctx) error {
 		if errors.Is(err, core.ErrUserNotFound) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "User specified not found", models.ValidationErrorType)
 		}
-		if errors.Is(err, core.ErrInvalidRole) || errors.Is(err, &core.ValidationError{}) {
+		if _, ok := errors.AsType[*core.ValidationError](err); ok || errors.Is(err, core.ErrInvalidRole) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
 		// Handle potential already-exists non-error case implicitly (core function returns nil)

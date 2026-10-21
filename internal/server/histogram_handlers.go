@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -15,9 +13,10 @@ import (
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
-	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+const histogramFailure = "Failed to generate histogram data"
 
 // handleGetHistogram generates histogram data (log counts over time intervals) for a specific source.
 // Access is controlled by the requireTeamHasSource middleware.
@@ -36,7 +35,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 
 	params, err := core.PrepareHistogram(req)
 	if err != nil {
-		return sendQueryRequestError(c, err)
+		return s.sendQueryError(c, sourceID, err, histogramFailure)
 	}
 
 	// Dashboard panel requests may opt into the per-dashboard result cache.
@@ -74,7 +73,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 			if handled, err := s.tryServeDashboardCache(c, key, effTTL, core.HistogramTimeout, fill); handled {
 				return err
 			} else if err != nil {
-				return s.handleHistogramError(c, sourceID, err)
+				return s.sendQueryError(c, sourceID, err, histogramFailure)
 			}
 		}
 	}
@@ -93,7 +92,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 			s.log.Warn("histogram request timed out", "source_id", sourceID, "timeout", core.HistogramTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
-		return s.handleHistogramError(c, sourceID, err)
+		return s.sendQueryError(c, sourceID, err, histogramFailure)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
@@ -116,45 +115,4 @@ func (s *Server) executeHistogram(ctx context.Context, class QueryClass, src acc
 	}
 	defer queryTracker.RemoveQuery(queryID)
 	return core.GetHistogramData(ctx, s.datasources, src, params)
-}
-
-// handleHistogramError maps a core.GetHistogramData error to the appropriate
-// HTTP error response.
-func (s *Server) handleHistogramError(c fiber.Ctx, sourceID models.SourceID, err error) error {
-	if errors.Is(err, context.Canceled) {
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, models.ErrHistogramBudgetExceeded) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	}
-	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
-		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
-	}
-	if errors.Is(err, core.ErrSourceNotFound) {
-		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-	}
-	if errors.Is(err, datasource.ErrOperationNotSupported) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Histogram is not supported for this source type yet", models.ValidationErrorType)
-	}
-	if datasource.IsValidationError(err) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	}
-
-	// Check for specific error types
-	switch {
-	case strings.Contains(err.Error(), "query parameter is required"):
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Query parameter is required for histogram data", models.ValidationErrorType)
-	case strings.Contains(err.Error(), "invalid histogram window"):
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	case strings.Contains(err.Error(), "invalid"):
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
-	default:
-		// Handle other errors
-		s.log.Error("failed to get histogram data", "error", err, "source_id", sourceID)
-		// Pass the actual error message to the client for better debugging
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Failed to generate histogram data: %v", err), models.DatabaseErrorType)
-	}
 }

@@ -25,6 +25,8 @@ type windowedQueryRequest struct {
 	SkipWindow    *int                 `json:"skip_window,omitempty"`
 }
 
+const windowedQueryFailure = "Windowed query failed"
+
 func (s *Server) handleStreamFields(c fiber.Ctx) error {
 	src, ok := s.authorizedSource(c)
 	if !ok {
@@ -34,7 +36,7 @@ func (s *Server) handleStreamFields(c fiber.Ctx) error {
 	defer cancel()
 	fields, err := s.datasources.StreamFields(ctx, src.SourceID())
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Could not discover stream fields", models.ExternalServiceErrorType)
+		return s.sendQueryError(c, src.SourceID(), err, "Could not discover stream fields")
 	}
 	return SendSuccess(c, fiber.StatusOK, fields)
 }
@@ -50,7 +52,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 	}
 	source, err := core.GetSource(c.Context(), s.datasources, src.SourceID())
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
 	}
 	if !source.IsVictoriaLogs() {
 		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, "Windowed search requires a VictoriaLogs source", models.ValidationErrorType)
@@ -61,7 +63,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 			Query: req.QueryText, StartTime: req.StartTime, EndTime: req.EndTime, Timezone: req.Timezone, Limit: req.Limit, QueryTimeout: req.QueryTimeout, Variables: req.Variables,
 		})
 		if err != nil {
-			return s.handleLogchefQLQueryError(c, src.SourceID(), err)
+			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
 		}
 		params = prepared.Params
 	} else {
@@ -70,7 +72,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		}
 		params, err = core.PrepareSQLQuery(s.config.Query, req.APIQueryRequest)
 		if err != nil {
-			return sendQueryRequestError(c, err)
+			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
 		}
 	}
 	plan, err := s.datasources.PrepareWindowedQuery(c.Context(), src.SourceID(), datasource.WindowedRequest{
@@ -80,7 +82,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, "Windowing is disabled or this query contains pipes. Run it through the standard query endpoint.", models.ValidationErrorType)
 	}
 	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
 	}
 	user := c.Locals("user").(*models.User)
 	class := QueryClassPreview

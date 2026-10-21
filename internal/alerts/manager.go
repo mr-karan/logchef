@@ -510,17 +510,11 @@ func (m *Manager) ManualResolve(ctx context.Context, alertID models.AlertID, mes
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
-		if models.IsNotFound(err) {
-			return fmt.Errorf("no active alert to resolve")
-		}
 		return fmt.Errorf("failed to find unresolved alert history: %w", err)
 	}
 
 	// Update the history entry in the database
 	if err := m.db.ResolveAlertHistory(ctx, entry.ID, message); err != nil {
-		if models.IsNotFound(err) {
-			return fmt.Errorf("alert history entry not found")
-		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
 	}
 

@@ -75,7 +75,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		Limit:     req.Limit,
 	})
 	if err != nil {
-		return s.sendLogchefQLPrepareError(c, src.SourceID(), err, "Failed to translate query")
+		return s.sendQueryError(c, src.SourceID(), err, "Failed to translate query")
 	}
 
 	response := TranslateResponse{
@@ -143,27 +143,6 @@ func substituteTranslateVariables(req *TranslateRequest) error {
 	return nil
 }
 
-// sendLogchefQLPrepareError writes the response for an error from
-// core.PrepareLogchefQLQuery or core.TranslateLogchefQL. compileFailure is the
-// message for a datasource compile failure.
-func (s *Server) sendLogchefQLPrepareError(c fiber.Ctx, sourceID models.SourceID, err error, compileFailure string) error {
-	if reqErr, ok := errors.AsType[*core.QueryRequestError](err); ok {
-		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
-	}
-	if errors.Is(err, core.ErrSourceNotFound) {
-		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-	}
-	if errors.Is(err, core.ErrLogchefQLNotSupported) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
-	}
-	if _, ok := errors.AsType[*core.LogchefQLCompileError](err); ok {
-		s.log.Error("failed to compile logchefql query", "error", err, "source_id", sourceID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, compileFailure, models.GeneralErrorType)
-	}
-	s.log.Error("failed to get source", "error", err, "source_id", sourceID)
-	return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
-}
-
 // handleLogchefQLValidate validates a LogchefQL query without translating to SQL.
 // This is a lightweight endpoint for real-time validation in the editor.
 //
@@ -185,24 +164,7 @@ func (s *Server) handleLogchefQLValidate(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, response)
 }
 
-func (s *Server) handleLogchefQLQueryError(c fiber.Ctx, sourceID models.SourceID, err error) error {
-	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
-		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
-	}
-	// A cached fill surfaces the caller's own cancellation, which the explorer
-	// and dashboard both trigger on every re-query. That is not a failure.
-	if errors.Is(err, context.Canceled) {
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, datasource.ErrOperationNotSupported) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Querying is not supported for this source type yet", models.ValidationErrorType)
-	}
-	s.log.Error("failed to execute logchefql query", "error", err, "source_id", sourceID)
-	return SendErrorWithType(c, fiber.StatusInternalServerError, "Query execution failed: "+err.Error(), models.DatabaseErrorType)
-}
+const logchefQLQueryFailure = "Query execution failed"
 
 // handleLogchefQLQuery executes a LogchefQL query directly.
 // This is an alternative to the existing logs/query endpoint that accepts raw SQL.
@@ -228,7 +190,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 
 	prepared, err := core.PrepareLogchefQLQuery(c.Context(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
-		return s.sendLogchefQLPrepareError(c, sourceID, err, "Failed to compile query")
+		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure)
 	}
 	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
 	executableQuery := compiled.Query
@@ -320,7 +282,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.handleLogchefQLQueryError(c, sourceID, err)
+			return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure)
 		}
 	}
 
@@ -351,7 +313,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	// Execute via core function
 	result, err := core.QueryLogs(queryCtx, s.datasources, src, queryParams)
 	if err != nil {
-		return s.handleLogchefQLQueryError(c, sourceID, err)
+		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure)
 	}
 
 	// Log successful query execution

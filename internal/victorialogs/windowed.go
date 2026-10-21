@@ -128,7 +128,7 @@ func (p *Provider) PrepareWindowedQuery(source *models.Source, req datasource.Wi
 	windows := make([]datasource.SearchWindow, 0)
 	for end := *req.EndTime; end.After(*req.StartTime); {
 		if len(windows) == maxSearchWindows {
-			return nil, fmt.Errorf("time range exceeds %d search windows", maxSearchWindows)
+			return nil, &datasource.ValidationError{Field: "time_range", Message: fmt.Sprintf("time range exceeds %d search windows", maxSearchWindows)}
 		}
 		start := end.Add(-width)
 		if start.Before(*req.StartTime) {
@@ -170,15 +170,15 @@ func validateWindowedRequest(req *datasource.WindowedRequest) error {
 		return datasource.ErrOperationNotSupported
 	}
 	if req.StartTime == nil || req.EndTime == nil || !req.StartTime.Before(*req.EndTime) {
-		return fmt.Errorf("windowed search requires start_time before end_time")
+		return &datasource.ValidationError{Field: "start_time", Message: "windowed search requires start_time before end_time"}
 	}
 	if req.Count {
 		step, err := time.ParseDuration(req.Step)
 		if err != nil || step < time.Second {
-			return fmt.Errorf("count step must be at least 1s")
+			return &datasource.ValidationError{Field: "step", Message: "count step must be at least 1s"}
 		}
 		if req.EndTime.Sub(*req.StartTime)/step > 1000 {
-			return fmt.Errorf("count step produces more than 1000 buckets")
+			return &datasource.ValidationError{Field: "step", Message: "count step produces more than 1000 buckets"}
 		}
 		req.Step = step.String()
 	}
@@ -194,37 +194,37 @@ func restoreWindowCursor(plan *datasource.WindowedPlan) error {
 	}
 	if req.WindowIndex != nil {
 		if *req.WindowIndex < 0 || *req.WindowIndex >= len(plan.Windows) {
-			return fmt.Errorf("window_index is outside the selected range")
+			return &datasource.ValidationError{Field: "window_index", Message: "window_index is outside the selected range"}
 		}
 		if !req.Count && (req.Cursor == "" || *req.WindowIndex != plan.Index) {
-			return fmt.Errorf("search retries require a cursor for the selected window")
+			return &datasource.ValidationError{Field: "cursor", Message: "search retries require a cursor for the selected window"}
 		}
 		plan.Index = *req.WindowIndex
 	}
 	if req.SkipWindow != nil && (req.Count || *req.SkipWindow != plan.Index) {
-		return fmt.Errorf("only the current search window can be skipped")
+		return &datasource.ValidationError{Field: "skip_window", Message: "only the current search window can be skipped"}
 	}
 	return nil
 }
 
 func decodeWindowCursor(plan *datasource.WindowedPlan, encoded string) error {
 	if len(encoded) > 2048 {
-		return fmt.Errorf("invalid search cursor")
+		return &datasource.ValidationError{Field: "cursor", Message: "invalid search cursor"}
 	}
 	data, err := base64.RawURLEncoding.DecodeString(encoded)
 	if err != nil {
-		return fmt.Errorf("invalid search cursor")
+		return &datasource.ValidationError{Field: "cursor", Message: "invalid search cursor"}
 	}
 	var cursor windowCursor
 	if err := json.Unmarshal(data, &cursor); err != nil || cursor.Fingerprint != plan.Fingerprint || cursor.Index < 0 || cursor.Index >= len(plan.Windows) || cursor.Skip < 0 || cursor.Skip > math.MaxInt-plan.Request.Limit-1 {
-		return fmt.Errorf("search cursor does not match this query or source")
+		return &datasource.ValidationError{Field: "cursor", Message: "search cursor does not match this query or source"}
 	}
 	plan.Index = cursor.Index
 	if cursor.Skip > 0 {
 		window := plan.Windows[cursor.Index]
 		position := datasource.WindowPosition{Time: time.Unix(0, cursor.TimeNanos).UTC(), Skip: cursor.Skip}
 		if position.Time.Before(window.Start) || !position.Time.Before(window.End) {
-			return fmt.Errorf("search cursor does not match this query or source")
+			return &datasource.ValidationError{Field: "cursor", Message: "search cursor does not match this query or source"}
 		}
 		plan.Position = position
 	}

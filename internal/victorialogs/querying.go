@@ -1056,6 +1056,11 @@ func (p *Provider) doFormRequest(ctx context.Context, conn models.VictoriaLogsCo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// VictoriaLogs answers 400 when it cannot parse the query or its
+		// arguments; that reason is the caller's to fix.
+		if resp.StatusCode == http.StatusBadRequest {
+			return nil, &datasource.ValidationError{Field: "victorialogs", Message: strings.TrimSpace(string(body))}
+		}
 		return nil, fmt.Errorf("victorialogs request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return resp, nil

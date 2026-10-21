@@ -98,7 +98,7 @@ func TestHistogramErrorResponses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			app := fiber.New()
 			s := &Server{}
-			app.Get("/", func(c fiber.Ctx) error { return s.handleHistogramError(c, 1, tc.err) })
+			app.Get("/", func(c fiber.Ctx) error { return s.sendQueryError(c, 1, tc.err, histogramFailure) })
 			response, err := app.Test(httptest.NewRequest(http.MethodGet, "/", http.NoBody))
 			if err != nil {
 				t.Fatal(err)

@@ -217,7 +217,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 
 	if s.alertsManager != nil {
 		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, strings.TrimSpace(req.Message)); err != nil {
-			if strings.Contains(err.Error(), "no active alert") {
+			if models.IsNotFound(err) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
 			s.log.Error("failed to manually resolve alert", "alert_id", alert.ID, "error", err)
@@ -309,8 +309,7 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
-		s.log.Error("failed to test alert query", "source_id", req.SourceID, "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
+		return s.sendQueryError(c, req.SourceID, err, "Failed to test alert query")
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
