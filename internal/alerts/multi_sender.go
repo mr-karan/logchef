@@ -32,7 +32,7 @@ func (m MultiSender) Send(ctx context.Context, notification AlertNotification) e
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("notification delivery failed: %s", strings.Join(errs, "; "))
+		return boundedDeliveryError(fmt.Errorf("notification delivery failed: %s", strings.Join(errs, "; ")))
 	}
 	return nil
 }

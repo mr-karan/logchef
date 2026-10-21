@@ -41,6 +41,7 @@ type ServerOptions struct {
 	SQLite        store.Store
 	ClickHouse    *clickhouse.Manager
 	Datasources   *datasource.Service
+	WebhookSender *alerts.DynamicWebhookSender
 	AlertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	OIDCProvider  *auth.OIDCProvider // OIDC provider for authentication flows.
 	OAuth         *oauth.Server      // OAuth authorization server; nil when auth.oauth is disabled.
@@ -61,6 +62,7 @@ type Server struct {
 	sqlite        store.Store
 	clickhouse    *clickhouse.Manager
 	datasources   *datasource.Service
+	webhookSender *alerts.DynamicWebhookSender
 	alertsManager *alerts.Manager    // Alerts manager for manual resolution and notifications.
 	oidcProvider  *auth.OIDCProvider // Handles OIDC authentication logic.
 	oauth         *oauth.Server      // nil when auth.oauth is disabled
@@ -162,6 +164,7 @@ func New(opts ServerOptions) *Server {
 		clickhouse:    opts.ClickHouse,
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,
+		webhookSender: opts.WebhookSender,
 		oidcProvider:  opts.OIDCProvider,
 		oauth:         opts.OAuth,
 		fs:            opts.FS,

@@ -574,3 +574,32 @@ func TestLoadWebhookAllowedHosts(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadRejectsInvalidWebhookAllowedHosts(t *testing.T) {
+	for _, entry := range []string{"example.com:443", "https://example.com", "example.com/path", "bad host", "", "[::1]:80", "host?token=value", "fe80::1%eth0", "bad\thost", "-host", "host..example", "host#fragment"} {
+		t.Run(entry, func(t *testing.T) {
+			_, err := Load(writeConfig(t, fmt.Sprintf("\n[alerts]\nwebhook_allowed_hosts = [%q]\n", entry)))
+			if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("%q", entry)) {
+				t.Fatalf("Load invalid entry %q = %v; want startup error naming entry", entry, err)
+			}
+		})
+	}
+}
+
+func TestLoadCanonicalWebhookAllowlist(t *testing.T) {
+	cfg, err := Load(writeConfig(t, `
+[alerts]
+webhook_allowed_hosts = [" LOCALHOST. ", "2001:0db8:0000::1", "::ffff:127.0.0.1"]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"localhost", "LOCALHOST.", "2001:db8::1", "127.0.0.1", "::ffff:7f00:1"} {
+		if !cfg.Alerts.WebhookAllowlist.Contains(host) {
+			t.Errorf("allowlist does not match canonical host %q", host)
+		}
+	}
+	if cfg.Alerts.WebhookAllowlist.Contains("example.com") {
+		t.Error("unlisted hostname accepted")
+	}
+}

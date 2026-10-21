@@ -5,25 +5,28 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/config"
 )
 
 type DynamicWebhookSender struct {
 	settings      SettingsReader
 	logger        *slog.Logger
-	allowedHosts  []string
+	allowedHosts  config.WebhookAllowlist
 	mu            sync.Mutex
 	sender        *WebhookSender
 	timeout       time.Duration
 	skipTLSVerify bool
 }
 
-func NewDynamicWebhookSender(settings SettingsReader, logger *slog.Logger, allowedHosts ...string) *DynamicWebhookSender {
+func NewDynamicWebhookSender(settings SettingsReader, opts WebhookSenderOptions) *DynamicWebhookSender {
+	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &DynamicWebhookSender{
 		settings:     settings,
-		allowedHosts: append([]string(nil), allowedHosts...),
+		allowedHosts: opts.AllowedHosts,
 		logger:       logger.With("component", "dynamic_webhook_sender"),
 	}
 }

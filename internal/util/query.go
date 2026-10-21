@@ -35,6 +35,7 @@ func ExtractFirstNumeric(result *models.QueryResult) (float64, error) {
 	return value, nil
 }
 
+// Alert thresholds use float64, so integers wider than 53 bits can lose precision.
 func convertToFloat64(raw any) (float64, error) {
 	value := reflect.ValueOf(raw)
 	if value.Kind() == reflect.Pointer {

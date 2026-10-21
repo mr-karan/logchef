@@ -446,13 +446,6 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
 
-	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
-		Logger:        s.log,
-		AllowedHosts:  s.config.Alerts.WebhookAllowedHosts,
-	})
-
 	// Build test notification
 	notification := alerts.AlertNotification{
 		AlertName:      "Test Alert",
@@ -472,12 +465,12 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	}
 
 	// Send test webhook
-	if err := sender.Send(c.Context(), notification); err != nil {
-		s.log.Error("failed to send test webhook", "error", err, "url", webhookURL, "user", user.Email)
+	if err := s.webhookSender.Send(c.Context(), notification); err != nil {
+		s.log.Error("failed to send test webhook", "error", err, "host", parsedURL.Hostname(), "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test webhook: %v", err))
 	}
 
-	s.log.Info("test webhook sent successfully", "url", webhookURL, "user", user.Email)
+	s.log.Info("test webhook sent successfully", "host", parsedURL.Hostname(), "user", user.Email)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
 		"message": "Test webhook sent successfully",
 		"url":     webhookURL,

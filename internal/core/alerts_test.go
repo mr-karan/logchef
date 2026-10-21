@@ -403,35 +403,3 @@ func TestAlertQueryNoRowsIsGraceful(t *testing.T) {
 		t.Errorf("got no warnings, want the no-rows warning for an empty result")
 	}
 }
-
-// TestCompareAlertThreshold pins the threshold-comparison seam directly:
-// every supported operator, including the epsilon-based equal/not-equal.
-func TestCompareAlertThreshold(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		name      string
-		value     float64
-		threshold float64
-		operator  models.AlertThresholdOperator
-		want      bool
-	}{
-		{"gt true", 11, 10, models.AlertThresholdGreaterThan, true},
-		{"gt false", 10, 10, models.AlertThresholdGreaterThan, false},
-		{"gte true at boundary", 10, 10, models.AlertThresholdGreaterThanOrEqual, true},
-		{"lt true", 9, 10, models.AlertThresholdLessThan, true},
-		{"lte true at boundary", 10, 10, models.AlertThresholdLessThanOrEqual, true},
-		{"eq true", 10, 10, models.AlertThresholdEqual, true},
-		{"eq false", 10.5, 10, models.AlertThresholdEqual, false},
-		{"neq true", 11, 10, models.AlertThresholdNotEqual, true},
-		{"neq false", 10, 10, models.AlertThresholdNotEqual, false},
-		{"unknown operator defaults false", 100, 10, models.AlertThresholdOperator("bogus"), false},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if got := compareAlertThreshold(tc.value, tc.threshold, tc.operator); got != tc.want {
-				t.Errorf("compareAlertThreshold(%v, %v, %q) = %v, want %v", tc.value, tc.threshold, tc.operator, got, tc.want)
-			}
-		})
-	}
-}

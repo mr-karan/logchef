@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
+	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -27,7 +29,9 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 		allowedHosts []string
 		wantStatus   int
 		wantRequests int32
+		malformed    bool
 	}{
+		{name: "malformed status error bounded", allowedHosts: []string{"127.0.0.1"}, wantStatus: http.StatusBadGateway, wantRequests: 1, malformed: true},
 		{name: "loopback denied by default", wantStatus: http.StatusBadGateway},
 		{name: "unrelated allowlist does not permit loopback", allowedHosts: []string{"example.com"}, wantStatus: http.StatusBadGateway},
 		{name: "allowlisted loopback permitted", allowedHosts: []string{"127.0.0.1"}, wantStatus: http.StatusOK, wantRequests: 1},
@@ -36,16 +40,35 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 			t.Parallel()
 
 			var requests atomic.Int32
-			receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			var connections atomic.Int32
+			receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				requests.Add(1)
+				if tc.malformed {
+					connection, buffer, err := w.(http.Hijacker).Hijack()
+					if err != nil {
+						t.Error(err)
+						return
+					}
+					defer connection.Close()
+					_, _ = buffer.WriteString("HTTP/1.1 " + strings.Repeat("x", 10000) + "\r\n\r\n")
+					_ = buffer.Flush()
+					return
+				}
 				if r.Method != http.MethodPost {
 					t.Errorf("webhook method = %s, want POST", r.Method)
 				}
 				w.WriteHeader(http.StatusNoContent)
 			}))
+			receiver.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+				if state == http.StateNew {
+					connections.Add(1)
+				}
+			}
+			receiver.Start()
 			t.Cleanup(receiver.Close)
 
-			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewTextHandler(&logs, nil))
 			db, err := sqlite.New(t.Context(), sqlite.Options{
 				Logger: logger,
 				Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "settings.db")},
@@ -55,10 +78,14 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 			}
 			t.Cleanup(func() { _ = db.Close() })
 
+			allowlist, err := config.ParseWebhookAllowlist(tc.allowedHosts)
+			if err != nil {
+				t.Fatal(err)
+			}
 			s := &Server{
-				config: &config.Config{Alerts: config.AlertsConfig{WebhookAllowedHosts: tc.allowedHosts}},
-				sqlite: db,
-				log:    logger,
+				webhookSender: alerts.NewDynamicWebhookSender(db, alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}),
+				sqlite:        db,
+				log:           logger,
 			}
 			app := fiber.New()
 			app.Post("/api/v1/admin/settings/test-webhook", func(c fiber.Ctx) error {
@@ -66,29 +93,40 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 				return s.handleTestWebhook(c)
 			})
 
-			body, err := json.Marshal(TestWebhookRequest{WebhookURL: receiver.URL})
-			if err != nil {
-				t.Fatal(err)
+			for range 2 {
+				body, err := json.Marshal(TestWebhookRequest{WebhookURL: strings.Replace(receiver.URL, "://", "://user:secret-userinfo@", 1) + "/receiver?token=secret-query"})
+				if err != nil {
+					t.Fatal(err)
+				}
+				req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/test-webhook", bytes.NewReader(body))
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				responseBody, err := io.ReadAll(resp.Body)
+				_ = resp.Body.Close()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.malformed && (len(responseBody) > 1024 || strings.Contains(string(responseBody), strings.Repeat("x", 100))) {
+					t.Errorf("API response retained malformed-status parser text, length %d", len(responseBody))
+				}
+				if resp.StatusCode != tc.wantStatus {
+					t.Errorf("status = %d, want %d; body = %s", resp.StatusCode, tc.wantStatus, responseBody)
+				}
+				if tc.wantRequests == 0 && !strings.Contains(string(responseBody), "not allowed") {
+					t.Errorf("response does not report a blocked destination: %s", responseBody)
+				}
 			}
-			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/test-webhook", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			resp, err := app.Test(req)
-			if err != nil {
-				t.Fatal(err)
+			if strings.Contains(logs.String(), "secret-userinfo") || strings.Contains(logs.String(), "secret-query") || strings.Contains(logs.String(), "/receiver") {
+				t.Errorf("webhook URL credentials leaked in logs: %s", logs.String())
 			}
-			defer resp.Body.Close()
-			responseBody, err := io.ReadAll(resp.Body)
-			if err != nil {
-				t.Fatal(err)
+			if tc.wantStatus == http.StatusOK && connections.Load() != 1 {
+				t.Errorf("admin notifications used %d connections, want one shared connection", connections.Load())
 			}
-			if resp.StatusCode != tc.wantStatus {
-				t.Errorf("status = %d, want %d; body = %s", resp.StatusCode, tc.wantStatus, responseBody)
-			}
-			if tc.wantRequests == 0 && !strings.Contains(string(responseBody), "not allowed") {
-				t.Errorf("response does not report a blocked destination: %s", responseBody)
-			}
-			if got := requests.Load(); got != tc.wantRequests {
-				t.Errorf("webhook requests = %d, want %d", got, tc.wantRequests)
+			if got := requests.Load(); got != 2*tc.wantRequests {
+				t.Errorf("webhook requests = %d, want %d", got, 2*tc.wantRequests)
 			}
 		})
 	}

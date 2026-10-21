@@ -6,9 +6,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -421,5 +423,25 @@ func TestManagerSkipsRemainingAlertsAfterCancellation(t *testing.T) {
 	manager.evaluateCycle(ctx)
 	if evaluations != 1 {
 		t.Errorf("evaluated %d alerts after cancellation; want one", evaluations)
+	}
+}
+
+func TestCanceledEvaluationDoesNotRecordFailure(t *testing.T) {
+	db, alert, _ := newManagerTestAlert(t)
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
+	manager.evalFn = func(ctx context.Context, current *models.Alert) error {
+		err := fmt.Errorf("query failed: %w", context.Canceled)
+		manager.recordEvaluationError(ctx, current, err)
+		return err
+	}
+	manager.evaluateCycle(t.Context())
+	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("cancellation created failure history = %v, %v", history, err)
+	}
+	if strings.Contains(logs.String(), `"level":"ERROR"`) {
+		t.Fatalf("cancellation logged an evaluation error: %s", logs.String())
 	}
 }

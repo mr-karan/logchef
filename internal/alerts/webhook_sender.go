@@ -11,19 +11,20 @@ import (
 	"net"
 	"net/http"
 	"net/netip"
-	"net/url"
 	"strings"
 	"syscall"
 	"time"
 
 	"log/slog"
+
+	"github.com/mr-karan/logchef/internal/config"
 )
 
 type WebhookSenderOptions struct {
 	Timeout       time.Duration
 	SkipTLSVerify bool
 	Logger        *slog.Logger
-	AllowedHosts  []string
+	AllowedHosts  config.WebhookAllowlist
 }
 
 const maxWebhookResponseBytes = 4096
@@ -61,10 +62,6 @@ func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
 	if timeout <= 0 {
 		timeout = 5 * time.Second
 	}
-	allowedHosts := make(map[string]bool, len(opts.AllowedHosts))
-	for _, host := range opts.AllowedHosts {
-		allowedHosts[strings.ToLower(strings.TrimSuffix(host, "."))] = true
-	}
 	transport := &http.Transport{
 		TLSClientConfig:        &tls.Config{InsecureSkipVerify: opts.SkipTLSVerify}, // #nosec G402
 		IdleConnTimeout:        30 * time.Second,
@@ -79,16 +76,16 @@ func NewWebhookSender(opts WebhookSenderOptions) *WebhookSender {
 				return nil, err
 			}
 			dialer := &net.Dialer{Timeout: timeout, KeepAlive: 30 * time.Second}
-			if !allowedHosts[strings.ToLower(strings.TrimSuffix(host, "."))] {
+			if !opts.AllowedHosts.Contains(host) {
 				// ControlContext checks the resolved IP used by this socket, preventing DNS rebinding.
 				dialer.ControlContext = func(_ context.Context, _, address string, _ syscall.RawConn) error {
 					target, err := netip.ParseAddrPort(address)
 					if err != nil {
 						return err
 					}
-					ip := target.Addr().Unmap()
-					if !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
-						return fmt.Errorf("webhook destination %s is not allowed", ip)
+					ip := target.Addr()
+					if webhookAddressDenied(ip) {
+						return fmt.Errorf("%w: %s", errWebhookDestinationDenied, ip)
 					}
 					return nil
 				}
@@ -157,17 +154,17 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 		request.Header.Set("Content-Type", "application/json")
 		response, err := s.client.Do(request)
 		if err != nil {
-			if urlErr, ok := errors.AsType[*url.Error](err); ok {
-				err = urlErr.Err
+			if errors.Is(err, context.Canceled) {
+				return context.Canceled
 			}
-			errs = append(errs, fmt.Sprintf("webhook %d: %v", index+1, err))
+			errs = append(errs, fmt.Sprintf("webhook %d: %v", index+1, sanitizeWebhookTransportError(err)))
 			continue
 		}
 		responseBody, readErr := io.ReadAll(io.LimitReader(response.Body, maxWebhookResponseBytes+1))
 		_ = response.Body.Close()
 		if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
 			if readErr != nil {
-				errs = append(errs, fmt.Sprintf("webhook %d: status %d (body read error: %v)", index+1, response.StatusCode, readErr))
+				errs = append(errs, fmt.Sprintf("webhook %d: status %d (body read error: %v)", index+1, response.StatusCode, sanitizeWebhookTransportError(readErr)))
 				continue
 			}
 			truncated := len(responseBody) > maxWebhookResponseBytes
@@ -186,7 +183,70 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 		}
 	}
 	if len(errs) > 0 {
-		return fmt.Errorf("webhook delivery failed: %s", strings.Join(errs, "; "))
+		return boundedDeliveryError(fmt.Errorf("webhook delivery failed: %s", strings.Join(errs, "; ")))
 	}
 	return nil
+}
+
+var errWebhookDestinationDenied = errors.New("webhook destination is not allowed")
+
+var deniedWebhookPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"),
+	netip.MustParsePrefix("10.0.0.0/8"),
+	netip.MustParsePrefix("100.64.0.0/10"),
+	netip.MustParsePrefix("127.0.0.0/8"),
+	netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("172.16.0.0/12"),
+	netip.MustParsePrefix("192.0.0.0/24"),
+	netip.MustParsePrefix("192.168.0.0/16"),
+	netip.MustParsePrefix("198.18.0.0/15"),
+	netip.MustParsePrefix("240.0.0.0/4"),
+	netip.MustParsePrefix("::/128"),
+	netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("fc00::/7"),
+	netip.MustParsePrefix("fe80::/10"),
+	netip.MustParsePrefix("fec0::/10"),
+	netip.MustParsePrefix("2002::/16"),
+	netip.MustParsePrefix("::/96"),
+}
+
+var translatedWebhookPrefixes = []netip.Prefix{
+	netip.MustParsePrefix("64:ff9b::/96"),
+	netip.MustParsePrefix("64:ff9b:1::/48"),
+}
+
+func webhookAddressDenied(ip netip.Addr) bool {
+	ip = ip.Unmap().WithZone("")
+	for _, prefix := range translatedWebhookPrefixes {
+		if prefix.Contains(ip) {
+			addressBytes := ip.As16()
+			ip = netip.AddrFrom4([4]byte{addressBytes[12], addressBytes[13], addressBytes[14], addressBytes[15]})
+			break
+		}
+	}
+	if !ip.IsGlobalUnicast() {
+		return true
+	}
+	for _, prefix := range deniedWebhookPrefixes {
+		if prefix.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func sanitizeWebhookTransportError(err error) error {
+	if errors.Is(err, errWebhookDestinationDenied) {
+		return errWebhookDestinationDenied
+	}
+	if errors.Is(err, context.Canceled) {
+		return context.Canceled
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return context.DeadlineExceeded
+	}
+	if networkErr, ok := errors.AsType[net.Error](err); ok && networkErr.Timeout() {
+		return errors.New("request timed out")
+	}
+	return errors.New("HTTP request failed")
 }

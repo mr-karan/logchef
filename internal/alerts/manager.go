@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -127,6 +128,9 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 	alerts, err := m.db.ListActiveAlertsDue(ctx)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		m.log.Error("failed to fetch alerts for evaluation", "error", err)
 		return
 	}
@@ -138,7 +142,7 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
+		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil && !errors.Is(err, context.Canceled) {
 			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
 	}
@@ -211,7 +215,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 }
 
 func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert, evalErr error) {
-	if alert == nil || evalErr == nil {
+	if alert == nil || evalErr == nil || errors.Is(evalErr, context.Canceled) {
 		return
 	}
 
@@ -321,7 +325,9 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	} else {
 		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
-	if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, historyPayload); err != nil {
+	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	if err := m.db.UpdateAlertHistoryPayload(bookkeepingCtx, history.ID, historyPayload); err != nil {
 		m.log.Error("failed to update alert history payload after delivery", "alert_id", alert.ID, "history_id", history.ID, "error", err)
 	}
 
@@ -424,7 +430,7 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 	}
 
 	notification := m.buildNotification(ctx, alert, history, labels, annotations, status, value)
-	return m.sender.Send(ctx, notification)
+	return boundedDeliveryError(m.sender.Send(ctx, notification))
 }
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
