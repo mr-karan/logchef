@@ -46,11 +46,6 @@ func (m *ClickHouseMetrics) RecordConnectionValidation(success bool) {
 	RecordClickHouseValidation(m.source, success)
 }
 
-// RecordReconnection records reconnection attempt metrics
-func (m *ClickHouseMetrics) RecordReconnection(success bool) {
-	RecordClickHouseReconnection(m.source, success)
-}
-
 // UpdateConnectionStatus updates the connection health status
 func (m *ClickHouseMetrics) UpdateConnectionStatus(healthy bool) {
 	RecordClickHouseConnectionStatus(m.source, healthy)

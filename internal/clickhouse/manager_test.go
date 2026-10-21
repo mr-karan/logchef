@@ -23,6 +23,7 @@ type testProxy struct {
 	upstream string
 	addr     string
 	silent   atomic.Bool
+	accepted atomic.Int64
 
 	mu    sync.Mutex
 	ln    net.Listener
@@ -53,6 +54,7 @@ func (p *testProxy) start() {
 				return
 			}
 			p.track(conn)
+			p.accepted.Add(1)
 			if p.silent.Load() {
 				continue
 			}
@@ -140,16 +142,14 @@ func addTestSource(t *testing.T, m *Manager, id models.SourceID, host string) *C
 	return client
 }
 
-func waitForHealth(t *testing.T, m *Manager, id models.SourceID, timeout time.Duration, done func(models.SourceHealth) bool) models.SourceHealth {
+func waitForHealth(t *testing.T, m *Manager, id models.SourceID, timeout time.Duration, want healthState) {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for {
-		health := m.GetCachedHealth(id)
-		if done(health) || time.Now().After(deadline) {
-			return health
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	waitForCondition(t, timeout, func() bool {
+		m.healthMux.RLock()
+		defer m.healthMux.RUnlock()
+		state, exists := m.health[id]
+		return exists && state == want
+	})
 }
 
 // The driver pool redials after the server comes back; the client needs no
@@ -195,18 +195,31 @@ func TestHungQueryDoesNotStallHealthOrQueriesClickHouse(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close() })
 	const id models.SourceID = 1
 	client := addTestSource(t, m, id, proxy.addr)
-	initial := waitForHealth(t, m, id, 5*time.Second, func(h models.SourceHealth) bool { return h.Error != "Initial connection pending" })
-	if initial.Status != models.HealthStatusUnhealthy {
-		t.Fatalf("silent server reported %s", initial.Status)
-	}
+	waitForHealth(t, m, id, 5*time.Second, healthUnhealthy)
 
 	hungCtx, cancelHung := context.WithTimeout(context.Background(), 30*time.Second)
-	t.Cleanup(cancelHung)
-	go func() { _, _ = client.Query(hungCtx, "SELECT 1") }()
-	time.Sleep(100 * time.Millisecond)
+	hungDone := make(chan struct{})
+	t.Cleanup(func() {
+		cancelHung()
+		select {
+		case <-hungDone:
+		case <-time.After(5 * time.Second):
+			t.Error("hung query did not stop after cancellation")
+		}
+	})
+	accepted := proxy.accepted.Load()
+	go func() {
+		_, _ = client.Query(hungCtx, "SELECT 1")
+		close(hungDone)
+	}()
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > accepted })
+	m.checkAllSourcesHealth()
+	select {
+	case <-hungDone:
+		t.Fatal("query ended before the server recovered")
+	default:
+	}
 	m.StartBackgroundHealthChecks(time.Second)
-	// Let the first background check fail against the silent server.
-	time.Sleep(1500 * time.Millisecond)
 	proxy.silent.Store(false)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -218,10 +231,7 @@ func TestHungQueryDoesNotStallHealthOrQueriesClickHouse(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("query after recovery took %s", elapsed)
 	}
-	health := waitForHealth(t, m, id, 4*time.Second, func(h models.SourceHealth) bool { return h.Status == models.HealthStatusHealthy })
-	if health.Status != models.HealthStatusHealthy {
-		t.Fatalf("health loop stalled: %+v", health)
-	}
+	waitForHealth(t, m, id, 4*time.Second, healthHealthy)
 }
 
 func TestFailedQueryLogsOnce(t *testing.T) {
@@ -241,17 +251,114 @@ func TestFailedQueryLogsOnce(t *testing.T) {
 }
 
 func TestRemovedSourceLeavesNoHealth(t *testing.T) {
+	proxy := startProxy(t, "")
+	proxy.silent.Store(true)
 	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { _ = m.Close() })
 	const id models.SourceID = 1
-	// The silent server holds the initial health check open past the removal.
-	addTestSource(t, m, id, silentServer(t))
-	time.Sleep(100 * time.Millisecond)
+	addTestSource(t, m, id, proxy.addr)
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 0 })
+	done := make(chan struct{})
+	go func() {
+		m.checkSource(context.Background(), id)
+		close(done)
+	}()
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 1 })
 	if err := m.RemoveSource(id); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(2 * HealthCheckTimeout)
-	if health := m.GetCachedHealth(id); !health.LastChecked.IsZero() {
-		t.Fatalf("removed source has health entry: %+v", health)
+	select {
+	case <-done:
+	case <-time.After(2 * HealthCheckTimeout):
+		t.Fatal("removed source health check did not finish")
+	}
+	m.healthMux.RLock()
+	_, exists := m.health[id]
+	m.healthMux.RUnlock()
+	if exists {
+		t.Fatal("removed source has a health entry")
+	}
+}
+
+func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for !condition() {
+		if time.Now().After(deadline) {
+			t.Fatal("condition timed out")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestOldHealthCannotOverwriteReplacementClickHouse(t *testing.T) {
+	addr := testClickHouseAddr(t)
+	proxy := startProxy(t, addr)
+	proxy.silent.Store(true)
+	var logs syncBuffer
+	m := NewManager(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { _ = m.Close() })
+	const id models.SourceID = 1
+	addTestSource(t, m, id, proxy.addr)
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 0 })
+
+	done := make(chan struct{})
+	go func() {
+		m.checkSource(context.Background(), id)
+		close(done)
+	}()
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 1 })
+	if err := m.RemoveSource(id); err != nil {
+		t.Fatal(err)
+	}
+	replacement := addTestSource(t, m, id, addr)
+	waitForCondition(t, 500*time.Millisecond, func() bool {
+		return strings.Contains(logs.String(), `"msg":"source healthy"`)
+	})
+	select {
+	case <-done:
+	case <-time.After(2 * HealthCheckTimeout):
+		t.Fatal("old health check did not finish")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := replacement.Ping(ctx, "", ""); err != nil {
+		t.Fatalf("replacement ping: %v", err)
+	}
+	if strings.Contains(logs.String(), `"msg":"source unhealthy"`) {
+		t.Fatalf("old probe overwrote replacement health:\n%s", logs.String())
+	}
+}
+
+func TestStartupUnreachableLogsOnce(t *testing.T) {
+	var logs syncBuffer
+	m := NewManager(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { _ = m.Close() })
+	const id models.SourceID = 1
+	addTestSource(t, m, id, refusedAddr(t))
+	waitForCondition(t, 2*time.Second, func() bool {
+		return strings.Contains(logs.String(), `"level":"WARN","msg":"source unhealthy"`)
+	})
+	m.checkSource(context.Background(), id)
+	if got := strings.Count(logs.String(), `"msg":"source unhealthy"`); got != 1 {
+		t.Fatalf("startup failure logged %d times:\n%s", got, logs.String())
+	}
+}
+
+func TestHealthRecoveryLogsAtInfoClickHouse(t *testing.T) {
+	proxy := startProxy(t, testClickHouseAddr(t))
+	proxy.silent.Store(true)
+	var logs syncBuffer
+	m := NewManager(slog.New(slog.NewJSONHandler(&logs, nil)))
+	t.Cleanup(func() { _ = m.Close() })
+	const id models.SourceID = 2
+	addTestSource(t, m, id, proxy.addr)
+	waitForHealth(t, m, id, 2*time.Second, healthUnhealthy)
+	proxy.silent.Store(false)
+	m.checkSource(context.Background(), id)
+	waitForHealth(t, m, id, 2*time.Second, healthHealthy)
+	m.checkSource(context.Background(), id)
+	if got := strings.Count(logs.String(), `"level":"INFO","msg":"source healthy"`); got != 1 {
+		t.Fatalf("recovery logged at Info %d times:\n%s", got, logs.String())
 	}
 }

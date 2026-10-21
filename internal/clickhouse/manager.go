@@ -17,13 +17,21 @@ const (
 	DefaultHealthCheckInterval = 30 * time.Second
 )
 
+type healthState uint8
+
+const (
+	healthPending healthState = iota
+	healthHealthy
+	healthUnhealthy
+)
+
 // Manager handles pooling and management of multiple ClickHouse client connections,
 // one per data source. It also manages query hooks and background health checks.
 type Manager struct {
 	clients    map[models.SourceID]*Client
 	clientsMux sync.RWMutex // Protects the clients map.
 	logger     *slog.Logger
-	health     map[models.SourceID]models.SourceHealth
+	health     map[models.SourceID]healthState
 	healthMux  sync.RWMutex   // Protects the health map.
 	hooks      []QueryHook    // Hooks applied to all managed clients; fixed at construction.
 	stopHealth chan struct{}  // Channel to signal health check goroutine to stop.
@@ -35,7 +43,7 @@ func NewManager(log *slog.Logger, hooks ...QueryHook) *Manager {
 	return &Manager{
 		clients:    make(map[models.SourceID]*Client),
 		logger:     log.With("component", "clickhouse_manager"),
-		health:     make(map[models.SourceID]models.SourceHealth),
+		health:     make(map[models.SourceID]healthState),
 		hooks:      hooks,
 		stopHealth: make(chan struct{}),
 	}
@@ -96,36 +104,30 @@ func (m *Manager) checkAllSourcesHealth() {
 	wg.Wait()
 }
 
-// updateHealthStatus skips sources removed while their check ran.
-func (m *Manager) updateHealthStatus(sourceID models.SourceID, isHealthy bool, errorMsg string) {
-	m.healthMux.Lock()
-	defer m.healthMux.Unlock()
-
-	oldHealth, existed := m.health[sourceID]
-	if !existed {
+// updateHealthStatus ignores results from removed or replaced clients.
+func (m *Manager) updateHealthStatus(sourceID models.SourceID, client *Client, isHealthy bool, errorMsg string) {
+	m.clientsMux.RLock()
+	defer m.clientsMux.RUnlock()
+	if m.clients[sourceID] != client {
 		return
 	}
 
-	newStatus := models.HealthStatusUnhealthy
+	m.healthMux.Lock()
+	defer m.healthMux.Unlock()
+
+	newState := healthUnhealthy
 	if isHealthy {
-		newStatus = models.HealthStatusHealthy
+		newState = healthHealthy
 	}
-
-	statusChanged := oldHealth.Status != newStatus
-
-	m.health[sourceID] = models.SourceHealth{
-		SourceID:    sourceID,
-		Status:      newStatus,
-		LastChecked: time.Now(),
-		Error:       errorMsg,
+	oldState := m.health[sourceID]
+	m.health[sourceID] = newState
+	if oldState == newState {
+		return
 	}
-
-	if statusChanged {
-		if isHealthy {
-			m.logger.Debug("source healthy", "source_id", sourceID)
-		} else {
-			m.logger.Warn("source unhealthy", "source_id", sourceID, "error", errorMsg)
-		}
+	if isHealthy {
+		m.logger.Info("source healthy", "source_id", sourceID)
+	} else {
+		m.logger.Warn("source unhealthy", "source_id", sourceID, "error", errorMsg)
 	}
 }
 
@@ -139,34 +141,13 @@ func (m *Manager) checkSource(ctx context.Context, sourceID models.SourceID) {
 	pingCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 	defer cancel()
 	if err := client.Ping(pingCtx, "", ""); err != nil {
-		m.updateHealthStatus(sourceID, false, err.Error())
+		m.updateHealthStatus(sourceID, client, false, err.Error())
 		return
 	}
-	m.updateHealthStatus(sourceID, true, "")
+	m.updateHealthStatus(sourceID, client, true, "")
 }
 
-// GetCachedHealth retrieves the latest known health status for a source ID from the cache.
-// Returns a default unhealthy status if the source hasn't been checked yet.
-func (m *Manager) GetCachedHealth(sourceID models.SourceID) models.SourceHealth {
-	m.healthMux.RLock()
-	health, ok := m.health[sourceID]
-	m.healthMux.RUnlock()
-
-	if !ok {
-		// Return a default status if not found (e.g., source just added, first check pending)
-		return models.SourceHealth{
-			SourceID:    sourceID,
-			Status:      models.HealthStatusUnhealthy, // Use Unhealthy as default when status is unknown
-			LastChecked: time.Time{},                  // Zero time indicates never checked
-			Error:       "source health not yet checked",
-		}
-	}
-	return health
-}
-
-// AddSource creates a new ClickHouse client connection based on the source details,
-// stores it in the manager pool, and initializes health.
-// Modified to always create a client entry even if initial connection fails.
+// AddSource creates a managed client and schedules its first health check.
 func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 	m.clientsMux.Lock() // Lock clients map for writing.
 	defer m.clientsMux.Unlock()
@@ -182,12 +163,7 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 	// Check if client already exists to prevent overwriting.
 	if _, exists := m.clients[source.ID]; exists {
 		m.logger.Warn("source already exists in manager, skipping add", "source_id", source.ID)
-		// Ensure health status exists, potentially trigger an immediate check?
-		if _, healthExists := m.health[source.ID]; !healthExists {
-			// Initialize with Unhealthy if somehow missing
-			m.health[source.ID] = models.SourceHealth{SourceID: source.ID, Status: models.HealthStatusUnhealthy}
-		}
-		return nil // Not an error, already managed.
+		return nil
 	}
 
 	// Create new client without initial ping validation
@@ -208,25 +184,11 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 		m.logger.Error("failed to create client instance",
 			"source_id", source.ID,
 			"error", err)
-		m.health[source.ID] = models.SourceHealth{
-			SourceID:    source.ID,
-			Status:      models.HealthStatusUnhealthy,
-			LastChecked: time.Now(),
-			Error:       fmt.Sprintf("failed to create client: %v", err),
-		}
 		return fmt.Errorf("creating client: %w", err)
 	}
 
-	// Store the client regardless of connection status
 	m.clients[source.ID] = client
-
-	// Initialize health status as Unhealthy - background check will update it.
-	m.health[source.ID] = models.SourceHealth{
-		SourceID:    source.ID,
-		Status:      models.HealthStatusUnhealthy, // Default to Unhealthy until first check passes
-		LastChecked: time.Now(),                   // Set current time to indicate we've attempted
-		Error:       "Initial connection pending",
-	}
+	m.health[source.ID] = healthPending
 
 	// Trigger an immediate check for the newly added source in the background
 	go m.checkSource(context.Background(), source.ID) //nolint:contextcheck,gosec // G118: detached background source check, must outlive request
@@ -240,12 +202,11 @@ func (m *Manager) RemoveSource(sourceID models.SourceID) error {
 
 	m.clientsMux.Lock()
 	client, exists := m.clients[sourceID]
-	delete(m.clients, sourceID) // Remove from map regardless of close success.
-	m.clientsMux.Unlock()
-
+	delete(m.clients, sourceID)
 	m.healthMux.Lock()
-	delete(m.health, sourceID) // Remove health status.
+	delete(m.health, sourceID)
 	m.healthMux.Unlock()
+	m.clientsMux.Unlock()
 
 	if exists && client != nil {
 		if err := client.Close(); err != nil {
@@ -253,8 +214,6 @@ func (m *Manager) RemoveSource(sourceID models.SourceID) error {
 				"source_id", sourceID,
 				"error", err,
 			)
-			// Return the close error if needed, otherwise just log.
-			// return err
 		}
 	} else {
 		m.logger.Warn("attempted to remove source not found in manager", "source_id", sourceID)
@@ -277,95 +236,26 @@ func (m *Manager) GetConnection(sourceID models.SourceID) (*Client, error) {
 	return client, nil
 }
 
-// Close iterates through all managed client connections and closes them,
-// with a timeout for each client to prevent hanging on unhealthy connections.
-// It also stops the background health checker and waits for it to complete.
+// Close stops background health checks and closes all managed clients.
 func (m *Manager) Close() error {
 	m.logger.Debug("closing clickhouse manager")
-
-	// Stop health checks first and wait for the goroutine to exit
 	m.StopBackgroundHealthChecks()
-
-	waitChan := make(chan struct{})
-	go func() {
-		m.healthWG.Wait()
-		close(waitChan)
-	}()
-
-	select {
-	case <-waitChan:
-	case <-time.After(5 * time.Second):
-		m.logger.Warn("health check goroutine shutdown timeout")
-	}
+	m.healthWG.Wait()
 
 	m.clientsMux.Lock()
 	defer m.clientsMux.Unlock()
 
-	// Close all clients with timeouts and in parallel
-	var wg sync.WaitGroup
-	var mu sync.Mutex
 	var lastErr error
-
-	// Get all the source IDs first
-	clientIDs := make([]models.SourceID, 0, len(m.clients))
-	for id := range m.clients {
-		clientIDs = append(clientIDs, id)
+	for id, client := range m.clients {
+		if err := client.Close(); err != nil {
+			m.logger.Error("error closing client", "source_id", id, "error", err)
+			lastErr = err
+		}
 	}
-
-	for _, id := range clientIDs {
-		client := m.clients[id]
-
-		// Close each client in a separate goroutine to allow parallel shutdown
-		wg.Go(func() {
-			// Use a timeout context for each client close operation
-			closeCtx, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer closeCancel()
-
-			// Create a done channel to signal completion
-			done := make(chan error, 1)
-
-			go func() {
-				// Each client.Close() already has its own timeout
-				done <- client.Close()
-			}()
-
-			// Wait for client to close or timeout
-			select {
-			case err := <-done:
-				if err != nil {
-					mu.Lock()
-					m.logger.Error("error closing client", "source_id", id, "error", err)
-					lastErr = err // Keep track of the last error
-					mu.Unlock()
-				}
-			case <-closeCtx.Done():
-				mu.Lock()
-				m.logger.Warn("timeout closing client", "source_id", id)
-				mu.Unlock()
-			}
-		})
-	}
-
-	// Wait for all clients to be closed or timeout
-	closeDone := make(chan struct{})
-	go func() {
-		wg.Wait()
-		close(closeDone)
-	}()
-
-	select {
-	case <-closeDone:
-	case <-time.After(8 * time.Second):
-		m.logger.Warn("client shutdown timeout")
-	}
-
-	// Clean up maps
-	m.clients = make(map[models.SourceID]*Client) // Reset map after closing all.
-
+	clear(m.clients)
 	m.healthMux.Lock()
-	m.health = make(map[models.SourceID]models.SourceHealth) // Clear health map.
+	clear(m.health)
 	m.healthMux.Unlock()
-
 	return lastErr
 }
 

@@ -13,13 +13,11 @@ import (
 // Ping checks the connectivity to the ClickHouse server and optionally verifies a table exists.
 // It uses short timeouts internally. Returns nil on success, or an error indicating the failure reason.
 func (c *Client) Ping(ctx context.Context, database, table string) error {
-	conn := c.conn
-
 	// 1. Check basic connection with a short timeout.
 	pingCtx, pingCancel := context.WithTimeout(ctx, 1*time.Second)
 	defer pingCancel()
 
-	if err := conn.Ping(pingCtx); err != nil {
+	if err := c.conn.Ping(pingCtx); err != nil {
 		// The server may come back as another version, so probe capabilities again.
 		c.capabilitiesMu.Lock()
 		c.flattenedJSON = nil
@@ -56,7 +54,7 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	var exists uint8
 
 	// No need for executeQueryWithHooks here, it's a simple metadata check.
-	err := conn.QueryRow(tableCtx, query, database, table).Scan(&exists)
+	err := c.conn.QueryRow(tableCtx, query, database, table).Scan(&exists)
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)

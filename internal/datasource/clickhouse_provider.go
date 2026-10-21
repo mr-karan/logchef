@@ -652,10 +652,6 @@ func (p *ClickHouseProvider) CheckSourceConnectionStatus(ctx context.Context, so
 	return client.Ping(ctx, source.Connection.Database, source.Connection.TableName) == nil
 }
 
-func (p *ClickHouseProvider) GetSourceHealth(ctx context.Context, sourceID models.SourceID) models.SourceHealth {
-	return p.manager.GetCachedHealth(sourceID)
-}
-
 func (p *ClickHouseProvider) connectionFromConfig(raw json.RawMessage) (models.ConnectionInfo, error) {
 	var conn models.ConnectionInfo
 	if len(raw) == 0 {

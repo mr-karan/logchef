@@ -198,32 +198,9 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 	return err // Return the error from the query function itself.
 }
 
-// Close terminates the underlying database connection with a timeout.
+// Close releases the underlying connection pool.
 func (c *Client) Close() error {
-	c.logger.Debug("closing clickhouse connection")
-
-	// Create a timeout context for the close operation
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	// Create a channel to signal completion
-	done := make(chan error, 1)
-
-	// Close the connection in a goroutine
-	go func() {
-		done <- c.conn.Close()
-	}()
-
-	// Wait for close to complete or timeout
-	select {
-	case err := <-done:
-		// Connection closed normally
-		return err
-	case <-ctx.Done():
-		// Timeout occurred
-		c.logger.Warn("timeout while closing clickhouse connection, abandoning")
-		return fmt.Errorf("timeout while closing connection")
-	}
+	return c.conn.Close()
 }
 
 func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (driver.Rows, error) {
