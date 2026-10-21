@@ -729,6 +729,24 @@ describe("explore store", () => {
       expect(next.window).not.toEqual(relative("7d"));
     });
 
+    it("brings back a source's unrun draft after switching away and back", async () => {
+      mocks.teamsState.currentTeamId = 1;
+      const ctx = useContextStore();
+      ctx.selectTeam(1);
+      ctx.selectSource(10);
+      const store = useExploreStore();
+      store.setLogchefqlCode('level="debug"');
+
+      ctx.selectSource(11);
+      await nextTick();
+      expect(store.logchefqlCode).toBe("");
+
+      ctx.selectSource(10);
+      await nextTick();
+      expect(store.logchefqlCode).toBe('level="debug"');
+      expect(JSON.parse(localStorage.getItem("logchef.explore.draft.1.10") ?? "{}")).toMatchObject({ logchefqlCode: 'level="debug"' });
+    });
+
     it("still restores the draft when the link names no query", () => {
       saveDraft();
       const store = useExploreStore();

@@ -629,6 +629,9 @@ export const useExploreStore = defineStore("explore", () => {
     state.data.value.hasExecutedQuery = false;
     state.data.value.nativeQuery = '';
     state.data.value.logchefqlCode = '';
+    // Switching sources reopens that source's unrun draft. A link that names
+    // its own query loads it afterwards and wins.
+    restoreDraftForCurrentContext();
   }
 
   function setSource(newSourceId: number) {
