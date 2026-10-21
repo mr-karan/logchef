@@ -107,10 +107,10 @@ async function findTeamWithSource(sourceId: number): Promise<number | null> {
   const teamIds = new Set([currentTeamId.value, ...teamsStore.userTeams.map((team) => team.id)]);
   for (const teamId of teamIds) {
     if (teamId == null) continue;
-    if (!teamsStore.getTeamSources(teamId).length) {
+    if (!teamsStore.getTeamSourcesByTeamId(teamId).length) {
       await teamsStore.listTeamSources(teamId);
     }
-    if (teamsStore.getTeamSources(teamId).some((source) => source.id === sourceId)) {
+    if (teamsStore.getTeamSourcesByTeamId(teamId).some((source) => source.id === sourceId)) {
       return teamId;
     }
   }

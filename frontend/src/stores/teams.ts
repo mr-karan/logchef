@@ -62,20 +62,6 @@ export const useTeamsStore = defineStore("teams", () => {
   // Current team using the getter
   const currentTeam = computed(() => getTeamById.value(currentTeamId.value));
 
-  // Get team sources helper
-  const getTeamSources = computed(() => (teamId: number) => {
-    return state.data.value.teamSourcesMap?.[teamId] || [];
-  });
-
-  const getTeamsWithDefaults = computed(() => {
-    return teams.value.map(team => ({
-      ...team,
-      name: team.name || `Team ${team.id}`,
-      description: team.description || '',
-      member_count: team.member_count || 0
-    }));
-  });
-
   // Get the last created team (most recent by created_at date)
   const getLastCreatedTeam = computed(() => {
     if (!teams.value.length) return null;
@@ -99,14 +85,28 @@ export const useTeamsStore = defineStore("teams", () => {
     state.data.value.teamSourcesMap = {};
   }
 
-  // Reset user teams data - useful when switching contexts
-  function resetUserTeams() {
-    state.data.value.userTeams = [];
+  // A team can sit in both userTeams and adminTeams; keep the copies in step.
+  function patchTeam(teamId: number, update: (team: { member_count: number }) => Partial<Team>): boolean {
+    let found = false;
+    const apply = <T extends { id: number; member_count: number }>(list: T[]) => {
+      const index = list.findIndex((t) => t.id === teamId);
+      if (index < 0) return;
+      list[index] = { ...list[index], ...update(list[index]) };
+      found = true;
+    };
+    apply(state.data.value.userTeams);
+    apply(state.data.value.adminTeams);
+    return found;
   }
 
-  // Reset admin teams data
-  function resetAdminTeams() {
-    state.data.value.adminTeams = [];
+  function selectNextTeamIfCurrent(teamId: number) {
+    if (contextStore.teamId !== teamId) return;
+    const next = teams.value.find((t) => t.id !== teamId);
+    if (next) {
+      contextStore.selectTeam(next.id);
+    } else {
+      contextStore.clear();
+    }
   }
 
   async function loadUserTeams() {
@@ -165,11 +165,6 @@ export const useTeamsStore = defineStore("teams", () => {
     }
   }
 
-  function setCurrentTeam(teamId: number | string) {
-    const id = typeof teamId === 'string' ? parseInt(teamId) : teamId;
-    contextStore.selectTeam(id);
-  }
-
   async function createTeam(data: CreateTeamRequest) {
     return await state.callApi({
       apiCall: () => teamsApi.createTeam(data),
@@ -186,7 +181,7 @@ export const useTeamsStore = defineStore("teams", () => {
           state.data.value.adminTeams.push(newTeam);
 
           if (!contextStore.teamId && state.data.value.adminTeams.length > 0) {
-            setCurrentTeam(newTeam.id);
+            contextStore.selectTeam(newTeam.id);
           }
         }
       }
@@ -199,34 +194,9 @@ export const useTeamsStore = defineStore("teams", () => {
         const response = await teamsApi.getTeam(teamId);
 
         if (isSuccessResponse(response) && response.data) {
-          const teamData = response.data;
-          const memberCount = teamData.member_count || 0;
-
-          const userIndex = state.data.value.userTeams.findIndex(t => t.id === teamId);
-          if (userIndex >= 0) {
-            const existingTeam = state.data.value.userTeams[userIndex];
-            state.data.value.userTeams[userIndex] = {
-              ...existingTeam,
-              ...teamData,
-              member_count: memberCount,
-            };
-          }
-
-          const adminIndex = state.data.value.adminTeams.findIndex(t => t.id === teamId);
-          if (adminIndex >= 0) {
-            state.data.value.adminTeams[adminIndex] = {
-              ...state.data.value.adminTeams[adminIndex],
-              ...teamData,
-              member_count: memberCount,
-            };
-          }
-
-          if (userIndex < 0 && adminIndex < 0) {
-            const newTeam: TeamWithMemberCount = {
-              ...teamData,
-              member_count: memberCount,
-            };
-            state.data.value.adminTeams.push(newTeam);
+          const teamData = { ...response.data, member_count: response.data.member_count || 0 };
+          if (!patchTeam(teamId, () => teamData)) {
+            state.data.value.adminTeams.push(teamData);
           }
 
           return { success: true, data: teamData };
@@ -247,23 +217,10 @@ export const useTeamsStore = defineStore("teams", () => {
       onSuccess: (response) => {
         if (response) {
           const teamResponse = response as Team;
-          const userIndex = state.data.value.userTeams.findIndex(t => t.id === teamId);
-          if (userIndex >= 0) {
-            state.data.value.userTeams[userIndex] = {
-              ...state.data.value.userTeams[userIndex],
-              ...teamResponse,
-              member_count: teamResponse.member_count || state.data.value.userTeams[userIndex].member_count
-            };
-          }
-
-          const adminIndex = state.data.value.adminTeams.findIndex(t => t.id === teamId);
-          if (adminIndex >= 0) {
-            state.data.value.adminTeams[adminIndex] = {
-              ...state.data.value.adminTeams[adminIndex],
-              ...teamResponse,
-              member_count: teamResponse.member_count || state.data.value.adminTeams[adminIndex].member_count
-            };
-          }
+          patchTeam(teamId, (team) => ({
+            ...teamResponse,
+            member_count: teamResponse.member_count || team.member_count,
+          }));
         }
       }
     });
@@ -281,19 +238,7 @@ export const useTeamsStore = defineStore("teams", () => {
         state.data.value.adminTeams = state.data.value.adminTeams.filter(
           (t) => t.id !== teamId
         );
-
-        if (contextStore.teamId === teamId) {
-          const nextTeamId = state.data.value.userTeams.length > 0
-            ? state.data.value.userTeams[0].id
-            : (state.data.value.adminTeams.length > 0
-              ? state.data.value.adminTeams[0].id
-              : null);
-          if (nextTeamId) {
-            contextStore.selectTeam(nextTeamId);
-          } else {
-            contextStore.clear();
-          }
-        }
+        selectNextTeamIfCurrent(teamId);
 
         delete state.data.value.teamMembersMap[teamId];
         delete state.data.value.teamSourcesMap[teamId];
@@ -342,15 +287,7 @@ export const useTeamsStore = defineStore("teams", () => {
       successMessage: "Member added successfully",
       operationKey: `addTeamMember-${teamId}`,
       onSuccess: async (_response) => {
-        const userTeam = state.data.value.userTeams.find(t => t.id === teamId);
-        if (userTeam) {
-          userTeam.member_count = (userTeam.member_count || 0) + 1;
-        }
-
-        const adminTeam = state.data.value.adminTeams.find(t => t.id === teamId);
-        if (adminTeam) {
-          adminTeam.member_count = (adminTeam.member_count || 0) + 1;
-        }
+        patchTeam(teamId, (team) => ({ member_count: (team.member_count || 0) + 1 }));
 
         await listTeamMembers(teamId);
 
@@ -391,29 +328,11 @@ export const useTeamsStore = defineStore("teams", () => {
             );
           }
 
-          const userTeam = state.data.value.userTeams.find(t => t.id === teamId);
-          if (userTeam && userTeam.member_count > 0) {
-            userTeam.member_count--;
-          }
-
-          const adminTeam = state.data.value.adminTeams.find(t => t.id === teamId);
-          if (adminTeam && adminTeam.member_count > 0) {
-            adminTeam.member_count--;
-          }
+          patchTeam(teamId, (team) => ({ member_count: Math.max((team.member_count || 0) - 1, 0) }));
 
           if (isCurrentUser) {
             state.data.value.userTeams = state.data.value.userTeams.filter(t => t.id !== teamId);
-
-            if (contextStore.teamId === teamId) {
-              const nextTeamId = state.data.value.userTeams.length > 0
-                ? state.data.value.userTeams[0].id
-                : null;
-              if (nextTeamId) {
-                contextStore.selectTeam(nextTeamId);
-              } else {
-                contextStore.clear();
-              }
-            }
+            selectNextTeamIfCurrent(teamId);
 
             await loadUserTeams();
           }
@@ -476,60 +395,6 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
-  async function getTeamSourceIds(teamId: number) {
-    if (state.data.value.teamSourcesMap[teamId]?.length > 0) {
-      return state.data.value.teamSourcesMap[teamId].map(source => source.id);
-    }
-
-    const result = await listTeamSources(teamId);
-
-    if (result.success && result.data && Array.isArray(result.data)) {
-      return result.data.map((source: Source) => source.id);
-    }
-
-    return [];
-  }
-
-  async function invalidateTeamCache(teamId: number) {
-    state.data.value.userTeams = state.data.value.userTeams.filter(t => t.id !== teamId);
-    state.data.value.adminTeams = state.data.value.adminTeams.filter(t => t.id !== teamId);
-
-    delete state.data.value.teamSourcesMap[teamId];
-
-    if (contextStore.teamId === teamId) {
-      const nextTeamId = state.data.value.userTeams.length > 0
-        ? state.data.value.userTeams[0].id
-        : (state.data.value.adminTeams.length > 0
-          ? state.data.value.adminTeams[0].id
-          : null);
-      if (nextTeamId) {
-        contextStore.selectTeam(nextTeamId);
-      } else {
-        contextStore.clear();
-      }
-    }
-
-    delete state.data.value.teamMembersMap[teamId];
-  }
-
-  // Get sources not in team (for filtering in add source dialog)
-  function getSourcesNotInTeam(_teamSourceIds: (string | number)[]) {
-    return [] as Source[]; // Implement or delegate to sources store
-  }
-
-  // Add a new method to check if the current user belongs to a specific team
-  function userBelongsToTeam(teamId: number): boolean {
-    return state.data.value.userTeams.some(team => team.id === teamId);
-  }
-
-  // Add a new getter to get the current user's role in a specific team
-  const getUserRoleInTeam = computed(() =>
-    (teamId: number): UserTeamMembership["role"] | undefined => {
-      const team = state.data.value.userTeams.find(t => t.id === teamId);
-      return team?.role; // team.role is now directly available from UserTeamMembership
-    }
-  );
-
   // Check if user is admin in ANY team (for showing administration sidebar)
   const isAnyTeamAdmin = computed(() => {
     return state.data.value.userTeams.some(team => team.role === 'admin');
@@ -559,30 +424,19 @@ export const useTeamsStore = defineStore("teams", () => {
 
     // Loading state helpers
     isLoadingOperation: state.isLoadingOperation,
-    isLoadingTeams: () => state.isLoadingOperation('loadTeams') ||
-                          state.isLoadingOperation('loadUserTeams') ||
-                          state.isLoadingOperation('loadAdminTeams'),
-    isLoadingTeam: (teamId: number) => state.isLoadingOperation(`getTeam-${teamId}`),
     isLoadingTeamMembers: (teamId: number) => state.isLoadingOperation(`listTeamMembers-${teamId}`),
     isLoadingTeamSources: (teamId: number) => state.isLoadingOperation(`listTeamSources-${teamId}`),
 
     // Getters
     getTeamById: (id: number) => getTeamById.value(id),
-    getTeamSources: (teamId: number) => getTeamSources.value(teamId),
     getTeamMembersByTeamId: (teamId: number) => getTeamMembersByTeamId.value(teamId),
     getTeamSourcesByTeamId: (teamId: number) => getTeamSourcesByTeamId.value(teamId),
-    getTeamsWithDefaults: () => getTeamsWithDefaults.value,
     getLastCreatedTeam: () => getLastCreatedTeam.value,
-    getSourcesNotInTeam,
-    userBelongsToTeam,
-    getUserRoleInTeam,
     isAnyTeamAdmin,
     managedTeams,
 
     // State Management
     clearState,
-    resetUserTeams,
-    resetAdminTeams,
 
     // Actions
     loadTeams,
@@ -592,14 +446,11 @@ export const useTeamsStore = defineStore("teams", () => {
     getTeam,
     updateTeam,
     deleteTeam,
-    setCurrentTeam,
     listTeamMembers,
     addTeamMember,
     removeTeamMember,
     listTeamSources,
     addTeamSource,
     removeTeamSource,
-    getTeamSourceIds,
-    invalidateTeamCache,
   };
 });
