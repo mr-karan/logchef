@@ -30,9 +30,9 @@ func (s *Server) handleListUsers(c fiber.Ctx) error {
 // URL: GET /api/v1/admin/users/:userID
 // Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleGetUser(c fiber.Ctx) error {
-	user, err := s.loadHumanUser(c)
-	if err != nil {
-		return err
+	user, ok := s.loadHumanUser(c)
+	if !ok {
+		return nil
 	}
 	return SendSuccess(c, fiber.StatusOK, user)
 }
@@ -40,27 +40,32 @@ func (s *Server) handleGetUser(c fiber.Ctx) error {
 // loadHumanUser parses :userID and returns the user only if it's a human account.
 // Service principals are managed via /admin/service-accounts/* and must not leak
 // through the human-user CRUD path.
-func (s *Server) loadHumanUser(c fiber.Ctx) (*models.User, error) {
+func (s *Server) loadHumanUser(c fiber.Ctx) (*models.User, bool) {
 	userIDStr := c.Params("userID")
 	if userIDStr == "" {
-		return nil, SendError(c, fiber.StatusBadRequest, "User ID is required")
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "User ID is required", models.GeneralErrorType)
+		return nil, false
 	}
 	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return nil, SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid user ID format", models.GeneralErrorType)
+		return nil, false
 	}
 	user, err := core.GetUser(c.Context(), s.sqlite, userID)
 	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
-			return nil, SendError(c, fiber.StatusNotFound, "User not found")
+			s.sendLoadFailure(c, fiber.StatusNotFound, "User not found", models.GeneralErrorType)
+			return nil, false
 		}
 		s.log.Error("failed to get user", "error", err, "user_id", userID)
-		return nil, SendError(c, fiber.StatusInternalServerError, "Error getting user")
+		s.sendLoadFailure(c, fiber.StatusInternalServerError, "Error getting user", models.GeneralErrorType)
+		return nil, false
 	}
 	if user.AccountType == models.UserAccountTypeService {
-		return nil, SendError(c, fiber.StatusNotFound, "User not found")
+		s.sendLoadFailure(c, fiber.StatusNotFound, "User not found", models.GeneralErrorType)
+		return nil, false
 	}
-	return user, nil
+	return user, true
 }
 
 // handleCreateUser creates a new user in the system.
@@ -110,9 +115,9 @@ func (s *Server) handleCreateUser(c fiber.Ctx) error {
 // URL: PUT /api/v1/admin/users/:userID
 // Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleUpdateUser(c fiber.Ctx) error {
-	existing, err := s.loadHumanUser(c)
-	if err != nil {
-		return err
+	existing, ok := s.loadHumanUser(c)
+	if !ok {
+		return nil
 	}
 	userID := existing.ID
 
@@ -172,9 +177,9 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 // URL: DELETE /api/v1/admin/users/:userID
 // Requires: Admin privileges (requireAdmin middleware)
 func (s *Server) handleDeleteUser(c fiber.Ctx) error {
-	existing, err := s.loadHumanUser(c)
-	if err != nil {
-		return err
+	existing, ok := s.loadHumanUser(c)
+	if !ok {
+		return nil
 	}
 	userID := existing.ID
 
@@ -393,22 +398,24 @@ func (s *Server) handleDeleteServiceAccount(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account deleted successfully"})
 }
 
-func (s *Server) loadServiceAccount(c fiber.Ctx) (*models.User, error) {
+func (s *Server) loadServiceAccount(c fiber.Ctx) (*models.User, bool) {
 	userID, err := core.ParseUserID(c.Params("userID"))
 	if err != nil {
-		return nil, SendError(c, fiber.StatusBadRequest, "Invalid service account ID format")
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid service account ID format", models.GeneralErrorType)
+		return nil, false
 	}
 	account, err := core.GetUser(c.Context(), s.sqlite, userID)
 	if err != nil || account.AccountType != models.UserAccountTypeService {
-		return nil, SendError(c, fiber.StatusNotFound, "Service account not found")
+		s.sendLoadFailure(c, fiber.StatusNotFound, "Service account not found", models.GeneralErrorType)
+		return nil, false
 	}
-	return account, nil
+	return account, true
 }
 
 func (s *Server) handleListServiceAccountTokens(c fiber.Ctx) error {
-	account, err := s.loadServiceAccount(c)
-	if err != nil {
-		return err
+	account, ok := s.loadServiceAccount(c)
+	if !ok {
+		return nil
 	}
 	tokens, err := core.ListAPITokensForUser(c.Context(), s.sqlite, account.ID)
 	if err != nil {
@@ -419,9 +426,9 @@ func (s *Server) handleListServiceAccountTokens(c fiber.Ctx) error {
 }
 
 func (s *Server) handleCreateServiceAccountToken(c fiber.Ctx) error {
-	account, err := s.loadServiceAccount(c)
-	if err != nil {
-		return err
+	account, ok := s.loadServiceAccount(c)
+	if !ok {
+		return nil
 	}
 
 	var req models.CreateAPITokenRequest
@@ -444,9 +451,9 @@ func (s *Server) handleCreateServiceAccountToken(c fiber.Ctx) error {
 }
 
 func (s *Server) handleListServiceAccountTeams(c fiber.Ctx) error {
-	account, err := s.loadServiceAccount(c)
-	if err != nil {
-		return err
+	account, ok := s.loadServiceAccount(c)
+	if !ok {
+		return nil
 	}
 	teams, err := core.ListTeamsForUser(c.Context(), s.sqlite, account.ID)
 	if err != nil {
@@ -457,9 +464,9 @@ func (s *Server) handleListServiceAccountTeams(c fiber.Ctx) error {
 }
 
 func (s *Server) handleAddServiceAccountToTeam(c fiber.Ctx) error {
-	account, err := s.loadServiceAccount(c)
-	if err != nil {
-		return err
+	account, ok := s.loadServiceAccount(c)
+	if !ok {
+		return nil
 	}
 	var req struct {
 		TeamID models.TeamID   `json:"team_id"`
@@ -485,9 +492,9 @@ func (s *Server) handleAddServiceAccountToTeam(c fiber.Ctx) error {
 }
 
 func (s *Server) handleRemoveServiceAccountFromTeam(c fiber.Ctx) error {
-	account, err := s.loadServiceAccount(c)
-	if err != nil {
-		return err
+	account, ok := s.loadServiceAccount(c)
+	if !ok {
+		return nil
 	}
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
@@ -501,9 +508,9 @@ func (s *Server) handleRemoveServiceAccountFromTeam(c fiber.Ctx) error {
 }
 
 func (s *Server) handleDeleteServiceAccountToken(c fiber.Ctx) error {
-	account, err := s.loadServiceAccount(c)
-	if err != nil {
-		return err
+	account, ok := s.loadServiceAccount(c)
+	if !ok {
+		return nil
 	}
 	tokenID, err := strconv.Atoi(c.Params("tokenID"))
 	if err != nil {

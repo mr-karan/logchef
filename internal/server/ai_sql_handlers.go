@@ -23,22 +23,14 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 		return err(c)
 	}
 
-	sourceID, teamID, err := s.parseSourceTeamIDs(c)
-	if err != nil {
-		return err
+	sourceID, _, ok := s.parseSourceTeamIDs(c)
+	if !ok {
+		return nil
 	}
 
 	user := c.Locals("user").(*models.User)
 	if user == nil {
 		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized", models.AuthenticationErrorType)
-	}
-
-	hasAccess, accessErr := core.UserHasAccessToTeamSource(c.Context(), s.sqlite, s.log, user.ID, teamID, sourceID)
-	if accessErr != nil {
-		return SendErrorWithType(c, http.StatusInternalServerError, "Failed to verify source access", models.GeneralErrorType)
-	}
-	if !hasAccess {
-		return SendErrorWithType(c, http.StatusForbidden, "You don't have access to this source", models.AuthorizationErrorType)
 	}
 
 	var req models.GenerateSQLRequest
@@ -49,9 +41,9 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 		return SendErrorWithType(c, http.StatusBadRequest, "Natural language query is required", models.ValidationErrorType)
 	}
 
-	source, schemaJSON, tableName, err := s.getSourceSchemaForAI(c, sourceID)
-	if err != nil {
-		return err
+	source, schemaJSON, tableName, ok := s.getSourceSchemaForAI(c, sourceID)
+	if !ok {
+		return nil
 	}
 
 	// The target language is chosen deterministically from the source backend
@@ -104,49 +96,58 @@ func (s *Server) validateAIConfig() func(fiber.Ctx) error {
 	return nil
 }
 
-func (s *Server) parseSourceTeamIDs(c fiber.Ctx) (models.SourceID, models.TeamID, error) {
+func (s *Server) parseSourceTeamIDs(c fiber.Ctx) (models.SourceID, models.TeamID, bool) {
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
-		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+		s.sendLoadFailure(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
+		return 0, 0, false
 	}
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
-		return 0, 0, SendErrorWithType(c, http.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
+		s.sendLoadFailure(c, http.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
+		return 0, 0, false
 	}
-	return sourceID, teamID, nil
+	return sourceID, teamID, true
 }
 
-func (s *Server) getSourceSchemaForAI(c fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, err error) {
-	source, err = core.GetSource(c.Context(), s.datasources, sourceID)
+func (s *Server) getSourceSchemaForAI(c fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, ok bool) {
+	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
-			return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			s.sendLoadFailure(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+			return nil, "", "", false
 		}
-		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		s.sendLoadFailure(c, http.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+		return nil, "", "", false
 	}
 	if source == nil {
-		return nil, "", "", SendErrorWithType(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		s.sendLoadFailure(c, http.StatusNotFound, "Source not found", models.NotFoundErrorType)
+		return nil, "", "", false
 	}
 	if !source.HasCapability(string(datasource.CapabilityAISQLGeneration)) {
-		return nil, "", "", SendErrorWithType(c, http.StatusBadRequest, "AI query generation is not supported for this source", models.ValidationErrorType)
+		s.sendLoadFailure(c, http.StatusBadRequest, "AI query generation is not supported for this source", models.ValidationErrorType)
+		return nil, "", "", false
 	}
 
 	if !source.IsConnected {
-		return nil, "", "", SendErrorWithType(c, http.StatusServiceUnavailable, "Source is not currently connected", models.ExternalServiceErrorType)
+		s.sendLoadFailure(c, http.StatusServiceUnavailable, "Source is not currently connected", models.ExternalServiceErrorType)
+		return nil, "", "", false
 	}
 	// ClickHouse SQL generation needs a concrete schema. VictoriaLogs discovers
 	// fields dynamically and may legitimately have a sparse/empty column set, so
 	// we proceed for VL and let the prompt work from whatever schema is available.
 	if source.SourceType != models.SourceTypeVictoriaLogs && len(source.Columns) == 0 {
-		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
+		s.sendLoadFailure(c, http.StatusInternalServerError, "Failed to get source schema", models.ExternalServiceErrorType)
+		return nil, "", "", false
 	}
 
 	schemaJSON, err = formatSchemaForAI(source)
 	if err != nil {
-		return nil, "", "", SendErrorWithType(c, http.StatusInternalServerError, "Failed to encode source schema", models.GeneralErrorType)
+		s.sendLoadFailure(c, http.StatusInternalServerError, "Failed to encode source schema", models.GeneralErrorType)
+		return nil, "", "", false
 	}
 	tableName = source.GetFullTableName()
-	return source, schemaJSON, tableName, nil
+	return source, schemaJSON, tableName, true
 }
 
 // aiSchemaEntry is one column, or the sort-key note, in the schema sent to the AI.
