@@ -21,7 +21,7 @@ type Querier interface {
 	// Add a member to a team
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error
 	// Team Sources
-	// Add a data source to a team
+	// Add a data source to a team; linking an already linked source is a no-op.
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
 	ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)

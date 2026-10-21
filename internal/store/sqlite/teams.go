@@ -304,22 +304,12 @@ func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*model
 
 // AddTeamSource creates an association between a team and a data source.
 func (db *DB) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error {
-
-	// Existence checks for team/source are optional here, FK constraints handle integrity.
-	// _, err := db.GetTeam(ctx, teamID) ...
-	// _, err = db.GetSource(ctx, sourceID) ...
-
 	params := sqlc.AddTeamSourceParams{
 		TeamID:   int64(teamID),
 		SourceID: int64(sourceID),
 	}
 	err := db.writeQueries.AddTeamSource(ctx, params)
 	if err != nil {
-		// Check for primary key violation (association already exists).
-		if IsUniqueConstraintError(err) && (strings.Contains(err.Error(), "team_id") || strings.Contains(err.Error(), "source_id")) {
-			db.log.Warn("attempted to add existing team-source association", "team_id", teamID, "source_id", sourceID)
-			return nil // Treat as success/no-op if association already exists.
-		}
 		db.log.Error("failed to add team source record", "error", err, "team_id", teamID, "source_id", sourceID)
 		return fmt.Errorf("error adding team source: %w", err)
 	}

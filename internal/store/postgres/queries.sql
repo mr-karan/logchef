@@ -214,9 +214,10 @@ ORDER BY t.name;
 -- Team Sources
 
 -- name: AddTeamSource :exec
--- Add a data source to a team
+-- Add a data source to a team; linking an already linked source is a no-op.
 INSERT INTO team_sources (team_id, source_id)
-VALUES ($1, $2);
+VALUES ($1, $2)
+ON CONFLICT (team_id, source_id) DO NOTHING;
 
 -- name: RemoveTeamSource :exec
 -- Remove a data source from a team

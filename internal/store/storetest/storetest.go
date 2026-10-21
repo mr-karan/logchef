@@ -201,6 +201,14 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.AddTeamSource(ctx, team.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
+	if err := s.AddTeamSource(ctx, team.ID, src.ID); err != nil {
+		t.Fatalf("AddTeamSource duplicate: %v", err)
+	}
+	if err := s.WithTx(ctx, func(tx store.StoreOps) error {
+		return tx.AddTeamSource(ctx, team.ID, src.ID)
+	}); err != nil {
+		t.Fatalf("AddTeamSource duplicate in transaction: %v", err)
+	}
 	assertSourceAccess(t, ctx, s, team.ID, alice.ID, src.ID, true)
 	// Negative case: an unlinked source must report no access (no error).
 	other := mkSource(t, ctx, s, "unlinked")

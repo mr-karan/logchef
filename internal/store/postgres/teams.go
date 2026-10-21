@@ -238,10 +238,6 @@ func (s *Store) AddTeamSource(ctx context.Context, teamID models.TeamID, sourceI
 		SourceID: int64(sourceID),
 	})
 	if err != nil {
-		if isUniqueViolation(err) {
-			s.log.Warn("attempted to add existing team-source association", "team_id", teamID, "source_id", sourceID)
-			return nil
-		}
 		s.log.Error("failed to add team source record", "error", err, "team_id", teamID, "source_id", sourceID)
 		return fmt.Errorf("error adding team source: %w", err)
 	}

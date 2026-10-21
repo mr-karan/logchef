@@ -101,6 +101,7 @@ const addTeamSource = `-- name: AddTeamSource :exec
 
 INSERT INTO team_sources (team_id, source_id)
 VALUES (?, ?)
+ON CONFLICT (team_id, source_id) DO NOTHING
 `
 
 type AddTeamSourceParams struct {
@@ -109,7 +110,7 @@ type AddTeamSourceParams struct {
 }
 
 // Team Sources
-// Add a data source to a team
+// Add a data source to a team; linking an already linked source is a no-op.
 func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error {
 	_, err := q.exec(ctx, q.addTeamSourceStmt, addTeamSource, arg.TeamID, arg.SourceID)
 	return err
