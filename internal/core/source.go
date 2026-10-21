@@ -50,7 +50,7 @@ func populateSourceStatuses(ctx context.Context, ds *datasource.Service, sources
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, models.SourceHealthTimeout+500*time.Millisecond)
 	defer cancel()
 	// Checks unfinished at the listing deadline remain disconnected.
 	jobs := make(chan *models.Source)

@@ -5,9 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -295,7 +299,7 @@ func TestListSourcesWholeHealthDeadline(t *testing.T) {
 	}
 	t.Logf("65 stalled sources elapsed=%s", elapsed)
 	if elapsed > 6500*time.Millisecond {
-		t.Errorf("listing took %s, want 5s whole deadline plus 1.5s scheduling margin", elapsed)
+		t.Errorf("listing took %s, want 5.5s whole deadline plus 1s scheduling margin", elapsed)
 	}
 }
 
@@ -310,4 +314,145 @@ func TestLoadSourceMetadataErrorContext(t *testing.T) {
 	if errors.Unwrap(err) == nil {
 		t.Fatalf("metadata error lost provider cause: %v", err)
 	}
+}
+
+func TestListSourcesStalledHealthCached(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	log := discardLogger()
+	var calls atomic.Int32
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		<-r.Context().Done()
+	}))
+	defer backend.Close()
+	raw, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: backend.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &models.Source{Name: "stalled-health", SourceType: models.SourceTypeVictoriaLogs, MetaTSField: "_time", ConnectionConfig: raw}
+	if err := db.CreateSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	ds := datasource.NewService(db, log)
+	ds.Register(victorialogs.NewProvider(log))
+	sources, err := ListSources(ctx, db, ds)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(sources) != 1 || sources[0].IsConnected {
+		t.Fatalf("stalled listing result: %+v", sources)
+	}
+	started := time.Now()
+	health, err := GetSourceHealth(ctx, ds, source.ID)
+	elapsed := time.Since(started)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("next health status=%s requests=%d elapsed=%s", health.Status, calls.Load(), elapsed)
+	if health.Status != models.HealthStatusUnhealthy || calls.Load() != 1 || elapsed > 500*time.Millisecond {
+		t.Fatalf("stalled health not cached: status=%s requests=%d elapsed=%s", health.Status, calls.Load(), elapsed)
+	}
+}
+
+func TestListSourcesClickHouseHealthBudget(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	for _, test := range []struct {
+		name      string
+		delay     time.Duration
+		connected bool
+	}{
+		{"slow-handshake", 2 * time.Second, true},
+		{"stalled-handshake", 10 * time.Second, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ctx := context.Background()
+			log := discardLogger()
+			proxy := delayedClickHouseProxy(t, addr, test.delay)
+			source := &models.Source{Name: test.name, SourceType: models.SourceTypeClickHouse, MetaTSField: "event_time", Connection: models.ConnectionInfo{Host: proxy, Database: "system", TableName: "tables"}}
+			if err := source.SyncConnectionConfig(); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.CreateSource(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+			manager := clickhouse.NewManager(log)
+			defer manager.Close()
+			if err := manager.AddSource(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+			ds := datasource.NewService(db, log)
+			ds.Register(datasource.NewClickHouseProvider(manager, log))
+			started := time.Now()
+			sources, err := ListSources(ctx, db, ds)
+			elapsed := time.Since(started)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sources) != 1 {
+				t.Fatalf("sources=%d, want 1", len(sources))
+			}
+			t.Logf("connected=%t elapsed=%s", sources[0].IsConnected, elapsed)
+			if sources[0].IsConnected != test.connected {
+				t.Errorf("connected=%t, want %t", sources[0].IsConnected, test.connected)
+			}
+			if elapsed > 6500*time.Millisecond {
+				t.Errorf("listing exceeded health deadline: %s", elapsed)
+			}
+		})
+	}
+}
+
+func delayedClickHouseProxy(t *testing.T, upstream string, delay time.Duration) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		for {
+			downstream, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			workers.Go(func() {
+				defer downstream.Close()
+				remote, err := (&net.Dialer{}).DialContext(ctx, "tcp", upstream)
+				if err != nil {
+					return
+				}
+				defer remote.Close()
+				stop := context.AfterFunc(ctx, func() {
+					_ = downstream.Close()
+					_ = remote.Close()
+				})
+				defer stop()
+				var copyWorker sync.WaitGroup
+				copyWorker.Go(func() {
+					_, _ = io.Copy(remote, downstream)
+					_ = remote.Close()
+				})
+				select {
+				case <-time.After(delay):
+					_, _ = io.Copy(downstream, remote)
+				case <-ctx.Done():
+				}
+				_ = downstream.Close()
+				_ = remote.Close()
+				copyWorker.Wait()
+			})
+		}
+	})
+	t.Cleanup(func() {
+		cancel()
+		_ = listener.Close()
+		workers.Wait()
+	})
+	return listener.Addr().String()
 }

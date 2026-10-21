@@ -15,7 +15,7 @@ import (
 // Default values
 const (
 	DefaultQueryLimit          = 100
-	HealthCheckTimeout         = 1 * time.Second // Reduce to 1 second for faster health checks
+	HealthCheckTimeout         = models.SourceHealthTimeout
 	DefaultHealthCheckInterval = 30 * time.Second
 )
 
@@ -149,7 +149,7 @@ func (m *Manager) checkSource(ctx context.Context, sourceID models.SourceID) {
 	defer rootCancel()
 
 	// 1. Perform the actual health check (Ping) with its own timeout.
-	pingCtx, pingCancel := context.WithTimeout(rootCtx, HealthCheckTimeout) // e.g., 1 second for ping
+	pingCtx, pingCancel := context.WithTimeout(rootCtx, HealthCheckTimeout)
 	pingErr := client.Ping(pingCtx, "", "")
 	pingCancel() // Cancel the ping context immediately after the call.
 
@@ -439,7 +439,7 @@ func (m *Manager) CreateTemporaryClient(ctx context.Context, source *models.Sour
 		return nil, fmt.Errorf("error creating temporary client: %w", err)
 	}
 
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 	defer cancel()
 
 	if err := client.Ping(pingCtx, "", ""); err != nil {

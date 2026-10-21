@@ -21,7 +21,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-const defaultHealthTimeout = 5 * time.Second
+const defaultHealthTimeout = models.SourceHealthTimeout
 const defaultValidationTimeout = 8 * time.Second
 
 const (

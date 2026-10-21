@@ -519,6 +519,9 @@ func (s *Source) GetFullTableName() string {
 	return fmt.Sprintf("%s.%s", s.Connection.Database, s.Connection.TableName)
 }
 
+// SourceHealthTimeout bounds a provider health check, including connection setup.
+const SourceHealthTimeout = 5 * time.Second
+
 // SourceHealth represents the health status of a source.
 type SourceHealth struct {
 	SourceID    SourceID     `json:"source_id"`
