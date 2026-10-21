@@ -20,7 +20,9 @@ import (
 // (the suite drops and recreates the public schema for a clean run).
 func TestConformance(t *testing.T) {
 	dsn := resetSchema(t)
-	storetest.Run(t, opener(dsn)(t))
+	s := opener(dsn)(t)
+	storetest.Run(t, s)
+	t.Run("MembershipWritesSerialized", func(t *testing.T) { storetest.RunMembershipWritesSerialized(t, s) })
 }
 
 // TestOAuthConformance runs the OAuth suite. Each opened store has its own
