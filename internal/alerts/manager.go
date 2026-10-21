@@ -234,7 +234,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 		return
 	}
 	// Evaluation deadlines must not prevent recording genuine failures.
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 
 	// Update last_evaluated_at even on error so the alert respects its frequency_seconds
