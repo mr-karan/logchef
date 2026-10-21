@@ -422,7 +422,7 @@ func (s *Server) setupRoutes() {
 	teamSourceOps := api.Group("/teams/:teamID/sources/:sourceID", s.requireAuth, s.requireTeamMember)
 	// Get detailed source info including connection status and schema
 	teamSourceOps.Get("/", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSource)
-	teamSourceOps.Get("/stats", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceStats)
+	teamSourceOps.Get("/stats", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetSourceStats)
 	teamSourceOps.Get("/activity", s.requireTeamHasSource(models.TokenScopeSourcesRead), s.handleGetTeamSourceActivity)
 
 	// Query and explore logs. The heavy query/exploration endpoints are

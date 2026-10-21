@@ -86,18 +86,6 @@ func DeleteSource(ctx context.Context, ds *datasource.Service, id models.SourceI
 	return nil
 }
 
-// GetSourceHealth retrieves the health status of a source from its registered datasource provider.
-func GetSourceHealth(ctx context.Context, ds *datasource.Service, id models.SourceID) (models.SourceHealth, error) {
-	health, err := ds.GetSourceHealth(ctx, id)
-	if err != nil {
-		if errors.Is(err, models.ErrNotFound) {
-			return models.SourceHealth{}, ErrSourceNotFound
-		}
-		return models.SourceHealth{}, fmt.Errorf("error getting source health: %w", err)
-	}
-	return health, nil
-}
-
 type SourceInspection = datasource.SourceInspection
 
 func InspectSource(ctx context.Context, ds *datasource.Service, sourceID models.SourceID) (*SourceInspection, error) {

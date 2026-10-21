@@ -198,9 +198,9 @@ func TestMarkSavedQueriesRunnable(t *testing.T) {
 	}
 }
 
-// TestValidateSavedQueryContent pins the pure content-validation rules used
-// by both create and update.
-func TestValidateSavedQueryContent(t *testing.T) {
+// TestParseAndValidateSavedQueryContent pins the pure content-validation rules
+// used by both create and update.
+func TestParseAndValidateSavedQueryContent(t *testing.T) {
 	t.Parallel()
 
 	valid := `{"version":1,"sourceId":1,"timeRange":{"relative":"15m"},"limit":100,"content":"SELECT 1"}`
@@ -226,12 +226,12 @@ func TestValidateSavedQueryContent(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := ValidateSavedQueryContent(tc.content)
+			_, err := parseAndValidateSavedQueryContent(tc.content)
 			if tc.wantErr && !errors.Is(err, ErrInvalidQueryContent) {
-				t.Errorf("ValidateSavedQueryContent(%s) err = %v, want ErrInvalidQueryContent", tc.content, err)
+				t.Errorf("parseAndValidateSavedQueryContent(%s) err = %v, want ErrInvalidQueryContent", tc.content, err)
 			}
 			if !tc.wantErr && err != nil {
-				t.Errorf("ValidateSavedQueryContent(%s) unexpected err: %v", tc.content, err)
+				t.Errorf("parseAndValidateSavedQueryContent(%s) unexpected err: %v", tc.content, err)
 			}
 		})
 	}

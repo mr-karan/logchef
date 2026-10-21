@@ -33,12 +33,6 @@ var (
 
 // --- Saved Query Content Validation ---
 
-// ValidateSavedQueryContent validates the JSON structure and basic rules of the query content.
-func ValidateSavedQueryContent(contentJSON string) error {
-	_, err := parseAndValidateSavedQueryContent(contentJSON)
-	return err
-}
-
 // parseAndValidateSavedQueryContent parses the envelope ONCE and validates its
 // structural rules, returning the parsed content so callers (create/update) can
 // reuse the inner .Content for the language-match check without re-parsing.
