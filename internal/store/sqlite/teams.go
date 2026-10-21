@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -191,7 +192,7 @@ func (db *DB) GetTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 		UserID: int64(userID),
 	})
 	if err != nil {
-		if models.IsNotFound(translateNotFound(err)) {
+		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
 		db.log.Error("failed to get team member record from db", "error", err, "team_id", teamID, "user_id", userID)

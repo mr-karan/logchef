@@ -182,3 +182,84 @@ func testGetNotFound(t *testing.T, ctx context.Context, s store.Store) {
 		t.Errorf("GetTeamMember = %+v, %v, want nil, nil", member, err)
 	}
 }
+
+func testCollectionMapping(t *testing.T, ctx context.Context, s store.Store) {
+	user := mkUser(t, ctx, s, "collection-mapping@test.dev")
+	for _, personal := range []bool{true, false} {
+		t.Run(fmt.Sprintf("personal-%t", personal), func(t *testing.T) {
+			name := fmt.Sprintf("mapping-%t", personal)
+			collection, err := s.CreateCollection(ctx, name, "collection description", personal, user.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := s.DeleteCollection(ctx, collection.ID); err != nil {
+					t.Error(err)
+				}
+			})
+			wantCreated := &models.Collection{
+				ID:          collection.ID,
+				Name:        name,
+				Description: "collection description",
+				IsPersonal:  personal,
+				CreatedBy:   &user.ID,
+				CreatedAt:   collection.CreatedAt,
+				UpdatedAt:   collection.UpdatedAt,
+			}
+			if collection.CreatedAt.IsZero() || collection.UpdatedAt.IsZero() || !reflect.DeepEqual(collection, wantCreated) {
+				t.Fatalf("CreateCollection = %+v, want %+v", collection, wantCreated)
+			}
+			got, err := s.GetCollection(ctx, collection.ID)
+			if err != nil || !reflect.DeepEqual(got, collection) {
+				t.Fatalf("GetCollection = %+v, %v, want %+v", got, err, collection)
+			}
+			if personal {
+				got, err := s.GetPersonalCollection(ctx, user.ID)
+				if err != nil || !reflect.DeepEqual(got, collection) {
+					t.Fatalf("GetPersonalCollection = %+v, %v, want %+v", got, err, collection)
+				}
+			}
+			assertCollectionMembership(t, ctx, s, collection, user)
+			collections, err := s.ListCollectionsForUser(ctx, user.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := *collection
+			want.CallerRole = models.CollectionRoleOwner
+			want.MemberCount, want.TeamCount, want.ItemCount = 1, 0, 0
+			matches := 0
+			for _, got := range collections {
+				if got.ID == collection.ID {
+					matches++
+					if !reflect.DeepEqual(got, &want) {
+						t.Errorf("ListCollectionsForUser = %+v, want %+v", got, &want)
+					}
+				}
+			}
+			if matches != 1 {
+				t.Errorf("ListCollectionsForUser returned collection %d times, want 1", matches)
+			}
+		})
+	}
+}
+
+func assertCollectionMembership(t *testing.T, ctx context.Context, s store.Store, collection *models.Collection, user *models.User) {
+	t.Helper()
+	if err := s.AddCollectionMember(ctx, collection.ID, user.ID, models.CollectionRoleOwner, &user.ID); err != nil {
+		t.Fatal(err)
+	}
+	member, err := s.GetCollectionMember(ctx, collection.ID, user.ID)
+	if err != nil || member == nil {
+		t.Fatalf("GetCollectionMember = %+v, %v", member, err)
+	}
+	wantMember := &models.CollectionMember{
+		CollectionID: collection.ID,
+		UserID:       user.ID,
+		Role:         models.CollectionRoleOwner,
+		AddedBy:      &user.ID,
+		CreatedAt:    member.CreatedAt,
+	}
+	if member.CreatedAt.IsZero() || !reflect.DeepEqual(member, wantMember) {
+		t.Fatalf("GetCollectionMember = %+v, want %+v", member, wantMember)
+	}
+}

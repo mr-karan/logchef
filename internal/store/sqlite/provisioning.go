@@ -13,7 +13,7 @@ import (
 func (db *DB) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error) {
 	managed, err := db.readQueries.IsSourceManaged(ctx, int64(id))
 	if err != nil {
-		return false, translateNotFound(err)
+		return false, err
 	}
 	return managed == 1, nil
 }
@@ -22,7 +22,7 @@ func (db *DB) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, er
 func (db *DB) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error) {
 	managed, err := db.readQueries.IsTeamManaged(ctx, int64(id))
 	if err != nil {
-		return false, translateNotFound(err)
+		return false, err
 	}
 	return managed == 1, nil
 }
@@ -31,7 +31,7 @@ func (db *DB) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error)
 func (db *DB) IsUserManaged(ctx context.Context, id models.UserID) (bool, error) {
 	managed, err := db.readQueries.IsUserManaged(ctx, int64(id))
 	if err != nil {
-		return false, translateNotFound(err)
+		return false, err
 	}
 	return managed == 1, nil
 }
