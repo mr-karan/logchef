@@ -262,69 +262,55 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 		return err
 	}
 
-	existing, err := db.GetUser(ctx, userID)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrUserNotFound
+	var deactivated bool
+	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		count, err := tx.CountAdminUsers(ctx)
+		if err != nil {
+			return fmt.Errorf("error counting admin users: %w", err)
 		}
-		log.Error("failed to get existing user for update", "error", err, "user_id", userID)
-		return fmt.Errorf("error getting user for update: %w", err)
-	}
+		existing, err := tx.GetUser(ctx, userID)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrUserNotFound
+			}
+			return fmt.Errorf("error getting user for update: %w", err)
+		}
 
-	wasActiveAdmin := existing.Role == models.UserRoleAdmin && existing.Status == models.UserStatusActive
-	updated, deactivating, err := applyUserUpdates(existing, updateData)
-	if err != nil {
+		wasActiveAdmin := existing.Role == models.UserRoleAdmin && existing.Status == models.UserStatusActive
+		updated, deactivating, err := applyUserUpdates(existing, updateData)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return nil
+		}
+		if wasActiveAdmin && (existing.Role != models.UserRoleAdmin || existing.Status != models.UserStatusActive) && count <= 1 {
+			return ErrCannotDeleteLastAdmin
+		}
+
+		existing.UpdatedAt = time.Now().UTC()
+		if err := tx.UpdateUser(ctx, existing); err != nil {
+			return fmt.Errorf("error updating user: %w", err)
+		}
+		if deactivating {
+			if err := RevokeUserSessions(ctx, tx, log, userID); err != nil {
+				return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
+			}
+			deactivated = true
+		}
+		return nil
+	}); err != nil {
+		if !errors.Is(err, ErrCannotDeleteLastAdmin) && !errors.Is(err, ErrUserNotFound) {
+			log.Error("failed to update user", "error", err, "user_id", userID)
+		}
 		return err
 	}
 
-	if !updated {
-		return nil
+	if deactivated {
+		log.Info("user.deactivated", "user_id", userID)
+	} else {
+		log.Debug("user updated", "user_id", userID)
 	}
-
-	existing.UpdatedAt = time.Now().UTC()
-
-	demotingAdmin := wasActiveAdmin && existing.Role != models.UserRoleAdmin
-	if deactivating || demotingAdmin {
-		if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-			// SQLite's BEGIN IMMEDIATE serializes changes to the active-admin count.
-			if wasActiveAdmin {
-				count, err := tx.CountAdminUsers(ctx)
-				if err != nil {
-					return fmt.Errorf("error counting admin users: %w", err)
-				}
-				if count <= 1 {
-					return ErrCannotDeleteLastAdmin
-				}
-			}
-			if err := tx.UpdateUser(ctx, existing); err != nil {
-				return fmt.Errorf("error updating user: %w", err)
-			}
-			if deactivating {
-				if err := RevokeUserSessions(ctx, tx, log, existing.ID); err != nil {
-					return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
-				}
-			}
-			return nil
-		}); err != nil {
-			if !errors.Is(err, ErrCannotDeleteLastAdmin) {
-				log.Error("failed to update user", "error", err, "user_id", userID)
-			}
-			return err
-		}
-		if deactivating {
-			log.Info("user.deactivated", "user_id", userID)
-		} else {
-			log.Debug("user updated", "user_id", userID)
-		}
-		return nil
-	}
-
-	if err := db.UpdateUser(ctx, existing); err != nil {
-		log.Error("failed to update user in db", "error", err, "user_id", userID)
-		return fmt.Errorf("error updating user: %w", err)
-	}
-
-	log.Debug("user updated", "user_id", userID)
 	return nil
 }
 
@@ -395,30 +381,20 @@ func applyStatusUpdate(existing *models.User, updateData models.User) (changed, 
 // user holds. The user row and session rows are removed in the same
 // transaction so a deleted user can never be left with a live session.
 func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
-	// Validate user exists
-	existing, err := db.GetUser(ctx, id)
-	if err != nil {
-		if models.IsNotFound(err) {
-			return ErrUserNotFound
-		}
-		log.Error("failed to get user for deletion check", "error", err, "user_id", id)
-		return fmt.Errorf("error checking existing user: %w", err)
-	}
-
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		// #96: re-check the last-admin guard inside the write tx so two
-		// concurrent deletions of different admins can't both pass a stale
-		// count and leave the org with zero admins. On SQLite the write
-		// connection uses BEGIN IMMEDIATE, so these txs serialize and the
-		// second one sees the decremented active-admin count.
-		if existing.Role == models.UserRoleAdmin {
-			count, err := tx.CountAdminUsers(ctx)
-			if err != nil {
-				return fmt.Errorf("error counting admin users: %w", err)
+		count, err := tx.CountAdminUsers(ctx)
+		if err != nil {
+			return fmt.Errorf("error counting admin users: %w", err)
+		}
+		existing, err := tx.GetUser(ctx, id)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrUserNotFound
 			}
-			if count <= 1 {
-				return ErrCannotDeleteLastAdmin
-			}
+			return fmt.Errorf("error checking existing user: %w", err)
+		}
+		if existing.Role == models.UserRoleAdmin && existing.Status == models.UserStatusActive && count <= 1 {
+			return ErrCannotDeleteLastAdmin
 		}
 		if err := tx.DeleteUser(ctx, id); err != nil {
 			return fmt.Errorf("error deleting user: %w", err)

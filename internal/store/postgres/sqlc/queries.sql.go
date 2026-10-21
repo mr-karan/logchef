@@ -388,7 +388,9 @@ func (q *Queries) ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuth
 }
 
 const countAdminUsers = `-- name: CountAdminUsers :one
-SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2
+SELECT COUNT(*) FROM (
+    SELECT id FROM users WHERE role = $1 AND status = $2 ORDER BY id FOR UPDATE
+) AS active_admins
 `
 
 type CountAdminUsersParams struct {
@@ -396,7 +398,7 @@ type CountAdminUsersParams struct {
 	Status string `json:"status"`
 }
 
-// Count active admin users
+// Lock in ID order so concurrent removals preserve an active admin.
 func (q *Queries) CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAdminUsers, arg.Role, arg.Status)
 	var count int64

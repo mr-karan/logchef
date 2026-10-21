@@ -37,7 +37,7 @@ type Querier interface {
 	ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (pgtype.Int8, error)
 	// Rotation claim. Exactly one concurrent caller gets the row.
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
-	// Count active admin users
+	// Lock in ID order so concurrent removals preserve an active admin.
 	CountAdminUsers(ctx context.Context, arg CountAdminUsersParams) (int64, error)
 	// Count the teams shared with a collection that the user currently belongs to.
 	// A non-zero count grants the user the collection Member role.

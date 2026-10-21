@@ -81,8 +81,10 @@ SELECT * FROM users ORDER BY created_at ASC;
 SELECT * FROM users WHERE account_type = 'service' ORDER BY created_at ASC;
 
 -- name: CountAdminUsers :one
--- Count active admin users
-SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2;
+-- Lock in ID order so concurrent removals preserve an active admin.
+SELECT COUNT(*) FROM (
+    SELECT id FROM users WHERE role = $1 AND status = $2 ORDER BY id FOR UPDATE
+) AS active_admins;
 
 -- name: DeleteUser :exec
 -- Delete a user by ID

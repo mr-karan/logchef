@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	// "github.com/mr-karan/logchef/internal/identity" // Removed
@@ -302,10 +303,11 @@ func (s *Server) handleCreateAPIToken(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	if parent, ok := c.Locals("api_token").(*models.APIToken); ok {
-		if err := core.AuthorizeAPITokenCreation(parent, req.Scopes, req.ExpiresAt); err != nil {
-			return SendError(c, fiber.StatusForbidden, err.Error())
+	if err := authorizeAPITokenCreation(c, req); err != nil {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
+		return SendError(c, fiber.StatusForbidden, err.Error())
 	}
 
 	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, req.Name, req.ExpiresAt, req.Scopes)
@@ -320,6 +322,18 @@ func (s *Server) handleCreateAPIToken(c fiber.Ctx) error {
 	}
 
 	return SendSuccess(c, fiber.StatusCreated, response)
+}
+
+func authorizeAPITokenCreation(c fiber.Ctx, req models.CreateAPITokenRequest) error {
+	switch principalFromLocals(c).Method {
+	case access.AuthSession:
+		return nil
+	case access.AuthAPIToken:
+		parent, _ := c.Locals("api_token").(*models.APIToken)
+		return core.AuthorizeAPITokenCreation(parent, req.Scopes, req.ExpiresAt)
+	default:
+		return errors.New("authentication method cannot create API tokens")
+	}
 }
 
 // handleDeleteAPIToken deletes an API token owned by the authenticated user.
@@ -440,10 +454,11 @@ func (s *Server) handleCreateServiceAccountToken(c fiber.Ctx) error {
 	if len(req.Scopes) == 0 {
 		req.Scopes = core.ReadOnlyTokenScopes()
 	}
-	if parent, ok := c.Locals("api_token").(*models.APIToken); ok {
-		if err := core.AuthorizeAPITokenCreation(parent, req.Scopes, req.ExpiresAt); err != nil {
-			return SendError(c, fiber.StatusForbidden, err.Error())
+	if err := authorizeAPITokenCreation(c, req); err != nil {
+		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
+			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
+		return SendError(c, fiber.StatusForbidden, err.Error())
 	}
 
 	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, account.ID, req.Name, req.ExpiresAt, req.Scopes)

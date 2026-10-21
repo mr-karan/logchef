@@ -37,6 +37,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("WithTxCommit", func(t *testing.T) { testWithTxCommit(t, ctx, s) })
 	t.Run("WithTxRollback", func(t *testing.T) { testWithTxRollback(t, ctx, s) })
 	t.Run("WithTxNoNesting", func(t *testing.T) { testWithTxNoNesting(t, ctx, s) })
+	t.Run("ConcurrentAdminRemovals", func(t *testing.T) { testConcurrentAdminRemovals(t, s) })
 }
 
 // --- helpers ---

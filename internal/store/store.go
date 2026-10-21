@@ -62,6 +62,7 @@ type UserStore interface {
 	UpdateUser(ctx context.Context, user *models.User) error
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
+	// CountAdminUsers serializes active-admin changes when called inside WithTx.
 	CountAdminUsers(ctx context.Context) (int, error)
 	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
 	// local email+password authentication.

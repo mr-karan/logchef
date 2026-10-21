@@ -5,12 +5,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -25,19 +30,23 @@ func TestCreateTokenDelegationHTTP(t *testing.T) {
 			parentExpiry *time.Time
 			request      models.CreateAPITokenRequest
 			session      bool
+			serviceOnly  bool
 			want         int
 		}{
-			{"subset", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeLogsRead}}, false, fiber.StatusCreated},
-			{"superset", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}}, false, fiber.StatusForbidden},
-			{"child wildcard", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll}}, false, fiber.StatusForbidden},
-			{"parent wildcard", []models.TokenScope{models.TokenScopeAll}, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll}}, false, fiber.StatusCreated},
-			{"expiry beyond parent", scoped, &parentExpiry, models.CreateAPITokenRequest{Scopes: scoped, ExpiresAt: &later}, false, fiber.StatusForbidden},
-			{"missing expiry", scoped, &parentExpiry, models.CreateAPITokenRequest{Scopes: scoped}, false, fiber.StatusForbidden},
-			{"equal expiry", scoped, &parentExpiry, models.CreateAPITokenRequest{Scopes: scoped, ExpiresAt: &parentExpiry}, false, fiber.StatusCreated},
-			{"session unrestricted", nil, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll}}, true, fiber.StatusCreated},
-			{"default scopes", scoped, nil, models.CreateAPITokenRequest{}, false, fiber.StatusForbidden},
+			{"subset", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeLogsRead}}, false, false, fiber.StatusCreated},
+			{"superset", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}}, false, false, fiber.StatusForbidden},
+			{"child wildcard", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll}}, false, false, fiber.StatusForbidden},
+			{"parent wildcard", []models.TokenScope{models.TokenScopeAll}, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll}}, false, false, fiber.StatusCreated},
+			{"expiry beyond parent", scoped, &parentExpiry, models.CreateAPITokenRequest{Scopes: scoped, ExpiresAt: &later}, false, false, fiber.StatusForbidden},
+			{"missing expiry", scoped, &parentExpiry, models.CreateAPITokenRequest{Scopes: scoped}, false, false, fiber.StatusForbidden},
+			{"equal expiry", scoped, &parentExpiry, models.CreateAPITokenRequest{Scopes: scoped, ExpiresAt: &parentExpiry}, false, false, fiber.StatusCreated},
+			{"session unrestricted", nil, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll}}, true, false, fiber.StatusCreated},
+			{"default scopes", scoped, nil, models.CreateAPITokenRequest{}, false, true, fiber.StatusForbidden},
+			{"default session scopes", nil, nil, models.CreateAPITokenRequest{}, true, true, fiber.StatusCreated},
+			{"unknown scope", scoped, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{"unknown"}}, false, false, fiber.StatusBadRequest},
+			{"unknown after wildcard", []models.TokenScope{models.TokenScopeAll}, nil, models.CreateAPITokenRequest{Scopes: []models.TokenScope{models.TokenScopeAll, "unknown"}}, false, false, fiber.StatusBadRequest},
 		} {
-			if tc.name == "default scopes" && !serviceAccount {
+			if tc.serviceOnly && !serviceAccount {
 				continue
 			}
 			t.Run(fmt.Sprintf("service=%t/%s", serviceAccount, tc.name), func(t *testing.T) {
@@ -76,14 +85,41 @@ func TestCreateTokenDelegationHTTP(t *testing.T) {
 				if resp.status != tc.want {
 					t.Fatalf("status = %d (%q), want %d", resp.status, resp.message, tc.want)
 				}
-				if tc.want == fiber.StatusForbidden {
-					after, err := core.ListAPITokensForUser(context.Background(), s.sqlite, target.ID)
-					if err != nil {
-						t.Fatal(err)
-					}
+				after, err := core.ListAPITokensForUser(context.Background(), s.sqlite, target.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if tc.want != fiber.StatusCreated {
 					if len(after) != len(before) {
 						t.Fatalf("denied request created a token: before=%d after=%d", len(before), len(after))
 					}
+					return
+				}
+				if len(after) != len(before)+1 {
+					t.Fatalf("token count = %d, want %d", len(after), len(before)+1)
+				}
+				var child *models.APIToken
+				for _, token := range after {
+					if token.Name == "child" {
+						child = token
+					}
+				}
+				if child == nil {
+					t.Fatal("created child token not stored")
+				}
+				wantScopes := tc.request.Scopes
+				if serviceAccount && len(wantScopes) == 0 {
+					wantScopes = core.ReadOnlyTokenScopes()
+				}
+				if !slices.Equal(child.Scopes, wantScopes) {
+					t.Errorf("stored scopes = %v, want %v", child.Scopes, wantScopes)
+				}
+				if wantExpiry := tc.request.ExpiresAt; wantExpiry == nil {
+					if child.ExpiresAt != nil {
+						t.Errorf("stored expiry = %v, want nil", child.ExpiresAt)
+					}
+				} else if child.ExpiresAt == nil || !child.ExpiresAt.Equal(*wantExpiry) {
+					t.Errorf("stored expiry = %v, want %v", child.ExpiresAt, wantExpiry)
 				}
 			})
 		}
@@ -103,5 +139,56 @@ func TestUpdateLastAdminHTTP(t *testing.T) {
 				t.Fatalf("message = %q, want %q", resp.message, core.ErrCannotDeleteLastAdmin.Error())
 			}
 		})
+	}
+}
+
+func TestCreateTokenRejectsOtherAuthMethods(t *testing.T) {
+	for _, serviceAccount := range []bool{false, true} {
+		for _, method := range []string{"oauth", "unknown", "token"} {
+			t.Run(fmt.Sprintf("service=%t/%s", serviceAccount, method), func(t *testing.T) {
+				s := newAuthzTestServer(t)
+				user := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+				target := user
+				path := "/tokens"
+				handler := s.handleCreateAPIToken
+				if serviceAccount {
+					var err error
+					target, err = core.CreateServiceAccount(context.Background(), s.sqlite, s.log, "Test bot")
+					if err != nil {
+						t.Fatal(err)
+					}
+					path = fmt.Sprintf("/%d/tokens", target.ID)
+					handler = s.handleCreateServiceAccountToken
+				}
+				app := fiber.New()
+				app.Use(func(c fiber.Ctx) error {
+					c.Locals("user", user)
+					c.Locals("auth_method", method)
+					if method == "oauth" {
+						c.Locals("oauth_token", &oauth.AccessToken{Principal: access.OAuthPrincipal(user, 1, "client", []models.TokenScope{models.TokenScopeTokensWrite})})
+					}
+					return c.Next()
+				})
+				app.Post("/tokens", handler)
+				app.Post("/:userID/tokens", handler)
+				req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"name":"child","scopes":["logs:read"]}`))
+				req.Header.Set("Content-Type", "application/json")
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				if resp.StatusCode != fiber.StatusForbidden {
+					t.Fatalf("status = %d, want 403", resp.StatusCode)
+				}
+				tokens, err := core.ListAPITokensForUser(context.Background(), s.sqlite, target.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(tokens) != 0 {
+					t.Fatalf("denied request stored %d tokens", len(tokens))
+				}
+			})
+		}
 	}
 }
