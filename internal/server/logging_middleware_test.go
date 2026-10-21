@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -107,5 +108,82 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 	}
 	if len(wantRoutes) != 0 || !foundError {
 		t.Error("expected request or error logs are missing")
+	}
+}
+
+func TestFailureLogsExcludeCredentials(t *testing.T) {
+	tests := []struct {
+		name    string
+		message string
+		handler func(*Server, fiber.Ctx) error
+	}{
+		{
+			name:    "panic",
+			message: "panic recovered",
+			handler: func(_ *Server, _ fiber.Ctx) error {
+				panic("test handler panic")
+			},
+		},
+		{
+			name:    "response write",
+			message: "failed to write error response",
+			handler: func(s *Server, c fiber.Ctx) error {
+				s.sendLoadFailure(c, fiber.StatusInternalServerError, "test load failure", models.GeneralErrorType)
+				return nil
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			app := fiber.New(fiber.Config{
+				JSONEncoder: func(any) ([]byte, error) {
+					return nil, fmt.Errorf("test response encoding failure")
+				},
+			})
+			app.Use(recoverMiddleware(logger))
+			app.Use(requestLogger(logger))
+			s := &Server{log: logger}
+			const route = "/logging-failures/:token"
+			app.Get(route, func(c fiber.Ctx) error { return tt.handler(s, c) })
+
+			const token = "secret-failure-path-token"
+			const code = "secret-failure-query-code"
+			path := "/logging-failures/" + token + "?code=" + code
+			resp, err := app.Test(httptest.NewRequest(http.MethodGet, path, http.NoBody))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusInternalServerError)
+			}
+			for _, credential := range []string{token, code} {
+				if strings.Contains(logs.String(), credential) {
+					t.Error("log output contains a request credential")
+				}
+			}
+			found := false
+			decoder := json.NewDecoder(strings.NewReader(logs.String()))
+			for decoder.More() {
+				var record struct {
+					Message string `json:"msg"`
+					Path    string `json:"path"`
+				}
+				if err := decoder.Decode(&record); err != nil {
+					t.Fatal(err)
+				}
+				if record.Message == tt.message {
+					found = true
+					if record.Path != route {
+						t.Error("failure log does not use the route template")
+					}
+				}
+			}
+			if !found {
+				t.Errorf("missing %q log", tt.message)
+			}
+		})
 	}
 }

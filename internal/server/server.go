@@ -226,7 +226,7 @@ func recoverMiddleware(log *slog.Logger) fiber.Handler {
 		EnableStackTrace: true,
 		StackTraceHandler: func(c fiber.Ctx, panicValue any) {
 			log.Error("panic recovered",
-				"path", c.Path(),
+				"path", c.Route().Path,
 				"method", c.Method(),
 				"panic", panicValue,
 				"stack", string(debug.Stack()),
