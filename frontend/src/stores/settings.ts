@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
 import { settingsApi, type SettingsByCategory, type SystemSetting, type UpdateSettingRequest } from "@/api/settings";
 import { computed } from "vue";
+import { i18n } from "@/i18n";
 
 interface SettingsState {
   settingsByCategory: SettingsByCategory[];
@@ -84,7 +85,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return await state.withLoading(`updateSetting-${key}`, async () => {
       const result = await state.callApi({
         apiCall: () => settingsApi.updateSetting(key, data),
-        successMessage: "Setting updated successfully",
+        successMessage: i18n.global.t("admin.settingUpdated"),
         operationKey: `updateSetting-${key}`,
       });
 
@@ -102,7 +103,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return await state.withLoading(`deleteSetting-${key}`, async () => {
       const result = await state.callApi({
         apiCall: () => settingsApi.deleteSetting(key),
-        successMessage: "Setting deleted successfully",
+        successMessage: i18n.global.t("admin.settingDeleted"),
         operationKey: `deleteSetting-${key}`,
       });
 
@@ -120,7 +121,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return await state.withLoading('testEmail', async () => {
       return await state.callApi({
         apiCall: () => settingsApi.testEmail({ recipient_email: recipientEmail }),
-        successMessage: "Test email sent successfully",
+        successMessage: i18n.global.t("admin.testEmailSent"),
         operationKey: 'testEmail',
       });
     });
@@ -131,7 +132,7 @@ export const useSettingsStore = defineStore("settings", () => {
     return await state.withLoading('testWebhook', async () => {
       return await state.callApi({
         apiCall: () => settingsApi.testWebhook({ webhook_url: webhookUrl }),
-        successMessage: "Test webhook sent successfully",
+        successMessage: i18n.global.t("admin.testWebhookSent"),
         operationKey: 'testWebhook',
       });
     });

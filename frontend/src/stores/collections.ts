@@ -13,6 +13,7 @@ import {
   type AddCollectionItemRequest,
 } from "@/api/collections";
 import { useBaseStore } from "./base";
+import { i18n } from "@/i18n";
 
 interface CollectionsState {
   collections: Collection[];
@@ -65,7 +66,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<Collection>({
         apiCall: () => collectionsApi.create(payload),
         operationKey: "createCollection",
-        successMessage: "Collection created",
+        successMessage: i18n.global.t("library.collectionCreated"),
         onSuccess: (data) => {
           if (data) state.data.value.collections.unshift(data);
         },
@@ -78,7 +79,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<Collection>({
         apiCall: () => collectionsApi.update(id, payload),
         operationKey: `updateCollection-${id}`,
-        successMessage: "Collection updated",
+        successMessage: i18n.global.t("library.collectionUpdated"),
         onSuccess: (data) => {
           if (!data) return;
           const idx = state.data.value.collections.findIndex((c) => c.id === id);
@@ -98,7 +99,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.delete(id),
         operationKey: `deleteCollection-${id}`,
-        successMessage: "Collection deleted",
+        successMessage: i18n.global.t("library.collectionDeleted"),
         onSuccess: () => {
           state.data.value.collections = state.data.value.collections.filter((c) => c.id !== id);
           delete state.data.value.members[id];
@@ -129,7 +130,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.addMember(id, payload),
         operationKey: `addMember-${id}`,
-        successMessage: "Member added",
+        successMessage: i18n.global.t("library.memberAdded"),
         onSuccess: async () => {
           await Promise.all([fetchMembers(id), fetchCollections()]);
         },
@@ -142,7 +143,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.removeMember(id, userId),
         operationKey: `removeMember-${id}-${userId}`,
-        successMessage: "Member removed",
+        successMessage: i18n.global.t("library.memberRemoved"),
         onSuccess: async () => {
           await Promise.all([fetchMembers(id), fetchCollections()]);
         },
@@ -169,7 +170,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.addTeam(id, payload),
         operationKey: `addTeam-${id}`,
-        successMessage: "Team added",
+        successMessage: i18n.global.t("library.teamAdded"),
         onSuccess: async () => {
           await Promise.all([fetchTeams(id), fetchCollections()]);
         },
@@ -182,7 +183,7 @@ export const useCollectionsStore = defineStore("collections", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.removeTeam(id, teamId),
         operationKey: `removeTeam-${id}-${teamId}`,
-        successMessage: "Team removed",
+        successMessage: i18n.global.t("library.teamRemoved"),
         onSuccess: async () => {
           await Promise.all([fetchTeams(id), fetchCollections()]);
         },
@@ -204,12 +205,12 @@ export const useCollectionsStore = defineStore("collections", () => {
     });
   }
 
-  async function addItem(id: number, payload: AddCollectionItemRequest) {
+  async function addItem(id: number, payload: AddCollectionItemRequest, { notify = true } = {}) {
     return await state.withLoading(`addItem-${id}`, async () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.addItem(id, payload),
         operationKey: `addItem-${id}`,
-        successMessage: "Added to collection",
+        successMessage: notify ? i18n.global.t("library.queryAdded") : undefined,
         onSuccess: async () => {
           await fetchItems(id);
           await fetchCollections();
@@ -218,12 +219,12 @@ export const useCollectionsStore = defineStore("collections", () => {
     });
   }
 
-  async function removeItem(id: number, queryId: number) {
+  async function removeItem(id: number, queryId: number, { notify = true } = {}) {
     return await state.withLoading(`removeItem-${id}-${queryId}`, async () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => collectionsApi.removeItem(id, queryId),
         operationKey: `removeItem-${id}-${queryId}`,
-        successMessage: "Removed from collection",
+        successMessage: notify ? i18n.global.t("library.queryRemoved") : undefined,
         onSuccess: async () => {
           await fetchItems(id);
           await fetchCollections();

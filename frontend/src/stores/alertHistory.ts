@@ -4,6 +4,7 @@ import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/a
 import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
 import type { APIErrorResponse } from "@/api/types";
+import { i18n } from "@/i18n";
 
 interface AlertHistoryState {
   entries: AlertHistoryEntry[];
@@ -75,7 +76,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => alertsApi.resolve(alertId, payload),
         operationKey: `resolveAlert-${alertId}`,
-        successMessage: "Alert resolved",
+        successMessage: i18n.global.t("alerts.alertResolved"),
         onSuccess: () => {
           // Optimistically mark the latest triggered entry as resolved.
           const idx = state.data.value.entries.findIndex((entry) => entry.status === "triggered");

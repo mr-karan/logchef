@@ -9,6 +9,7 @@ import {
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import { useBaseStore } from "./base";
 import { useContextStore } from "./context";
+import { i18n } from "@/i18n";
 
 export interface SavedQueriesState {
   queries: SavedQuery[];
@@ -139,7 +140,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       return await state.callApi<SavedQuery>({
         apiCall: () => savedQueriesApi.create(payload),
         operationKey: key,
-        successMessage: "Query created successfully",
+        successMessage: i18n.global.t("library.queryCreated"),
         onSuccess: (response) => {
           if (response) {
             if (!state.data.value.queries) {
@@ -162,7 +163,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       return await state.callApi<SavedQuery>({
         apiCall: () => savedQueriesApi.update(queryId, payload),
         operationKey: key,
-        successMessage: "Query updated successfully",
+        successMessage: i18n.global.t("library.queryUpdated"),
         onSuccess: (response) => {
           if (response) {
             const index = state.data.value.queries.findIndex(
@@ -192,7 +193,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => savedQueriesApi.delete(queryId),
         operationKey: key,
-        successMessage: "Query deleted successfully",
+        successMessage: i18n.global.t("library.queryDeleted"),
         onSuccess: () => {
           state.data.value.queries = state.data.value.queries.filter(
             (q) => String(q.id) !== String(queryId)

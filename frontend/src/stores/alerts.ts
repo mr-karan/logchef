@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { alertsApi, type Alert, type CreateAlertRequest, type UpdateAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
+import { i18n } from "@/i18n";
 
 interface AlertsState {
   alerts: Alert[];
@@ -91,7 +92,7 @@ export const useAlertsStore = defineStore("alerts", () => {
       return await state.callApi<Alert>({
         apiCall: () => alertsApi.create({ ...payload, source_id: sourceId }),
         operationKey: "createAlert",
-        successMessage: "Alert created successfully",
+        successMessage: i18n.global.t("alerts.alertCreated"),
         onSuccess: (response) => {
           if (response) {
             upsertAlert(response);
@@ -108,7 +109,7 @@ export const useAlertsStore = defineStore("alerts", () => {
       return await state.callApi<Alert>({
         apiCall: () => alertsApi.update(alertId, payload),
         operationKey: `updateAlert-${alertId}`,
-        successMessage: "Alert updated successfully",
+        successMessage: i18n.global.t("alerts.alertUpdated"),
         onSuccess: (response) => {
           if (response) {
             upsertAlert(response);
@@ -124,7 +125,7 @@ export const useAlertsStore = defineStore("alerts", () => {
       return await state.callApi<{ message: string }>({
         apiCall: () => alertsApi.delete(alertId),
         operationKey: `deleteAlert-${alertId}`,
-        successMessage: "Alert deleted",
+        successMessage: i18n.global.t("alerts.alertDeleted"),
         onSuccess: () => {
           removeAlert(alertId);
         },

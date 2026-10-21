@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
 import { computed } from "vue";
 import { apiTokensApi, type APIToken, type CreateAPITokenRequest } from "@/api/apiTokens";
+import { i18n } from "@/i18n";
 
 interface APITokensState {
   tokens: APIToken[];
@@ -31,7 +32,7 @@ export const useAPITokensStore = defineStore("apiTokens", () => {
   async function createToken(data: CreateAPITokenRequest) {
     return await state.callApi({
       apiCall: () => apiTokensApi.createToken(data),
-      successMessage: "API token created successfully",
+      successMessage: i18n.global.t("tokens.tokenCreated"),
       operationKey: 'createToken',
       onSuccess: async () => {
         await loadTokens(true);
@@ -42,7 +43,7 @@ export const useAPITokensStore = defineStore("apiTokens", () => {
   async function deleteToken(tokenId: number) {
     return await state.callApi({
       apiCall: () => apiTokensApi.deleteToken(tokenId),
-      successMessage: "API token deleted successfully",
+      successMessage: i18n.global.t("tokens.tokenDeleted"),
       operationKey: `deleteToken-${tokenId}`,
       onSuccess: async () => {
         await loadTokens(true);

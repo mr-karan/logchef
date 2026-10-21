@@ -9,6 +9,7 @@ import {
 } from "@/api/serviceAccounts";
 import type { APIToken, CreateAPITokenRequest } from "@/api/apiTokens";
 import type { UserTeamMembership } from "@/api/teams";
+import { i18n } from "@/i18n";
 
 interface ServiceAccountsState {
   accounts: User[];
@@ -44,7 +45,7 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   async function createAccount(data: CreateServiceAccountRequest) {
     return await state.callApi({
       apiCall: () => serviceAccountsApi.createServiceAccount(data),
-      successMessage: "Service account created successfully",
+      successMessage: i18n.global.t("access.serviceAccountCreated"),
       operationKey: "createServiceAccount",
       onSuccess: async () => {
         await loadAccounts(true);
@@ -55,7 +56,7 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   async function deleteAccount(id: string) {
     return await state.callApi({
       apiCall: () => serviceAccountsApi.deleteServiceAccount(id),
-      successMessage: "Service account deleted successfully",
+      successMessage: i18n.global.t("access.serviceAccountDeleted"),
       operationKey: `deleteServiceAccount-${id}`,
       onSuccess: async () => {
         delete state.data.value.tokensByAccount[id];
@@ -81,7 +82,7 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   async function createToken(accountId: string, data: CreateAPITokenRequest) {
     return await state.callApi({
       apiCall: () => serviceAccountsApi.createToken(accountId, data),
-      successMessage: "Service token created successfully",
+      successMessage: i18n.global.t("access.serviceTokenCreated"),
       operationKey: `createServiceAccountToken-${accountId}`,
       onSuccess: async () => {
         await loadTokens(accountId, true);
@@ -92,7 +93,7 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   async function deleteToken(accountId: string, tokenId: number) {
     return await state.callApi({
       apiCall: () => serviceAccountsApi.deleteToken(accountId, tokenId),
-      successMessage: "Service token deleted successfully",
+      successMessage: i18n.global.t("access.serviceTokenDeleted"),
       operationKey: `deleteServiceAccountToken-${tokenId}`,
       onSuccess: async () => {
         await loadTokens(accountId, true);
@@ -117,7 +118,7 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   async function addToTeam(accountId: string, data: AddServiceAccountToTeamRequest) {
     return await state.callApi({
       apiCall: () => serviceAccountsApi.addToTeam(accountId, data),
-      successMessage: "Service account added to team",
+      successMessage: i18n.global.t("access.serviceAccountAddedToTeam"),
       operationKey: `addServiceAccountToTeam-${accountId}`,
       onSuccess: async () => {
         await loadTeams(accountId, true);
@@ -128,7 +129,7 @@ export const useServiceAccountsStore = defineStore("serviceAccounts", () => {
   async function removeFromTeam(accountId: string, teamId: number) {
     return await state.callApi({
       apiCall: () => serviceAccountsApi.removeFromTeam(accountId, teamId),
-      successMessage: "Service account removed from team",
+      successMessage: i18n.global.t("access.serviceAccountRemovedFromTeam"),
       operationKey: `removeServiceAccountFromTeam-${accountId}-${teamId}`,
       onSuccess: async () => {
         await loadTeams(accountId, true);

@@ -334,10 +334,7 @@ watch(showAddQuery, async (isOpen) => {
 });
 
 async function handleAddQuery(queryId: number) {
-  const result = await store.addItem(collectionID.value, { saved_query_id: queryId });
-  if (result.success) {
-    toast({ title: t("library.queryAdded"), duration: TOAST_DURATION.SUCCESS });
-  }
+  await store.addItem(collectionID.value, { saved_query_id: queryId });
 }
 
 // --- Move a query to a different collection (fix 1) ---
@@ -363,9 +360,9 @@ async function handleMove() {
   if (queryId == null || !target) return;
   // Move = pin to the target, then unpin from the current collection. If the add
   // fails we keep it where it is rather than orphan it.
-  const added = await store.addItem(target, { saved_query_id: queryId });
+  const added = await store.addItem(target, { saved_query_id: queryId }, { notify: false });
   if (!added.success) return;
-  await store.removeItem(collectionID.value, queryId);
+  await store.removeItem(collectionID.value, queryId, { notify: false });
   pendingMoveQueryId.value = null;
   toast({ title: t("library.queryMoved"), duration: TOAST_DURATION.SUCCESS });
 }

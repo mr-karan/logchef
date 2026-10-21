@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { toast } from 'vue-sonner'
 import { useBaseStore } from '../base'
 
 vi.mock('vue-sonner', () => ({
@@ -16,7 +17,41 @@ function deferred<T>() {
 
 describe('useBaseStore', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  it('shows the success message once after a successful call', async () => {
+    const store = useBaseStore({})
+
+    const result = await store.callApi({ apiCall: async () => ok({ id: 1 }), successMessage: 'User created' })
+
+    expect(result.success).toBe(true)
+    expect(toast).toHaveBeenCalledTimes(1)
+    expect(toast).toHaveBeenCalledWith('User created', expect.anything())
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
+  it('shows no success message when toasts are off', async () => {
+    const store = useBaseStore({})
+
+    await store.callApi({ apiCall: async () => ok({ id: 1 }), successMessage: 'User created', showToast: false })
+
+    expect(toast).not.toHaveBeenCalled()
+  })
+
+  it('shows no success message when the call or its follow-up fails', async () => {
+    const store = useBaseStore({})
+
+    await store.callApi({ apiCall: async () => fail('email already exists'), successMessage: 'User created' })
+    await store.callApi({
+      apiCall: async () => ok({ id: 1 }),
+      successMessage: 'User created',
+      onSuccess: async () => { throw fail('reload failed') },
+    })
+
+    expect(toast).not.toHaveBeenCalled()
+    expect(toast.error).toHaveBeenCalledTimes(2)
   })
 
   it('clears a previous error when a later call succeeds', async () => {

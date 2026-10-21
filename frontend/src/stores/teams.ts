@@ -15,6 +15,7 @@ import type { APIErrorResponse } from "@/api/types";
 import { isSuccessResponse } from "@/api/types";
 import { useAuthStore } from "./auth";
 import { useContextStore } from "./context";
+import { i18n } from "@/i18n";
 
 interface TeamsState {
   userTeams: UserTeamMembership[];
@@ -168,7 +169,7 @@ export const useTeamsStore = defineStore("teams", () => {
   async function createTeam(data: CreateTeamRequest) {
     return await state.callApi({
       apiCall: () => teamsApi.createTeam(data),
-      successMessage: "Team created successfully",
+      successMessage: i18n.global.t("access.teamCreated"),
       operationKey: 'createTeam',
       onSuccess: (response) => {
         if (response) {
@@ -212,7 +213,7 @@ export const useTeamsStore = defineStore("teams", () => {
   async function updateTeam(teamId: number, data: UpdateTeamRequest) {
     return await state.callApi({
       apiCall: () => teamsApi.updateTeam(teamId, data),
-      successMessage: "Team updated successfully",
+      successMessage: i18n.global.t("access.teamUpdated"),
       operationKey: `updateTeam-${teamId}`,
       onSuccess: (response) => {
         if (response) {
@@ -229,7 +230,7 @@ export const useTeamsStore = defineStore("teams", () => {
   async function deleteTeam(teamId: number) {
     return await state.callApi({
       apiCall: () => teamsApi.deleteTeam(teamId),
-      successMessage: "Team deleted successfully",
+      successMessage: i18n.global.t("access.teamDeleted"),
       operationKey: `deleteTeam-${teamId}`,
       onSuccess: () => {
         state.data.value.userTeams = state.data.value.userTeams.filter(
@@ -284,7 +285,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
     return await state.callApi({
       apiCall: () => teamsApi.addTeamMember(teamId, data),
-      successMessage: "Member added successfully",
+      successMessage: i18n.global.t("access.memberAdded"),
       operationKey: `addTeamMember-${teamId}`,
       onSuccess: async (_response) => {
         patchTeam(teamId, (team) => ({ member_count: (team.member_count || 0) + 1 }));
@@ -317,7 +318,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
     return await state.callApi({
       apiCall: () => teamsApi.removeTeamMember(teamId, userId),
-      successMessage: "Member removed successfully",
+      successMessage: i18n.global.t("access.memberRemoved"),
       operationKey: `removeTeamMember-${teamId}-${userId}`,
       onSuccess: async () => {
         try {
@@ -369,7 +370,7 @@ export const useTeamsStore = defineStore("teams", () => {
   async function addTeamSource(teamId: number, sourceId: number) {
     return await state.callApi({
       apiCall: () => teamsApi.addTeamSource(teamId, sourceId),
-     successMessage: "Source added successfully",
+     successMessage: i18n.global.t("access.teamSourceAdded"),
      operationKey: `addTeamSource-${teamId}-${sourceId}`,
      onSuccess: async () => {
        // Always refresh the list after successfully adding a source
@@ -382,7 +383,7 @@ export const useTeamsStore = defineStore("teams", () => {
   async function removeTeamSource(teamId: number, sourceId: number) {
     return await state.callApi({
       apiCall: () => teamsApi.removeTeamSource(teamId, sourceId),
-      successMessage: "Source removed successfully",
+      successMessage: i18n.global.t("access.teamSourceRemoved"),
       operationKey: `removeTeamSource-${teamId}-${sourceId}`,
       onSuccess: async () => {
         // Update the cache if we have it

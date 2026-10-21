@@ -3,6 +3,7 @@ import { useBaseStore } from "./base";
 import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
+import { i18n } from "@/i18n";
 
 interface UsersState {
   users: User[];
@@ -53,7 +54,7 @@ export const useUsersStore = defineStore("users", () => {
   }) {
     return await state.callApi({
       apiCall: () => usersApi.createUser(data),
-      successMessage: "User created successfully",
+      successMessage: i18n.global.t("access.userCreated"),
       operationKey: 'createUser',
       onSuccess: async () => {
         await loadUsers(true);
@@ -72,7 +73,7 @@ export const useUsersStore = defineStore("users", () => {
   ) {
     return await state.callApi({
       apiCall: () => usersApi.updateUser(id, data),
-      successMessage: "User updated successfully",
+      successMessage: i18n.global.t("access.userUpdated"),
       operationKey: `updateUser-${id}`,
       onSuccess: async () => {
         await loadUsers(true);
@@ -83,7 +84,7 @@ export const useUsersStore = defineStore("users", () => {
   async function deleteUser(id: string) {
     return await state.callApi({
       apiCall: () => usersApi.deleteUser(id),
-      successMessage: "User deleted successfully",
+      successMessage: i18n.global.t("access.userDeleted"),
       operationKey: `deleteUser-${id}`,
       onSuccess: async () => {
         await loadUsers(true);

@@ -4,7 +4,6 @@ import type { Session, User } from "@/types";
 import { authApi, type SessionResponse } from "@/api/auth";
 import router from "@/router";
 import { useBaseStore } from "./base";
-import { useApiQuery } from "@/composables/useApiQuery";
 import { useMetaStore } from "./meta";
 import { useContextStore } from "./context";
 import type { APIErrorResponse } from "@/api/types";
@@ -23,9 +22,6 @@ export const useAuthStore = defineStore("auth", () => {
     isInitialized: false,
     isInitializing: false,
   });
-
-  // Use our API query composable for loading state only
-  const { isLoading: apiLoading } = useApiQuery<SessionResponse>();
 
   // Computed properties
   const user = computed(() => state.data.value.user);
@@ -170,7 +166,7 @@ export const useAuthStore = defineStore("auth", () => {
     logout,
     clearState,
     // Loading state helpers
-    isLoading: computed(() => apiLoading.value || state.isLoading.value),
+    isLoading: state.isLoading,
     isLoadingOperation: state.isLoadingOperation,
   };
 });
