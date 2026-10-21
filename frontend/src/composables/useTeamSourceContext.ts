@@ -1,4 +1,4 @@
-import { computed, watch } from 'vue'
+import { computed, nextTick, watch } from 'vue'
 import { useContextStore } from '@/stores/context'
 import { useSourcesStore } from '@/stores/sources'
 import { useTeamsStore } from '@/stores/teams'
@@ -120,8 +120,10 @@ export function useTeamSourceContext() {
   ): Promise<number | null> {
     const maxWaitMs = options.maxWaitMs ?? 5000
 
+    // The sources store starts loading in a watcher, so let it run before waiting.
     if (currentTeamId.value !== teamId) {
       contextStore.selectTeam(teamId)
+      await nextTick()
     }
 
     await waitForTeamSources(teamId, maxWaitMs)
@@ -137,6 +139,7 @@ export function useTeamSourceContext() {
 
     if (currentSourceId.value !== resolvedSourceId) {
       contextStore.selectSource(resolvedSourceId)
+      await nextTick()
     }
 
     await waitForSourceDetails(teamId, resolvedSourceId, maxWaitMs)
