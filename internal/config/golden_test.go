@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
@@ -28,7 +29,7 @@ func clearLogchefEnv(t *testing.T) {
 
 func assertGolden(t *testing.T, name string, cfg *Config) {
 	t.Helper()
-	got, err := json.MarshalIndent(cfg, "", "  ")
+	got, err := json.MarshalIndent(cfg, "", "  ") //nolint:musttag // Go field names are the golden schema
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
 	}
@@ -47,7 +48,7 @@ func assertGolden(t *testing.T, name string, cfg *Config) {
 	if err != nil {
 		t.Fatalf("read golden (run with -update to create): %v", err)
 	}
-	if string(got) != string(want) {
+	if !bytes.Equal(got, want) {
 		t.Errorf("resolved config differs from %s\n got: %s\nwant: %s", path, got, want)
 	}
 }

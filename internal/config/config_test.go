@@ -553,3 +553,52 @@ func TestAIConfigAskChefEnabled(t *testing.T) {
 		})
 	}
 }
+
+func setRequiredEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOGCHEF_AUTH__ADMIN_EMAILS", "admin@example.com")
+	t.Setenv("LOGCHEF_AUTH__API_TOKEN_SECRET", "0123456789abcdef0123456789abcdef")
+	t.Setenv("LOGCHEF_OIDC__PROVIDER_URL", "http://localhost/dex")
+	t.Setenv("LOGCHEF_OIDC__AUTH_URL", "http://localhost/dex/auth")
+	t.Setenv("LOGCHEF_OIDC__TOKEN_URL", "http://localhost/dex/token")
+	t.Setenv("LOGCHEF_OIDC__CLIENT_ID", "logchef")
+	t.Setenv("LOGCHEF_OIDC__REDIRECT_URL", "http://localhost/callback")
+}
+
+func TestLoad_MissingFileFailsEvenWithCompleteEnvironment(t *testing.T) {
+	setRequiredEnv(t)
+	missing := filepath.Join(t.TempDir(), "typo.toml")
+	_, err := Load(missing)
+	if err == nil {
+		t.Fatal("expected an error for a config file that does not exist")
+	}
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("error %q does not name the missing file %q", err, missing)
+	}
+}
+
+func TestLoad_MalformedFileFails(t *testing.T) {
+	setRequiredEnv(t)
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[server\nport = 1"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("expected an error for a config file that does not parse")
+	}
+}
+
+func TestLoad_EmptyPathUsesEnvironmentOnly(t *testing.T) {
+	setRequiredEnv(t)
+	t.Setenv("LOGCHEF_SERVER__PORT", "9100")
+	cfg, err := Load("")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Server.Port != 9100 {
+		t.Errorf("server.port = %d, want 9100", cfg.Server.Port)
+	}
+	if cfg.Tail.MaxGlobal != defaultTailMaxGlobal {
+		t.Errorf("tail.max_global = %d, want default %d", cfg.Tail.MaxGlobal, defaultTailMaxGlobal)
+	}
+}

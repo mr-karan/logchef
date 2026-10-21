@@ -514,17 +514,18 @@ var defaultOIDCScopes = []string{"openid", "email", "profile"}
 // reasoning-capable models.
 var ValidReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
 
-// Load loads the configuration from a file and environment variables.
-// Environment variables with the prefix LOGCHEF_ can override file values.
-// E.g., LOGCHEF_SERVER__PORT will override server.port
+// Load loads the configuration from a TOML file and environment variables. A
+// file that is missing or does not parse is an error; pass an empty path to
+// configure from the environment alone. Environment variables with the prefix
+// LOGCHEF_ can override file values. E.g., LOGCHEF_SERVER__PORT will override server.port
 func Load(path string) (*Config, error) {
 	k := koanf.New(".")
 
-	// Load configuration from the specified TOML file first.
-	if err := k.Load(file.Provider(path), toml.Parser()); err != nil {
-		// Log a warning if the config file fails to load, but proceed to check env vars.
-		log.Printf("warning: error loading config file at '%s': %v. Will attempt to load from environment variables.", path, err)
-	} else {
+	// An empty path means environment-only configuration.
+	if path != "" {
+		if err := k.Load(file.Provider(path), toml.Parser()); err != nil {
+			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
+		}
 		log.Printf("loaded configuration from file: %s", path)
 	}
 
@@ -543,12 +544,12 @@ func Load(path string) (*Config, error) {
 	}
 	log.Printf("loaded configuration from environment variables with prefix %s", envPrefix)
 
-	var cfg Config
+	cfg := defaultConfig()
 	if err := k.Unmarshal("", &cfg); err != nil {
 		log.Printf("error unmarshaling config: %v", err)
 		return nil, err
 	}
-	applyDefaults(k, &cfg)
+	normalize(k, &cfg)
 
 	// Load separate provisioning file if specified.
 	if cfg.Provisioning.File != "" {
@@ -825,112 +826,113 @@ func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation i
 	return nil
 }
 
-func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config defaults are a flat per-key table
-	if !k.Exists("server.port") {
-		cfg.Server.Port = defaultServerPort
+// defaultConfig returns the configuration every key falls back to. Load
+// unmarshals the file and environment over it, so an explicit zero in a file
+// overrides a default and an absent key keeps it. Slice defaults are not set
+// here because unmarshaling over a non-empty slice would merge, not replace.
+func defaultConfig() Config {
+	secureCookie := defaultServerSecureCookie
+	return Config{
+		Server: ServerConfig{
+			Port:              defaultServerPort,
+			Host:              defaultServerHost,
+			HTTPServerTimeout: defaultHTTPServerTimeout,
+			SecureCookie:      &secureCookie,
+			ProxyHeader:       defaultProxyHeader,
+		},
+		Database: DatabaseConfig{Driver: defaultDatabaseDriver},
+		SQLite:   SQLiteConfig{Path: defaultSQLitePath},
+		Postgres: PostgresConfig{
+			MaxOpenConns:    defaultPostgresMaxOpenConns,
+			MaxIdleConns:    defaultPostgresMaxIdleConns,
+			ConnMaxLifetime: defaultPostgresConnMaxLifetime,
+		},
+		Logging: LoggingConfig{Level: defaultLoggingLevel},
+		Alerts: AlertsConfig{
+			Enabled:            defaultAlertsEnabled,
+			EvaluationInterval: defaultAlertsEvaluationInterval,
+			DefaultLookback:    defaultAlertsDefaultLookback,
+			HistoryLimit:       defaultAlertsHistoryLimit,
+		},
+		AI: AIConfig{
+			Enabled:     defaultAIEnabled,
+			BaseURL:     defaultAIBaseURL,
+			MaxTokens:   defaultAIMaxTokens,
+			Temperature: defaultAITemperature,
+		},
+		Auth: AuthConfig{
+			SessionDuration:       defaultAuthSessionDuration,
+			MaxConcurrentSessions: defaultAuthMaxConcurrentSessions,
+			DefaultTokenExpiry:    defaultAuthDefaultTokenExpiry,
+		},
+		Query: QueryConfig{
+			DefaultPreviewLimit:   defaultQueryDefaultPreviewLimit,
+			MaxPreviewLimit:       defaultQueryMaxPreviewLimit,
+			MaxResponseBytes:      defaultQueryMaxResponseBytes,
+			DefaultTimeoutSeconds: defaultQueryDefaultTimeoutSecs,
+			MaxTimeoutSeconds:     defaultQueryMaxTimeoutSecs,
+			MCPCallTimeoutSeconds: defaultQueryMCPCallTimeoutSecs,
+			MaxConcurrentPerUser:  defaultQueryMaxConcurrentPerUser,
+			MaxConcurrentGlobal:   defaultQueryMaxConcurrentGlobal,
+		},
+		Export: ExportConfig{
+			MaxRows:               defaultExportMaxRows,
+			DefaultTimeoutSeconds: defaultExportDefaultTimeoutSecs,
+			MaxTimeoutSeconds:     defaultExportMaxTimeoutSecs,
+			MaxConcurrentPerUser:  defaultExportMaxConcurrentPerUser,
+			MaxConcurrentGlobal:   defaultExportMaxConcurrentGlobal,
+			ArtifactTTL:           defaultExportArtifactTTL,
+		},
+		Tail: TailConfig{
+			PollInterval:   defaultTailPollInterval,
+			MaxPerUser:     defaultTailMaxPerUser,
+			MaxGlobal:      defaultTailMaxGlobal,
+			SessionTTL:     defaultTailSessionTTL,
+			MaxRowsPerSec:  defaultTailMaxRowsPerSec,
+			LookbackMargin: defaultTailLookbackMargin,
+		},
+		Shares: SharesConfig{
+			DefaultTTL:        defaultSharesDefaultTTL,
+			MaxQueryTextBytes: defaultSharesMaxQueryTextBytes,
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:               defaultRateLimitEnabled,
+			AuthPerIPPerMinute:    defaultRateLimitAuthPerIPPerMinute,
+			AuthGlobalPerMinute:   defaultRateLimitAuthGlobalPerMinute,
+			QueryPerUserPerMinute: defaultRateLimitQueryPerUserPerMinute,
+		},
+		DashboardCache: DashboardCacheConfig{
+			Enabled:            defaultDashboardCacheEnabled,
+			DefaultTTL:         defaultDashboardCacheDefaultTTL,
+			MaxTTL:             defaultDashboardCacheMaxTTL,
+			MaxBytes:           defaultDashboardCacheMaxBytes,
+			MaxEntryBytes:      defaultDashboardCacheMaxEntryBytes,
+			MaxEntries:         defaultDashboardCacheMaxEntries,
+			MaxConcurrentFills: defaultDashboardCacheMaxConcurrentFills,
+		},
 	}
-	if !k.Exists("server.host") {
-		cfg.Server.Host = defaultServerHost
-	}
-	if !k.Exists("server.http_server_timeout") {
-		cfg.Server.HTTPServerTimeout = defaultHTTPServerTimeout
-	}
-	if !k.Exists("server.secure_cookie") {
-		defaultVal := defaultServerSecureCookie
-		cfg.Server.SecureCookie = &defaultVal
-	}
-	if !k.Exists("database.driver") {
-		cfg.Database.Driver = defaultDatabaseDriver
-	}
+}
+
+// normalize resolves what defaultConfig cannot express: slice defaults,
+// defaults that depend on other keys, values where zero or less is invalid
+// and falls back to the default, and cross-field limits. It uses k only where
+// an explicit value differs from an absent one.
+func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key table
 	cfg.Database.Driver = strings.ToLower(strings.TrimSpace(cfg.Database.Driver))
-	if !k.Exists("sqlite.path") {
-		cfg.SQLite.Path = defaultSQLitePath
-	}
-	if !k.Exists("postgres.max_open_conns") {
-		cfg.Postgres.MaxOpenConns = defaultPostgresMaxOpenConns
-	}
-	if !k.Exists("postgres.max_idle_conns") {
-		cfg.Postgres.MaxIdleConns = defaultPostgresMaxIdleConns
-	}
-	if !k.Exists("postgres.conn_max_lifetime") {
-		cfg.Postgres.ConnMaxLifetime = defaultPostgresConnMaxLifetime
-	}
-	if !k.Exists("logging.level") {
-		cfg.Logging.Level = defaultLoggingLevel
-	}
 	if !k.Exists("oidc.scopes") {
 		cfg.OIDC.Scopes = append([]string(nil), defaultOIDCScopes...)
 	}
 
-	if !k.Exists("alerts.enabled") {
-		cfg.Alerts.Enabled = defaultAlertsEnabled
-	}
-	if !k.Exists("alerts.evaluation_interval") {
-		cfg.Alerts.EvaluationInterval = defaultAlertsEvaluationInterval
-	}
-	if !k.Exists("alerts.default_lookback") {
-		cfg.Alerts.DefaultLookback = defaultAlertsDefaultLookback
-	}
-	if !k.Exists("alerts.history_limit") {
-		cfg.Alerts.HistoryLimit = defaultAlertsHistoryLimit
-	}
-
-	if !k.Exists("ai.enabled") {
-		cfg.AI.Enabled = defaultAIEnabled
-	}
-	if !k.Exists("ai.base_url") {
-		cfg.AI.BaseURL = defaultAIBaseURL
-	}
 	// Default the model to gpt-4o only for the OpenAI provider — "gpt-4o" is not
 	// a valid Bedrock model id, so leaving it empty lets validateConfig fail fast
 	// and require an explicit Bedrock model id.
 	if !k.Exists("ai.model") && cfg.AI.Provider != "bedrock" {
 		cfg.AI.Model = defaultAIModel
 	}
-	if !k.Exists("ai.max_tokens") {
-		cfg.AI.MaxTokens = defaultAIMaxTokens
-	}
-	if !k.Exists("ai.temperature") {
-		cfg.AI.Temperature = defaultAITemperature
-	}
 
-	if !k.Exists("auth.session_duration") {
-		cfg.Auth.SessionDuration = defaultAuthSessionDuration
-	}
-	if !k.Exists("auth.max_concurrent_sessions") {
-		cfg.Auth.MaxConcurrentSessions = defaultAuthMaxConcurrentSessions
-	}
-	if !k.Exists("auth.default_token_expiry") {
-		cfg.Auth.DefaultTokenExpiry = defaultAuthDefaultTokenExpiry
-	}
-
-	if !k.Exists("query.default_preview_limit") {
-		cfg.Query.DefaultPreviewLimit = defaultQueryDefaultPreviewLimit
-	}
-	if !k.Exists("query.max_preview_limit") {
-		if k.Exists("query.max_limit") && cfg.Query.MaxLimit > 0 {
-			cfg.Query.MaxPreviewLimit = cfg.Query.MaxLimit
-		} else {
-			cfg.Query.MaxPreviewLimit = defaultQueryMaxPreviewLimit
-		}
-	}
-	if !k.Exists("query.max_response_bytes") {
-		cfg.Query.MaxResponseBytes = defaultQueryMaxResponseBytes
-	}
-	if !k.Exists("query.default_timeout_seconds") {
-		cfg.Query.DefaultTimeoutSeconds = defaultQueryDefaultTimeoutSecs
-	}
-	if !k.Exists("query.max_timeout_seconds") {
-		cfg.Query.MaxTimeoutSeconds = defaultQueryMaxTimeoutSecs
-	}
-	if !k.Exists("query.mcp_call_timeout_seconds") {
-		cfg.Query.MCPCallTimeoutSeconds = defaultQueryMCPCallTimeoutSecs
-	}
-	if !k.Exists("query.max_concurrent_per_user") {
-		cfg.Query.MaxConcurrentPerUser = defaultQueryMaxConcurrentPerUser
-	}
-	if !k.Exists("query.max_concurrent_global") {
-		cfg.Query.MaxConcurrentGlobal = defaultQueryMaxConcurrentGlobal
+	// query.max_limit is the deprecated alias of query.max_preview_limit.
+	if !k.Exists("query.max_preview_limit") && cfg.Query.MaxLimit > 0 {
+		cfg.Query.MaxPreviewLimit = cfg.Query.MaxLimit
 	}
 	if cfg.Query.MaxLimit == 0 {
 		cfg.Query.MaxLimit = cfg.Query.MaxPreviewLimit
@@ -960,27 +962,6 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 		cfg.Query.MCPCallTimeoutSeconds = cfg.Query.MaxTimeoutSeconds
 	}
 
-	if !k.Exists("export.max_rows") {
-		cfg.Export.MaxRows = defaultExportMaxRows
-	}
-	if !k.Exists("export.default_timeout_seconds") {
-		cfg.Export.DefaultTimeoutSeconds = defaultExportDefaultTimeoutSecs
-	}
-	if !k.Exists("export.max_timeout_seconds") {
-		cfg.Export.MaxTimeoutSeconds = defaultExportMaxTimeoutSecs
-	}
-	if !k.Exists("export.max_concurrent_per_user") {
-		cfg.Export.MaxConcurrentPerUser = defaultExportMaxConcurrentPerUser
-	}
-	if !k.Exists("export.max_concurrent_global") {
-		cfg.Export.MaxConcurrentGlobal = defaultExportMaxConcurrentGlobal
-	}
-	if !k.Exists("export.artifact_ttl") {
-		cfg.Export.ArtifactTTL = defaultExportArtifactTTL
-	}
-	if !k.Exists("export.formats") {
-		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
-	}
 	if cfg.Export.MaxRows <= 0 {
 		cfg.Export.MaxRows = defaultExportMaxRows
 	}
@@ -1000,21 +981,6 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 		cfg.Export.Formats = append([]string(nil), defaultExportFormats...)
 	}
 
-	if !k.Exists("tail.poll_interval") {
-		cfg.Tail.PollInterval = defaultTailPollInterval
-	}
-	if !k.Exists("tail.max_per_user") {
-		cfg.Tail.MaxPerUser = defaultTailMaxPerUser
-	}
-	if !k.Exists("tail.max_global") {
-		cfg.Tail.MaxGlobal = defaultTailMaxGlobal
-	}
-	if !k.Exists("tail.session_ttl") {
-		cfg.Tail.SessionTTL = defaultTailSessionTTL
-	}
-	if !k.Exists("tail.max_rows_per_sec") {
-		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
-	}
 	if cfg.Tail.PollInterval <= 0 {
 		cfg.Tail.PollInterval = defaultTailPollInterval
 	}
@@ -1030,19 +996,11 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 	if cfg.Tail.MaxRowsPerSec <= 0 {
 		cfg.Tail.MaxRowsPerSec = defaultTailMaxRowsPerSec
 	}
-	if !k.Exists("tail.lookback_margin") {
-		cfg.Tail.LookbackMargin = defaultTailLookbackMargin
-	}
+	// A zero margin is valid and disables the re-scan; only a negative is not.
 	if cfg.Tail.LookbackMargin < 0 {
 		cfg.Tail.LookbackMargin = defaultTailLookbackMargin
 	}
 
-	if !k.Exists("shares.default_ttl") {
-		cfg.Shares.DefaultTTL = defaultSharesDefaultTTL
-	}
-	if !k.Exists("shares.max_query_text_bytes") {
-		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
-	}
 	if cfg.Shares.DefaultTTL <= 0 {
 		cfg.Shares.DefaultTTL = defaultSharesDefaultTTL
 	}
@@ -1050,22 +1008,10 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 		cfg.Shares.MaxQueryTextBytes = defaultSharesMaxQueryTextBytes
 	}
 
-	if !k.Exists("server.proxy_header") || strings.TrimSpace(cfg.Server.ProxyHeader) == "" {
+	if strings.TrimSpace(cfg.Server.ProxyHeader) == "" {
 		cfg.Server.ProxyHeader = defaultProxyHeader
 	}
 
-	if !k.Exists("rate_limit.enabled") {
-		cfg.RateLimit.Enabled = defaultRateLimitEnabled
-	}
-	if !k.Exists("rate_limit.auth_per_ip_per_minute") {
-		cfg.RateLimit.AuthPerIPPerMinute = defaultRateLimitAuthPerIPPerMinute
-	}
-	if !k.Exists("rate_limit.auth_global_per_minute") {
-		cfg.RateLimit.AuthGlobalPerMinute = defaultRateLimitAuthGlobalPerMinute
-	}
-	if !k.Exists("rate_limit.query_per_user_per_minute") {
-		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
-	}
 	if cfg.RateLimit.AuthPerIPPerMinute <= 0 {
 		cfg.RateLimit.AuthPerIPPerMinute = defaultRateLimitAuthPerIPPerMinute
 	}
@@ -1078,11 +1024,6 @@ func applyDefaults(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // config def
 		cfg.RateLimit.QueryPerUserPerMinute = defaultRateLimitQueryPerUserPerMinute
 	}
 
-	// enabled defaults to true, so only override when the key is absent (an
-	// explicit false must be preserved).
-	if !k.Exists("dashboard_cache.enabled") {
-		cfg.DashboardCache.Enabled = defaultDashboardCacheEnabled
-	}
 	if cfg.DashboardCache.DefaultTTL <= 0 {
 		cfg.DashboardCache.DefaultTTL = defaultDashboardCacheDefaultTTL
 	}
