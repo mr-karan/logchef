@@ -3992,24 +3992,19 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) 
 
 const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
 UPDATE export_jobs
-SET status = 'failed', error_message = 'interrupted by restart', updated_at = $1
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
 WHERE id IN (
     SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < $2
+    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < now() - $1::bigint * interval '1 second'
     ORDER BY id
     LIMIT 100
 )
-  AND status IN ('pending', 'running') AND export_jobs.updated_at < $2
+  AND status IN ('pending', 'running') AND export_jobs.updated_at < now() - $1::bigint * interval '1 second'
 RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at
 `
 
-type ReapInterruptedExportJobsParams struct {
-	ReapedAt pgtype.Timestamptz `json:"reaped_at"`
-	Before   pgtype.Timestamptz `json:"before"`
-}
-
-func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error) {
-	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, arg.ReapedAt, arg.Before)
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds int64) ([]ExportJob, error) {
+	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, maxAgeSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -4552,6 +4547,7 @@ UPDATE api_tokens
 SET last_used_at = now(),
     updated_at = now()
 WHERE id = $1
+  AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds')
 `
 
 // Update the last used timestamp for an API token
@@ -4705,21 +4701,20 @@ UPDATE export_jobs
 SET
     status = $1,
     error_message = NULL,
-    updated_at = $2
-WHERE id = $3
+    updated_at = now()
+WHERE id = $2
   AND status IN ('pending', 'running')
 RETURNING id
 `
 
 type UpdateExportJobRunningParams struct {
-	Status    string             `json:"status"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	ID        string             `json:"id"`
+	Status string `json:"status"`
+	ID     string `json:"id"`
 }
 
 // Mark an export job as running and return its ID
 func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error) {
-	row := q.db.QueryRow(ctx, updateExportJobRunning, arg.Status, arg.UpdatedAt, arg.ID)
+	row := q.db.QueryRow(ctx, updateExportJobRunning, arg.Status, arg.ID)
 	var id string
 	err := row.Scan(&id)
 	return id, err

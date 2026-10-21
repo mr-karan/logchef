@@ -42,11 +42,10 @@ func (db *DB) GetExportJob(ctx context.Context, id string) (*models.ExportJob, e
 	return exportJobFromSQLC(row), nil
 }
 
-func (db *DB) UpdateExportJobRunning(ctx context.Context, id string, updatedAt time.Time) error {
+func (db *DB) UpdateExportJobRunning(ctx context.Context, id string) error {
 	_, err := db.writeQueries.UpdateExportJobRunning(ctx, sqlc.UpdateExportJobRunningParams{
-		Status:    string(models.ExportJobStatusRunning),
-		UpdatedAt: updatedAt,
-		ID:        id,
+		Status: string(models.ExportJobStatusRunning),
+		ID:     id,
 	})
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -154,8 +153,8 @@ func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 }
 
 // ReapInterruptedExportJobs fails and returns a bounded batch of stale exports.
-func (db *DB) ReapInterruptedExportJobs(ctx context.Context, before time.Time) ([]*models.ExportJob, error) {
-	rows, err := db.writeQueries.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{Before: before, ReapedAt: time.Now().UTC()})
+func (db *DB) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration) ([]*models.ExportJob, error) {
+	rows, err := db.writeQueries.ReapInterruptedExportJobs(ctx, int64(maxAge/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
 	}

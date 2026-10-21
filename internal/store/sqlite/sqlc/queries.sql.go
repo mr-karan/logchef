@@ -4133,24 +4133,20 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate string) ([]Qu
 
 const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
 UPDATE export_jobs
-SET status = 'failed', error_message = 'interrupted by restart', updated_at = ?1
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id IN (
     SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < ?2
+    WHERE status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(?1 AS INTEGER) / 86400.0
     ORDER BY id
     LIMIT 100
 )
-  AND status IN ('pending', 'running') AND export_jobs.updated_at < ?2
+  AND status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(?1 AS INTEGER) / 86400.0
 RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at
 `
 
-type ReapInterruptedExportJobsParams struct {
-	ReapedAt time.Time `json:"reaped_at"`
-	Before   time.Time `json:"before"`
-}
-
-func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error) {
-	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, arg.ReapedAt, arg.Before)
+// Legacy workers stored UTC timestamps with a Go zone suffix.
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds int64) ([]ExportJob, error) {
+	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, maxAgeSeconds)
 	if err != nil {
 		return nil, err
 	}
@@ -4693,9 +4689,10 @@ func (q *Queries) TouchQueryShare(ctx context.Context, arg TouchQueryShareParams
 
 const updateAPITokenLastUsed = `-- name: UpdateAPITokenLastUsed :exec
 UPDATE api_tokens
-SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?
+  AND (last_used_at IS NULL OR julianday(last_used_at) < julianday('now', '-60 seconds'))
 `
 
 // Update the last used timestamp for an API token
@@ -4849,21 +4846,20 @@ UPDATE export_jobs
 SET
     status = ?,
     error_message = NULL,
-    updated_at = ?
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?
   AND status IN ('pending', 'running')
 RETURNING id
 `
 
 type UpdateExportJobRunningParams struct {
-	Status    string    `json:"status"`
-	UpdatedAt time.Time `json:"updated_at"`
-	ID        string    `json:"id"`
+	Status string `json:"status"`
+	ID     string `json:"id"`
 }
 
 // Mark an export job as running and return its ID
 func (q *Queries) UpdateExportJobRunning(ctx context.Context, arg UpdateExportJobRunningParams) (string, error) {
-	row := q.queryRow(ctx, q.updateExportJobRunningStmt, updateExportJobRunning, arg.Status, arg.UpdatedAt, arg.ID)
+	row := q.queryRow(ctx, q.updateExportJobRunningStmt, updateExportJobRunning, arg.Status, arg.ID)
 	var id string
 	err := row.Scan(&id)
 	return id, err

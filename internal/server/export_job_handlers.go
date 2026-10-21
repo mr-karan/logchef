@@ -249,7 +249,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	complete := false
 	defer func() { s.finishExportJob(queryCtx, jobID, tmpFile, filePath, complete, recover()) }()
 	runningCtx, runningCancel := context.WithTimeout(queryCtx, time.Second)
-	err := s.sqlite.UpdateExportJobRunning(runningCtx, jobID, time.Now().UTC())
+	err := s.sqlite.UpdateExportJobRunning(runningCtx, jobID)
 	runningCancel()
 	if err != nil {
 		s.failExportJob(queryCtx, jobID, "", "failed to mark export running")
@@ -483,9 +483,9 @@ func (s *Server) reapInterruptedExportJobs() {
 	if s.config.Export.MaxTimeoutSeconds > 0 && s.config.Export.MaxTimeoutSeconds < maxTimeout {
 		maxTimeout = s.config.Export.MaxTimeoutSeconds
 	}
-	cutoff := time.Now().UTC().Add(-time.Duration(maxTimeout)*time.Second - exportQueryGrace - exportReapSlack)
+	maxAge := time.Duration(maxTimeout)*time.Second + exportQueryGrace + exportReapSlack
 	for ctx.Err() == nil {
-		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, cutoff)
+		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge)
 		if err != nil {
 			s.log.Error("failed to reap interrupted exports", "error", err)
 			return
@@ -498,8 +498,7 @@ func (s *Server) reapInterruptedExportJobs() {
 			if _, err := uuid.Parse(job.ID); err == nil {
 				paths, err := filepath.Glob(filepath.Join(os.TempDir(), "logchef-export-"+job.ID+"-*"))
 				if err != nil {
-					s.log.Error("failed to find interrupted export artifacts", "error", err)
-					return
+					s.log.Error("failed to find interrupted export artifacts", "error", err, "job_id", job.ID)
 				}
 				if job.FilePath != "" {
 					paths = append(paths, job.FilePath)
@@ -507,7 +506,6 @@ func (s *Server) reapInterruptedExportJobs() {
 				for _, path := range paths {
 					if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
 						s.log.Error("failed to remove interrupted export artifact", "error", err, "job_id", job.ID)
-						return
 					}
 				}
 			}

@@ -54,6 +54,9 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 			for _, status := range []models.ExportJobStatus{models.ExportJobStatusPending, models.ExportJobStatusRunning, models.ExportJobStatusComplete} {
 				now := time.Now().UTC().Add(-2 * time.Hour)
 				job := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusPending, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: time.Now().Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+				if status == models.ExportJobStatusRunning {
+					job.Status = status
+				}
 				if err := db.CreateExportJob(ctx, job); err != nil {
 					t.Fatal(err)
 				}
@@ -65,11 +68,6 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 				t.Cleanup(func() { _ = os.Remove(f.Name()) })
 				if status == models.ExportJobStatusComplete {
 					if err := db.CompleteExportJob(ctx, job.ID, "export.csv", f.Name(), 1, 0, now); err != nil {
-						t.Fatal(err)
-					}
-				}
-				if status == models.ExportJobStatusRunning {
-					if err := db.UpdateExportJobRunning(ctx, job.ID, now); err != nil {
 						t.Fatal(err)
 					}
 				}
@@ -149,7 +147,7 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 						if err := db.CompleteExportJob(ctx, job.ID, "export.csv", paths[i], 1, 0, time.Now()); err == nil {
 							t.Error("reaped job can be completed")
 						}
-						if err := db.UpdateExportJobRunning(ctx, job.ID, time.Now()); err == nil {
+						if err := db.UpdateExportJobRunning(ctx, job.ID); err == nil {
 							t.Error("reaped job can be restarted")
 						}
 					}

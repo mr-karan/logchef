@@ -63,11 +63,10 @@ func (s *Store) GetExportJob(ctx context.Context, id string) (*models.ExportJob,
 }
 
 // UpdateExportJobRunning marks an export job running.
-func (s *Store) UpdateExportJobRunning(ctx context.Context, id string, updatedAt time.Time) error {
+func (s *Store) UpdateExportJobRunning(ctx context.Context, id string) error {
 	_, err := s.q.UpdateExportJobRunning(ctx, sqlc.UpdateExportJobRunningParams{
-		Status:    string(models.ExportJobStatusRunning),
-		UpdatedAt: ts(updatedAt),
-		ID:        id,
+		Status: string(models.ExportJobStatusRunning),
+		ID:     id,
 	})
 	if err != nil {
 		if notFound(err) {
@@ -145,8 +144,8 @@ func (s *Store) DeleteExpiredExportJobs(ctx context.Context, before time.Time) e
 }
 
 // ReapInterruptedExportJobs fails and returns a bounded batch of stale exports.
-func (s *Store) ReapInterruptedExportJobs(ctx context.Context, before time.Time) ([]*models.ExportJob, error) {
-	rows, err := s.q.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{Before: ts(before), ReapedAt: ts(time.Now().UTC())})
+func (s *Store) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration) ([]*models.ExportJob, error) {
+	rows, err := s.q.ReapInterruptedExportJobs(ctx, int64(maxAge/time.Second))
 	if err != nil {
 		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
 	}

@@ -1,11 +1,12 @@
 package alerts
 
 import (
+	"bytes"
 	"context"
 	"errors"
-	"io"
 	"log/slog"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,7 +53,8 @@ func TestEvaluateAlertWithTimeoutIsolatesHungEvaluation(t *testing.T) {
 }
 
 func TestStopCancelsActiveEvaluation(t *testing.T) {
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "alerts.db")}})
 	if err != nil {
 		t.Fatal(err)
@@ -70,6 +72,15 @@ func TestStopCancelsActiveEvaluation(t *testing.T) {
 		t.Fatal(err)
 	}
 	manager := NewManager(Options{Logger: log, DB: db, Config: config.AlertsConfig{Enabled: true}})
+	for _, failure := range []error{context.Canceled, context.DeadlineExceeded} {
+		logs.Reset()
+		manager.evalFn = func(context.Context, *models.Alert) error { return failure }
+		manager.evaluateCycle(context.Background())
+		if !strings.Contains(logs.String(), "level=ERROR msg=\"alert evaluation failed\"") {
+			t.Errorf("evaluation failure missing error log: %s", logs.String())
+		}
+	}
+	logs.Reset()
 	entered := make(chan struct{})
 	manager.evalFn = func(ctx context.Context, _ *models.Alert) error { close(entered); <-ctx.Done(); return ctx.Err() }
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -84,5 +95,11 @@ func TestStopCancelsActiveEvaluation(t *testing.T) {
 	manager.Stop()
 	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
 		t.Fatalf("Stop waited %s for active evaluation", elapsed)
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("shutdown cancellation logged as error: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "level=DEBUG msg=\"alert evaluation failed\"") {
+		t.Errorf("shutdown cancellation missing debug log: %s", logs.String())
 	}
 }

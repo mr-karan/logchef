@@ -277,7 +277,8 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
-	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error)
+	// Legacy workers stored UTC timestamps with a Go zone suffix.
+	ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds int64) ([]ExportJob, error)
 	// Record one poll. An early poll on a nonterminal request (not expired, not
 	// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
 	// last_polled_at, so on_time is false. Expired and denied requests are

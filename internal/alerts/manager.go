@@ -2,6 +2,7 @@ package alerts
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -147,7 +148,11 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 			return
 		}
 		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
-			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
+			if ctx.Err() != nil && errors.Is(err, context.Canceled) {
+				m.log.Debug("alert evaluation failed", "alert_id", alert.ID, "error", err)
+			} else {
+				m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
+			}
 		}
 	}
 }
