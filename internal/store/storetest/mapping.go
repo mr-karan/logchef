@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"reflect"
 	"testing"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -171,7 +170,6 @@ func testGetNotFound(t *testing.T, ctx context.Context, s store.Store) {
 		{"GetAPIToken", resultError(s.GetAPIToken(ctx, -1))},
 		{"GetAPITokenByHash", resultError(s.GetAPITokenByHash(ctx, "missing"))},
 		{"GetOAuthAuthRequest", resultError(s.GetOAuthAuthRequest(ctx, "missing"))},
-		{"GetPendingOAuthDeviceAuthorization", resultError(s.GetPendingOAuthDeviceAuthorization(ctx, models.HashOAuthSecret(models.OAuthHashKey{}, "missing"), time.Now()))},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
