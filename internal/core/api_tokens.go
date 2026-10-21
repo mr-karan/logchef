@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -136,6 +137,20 @@ func validateAPITokenCreation(name string, scopes []models.TokenScope) ([]models
 		return nil, &ValidationError{Field: "scopes", Message: "at least one token scope is required"}
 	}
 	return normalized, nil
+}
+
+// AuthorizeAPITokenCreation limits a child token to its parent's scopes and lifetime.
+func AuthorizeAPITokenCreation(parent *models.APIToken, scopes []models.TokenScope, expiresAt *time.Time) error {
+	principal := access.APITokenPrincipal(nil, parent)
+	for _, scope := range scopes {
+		if err := principal.Require(scope); err != nil {
+			return errors.New("requested token scopes exceed the caller token's scopes")
+		}
+	}
+	if parent.ExpiresAt != nil && (expiresAt == nil || expiresAt.After(*parent.ExpiresAt)) {
+		return errors.New("token expiry must be set and no later than the caller token's expiry")
+	}
+	return nil
 }
 
 // CreateAPIToken creates a new API token for a user

@@ -150,6 +150,9 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 		if errors.Is(err, core.ErrUserAlreadyExists) {
 			return SendError(c, fiber.StatusConflict, err.Error())
 		}
+		if errors.Is(err, core.ErrCannotDeleteLastAdmin) {
+			return SendError(c, fiber.StatusBadRequest, err.Error())
+		}
 		if valErr, ok := errors.AsType[*core.ValidationError](err); ok {
 			return SendError(c, fiber.StatusBadRequest, valErr.Error())
 		}
@@ -299,6 +302,12 @@ func (s *Server) handleCreateAPIToken(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
+	if parent, ok := c.Locals("api_token").(*models.APIToken); ok {
+		if err := core.AuthorizeAPITokenCreation(parent, req.Scopes, req.ExpiresAt); err != nil {
+			return SendError(c, fiber.StatusForbidden, err.Error())
+		}
+	}
+
 	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, user.ID, req.Name, req.ExpiresAt, req.Scopes)
 	if err != nil {
 		// Handle specific error types from core
@@ -430,6 +439,11 @@ func (s *Server) handleCreateServiceAccountToken(c fiber.Ctx) error {
 	}
 	if len(req.Scopes) == 0 {
 		req.Scopes = core.ReadOnlyTokenScopes()
+	}
+	if parent, ok := c.Locals("api_token").(*models.APIToken); ok {
+		if err := core.AuthorizeAPITokenCreation(parent, req.Scopes, req.ExpiresAt); err != nil {
+			return SendError(c, fiber.StatusForbidden, err.Error())
+		}
 	}
 
 	response, err := core.CreateAPIToken(c.Context(), s.sqlite, s.log, &s.config.Auth, account.ID, req.Name, req.ExpiresAt, req.Scopes)

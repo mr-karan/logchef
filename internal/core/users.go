@@ -18,8 +18,8 @@ import (
 var (
 	// ErrUserNotFound is returned when a user is not found.
 	ErrUserNotFound = errors.New("user not found")
-	// ErrCannotDeleteLastAdmin is returned when attempting to delete or deactivate the last admin.
-	ErrCannotDeleteLastAdmin = errors.New("cannot delete or deactivate the last admin user")
+	// ErrCannotDeleteLastAdmin is returned when an operation would remove the last active admin.
+	ErrCannotDeleteLastAdmin = errors.New("cannot delete, deactivate, or demote the last admin user")
 	// ErrUserAlreadyExists is returned when trying to create a user that already exists.
 	ErrUserAlreadyExists = errors.New("user already exists")
 	// ErrTeamAlreadyExists is returned when trying to create a team that already exists.
@@ -256,16 +256,7 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 	return user, nil
 }
 
-// UpdateUser updates an existing user's information.
-//
-// Deactivating a user (status -> inactive) is handled specially: the write, the
-// last-admin guard, and the revocation of the user's live sessions all run
-// inside a single transaction. This closes two issues at once:
-//   - #96: re-checking the admin count inside the tx (immediately before the
-//     write) prevents two concurrent deactivations from both passing a stale
-//     count and locking the org out of all admin functions.
-//   - #90: the user's sessions are revoked atomically with the status change so
-//     a deactivated account cannot keep using an already-issued session cookie.
+// UpdateUser updates a user while preserving an active admin and revoking deactivated sessions.
 func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
@@ -280,6 +271,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 		return fmt.Errorf("error getting user for update: %w", err)
 	}
 
+	wasActiveAdmin := existing.Role == models.UserRoleAdmin && existing.Status == models.UserStatusActive
 	updated, deactivating, err := applyUserUpdates(existing, updateData)
 	if err != nil {
 		return err
@@ -291,13 +283,11 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 
 	existing.UpdatedAt = time.Now().UTC()
 
-	if deactivating {
+	demotingAdmin := wasActiveAdmin && existing.Role != models.UserRoleAdmin
+	if deactivating || demotingAdmin {
 		if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-			// #96: re-check the last-admin guard inside the write tx. On SQLite
-			// the write connection uses BEGIN IMMEDIATE, so concurrent
-			// deactivations serialize and the second one sees the decremented
-			// active-admin count here and is rejected.
-			if existing.Role == models.UserRoleAdmin {
+			// SQLite's BEGIN IMMEDIATE serializes changes to the active-admin count.
+			if wasActiveAdmin {
 				count, err := tx.CountAdminUsers(ctx)
 				if err != nil {
 					return fmt.Errorf("error counting admin users: %w", err)
@@ -309,20 +299,23 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 			if err := tx.UpdateUser(ctx, existing); err != nil {
 				return fmt.Errorf("error updating user: %w", err)
 			}
-			// #90: end the deactivated user's live sessions in the same tx.
-			if err := RevokeUserSessions(ctx, tx, log, existing.ID); err != nil {
-				return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
+			if deactivating {
+				if err := RevokeUserSessions(ctx, tx, log, existing.ID); err != nil {
+					return fmt.Errorf("error revoking sessions for deactivated user: %w", err)
+				}
 			}
 			return nil
 		}); err != nil {
-			// The last-admin guard is an expected validation rejection, not a
-			// failure — don't log it at Error level.
 			if !errors.Is(err, ErrCannotDeleteLastAdmin) {
-				log.Error("failed to deactivate user", "error", err, "user_id", userID)
+				log.Error("failed to update user", "error", err, "user_id", userID)
 			}
 			return err
 		}
-		log.Info("user.deactivated", "user_id", userID)
+		if deactivating {
+			log.Info("user.deactivated", "user_id", userID)
+		} else {
+			log.Debug("user updated", "user_id", userID)
+		}
 		return nil
 	}
 
