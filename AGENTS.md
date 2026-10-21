@@ -114,3 +114,8 @@ frontend parsing in `frontend/src/utils/logchefql/` and run its vitest suite.
   commit them.
 - This is a public repo: no credentials, internal URLs, or org-specific config in
   committed files.
+- **Merge PRs with rebase, never a merge commit**: `gh pr merge <n> --rebase`. History
+  stays linear, one commit per change. For a stack, merge the bottom PR, then move
+  the next branch onto main without the merged commits
+  (`git rebase --onto origin/main <old-parent-tip> <branch>`), push it with
+  `--force-with-lease`, retarget the PR to `main`, and merge it the same way.
