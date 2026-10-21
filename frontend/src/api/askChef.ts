@@ -1,5 +1,5 @@
 import { apiBaseURL } from "./config";
-import { createSSEParser } from "@/lib/sse";
+import { streamSSE, StreamHTTPError, type StreamOutcome } from "./eventStream";
 
 export type QueryMode = "logchefql" | "native";
 export type EvidenceId = `E${number}`;
@@ -159,32 +159,6 @@ export function parseAskChefEvent(name: string, data: string): AskChefEvent | nu
   return event;
 }
 
-export interface AskChefStreamParser {
-  push(chunk: string): AskChefEvent[];
-}
-
-export function createAskChefStreamParser(): AskChefStreamParser {
-  const sse = createSSEParser();
-  return {
-    push(chunk) {
-      const events: AskChefEvent[] = [];
-      for (const frame of sse.push(chunk)) {
-        if (frame.type !== "message") continue;
-        const event = parseAskChefEvent(frame.event, frame.data);
-        if (event) events.push(event);
-      }
-      return events;
-    },
-  };
-}
-
-async function readError(response: Response): Promise<AskChefError> {
-  const body: unknown = await response.json().catch(() => null);
-  const message = isRecord(body) && typeof body.message === "string" ? body.message : `Ask Chef request failed (${response.status})`;
-  if (response.status === 404) return new AskChefError("disabled", message);
-  return new AskChefError("failed", message);
-}
-
 // Runs one turn and calls onEvent for each event until done or error.
 // Resolves without error when the signal aborts.
 export async function streamTurn(
@@ -192,41 +166,19 @@ export async function streamTurn(
   onEvent: (event: AskChefEvent) => void,
   signal: AbortSignal
 ): Promise<void> {
-  let response: Response;
+  let outcome: StreamOutcome;
   try {
-    response = await fetch(`${apiBaseURL}/ask-chef/turns`, {
-      method: "POST",
-      credentials: "same-origin",
-      cache: "no-store",
-      signal,
-      headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify(request),
+    outcome = await streamSSE(`${apiBaseURL}/ask-chef/turns`, { method: "POST", body: request, signal, label: "Ask Chef request" }, (frame) => {
+      if (frame.type !== "message") return;
+      const event = parseAskChefEvent(frame.event, frame.data);
+      if (!event) return;
+      onEvent(event);
+      if (event.type === "done" || event.type === "error") return "stop";
     });
   } catch (err) {
-    if (signal.aborted) return;
+    if (err instanceof StreamHTTPError) throw new AskChefError(err.status === 404 ? "disabled" : "failed", err.message);
     throw err;
   }
-  if (!response.ok) throw await readError(response);
-  if (!response.body) throw new AskChefError("protocol", "Ask Chef returned no stream");
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const parser = createAskChefStreamParser();
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      for (const event of parser.push(decoder.decode(value, { stream: true }))) {
-        onEvent(event);
-        if (event.type === "done" || event.type === "error") return;
-      }
-    }
-    throw new AskChefError("protocol", "Connection closed before Ask Chef finished");
-  } catch (err) {
-    if (signal.aborted) return;
-    throw err;
-  } finally {
-    await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
+  if (outcome === "no-body") throw new AskChefError("protocol", "Ask Chef returned no stream");
+  if (outcome === "eof") throw new AskChefError("protocol", "Connection closed before Ask Chef finished");
 }

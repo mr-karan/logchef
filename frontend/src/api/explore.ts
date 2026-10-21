@@ -1,6 +1,6 @@
 import { apiClient } from "./apiUtils";
 import { apiBaseURL } from "./config";
-import { createSSEParser } from "@/lib/sse";
+import { streamSSE } from "./eventStream";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
 // tens of seconds, and the shared axios client otherwise aborts after 10s.
@@ -395,10 +395,6 @@ export interface TailCallbacks {
   onHeartbeat?: () => void;
 }
 
-export interface TailErrorLike extends Error {
-  status?: number;
-}
-
 /**
  * Build the live-tail SSE URL. query may be empty (an unfiltered tail).
  */
@@ -437,92 +433,34 @@ export async function subscribeToTail(
   signal: AbortSignal,
   callbacks: TailCallbacks
 ): Promise<void> {
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "GET",
-      headers: { Accept: "text/event-stream" },
-      credentials: "same-origin",
-      cache: "no-store",
-      signal,
-    });
-  } catch (err) {
-    if (signal.aborted) return;
-    throw err;
-  }
-
-  if (!response.ok) {
-    let message = `Live tail request failed (${response.status})`;
-    try {
-      const body = await response.json();
-      if (body?.message) message = body.message;
-    } catch {
-      // non-JSON error body; keep the default message
-    }
-    const error: TailErrorLike = new Error(message);
-    error.status = response.status;
-    throw error;
-  }
-
-  if (!response.body) {
-    throw new Error("Live tail stream did not return a readable body");
-  }
-
-  callbacks.onOpen?.();
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const parser = createSSEParser();
-  let endReceived = false;
-
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      const events = parser.push(decoder.decode(value, { stream: true }));
-      for (const event of events) {
-        if (event.type === "comment") {
-          if (event.text === "hb") callbacks.onHeartbeat?.();
-          continue;
+  const outcome = await streamSSE(
+    url,
+    { method: "GET", signal, label: "Live tail request", onOpen: () => callbacks.onOpen?.() },
+    (frame) => {
+      if (frame.type === "comment") {
+        if (frame.text === "hb") callbacks.onHeartbeat?.();
+        return;
+      }
+      switch (frame.event) {
+        case "rows": {
+          const rows = parseJsonSafe<Record<string, unknown>[]>(frame.data);
+          if (Array.isArray(rows) && rows.length) callbacks.onRows?.(rows);
+          return;
         }
-        switch (event.event) {
-          case "rows": {
-            const rows = parseJsonSafe<Record<string, any>[]>(event.data);
-            if (Array.isArray(rows) && rows.length) callbacks.onRows?.(rows);
-            break;
-          }
-          case "notice": {
-            const notice = parseJsonSafe<TailNotice>(event.data) ?? {};
-            callbacks.onNotice?.(notice);
-            break;
-          }
-          case "end": {
-            const end = parseJsonSafe<TailEnd>(event.data) ?? {};
-            endReceived = true;
-            callbacks.onEnd?.(end);
-            return;
-          }
-          default:
-            // Unknown event types are ignored.
-            break;
-        }
+        case "notice":
+          callbacks.onNotice?.(parseJsonSafe<TailNotice>(frame.data) ?? {});
+          return;
+        case "end":
+          callbacks.onEnd?.(parseJsonSafe<TailEnd>(frame.data) ?? {});
+          return "stop";
       }
     }
-  } catch (err) {
-    if (signal.aborted) return;
-    throw err;
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // reader may already be released on abort
-    }
-  }
+  );
 
-  // The reader loop exited via EOF (transport closed) without ever seeing a
-  // terminating `end` frame. Surface this as an abnormal end rather than
-  // resolving silently, which would leave the UI showing "Live" forever.
-  if (!endReceived && !signal.aborted) {
+  if (outcome === "no-body") throw new Error("Live tail stream did not return a readable body");
+
+  // A silent EOF would leave the UI showing "Live" forever.
+  if (outcome === "eof") {
     callbacks.onEnd?.({
       reason: "connection_lost",
       message: "Connection closed unexpectedly before the stream signaled completion.",
