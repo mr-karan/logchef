@@ -450,6 +450,7 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
 		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
+		AllowedHosts:  s.config.Alerts.WebhookAllowedHosts,
 	})
 
 	// Build test notification
