@@ -36,7 +36,7 @@ type Manager struct {
 	hooks      []QueryHook    // Hooks applied to all managed clients; fixed at construction.
 	stopHealth chan struct{}  // Channel to signal health check goroutine to stop.
 	healthWG   sync.WaitGroup // WaitGroup to wait for health check goroutine to exit.
-	stopOnce   sync.Once
+	stopOnce   sync.Once      // Makes StopBackgroundHealthChecks idempotent.
 }
 
 // NewManager creates a ClickHouse connection manager whose clients all run hooks.
