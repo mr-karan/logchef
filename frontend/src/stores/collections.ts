@@ -48,188 +48,162 @@ export const useCollectionsStore = defineStore("collections", () => {
   }
 
   async function fetchCollections() {
-    return await state.withLoading("listCollections", async () => {
-      return await state.callApi<Collection[]>({
-        apiCall: () => collectionsApi.list(),
-        operationKey: "listCollections",
-        onSuccess: (data) => {
-          state.data.value.collections = data ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<Collection[]>({
+      apiCall: () => collectionsApi.list(),
+      operationKey: "listCollections",
+      onSuccess: (data) => {
+        state.data.value.collections = data ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
   async function createCollection(payload: CreateCollectionRequest) {
-    return await state.withLoading("createCollection", async () => {
-      return await state.callApi<Collection>({
-        apiCall: () => collectionsApi.create(payload),
-        operationKey: "createCollection",
-        successMessage: i18n.global.t("library.collectionCreated"),
-        onSuccess: (data) => {
-          if (data) state.data.value.collections.unshift(data);
-        },
-      });
+    return await state.callApi<Collection>({
+      apiCall: () => collectionsApi.create(payload),
+      operationKey: "createCollection",
+      successMessage: i18n.global.t("library.collectionCreated"),
+      onSuccess: (data) => {
+        if (data) state.data.value.collections.unshift(data);
+      },
     });
   }
 
   async function updateCollection(id: number, payload: UpdateCollectionRequest) {
-    return await state.withLoading(`updateCollection-${id}`, async () => {
-      return await state.callApi<Collection>({
-        apiCall: () => collectionsApi.update(id, payload),
-        operationKey: `updateCollection-${id}`,
-        successMessage: i18n.global.t("library.collectionUpdated"),
-        onSuccess: (data) => {
-          if (!data) return;
-          const idx = state.data.value.collections.findIndex((c) => c.id === id);
-          if (idx >= 0) {
-            state.data.value.collections[idx] = {
-              ...state.data.value.collections[idx],
-              ...data,
-            };
-          }
-        },
-      });
+    return await state.callApi<Collection>({
+      apiCall: () => collectionsApi.update(id, payload),
+      operationKey: `updateCollection-${id}`,
+      successMessage: i18n.global.t("library.collectionUpdated"),
+      onSuccess: (data) => {
+        if (!data) return;
+        const idx = state.data.value.collections.findIndex((c) => c.id === id);
+        if (idx >= 0) {
+          state.data.value.collections[idx] = {
+            ...state.data.value.collections[idx],
+            ...data,
+          };
+        }
+      },
     });
   }
 
   async function deleteCollection(id: number) {
-    return await state.withLoading(`deleteCollection-${id}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.delete(id),
-        operationKey: `deleteCollection-${id}`,
-        successMessage: i18n.global.t("library.collectionDeleted"),
-        onSuccess: () => {
-          state.data.value.collections = state.data.value.collections.filter((c) => c.id !== id);
-          delete state.data.value.members[id];
-          delete state.data.value.teams[id];
-          delete state.data.value.items[id];
-          if (state.data.value.selectedId === id) state.data.value.selectedId = null;
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.delete(id),
+      operationKey: `deleteCollection-${id}`,
+      successMessage: i18n.global.t("library.collectionDeleted"),
+      onSuccess: () => {
+        state.data.value.collections = state.data.value.collections.filter((c) => c.id !== id);
+        delete state.data.value.members[id];
+        delete state.data.value.teams[id];
+        delete state.data.value.items[id];
+        if (state.data.value.selectedId === id) state.data.value.selectedId = null;
+      },
     });
   }
 
   async function fetchMembers(id: number) {
-    return await state.withLoading(`listMembers-${id}`, async () => {
-      return await state.callApi<CollectionMember[]>({
-        apiCall: () => collectionsApi.listMembers(id),
-        operationKey: `listMembers-${id}`,
-        onSuccess: (data) => {
-          state.data.value.members[id] = data ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<CollectionMember[]>({
+      apiCall: () => collectionsApi.listMembers(id),
+      operationKey: `listMembers-${id}`,
+      onSuccess: (data) => {
+        state.data.value.members[id] = data ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
   async function addMember(id: number, payload: AddCollectionMemberRequest) {
-    return await state.withLoading(`addMember-${id}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.addMember(id, payload),
-        operationKey: `addMember-${id}`,
-        successMessage: i18n.global.t("library.memberAdded"),
-        onSuccess: async () => {
-          await Promise.all([fetchMembers(id), fetchCollections()]);
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.addMember(id, payload),
+      operationKey: `addMember-${id}`,
+      successMessage: i18n.global.t("library.memberAdded"),
+      onSuccess: async () => {
+        await Promise.all([fetchMembers(id), fetchCollections()]);
+      },
     });
   }
 
   async function removeMember(id: number, userId: number) {
-    return await state.withLoading(`removeMember-${id}-${userId}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.removeMember(id, userId),
-        operationKey: `removeMember-${id}-${userId}`,
-        successMessage: i18n.global.t("library.memberRemoved"),
-        onSuccess: async () => {
-          await Promise.all([fetchMembers(id), fetchCollections()]);
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.removeMember(id, userId),
+      operationKey: `removeMember-${id}-${userId}`,
+      successMessage: i18n.global.t("library.memberRemoved"),
+      onSuccess: async () => {
+        await Promise.all([fetchMembers(id), fetchCollections()]);
+      },
     });
   }
 
   async function fetchTeams(id: number) {
-    return await state.withLoading(`listTeams-${id}`, async () => {
-      return await state.callApi<CollectionTeam[]>({
-        apiCall: () => collectionsApi.listTeams(id),
-        operationKey: `listTeams-${id}`,
-        onSuccess: (data) => {
-          state.data.value.teams[id] = data ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<CollectionTeam[]>({
+      apiCall: () => collectionsApi.listTeams(id),
+      operationKey: `listTeams-${id}`,
+      onSuccess: (data) => {
+        state.data.value.teams[id] = data ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
   async function addTeam(id: number, payload: AddCollectionTeamRequest) {
-    return await state.withLoading(`addTeam-${id}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.addTeam(id, payload),
-        operationKey: `addTeam-${id}`,
-        successMessage: i18n.global.t("library.teamAdded"),
-        onSuccess: async () => {
-          await Promise.all([fetchTeams(id), fetchCollections()]);
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.addTeam(id, payload),
+      operationKey: `addTeam-${id}`,
+      successMessage: i18n.global.t("library.teamAdded"),
+      onSuccess: async () => {
+        await Promise.all([fetchTeams(id), fetchCollections()]);
+      },
     });
   }
 
   async function removeTeam(id: number, teamId: number) {
-    return await state.withLoading(`removeTeam-${id}-${teamId}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.removeTeam(id, teamId),
-        operationKey: `removeTeam-${id}-${teamId}`,
-        successMessage: i18n.global.t("library.teamRemoved"),
-        onSuccess: async () => {
-          await Promise.all([fetchTeams(id), fetchCollections()]);
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.removeTeam(id, teamId),
+      operationKey: `removeTeam-${id}-${teamId}`,
+      successMessage: i18n.global.t("library.teamRemoved"),
+      onSuccess: async () => {
+        await Promise.all([fetchTeams(id), fetchCollections()]);
+      },
     });
   }
 
   async function fetchItems(id: number) {
-    return await state.withLoading(`listItems-${id}`, async () => {
-      return await state.callApi<CollectionItem[]>({
-        apiCall: () => collectionsApi.listItems(id),
-        operationKey: `listItems-${id}`,
-        onSuccess: (data) => {
-          state.data.value.items[id] = data ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<CollectionItem[]>({
+      apiCall: () => collectionsApi.listItems(id),
+      operationKey: `listItems-${id}`,
+      onSuccess: (data) => {
+        state.data.value.items[id] = data ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
   async function addItem(id: number, payload: AddCollectionItemRequest, { notify = true } = {}) {
-    return await state.withLoading(`addItem-${id}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.addItem(id, payload),
-        operationKey: `addItem-${id}`,
-        successMessage: notify ? i18n.global.t("library.queryAdded") : undefined,
-        onSuccess: async () => {
-          await fetchItems(id);
-          await fetchCollections();
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.addItem(id, payload),
+      operationKey: `addItem-${id}`,
+      successMessage: notify ? i18n.global.t("library.queryAdded") : undefined,
+      onSuccess: async () => {
+        await fetchItems(id);
+        await fetchCollections();
+      },
     });
   }
 
   async function removeItem(id: number, queryId: number, { notify = true } = {}) {
-    return await state.withLoading(`removeItem-${id}-${queryId}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => collectionsApi.removeItem(id, queryId),
-        operationKey: `removeItem-${id}-${queryId}`,
-        successMessage: notify ? i18n.global.t("library.queryRemoved") : undefined,
-        onSuccess: async () => {
-          await fetchItems(id);
-          await fetchCollections();
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => collectionsApi.removeItem(id, queryId),
+      operationKey: `removeItem-${id}-${queryId}`,
+      successMessage: notify ? i18n.global.t("library.queryRemoved") : undefined,
+      onSuccess: async () => {
+        await fetchItems(id);
+        await fetchCollections();
+      },
     });
   }
 

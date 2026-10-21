@@ -48,7 +48,6 @@ export const useAuthStore = defineStore("auth", () => {
         const result = await state.callApi({
           apiCall: () => authApi.getSession(),
           showToast: false,
-          operationKey: 'initialize',
           onSuccess: (response: SessionResponse | null) => {
             if (response) {
               state.data.value.user = response.user;
@@ -107,14 +106,12 @@ export const useAuthStore = defineStore("auth", () => {
       const result = await state.callApi({
         apiCall: () => authApi.localLogin(email, password),
         showToast: false,
-        operationKey: 'localLogin',
       });
       if (result.success) {
         // Hydrate user/session state off the fresh cookie.
         const session = await state.callApi({
           apiCall: () => authApi.getSession(),
           showToast: false,
-          operationKey: 'localLogin',
           onSuccess: (response: SessionResponse | null) => {
             if (response) {
               state.data.value.user = response.user;
@@ -136,7 +133,6 @@ export const useAuthStore = defineStore("auth", () => {
         const result = await state.callApi({
           apiCall: () => authApi.logout(),
           showToast: false,
-          operationKey: 'logout'
         });
 
         clearState();

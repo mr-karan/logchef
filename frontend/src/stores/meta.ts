@@ -105,42 +105,40 @@ export const useMetaStore = defineStore("meta", () => {
       return { success: true, message: "Meta already loaded" };
     }
 
-    return await state.withLoading('loadMeta', async () => {
-      try {
-        const result = await state.callApi({
-          apiCall: () => metaApi.getMeta(),
-          showToast: false, // Don't show toast for meta loading
-          operationKey: 'loadMeta',
-          onSuccess: (response: MetaResponse | null) => {
-            if (response) {
-              state.data.value.version = response.version;
-              state.data.value.httpServerTimeout = response.http_server_timeout;
-              state.data.value.maxQueryLimit = response.max_query_limit;
-              state.data.value.maxQueryTimeoutSeconds = response.max_query_timeout_seconds ?? 120;
-              state.data.value.defaultPreviewLimit = response.default_preview_limit ?? response.max_query_limit;
-              state.data.value.maxPreviewLimit = response.max_preview_limit ?? response.max_query_limit;
-              state.data.value.maxExportRows = response.max_export_rows ?? 1000000;
-              state.data.value.alertsEnabled = response.alerts_enabled ?? true;
-              state.data.value.localAuthEnabled = response.local_auth_enabled ?? false;
-              state.data.value.oidcEnabled = response.oidc_enabled ?? true;
-              state.data.value.demoReadOnly = response.demo_read_only ?? false;
-              state.data.value.demoLoginCredentials = parseDemoLoginCredentials(response.demo_login_credentials);
-              state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
-              state.data.value.oauthIssuer = response.oauth_issuer || null;
-              state.data.value.askChefEnabled = response.ask_chef_enabled === true;
-              state.data.value.isInitialized = true;
-            }
-          },
-          onError: (error) => {
-            console.error("Failed to load server metadata:", error);
-          },
-        });
+    try {
+      const result = await state.callApi({
+        apiCall: () => metaApi.getMeta(),
+        showToast: false, // Don't show toast for meta loading
+        operationKey: 'loadMeta',
+        onSuccess: (response: MetaResponse | null) => {
+          if (response) {
+            state.data.value.version = response.version;
+            state.data.value.httpServerTimeout = response.http_server_timeout;
+            state.data.value.maxQueryLimit = response.max_query_limit;
+            state.data.value.maxQueryTimeoutSeconds = response.max_query_timeout_seconds ?? 120;
+            state.data.value.defaultPreviewLimit = response.default_preview_limit ?? response.max_query_limit;
+            state.data.value.maxPreviewLimit = response.max_preview_limit ?? response.max_query_limit;
+            state.data.value.maxExportRows = response.max_export_rows ?? 1000000;
+            state.data.value.alertsEnabled = response.alerts_enabled ?? true;
+            state.data.value.localAuthEnabled = response.local_auth_enabled ?? false;
+            state.data.value.oidcEnabled = response.oidc_enabled ?? true;
+            state.data.value.demoReadOnly = response.demo_read_only ?? false;
+            state.data.value.demoLoginCredentials = parseDemoLoginCredentials(response.demo_login_credentials);
+            state.data.value.dashboardCachePolicy = parseDashboardCachePolicy(response.dashboard_cache);
+            state.data.value.oauthIssuer = response.oauth_issuer || null;
+            state.data.value.askChefEnabled = response.ask_chef_enabled === true;
+            state.data.value.isInitialized = true;
+          }
+        },
+        onError: (error) => {
+          console.error("Failed to load server metadata:", error);
+        },
+      });
 
-        return result;
-      } catch (error) {
-        return state.handleError(error as Error | APIErrorResponse, 'loadMeta');
-      }
-    });
+      return result;
+    } catch (error) {
+      return state.handleError(error as Error | APIErrorResponse, 'loadMeta');
+    }
   }
 
   // Clear meta state

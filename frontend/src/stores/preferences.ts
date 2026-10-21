@@ -170,7 +170,6 @@ export const usePreferencesStore = defineStore("preferences", () => {
       if ((authStore.user?.id ?? null) !== userId || revision !== preferencesRevision) return { success: false };
       const result = await state.callApi<UserPreferencesResponse>({
         apiCall: () => preferencesApi.getPreferences(),
-        operationKey: "loadPreferences",
         showToast: false,
       });
       if (!result.success || !result.data || (authStore.user?.id ?? null) !== userId || revision !== preferencesRevision) return result;

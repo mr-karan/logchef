@@ -48,18 +48,16 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   const selectedTeam = computed(() => teams.value?.find((t) => t.id === selectedTeamId.value) || null);
 
   async function fetchUserTeams() {
-    return await state.withLoading('fetchUserTeams', async () => {
-      return await state.callApi<Team[]>({
-        apiCall: () => savedQueriesApi.getUserTeams(),
-        operationKey: 'fetchUserTeams',
-        onSuccess: (response) => {
-          state.data.value.teams = response ?? [];
-          if (response && response.length > 0 && !contextStore.teamId) {
-            contextStore.selectTeam(response[0].id);
-          }
-        },
-        defaultData: []
-      });
+    return await state.callApi<Team[]>({
+      apiCall: () => savedQueriesApi.getUserTeams(),
+      operationKey: 'fetchUserTeams',
+      onSuccess: (response) => {
+        state.data.value.teams = response ?? [];
+        if (response && response.length > 0 && !contextStore.teamId) {
+          contextStore.selectTeam(response[0].id);
+        }
+      },
+      defaultData: []
     });
   }
 
@@ -70,16 +68,14 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   // list fetches saved queries the user can see. Optional sourceId narrows to one source.
   async function list(sourceId?: number) {
     const key = sourceId ? `listSavedQueries-${sourceId}` : 'listSavedQueries';
-    return await state.withLoading(key, async () => {
-      return await state.callApi<SavedQuery[]>({
-        apiCall: () => savedQueriesApi.list(sourceId),
-        operationKey: key,
-        onSuccess: (responseData) => {
-          state.data.value.queries = responseData ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<SavedQuery[]>({
+      apiCall: () => savedQueriesApi.list(sourceId),
+      operationKey: key,
+      onSuccess: (responseData) => {
+        state.data.value.queries = responseData ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
@@ -89,29 +85,25 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   // "All queries" browse surface. Rows the caller can't run come back with
   // runnable=false so the UI can lock them.
   async function listAll() {
-    return await state.withLoading('listAllSavedQueries', async () => {
-      return await state.callApi<SavedQuery[]>({
-        apiCall: () => savedQueriesApi.listAll(),
-        operationKey: 'listAllSavedQueries',
-        onSuccess: (responseData) => {
-          state.data.value.allQueries = responseData ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<SavedQuery[]>({
+      apiCall: () => savedQueriesApi.listAll(),
+      operationKey: 'listAllSavedQueries',
+      onSuccess: (responseData) => {
+        state.data.value.allQueries = responseData ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
   async function fetchById(queryId: number | string) {
     const key = `fetchSavedQuery-${queryId}`;
-    return await state.withLoading(key, async () => {
-      return await state.callApi<SavedQuery>({
-        apiCall: () => savedQueriesApi.resolve(queryId, contextStore.teamId),
-        operationKey: key,
-        onSuccess: (response) => {
-          state.data.value.selectedQuery = response;
-        },
-      });
+    return await state.callApi<SavedQuery>({
+      apiCall: () => savedQueriesApi.resolve(queryId, contextStore.teamId),
+      operationKey: key,
+      onSuccess: (response) => {
+        state.data.value.selectedQuery = response;
+      },
     });
   }
 
@@ -125,32 +117,30 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     editorMode: SavedQueryEditorMode,
   ) {
     const key = `createSavedQuery-${sourceId}`;
-    return await state.withLoading(key, async () => {
-      const apiQueryContent = { ...queryContent };
-      const payload = {
-        source_id: sourceId,
-        created_from_team_id: createdFromTeamId ?? null,
-        name,
-        description,
-        query_language: queryLanguage,
-        editor_mode: editorMode,
-        query_content: JSON.stringify(apiQueryContent),
-      };
+    const apiQueryContent = { ...queryContent };
+    const payload = {
+      source_id: sourceId,
+      created_from_team_id: createdFromTeamId ?? null,
+      name,
+      description,
+      query_language: queryLanguage,
+      editor_mode: editorMode,
+      query_content: JSON.stringify(apiQueryContent),
+    };
 
-      return await state.callApi<SavedQuery>({
-        apiCall: () => savedQueriesApi.create(payload),
-        operationKey: key,
-        successMessage: i18n.global.t("library.queryCreated"),
-        onSuccess: (response) => {
-          if (response) {
-            if (!state.data.value.queries) {
-              state.data.value.queries = [];
-            }
-            state.data.value.queries.unshift(response);
-            state.data.value.selectedQuery = response;
+    return await state.callApi<SavedQuery>({
+      apiCall: () => savedQueriesApi.create(payload),
+      operationKey: key,
+      successMessage: i18n.global.t("library.queryCreated"),
+      onSuccess: (response) => {
+        if (response) {
+          if (!state.data.value.queries) {
+            state.data.value.queries = [];
           }
+          state.data.value.queries.unshift(response);
+          state.data.value.selectedQuery = response;
         }
-      });
+      }
     });
   }
 
@@ -159,50 +149,46 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     payload: Partial<Omit<SavedQuery, "id" | "source_id" | "created_by" | "created_at" | "updated_at">>
   ) {
     const key = `updateSavedQuery-${queryId}`;
-    return await state.withLoading(key, async () => {
-      return await state.callApi<SavedQuery>({
-        apiCall: () => savedQueriesApi.update(queryId, payload),
-        operationKey: key,
-        successMessage: i18n.global.t("library.queryUpdated"),
-        onSuccess: (response) => {
-          if (response) {
-            const index = state.data.value.queries.findIndex(
-              (q) => String(q.id) === String(queryId)
-            );
-            if (index >= 0) {
-              state.data.value.queries[index] = {
-                ...state.data.value.queries[index],
-                ...response
-              };
-            }
-            if (state.data.value.selectedQuery?.id === Number(queryId)) {
-              state.data.value.selectedQuery = {
-                ...state.data.value.selectedQuery,
-                ...response
-              };
-            }
+    return await state.callApi<SavedQuery>({
+      apiCall: () => savedQueriesApi.update(queryId, payload),
+      operationKey: key,
+      successMessage: i18n.global.t("library.queryUpdated"),
+      onSuccess: (response) => {
+        if (response) {
+          const index = state.data.value.queries.findIndex(
+            (q) => String(q.id) === String(queryId)
+          );
+          if (index >= 0) {
+            state.data.value.queries[index] = {
+              ...state.data.value.queries[index],
+              ...response
+            };
+          }
+          if (state.data.value.selectedQuery?.id === Number(queryId)) {
+            state.data.value.selectedQuery = {
+              ...state.data.value.selectedQuery,
+              ...response
+            };
           }
         }
-      });
+      }
     });
   }
 
   async function remove(queryId: number | string) {
     const key = `deleteSavedQuery-${queryId}`;
-    return await state.withLoading(key, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => savedQueriesApi.delete(queryId),
-        operationKey: key,
-        successMessage: i18n.global.t("library.queryDeleted"),
-        onSuccess: () => {
-          state.data.value.queries = state.data.value.queries.filter(
-            (q) => String(q.id) !== String(queryId)
-          );
-          if (state.data.value.selectedQuery?.id === Number(queryId)) {
-            state.data.value.selectedQuery = null;
-          }
+    return await state.callApi<{ message: string }>({
+      apiCall: () => savedQueriesApi.delete(queryId),
+      operationKey: key,
+      successMessage: i18n.global.t("library.queryDeleted"),
+      onSuccess: () => {
+        state.data.value.queries = state.data.value.queries.filter(
+          (q) => String(q.id) !== String(queryId)
+        );
+        if (state.data.value.selectedQuery?.id === Number(queryId)) {
+          state.data.value.selectedQuery = null;
         }
-      });
+      }
     });
   }
 

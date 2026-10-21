@@ -44,16 +44,14 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     setCurrentContext(alertId);
     const effectiveLimit = limit ?? state.data.value.limit;
-    return await state.withLoading(`loadHistory-${alertId}`, async () => {
-      return await state.callApi<AlertHistoryEntry[]>({
-        apiCall: () => alertsApi.history(alertId, effectiveLimit),
-        operationKey: `loadHistory-${alertId}`,
-        onSuccess: (response) => {
-          state.data.value.entries = response ?? [];
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<AlertHistoryEntry[]>({
+      apiCall: () => alertsApi.history(alertId, effectiveLimit),
+      operationKey: `loadHistory-${alertId}`,
+      onSuccess: (response) => {
+        state.data.value.entries = response ?? [];
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
@@ -72,25 +70,23 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
 
   async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    return await state.withLoading(`resolveAlert-${alertId}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.resolve(alertId, payload),
-        operationKey: `resolveAlert-${alertId}`,
-        successMessage: i18n.global.t("alerts.alertResolved"),
-        onSuccess: () => {
-          // Optimistically mark the latest triggered entry as resolved.
-          const idx = state.data.value.entries.findIndex((entry) => entry.status === "triggered");
-          if (idx !== -1) {
-            const entry = state.data.value.entries[idx];
-            state.data.value.entries.splice(idx, 1, {
-              ...entry,
-              status: "resolved",
-              resolved_at: new Date().toISOString(),
-              message: payload.message ?? entry.message ?? undefined,
-            });
-          }
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => alertsApi.resolve(alertId, payload),
+      operationKey: `resolveAlert-${alertId}`,
+      successMessage: i18n.global.t("alerts.alertResolved"),
+      onSuccess: () => {
+        // Optimistically mark the latest triggered entry as resolved.
+        const idx = state.data.value.entries.findIndex((entry) => entry.status === "triggered");
+        if (idx !== -1) {
+          const entry = state.data.value.entries[idx];
+          state.data.value.entries.splice(idx, 1, {
+            ...entry,
+            status: "resolved",
+            resolved_at: new Date().toISOString(),
+            message: payload.message ?? entry.message ?? undefined,
+          });
+        }
+      },
     });
   }
 

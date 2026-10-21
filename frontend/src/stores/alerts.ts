@@ -48,23 +48,21 @@ export const useAlertsStore = defineStore("alerts", () => {
   async function fetchAlerts(_teamId?: number | undefined, sourceId?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     const key = sourceId ? `fetchAlerts-${sourceId}` : 'fetchAlerts-all';
-    return await state.withLoading(key, async () => {
-      return await state.callApi<Alert[]>({
-        apiCall: () => alertsApi.list(sourceId),
-        operationKey: key,
-        onSuccess: (response) => {
-          state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
-          // Clear selected alert if it no longer exists in the new list.
-          if (
-            state.data.value.selectedAlertId &&
-            !state.data.value.alerts.some((alert) => alert.id === state.data.value.selectedAlertId)
-          ) {
-            state.data.value.selectedAlertId = null;
-          }
-        },
-        defaultData: [],
-        showToast: false,
-      });
+    return await state.callApi<Alert[]>({
+      apiCall: () => alertsApi.list(sourceId),
+      operationKey: key,
+      onSuccess: (response) => {
+        state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
+        // Clear selected alert if it no longer exists in the new list.
+        if (
+          state.data.value.selectedAlertId &&
+          !state.data.value.alerts.some((alert) => alert.id === state.data.value.selectedAlertId)
+        ) {
+          state.data.value.selectedAlertId = null;
+        }
+      },
+      defaultData: [],
+      showToast: false,
     });
   }
 
@@ -88,64 +86,56 @@ export const useAlertsStore = defineStore("alerts", () => {
 
   async function createAlert(_teamId: number | undefined, sourceId: number, payload: Omit<CreateAlertRequest, "source_id">) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    return await state.withLoading("createAlert", async () => {
-      return await state.callApi<Alert>({
-        apiCall: () => alertsApi.create({ ...payload, source_id: sourceId }),
-        operationKey: "createAlert",
-        successMessage: i18n.global.t("alerts.alertCreated"),
-        onSuccess: (response) => {
-          if (response) {
-            upsertAlert(response);
-            state.data.value.selectedAlertId = response.id;
-          }
-        },
-      });
+    return await state.callApi<Alert>({
+      apiCall: () => alertsApi.create({ ...payload, source_id: sourceId }),
+      operationKey: "createAlert",
+      successMessage: i18n.global.t("alerts.alertCreated"),
+      onSuccess: (response) => {
+        if (response) {
+          upsertAlert(response);
+          state.data.value.selectedAlertId = response.id;
+        }
+      },
     });
   }
 
   async function updateAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: UpdateAlertRequest) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    return await state.withLoading(`updateAlert-${alertId}`, async () => {
-      return await state.callApi<Alert>({
-        apiCall: () => alertsApi.update(alertId, payload),
-        operationKey: `updateAlert-${alertId}`,
-        successMessage: i18n.global.t("alerts.alertUpdated"),
-        onSuccess: (response) => {
-          if (response) {
-            upsertAlert(response);
-          }
-        },
-      });
+    return await state.callApi<Alert>({
+      apiCall: () => alertsApi.update(alertId, payload),
+      operationKey: `updateAlert-${alertId}`,
+      successMessage: i18n.global.t("alerts.alertUpdated"),
+      onSuccess: (response) => {
+        if (response) {
+          upsertAlert(response);
+        }
+      },
     });
   }
 
   async function deleteAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    return await state.withLoading(`deleteAlert-${alertId}`, async () => {
-      return await state.callApi<{ message: string }>({
-        apiCall: () => alertsApi.delete(alertId),
-        operationKey: `deleteAlert-${alertId}`,
-        successMessage: i18n.global.t("alerts.alertDeleted"),
-        onSuccess: () => {
-          removeAlert(alertId);
-        },
-      });
+    return await state.callApi<{ message: string }>({
+      apiCall: () => alertsApi.delete(alertId),
+      operationKey: `deleteAlert-${alertId}`,
+      successMessage: i18n.global.t("alerts.alertDeleted"),
+      onSuccess: () => {
+        removeAlert(alertId);
+      },
     });
   }
 
   async function refreshAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    return await state.withLoading(`refreshAlert-${alertId}`, async () => {
-      return await state.callApi<Alert>({
-        apiCall: () => alertsApi.get(alertId),
-        operationKey: `refreshAlert-${alertId}`,
-        onSuccess: (response) => {
-          if (response) {
-            upsertAlert(response);
-          }
-        },
-        showToast: false,
-      });
+    return await state.callApi<Alert>({
+      apiCall: () => alertsApi.get(alertId),
+      operationKey: `refreshAlert-${alertId}`,
+      onSuccess: (response) => {
+        if (response) {
+          upsertAlert(response);
+        }
+      },
+      showToast: false,
     });
   }
 
