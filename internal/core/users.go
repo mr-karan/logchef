@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -90,6 +91,17 @@ func validateUserUpdate(updateData models.User) error {
 }
 
 // --- User Management Functions ---
+
+// AuthorizeUserRoleGrant requires full credential authority to assign the admin role.
+func AuthorizeUserRoleGrant(principal access.Principal, role models.UserRole) error {
+	if role != models.UserRoleAdmin {
+		return nil
+	}
+	if principal.Method == access.AuthSession || (principal.Method == access.AuthAPIToken && principal.Require(models.TokenScopeAll) == nil) {
+		return nil
+	}
+	return errors.New("granting the admin role requires a browser session or an API token with '*' scope")
+}
 
 // ListUsers returns all interactive users from the database.
 func ListUsers(ctx context.Context, db store.StoreOps) ([]*models.User, error) {

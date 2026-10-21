@@ -7,9 +7,35 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+func TestAuthorizeUserRoleGrant(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		principal access.Principal
+		role      models.UserRole
+		denied    bool
+	}{
+		{"scoped admin", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}}), models.UserRoleAdmin, true},
+		{"scoped member", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}}), models.UserRoleMember, false},
+		{"wildcard admin", access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeAll}}), models.UserRoleAdmin, false},
+		{"session admin", access.SessionPrincipal(nil), models.UserRoleAdmin, false},
+		{"missing token", access.APITokenPrincipal(nil, nil), models.UserRoleAdmin, true},
+		{"unknown method", access.Principal{}, models.UserRoleAdmin, true},
+		{"oauth wildcard", access.OAuthPrincipal(nil, 1, "client", []models.TokenScope{models.TokenScopeAll}), models.UserRoleAdmin, true},
+		{"assistant", access.AssistantPrincipal(nil), models.UserRoleAdmin, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := AuthorizeUserRoleGrant(tc.principal, tc.role)
+			if (err != nil) != tc.denied {
+				t.Fatalf("authorization error = %v, denied = %t", err, tc.denied)
+			}
+		})
+	}
+}
 
 // newTestAdmin creates an active admin user row.
 func newTestAdmin(t *testing.T, db *sqlite.DB, email string) *models.User {

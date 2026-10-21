@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -190,5 +191,107 @@ func TestCreateTokenRejectsOtherAuthMethods(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestUserAdminGrantHTTP(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		scope   models.TokenScope
+		session bool
+		update  bool
+		body    string
+		want    int
+		role    models.UserRole
+	}{
+		{"scoped create admin", models.TokenScopeUsersWrite, false, false, `{"role":"admin"}`, fiber.StatusForbidden, ""},
+		{"scoped promote member", models.TokenScopeUsersWrite, false, true, `{"role":"admin"}`, fiber.StatusForbidden, models.UserRoleMember},
+		{"scoped create member", models.TokenScopeUsersWrite, false, false, `{"role":"member"}`, fiber.StatusCreated, models.UserRoleMember},
+		{"scoped default member", models.TokenScopeUsersWrite, false, false, `{}`, fiber.StatusCreated, models.UserRoleMember},
+		{"wildcard create admin", models.TokenScopeAll, false, false, `{"role":"admin"}`, fiber.StatusCreated, models.UserRoleAdmin},
+		{"session create admin", "", true, false, `{"role":"admin"}`, fiber.StatusCreated, models.UserRoleAdmin},
+		{"wildcard promote member", models.TokenScopeAll, false, true, `{"role":"admin"}`, fiber.StatusOK, models.UserRoleAdmin},
+		{"session promote member", "", true, true, `{"role":"admin"}`, fiber.StatusOK, models.UserRoleAdmin},
+		{"scoped edit member", models.TokenScopeUsersWrite, false, true, `{"full_name":"Updated Member"}`, fiber.StatusOK, models.UserRoleMember},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := newAuthzTestServer(t)
+			admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+			var auth func(*http.Request)
+			if tc.session {
+				auth = withSession(sessionCookie(t, s.sqlite, admin))
+			} else {
+				auth = withBearer(apiToken(t, s, admin, tc.scope))
+			}
+			method, path := http.MethodPost, "/api/v1/admin/users"
+			var body map[string]string
+			if err := json.Unmarshal([]byte(tc.body), &body); err != nil {
+				t.Fatal(err)
+			}
+			if tc.update {
+				member := mkTestUser(t, s.sqlite, "target@example.com", models.UserRoleMember)
+				method = http.MethodPut
+				path = fmt.Sprintf("%s/%d", path, member.ID)
+			} else {
+				body["email"] = "target@example.com"
+				body["full_name"] = "Target User"
+			}
+			payload, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp := doAuthzRequest(t, s, method, path, string(payload), auth)
+			if resp.status != tc.want {
+				t.Fatalf("status = %d (%q), want %d", resp.status, resp.message, tc.want)
+			}
+			if tc.want == fiber.StatusForbidden && (!strings.Contains(resp.message, "admin") || !strings.Contains(resp.message, "*")) {
+				t.Errorf("denial must explain the admin grant scope requirement, got %q", resp.message)
+			}
+			user, err := core.GetUserByEmail(context.Background(), s.sqlite, "target@example.com")
+			if tc.role == "" {
+				if !errors.Is(err, core.ErrUserNotFound) {
+					t.Fatalf("denied creation persisted a user: user=%v err=%v", user, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if user.Role != tc.role {
+				t.Errorf("stored role = %q, want %q", user.Role, tc.role)
+			}
+			if tc.update && resp.status == fiber.StatusOK && body["full_name"] != "" && user.FullName != body["full_name"] {
+				t.Errorf("stored name = %q, want %q", user.FullName, body["full_name"])
+			}
+		})
+	}
+}
+
+func TestServiceAccountRoleHTTP(t *testing.T) {
+	s := newAuthzTestServer(t)
+	admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+	auth := withBearer(apiToken(t, s, admin, models.TokenScopeUsersWrite))
+	resp := doAuthzRequest(t, s, http.MethodPost, "/api/v1/admin/service-accounts", `{"name":"Test bot","role":"admin"}`, auth)
+	if resp.status != fiber.StatusCreated {
+		t.Fatalf("status = %d (%q), want 201", resp.status, resp.message)
+	}
+	accounts, err := core.ListServiceAccounts(context.Background(), s.sqlite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 || accounts[0].Role != models.UserRoleMember {
+		t.Fatalf("service-account creation must produce one member, got %v", accounts)
+	}
+	path := fmt.Sprintf("/api/v1/admin/users/%d", accounts[0].ID)
+	resp = doAuthzRequest(t, s, http.MethodPut, path, `{"role":"admin"}`, auth)
+	if resp.status != fiber.StatusNotFound {
+		t.Fatalf("human-user update status = %d (%q), want 404", resp.status, resp.message)
+	}
+	account, err := core.GetUser(context.Background(), s.sqlite, accounts[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if account.Role != models.UserRoleMember {
+		t.Errorf("stored service-account role = %q, want member", account.Role)
 	}
 }

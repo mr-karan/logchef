@@ -44,22 +44,22 @@ func (s *Server) handleGetUser(c fiber.Ctx) error {
 func (s *Server) loadHumanUser(c fiber.Ctx) (*models.User, error) {
 	userIDStr := c.Params("userID")
 	if userIDStr == "" {
-		return nil, SendError(c, fiber.StatusBadRequest, "User ID is required")
+		return nil, fiber.NewError(fiber.StatusBadRequest, "User ID is required")
 	}
 	userID, err := core.ParseUserID(userIDStr)
 	if err != nil {
-		return nil, SendError(c, fiber.StatusBadRequest, "Invalid user ID format")
+		return nil, fiber.NewError(fiber.StatusBadRequest, "Invalid user ID format")
 	}
 	user, err := core.GetUser(c.Context(), s.sqlite, userID)
 	if err != nil {
 		if errors.Is(err, core.ErrUserNotFound) {
-			return nil, SendError(c, fiber.StatusNotFound, "User not found")
+			return nil, fiber.NewError(fiber.StatusNotFound, "User not found")
 		}
 		s.log.Error("failed to get user", "error", err, "user_id", userID)
-		return nil, SendError(c, fiber.StatusInternalServerError, "Error getting user")
+		return nil, fiber.NewError(fiber.StatusInternalServerError, "Error getting user")
 	}
 	if user.AccountType == models.UserAccountTypeService {
-		return nil, SendError(c, fiber.StatusNotFound, "User not found")
+		return nil, fiber.NewError(fiber.StatusNotFound, "User not found")
 	}
 	return user, nil
 }
@@ -83,6 +83,9 @@ func (s *Server) handleCreateUser(c fiber.Ctx) error {
 	role := models.UserRole(req.Role)
 	if role == "" {
 		role = models.UserRoleMember // Default role
+	}
+	if err := core.AuthorizeUserRoleGrant(principalFromLocals(c), role); err != nil {
+		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 	}
 
 	status := models.UserStatus(req.Status)
@@ -138,6 +141,9 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 	}
 	if req.Role != nil {
 		updateData.Role = models.UserRole(*req.Role)
+	}
+	if err := core.AuthorizeUserRoleGrant(principalFromLocals(c), updateData.Role); err != nil {
+		return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 	}
 	if req.Status != nil {
 		updateData.Status = models.UserStatus(*req.Status)
