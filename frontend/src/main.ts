@@ -4,7 +4,7 @@ import { createPinia } from "pinia";
 import "./assets/index.css";
 import "@unovis/ts/styles";
 import { setUnauthorizedHandler, setForbiddenHandler } from "@/api/config";
-import { expireSession } from "@/api/session";
+import { createSessionExpirationHandler } from "@/api/session";
 import App from "./App.vue";
 import router from "./router";
 import { useAuthStore } from "@/stores/auth";
@@ -29,7 +29,7 @@ async function initializeApp() {
 
     // Initialize auth store before router
     const authStore = useAuthStore(pinia);
-    setUnauthorizedHandler(({ toast }) => expireSession({ toast, clearState: authStore.clearState, router }));
+    setUnauthorizedHandler(createSessionExpirationHandler({ clearState: authStore.clearState, router }));
     setForbiddenHandler(() => { void router.push({ name: "Forbidden" }); });
     await authStore.initialize();
 

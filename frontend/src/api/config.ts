@@ -4,10 +4,19 @@ import type { APIErrorResponse } from "@/api/types";
 import { basePath } from "@/utils/basePath";
 
 let unauthorizedHandler: ((options: { toast: boolean }) => Promise<APIErrorResponse>) | undefined;
+let reportedMissingUnauthorizedHandler = false;
 let forbiddenHandler: (() => void) | undefined;
 
 export function setUnauthorizedHandler(handler: NonNullable<typeof unauthorizedHandler>): void {
   unauthorizedHandler = handler;
+}
+
+export function handleUnauthorized(options: { toast: boolean }): Promise<APIErrorResponse> | undefined {
+  if (unauthorizedHandler) return unauthorizedHandler(options);
+  if (import.meta.env.DEV && !reportedMissingUnauthorizedHandler) {
+    reportedMissingUnauthorizedHandler = true;
+    console.error("No session expiration handler registered");
+  }
 }
 
 export function setForbiddenHandler(handler: NonNullable<typeof forbiddenHandler>): void {
@@ -65,10 +74,11 @@ api.interceptors.response.use(
       error_type: "NetworkError",
     };
 
-    if (error.response?.status === 401 && unauthorizedHandler) {
+    if (error.response?.status === 401) {
       const isInitialSessionCheck = error.config?.url === "/me" &&
         !sessionStorage.getItem("hadPreviousSession");
-      return Promise.reject(await unauthorizedHandler({ toast: !isInitialSessionCheck }));
+      const expiration = handleUnauthorized({ toast: !isInitialSessionCheck });
+      if (expiration) return Promise.reject(await expiration);
     }
 
     // Handle CSRF token errors (must be checked BEFORE generic 403 handler)

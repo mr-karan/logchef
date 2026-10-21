@@ -58,7 +58,7 @@ function readStoredPreferences(themeFallback: ThemeMode): UserPreferences {
       return normalizePreferences({
         ...DEFAULT_PREFERENCES,
         ...parsed,
-        theme: themeFallback,
+        theme: parsed.theme && isThemeMode(parsed.theme) ? parsed.theme : themeFallback,
       } as UserPreferences);
     } catch (error) {
       console.warn("Failed to parse stored preferences, using defaults.", error);
@@ -145,7 +145,7 @@ export const usePreferencesStore = defineStore("preferences", () => {
     }
   }
 
-  applyPreferences(state.data.value.preferences, { syncTheme: false });
+  applyPreferences(state.data.value.preferences);
 
   async function loadPreferences(forceReload = false) {
     const userId = authStore.user?.id ?? null;
