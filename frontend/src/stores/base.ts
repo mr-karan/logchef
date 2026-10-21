@@ -22,7 +22,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   callApi: <R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
-    onSuccess?: (data: R | null) => void;
+    onSuccess?: (data: R | null) => void | Promise<void>;
     onError?: (error: APIErrorResponse) => void;
     successMessage?: string;
     errorMessage?: string;
@@ -42,9 +42,6 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     startLoading,
     stopLoading
   } = useLoadingState();
-
-  // Use our new API query composable
-  const { execute } = useApiQuery();
 
   function handleError(err: Error | APIErrorResponse, operation: string): { success: false; error: APIErrorResponse } {
     // Handle canceled requests silently - don't show error or store in state
@@ -85,7 +82,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   async function callApi<R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
-    onSuccess?: (data: R | null) => void;
+    onSuccess?: (data: R | null) => void | Promise<void>;
     onError?: (error: APIErrorResponse) => void;
     successMessage?: string;
     errorMessage?: string;
@@ -93,7 +90,9 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     defaultData?: R;
   }): Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }> {
     const showToast = options.showToast !== false;
-    
+    const { execute } = useApiQuery<R>();
+    error.value = null;
+
     const executeApiCall = async (): Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }> => {
       try {
         const result = await execute(options.apiCall, {
@@ -101,7 +100,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
           errorMessage: options.errorMessage,
           showToast: showToast,
           defaultData: options.defaultData,
-          onSuccess: options.onSuccess as ((data: unknown) => void) | undefined,
+          onSuccess: options.onSuccess,
           onError: (err) => {
             error.value = err;
             options.onError?.(err);
@@ -109,7 +108,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
         });
         
         if (result.success) {
-          return { success: true, data: result.data as R | null };
+          return { success: true, data: result.data };
         } else {
           return { success: false, error: result.error ?? undefined };
         }
