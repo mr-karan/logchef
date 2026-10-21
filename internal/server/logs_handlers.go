@@ -233,7 +233,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
-	params, err := core.PrepareSQLQuery(s.config.Query, req)
+	params, err := core.PrepareSourceSQLQuery(c.Context(), s.datasources, s.config.Query, src, req)
 	if err != nil {
 		return sendQueryRequestError(c, err)
 	}

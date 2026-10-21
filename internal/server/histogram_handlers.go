@@ -34,7 +34,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
 
-	params, err := core.PrepareHistogram(req)
+	params, err := core.PrepareSourceHistogram(c.Context(), s.datasources, src, req)
 	if err != nil {
 		return sendQueryRequestError(c, err)
 	}

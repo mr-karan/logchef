@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
 // SQLGenerator converts an AST into ClickHouse SQL
@@ -51,7 +53,7 @@ func (g *SQLGenerator) GenerateSelectClause(selectFields []SelectField, defaultT
 
 	// Always include timestamp field first if specified
 	if defaultTimestampField != "" {
-		columns = append(columns, g.escapeIdentifier(defaultTimestampField))
+		columns = append(columns, queryescape.ClickHouseIdentifier(defaultTimestampField))
 	}
 
 	// Generate column expressions for each select field
@@ -187,22 +189,6 @@ func (g *SQLGenerator) visitGroup(node *GroupNode) (string, *ParseError) {
 	return fmt.Sprintf("(%s)", strings.Join(conditions, " AND ")), nil
 }
 
-func (g *SQLGenerator) escapeIdentifier(identifier string) string {
-	// Escape backticks by doubling them
-	escaped := strings.ReplaceAll(identifier, "`", "``")
-	return "`" + escaped + "`"
-}
-
-func (g *SQLGenerator) escapeSQLString(value string) string {
-	// Escape backslashes first, then single quotes
-	result := strings.ReplaceAll(value, "\\", "\\\\")
-	result = strings.ReplaceAll(result, "'", "''")
-	result = strings.ReplaceAll(result, "\x00", "\\0")
-	result = strings.ReplaceAll(result, "\r", "\\r")
-	result = strings.ReplaceAll(result, "\n", "\\n")
-	return result
-}
-
 func (g *SQLGenerator) formatValue(value any) string {
 	if value == nil {
 		return "NULL"
@@ -219,10 +205,10 @@ func (g *SQLGenerator) formatValue(value any) string {
 	case int, int32, int64, float32, float64:
 		return fmt.Sprintf("%v", v)
 	case string:
-		escaped := g.escapeSQLString(v)
+		escaped := queryescape.ClickHouseString(v)
 		return fmt.Sprintf("'%s'", escaped)
 	default:
-		escaped := g.escapeSQLString(fmt.Sprintf("%v", v))
+		escaped := queryescape.ClickHouseString(fmt.Sprintf("%v", v))
 		return fmt.Sprintf("'%s'", escaped)
 	}
 }
@@ -279,7 +265,7 @@ func (g *SQLGenerator) resolveField(field any) sqlField {
 		if strings.TrimSpace(f) == "" {
 			return sqlField{}
 		}
-		return sqlField{sql: g.escapeIdentifier(f), columnType: g.getColumnType(f)}
+		return sqlField{sql: queryescape.ClickHouseIdentifier(f), columnType: g.getColumnType(f)}
 	case NestedField:
 		if strings.TrimSpace(f.Base) == "" || len(f.Path) == 0 {
 			return sqlField{}
@@ -311,13 +297,13 @@ func (g *SQLGenerator) resolveField(field any) sqlField {
 }
 
 func (g *SQLGenerator) nativeJSONPath(base string, path []string, columnType string) string {
-	baseExpression := g.escapeIdentifier(base)
+	baseExpression := queryescape.ClickHouseIdentifier(base)
 	if isNullableType(columnType) {
 		baseExpression = "assumeNotNull(" + baseExpression + ")"
 	}
 	parts := []string{baseExpression}
 	for _, segment := range path {
-		parts = append(parts, g.escapeIdentifier(strings.Trim(segment, "\"'")))
+		parts = append(parts, queryescape.ClickHouseIdentifier(strings.Trim(segment, "\"'")))
 	}
 	return strings.Join(parts, ".")
 }
@@ -337,7 +323,7 @@ func isNullableType(columnType string) bool {
 }
 
 func (g *SQLGenerator) mapAccess(baseColumn string, path []string) string {
-	escapedColumn := g.escapeIdentifier(baseColumn)
+	escapedColumn := queryescape.ClickHouseIdentifier(baseColumn)
 
 	// For ClickHouse Maps, access nested keys using dot notation as a single key
 	var escapedPath []string
@@ -347,7 +333,7 @@ func (g *SQLGenerator) mapAccess(baseColumn string, path []string) string {
 		s = strings.TrimSuffix(s, "\"")
 		s = strings.TrimPrefix(s, "'")
 		s = strings.TrimSuffix(s, "'")
-		escapedPath = append(escapedPath, g.escapeSQLString(s))
+		escapedPath = append(escapedPath, queryescape.ClickHouseString(s))
 	}
 	fullKey := strings.Join(escapedPath, ".")
 	return fmt.Sprintf("%s['%s']", escapedColumn, fullKey)
@@ -410,7 +396,7 @@ func splitTypeArguments(value string) []string {
 }
 
 func (g *SQLGenerator) jsonExtraction(baseColumn string, path []string) string {
-	escapedColumn := g.escapeIdentifier(baseColumn)
+	escapedColumn := queryescape.ClickHouseIdentifier(baseColumn)
 
 	// ClickHouse JSONExtractString requires separate parameters for nested access
 	var pathParams []string
@@ -420,7 +406,7 @@ func (g *SQLGenerator) jsonExtraction(baseColumn string, path []string) string {
 		s = strings.TrimSuffix(s, "\"")
 		s = strings.TrimPrefix(s, "'")
 		s = strings.TrimSuffix(s, "'")
-		pathParams = append(pathParams, fmt.Sprintf("'%s'", g.escapeSQLString(s)))
+		pathParams = append(pathParams, fmt.Sprintf("'%s'", queryescape.ClickHouseString(s)))
 	}
 
 	return fmt.Sprintf("JSONExtractString(%s, %s)", escapedColumn, strings.Join(pathParams, ", "))
@@ -494,12 +480,12 @@ func (g *SQLGenerator) generateSelectFieldExpression(selectField SelectField) (s
 	// Add alias if provided, or generate one for nested/map fields
 	switch {
 	case selectField.Alias != "":
-		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(selectField.Alias)), nil
+		return fmt.Sprintf("%s AS %s", columnExpression, queryescape.ClickHouseIdentifier(selectField.Alias)), nil
 	case nestedField != nil:
 		autoAlias := nestedField.Base + "_" + strings.Join(nestedField.Path, "_")
-		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(autoAlias)), nil
+		return fmt.Sprintf("%s AS %s", columnExpression, queryescape.ClickHouseIdentifier(autoAlias)), nil
 	case simpleFieldName != "" && !g.columnExists(simpleFieldName):
-		return fmt.Sprintf("%s AS %s", columnExpression, g.escapeIdentifier(simpleFieldName)), nil
+		return fmt.Sprintf("%s AS %s", columnExpression, queryescape.ClickHouseIdentifier(simpleFieldName)), nil
 	default:
 		return columnExpression, nil
 	}

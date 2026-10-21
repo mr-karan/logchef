@@ -571,3 +571,81 @@ func TestExtractVariableNames(t *testing.T) {
 		})
 	}
 }
+
+func TestOptionalClausesPreserveLiteralSyntax(t *testing.T) {
+	for _, query := range []string{
+		`SELECT '[[info]]'`, `SELECT "[[field]]"`, "SELECT `[[field]]`", `SELECT [[1,2],[3]]`,
+		`SELECT [['a'],['b']]`, `SELECT [[{{value}}],[3]]`, `SELECT 'it''s [[info]]'`, `SELECT 'it\'s [[info]]'`,
+		`SELECT $tag$[[info]]$tag$`, `SELECT $$[[info]]$$`, `SELECT [[field + 1]]`, `SELECT [[length('text')]]`, `SELECT [[{{value}}+1]]`, `SELECT [[field={{value}}]]`,
+		`SELECT 1 -- [[comment]]`, "SELECT 1 /* [[comment]] */",
+	} {
+		t.Run(query, func(t *testing.T) {
+			got := ProcessOptionalClauses(query, map[string]Variable{"value": {Name: "value", Type: TypeNumber, Value: 1}})
+			if got != query {
+				t.Fatalf("got %q, want %q", got, query)
+			}
+		})
+	}
+	for _, tt := range []struct{ query, want string }{
+		{"SELECT 1 [[\n AND x={{value}}\n]]", "SELECT 1 \n AND x={{value}}\n"},
+		{`SELECT 1 [[ AND x='a]]b' AND y={{value}} ]]`, `SELECT 1  AND x='a]]b' AND y={{value}} `},
+		{`SELECT 1 [[ AND x IN [[1],[2]] AND y={{value}} ]]`, `SELECT 1  AND x IN [[1],[2]] AND y={{value}} `},
+	} {
+		t.Run(tt.query, func(t *testing.T) {
+			got := ProcessOptionalClauses(tt.query, map[string]Variable{"value": {Name: "value", Type: TypeNumber, Value: 1}})
+			if got != tt.want {
+				t.Fatalf("got %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNativeTemplateQuoting(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		query   string
+		value   Variable
+		logsQL  bool
+		want    string
+		wantErr bool
+	}{
+		{name: "SQL backslash and quote", query: `SELECT {{value}}`, value: Variable{Type: TypeString, Value: `\'`}, want: `SELECT '\\'''`},
+		{name: "SQL quoted value", query: `SELECT 'prefix {{value}}'`, value: Variable{Type: TypeString, Value: `\'`}, want: `SELECT 'prefix \\'''`},
+		{name: "SQL identifier", query: "SELECT `{{value}}`", value: Variable{Type: TypeString, Value: "a`b"}, wantErr: true},
+		{name: "SQL double quoted identifier", query: `SELECT "{{value}}"`, value: Variable{Type: TypeString, Value: "a"}, wantErr: true},
+		{name: "LogsQL string", query: `field:={{value}}`, value: Variable{Type: TypeString, Value: `\'"`}, logsQL: true, want: `field:="\\'\""`},
+		{name: "LogsQL array", query: `field:in({{value}})`, value: Variable{Type: TypeString, Value: []string{`\`, `'`}}, logsQL: true, want: `field:in("\\", "'")`},
+		{name: "LogsQL number", query: `field:={{value}}`, value: Variable{Type: TypeNumber, Value: 42}, logsQL: true, want: `field:=42`},
+		{name: "LogsQL date", query: `field:={{value}}`, value: Variable{Type: TypeDate, Value: "2026-01-01"}, logsQL: true, want: `field:="2026-01-01 00:00:00"`},
+		{name: "LogsQL single quoted", query: `field:='{{value}}'`, value: Variable{Type: TypeString, Value: `\'"`}, logsQL: true, want: `field:='\\\'"'`},
+		{name: "LogsQL double quoted", query: `field:="{{value}}"`, value: Variable{Type: TypeString, Value: `\'"`}, logsQL: true, want: `field:="\\'\""`},
+		{name: "LogsQL raw quoted", query: "field:=`{{value}}`", value: Variable{Type: TypeString, Value: "x` | drop x"}, logsQL: true, wantErr: true},
+		{name: "SQL quoted array", query: `SELECT '{{value}}'`, value: Variable{Type: TypeString, Value: []string{"a", "b"}}, wantErr: true},
+		{name: "SQL line comment", query: "SELECT 1 -- {{value}}", value: Variable{Type: TypeString, Value: "\nOR 1=1"}, want: "SELECT 1 -- {{value}}"},
+		{name: "SQL nested block comment", query: "SELECT 1 /* outer /* inner */ {{value}} */", value: Variable{Type: TypeString, Value: "*/ OR 1=1"}, want: "SELECT 1 /* outer /* inner */ {{value}} */"},
+		{name: "SQL block comment", query: "SELECT 1 /* {{value}} */", value: Variable{Type: TypeString, Value: "*/ OR 1=1"}, want: "SELECT 1 /* {{value}} */"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.value.Name = "value"
+			substitute := SubstituteVariables
+			if tt.logsQL {
+				substitute = SubstituteLogsQLVariables
+			}
+			got, err := substitute(tt.query, []Variable{tt.value})
+			if (err != nil) != tt.wantErr || !tt.wantErr && got != tt.want {
+				t.Fatalf("got %q, %v; want %q, error=%v", got, err, tt.want, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestNativeTemplatesRejectUnsafeQuoteContexts(t *testing.T) {
+	for _, query := range []string{`SELECT '\{{value}}'`, `SELECT $tag${{value}}$tag$`, `SELECT $${{value}}$$`} {
+		t.Run(query, func(t *testing.T) {
+			got, err := SubstituteVariables(query, []Variable{{Name: "value", Type: TypeString, Value: ` $tag$ AS value --`}})
+			if err == nil {
+				t.Fatalf("expected unsafe quote context to be rejected, got %q", got)
+			}
+		})
+	}
+}

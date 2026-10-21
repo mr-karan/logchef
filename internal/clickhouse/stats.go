@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+
+	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
 const (
@@ -129,12 +130,7 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 }
 
 func quoteIdentifier(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if strings.HasPrefix(trimmed, "`") && strings.HasSuffix(trimmed, "`") {
-		return trimmed
-	}
-	escaped := strings.ReplaceAll(trimmed, "`", "``")
-	return "`" + escaped + "`"
+	return queryescape.ClickHouseIdentifier(name)
 }
 
 type ingestionActivityRow struct {

@@ -68,7 +68,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		if req.QueryLanguage != models.QueryLanguageLogsQL {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "query_language must be logchefql or logsql", models.ValidationErrorType)
 		}
-		params, err = core.PrepareSQLQuery(s.config.Query, req.APIQueryRequest)
+		params, err = core.PrepareSQLQuery(s.config.Query, req.APIQueryRequest, source.SourceType)
 		if err != nil {
 			return sendQueryRequestError(c, err)
 		}

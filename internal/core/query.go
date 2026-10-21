@@ -59,7 +59,7 @@ func (e *LogchefQLCompileError) Unwrap() error { return e.Err }
 
 // PrepareSQLQuery applies the configured timeout and limit policy and template
 // substitution to a raw query request. The returned QueryTimeout is never nil.
-func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest) (datasource.QueryRequest, error) {
+func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, sourceType models.SourceType) (datasource.QueryRequest, error) {
 	timeout, err := resolveQueryTimeout(cfg, req.QueryTimeout)
 	if err != nil {
 		return datasource.QueryRequest{}, err
@@ -74,7 +74,7 @@ func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest) (dataso
 	}
 	query := req.QueryText
 	if len(req.Variables) > 0 {
-		query, err = template.SubstituteVariables(req.QueryText, templateVariables(req.Variables))
+		query, err = substituteNativeVariables(req.QueryText, req.Variables, sourceType)
 		if err != nil {
 			return datasource.QueryRequest{}, queryRequestErrorf("Variable substitution failed: %v", err)
 		}
@@ -101,6 +101,22 @@ func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest) (dataso
 	return params, nil
 }
 
+// PrepareSourceSQLQuery selects template quoting from the source's native dialect.
+func PrepareSourceSQLQuery(ctx context.Context, ds *datasource.Service, cfg config.QueryConfig, src access.AuthorizedSource, req models.APIQueryRequest) (datasource.QueryRequest, error) {
+	sourceType := models.SourceTypeClickHouse
+	if len(req.Variables) > 0 {
+		source, err := ds.LoadSource(ctx, src.SourceID())
+		if errors.Is(err, models.ErrNotFound) {
+			return datasource.QueryRequest{}, ErrSourceNotFound
+		}
+		if err != nil {
+			return datasource.QueryRequest{}, err
+		}
+		sourceType = source.SourceType
+	}
+	return PrepareSQLQuery(cfg, req, sourceType)
+}
+
 // RunQuery prepares and runs a raw query with no streaming. One deadline,
 // the query timeout, covers preparation and execution, because callers such
 // as MCP have no client disconnect to cancel the call.
@@ -110,7 +126,7 @@ func RunQuery(ctx context.Context, ds *datasource.Service, cfg config.QueryConfi
 		return nil, err
 	}
 	defer cancel()
-	params, err := PrepareSQLQuery(cfg, req)
+	params, err := PrepareSourceSQLQuery(ctx, ds, cfg, src, req)
 	if err != nil {
 		return nil, err
 	}
@@ -319,7 +335,7 @@ func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.
 
 // PrepareHistogram validates a histogram request, substitutes template
 // variables and applies the window, timezone and timeout defaults.
-func PrepareHistogram(req models.APIHistogramRequest) (HistogramParams, error) {
+func PrepareHistogram(req models.APIHistogramRequest, sourceType models.SourceType) (HistogramParams, error) {
 	if strings.TrimSpace(req.QueryText) == "" {
 		return HistogramParams{}, &QueryRequestError{Message: "query_text parameter is required"}
 	}
@@ -333,7 +349,7 @@ func PrepareHistogram(req models.APIHistogramRequest) (HistogramParams, error) {
 	}
 	query := req.QueryText
 	if len(req.Variables) > 0 {
-		substituted, err := template.SubstituteVariables(req.QueryText, templateVariables(req.Variables))
+		substituted, err := substituteNativeVariables(req.QueryText, req.Variables, sourceType)
 		if err != nil {
 			return HistogramParams{}, queryRequestErrorf("Variable substitution failed: %v", err)
 		}
@@ -380,12 +396,35 @@ func PrepareHistogram(req models.APIHistogramRequest) (HistogramParams, error) {
 	return params, nil
 }
 
+// PrepareSourceHistogram selects template quoting from the source's native dialect.
+func PrepareSourceHistogram(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req models.APIHistogramRequest) (HistogramParams, error) {
+	sourceType := models.SourceTypeClickHouse
+	if len(req.Variables) > 0 {
+		source, err := ds.LoadSource(ctx, src.SourceID())
+		if errors.Is(err, models.ErrNotFound) {
+			return HistogramParams{}, ErrSourceNotFound
+		}
+		if err != nil {
+			return HistogramParams{}, err
+		}
+		sourceType = source.SourceType
+	}
+	return PrepareHistogram(req, sourceType)
+}
+
+func substituteNativeVariables(query string, variables []models.TemplateVariable, sourceType models.SourceType) (string, error) {
+	if models.NormalizeSourceType(sourceType) == models.SourceTypeVictoriaLogs {
+		return template.SubstituteLogsQLVariables(query, templateVariables(variables))
+	}
+	return template.SubstituteVariables(query, templateVariables(variables))
+}
+
 // RunHistogram prepares and runs a histogram. HistogramTimeout covers
 // preparation and execution.
 func RunHistogram(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req models.APIHistogramRequest) (*HistogramResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, HistogramTimeout)
 	defer cancel()
-	params, err := PrepareHistogram(req)
+	params, err := PrepareSourceHistogram(ctx, ds, src, req)
 	if err != nil {
 		return nil, err
 	}

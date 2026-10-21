@@ -18,7 +18,7 @@ func SubstituteLogchefQLVariables(query string, variables []Variable) (string, e
 		}
 		values[variable.Name] = variable
 	}
-	query = ProcessOptionalClauses(query, values)
+	query = processOptionalClauses(query, values, false)
 	var substitutionErr error
 	result := logchefQLTemplateToken.ReplaceAllStringFunc(query, func(token string) string {
 		quoted := token[0] == '"' || token[0] == '\''

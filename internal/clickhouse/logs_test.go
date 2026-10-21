@@ -202,7 +202,7 @@ func TestContextTimestampFormattingAndIdentifierQuoting(t *testing.T) {
 	if got, want := quoteTableName("default.logs"), "`default`.`logs`"; got != want {
 		t.Fatalf("quoteTableName = %q, want %q", got, want)
 	}
-	if got, want := quoteIdentifier("event`time"), "`event``time`"; got != want {
+	if got, want := quoteIdentifier("event`time"), "`event\\x60time`"; got != want {
 		t.Fatalf("quoteIdentifier = %q, want %q", got, want)
 	}
 }
