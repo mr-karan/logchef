@@ -24,7 +24,6 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 		c.capabilitiesMu.Unlock()
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
-			c.metrics.UpdateConnectionStatus(false)
 		}
 
 		// Check if the error is due to the context deadline exceeding
@@ -39,7 +38,6 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	if database == "" || table == "" {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(true)
-			c.metrics.UpdateConnectionStatus(true)
 		}
 		return nil // Basic ping successful, no table check needed.
 	}
@@ -58,7 +56,6 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	if err != nil {
 		if c.metrics != nil {
 			c.metrics.RecordConnectionValidation(false)
-			c.metrics.UpdateConnectionStatus(false)
 		}
 
 		if errors.Is(err, context.DeadlineExceeded) {
@@ -80,7 +77,6 @@ func (c *Client) Ping(ctx context.Context, database, table string) error {
 	// If Scan succeeds without error, the table exists.
 	if c.metrics != nil {
 		c.metrics.RecordConnectionValidation(true)
-		c.metrics.UpdateConnectionStatus(true)
 	}
 	return nil
 }

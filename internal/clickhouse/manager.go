@@ -36,6 +36,7 @@ type Manager struct {
 	hooks      []QueryHook    // Hooks applied to all managed clients; fixed at construction.
 	stopHealth chan struct{}  // Channel to signal health check goroutine to stop.
 	healthWG   sync.WaitGroup // WaitGroup to wait for health check goroutine to exit.
+	stopOnce   sync.Once
 }
 
 // NewManager creates a ClickHouse connection manager whose clients all run hooks.
@@ -81,8 +82,10 @@ func (m *Manager) StartBackgroundHealthChecks(interval time.Duration) {
 
 // StopBackgroundHealthChecks signals the health check goroutine to stop.
 func (m *Manager) StopBackgroundHealthChecks() {
-	m.logger.Debug("signaling health check stop")
-	close(m.stopHealth)
+	m.stopOnce.Do(func() {
+		m.logger.Debug("signaling health check stop")
+		close(m.stopHealth)
+	})
 }
 
 // checkAllSourcesHealth iterates through managed clients and updates their health status.
@@ -105,7 +108,7 @@ func (m *Manager) checkAllSourcesHealth() {
 }
 
 // updateHealthStatus ignores results from removed or replaced clients.
-func (m *Manager) updateHealthStatus(sourceID models.SourceID, client *Client, isHealthy bool, errorMsg string) {
+func (m *Manager) updateHealthStatus(sourceID models.SourceID, client *Client, err error) {
 	m.clientsMux.RLock()
 	defer m.clientsMux.RUnlock()
 	if m.clients[sourceID] != client {
@@ -115,8 +118,11 @@ func (m *Manager) updateHealthStatus(sourceID models.SourceID, client *Client, i
 	m.healthMux.Lock()
 	defer m.healthMux.Unlock()
 
+	if client.metrics != nil {
+		client.metrics.UpdateConnectionStatus(err == nil)
+	}
 	newState := healthUnhealthy
-	if isHealthy {
+	if err == nil {
 		newState = healthHealthy
 	}
 	oldState := m.health[sourceID]
@@ -124,10 +130,13 @@ func (m *Manager) updateHealthStatus(sourceID models.SourceID, client *Client, i
 	if oldState == newState {
 		return
 	}
-	if isHealthy {
+	switch {
+	case err != nil:
+		m.logger.Warn("source unhealthy", "source_id", sourceID, "error", err)
+	case oldState == healthUnhealthy:
 		m.logger.Info("source healthy", "source_id", sourceID)
-	} else {
-		m.logger.Warn("source unhealthy", "source_id", sourceID, "error", errorMsg)
+	default:
+		m.logger.Debug("source healthy", "source_id", sourceID)
 	}
 }
 
@@ -140,11 +149,7 @@ func (m *Manager) checkSource(ctx context.Context, sourceID models.SourceID) {
 
 	pingCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 	defer cancel()
-	if err := client.Ping(pingCtx, "", ""); err != nil {
-		m.updateHealthStatus(sourceID, client, false, err.Error())
-		return
-	}
-	m.updateHealthStatus(sourceID, client, true, "")
+	m.updateHealthStatus(sourceID, client, client.Ping(pingCtx, "", ""))
 }
 
 // AddSource creates a managed client and schedules its first health check.

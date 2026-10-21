@@ -3,6 +3,7 @@ package clickhouse
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
@@ -12,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	vmmetrics "github.com/VictoriaMetrics/metrics"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -292,42 +295,52 @@ func waitForCondition(t *testing.T, timeout time.Duration, condition func() bool
 }
 
 func TestOldHealthCannotOverwriteReplacementClickHouse(t *testing.T) {
-	addr := testClickHouseAddr(t)
-	proxy := startProxy(t, addr)
+	proxy := startProxy(t, testClickHouseAddr(t))
 	proxy.silent.Store(true)
-	var logs syncBuffer
-	m := NewManager(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	t.Cleanup(func() { _ = m.Close() })
 	const id models.SourceID = 1
 	addTestSource(t, m, id, proxy.addr)
-	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 0 })
+	waitForHealth(t, m, id, 2*time.Second, healthUnhealthy)
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	accepted := proxy.accepted.Load()
 	done := make(chan struct{})
 	go func() {
-		m.checkSource(context.Background(), id)
+		m.checkSource(ctx, id)
 		close(done)
 	}()
-	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 1 })
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > accepted })
 	if err := m.RemoveSource(id); err != nil {
 		t.Fatal(err)
 	}
-	replacement := addTestSource(t, m, id, addr)
-	waitForCondition(t, 500*time.Millisecond, func() bool {
-		return strings.Contains(logs.String(), `"msg":"source healthy"`)
-	})
+	proxy.silent.Store(false)
+	addTestSource(t, m, id, proxy.addr)
+	waitForHealth(t, m, id, 500*time.Millisecond, healthHealthy)
+	metric := fmt.Sprintf(`logchef_clickhouse_connection_status{source_id="%d",source_name=%q,database="default",table="logs",host=%q}`, id, t.Name(), proxy.addr)
+	assertHealthyMetric := func() {
+		t.Helper()
+		var exposition bytes.Buffer
+		vmmetrics.WritePrometheus(&exposition, false)
+		if !strings.Contains(exposition.String(), metric+" 1\n") {
+			t.Fatalf("replacement connection metric is not healthy:\n%s", exposition.String())
+		}
+	}
+	assertHealthyMetric()
+	cancel()
 	select {
 	case <-done:
 	case <-time.After(2 * HealthCheckTimeout):
 		t.Fatal("old health check did not finish")
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	if err := replacement.Ping(ctx, "", ""); err != nil {
-		t.Fatalf("replacement ping: %v", err)
+	m.healthMux.RLock()
+	state := m.health[id]
+	m.healthMux.RUnlock()
+	if state != healthHealthy {
+		t.Fatalf("old probe overwrote replacement health: got %v, want healthy", state)
 	}
-	if strings.Contains(logs.String(), `"msg":"source unhealthy"`) {
-		t.Fatalf("old probe overwrote replacement health:\n%s", logs.String())
-	}
+	assertHealthyMetric()
 }
 
 func TestStartupUnreachableLogsOnce(t *testing.T) {
@@ -360,5 +373,32 @@ func TestHealthRecoveryLogsAtInfoClickHouse(t *testing.T) {
 	m.checkSource(context.Background(), id)
 	if got := strings.Count(logs.String(), `"level":"INFO","msg":"source healthy"`); got != 1 {
 		t.Fatalf("recovery logged at Info %d times:\n%s", got, logs.String())
+	}
+}
+
+func TestStartupHealthyLogsAtDebugClickHouse(t *testing.T) {
+	var logs syncBuffer
+	m := NewManager(slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { _ = m.Close() })
+	const id models.SourceID = 3
+	addTestSource(t, m, id, testClickHouseAddr(t))
+	waitForHealth(t, m, id, 2*time.Second, healthHealthy)
+	m.checkSource(context.Background(), id)
+	if got := strings.Count(logs.String(), `"level":"DEBUG","msg":"source healthy"`); got != 1 {
+		t.Fatalf("startup success logged at Debug %d times:\n%s", got, logs.String())
+	}
+	if strings.Contains(logs.String(), `"level":"INFO","msg":"source healthy"`) {
+		t.Fatalf("startup success logged as recovery:\n%s", logs.String())
+	}
+}
+
+func TestManagerCloseTwice(t *testing.T) {
+	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	m.StartBackgroundHealthChecks(time.Hour)
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
 	}
 }
