@@ -86,8 +86,8 @@ just build-frontend
 ### 4. Run Logchef
 
 ```bash
-# Run with development config
-just CONFIG=dev/config.toml run
+# Run with the development config (dev/config.toml is the default)
+just run
 
 # Or run backend/frontend separately
 just run-backend

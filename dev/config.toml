@@ -1,0 +1,43 @@
+# Logchef development configuration (TOML).
+#
+# Used by `just run` and `just run-backend`. It targets the local dev stack
+# from `just dev-docker`: ClickHouse, VictoriaLogs and Dex on localhost.
+#
+# Never use this file outside development. It contains a committed
+# api_token_secret and serves cookies over plain HTTP.
+#
+# The production sample lives in ../config.toml. Keep required settings in
+# step with it; everything omitted here falls back to the built-in defaults.
+
+[server]
+port = 8125
+host = "0.0.0.0"
+# Dev serves the UI over plain HTTP, where a Secure cookie would be dropped.
+secure_cookie = false
+
+[sqlite]
+# Relative to the repository root, where the dev targets run the binary.
+path = "local.db"
+
+# Dex from dev/docker-compose.yml. Static credentials are in dev/dex/.
+[oidc]
+provider_url = "http://localhost:5556/dex"
+auth_url = "http://localhost:5556/dex/auth"
+token_url = "http://localhost:5556/dex/token"
+client_id = "logchef"
+client_secret = "logchef-secret"
+redirect_url = "http://localhost:8125/api/v1/auth/callback"
+scopes = ["openid", "email", "profile"]
+
+[auth]
+admin_emails = ["admin@logchef.internal"]
+# Dev-only, committed on purpose so the dev stack boots with no setup.
+api_token_secret = "5679649c50fddda837449b77d9983ab5f8dba65878897e968a74e7061bf47677"
+
+[logging]
+level = "debug"
+
+# Creates the dev teams and sources on every backend start.
+# The path is resolved against this file's directory, so it stays bare.
+[provisioning]
+file = "provisioning.toml"
