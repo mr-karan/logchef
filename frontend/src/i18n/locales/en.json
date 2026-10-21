@@ -918,6 +918,7 @@
   "routes.notFound": "Not Found",
   "pages.loginUnauthorized": "Access denied. Please contact your administrator to request access.",
   "pages.loginInactive": "Your account is inactive. Please contact your administrator.",
+  "pages.loginEmailNotVerified": "Your email address is not verified. Please verify it with your identity provider and try again.",
   "pages.loginSessionExpired": "Authentication session expired. Please try again.",
   "pages.loginInvalidRequest": "Invalid authentication request. Please try again.",
   "pages.loginFailed": "Authentication failed. Please try again.",

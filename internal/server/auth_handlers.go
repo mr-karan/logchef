@@ -26,21 +26,6 @@ const (
 	stateCookieTTL = 5 * time.Minute
 )
 
-// Define Auth/OIDC specific errors used within handlers, especially for redirect mapping.
-var (
-	// Note: Some errors might overlap with core definitions but are kept here
-	// for mapping purposes within redirectToFrontend.
-	ErrSessionNotFound           = errors.New("session not found")
-	ErrSessionExpired            = errors.New("session expired")
-	ErrUserNotFound              = errors.New("user not found")
-	ErrTeamNotFound              = errors.New("team not found")
-	ErrUnauthorizedUser          = errors.New("unauthorized user")
-	ErrUserInactive              = errors.New("user inactive")
-	ErrOIDCProviderNotConfigured = errors.New("OIDC provider not configured") // This one might belong in auth/oidc.go
-	ErrOIDCInvalidToken          = errors.New("invalid OIDC token")
-	ErrOIDCEmailNotVerified      = errors.New("email not verified")
-)
-
 // generateState generates a cryptographically secure random string used for the OIDC state parameter.
 // It includes a nonce and timestamp to prevent replay attacks and ensure freshness.
 func generateState() (string, error) {
@@ -148,24 +133,22 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 		var errCode string
 		// Map known auth errors to specific codes for the frontend.
 		switch {
-		// Use errors defined in this file first for mapping
-		case errors.Is(err, ErrSessionNotFound), errors.Is(err, core.ErrSessionNotFound):
+		case errors.Is(err, core.ErrSessionNotFound):
 			errCode = "session_not_found"
-		case errors.Is(err, ErrSessionExpired), errors.Is(err, core.ErrSessionExpired):
+		case errors.Is(err, core.ErrSessionExpired):
 			errCode = "session_expired"
-		case errors.Is(err, ErrOIDCInvalidToken):
+		case errors.Is(err, auth.ErrOIDCInvalidToken):
 			errCode = "invalid_token"
-		case errors.Is(err, ErrOIDCEmailNotVerified):
+		case errors.Is(err, auth.ErrOIDCEmailNotVerified):
 			errCode = "email_not_verified"
-		case errors.Is(err, ErrUnauthorizedUser):
+		case errors.Is(err, auth.ErrUnauthorizedUser):
 			errCode = "unauthorized"
-		case errors.Is(err, ErrUserInactive):
+		case errors.Is(err, auth.ErrUserInactive):
 			errCode = "user_inactive"
-		// Add mappings for other relevant core errors if needed
 		case errors.Is(err, core.ErrUserNotFound):
-			errCode = "user_not_found" // Example mapping
+			errCode = "user_not_found"
 		default:
-			errCode = "auth_error" // Generic code for other errors.
+			errCode = "auth_error"
 		}
 		finalURL = fmt.Sprintf("%s/auth/login?error=%s", targetURL, errCode)
 		s.log.Warn("authentication error during redirect",
