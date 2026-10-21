@@ -100,6 +100,8 @@ export function useUrlState(): UrlStateReturn {
   let skipNextSync = false;
   let pendingRouteSyncKey: string | null = null;
   let syncPaused = false;
+  // Bumped per navigation Explorer applies, so a superseded one stops.
+  let routeApplyId = 0;
 
   function isExploreRoute(): boolean {
     return route.path === '/logs/explore';
@@ -427,6 +429,7 @@ export function useUrlState(): UrlStateReturn {
 
     try {
       await router.push({ path: '/logs/explore', query });
+      skipNextSync = false;
     } catch (err: any) {
       skipNextSync = false;
       pendingRouteSyncKey = null;
@@ -496,6 +499,8 @@ export function useUrlState(): UrlStateReturn {
         return;
       }
 
+      const applyId = ++routeApplyId;
+      const superseded = () => applyId !== routeApplyId;
       exploreStore.holdAutoRun(true);
       let result: ReturnType<typeof exploreStore.initializeFromUrl>;
       try {
@@ -506,7 +511,7 @@ export function useUrlState(): UrlStateReturn {
           normalized.source = resolvedSourceId ? String(resolvedSourceId) : undefined;
         }
 
-        if (normalized.id) {
+        if (superseded() || normalized.id) {
           return;
         }
 
@@ -519,10 +524,12 @@ export function useUrlState(): UrlStateReturn {
         result = exploreStore.initializeFromUrl(normalized, { updateLastExecutedState: false });
         await waitForReadiness();
       } finally {
-        exploreStore.holdAutoRun(false);
+        if (!superseded()) {
+          exploreStore.holdAutoRun(false);
+        }
       }
 
-      if (result.shouldExecute) {
+      if (!superseded() && result.shouldExecute) {
         exploreStore.executeQuery().catch(err => {
           console.error('useUrlState: Error executing query from history navigation:', err);
         });
