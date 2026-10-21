@@ -146,7 +146,6 @@ export function useQuery() {
     // No need to modify the LogchefQL query itself
   };
 
-  // Prepare query for execution - now uses SqlManager
   const prepareQueryForExecution = async () => {
     try {
       const sourceDetails = sourcesStore.currentSourceDetails;

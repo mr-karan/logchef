@@ -1,6 +1,6 @@
 /**
  * Minimal LogchefQL utilities for Monaco integration.
- * Provides the field and column types it uses.
+ * Field and column types for Monaco integration.
  * Autocomplete is handled by SqlMonacoEditor.vue (context-aware).
  * Syntax highlighting is handled by monaco.ts registerLogchefQL().
  */
