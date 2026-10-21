@@ -264,7 +264,12 @@ func (s *Server) requireSourceNotManaged(c fiber.Ctx) error {
 		return c.Next() // let handler deal with bad ID
 	}
 	managed, err := s.sqlite.IsSourceManaged(c.Context(), sourceID)
-	if err == nil && managed {
+	if err != nil {
+		s.log.Error("failed to check source provisioning status", "error", err, "source_id", sourceID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError,
+			"Failed to verify source provisioning status", models.GeneralErrorType)
+	}
+	if managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This source is managed by provisioning config and cannot be modified via API",
 			models.ManagedResourceErrorType)
@@ -283,7 +288,12 @@ func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 		return c.Next()
 	}
 	managed, err := s.sqlite.IsTeamManaged(c.Context(), teamID)
-	if err == nil && managed {
+	if err != nil {
+		s.log.Error("failed to check team provisioning status", "error", err, "team_id", teamID)
+		return SendErrorWithType(c, fiber.StatusInternalServerError,
+			"Failed to verify team provisioning status", models.GeneralErrorType)
+	}
+	if managed {
 		return SendErrorWithType(c, fiber.StatusForbidden,
 			"This team is managed by provisioning config and cannot be modified via API",
 			models.ManagedResourceErrorType)

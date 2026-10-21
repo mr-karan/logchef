@@ -56,7 +56,7 @@ func (s *Server) handleListSettings(c fiber.Ctx) error {
 	// Group settings by category
 	categoriesMap := make(map[string][]SystemSettingResponse)
 	for i := range settings {
-		response := s.settingToResponse(settings[i])
+		response := s.settingToResponse(c, settings[i])
 		categoriesMap[settings[i].Category] = append(categoriesMap[settings[i].Category], response)
 	}
 
@@ -88,7 +88,7 @@ func (s *Server) handleListSettingsByCategory(c fiber.Ctx) error {
 
 	var response []SystemSettingResponse
 	for i := range settings {
-		response = append(response, s.settingToResponse(settings[i]))
+		response = append(response, s.settingToResponse(c, settings[i]))
 	}
 
 	return SendSuccess(c, fiber.StatusOK, response)
@@ -102,13 +102,18 @@ func (s *Server) handleGetSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
-	value, err := s.sqlite.GetSetting(c.Context(), key)
+	settings, err := s.sqlite.ListSettings(c.Context())
 	if err != nil {
 		s.log.Error("failed to get setting", "key", key, "error", err)
-		return SendError(c, fiber.StatusNotFound, "setting not found")
+		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve setting")
 	}
-
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{"key": key, "value": value})
+	for _, setting := range settings {
+		if setting.Key == key {
+			response := s.settingToResponse(c, setting)
+			return SendSuccess(c, fiber.StatusOK, fiber.Map{"key": key, "value": response.Value})
+		}
+	}
+	return SendError(c, fiber.StatusNotFound, "setting not found")
 }
 
 // handleUpdateSetting updates or creates a setting.
@@ -182,7 +187,7 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 }
 
 // settingToResponse converts a database setting to API response format.
-func (s *Server) settingToResponse(setting *models.SystemSetting) SystemSettingResponse {
+func (s *Server) settingToResponse(c fiber.Ctx, setting *models.SystemSetting) SystemSettingResponse {
 	response := SystemSettingResponse{
 		Key:         setting.Key,
 		Value:       setting.Value,
@@ -197,6 +202,9 @@ func (s *Server) settingToResponse(setting *models.SystemSetting) SystemSettingR
 	// Mask sensitive values in responses.
 	if response.IsSensitive && response.Value != "" {
 		response.MaskedValue = "********"
+		if c.Locals("auth_method") != "session" {
+			response.Value = response.MaskedValue
+		}
 	}
 
 	return response
@@ -212,8 +220,7 @@ func (s *Server) validateSettingValue(value, valueType string) error {
 		_, err := strconv.ParseFloat(value, 64)
 		return err
 	case "duration":
-		_, err := time.ParseDuration(value)
-		return err
+		return validatePositiveDuration(value)
 	case "string":
 		return nil // Strings are always valid
 	default:
@@ -231,6 +238,11 @@ func (s *Server) validateSpecificSetting(key, value string) error {
 }
 
 var specificSettingValidators = map[string]func(string) error{
+	"auth.session_duration":        validatePositiveDuration,
+	"auth.default_token_expiry":    validatePositiveDuration,
+	"alerts.evaluation_interval":   validatePositiveDuration,
+	"alerts.default_lookback":      validatePositiveDuration,
+	"alerts.request_timeout":       validatePositiveDuration,
 	"alerts.external_url":          validateOptionalURL,
 	"alerts.frontend_url":          validateOptionalURL,
 	"server.frontend_url":          validateOptionalURL,
@@ -254,6 +266,17 @@ func validateReasoningEffort(value string) error {
 	}
 	if !slices.Contains(config.ValidReasoningEfforts, value) {
 		return fmt.Errorf("must be one of %v (or empty for the model default)", config.ValidReasoningEfforts)
+	}
+	return nil
+}
+
+func validatePositiveDuration(value string) error {
+	duration, err := time.ParseDuration(value)
+	if err != nil {
+		return err
+	}
+	if duration <= 0 {
+		return fmt.Errorf("duration must be greater than 0")
 	}
 	return nil
 }

@@ -110,12 +110,13 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 	}
 
+	tokenPrefix := token[:min(len(token), 8)]
 	share, err := s.sqlite.GetQueryShare(c.Context(), token)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
 		}
-		s.log.Error("failed to get query share", "error", err, "token", token)
+		s.log.Error("failed to get query share", "error", err, "token_prefix", tokenPrefix)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get share link", models.GeneralErrorType)
 	}
 	if time.Now().UTC().After(share.ExpiresAt) {
@@ -127,7 +128,7 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 	// member of a team that has the source.
 	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
 	if err != nil {
-		s.log.Error("failed to check query share access", "error", err, "token", token, "user_id", user.ID)
+		s.log.Error("failed to check query share access", "error", err, "token_prefix", tokenPrefix, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
 	}
 	if !hasAccess {
@@ -135,7 +136,7 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 	}
 
 	if err := s.sqlite.TouchQueryShare(c.Context(), token, time.Now().UTC()); err != nil {
-		s.log.Warn("failed to touch query share", "error", err, "token", token)
+		s.log.Warn("failed to touch query share", "error", err, "token_prefix", tokenPrefix)
 	}
 
 	// Resolve a team the recipient actually belongs to for this source, so
@@ -149,7 +150,7 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusForbidden,
 				"You don't have access to this source through any team", models.AuthorizationErrorType)
 		}
-		s.log.Error("failed to resolve team for share recipient", "error", err, "token", token, "user_id", user.ID)
+		s.log.Error("failed to resolve team for share recipient", "error", err, "token_prefix", tokenPrefix, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to resolve team context", models.GeneralErrorType)
 	}
 	share.TeamID = &recipientTeam
