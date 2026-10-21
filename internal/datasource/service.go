@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sync"
 	"time"
 
@@ -17,10 +18,7 @@ import (
 
 type Provider interface {
 	Type() models.SourceType
-	Capabilities() []Capability
-	SupportedQueryLanguages() []models.QueryLanguage
-	SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode
-	SupportedAlertEditorModes() []models.AlertEditorMode
+	Describe() Descriptor
 	PrepareSource(context.Context, *models.CreateSourceRequest) (*models.Source, error)
 	ValidateConnection(context.Context, *models.ValidateConnectionRequest) (*models.ConnectionValidationResult, error)
 	UpdateSource(context.Context, *models.Source, *models.UpdateSourceRequest) (*SourceUpdateResult, error)
@@ -61,6 +59,17 @@ const (
 	CapabilityExports          Capability = "exports"
 	CapabilityLiveTail         Capability = "live_tail"
 )
+
+// Descriptor is the static feature set of a provider.
+type Descriptor struct {
+	Capabilities          []Capability
+	QueryLanguages        []models.QueryLanguage
+	SavedQueryEditorModes []models.SavedQueryEditorMode
+	AlertEditorModes      []models.AlertEditorMode
+	// LogchefQLNeedsColumns makes CompileLogchefQL resolve column types for a
+	// source that has none, since the compiler types comparisons by column.
+	LogchefQLNeedsColumns bool
+}
 
 func NewService(db store.Store, log *slog.Logger) *Service {
 	return &Service{
@@ -174,13 +183,14 @@ func (s *Service) ValidateSavedQuerySupport(ctx context.Context, sourceID models
 		return err
 	}
 
+	descriptor := provider.Describe()
 	normalizedLanguage := models.NormalizeQueryLanguage(language)
-	if !supportsQueryLanguage(provider.SupportedQueryLanguages(), normalizedLanguage) {
+	if !slices.Contains(descriptor.QueryLanguages, normalizedLanguage) {
 		return fmt.Errorf("%s does not support saved query language %q", source.SourceType, normalizedLanguage)
 	}
 
 	normalizedMode := models.NormalizeSavedQueryEditorMode(mode)
-	if !supportsSavedQueryEditorMode(provider.SupportedSavedQueryEditorModes(), normalizedMode) {
+	if !slices.Contains(descriptor.SavedQueryEditorModes, normalizedMode) {
 		return fmt.Errorf("%s does not support saved query editor mode %q", source.SourceType, normalizedMode)
 	}
 
@@ -193,13 +203,14 @@ func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.Sour
 		return err
 	}
 
+	descriptor := provider.Describe()
 	normalizedLanguage := models.NormalizeQueryLanguage(language)
-	if !supportsQueryLanguage(provider.SupportedQueryLanguages(), normalizedLanguage) {
+	if !slices.Contains(descriptor.QueryLanguages, normalizedLanguage) {
 		return fmt.Errorf("%s does not support alert query language %q", source.SourceType, normalizedLanguage)
 	}
 
 	normalizedMode := models.NormalizeAlertEditorMode(mode)
-	if !supportsAlertEditorMode(provider.SupportedAlertEditorModes(), normalizedMode) {
+	if !slices.Contains(descriptor.AlertEditorModes, normalizedMode) {
 		return fmt.Errorf("%s does not support alert editor mode %q", source.SourceType, normalizedMode)
 	}
 
@@ -392,10 +403,10 @@ func (s *Service) CompileLogchefQL(ctx context.Context, sourceID models.SourceID
 	if !ok {
 		return nil, ErrOperationNotSupported
 	}
-	// ClickHouse translation needs column types. Share inspection fills with the
-	// source page, including its revision checks and short schema freshness TTL.
-	// Keep enrichment local so concurrent compiles never mutate the source.
-	if provider.Type() == models.SourceTypeClickHouse && len(source.Columns) == 0 {
+	// Share inspection fills with the source page, including its revision checks
+	// and short schema freshness TTL. Keep enrichment local so concurrent
+	// compiles never mutate the source.
+	if provider.Describe().LogchefQLNeedsColumns && len(source.Columns) == 0 {
 		columns, cerr := s.compileColumns(ctx, source, provider)
 		if cerr != nil {
 			return nil, fmt.Errorf("resolve source schema for LogchefQL compilation: %w", cerr)
@@ -511,45 +522,14 @@ func (s *Service) ApplySourceMetadata(source *models.Source) error {
 		return err
 	}
 
-	queryLanguages := provider.SupportedQueryLanguages()
-	source.QueryLanguages = make([]models.QueryLanguage, 0, len(queryLanguages))
-	for _, language := range queryLanguages {
-		normalized := models.NormalizeQueryLanguage(language)
-		if normalized == "" {
-			continue
-		}
-		source.QueryLanguages = append(source.QueryLanguages, normalized)
+	descriptor := provider.Describe()
+	source.QueryLanguages = descriptor.QueryLanguages
+	source.SavedQueryEditorModes = descriptor.SavedQueryEditorModes
+	source.AlertEditorModes = descriptor.AlertEditorModes
+	source.Capabilities = make([]string, len(descriptor.Capabilities))
+	for i, capability := range descriptor.Capabilities {
+		source.Capabilities[i] = string(capability)
 	}
-
-	savedQueryModes := provider.SupportedSavedQueryEditorModes()
-	source.SavedQueryEditorModes = make([]models.SavedQueryEditorMode, 0, len(savedQueryModes))
-	for _, mode := range savedQueryModes {
-		normalized := models.NormalizeSavedQueryEditorMode(mode)
-		if normalized == "" {
-			continue
-		}
-		source.SavedQueryEditorModes = append(source.SavedQueryEditorModes, normalized)
-	}
-
-	alertModes := provider.SupportedAlertEditorModes()
-	source.AlertEditorModes = make([]models.AlertEditorMode, 0, len(alertModes))
-	for _, mode := range alertModes {
-		normalized := models.NormalizeAlertEditorMode(mode)
-		if normalized == "" {
-			continue
-		}
-		source.AlertEditorModes = append(source.AlertEditorModes, normalized)
-	}
-
-	capabilities := provider.Capabilities()
-	source.Capabilities = make([]string, 0, len(capabilities))
-	for _, capability := range capabilities {
-		if capability == "" {
-			continue
-		}
-		source.Capabilities = append(source.Capabilities, string(capability))
-	}
-
 	return nil
 }
 
@@ -613,31 +593,4 @@ func (s *Service) sourceAndProvider(ctx context.Context, sourceID models.SourceI
 	}
 
 	return source, provider, nil
-}
-
-func supportsQueryLanguage(supported []models.QueryLanguage, language models.QueryLanguage) bool {
-	for _, candidate := range supported {
-		if models.NormalizeQueryLanguage(candidate) == language {
-			return true
-		}
-	}
-	return false
-}
-
-func supportsSavedQueryEditorMode(supported []models.SavedQueryEditorMode, mode models.SavedQueryEditorMode) bool {
-	for _, candidate := range supported {
-		if models.NormalizeSavedQueryEditorMode(candidate) == mode {
-			return true
-		}
-	}
-	return false
-}
-
-func supportsAlertEditorMode(supported []models.AlertEditorMode, mode models.AlertEditorMode) bool {
-	for _, candidate := range supported {
-		if models.NormalizeAlertEditorMode(candidate) == mode {
-			return true
-		}
-	}
-	return false
 }

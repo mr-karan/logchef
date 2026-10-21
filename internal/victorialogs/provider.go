@@ -123,35 +123,19 @@ func (p *Provider) Type() models.SourceType {
 	return models.SourceTypeVictoriaLogs
 }
 
-func (p *Provider) Capabilities() []datasource.Capability {
-	return []datasource.Capability{
-		datasource.CapabilitySchemaInspection,
-		datasource.CapabilityHistogram,
-		datasource.CapabilityFieldValues,
-		datasource.CapabilitySourceInspection,
-		datasource.CapabilityLiveTail,
-		datasource.CapabilityAISQLGeneration,
-	}
-}
-
-func (p *Provider) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{
-		models.QueryLanguageLogchefQL,
-		models.QueryLanguageLogsQL,
-	}
-}
-
-func (p *Provider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return []models.SavedQueryEditorMode{
-		models.SavedQueryEditorModeBuilder,
-		models.SavedQueryEditorModeNative,
-	}
-}
-
-func (p *Provider) SupportedAlertEditorModes() []models.AlertEditorMode {
-	return []models.AlertEditorMode{
-		models.AlertEditorModeCondition,
-		models.AlertEditorModeNative,
+func (p *Provider) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		Capabilities: []datasource.Capability{
+			datasource.CapabilitySchemaInspection,
+			datasource.CapabilityHistogram,
+			datasource.CapabilityFieldValues,
+			datasource.CapabilitySourceInspection,
+			datasource.CapabilityLiveTail,
+			datasource.CapabilityAISQLGeneration,
+		},
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogsQL},
+		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
+		AlertEditorModes:      []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative},
 	}
 }
 

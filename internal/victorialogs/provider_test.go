@@ -862,7 +862,8 @@ func TestProviderSourceMetadata(t *testing.T) {
 	t.Parallel()
 
 	service := datasource.NewService(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
-	service.Register(newTestProvider(nil))
+	provider := newTestProvider(nil)
+	service.Register(provider)
 	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs}
 	if err := service.ApplySourceMetadata(source); err != nil {
 		t.Fatal(err)
@@ -875,6 +876,7 @@ func TestProviderSourceMetadata(t *testing.T) {
 		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
 		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
 		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "live_tail", "ai_sql_generation"}},
+		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

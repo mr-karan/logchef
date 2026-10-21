@@ -25,15 +25,13 @@ type fakeProvider struct {
 
 func (f *fakeProvider) Type() models.SourceType { return models.SourceTypeClickHouse }
 
-func (f *fakeProvider) Capabilities() []datasource.Capability { return nil }
-
-func (f *fakeProvider) SupportedQueryLanguages() []models.QueryLanguage { return f.queryLanguages }
-
-func (f *fakeProvider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return f.savedQueryModes
+func (f *fakeProvider) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		QueryLanguages:        f.queryLanguages,
+		SavedQueryEditorModes: f.savedQueryModes,
+		AlertEditorModes:      f.alertModes,
+	}
 }
-
-func (f *fakeProvider) SupportedAlertEditorModes() []models.AlertEditorMode { return f.alertModes }
 
 func (f *fakeProvider) PrepareSource(context.Context, *models.CreateSourceRequest) (*models.Source, error) {
 	return nil, nil

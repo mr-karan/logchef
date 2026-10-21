@@ -145,7 +145,8 @@ func TestCompileLogchefQLWithoutColumnsDoesNotMutateSource(t *testing.T) {
 func TestClickHouseProviderSourceMetadata(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	service := NewService(nil, log)
-	service.Register(NewClickHouseProvider(nil, log))
+	provider := NewClickHouseProvider(nil, log)
+	service.Register(provider)
 	source := &models.Source{SourceType: models.SourceTypeClickHouse}
 	if err := service.ApplySourceMetadata(source); err != nil {
 		t.Fatal(err)
@@ -158,6 +159,7 @@ func TestClickHouseProviderSourceMetadata(t *testing.T) {
 		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
 		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
 		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "ai_sql_generation", "log_context", "exports", "live_tail"}},
+		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

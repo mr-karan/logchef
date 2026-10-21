@@ -47,15 +47,13 @@ type fakeClickHouseCompiler struct {
 	timeRangeErr error
 }
 
-func (f *fakeClickHouseCompiler) Type() models.SourceType               { return models.SourceTypeClickHouse }
-func (f *fakeClickHouseCompiler) Capabilities() []datasource.Capability { return nil }
-func (f *fakeClickHouseCompiler) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL}
+func (f *fakeClickHouseCompiler) Type() models.SourceType { return models.SourceTypeClickHouse }
+func (f *fakeClickHouseCompiler) Describe() datasource.Descriptor {
+	return datasource.Descriptor{
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},
+		LogchefQLNeedsColumns: true,
+	}
 }
-func (f *fakeClickHouseCompiler) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return nil
-}
-func (f *fakeClickHouseCompiler) SupportedAlertEditorModes() []models.AlertEditorMode { return nil }
 func (f *fakeClickHouseCompiler) CheckSourceConnectionStatus(ctx context.Context, source *models.Source) bool {
 	return true
 }
