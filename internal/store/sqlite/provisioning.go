@@ -131,12 +131,16 @@ func (db *DB) SetUserManaged(ctx context.Context, id models.UserID, managed bool
 	return nil
 }
 
-// ListUsersForProvisioning loads the users referenced by provisioning.
-func (db *DB) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
-	if len(emails) == 0 {
+// LockProvisioningUsers loads users protected by the SQLite write transaction.
+func (db *DB) LockProvisioningUsers(ctx context.Context, emails, teamNames []string, prune bool) ([]*models.User, error) {
+	if len(emails) == 0 && !prune {
 		return nil, nil
 	}
-	rows, err := db.readQueries.ListUsersForProvisioning(ctx, emails)
+	rows, err := db.readQueries.LockProvisioningUsers(ctx, sqlc.LockProvisioningUsersParams{
+		Emails:    emails,
+		TeamNames: teamNames,
+		Prune:     boolToInt(prune),
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error loading provisioning users: %w", err)
 	}

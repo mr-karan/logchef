@@ -53,11 +53,11 @@ func (s *lookupFailure) GetTeamByName(ctx context.Context, name string) (*models
 	return s.StoreOps.GetTeamByName(ctx, name)
 }
 
-func (s *lookupFailure) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
+func (s *lookupFailure) LockProvisioningUsers(ctx context.Context, emails, teamNames []string, prune bool) ([]*models.User, error) {
 	if s.target == "user" {
 		ctx = canceledLookupContext(ctx)
 	}
-	return s.StoreOps.ListUsersForProvisioning(ctx, emails)
+	return s.StoreOps.LockProvisioningUsers(ctx, emails, teamNames, prune)
 }
 
 func (s *lookupFailure) CreateSource(ctx context.Context, src *models.Source) error {
@@ -200,14 +200,15 @@ func TestReconcileValidationDoesNotHoldWriteConnection(t *testing.T) {
 	}
 }
 
-func TestValidateConfigNormalizedMemberEmails(t *testing.T) {
+func TestReconcileRejectsNormalizedMemberEmails(t *testing.T) {
 	for _, emails := range [][]string{{"A@example.com", " a@example.com "}, {"   "}} {
 		t.Run(fmt.Sprint(emails), func(t *testing.T) {
 			cfg := &config.ProvisioningConfig{ManageTeams: true, Teams: []config.ProvisionTeam{{Name: "team"}}}
 			for _, email := range emails {
 				cfg.Teams[0].Members = append(cfg.Teams[0].Members, config.ProvisionMember{Email: email})
 			}
-			err := ValidateConfig(cfg)
+			db := newReconcileTestDB(t)
+			err := Reconcile(context.Background(), cfg, db, nil, quietLogger(), nil)
 			if err == nil || (!strings.Contains(err.Error(), "duplicate email") && !strings.Contains(err.Error(), "email is required")) {
 				t.Fatalf("validation = %v", err)
 			}

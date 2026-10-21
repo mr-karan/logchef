@@ -112,12 +112,16 @@ func (s *Store) SetUserManaged(ctx context.Context, id models.UserID, managed bo
 	return nil
 }
 
-// ListUsersForProvisioning locks referenced users in ID order to prevent deletion deadlocks.
-func (s *Store) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
-	if len(emails) == 0 {
+// LockProvisioningUsers locks users in ID order to prevent deletion deadlocks.
+func (s *Store) LockProvisioningUsers(ctx context.Context, emails, teamNames []string, prune bool) ([]*models.User, error) {
+	if len(emails) == 0 && !prune {
 		return nil, nil
 	}
-	rows, err := s.q.ListUsersForProvisioning(ctx, emails)
+	rows, err := s.q.LockProvisioningUsers(ctx, sqlc.LockProvisioningUsersParams{
+		Emails:    emails,
+		TeamNames: teamNames,
+		Prune:     prune,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error loading provisioning users: %w", err)
 	}

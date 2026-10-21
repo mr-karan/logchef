@@ -26,12 +26,10 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 		return nil
 	}
 
-	// Validate config
+	ResolveConfig(cfg)
 	if err := ValidateConfig(cfg); err != nil {
 		return err
 	}
-
-	ResolveConfig(cfg)
 
 	// Build admin email set for role precedence
 	adminSet := make(map[string]bool)
@@ -49,6 +47,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	// All mutations run in a single transaction. On dry_run we return errDryRun
 	// to roll the whole thing back without surfacing an error.
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		// Lock users first so deletion cannot hold memberships needed by this transaction.
 		usersByEmail, err := loadProvisioningUsers(ctx, tx, cfg)
 		if err != nil {
 			return err

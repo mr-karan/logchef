@@ -264,8 +264,8 @@ type Querier interface {
 	ListUserTeams(ctx context.Context, userID int64) ([]Team, error)
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
-	// Provisioning Queries
-	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
+	// The write transaction already prevents concurrent user deletion.
+	LockProvisioningUsers(ctx context.Context, arg LockProvisioningUsersParams) ([]User, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error

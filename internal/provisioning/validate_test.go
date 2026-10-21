@@ -496,3 +496,19 @@ schema_lookback_seconds = %d
 		}
 	}
 }
+
+func TestValidateConfig_DuplicateTeamSources(t *testing.T) {
+	for _, manageSources := range []bool{false, true} {
+		t.Run(fmt.Sprintf("manage_sources=%t", manageSources), func(t *testing.T) {
+			cfg := &config.ProvisioningConfig{
+				ManageTeams:   true,
+				ManageSources: manageSources,
+				Sources:       []config.ProvisionSource{{Name: "logs", Connection: map[string]any{"host": "localhost:9000", "database": "default", "table_name": "logs"}}},
+				Teams:         []config.ProvisionTeam{{Name: "team", Sources: []string{"logs", "logs"}}},
+			}
+			if err := ValidateConfig(cfg); err == nil || !strings.Contains(err.Error(), "duplicate source") {
+				t.Fatalf("expected duplicate source validation error, got %v", err)
+			}
+		})
+	}
+}

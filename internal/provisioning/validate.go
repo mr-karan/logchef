@@ -16,7 +16,7 @@ import (
 // ClickHouse SQL, so validate them here too (defense-in-depth, matching the API).
 var sqlIdentifierRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// ValidateConfig checks the provisioning config for internal consistency.
+// ValidateConfig checks resolved provisioning config for internal consistency.
 func ValidateConfig(cfg *config.ProvisioningConfig) error {
 	var errs []string
 
@@ -192,12 +192,14 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 		}
 		seen[team.Name] = true
 
-		// Validate source references
-		if cfg.ManageSources {
-			for _, srcName := range team.Sources {
-				if !sourceNames[srcName] {
-					errs = append(errs, fmt.Sprintf("%s: references unknown source %q", prefix, srcName))
-				}
+		sourceSeen := make(map[string]bool)
+		for _, srcName := range team.Sources {
+			if sourceSeen[srcName] {
+				errs = append(errs, fmt.Sprintf("%s: duplicate source %q", prefix, srcName))
+			}
+			sourceSeen[srcName] = true
+			if cfg.ManageSources && !sourceNames[srcName] {
+				errs = append(errs, fmt.Sprintf("%s: references unknown source %q", prefix, srcName))
 			}
 		}
 
@@ -206,7 +208,7 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 		for j, member := range team.Members {
 			memberPrefix := fmt.Sprintf("%s.members[%d]", prefix, j)
 
-			email := strings.ToLower(strings.TrimSpace(member.Email))
+			email := member.Email
 			if email == "" {
 				errs = append(errs, fmt.Sprintf("%s: email is required", memberPrefix))
 				continue

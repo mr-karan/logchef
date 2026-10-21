@@ -223,8 +223,8 @@ type ProvisioningStore interface {
 
 	ListManagedSources(ctx context.Context) ([]*models.Source, error)
 	ListManagedTeams(ctx context.Context) ([]*models.Team, error)
-	// ListUsersForProvisioning locks referenced users in ID order before membership changes.
-	ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error)
+	// LockProvisioningUsers locks configured and prune-affected users in ID order.
+	LockProvisioningUsers(ctx context.Context, emails, teamNames []string, prune bool) ([]*models.User, error)
 	// GetSourceByNameForProvisioning looks a source up by name (managed or not),
 	// returning models.ErrNotFound when absent.
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error)
