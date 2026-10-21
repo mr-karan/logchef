@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { runWithConcurrency } from "@/utils/promisePool";
+import { describe, it, expect, vi } from "vitest";
+import { createConcurrencyLimiter, runWithConcurrency } from "@/utils/promisePool";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -51,11 +51,8 @@ describe("runWithConcurrency", () => {
     // Only the first two start under a cap of 2.
     expect(started).toEqual([0, 1]);
 
-    // Freeing one slot should admit the next queued task.
     gates[0].resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(started).toContain(2);
+    await vi.waitFor(() => expect(started).toContain(2));
 
     gates[1].resolve();
     gates[2].resolve();
@@ -75,5 +72,15 @@ describe("runWithConcurrency", () => {
       },
     ];
     await expect(runWithConcurrency(tasks, 2)).rejects.toThrow("boom");
+  });
+});
+
+describe("createConcurrencyLimiter", () => {
+  it("releases a slot after a rejected task", async () => {
+    const run = createConcurrencyLimiter(1);
+    const first = run(async () => { throw new Error("failed request"); });
+    const second = run(async () => "next result");
+    await expect(first).rejects.toThrow("failed request");
+    await expect(second).resolves.toBe("next result");
   });
 });

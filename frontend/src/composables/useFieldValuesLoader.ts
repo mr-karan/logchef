@@ -2,6 +2,7 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import { sourcesApi, type FieldValuesResult } from '@/api/sources'
 import type { TemplateVariable } from '@/api/logchefql'
 import { useFieldValuesStore } from '@/stores/exploreFieldValues'
+import { createConcurrencyLimiter } from '@/utils/promisePool'
 import type { QueryLanguage } from '@/lib/queryMetadata'
 import {
   isPriorityField,
@@ -36,58 +37,11 @@ export interface LoaderOptions {
   limit?: number
 }
 
-/**
- * Concurrency queue to limit parallel requests
- * Prevents overwhelming the active datasource backend with too many simultaneous queries
- */
-class ConcurrencyQueue {
-  private running = 0
-  private queue: Array<() => void> = []
-
-  constructor(private maxConcurrent: number = 4) {}
-
-  async add<T>(task: () => Promise<T>): Promise<T> {
-    // Wait for a slot if at capacity
-    if (this.running >= this.maxConcurrent) {
-      await new Promise<void>(resolve => {
-        this.queue.push(resolve)
-      })
-    }
-
-    this.running++
-    try {
-      return await task()
-    } finally {
-      this.running--
-      // Release next queued task
-      const next = this.queue.shift()
-      if (next) next()
-    }
-  }
-
-  clear() {
-    this.queue = []
-  }
-}
-
-/**
- * Composable for progressive per-field value loading
- *
- * Features:
- * - Parallel requests with concurrency limit (max 4)
- * - Per-field AbortController for cancellation
- * - Hybrid loading: auto-load cheap scalar fields, click-to-load for potentially expensive ones
- * - Progressive updates as each field loads
- */
 export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<LoaderOptions>) {
-  // Per-field loading states
   const fieldStates = ref<Map<string, FieldLoadingState>>(new Map())
 
-  // Per-field abort controllers
-  const abortControllers = ref<Map<string, AbortController>>(new Map())
-
-  // Concurrency queue (max 4 parallel requests)
-  const concurrencyQueue = new ConcurrencyQueue(4)
+  const abortControllers = new Map<string, AbortController>()
+  const runFieldLoad = createConcurrencyLimiter(4)
 
   /**
    * Get the current state for a field
@@ -96,101 +50,54 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
     return fieldStates.value.get(fieldName) || { status: 'idle' }
   }
 
-  /**
-   * Update state for a field and trigger reactivity
-   */
   const setFieldState = (fieldName: string, state: FieldLoadingState) => {
     fieldStates.value.set(fieldName, state)
-    // Trigger Vue reactivity by creating new Map reference
-    fieldStates.value = new Map(fieldStates.value)
   }
 
-  /**
-   * Load values for a single field
-   */
   const loadField = async (fieldName: string, fieldType: string): Promise<void> => {
     const opts = options.value
+    const { teamId, sourceId } = opts
     const timeRange = opts.getTimeRange()
+    if (!timeRange || !teamId || !sourceId) return
 
-    if (!timeRange || !opts.teamId || !opts.sourceId) {
-      return
-    }
-
-    // Cancel any existing request for this field
-    const existingController = abortControllers.value.get(fieldName)
-    if (existingController) {
-      existingController.abort()
-    }
-
-    // Create new AbortController for this field
+    abortControllers.get(fieldName)?.abort()
     const controller = new AbortController()
-    abortControllers.value.set(fieldName, controller)
+    abortControllers.set(fieldName, controller)
 
-    // Snapshot query before async work to avoid TOCTOU race
     const filterQuery = opts.getFilterQuery()
     const filterQueryLanguage = opts.getFilterQueryLanguage()
     const filterVariables = opts.getFilterVariables()
-
-    // Set loading state immediately
     setFieldState(fieldName, { status: 'loading' })
 
-    // Queue the request with concurrency control
     try {
-      await concurrencyQueue.add(async () => {
-        // Check if aborted before making request
+      await runFieldLoad(async () => {
         if (controller.signal.aborted) return
-
         try {
           const response = await sourcesApi.getFieldValues(
-            opts.teamId!,
-            opts.sourceId!,
-            fieldName,
-            fieldType,
-            timeRange.startTime,
-            timeRange.endTime,
-            opts.timezone,
-            opts.limit || 10,
-            filterQueryLanguage,
-            filterQuery,
-            filterVariables,
-            controller.signal
+            teamId, sourceId, fieldName, fieldType,
+            timeRange.startTime, timeRange.endTime,
+            opts.timezone, opts.limit || 10,
+            filterQueryLanguage, filterQuery, filterVariables,
+            controller.signal,
           )
+          if (controller.signal.aborted || !response.data) return
 
-          // Only update if not aborted
-          if (!controller.signal.aborted && response.data) {
-            setFieldState(fieldName, {
-              status: 'loaded',
-              values: response.data
-            })
-
-            // Populate the shared store for editor autocomplete
-            try {
-              const store = useFieldValuesStore()
-              store.populateFromFetch(
-                opts.teamId!, opts.sourceId!, fieldName,
-                timeRange.startTime, timeRange.endTime,
-                filterQuery || '',
-                response.data,
-              )
-            } catch {
-              // Store not available yet, ignore
-            }
+          setFieldState(fieldName, { status: 'loaded', values: response.data })
+          useFieldValuesStore().populateFromFetch(
+            teamId, sourceId, fieldName,
+            timeRange.startTime, timeRange.endTime,
+            filterQuery, response.data,
+          )
+        } catch {
+          if (!controller.signal.aborted) {
+            setFieldState(fieldName, { status: 'error', error: 'Failed to load' })
           }
-        } catch (error: any) {
-          // Ignore abort errors silently
-          if (error.name === 'AbortError' || error.name === 'CanceledError') {
-            return
-          }
-
-          // Set error state
-          setFieldState(fieldName, {
-            status: 'error',
-            error: 'Failed to load'
-          })
         }
       })
-    } catch {
-      // Queue was cleared, ignore
+    } finally {
+      if (abortControllers.get(fieldName) === controller) {
+        abortControllers.delete(fieldName)
+      }
     }
   }
 
@@ -200,33 +107,29 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
    * list without refetching. Call clearCache() first to start over.
    */
   const loadPriorityFields = (fields: FieldInfo[]) => {
-    const newStates = new Map(fieldStates.value)
     const priorityFields: FieldInfo[] = []
     for (const field of fields) {
-      if (newStates.has(field.name)) continue
+      if (fieldStates.value.has(field.name)) continue
       if (isPriorityField(field.type)) {
-        newStates.set(field.name, { status: 'idle' })
+        fieldStates.value.set(field.name, { status: 'idle' })
         priorityFields.push(field)
       } else if (isClickToLoadField(field.type)) {
-        newStates.set(field.name, { status: 'click-to-load' })
+        fieldStates.value.set(field.name, { status: 'click-to-load' })
       }
     }
-    fieldStates.value = newStates
 
-    priorityFields.forEach(field => {
-      loadField(field.name, field.type)
-    })
+    return Promise.all(priorityFields.map(field => loadField(field.name, field.type)))
   }
 
   /**
    * Cancel all in-flight requests
    */
   const cancelAll = () => {
-    concurrencyQueue.clear()
-    abortControllers.value.forEach(controller => {
+    abortControllers.forEach((controller, fieldName) => {
       controller.abort()
+      setFieldState(fieldName, { status: 'idle' })
     })
-    abortControllers.value.clear()
+    abortControllers.clear()
   }
 
   /**
@@ -234,7 +137,7 @@ export function useFieldValuesLoader(options: ComputedRef<LoaderOptions> | Ref<L
    */
   const clearCache = () => {
     cancelAll()
-    fieldStates.value = new Map()
+    fieldStates.value.clear()
   }
 
   /**
