@@ -573,14 +573,10 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, d
   }
 }
 
+// Like the picker, a new window runs through the store's auto-run watcher.
 const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
   try {
-    if (handleHistogramTimeRangeZoom(range)) {
-      const zoomKey = `zoom-${Date.now()}`;
-      setTimeout(() => {
-        handleQueryExecution(zoomKey);
-      }, 50);
-    }
+    handleHistogramTimeRangeZoom(range);
   } catch (e) {
     console.error("Error handling histogram time range:", e);
     toast({
