@@ -17,8 +17,8 @@ func (db *DB) CreateSession(ctx context.Context, session *models.Session) error 
 	params := sqlc.CreateSessionParams{
 		ID:        string(session.ID),
 		UserID:    int64(session.UserID),
-		ExpiresAt: session.ExpiresAt.UTC(),
-		CreatedAt: time.Now().UTC(),
+		ExpiresAt: session.ExpiresAt,
+		CreatedAt: time.Now(),
 	}
 
 	err := db.writeQueries.CreateSession(ctx, params)
@@ -90,7 +90,7 @@ func (db *DB) CountUserSessions(ctx context.Context, userID models.UserID) (int,
 	// Count sessions where the expiration time is in the future.
 	count, err := db.readQueries.CountUserSessions(ctx, sqlc.CountUserSessionsParams{
 		UserID:    int64(userID),
-		ExpiresAt: time.Now().UTC(),
+		ExpiresAt: time.Now(),
 	})
 	if err != nil {
 		db.log.Error("failed to count user sessions in db",
@@ -107,7 +107,7 @@ func (db *DB) CountUserSessions(ctx context.Context, userID models.UserID) (int,
 // given time. Used by the periodic session sweeper.
 func (db *DB) DeleteExpiredSessions(ctx context.Context, before time.Time) error {
 
-	if err := db.writeQueries.DeleteExpiredSessions(ctx, before.UTC()); err != nil {
+	if err := db.writeQueries.DeleteExpiredSessions(ctx, before); err != nil {
 		db.log.Error("failed to delete expired sessions from db", "error", err)
 		return fmt.Errorf("error deleting expired sessions: %w", err)
 	}

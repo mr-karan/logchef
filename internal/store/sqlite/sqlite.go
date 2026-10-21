@@ -174,10 +174,12 @@ var connectionPragmas = []string{
 // buildDSN returns a modernc.org/sqlite DSN that applies connectionPragmas on
 // every connection open, plus any extra raw query params (e.g. _txlock=immediate).
 func buildDSN(path string, extra ...string) string {
-	params := make([]string, 0, len(connectionPragmas)+len(extra))
+	params := make([]string, 0, len(connectionPragmas)+len(extra)+1)
 	for _, p := range connectionPragmas {
 		params = append(params, "_pragma="+url.QueryEscape(p))
 	}
+	// Text timestamps compare lexicographically, so all connections must use UTC.
+	params = append(params, "_timezone=UTC")
 	params = append(params, extra...)
 	return "file:" + path + "?" + strings.Join(params, "&")
 }

@@ -19,9 +19,9 @@ func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error 
 		Status:      string(job.Status),
 		Format:      job.Format,
 		RequestJson: string(job.RequestPayload),
-		ExpiresAt:   job.ExpiresAt.UTC(),
-		CreatedAt:   job.CreatedAt.UTC(),
-		UpdatedAt:   job.UpdatedAt.UTC(),
+		ExpiresAt:   job.ExpiresAt,
+		CreatedAt:   job.CreatedAt,
+		UpdatedAt:   job.UpdatedAt,
 	})
 	if err != nil {
 		db.log.Error("failed to create export job", "error", err, "job_id", job.ID, "source_id", job.SourceID)
@@ -45,7 +45,7 @@ func (db *DB) GetExportJob(ctx context.Context, id string) (*models.ExportJob, e
 func (db *DB) UpdateExportJobRunning(ctx context.Context, id string, updatedAt time.Time) error {
 	_, err := db.writeQueries.UpdateExportJobRunning(ctx, sqlc.UpdateExportJobRunningParams{
 		Status:    string(models.ExportJobStatusRunning),
-		UpdatedAt: updatedAt.UTC(),
+		UpdatedAt: updatedAt,
 		ID:        id,
 	})
 	if err != nil {
@@ -65,8 +65,8 @@ func (db *DB) CompleteExportJob(ctx context.Context, id, fileName, filePath stri
 		FilePath:     nullString(filePath),
 		RowsExported: int64(rowsExported),
 		BytesWritten: bytesWritten,
-		CompletedAt:  sql.NullTime{Time: completedAt.UTC(), Valid: true},
-		UpdatedAt:    completedAt.UTC(),
+		CompletedAt:  sql.NullTime{Time: completedAt, Valid: true},
+		UpdatedAt:    completedAt,
 		ID:           id,
 	})
 	if err != nil {
@@ -83,7 +83,7 @@ func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, update
 	_, err := db.writeQueries.FailExportJob(ctx, sqlc.FailExportJobParams{
 		Status:       string(models.ExportJobStatusFailed),
 		ErrorMessage: nullString(errorMessage),
-		UpdatedAt:    updatedAt.UTC(),
+		UpdatedAt:    updatedAt,
 		ID:           id,
 	})
 	if err != nil {
@@ -100,7 +100,7 @@ func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, update
 // expires_at is before the given time, without deleting anything.
 // Callers should unlink the files first, then call DeleteExpiredExportJobs.
 func (db *DB) ListExpiredExportJobPaths(ctx context.Context, before time.Time) ([]string, error) {
-	rows, err := db.readQueries.ListExpiredExportJobPaths(ctx, before.UTC())
+	rows, err := db.readQueries.ListExpiredExportJobPaths(ctx, before)
 	if err != nil {
 		db.log.Error("failed to list expired export job paths", "error", err)
 		return nil, fmt.Errorf("error listing expired export job paths: %w", err)
@@ -117,7 +117,7 @@ func (db *DB) ListExpiredExportJobPaths(ctx context.Context, before time.Time) (
 
 // DeleteExpiredExportJobs removes rows whose expires_at is before the given time.
 func (db *DB) DeleteExpiredExportJobs(ctx context.Context, before time.Time) error {
-	if err := db.writeQueries.DeleteExpiredExportJobs(ctx, before.UTC()); err != nil {
+	if err := db.writeQueries.DeleteExpiredExportJobs(ctx, before); err != nil {
 		db.log.Error("failed to prune expired export jobs", "error", err)
 		return fmt.Errorf("error pruning expired export jobs: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -16,8 +17,7 @@ func TestPruneExpiredQuerySharesTimeZones(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceID := createTestSource(t, ctx, db)
-	cases := expiryTimeZoneCases()
-	now := cases[0].before
+	now, cases := expiryTimeZoneCases()
 	cases = append(cases, expiryTimeZoneCase{"exact expiry", now, now, true})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -51,8 +51,7 @@ func TestExpiredExportJobsTimeZones(t *testing.T) {
 		t.Fatal(err)
 	}
 	sourceID := createTestSource(t, ctx, db)
-	cases := expiryTimeZoneCases()
-	now := cases[0].before
+	now, cases := expiryTimeZoneCases()
 	cases = append(cases, expiryTimeZoneCase{"exact expiry", now, now, true})
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,6 +87,48 @@ func TestExpiredExportJobsTimeZones(t *testing.T) {
 				}
 			} else if !errors.Is(err, models.ErrNotFound) {
 				t.Fatalf("expired export survived: got %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestLegacyArtifactExpiryReads(t *testing.T) {
+	db := newTxTestDB(t)
+	ctx := context.Background()
+	user := makeUser("legacy-artifacts@example.com")
+	if err := db.CreateUser(ctx, user); err != nil {
+		t.Fatal(err)
+	}
+	sourceID := createTestSource(t, ctx, db)
+	now, cases := expiryTimeZoneCases()
+	for _, tc := range cases[:2] {
+		t.Run(tc.name, func(t *testing.T) {
+			legacy := tc.expiresAt.String() + " m=+7200.000000001"
+			if _, err := db.writeDB.ExecContext(ctx, `INSERT INTO query_shares
+				(token, source_id, created_by, payload_json, expires_at)
+				VALUES (?, ?, ?, '{}', ?)`, tc.name, sourceID, user.ID, legacy); err != nil {
+				t.Fatal(err)
+			}
+			share, err := db.GetQueryShare(ctx, tc.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.writeDB.ExecContext(ctx, `INSERT INTO export_jobs
+				(id, source_id, created_by, status, format, request_json, expires_at)
+				VALUES (?, ?, ?, 'complete', 'csv', '{}', ?)`, tc.name, sourceID, user.ID, legacy); err != nil {
+				t.Fatal(err)
+			}
+			job, err := db.GetExportJob(ctx, tc.name)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, expiry := range []time.Time{share.ExpiresAt, job.ExpiresAt} {
+				if !expiry.Equal(tc.expiresAt) || expiry.Location() != time.UTC {
+					t.Errorf("legacy expiry = %v, want %v in UTC", expiry, tc.expiresAt)
+				}
+				if expired := now.After(expiry); expired == tc.wantAlive {
+					t.Errorf("Go expiry check = %v, want alive = %v", expired, tc.wantAlive)
+				}
 			}
 		})
 	}
