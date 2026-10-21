@@ -27,6 +27,8 @@ import {
   type TimeWindow,
 } from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
+import { unwrap } from "@/api/types";
+import { stableStringify } from "@/utils/stableStringify";
 import { isAbortError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
 import {
@@ -35,8 +37,6 @@ import {
   execSignature,
   resolveAppliedRange,
   resolveEffectiveCacheTtl,
-  stableStringify,
-  unwrap,
 } from "@/utils/dashboardRuntime";
 
 // Number of panel fetches allowed in flight at once. A 24-panel dashboard would

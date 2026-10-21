@@ -1,28 +1,11 @@
 import type { DashboardCachePolicy } from "@/api/meta";
 import type { DashboardPanel } from "@/api/dashboards";
-import { isSuccessResponse, type APIResponse } from "@/api/types";
 
 // Table panel row cap. The builder's limit option maxes at 1000; a hand-edited
 // or legacy blob could carry anything (a saved limit:100000 would try to render
 // 100k rows), so the runtime clamps into [1, TABLE_LIMIT_MAX] regardless.
 const DEFAULT_TABLE_LIMIT = 100;
 const TABLE_LIMIT_MAX = 1000;
-
-// Stable, key-order-independent serialization used for the dirty comparison. The
-// reflow step re-emits object keys in a different order than the loaded blob, so
-// a plain JSON.stringify would report a semantically-identical draft as dirty.
-export function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    return `{${keys
-      .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
 
 // Resolve a dashboard's EFFECTIVE result-cache TTL (seconds), combining the blob
 // value with the server's advertised policy. Client and server apply the SAME
@@ -113,12 +96,4 @@ export function execSignature(p: DashboardPanel): string {
     p.options?.limit ?? null,
     p.options?.group_by ?? null,
   ]);
-}
-
-export function unwrap<T>(resp: APIResponse<T>): T {
-  if (isSuccessResponse(resp)) {
-    return resp.data as T;
-  }
-  // Non-2xx responses reject before this; a 200 with status:"error" lands here.
-  throw resp;
 }

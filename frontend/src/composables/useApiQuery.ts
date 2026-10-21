@@ -1,6 +1,6 @@
 import { ref } from "vue";
 import type { APIResponse, APIErrorResponse } from "@/api/types";
-import { showErrorToast, isCanceledError, hasShownErrorToast } from "@/api/error-handler";
+import { showErrorToast, isAbortError, hasShownErrorToast } from "@/api/error-handler";
 
 export function useApiQuery<T>() {
   const isLoading = ref(false);
@@ -44,10 +44,7 @@ export function useApiQuery<T>() {
     } catch (err) {
       // Handle canceled requests (AbortError, CanceledError) gracefully
       // This happens on page navigation, reload, or manual query cancellation
-      if (
-        (err instanceof Error && err.name === 'AbortError') ||
-        isCanceledError(err)
-      ) {
+      if (isAbortError(err)) {
         // Don't treat user-initiated aborts as operational errors
         // Don't show error toast or call onError handler for cancellations
         return { success: false, error: null, aborted: true };

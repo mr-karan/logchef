@@ -5,8 +5,6 @@ import {
   execSignature,
   resolveAppliedRange,
   resolveEffectiveCacheTtl,
-  stableStringify,
-  unwrap,
 } from "../dashboardRuntime";
 import type { DashboardCachePolicy } from "@/api/meta";
 import type { DashboardPanel } from "@/api/dashboards";
@@ -192,26 +190,6 @@ describe("resolveAppliedRange", () => {
   });
 });
 
-describe("stableStringify", () => {
-  it("ignores object key order", () => {
-    expect(stableStringify({ a: 1, b: { c: 2, d: 3 } })).toBe(stableStringify({ b: { d: 3, c: 2 }, a: 1 }));
-  });
-
-  it("keeps array order significant", () => {
-    expect(stableStringify([1, 2])).not.toBe(stableStringify([2, 1]));
-  });
-
-  it("distinguishes different values", () => {
-    expect(stableStringify({ a: 1 })).not.toBe(stableStringify({ a: 2 }));
-  });
-
-  it("handles primitives and null", () => {
-    expect(stableStringify(null)).toBe("null");
-    expect(stableStringify("x")).toBe('"x"');
-    expect(stableStringify([{ b: 1, a: null }])).toBe('[{"a":null,"b":1}]');
-  });
-});
-
 describe("classifyPanelError", () => {
   it("marks an AuthorizationError as locked", () => {
     expect(classifyPanelError({ error_type: "AuthorizationError", message: "no access" })).toEqual({
@@ -224,9 +202,11 @@ describe("classifyPanelError", () => {
     expect(classifyPanelError(new Error("boom"))).toEqual({ locked: false, message: "boom" });
   });
 
-  it("prefers the API message over the Error message", () => {
-    const err = Object.assign(new Error("generic"), { message: "specific" });
-    expect(classifyPanelError(err).message).toBe("specific");
+  it("keeps an authorization error locked when its message is empty", () => {
+    expect(classifyPanelError({ error_type: "AuthorizationError", message: "" })).toEqual({
+      locked: true,
+      message: "Failed to load panel",
+    });
   });
 
   it.each([undefined, null, "str", 42, {}])("falls back for %j", (err) => {
@@ -277,21 +257,5 @@ describe("execSignature", () => {
     ["group by", { options: { limit: 50, group_by: "host" } }],
   ])("changes when %s changes", (_name, patch) => {
     expect(execSignature({ ...base, ...patch })).not.toBe(execSignature(base));
-  });
-});
-
-describe("unwrap", () => {
-  it("returns the data of a success response", () => {
-    expect(unwrap({ status: "success", data: { n: 1 } })).toEqual({ n: 1 });
-  });
-
-  it("throws an error response as-is", () => {
-    const resp = { status: "error" as const, message: "bad", error_type: "ValidationError" };
-    expect(() => unwrap(resp)).toThrow();
-    try {
-      unwrap(resp);
-    } catch (e) {
-      expect(e).toBe(resp);
-    }
   });
 });
