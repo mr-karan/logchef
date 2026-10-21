@@ -160,7 +160,7 @@ export function useUrlState(): UrlStateReturn {
   async function applyContextSelection(
     teamId: number,
     requestedSourceId: number | null,
-    options: { syncUrl?: boolean } = {}
+    options: { pushHistory?: boolean } = {}
   ): Promise<number | null> {
     syncPaused = true;
 
@@ -168,8 +168,8 @@ export function useUrlState(): UrlStateReturn {
       return await routeSync.applyContextSelection(teamId, requestedSourceId);
     } finally {
       syncPaused = false;
-      if (options.syncUrl) {
-        syncUrlFromStore();
+      if (options.pushHistory) {
+        await pushHistoryEntry();
       }
     }
   }
@@ -441,7 +441,7 @@ export function useUrlState(): UrlStateReturn {
       return;
     }
 
-    await applyContextSelection(teamId, null, { syncUrl: true });
+    await applyContextSelection(teamId, null, { pushHistory: true });
   }
 
   async function selectSource(sourceId: number): Promise<void> {
@@ -450,7 +450,7 @@ export function useUrlState(): UrlStateReturn {
       return;
     }
 
-    await applyContextSelection(currentTeamId, sourceId, { syncUrl: true });
+    await applyContextSelection(currentTeamId, sourceId, { pushHistory: true });
   }
 
   watch(

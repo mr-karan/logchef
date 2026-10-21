@@ -3,7 +3,15 @@ import { useAuthStore } from '@/stores/auth'
 import { useContextStore } from '@/stores/context'
 import { useTeamsStore } from '@/stores/teams'
 
-export async function contextRouterGuard(to: Pick<RouteLocationNormalized, 'params' | 'query'>) {
+const EXPLORE_PATH = '/logs/explore'
+
+type GuardLocation = Pick<RouteLocationNormalized, 'path' | 'params' | 'query'>
+
+export async function contextRouterGuard(to: GuardLocation, from?: GuardLocation) {
+  // Explorer applies its own team and source after it reads the rest of the
+  // link. Selecting them here first would let the old query overwrite it.
+  if (from?.path === EXPLORE_PATH && to.path === EXPLORE_PATH) return
+
   const authStore = useAuthStore()
   const contextStore = useContextStore()
   const teamsStore = useTeamsStore()
