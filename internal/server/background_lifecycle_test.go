@@ -52,8 +52,8 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 			var jobs []*models.ExportJob
 			var paths []string
 			for _, status := range []models.ExportJobStatus{models.ExportJobStatusPending, models.ExportJobStatusRunning, models.ExportJobStatusComplete} {
-				now := time.Now().UTC()
-				job := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: status, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+				now := time.Now().UTC().Add(-2 * time.Hour)
+				job := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusPending, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: time.Now().Add(time.Hour), CreatedAt: now, UpdatedAt: now}
 				if err := db.CreateExportJob(ctx, job); err != nil {
 					t.Fatal(err)
 				}
@@ -68,13 +68,64 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 						t.Fatal(err)
 					}
 				}
+				if status == models.ExportJobStatusRunning {
+					if err := db.UpdateExportJobRunning(ctx, job.ID, now); err != nil {
+						t.Fatal(err)
+					}
+				}
+				job.Status = status
 				jobs = append(jobs, job)
 				paths = append(paths, f.Name())
 			}
+			replicaDB := db
+			if backend == "postgres" {
+				var err error
+				replicaDB, err = postgres.New(ctx, postgres.Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), Config: config.PostgresConfig{DSN: os.Getenv("LOGCHEF_TEST_POSTGRES_DSN")}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { _ = replicaDB.Close() })
+			}
+			replicaB := New(ServerOptions{Config: testOAuthConfig(), SQLite: replicaDB, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+			t.Cleanup(func() { _ = replicaB.Shutdown(ctx) })
+			fresh := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: time.Now().Add(time.Hour), CreatedAt: time.Now(), UpdatedAt: time.Now()}
+			if err := replicaDB.CreateExportJob(ctx, fresh); err != nil {
+				t.Fatal(err)
+			}
+			partial, err := os.CreateTemp("", "logchef-export-"+fresh.ID+"-*.csv")
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = partial.Close()
+			t.Cleanup(func() { _ = os.Remove(partial.Name()) })
 			for range 2 {
 				srv := New(ServerOptions{Config: testOAuthConfig(), SQLite: db, Logger: slog.New(slog.NewTextHandler(io.Discard, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+				stale := *fresh
+				stale.ID = uuid.NewString()
+				stale.UpdatedAt = time.Now().UTC().Add(-2 * time.Hour)
+				if err := db.CreateExportJob(ctx, &stale); err != nil {
+					t.Fatal(err)
+				}
+				srv.cleanupExpiredBackgroundState()
+				reaped, err := db.GetExportJob(ctx, stale.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if reaped.Status != models.ExportJobStatusFailed {
+					t.Errorf("periodic cleanup left stale job %s", reaped.Status)
+				}
 				if err := srv.Shutdown(ctx); err != nil {
 					t.Fatal(err)
+				}
+				gotFresh, err := db.GetExportJob(ctx, fresh.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if gotFresh.Status != models.ExportJobStatusRunning {
+					t.Errorf("other replica's fresh job = %s, want running", gotFresh.Status)
+				}
+				if _, err := os.Stat(partial.Name()); err != nil {
+					t.Errorf("other replica's partial file removed: %v", err)
 				}
 				for i, job := range jobs {
 					got, err := db.GetExportJob(ctx, job.ID)
@@ -94,6 +145,12 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 						}
 						if _, err := os.Stat(paths[i]); !os.IsNotExist(err) {
 							t.Errorf("partial artifact still exists: %s (%v)", filepath.Base(paths[i]), err)
+						}
+						if err := db.CompleteExportJob(ctx, job.ID, "export.csv", paths[i], 1, 0, time.Now()); err == nil {
+							t.Error("reaped job can be completed")
+						}
+						if err := db.UpdateExportJobRunning(ctx, job.ID, time.Now()); err == nil {
+							t.Error("reaped job can be restarted")
 						}
 					}
 				}
@@ -257,5 +314,95 @@ func TestQueryHistoryBackpressure(t *testing.T) {
 	runtime.Gosched()
 	if got := runtime.NumGoroutine(); got > before+10 {
 		t.Errorf("history writers are unbounded: before=%d after=%d", before, got)
+	}
+}
+
+func TestHistoryDrainsOnShutdown(t *testing.T) {
+	db := newServerTestDB(t)
+	srv := newServerForTest(t, testOAuthConfig(), db, nil)
+	user := mkTestUser(t, db, "drain@example.com", models.UserRoleMember)
+	team, source := mkTestTeam(t, db, "drain", user)
+	ready, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- db.WithTx(context.Background(), func(store.StoreOps) error { close(ready); <-release; return nil })
+	}()
+	<-ready
+	for range 64 {
+		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+	}
+	go func() { <-srv.baseCtx.Done(); close(release) }()
+	if err := srv.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	entries, err := db.ListQueryHistory(context.Background(), user.ID, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 64 {
+		t.Errorf("persisted %d of 64 queued entries, dropped=%d", len(entries), srv.historyDropped.Load())
+	}
+}
+
+func TestExportDeadlineReason(t *testing.T) {
+	db := newServerTestDB(t)
+	srv := newServerForTest(t, testOAuthConfig(), db, nil)
+	user := mkTestUser(t, db, "deadline@example.com", models.UserRoleMember)
+	_, source := mkTestTeam(t, db, "deadline", user)
+	now := time.Now()
+	job := &models.ExportJob{ID: uuid.NewString(), SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+	if err := db.CreateExportJob(context.Background(), job); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), now.Add(-time.Second))
+	defer cancel()
+	srv.finishExportJob(ctx, job.ID, nil, "", false, nil)
+	got, err := db.GetExportJob(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ErrorMessage != "export timed out" {
+		t.Errorf("deadline reason = %q, want export timed out", got.ErrorMessage)
+	}
+}
+
+func TestHistoryShutdownCountsUndrainedEntries(t *testing.T) {
+	db := newServerTestDB(t)
+	srv := newServerForTest(t, testOAuthConfig(), db, nil)
+	user := mkTestUser(t, db, "drain-budget@example.com", models.UserRoleMember)
+	team, source := mkTestTeam(t, db, "drain-budget", user)
+	ready, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- db.WithTx(context.Background(), func(store.StoreOps) error { close(ready); <-release; return nil })
+	}()
+	<-ready
+	for range 64 {
+		srv.recordQueryHistory(user, team.ID, source.ID, "SELECT 1", models.QueryLanguageClickHouseSQL, 1, 1)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(srv.historyQueue) == 64 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	_ = srv.Shutdown(ctx)
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-srv.backgroundDone:
+	case <-time.After(time.Second):
+		t.Fatal("history worker did not stop")
+	}
+	entries, err := db.ListQueryHistory(context.Background(), user.ID, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dropped := srv.historyDropped.Load()
+	if dropped == 0 || uint64(len(entries))+dropped != 64 {
+		t.Errorf("persisted=%d dropped=%d, want all 64 accounted for with drops", len(entries), dropped)
 	}
 }

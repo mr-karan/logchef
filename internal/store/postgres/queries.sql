@@ -422,6 +422,7 @@ SET
     error_message = NULL,
     updated_at = $2
 WHERE id = $3
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: CompleteExportJob :one
@@ -437,6 +438,7 @@ SET
     completed_at = $6,
     updated_at = $7
 WHERE id = $8
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: FailExportJob :one
@@ -1306,8 +1308,14 @@ WHERE NOT EXISTS (
       AND live.expires_at > sqlc.arg(now)::timestamptz
 );
 
--- name: ListInterruptedExportJobs :many
-SELECT * FROM export_jobs
-WHERE status IN ('pending', 'running')
-ORDER BY id
-LIMIT 100;
+-- name: ReapInterruptedExportJobs :many
+UPDATE export_jobs
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = sqlc.arg(reaped_at)
+WHERE id IN (
+    SELECT id FROM export_jobs
+    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < sqlc.arg(before)
+    ORDER BY id
+    LIMIT 100
+)
+  AND status IN ('pending', 'running') AND export_jobs.updated_at < sqlc.arg(before)
+RETURNING *;

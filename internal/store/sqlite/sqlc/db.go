@@ -324,9 +324,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listExpiredExportJobPathsStmt, err = db.PrepareContext(ctx, listExpiredExportJobPaths); err != nil {
 		return nil, fmt.Errorf("error preparing query ListExpiredExportJobPaths: %w", err)
 	}
-	if q.listInterruptedExportJobsStmt, err = db.PrepareContext(ctx, listInterruptedExportJobs); err != nil {
-		return nil, fmt.Errorf("error preparing query ListInterruptedExportJobs: %w", err)
-	}
 	if q.listManagedSourcesStmt, err = db.PrepareContext(ctx, listManagedSources); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedSources: %w", err)
 	}
@@ -407,6 +404,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.queryVolumeByDayStmt, err = db.PrepareContext(ctx, queryVolumeByDay); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryVolumeByDay: %w", err)
+	}
+	if q.reapInterruptedExportJobsStmt, err = db.PrepareContext(ctx, reapInterruptedExportJobs); err != nil {
+		return nil, fmt.Errorf("error preparing query ReapInterruptedExportJobs: %w", err)
 	}
 	if q.recordOAuthDevicePollStmt, err = db.PrepareContext(ctx, recordOAuthDevicePoll); err != nil {
 		return nil, fmt.Errorf("error preparing query RecordOAuthDevicePoll: %w", err)
@@ -1021,11 +1021,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listExpiredExportJobPathsStmt: %w", cerr)
 		}
 	}
-	if q.listInterruptedExportJobsStmt != nil {
-		if cerr := q.listInterruptedExportJobsStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing listInterruptedExportJobsStmt: %w", cerr)
-		}
-	}
 	if q.listManagedSourcesStmt != nil {
 		if cerr := q.listManagedSourcesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedSourcesStmt: %w", cerr)
@@ -1159,6 +1154,11 @@ func (q *Queries) Close() error {
 	if q.queryVolumeByDayStmt != nil {
 		if cerr := q.queryVolumeByDayStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing queryVolumeByDayStmt: %w", cerr)
+		}
+	}
+	if q.reapInterruptedExportJobsStmt != nil {
+		if cerr := q.reapInterruptedExportJobsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing reapInterruptedExportJobsStmt: %w", cerr)
 		}
 	}
 	if q.recordOAuthDevicePollStmt != nil {
@@ -1480,7 +1480,6 @@ type Queries struct {
 	listCollectionsForUserStmt                 *sql.Stmt
 	listDashboardsStmt                         *sql.Stmt
 	listExpiredExportJobPathsStmt              *sql.Stmt
-	listInterruptedExportJobsStmt              *sql.Stmt
 	listManagedSourcesStmt                     *sql.Stmt
 	listManagedTeamsStmt                       *sql.Stmt
 	listManagedUsersStmt                       *sql.Stmt
@@ -1508,6 +1507,7 @@ type Queries struct {
 	pruneExpiredQuerySharesStmt                *sql.Stmt
 	pruneQueryHistoryForUserStmt               *sql.Stmt
 	queryVolumeByDayStmt                       *sql.Stmt
+	reapInterruptedExportJobsStmt              *sql.Stmt
 	recordOAuthDevicePollStmt                  *sql.Stmt
 	removeCollectionItemStmt                   *sql.Stmt
 	removeCollectionMemberStmt                 *sql.Stmt
@@ -1650,7 +1650,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listCollectionsForUserStmt:                 q.listCollectionsForUserStmt,
 		listDashboardsStmt:                         q.listDashboardsStmt,
 		listExpiredExportJobPathsStmt:              q.listExpiredExportJobPathsStmt,
-		listInterruptedExportJobsStmt:              q.listInterruptedExportJobsStmt,
 		listManagedSourcesStmt:                     q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                       q.listManagedTeamsStmt,
 		listManagedUsersStmt:                       q.listManagedUsersStmt,
@@ -1678,6 +1677,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneExpiredQuerySharesStmt:                q.pruneExpiredQuerySharesStmt,
 		pruneQueryHistoryForUserStmt:               q.pruneQueryHistoryForUserStmt,
 		queryVolumeByDayStmt:                       q.queryVolumeByDayStmt,
+		reapInterruptedExportJobsStmt:              q.reapInterruptedExportJobsStmt,
 		recordOAuthDevicePollStmt:                  q.recordOAuthDevicePollStmt,
 		removeCollectionItemStmt:                   q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:                 q.removeCollectionMemberStmt,

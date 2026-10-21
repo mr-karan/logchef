@@ -153,11 +153,11 @@ func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 	return job
 }
 
-// ListInterruptedExportJobs returns a bounded batch of unfinished exports.
-func (db *DB) ListInterruptedExportJobs(ctx context.Context) ([]*models.ExportJob, error) {
-	rows, err := db.readQueries.ListInterruptedExportJobs(ctx)
+// ReapInterruptedExportJobs fails and returns a bounded batch of stale exports.
+func (db *DB) ReapInterruptedExportJobs(ctx context.Context, before time.Time) ([]*models.ExportJob, error) {
+	rows, err := db.writeQueries.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{Before: before, ReapedAt: time.Now().UTC()})
 	if err != nil {
-		return nil, fmt.Errorf("error listing interrupted exports: %w", err)
+		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
 	}
 	jobs := make([]*models.ExportJob, 0, len(rows))
 	for i := range rows {

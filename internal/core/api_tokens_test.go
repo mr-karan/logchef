@@ -95,7 +95,7 @@ func TestAuthenticateAPITokenBoundsLastUsedWrite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+	if elapsed := time.Since(start); elapsed > 80*time.Millisecond {
 		t.Fatalf("authentication blocked for %s", elapsed)
 	}
 	// A completed authentication must not leave a writer waiting for the database.

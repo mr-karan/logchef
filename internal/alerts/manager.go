@@ -48,8 +48,11 @@ type Manager struct {
 	evalTimeout time.Duration
 	evalFn      func(context.Context, *models.Alert) error
 
-	stop chan struct{}
-	wg   sync.WaitGroup
+	stop     chan struct{}
+	stopped  chan struct{}
+	stopOnce sync.Once
+	cancel   context.CancelFunc
+	wg       sync.WaitGroup
 }
 
 // NewManager constructs a new alert manager instance.
@@ -66,6 +69,7 @@ func NewManager(opts Options) *Manager {
 		sender:      sender,
 		evalTimeout: alertEvaluationTimeout,
 		stop:        make(chan struct{}),
+		stopped:     make(chan struct{}),
 	}
 	m.evalFn = m.evaluateAlert
 	return m
@@ -77,6 +81,7 @@ func (m *Manager) Start(ctx context.Context) {
 		m.log.Debug("alerting disabled")
 		return
 	}
+	ctx, m.cancel = context.WithCancel(ctx)
 	interval := m.cfg.EvaluationInterval
 	if interval <= 0 {
 		interval = time.Minute
@@ -107,8 +112,24 @@ func (m *Manager) Start(ctx context.Context) {
 
 // Stop signals the manager to stop evaluating alerts.
 func (m *Manager) Stop() {
-	close(m.stop)
-	m.wg.Wait()
+	_ = m.StopWithContext(context.Background())
+}
+
+// StopWithContext cancels evaluation and waits within the shutdown budget.
+func (m *Manager) StopWithContext(ctx context.Context) error {
+	m.stopOnce.Do(func() {
+		if m.cancel != nil {
+			m.cancel()
+		}
+		close(m.stop)
+		go func() { m.wg.Wait(); close(m.stopped) }()
+	})
+	select {
+	case <-m.stopped:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (m *Manager) evaluateCycle(ctx context.Context) {
@@ -122,6 +143,9 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 
 	for _, alert := range alerts {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
 			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}

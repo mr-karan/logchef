@@ -247,19 +247,24 @@ func (a *App) Shutdown(ctx context.Context) error {
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
 
+	alertDone := make(chan error, 1)
 	if a.Alerts != nil {
-		a.Logger.Info("stopping alert manager")
-		a.Alerts.Stop()
+		go func() { alertDone <- a.Alerts.StopWithContext(serverCtx) }()
+	} else {
+		alertDone <- nil
 	}
 
-	// Shutdown server first to stop accepting new requests.
+	var shutdownErr error
 	if a.server != nil {
-		a.Logger.Info("shutting down HTTP server")
-
 		if err := a.server.Shutdown(serverCtx); err != nil {
-			return fmt.Errorf("error shutting down server: %w", err)
+			shutdownErr = fmt.Errorf("error shutting down server: %w", err)
 		}
-		a.Logger.Info("HTTP server shut down successfully")
+	}
+	if err := <-alertDone; err != nil {
+		shutdownErr = errors.Join(shutdownErr, fmt.Errorf("error stopping alerts: %w", err))
+	}
+	if shutdownErr != nil {
+		return shutdownErr
 	}
 
 	// Close ClickHouse manager (stops health checks and closes clients).

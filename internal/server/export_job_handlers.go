@@ -102,7 +102,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 
 	// Admit synchronously so a saturated cap returns 429 to the client
 	// instead of accepting the job and async-failing it.
-	queryCtx, cancel := context.WithTimeout(s.baseCtx, time.Duration(*req.QueryTimeout)*time.Second+5*time.Second)
+	queryCtx, cancel := context.WithTimeout(s.baseCtx, time.Duration(*req.QueryTimeout)*time.Second+exportQueryGrace)
 	if err := queryTracker.StartQueryWithID(
 		job.ID,
 		QueryClassExport,
@@ -435,6 +435,8 @@ func (s *Server) startBackgroundCleanup() {
 }
 
 func (s *Server) cleanupExpiredBackgroundState() {
+	s.reapInterruptedExportJobs()
+	s.logBackgroundDrops()
 	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
 
@@ -469,13 +471,23 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	}
 }
 
+const (
+	exportQueryGrace = 5 * time.Second
+	exportReapSlack  = 30 * time.Second
+)
+
 func (s *Server) reapInterruptedExportJobs() {
 	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
+	maxTimeout := models.MaxQueryTimeoutSeconds
+	if s.config.Export.MaxTimeoutSeconds > 0 && s.config.Export.MaxTimeoutSeconds < maxTimeout {
+		maxTimeout = s.config.Export.MaxTimeoutSeconds
+	}
+	cutoff := time.Now().UTC().Add(-time.Duration(maxTimeout)*time.Second - exportQueryGrace - exportReapSlack)
 	for ctx.Err() == nil {
-		jobs, err := s.sqlite.ListInterruptedExportJobs(ctx)
+		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, cutoff)
 		if err != nil {
-			s.log.Error("failed to list interrupted exports", "error", err)
+			s.log.Error("failed to reap interrupted exports", "error", err)
 			return
 		}
 		if len(jobs) == 0 {
@@ -499,10 +511,6 @@ func (s *Server) reapInterruptedExportJobs() {
 					}
 				}
 			}
-			if err := s.sqlite.FailExportJob(ctx, job.ID, "interrupted by restart", time.Now().UTC()); err != nil {
-				s.log.Error("failed to fail interrupted export", "error", err, "job_id", job.ID)
-				return
-			}
 		}
 	}
 }
@@ -519,7 +527,11 @@ func (s *Server) finishExportJob(ctx context.Context, jobID string, file *os.Fil
 		s.failExportJob(ctx, jobID, path, "internal error while running export")
 	}
 	if ctx.Err() != nil && !complete {
-		s.failExportJob(ctx, jobID, path, "export cancelled")
+		reason := "export cancelled"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			reason = "export timed out"
+		}
+		s.failExportJob(ctx, jobID, path, reason)
 	}
 }
 

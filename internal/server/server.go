@@ -75,15 +75,19 @@ type Server struct {
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
 	askChefTurns  askChefTurns
 
-	listener       net.Listener
-	baseCtx        context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
-	backgroundMu   sync.Mutex
-	shutdownOnce   sync.Once
-	shutdownErr    error
-	backgroundDone chan struct{}
-	historyQueue   chan *models.QueryHistory
-	historyDropped atomic.Uint64
-	stop           chan struct{} // closed by Shutdown to stop background maintenance loops
+	listener        net.Listener
+	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
+	backgroundMu    sync.Mutex
+	shutdownOnce    sync.Once
+	shutdownErr     error
+	backgroundDone  chan struct{}
+	historyQueue    chan *models.QueryHistory
+	historyDropped  atomic.Uint64
+	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
+	tokenQueue      chan int
+	tokenLastQueued map[int]time.Time
+	tokenDropped    atomic.Uint64
+	stop            chan struct{} // closed by Shutdown to stop background maintenance loops
 	// cancelRequests cancels the base context every request runs on (see
 	// requestContext).
 	cancelRequests context.CancelFunc
@@ -187,11 +191,13 @@ func New(opts ServerOptions) *Server {
 			MaxEntries:         opts.Config.DashboardCache.MaxEntries,
 			MaxConcurrentFills: opts.Config.DashboardCache.MaxConcurrentFills,
 		}),
-		baseCtx:        baseCtx,
-		backgroundDone: make(chan struct{}),
-		historyQueue:   make(chan *models.QueryHistory, 128),
-		stop:           make(chan struct{}),
-		cancelRequests: cancelRequests,
+		baseCtx:         baseCtx,
+		backgroundDone:  make(chan struct{}),
+		historyQueue:    make(chan *models.QueryHistory, 128),
+		tokenQueue:      make(chan int, 128),
+		tokenLastQueued: make(map[int]time.Time),
+		stop:            make(chan struct{}),
+		cancelRequests:  cancelRequests,
 	}
 
 	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())
@@ -204,6 +210,7 @@ func New(opts ServerOptions) *Server {
 	s.reapInterruptedExportJobs()
 	s.setupRoutes()
 	s.startQueryHistoryWorker()
+	s.startTokenLastUsedWorker()
 	s.startBackgroundCleanup()
 
 	return s
@@ -582,6 +589,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 	defer cancel()
 	s.shutdownOnce.Do(func() {
 		s.backgroundMu.Lock()
+		s.historyDrainCtx = ctx
 		close(s.stop)
 		if s.listener != nil {
 			_ = s.listener.Close()
@@ -595,6 +603,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 				s.log.Warn("HTTP shutdown failed", "error", err)
 			}
 			s.wg.Wait()
+			s.logBackgroundDrops()
 			if s.dashCache != nil {
 				s.dashCache.Close()
 			}

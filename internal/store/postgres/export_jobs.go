@@ -144,11 +144,11 @@ func (s *Store) DeleteExpiredExportJobs(ctx context.Context, before time.Time) e
 	return nil
 }
 
-// ListInterruptedExportJobs returns a bounded batch of unfinished exports.
-func (s *Store) ListInterruptedExportJobs(ctx context.Context) ([]*models.ExportJob, error) {
-	rows, err := s.q.ListInterruptedExportJobs(ctx)
+// ReapInterruptedExportJobs fails and returns a bounded batch of stale exports.
+func (s *Store) ReapInterruptedExportJobs(ctx context.Context, before time.Time) ([]*models.ExportJob, error) {
+	rows, err := s.q.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{Before: ts(before), ReapedAt: ts(time.Now().UTC())})
 	if err != nil {
-		return nil, fmt.Errorf("error listing interrupted exports: %w", err)
+		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
 	}
 	jobs := make([]*models.ExportJob, 0, len(rows))
 	for i := range rows {

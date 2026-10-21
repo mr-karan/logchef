@@ -273,17 +273,7 @@ func AuthenticateAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logg
 		return nil, nil, ErrInvalidToken
 	}
 
-	// Last-used metadata must not delay authentication on a slow store.
-	updateCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-	_ = UpdateAPITokenLastUsed(updateCtx, db, apiToken.ID)
-
 	return user, apiToken, nil
-}
-
-// UpdateAPITokenLastUsed updates the last used timestamp for an API token
-func UpdateAPITokenLastUsed(ctx context.Context, db store.StoreOps, tokenID int) error {
-	return db.UpdateAPITokenLastUsed(ctx, tokenID)
 }
 
 // Helper functions

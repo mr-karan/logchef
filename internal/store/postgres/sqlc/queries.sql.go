@@ -264,6 +264,7 @@ SET
     completed_at = $6,
     updated_at = $7
 WHERE id = $8
+  AND status IN ('pending', 'running')
 RETURNING id
 `
 
@@ -2922,49 +2923,6 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtyp
 	return items, nil
 }
 
-const listInterruptedExportJobs = `-- name: ListInterruptedExportJobs :many
-SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at FROM export_jobs
-WHERE status IN ('pending', 'running')
-ORDER BY id
-LIMIT 100
-`
-
-func (q *Queries) ListInterruptedExportJobs(ctx context.Context) ([]ExportJob, error) {
-	rows, err := q.db.Query(ctx, listInterruptedExportJobs)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ExportJob{}
-	for rows.Next() {
-		var i ExportJob
-		if err := rows.Scan(
-			&i.ID,
-			&i.SourceID,
-			&i.CreatedBy,
-			&i.Status,
-			&i.Format,
-			&i.RequestJson,
-			&i.FileName,
-			&i.FilePath,
-			&i.ErrorMessage,
-			&i.RowsExported,
-			&i.BytesWritten,
-			&i.ExpiresAt,
-			&i.CompletedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listManagedSources = `-- name: ListManagedSources :many
 
 SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE managed = true ORDER BY id
@@ -4032,6 +3990,60 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) 
 	return items, nil
 }
 
+const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
+UPDATE export_jobs
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = $1
+WHERE id IN (
+    SELECT id FROM export_jobs
+    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < $2
+    ORDER BY id
+    LIMIT 100
+)
+  AND status IN ('pending', 'running') AND export_jobs.updated_at < $2
+RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at
+`
+
+type ReapInterruptedExportJobsParams struct {
+	ReapedAt pgtype.Timestamptz `json:"reaped_at"`
+	Before   pgtype.Timestamptz `json:"before"`
+}
+
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error) {
+	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, arg.ReapedAt, arg.Before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExportJob{}
+	for rows.Next() {
+		var i ExportJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.CreatedBy,
+			&i.Status,
+			&i.Format,
+			&i.RequestJson,
+			&i.FileName,
+			&i.FilePath,
+			&i.ErrorMessage,
+			&i.RowsExported,
+			&i.BytesWritten,
+			&i.ExpiresAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordOAuthDevicePoll = `-- name: RecordOAuthDevicePoll :one
 UPDATE oauth_device_authorizations
 SET interval_secs = CASE WHEN (expires_at > $1::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > $1::timestamptz - make_interval(secs => interval_secs)) THEN interval_secs + 5 ELSE interval_secs END,
@@ -4695,6 +4707,7 @@ SET
     error_message = NULL,
     updated_at = $2
 WHERE id = $3
+  AND status IN ('pending', 'running')
 RETURNING id
 `
 
