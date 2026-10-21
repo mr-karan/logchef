@@ -165,7 +165,10 @@ function failureStatus(err: unknown): AskChefStatus {
 
 export const useAskChefStore = defineStore("askChef", () => {
   const open = ref(false);
-  const context = ref<AskChefContext | null>(null);
+  // An alert investigation keeps the alert's window. Otherwise the context is
+  // whatever the Explorer shows, read again for every turn.
+  const pinned = ref<AskChefContext | null>(null);
+  const context = computed(() => pinned.value ?? explorerContext());
   const session = ref<AskChefSession>(newSession());
   const activeEvidenceId = ref<EvidenceId | null>(null);
   let controller: AbortController | null = null;
@@ -215,9 +218,7 @@ export const useAskChefStore = defineStore("askChef", () => {
 
   // Resumes the current conversation, or starts one from what the Explorer shows.
   function openForExplorer() {
-    if (!context.value || !session.value.transcript.length) {
-      context.value = explorerContext();
-    }
+    if (!session.value.transcript.length) pinned.value = null;
     open.value = true;
   }
 
@@ -227,9 +228,10 @@ export const useAskChefStore = defineStore("askChef", () => {
 
   async function send(text: string): Promise<void> {
     const message = text.trim().slice(0, MAX_MESSAGE_LENGTH);
-    if (!message || !context.value || session.value.status.kind === "streaming") return;
+    const turnContext = pinned.value ?? explorerContext();
+    if (!message || !turnContext || session.value.status.kind === "streaming") return;
 
-    const request = buildTurnRequest(context.value, session.value, message, useExploreStore().getTimezoneIdentifier());
+    const request = buildTurnRequest(turnContext, session.value, message, useExploreStore().getTimezoneIdentifier());
     session.value.transcript.push({ role: "user", text: message }, { role: "assistant", steps: [], text: "", evidenceIds: [], done: null });
     session.value.status = { kind: "streaming" };
     const turn = new AbortController();
@@ -254,7 +256,7 @@ export const useAskChefStore = defineStore("askChef", () => {
 
   function investigateAlert(alert: Alert, entry: AlertHistoryEntry, teamId: number) {
     clearConversation();
-    context.value = {
+    pinned.value = {
       ...alertHistoryWindow(alert, entry, teamId),
       subject: {
         kind: "alert",
@@ -278,15 +280,33 @@ export const useAskChefStore = defineStore("askChef", () => {
 
   function reset() {
     clearConversation();
-    context.value = explorerContext() ?? context.value;
+    pinned.value = null;
   }
+
+  // Evidence cites one source, so a conversation ends when the Explorer moves
+  // to another team or source. A team switch clears the source first, so
+  // compare with the last source that was set.
+  let lastSource: string | null = null;
+  watch(
+    () => {
+      const explore = useExploreStore();
+      const teamId = useTeamsStore().currentTeamId;
+      return teamId && explore.sourceId ? `${teamId}:${explore.sourceId}` : null;
+    },
+    (next) => {
+      if (!next) return;
+      if (!pinned.value && lastSource && next !== lastSource) clearConversation();
+      lastSource = next;
+    },
+    { immediate: true }
+  );
 
   // A conversation belongs to the user who had it, so logout or a new login ends it.
   watch(
     () => useAuthStore().user?.id,
     () => {
       clearConversation();
-      context.value = null;
+      pinned.value = null;
       open.value = false;
     },
     { flush: "sync" }

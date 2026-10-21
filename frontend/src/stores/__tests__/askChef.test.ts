@@ -1,4 +1,5 @@
 import { createPinia, setActivePinia } from "pinia";
+import { nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Alert, AlertHistoryEntry } from "@/api/alerts";
@@ -7,6 +8,8 @@ import type { EvidenceRecord } from "@/api/askChef";
 import type { User } from "@/types";
 import { applyAskChefEvent, buildTurnRequest, newSession, useAskChefStore, type AskChefContext, type AskChefSession } from "../askChef";
 import { useAuthStore } from "../auth";
+import { useContextStore } from "../context";
+import { useExploreStore } from "../explore";
 
 vi.mock("@/api/auth", () => ({
   authApi: { localLogin: vi.fn(), getSession: vi.fn(), logout: vi.fn() },
@@ -329,6 +332,81 @@ function hangingTurn(onAbort: () => void) {
     return Promise.resolve(new Response(body, { status: 200 }));
   });
 }
+
+describe("useAskChefStore and the Explorer", () => {
+  const done = () => sseResponse([frame("done", { stop_reason: "end", tool_calls: 0, input_tokens: 0, output_tokens: 0, duration_ms: 1 })]);
+
+  beforeEach(() => {
+    setActivePinia(createPinia());
+    useContextStore().selectTeam(1);
+    useContextStore().selectSource(3);
+    useExploreStore().setRelativeTimeRange("15m");
+    useExploreStore().setLogchefqlCode('level="error"');
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function sentBody(fetchMock: ReturnType<typeof vi.fn>, call: number) {
+    return JSON.parse(String(fetchMock.mock.calls[call][1].body));
+  }
+
+  it("shows what the Explorer shows, as it changes", () => {
+    const store = useAskChefStore();
+    store.openForExplorer();
+    expect(store.context).toMatchObject({ subject: { kind: "explorer" }, teamId: 1, sourceId: 3, query: 'level="error"' });
+
+    useExploreStore().setLogchefqlCode('level="warn"');
+
+    expect(store.context).toMatchObject({ query: 'level="warn"' });
+  });
+
+  it("sends every turn with the Explorer's current query and window", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(done()));
+    vi.stubGlobal("fetch", fetchMock);
+    const store = useAskChefStore();
+    store.openForExplorer();
+
+    await store.send("What failed?");
+    useExploreStore().setLogchefqlCode('level="warn"');
+    useExploreStore().setRelativeTimeRange("1h");
+    const before = Date.now();
+    await store.send("And warnings?");
+
+    const second = sentBody(fetchMock, 1);
+    expect(second.context).toMatchObject({ kind: "explorer", query: 'level="warn"' });
+    expect(second.context.end - second.context.start).toBe(3_600_000);
+    expect(second.context.end).toBeGreaterThanOrEqual(before - 1000);
+    expect(store.transcript).toHaveLength(4);
+  });
+
+  it("starts a new conversation when the Explorer moves to another source", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(done())));
+    const store = useAskChefStore();
+    store.openForExplorer();
+    await store.send("What failed?");
+
+    useContextStore().selectSource(4);
+    await nextTick();
+
+    expect(store.transcript).toEqual([]);
+    expect(store.context).toMatchObject({ sourceId: 4 });
+  });
+
+  it("keeps an alert investigation on the alert's window", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockImplementation(() => Promise.resolve(done())));
+    const store = useAskChefStore();
+    store.investigateAlert(alert, entry, 1);
+    await vi.waitFor(() => expect(store.status).toEqual({ kind: "idle" }));
+
+    useExploreStore().setLogchefqlCode('level="warn"');
+    useContextStore().selectSource(4);
+    await nextTick();
+
+    expect(store.context).toMatchObject({ subject: { kind: "alert", alertId: 7 }, query: 'level="error"' });
+    expect(store.transcript).toHaveLength(2);
+  });
+});
 
 describe("useAskChefStore and the signed-in user", () => {
   function user(id: string): User {
