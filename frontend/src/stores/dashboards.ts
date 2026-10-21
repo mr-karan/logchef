@@ -65,6 +65,8 @@ export interface PanelColumn {
 export interface PanelState {
   status: PanelStatus;
   error?: string;
+  /** The window the shown result ran over; a queued panel keeps its old one. */
+  range?: ResolvedWindow;
   timeseries?: {
     buckets: HistogramData[];
     granularity: string | null;
@@ -585,7 +587,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     try {
       const result = await fetchPanelData(panel, range, signal, cache);
       if (signal.aborted) return;
-      setPanelState(panel.id, result);
+      setPanelState(panel.id, { ...result, range });
     } catch (err) {
       if (signal.aborted || isAbort(err)) return;
       const { locked, message } = classifyPanelError(err);

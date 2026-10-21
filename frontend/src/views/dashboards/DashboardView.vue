@@ -782,7 +782,7 @@ onBeforeRouteUpdate((to, from) => {
           gridRow: `${p.y + 1} / span ${p.h}`,
         }"
       >
-        <DashboardPanel :panel="p.panel" :height-px="panelOuterHeight(p.h)" />
+        <DashboardPanel :panel="p.panel" :height-px="panelOuterHeight(p.h)" link-title />
       </div>
     </div>
 

@@ -2,6 +2,7 @@
 import { useI18n } from "vue-i18n";
 
 import { computed } from "vue";
+import { RouterLink } from "vue-router";
 import { Lock, AlertCircle, BarChart3, Hash, Table2, ListFilter } from "lucide-vue-next";
 import { Skeleton } from "@/components/ui/skeleton";
 import PanelTimeseries from "./PanelTimeseries.vue";
@@ -10,6 +11,7 @@ import PanelBreakdown from "./PanelBreakdown.vue";
 import PanelTable from "./PanelTable.vue";
 import type { DashboardPanel } from "@/api/dashboards";
 import { useDashboardsStore, type PanelState } from "@/stores/dashboards";
+import { panelExploreQuery } from "@/utils/panelExplore";
 
 const { t } = useI18n();
 
@@ -29,8 +31,10 @@ interface Props {
    * so it passes false to avoid a doubled header/border.
    */
   chrome?: boolean;
+  /** Link the title to the panel's logs in Explorer. Off in edit mode and previews. */
+  linkTitle?: boolean;
 }
-const props = withDefaults(defineProps<Props>(), { chrome: true });
+const props = withDefaults(defineProps<Props>(), { chrome: true, linkTitle: false });
 
 const store = useDashboardsStore();
 const panelState = computed<PanelState>(
@@ -42,6 +46,14 @@ const panelState = computed<PanelState>(
 // locked placeholder immediately, without a loading-skeleton flash before the
 // store's refresh sets the state.
 const isLocked = computed(() => props.panel.locked === true || panelState.value.status === "locked");
+
+// The title opens the panel's logs in Explorer over the window its shown result
+// ran over, which can lag the dashboard's window while a refresh is queued.
+const exploreLink = computed(() => {
+  if (!props.linkTitle || isLocked.value) return null;
+  const range = panelState.value.range ?? store.appliedRange ?? store.effectiveRange;
+  return { name: "LogExplorer", query: panelExploreQuery(props.panel, range) };
+});
 
 // Chart body height = outer height minus the header row (when shown) and the
 // body padding.
@@ -72,7 +84,13 @@ const typeIcon = computed(() => {
   >
     <div v-if="chrome" class="dash-panel__header">
       <component :is="typeIcon" class="dash-panel__icon" />
-      <span class="dash-panel__title" :title="panel.title">{{ panel.title || "Untitled" }}</span>
+      <RouterLink
+        v-if="exploreLink"
+        :to="exploreLink"
+        class="dash-panel__title dash-panel__title--link"
+        :title="t('dashboards.openPanelInExplorer')"
+      >{{ panel.title || "Untitled" }}</RouterLink>
+      <span v-else class="dash-panel__title" :title="panel.title">{{ panel.title || "Untitled" }}</span>
       <Lock
         v-if="isLocked"
         class="dash-panel__lock"
@@ -191,6 +209,11 @@ const typeIcon = computed(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.dash-panel__title--link:hover,
+.dash-panel__title--link:focus-visible {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 .dash-panel__lock {
   width: 0.8rem;

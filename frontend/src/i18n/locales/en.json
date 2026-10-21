@@ -1420,6 +1420,7 @@
   "dashboards.defaultRange": "Opens with",
   "dashboards.defaultRangeNone": "Viewer's range",
   "dashboards.defaultRangeHint": "Time range this dashboard opens with",
+  "dashboards.openPanelInExplorer": "Open in Explorer",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "New chat",
   "askChef.close": "Close Ask Chef",

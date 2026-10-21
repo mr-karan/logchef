@@ -703,6 +703,7 @@
   "dashboards.defaultRange": "Si apre con",
   "dashboards.defaultRangeNone": "Intervallo dell'utente",
   "dashboards.defaultRangeHint": "Intervallo di tempo con cui si apre questa dashboard",
+  "dashboards.openPanelInExplorer": "Apri in Explorer",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "Nuova chat",
   "askChef.close": "Chiudi Ask Chef",

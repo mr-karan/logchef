@@ -703,6 +703,7 @@
   "dashboards.defaultRange": "開啟時",
   "dashboards.defaultRangeNone": "沿用目前範圍",
   "dashboards.defaultRangeHint": "開啟此儀表板時使用的時間範圍",
+  "dashboards.openPanelInExplorer": "在探索器中開啟",
   "askChef.title": "Ask Chef",
   "askChef.newChat": "新對話",
   "askChef.close": "關閉 Ask Chef",
