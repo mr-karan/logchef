@@ -234,7 +234,7 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, princi
 //
 // The created user is left unmanaged (the DB default) so the provisioning
 // reconciler never adopts or deletes it.
-func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, principal access.Principal, email, fullName string) (*models.User, error) {
+func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
 	if fullName == "" {
 		fullName = email
 	}
@@ -253,10 +253,6 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
-	}
-
-	if err := AuthorizeAdminTransition(principal, models.User{}, *user); err != nil {
-		return nil, err
 	}
 
 	if err := db.CreateUser(ctx, user); err != nil {

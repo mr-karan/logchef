@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Local admin emails now use the same validation as `admin_emails`; domains without a dot, such as `admin@localhost`, fail at startup.
+
 ## [2.4.0] - 2026-10-13
 
 VictoriaLogs windowed search is opt-in. Enable it in the source form or

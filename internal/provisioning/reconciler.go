@@ -9,8 +9,6 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
-	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -326,7 +324,7 @@ func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.
 				globalRole = models.UserRoleAdmin
 			}
 
-			newUser, err := createManagedUser(ctx, tx, access.SystemPrincipal(), email, globalRole)
+			newUser, err := createManagedUser(ctx, tx, email, globalRole)
 			if err != nil {
 				return err
 			}
@@ -515,16 +513,13 @@ func buildProvisionedSourceModel(src config.ProvisionSource) (models.Source, err
 	return source, nil
 }
 
-func createManagedUser(ctx context.Context, tx store.StoreOps, principal access.Principal, email string, role models.UserRole) (*models.User, error) {
+func createManagedUser(ctx context.Context, tx store.StoreOps, email string, role models.UserRole) (*models.User, error) {
 	user := &models.User{
 		Email:       email,
 		FullName:    email,
 		Role:        role,
 		Status:      models.UserStatusActive,
 		AccountType: models.UserAccountTypeHuman,
-	}
-	if err := core.AuthorizeAdminTransition(principal, models.User{}, *user); err != nil {
-		return nil, err
 	}
 	if err := tx.CreateUser(ctx, user); err != nil {
 		return nil, fmt.Errorf("failed to create user %q: %w", email, err)

@@ -5,7 +5,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -17,7 +16,7 @@ func TestGetOrCreateAutoProvisionedUser_Creates(t *testing.T) {
 	log := discardLogger()
 	ctx := context.Background()
 
-	user, err := GetOrCreateAutoProvisionedUser(ctx, db, log, access.SystemPrincipal(), "new-hire@example.com", "New Hire")
+	user, err := GetOrCreateAutoProvisionedUser(ctx, db, log, "new-hire@example.com", "New Hire")
 	if err != nil {
 		t.Fatalf("GetOrCreateAutoProvisionedUser: %v", err)
 	}
@@ -47,7 +46,7 @@ func TestGetOrCreateAutoProvisionedUser_ConflictRefetches(t *testing.T) {
 
 	existing := newTestUser(t, db, "already-here@example.com", "Already Here")
 
-	got, err := GetOrCreateAutoProvisionedUser(ctx, db, log, access.SystemPrincipal(), "already-here@example.com", "Different Name From Claims")
+	got, err := GetOrCreateAutoProvisionedUser(ctx, db, log, "already-here@example.com", "Different Name From Claims")
 	if err != nil {
 		t.Fatalf("GetOrCreateAutoProvisionedUser: %v", err)
 	}
@@ -78,7 +77,7 @@ func TestGetOrCreateAutoProvisionedUser_ConcurrentLoginsBothSucceed(t *testing.T
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			users[i], errs[i] = GetOrCreateAutoProvisionedUser(ctx, db, log, access.SystemPrincipal(), "racer@example.com", "Racer")
+			users[i], errs[i] = GetOrCreateAutoProvisionedUser(ctx, db, log, "racer@example.com", "Racer")
 		}(i)
 	}
 	wg.Wait()

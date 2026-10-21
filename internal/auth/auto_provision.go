@@ -7,7 +7,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -46,7 +45,7 @@ func autoProvisionUser(ctx context.Context, db store.StoreOps, log *slog.Logger,
 		return nil, false, nil
 	}
 
-	user, err := core.GetOrCreateAutoProvisionedUser(ctx, db, log, access.SystemPrincipal(), email, fullName)
+	user, err := core.GetOrCreateAutoProvisionedUser(ctx, db, log, email, fullName)
 	if err != nil {
 		return nil, true, err
 	}

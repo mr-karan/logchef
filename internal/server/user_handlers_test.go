@@ -362,11 +362,12 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 			method, path, endpoint := http.MethodPost, "/api/v1/admin/users", "/api/v1/admin/users"
 			body := `{"email":"audit-target@example.com","full_name":"Audit Target","role":"admin"}`
 			target := "audit-target@example.com"
+			targetKey, targetValue := "target_email", fmt.Sprintf("%q", target)
 			if update {
 				member := mkTestUser(t, s.sqlite, target, models.UserRoleMember)
 				method, path, endpoint = http.MethodPut, fmt.Sprintf("%s/%d", path, member.ID), "/api/v1/admin/users/:userID"
 				body = `{"role":"admin"}`
-				target = fmt.Sprint(member.ID)
+				targetKey, targetValue = "target_user_id", fmt.Sprint(member.ID)
 			}
 			counter := vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_authorization_failures_total{endpoint=%q,reason="admin_grant_scope",user_email=%q,user_role="admin"}`, endpoint, admin.Email))
 			before := counter.Get()
@@ -395,8 +396,8 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 				if string(entry["user_id"]) != fmt.Sprint(admin.ID) || string(entry["auth_method"]) != `"token"` {
 					t.Errorf("missing principal audit fields: %s", line)
 				}
-				if strings.Trim(string(entry["target"]), `"`) != target {
-					t.Errorf("target = %s, want %s", entry["target"], target)
+				if string(entry[targetKey]) != targetValue {
+					t.Errorf("%s = %s, want %s", targetKey, entry[targetKey], targetValue)
 				}
 			}
 			if warnings != 1 {

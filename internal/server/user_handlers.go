@@ -85,7 +85,7 @@ func (s *Server) handleCreateUser(c fiber.Ctx) error {
 	if err != nil {
 		if errors.Is(err, core.ErrAdminGrantForbidden) {
 			metrics.RecordAuthorizationFailure(c.Route().Path, principal.User, "admin_grant_scope")
-			s.log.Warn("admin grant denied", "user_id", principal.User.ID, "target", req.Email, "auth_method", c.Locals("auth_method"))
+			s.log.Warn("admin grant denied", "user_id", principal.User.ID, "target_email", req.Email, "auth_method", c.Locals("auth_method"))
 			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 		}
 		if errors.Is(err, core.ErrUserAlreadyExists) {
@@ -143,7 +143,7 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 		// Handle specific error types from core
 		if errors.Is(err, core.ErrAdminGrantForbidden) {
 			metrics.RecordAuthorizationFailure(c.Route().Path, principal.User, "admin_grant_scope")
-			s.log.Warn("admin grant denied", "user_id", principal.User.ID, "target", userID, "auth_method", c.Locals("auth_method"))
+			s.log.Warn("admin grant denied", "user_id", principal.User.ID, "target_user_id", userID, "auth_method", c.Locals("auth_method"))
 			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
 		}
 		if errors.Is(err, core.ErrUserNotFound) {
