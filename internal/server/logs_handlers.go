@@ -12,6 +12,7 @@ import (
 	"github.com/google/uuid"
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -185,19 +186,17 @@ func (qt *QueryTracker) Cleanup() {
 
 const logsQueryFailure = "Failed to query logs"
 
-// sendQueryError writes the response for an error from preparing or running a
-// query. failure is the message for an error the caller cannot fix; its detail
-// goes to the log only, since driver and upstream text can name hosts and users.
+// Only typed validation messages are safe to return to callers.
 func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error, failure string) error {
-	if reqErr, ok := errors.AsType[*core.QueryRequestError](err); ok {
-		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
-	}
-	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
-		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
-	}
+	reqErr, isRequestError := errors.AsType[*core.QueryRequestError](err)
+	admissionErr, isAdmissionError := errors.AsType[*QueryAdmissionError](err)
+	validationErr, isValidationError := errors.AsType[*datasource.ValidationError](err)
+	clickhouseErr, isClickhouseError := errors.AsType[*clickhouse.ValidationError](err)
 	switch {
-	// A cached fill surfaces the caller's own cancellation, which the explorer
-	// and dashboard both trigger on every re-query. That is not a failure.
+	case isRequestError:
+		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
+	case isAdmissionError:
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
 	case errors.Is(err, context.Canceled):
 		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
 	case errors.Is(err, context.DeadlineExceeded):
@@ -210,8 +209,16 @@ func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error
 		return SendErrorWithType(c, fiber.StatusBadRequest, "This operation is not supported for this source type yet", models.ValidationErrorType)
 	case errors.Is(err, models.ErrHistogramBudgetExceeded):
 		return SendErrorWithType(c, fiber.StatusBadRequest, models.ErrHistogramBudgetExceeded.Error(), models.ValidationErrorType)
-	case datasource.IsValidationError(err):
-		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
+	case isValidationError:
+		s.log.Warn("query validation failed", "error", err, "source_id", sourceID, "path", c.Path())
+		message := validationErr.Message
+		// Upstream response bodies can contain proxy and driver details.
+		if validationErr.Field == "victorialogs" {
+			message = "Invalid query or query parameters"
+		}
+		return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
+	case isClickhouseError:
+		return SendErrorWithType(c, fiber.StatusBadRequest, clickhouseErr.Message, models.ValidationErrorType)
 	}
 	s.log.Error("query failed", "error", err, "source_id", sourceID, "path", c.Path())
 	return SendErrorWithType(c, fiber.StatusInternalServerError, failure, models.DatabaseErrorType)

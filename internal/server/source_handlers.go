@@ -44,9 +44,9 @@ func (s *Server) handleCreateSource(c fiber.Ctx) error {
 
 	createdSource, err := core.CreateSourceFromRequest(c.Context(), s.datasources, &req)
 	if err != nil {
-		// Handle specific validation or creation errors from core.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+			s.log.Warn("source validation failed", "error", err, "field", validationErr.Field)
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
 		}
 		if errors.Is(err, core.ErrSourceAlreadyExists) {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
@@ -121,7 +121,8 @@ func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+			s.log.Warn("source validation failed", "error", err, "field", validationErr.Field)
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
 		}
 		s.log.Error("failed to update source", "error", err, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error updating source", models.DatabaseErrorType)
@@ -143,8 +144,8 @@ func (s *Server) handleValidateSourceConnection(c fiber.Ctx) error {
 	if err != nil {
 		// Handle specific validation errors.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
-			s.log.Warn("connection validation failed", "error", validationErr.Message, "field", validationErr.Field)
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+			s.log.Warn("connection validation failed", "error", err, "field", validationErr.Field)
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
 		}
 		s.log.Error("connection validation error", "error", err, "source_type", req.SourceType)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating connection", models.ExternalServiceErrorType)

@@ -146,7 +146,7 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 	qb := NewQueryBuilder(tableName, 0)
 	baseQuery, err := qb.RemoveLimitClause(params.Query)
 	if err != nil {
-		return nil, fmt.Errorf("failed to process base query: %w", err)
+		return nil, &ValidationError{Message: err.Error()}
 	}
 
 	query, err := c.buildHistogramQuery(baseQuery, timestampField, intervalFunc, params.GroupBy)
