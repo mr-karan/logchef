@@ -99,7 +99,7 @@ func AuthorizeAdminTransition(principal access.Principal, before, after models.U
 	if isActiveAdmin(&before) || !isActiveAdmin(&after) {
 		return nil
 	}
-	if principal.Method == access.AuthSession || (principal.Method == access.AuthAPIToken && principal.Require(models.TokenScopeAll) == nil) {
+	if principal.Method == access.AuthSystem || principal.Method == access.AuthSession || (principal.Method == access.AuthAPIToken && principal.Require(models.TokenScopeAll) == nil) {
 		return nil
 	}
 	return ErrAdminGrantForbidden
@@ -166,7 +166,7 @@ func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*mode
 }
 
 // CreateUser creates a new user in the database.
-func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, principal access.Principal, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
 	// Default role if empty
 	if role == "" {
 		role = models.UserRoleMember
@@ -174,6 +174,10 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 	// Default status if empty
 	if status == "" {
 		status = models.UserStatusActive
+	}
+
+	if err := AuthorizeAdminTransition(principal, models.User{}, models.User{Role: role, Status: status}); err != nil {
+		return nil, err
 	}
 
 	// Validate input parameters
@@ -230,7 +234,7 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 //
 // The created user is left unmanaged (the DB default) so the provisioning
 // reconciler never adopts or deletes it.
-func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
+func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, principal access.Principal, email, fullName string) (*models.User, error) {
 	if fullName == "" {
 		fullName = email
 	}
@@ -249,6 +253,10 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 			CreatedAt: now,
 			UpdatedAt: now,
 		},
+	}
+
+	if err := AuthorizeAdminTransition(principal, models.User{}, *user); err != nil {
+		return nil, err
 	}
 
 	if err := db.CreateUser(ctx, user); err != nil {
@@ -493,7 +501,7 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 			if models.IsNotFound(err) {
 				// User doesn't exist, create a new admin user
 				log.Debug("creating admin user", "email", email)
-				_, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
+				_, createErr := CreateUser(ctx, db, log, access.SystemPrincipal(), email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
 				if createErr != nil {
 					errMsg := fmt.Sprintf("failed to create admin user %s: %v", email, createErr)
 					log.Error(errMsg)

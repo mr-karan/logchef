@@ -979,7 +979,7 @@
   "tokens.scopeDescriptions.tokensRead": "List token metadata.",
   "tokens.scopeDescriptions.tokensWrite": "Create and revoke tokens.",
   "tokens.scopeDescriptions.usersRead": "List users and service accounts.",
-  "tokens.scopeDescriptions.usersWrite": "Create, update, and delete users or service accounts.",
+  "tokens.scopeDescriptions.usersWrite": "Create, update, and delete users or service accounts. Cannot grant the admin role.",
   "tokens.scopeDescriptions.teamsRead": "Read teams, members, and team source links.",
   "tokens.scopeDescriptions.teamsWrite": "Manage teams, members, and source links.",
   "tokens.scopeDescriptions.sourcesRead": "Read source metadata, schema, and stats.",

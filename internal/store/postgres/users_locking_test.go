@@ -51,7 +51,7 @@ func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 	demoted := make(chan error, 1)
 	demoteDone := make(chan struct{})
 	go func() {
-		demoted <- core.UpdateUser(ctx, s, discardLogger(), access.SessionPrincipal(nil), a.ID, models.User{Role: models.UserRoleMember})
+		demoted <- core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), a.ID, models.User{Role: models.UserRoleMember})
 		close(demoteDone)
 	}()
 	awaitLockWaitOrDone(t, ctx, monitor, demoteDone)
@@ -71,7 +71,7 @@ func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 func TestConcurrentEditCannotReactivateUser(t *testing.T) {
 	edits := map[string]func(ctx context.Context, s store.Store, id models.UserID) error{
 		"name edit": func(ctx context.Context, s store.Store, id models.UserID) error {
-			return core.UpdateUser(ctx, s, discardLogger(), access.SessionPrincipal(nil), id, models.User{FullName: "Renamed User"})
+			return core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), id, models.User{FullName: "Renamed User"})
 		},
 		"last login": func(ctx context.Context, s store.Store, id models.UserID) error {
 			return s.UpdateUserLastLogin(ctx, id, time.Now().UTC())

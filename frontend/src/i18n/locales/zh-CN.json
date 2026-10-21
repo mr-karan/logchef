@@ -979,7 +979,7 @@
   "tokens.scopeDescriptions.tokensRead": "列出令牌元信息。",
   "tokens.scopeDescriptions.tokensWrite": "创建和撤销令牌。",
   "tokens.scopeDescriptions.usersRead": "列出用户和服务账户。",
-  "tokens.scopeDescriptions.usersWrite": "创建、更新和删除用户或服务账户。",
+  "tokens.scopeDescriptions.usersWrite": "创建、更新和删除用户或服务账户。不能授予管理员角色。",
   "tokens.scopeDescriptions.teamsRead": "读取团队、成员和团队数据源关联。",
   "tokens.scopeDescriptions.teamsWrite": "管理团队、成员和数据源关联。",
   "tokens.scopeDescriptions.sourcesRead": "读取数据源元信息、架构和统计信息。",

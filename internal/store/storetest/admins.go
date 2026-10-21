@@ -21,10 +21,10 @@ func testConcurrentAdminRemovals(t *testing.T, s store.Store) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	removals := map[string]func(ctx context.Context, id models.UserID) error{
 		"demote": func(ctx context.Context, id models.UserID) error {
-			return core.UpdateUser(ctx, s, log, access.SessionPrincipal(nil), id, models.User{Role: models.UserRoleMember})
+			return core.UpdateUser(ctx, s, log, access.SystemPrincipal(), id, models.User{Role: models.UserRoleMember})
 		},
 		"deactivate": func(ctx context.Context, id models.UserID) error {
-			return core.UpdateUser(ctx, s, log, access.SessionPrincipal(nil), id, models.User{Status: models.UserStatusInactive})
+			return core.UpdateUser(ctx, s, log, access.SystemPrincipal(), id, models.User{Status: models.UserStatusInactive})
 		},
 		"delete": func(ctx context.Context, id models.UserID) error {
 			return core.DeleteUser(ctx, s, log, id)

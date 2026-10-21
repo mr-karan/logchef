@@ -83,7 +83,7 @@ func TestSessionRejectedAfterDeactivation(t *testing.T) {
 
 	// Deactivate through the core flow (revokes sessions transactionally).
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
-	if err := core.UpdateUser(ctx, db, log, access.SessionPrincipal(nil), user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if err := core.UpdateUser(ctx, db, log, access.SystemPrincipal(), user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatalf("UpdateUser(deactivate): %v", err)
 	}
 

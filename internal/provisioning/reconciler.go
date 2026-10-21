@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -324,18 +326,9 @@ func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.
 				globalRole = models.UserRoleAdmin
 			}
 
-			newUser := &models.User{
-				Email:       email,
-				FullName:    email, // Placeholder, updated on first OIDC login.
-				Role:        globalRole,
-				Status:      models.UserStatusActive,
-				AccountType: models.UserAccountTypeHuman,
-			}
-			if err := tx.CreateUser(ctx, newUser); err != nil {
-				return fmt.Errorf("failed to create user %q: %w", email, err)
-			}
-			if err := tx.SetUserManaged(ctx, newUser.ID, true); err != nil {
-				return fmt.Errorf("failed to set user %q as managed: %w", email, err)
+			newUser, err := createManagedUser(ctx, tx, access.SystemPrincipal(), email, globalRole)
+			if err != nil {
+				return err
 			}
 			if err := tx.AddTeamMember(ctx, teamID, newUser.ID, role); err != nil {
 				return fmt.Errorf("failed to add member %q to team: %w", email, err)
@@ -520,4 +513,24 @@ func buildProvisionedSourceModel(src config.ProvisionSource) (models.Source, err
 	}
 
 	return source, nil
+}
+
+func createManagedUser(ctx context.Context, tx store.StoreOps, principal access.Principal, email string, role models.UserRole) (*models.User, error) {
+	user := &models.User{
+		Email:       email,
+		FullName:    email,
+		Role:        role,
+		Status:      models.UserStatusActive,
+		AccountType: models.UserAccountTypeHuman,
+	}
+	if err := core.AuthorizeAdminTransition(principal, models.User{}, *user); err != nil {
+		return nil, err
+	}
+	if err := tx.CreateUser(ctx, user); err != nil {
+		return nil, fmt.Errorf("failed to create user %q: %w", email, err)
+	}
+	if err := tx.SetUserManaged(ctx, user.ID, true); err != nil {
+		return nil, fmt.Errorf("failed to set user %q as managed: %w", email, err)
+	}
+	return user, nil
 }

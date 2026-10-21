@@ -859,7 +859,7 @@ func TestOAuthDeactivatedUser(t *testing.T) {
 	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusOK {
 		t.Fatalf("/me status %d", resp.StatusCode)
 	}
-	if err := core.UpdateUser(context.Background(), e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), access.SessionPrincipal(nil), e.user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
+	if err := core.UpdateUser(context.Background(), e.db, slog.New(slog.NewTextHandler(io.Discard, nil)), access.SystemPrincipal(), e.user.ID, models.User{Status: models.UserStatusInactive}); err != nil {
 		t.Fatal(err)
 	}
 	if resp := e.apiGet("/api/v1/me", tokens.AccessToken); resp.StatusCode != http.StatusUnauthorized {
