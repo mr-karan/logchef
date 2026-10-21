@@ -4279,7 +4279,7 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
-WHERE id = ?
+WHERE id = ? AND status = 'triggered'
 RETURNING alert_id
 `
 
@@ -4742,7 +4742,7 @@ func (q *Queries) UpdateAlert(ctx context.Context, arg UpdateAlertParams) (int64
 const updateAlertHistoryPayload = `-- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
-WHERE id = ?
+WHERE id = ? AND status = 'triggered'
 RETURNING id
 `
 

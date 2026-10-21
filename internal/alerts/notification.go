@@ -36,6 +36,7 @@ type AlertNotification struct {
 	RecipientResolutionErr  string
 	WebhookURLs             []string
 	deliveryTargets         map[DeliveryTargetID]struct{}
+	attemptedTargets        map[DeliveryTargetID]struct{}
 	recipientTargets        map[string]DeliveryTargetID
 }
 

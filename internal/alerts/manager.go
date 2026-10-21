@@ -254,11 +254,10 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 
 	deliveryAttempts, shouldRetryDelivery := deliveryRetryState(prevHistory)
 
-	if markErr := m.db.MarkAlertTriggered(ctx, alert.ID); markErr != nil {
-		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
-	}
-
 	if alreadyActive && !shouldRetryDelivery {
+		if err := m.db.TouchAlertEvaluated(ctx, alert.ID); err != nil {
+			return err
+		}
 		m.log.Debug("suppressing duplicate alert notification", "alert_id", alert.ID, "delivery_attempts", deliveryAttempts)
 		return nil
 	}
@@ -283,7 +282,13 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	notification := m.buildNotification(ctx, alert, notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
 	if shouldRetryDelivery {
 		notification.deliveryTargets = pendingDeliveryTargets(prevHistory.Payload)
+		notification.attemptedTargets = storedDeliveryTargets(prevHistory.Payload, "delivery_attempted")
+		if notification.attemptedTargets == nil {
+			notification.attemptedTargets = make(map[DeliveryTargetID]struct{})
+		}
 	}
+	selectedTargets := notification.targetIDs()
+	attemptedIDs := notification.attemptedTargetIDs()
 	deliveryAttempts++
 	historyPayload := make(map[string]any)
 	if prevHistory != nil {
@@ -293,33 +298,30 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		"labels":                     copyStringMap(labels),
 		"annotations":                copyStringMap(annotations),
 		"status":                     string(models.AlertStatusTriggered),
-		"delivery_failed":            true,
+		"delivery_failed":            false,
+		"delivery_in_progress":       true,
+		"delivery_attempted":         attemptedIDs,
 		"delivery_attempts":          deliveryAttempts,
-		"delivery_pending":           notification.targetIDs(),
+		"delivery_pending":           selectedTargets,
 		"delivery_retries_exhausted": deliveryAttempts >= maxDeliveryAttempts,
 	})
 
-	history := prevHistory
-	if shouldRetryDelivery {
-		if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, historyPayload); err != nil {
-			m.log.Error("failed to reserve alert delivery attempt", "alert_id", alert.ID, "history_id", history.ID, "error", err)
-			return nil
+	history, err := m.reserveTriggeredHistory(ctx, alert.ID, prevHistory, valueCopy, message, historyPayload)
+	if err != nil {
+		if !models.IsNotFound(err) {
+			m.log.Error("failed to reserve alert delivery attempt", "alert_id", alert.ID, "error", err)
 		}
-	} else {
-		var err error
-		history, err = m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
-		if err != nil {
-			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", err)
-			return nil
-		}
-		if err := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); err != nil {
-			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", err)
-		}
+		return nil
 	}
 
 	notification.TriggeredAt = history.TriggeredAt
 	results := m.sender.Send(ctx, notification)
 	deliveryErr := results.Err()
+	// Removing every pending target leaves delivery failed until a current target succeeds.
+	if shouldRetryDelivery && len(selectedTargets) == 0 && len(results) == 0 {
+		deliveryErr = errors.New("no pending notification targets remain")
+	}
+	historyPayload["delivery_in_progress"] = false
 	historyPayload["delivery_pending"] = results.failedTargets()
 	historyPayload["delivery_retries_exhausted"] = deliveryErr != nil && deliveryAttempts >= maxDeliveryAttempts
 	delete(historyPayload, "delivery_error")
@@ -340,6 +342,31 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	}
 
 	return nil
+}
+
+func (m *Manager) reserveTriggeredHistory(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, value float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
+	newHistory := history == nil
+	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if newHistory {
+			var err error
+			history, err = tx.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, &value, message, payload)
+			if err != nil {
+				return err
+			}
+		} else if err := tx.UpdateAlertHistoryPayload(ctx, history.ID, payload); err != nil {
+			return err
+		}
+		return tx.MarkAlertTriggered(ctx, alertID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if newHistory {
+		if err := m.db.PruneAlertHistory(ctx, alertID, m.cfg.HistoryLimit); err != nil {
+			m.log.Warn("failed to prune alert history", "alert_id", alertID, "error", err)
+		}
+	}
+	return history, nil
 }
 
 func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value float64) error {

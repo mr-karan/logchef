@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 
@@ -44,8 +45,12 @@ func (n AlertNotification) selects(target DeliveryTargetID) bool {
 	if n.deliveryTargets == nil {
 		return true
 	}
-	_, ok := n.deliveryTargets[target]
-	return ok
+	_, pending := n.deliveryTargets[target]
+	if n.attemptedTargets == nil {
+		return pending
+	}
+	_, attempted := n.attemptedTargets[target]
+	return pending || !attempted
 }
 
 func (n AlertNotification) targetIDs() []string {
@@ -73,7 +78,11 @@ func (n AlertNotification) targetIDs() []string {
 }
 
 func pendingDeliveryTargets(payload map[string]any) map[DeliveryTargetID]struct{} {
-	values, exists := payload["delivery_pending"]
+	return storedDeliveryTargets(payload, "delivery_pending")
+}
+
+func storedDeliveryTargets(payload map[string]any, field string) map[DeliveryTargetID]struct{} {
+	values, exists := payload[field]
 	if !exists {
 		return nil
 	}
@@ -119,5 +128,20 @@ func deliveryRetryState(history *models.AlertHistoryEntry) (attempts int, retry 
 		attempts = int(value)
 	}
 	failed, _ := history.Payload["delivery_failed"].(bool)
-	return attempts, failed && attempts < maxDeliveryAttempts
+	inProgress, _ := history.Payload["delivery_in_progress"].(bool)
+	return attempts, (failed || inProgress) && attempts < maxDeliveryAttempts
+}
+
+func (n AlertNotification) attemptedTargetIDs() []string {
+	targets := make(map[DeliveryTargetID]struct{})
+	maps.Copy(targets, n.attemptedTargets)
+	for _, target := range n.targetIDs() {
+		targets[DeliveryTargetID(target)] = struct{}{}
+	}
+	ids := make([]string, 0, len(targets))
+	for target := range targets {
+		ids = append(ids, string(target))
+	}
+	sort.Strings(ids)
+	return ids
 }

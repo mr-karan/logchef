@@ -10,7 +10,7 @@ const { t } = useI18n();
 <template>
   <div v-if="failure" class="space-y-1 text-sm" role="status">
     <Badge variant="destructive">{{ t('alerts.deliveryFailed') }}</Badge>
-    <p v-if="failure.message" class="text-muted-foreground break-words">{{ failure.message }}</p>
+    <p v-if="failure.message" class="text-muted-foreground break-words whitespace-pre-line">{{ failure.message }}</p>
     <p v-if="failure.retriesExhausted" class="text-muted-foreground">{{ t('alerts.deliveryRetriesExhausted') }}</p>
   </div>
 </template>

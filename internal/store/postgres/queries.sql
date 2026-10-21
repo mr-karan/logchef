@@ -671,13 +671,13 @@ UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
     message = $1
-WHERE id = $2
+WHERE id = $2 AND status = 'triggered'
 RETURNING alert_id;
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
-WHERE id = $2
+WHERE id = $2 AND status = 'triggered'
 RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one

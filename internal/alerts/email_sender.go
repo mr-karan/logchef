@@ -3,10 +3,13 @@ package alerts
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/smtp"
+	"net/textproto"
 	"strings"
+	"syscall"
 	"time"
 
 	"log/slog"
@@ -16,6 +19,12 @@ const (
 	smtpSecurityNone     = "none"
 	smtpSecurityStartTLS = "starttls"
 	smtpSecurityTLS      = "tls"
+)
+
+var (
+	errSMTPNotConfigured = errors.New("smtp is not configured")
+	errSMTPTLS           = errors.New("smtp TLS failed")
+	errSMTPAuth          = errors.New("smtp authentication failed")
 )
 
 type EmailSenderOptions struct {
@@ -96,19 +105,19 @@ func (s *EmailSender) Send(ctx context.Context, notification AlertNotification) 
 			results = append(results, DeliveryResult{Target: target, Err: fmt.Errorf("missing recipient user ID: %d", id)})
 		}
 	}
-	for _, recipient := range uniqueEmails(notification.RecipientEmails) {
+	for index, recipient := range uniqueEmails(notification.RecipientEmails) {
 		target := notification.emailTarget(recipient)
 		if !notification.selects(target) {
 			continue
 		}
 		var err error
 		if s.host == "" || s.port == 0 || s.from == "" {
-			err = fmt.Errorf("smtp is not configured")
+			err = errSMTPNotConfigured
 		} else {
 			err = s.sendEmail(ctx, recipient, s.buildMessage(notification, recipient))
 		}
 		if err != nil {
-			err = fmt.Errorf("email delivery failed: %s: %w", recipient, err)
+			err = fmt.Errorf("email delivery failed: email recipient %d: %w", index+1, sanitizeSMTPError(err))
 		}
 		results = append(results, DeliveryResult{Target: target, Err: err})
 	}
@@ -211,6 +220,9 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
 		tlsDialer := &tls.Dialer{NetDialer: dialer, Config: tlsConfig}
 		conn, err = tlsDialer.DialContext(ctx, "tcp", address)
+		if err != nil {
+			err = fmt.Errorf("%w: %w", errSMTPTLS, err)
+		}
 	} else {
 		conn, err = dialer.DialContext(ctx, "tcp", address)
 	}
@@ -228,19 +240,19 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 	if s.security == smtpSecurityStartTLS {
 		if ok, _ := client.Extension("STARTTLS"); !ok {
 			_ = client.Close()
-			return nil, fmt.Errorf("smtp server does not support STARTTLS")
+			return nil, errSMTPTLS
 		}
 		tlsConfig := &tls.Config{ServerName: s.host, InsecureSkipVerify: s.skipTLSVerify} // #nosec G402
 		if err := client.StartTLS(tlsConfig); err != nil {
 			_ = client.Close()
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errSMTPTLS, err)
 		}
 	}
 	if s.username != "" {
 		auth := smtp.PlainAuth("", s.username, s.password, s.host)
 		if err := client.Auth(auth); err != nil {
 			_ = client.Close()
-			return nil, err
+			return nil, fmt.Errorf("%w: %w", errSMTPAuth, err)
 		}
 	}
 	return client, nil
@@ -261,4 +273,41 @@ func uniqueEmails(emails []string) []string {
 		out = append(out, normalized)
 	}
 	return out
+}
+
+func sanitizeSMTPError(err error) error {
+	if errors.Is(err, errSMTPNotConfigured) {
+		return errSMTPNotConfigured
+	}
+	if errors.Is(err, context.Canceled) {
+		return errors.New("smtp request canceled")
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return errors.New("smtp request timed out")
+	}
+	if networkErr, ok := errors.AsType[net.Error](err); ok && networkErr.Timeout() {
+		return errors.New("smtp request timed out")
+	}
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
+		return errors.New("smtp DNS lookup failed")
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return errors.New("smtp connection refused")
+	}
+	if errors.Is(err, errSMTPTLS) {
+		return errSMTPTLS
+	}
+	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
+		return errSMTPTLS
+	}
+	if _, ok := errors.AsType[tls.RecordHeaderError](err); ok {
+		return errSMTPTLS
+	}
+	if errors.Is(err, errSMTPAuth) {
+		return errSMTPAuth
+	}
+	if reply, ok := errors.AsType[*textproto.Error](err); ok && (reply.Code == 530 || reply.Code == 534 || reply.Code == 535 || reply.Code == 538) {
+		return errSMTPAuth
+	}
+	return errors.New("smtp message rejected by server")
 }

@@ -7,13 +7,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"log/slog"
 	"strconv"
 	"testing"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -999,11 +996,11 @@ func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, al
 	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", nil); err != nil {
+	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+	if err != nil {
 		t.Fatal(err)
 	}
-	manager := alerts.NewManager(alerts.Options{DB: s, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
-	if err := manager.ManualResolve(ctx, alertID, "resolved manually"); err != nil {
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved manually"); err != nil {
 		t.Fatal(err)
 	}
 	after, err := s.GetAlert(ctx, alertID)
@@ -1013,8 +1010,15 @@ func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, al
 	if after.LastState != models.AlertStateResolved {
 		t.Errorf("last_state = %s, want resolved", after.LastState)
 	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "second resolution"); !models.IsNotFound(err) {
+		t.Errorf("second resolution = %v, want not found", err)
+	}
+	if err := s.UpdateAlertHistoryPayload(ctx, entry.ID, map[string]any{"delivery_failed": false}); !models.IsNotFound(err) {
+		t.Errorf("resolved history payload update = %v, want not found", err)
+	}
+
 	history, err := s.ListAlertHistory(ctx, alertID, 1)
-	if err != nil || len(history) != 1 || history[0].Status != models.AlertStatusResolved {
+	if err != nil || len(history) != 1 || history[0].Status != models.AlertStatusResolved || history[0].Payload["delivery_failed"] != true {
 		t.Fatalf("resolved history = %+v, %v", history, err)
 	}
 }
