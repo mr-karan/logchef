@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -50,9 +49,10 @@ type Manager struct {
 	evalTimeout time.Duration
 	evalFn      func(context.Context, *models.Alert) error
 
-	stop     chan struct{}
-	stopOnce sync.Once
-	wg       sync.WaitGroup
+	lifecycleMu sync.Mutex
+	stopped     bool
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 }
 
 // NewManager constructs a new alert manager instance.
@@ -68,7 +68,6 @@ func NewManager(opts Options) *Manager {
 		log:         opts.Logger.With("component", "alert_manager"),
 		sender:      sender,
 		evalTimeout: alertEvaluationTimeout,
-		stop:        make(chan struct{}),
 	}
 	m.evalFn = m.evaluateAlert
 	return m
@@ -76,6 +75,11 @@ func NewManager(opts Options) *Manager {
 
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
 func (m *Manager) Start(ctx context.Context) {
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	if m.stopped || m.cancel != nil {
+		return
+	}
 	if !m.cfg.Enabled {
 		m.log.Debug("alerting disabled")
 		return
@@ -84,6 +88,7 @@ func (m *Manager) Start(ctx context.Context) {
 	if interval <= 0 {
 		interval = time.Minute
 	}
+	ctx, m.cancel = context.WithCancel(ctx)
 	m.log.Debug("starting alert manager", "interval", interval)
 
 	m.wg.Go(func() {
@@ -97,9 +102,6 @@ func (m *Manager) Start(ctx context.Context) {
 			select {
 			case <-ticker.C:
 				m.evaluateCycle(ctx)
-			case <-m.stop:
-				m.log.Debug("alert manager stopping")
-				return
 			case <-ctx.Done():
 				m.log.Debug("alert manager context cancelled")
 				return
@@ -110,11 +112,19 @@ func (m *Manager) Start(ctx context.Context) {
 
 // Stop signals the manager to stop evaluating alerts.
 func (m *Manager) Stop() {
-	m.stopOnce.Do(func() { close(m.stop) })
+	m.lifecycleMu.Lock()
+	m.stopped = true
+	if m.cancel != nil {
+		m.cancel()
+	}
+	m.lifecycleMu.Unlock()
 	m.wg.Wait()
 }
 
 func (m *Manager) evaluateCycle(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
 	alerts, err := m.db.ListActiveAlertsDue(ctx)
 	if err != nil {
 		m.log.Error("failed to fetch alerts for evaluation", "error", err)
@@ -125,6 +135,9 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 
 	for _, alert := range alerts {
+		if ctx.Err() != nil {
+			return
+		}
 		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
 			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
@@ -181,7 +194,7 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 		return fmt.Errorf("failed to extract alert result: %w", err)
 	}
 
-	triggered := compareThreshold(value, alert.ThresholdValue, alert.ThresholdOperator)
+	triggered := util.CompareAlertThreshold(value, alert.ThresholdValue, alert.ThresholdOperator)
 
 	m.log.Debug("alert evaluation complete",
 		"alert_id", alert.ID,
@@ -555,22 +568,4 @@ func copyStringMap(src map[string]string) map[string]string {
 	dst := make(map[string]string, len(src))
 	maps.Copy(dst, src)
 	return dst
-}
-func compareThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {
-	switch operator {
-	case models.AlertThresholdGreaterThan:
-		return value > threshold
-	case models.AlertThresholdGreaterThanOrEqual:
-		return value >= threshold
-	case models.AlertThresholdLessThan:
-		return value < threshold
-	case models.AlertThresholdLessThanOrEqual:
-		return value <= threshold
-	case models.AlertThresholdEqual:
-		return math.Abs(value-threshold) < 1e-9
-	case models.AlertThresholdNotEqual:
-		return math.Abs(value-threshold) >= 1e-9
-	default:
-		return false
-	}
 }

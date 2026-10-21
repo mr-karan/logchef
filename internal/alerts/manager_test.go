@@ -381,3 +381,45 @@ func TestManagerOutcomeWriteFailureStopsAtMaxAttempts(t *testing.T) {
 		t.Errorf("exhaustion log = %+v, want error with alert %d, history %d, %d attempts", got, alert.ID, entry.ID, maxDeliveryAttempts)
 	}
 }
+
+func TestManagerStopCancelsEvaluation(t *testing.T) {
+	db, _, logger := newManagerTestAlert(t)
+	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour}})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := make(chan struct{})
+	manager.evalFn = func(ctx context.Context, _ *models.Alert) error { close(started); <-ctx.Done(); return ctx.Err() }
+	manager.Start(ctx)
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("evaluation did not start")
+	}
+	stopped := make(chan struct{})
+	go func() { manager.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		cancel()
+		<-stopped
+		t.Fatal("Stop did not cancel in-flight evaluation within one second")
+	}
+}
+
+func TestManagerSkipsRemainingAlertsAfterCancellation(t *testing.T) {
+	db, alert, logger := newManagerTestAlert(t)
+	alert.ID = 0
+	alert.Name = "another alert"
+	if err := db.CreateAlert(t.Context(), alert); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(Options{DB: db, Logger: logger})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	evaluations := 0
+	manager.evalFn = func(context.Context, *models.Alert) error { evaluations++; cancel(); return nil }
+	manager.evaluateCycle(ctx)
+	if evaluations != 1 {
+		t.Errorf("evaluated %d alerts after cancellation; want one", evaluations)
+	}
+}

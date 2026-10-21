@@ -169,7 +169,7 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize alerts manager with dynamic senders that read config from DB
 	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
-	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, a.Logger)
+	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, a.Logger, a.Config.Alerts.WebhookAllowedHosts...)
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
@@ -247,11 +247,6 @@ func (a *App) Shutdown(ctx context.Context) error {
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
 
-	if a.Alerts != nil {
-		a.Logger.Info("stopping alert manager")
-		a.Alerts.Stop()
-	}
-
 	// Shutdown server first to stop accepting new requests.
 	if a.server != nil {
 		a.Logger.Info("shutting down HTTP server")
@@ -272,6 +267,11 @@ func (a *App) Shutdown(ctx context.Context) error {
 		case <-serverCtx.Done():
 			a.Logger.Warn("timeout shutting down HTTP server, continuing")
 		}
+	}
+
+	if a.Alerts != nil {
+		a.Logger.Info("stopping alert manager")
+		a.Alerts.Stop()
 	}
 
 	// Close ClickHouse manager (stops health checks and closes clients).

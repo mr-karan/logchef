@@ -421,13 +421,14 @@ func (c AIConfig) AskChefEnabled() bool {
 	return false
 }
 
-// AlertsConfig controls scheduling behaviour for alert rules.
+// AlertsConfig controls scheduling and webhook network access for alert rules.
 // SMTP and other delivery settings are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
-	Enabled            bool          `koanf:"enabled"`
-	EvaluationInterval time.Duration `koanf:"evaluation_interval"`
-	DefaultLookback    time.Duration `koanf:"default_lookback"`
-	HistoryLimit       int           `koanf:"history_limit"`
+	Enabled             bool          `koanf:"enabled"`
+	EvaluationInterval  time.Duration `koanf:"evaluation_interval"`
+	DefaultLookback     time.Duration `koanf:"default_lookback"`
+	HistoryLimit        int           `koanf:"history_limit"`
+	WebhookAllowedHosts []string      `koanf:"webhook_allowed_hosts"`
 }
 
 const (

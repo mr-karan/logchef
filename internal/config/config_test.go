@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -549,6 +550,26 @@ func TestAIConfigAskChefEnabled(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.cfg.AskChefEnabled(); got != tt.want {
 				t.Fatalf("AskChefEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadWebhookAllowedHosts(t *testing.T) {
+	for _, tc := range []struct {
+		name, extra string
+		want        []string
+	}{
+		{name: "default"},
+		{name: "internal receivers", extra: "\n[alerts]\nwebhook_allowed_hosts = [\"localhost\", \"127.0.0.1\"]\n", want: []string{"localhost", "127.0.0.1"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Load(writeConfig(t, tc.extra))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(cfg.Alerts.WebhookAllowedHosts, tc.want) {
+				t.Errorf("webhook_allowed_hosts = %v; want %v", cfg.Alerts.WebhookAllowedHosts, tc.want)
 			}
 		})
 	}

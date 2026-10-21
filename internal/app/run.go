@@ -48,6 +48,7 @@ func Run(opts Options) error {
 	// Wait for shutdown signal (Ctrl+C or SIGTERM).
 	<-shutdown
 	app.Logger.Info("received shutdown signal")
+	cancel()
 
 	// Create a context with timeout for graceful shutdown phase.
 	shutdownTimeout := 10 * time.Second
