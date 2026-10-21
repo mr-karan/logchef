@@ -2,7 +2,9 @@ package core
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"path/filepath"
@@ -855,5 +857,60 @@ func TestCollectionTeamShareAuthorization(t *testing.T) {
 	}
 	if err := RemoveCollectionTeam(ctx, db, log, personal.ID, owner.ID, ownTeam.ID); !errors.Is(err, ErrPersonalCollectionImmutable) {
 		t.Errorf("RemoveCollectionTeam(personal) err = %v, want ErrPersonalCollectionImmutable", err)
+	}
+}
+
+func TestCollectionCreationRollback(t *testing.T) {
+	for _, personal := range []bool{true, false} {
+		t.Run(fmt.Sprintf("personal=%t", personal), func(t *testing.T) {
+			ctx := context.Background()
+			path := filepath.Join(t.TempDir(), "collections.db")
+			db, err := sqlite.New(ctx, sqlite.Options{Logger: discardLogger(), Config: config.SQLiteConfig{Path: path}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			conn, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = conn.Close() })
+			user := newTestUser(t, db, "owner@example.com", "Owner")
+			_, err = conn.ExecContext(ctx, `
+CREATE TRIGGER reject_owner BEFORE INSERT ON collection_members
+BEGIN SELECT RAISE(ABORT, 'owner insertion rejected'); END;
+CREATE TRIGGER reject_collection_delete BEFORE DELETE ON collections
+BEGIN SELECT RAISE(ABORT, 'collection deletion rejected'); END;`)
+			if err != nil {
+				t.Fatal(err)
+			}
+			create := func() (*models.Collection, error) {
+				if personal {
+					return EnsurePersonalCollection(ctx, db, discardLogger(), user)
+				}
+				return CreateCollection(ctx, db, discardLogger(), "Shared", "", user.ID)
+			}
+			if collection, err := create(); err == nil || collection != nil {
+				t.Fatalf("creation = %+v / %v, want failure", collection, err)
+			}
+			var count int
+			if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM collections").Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 0 {
+				t.Fatalf("collections after failed owner insertion = %d, want 0", count)
+			}
+			if _, err := conn.ExecContext(ctx, "DROP TRIGGER reject_owner"); err != nil {
+				t.Fatal(err)
+			}
+			collection, err := create()
+			if err != nil {
+				t.Fatalf("retry creation: %v", err)
+			}
+			member, err := db.GetCollectionMember(ctx, collection.ID, user.ID)
+			if err != nil || member.Role != models.CollectionRoleOwner {
+				t.Fatalf("owner after retry = %+v / %v", member, err)
+			}
+		})
 	}
 }
