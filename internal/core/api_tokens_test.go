@@ -2,10 +2,14 @@ package core
 
 import (
 	"context"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -63,5 +67,41 @@ func TestCreateServiceAccount(t *testing.T) {
 	}
 	if len(accounts) != 1 || accounts[0].ID != account.ID {
 		t.Fatalf("service account list = %+v, want created account", accounts)
+	}
+}
+
+func TestAuthenticateAPITokenBoundsLastUsedWrite(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	user := newTestUser(t, db, "slow-token@example.com", "Slow Token")
+	authCfg := &config.AuthConfig{APITokenSecret: "0123456789abcdef0123456789abcdef"}
+	token, err := CreateAPIToken(ctx, db, discardLogger(), authCfg, user.ID, "slow", nil, []models.TokenScope{models.TokenScopeLogsRead})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ready, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+	go func() {
+		done <- db.WithTx(ctx, func(store.StoreOps) error { close(ready); <-release; return nil })
+	}()
+	defer func() {
+		close(release)
+		if err := <-done; err != nil {
+			t.Error(err)
+		}
+	}()
+	<-ready
+	start := time.Now()
+	_, _, err = AuthenticateAPIToken(ctx, db, discardLogger(), authCfg, token.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("authentication blocked for %s", elapsed)
+	}
+	// A completed authentication must not leave a writer waiting for the database.
+	stack := make([]byte, 1<<20)
+	stack = stack[:runtime.Stack(stack, true)]
+	if strings.Contains(string(stack), "core.AuthenticateAPIToken.func") {
+		t.Fatal("authentication left a detached last-used writer")
 	}
 }

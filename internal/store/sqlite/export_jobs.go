@@ -152,3 +152,16 @@ func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 	}
 	return job
 }
+
+// ListInterruptedExportJobs returns a bounded batch of unfinished exports.
+func (db *DB) ListInterruptedExportJobs(ctx context.Context) ([]*models.ExportJob, error) {
+	rows, err := db.readQueries.ListInterruptedExportJobs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing interrupted exports: %w", err)
+	}
+	jobs := make([]*models.ExportJob, 0, len(rows))
+	for i := range rows {
+		jobs = append(jobs, exportJobFromSQLC(rows[i]))
+	}
+	return jobs, nil
+}

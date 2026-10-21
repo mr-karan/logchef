@@ -1318,3 +1318,9 @@ WHERE NOT EXISTS (
     WHERE live.grant_id = oauth_refresh_tokens.grant_id
       AND live.expires_at > sqlc.arg(now)
 );
+
+-- name: ListInterruptedExportJobs :many
+SELECT * FROM export_jobs
+WHERE status IN ('pending', 'running')
+ORDER BY id
+LIMIT 100;

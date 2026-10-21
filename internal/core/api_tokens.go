@@ -273,12 +273,10 @@ func AuthenticateAPIToken(ctx context.Context, db store.StoreOps, log *slog.Logg
 		return nil, nil, ErrInvalidToken
 	}
 
-	//nolint:contextcheck // Background goroutine for async last-used update
-	go func() { //nolint:gosec // G118: detached background last-used update, must outlive request
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = UpdateAPITokenLastUsed(ctx, db, apiToken.ID)
-	}()
+	// Last-used metadata must not delay authentication on a slow store.
+	updateCtx, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
+	defer cancel()
+	_ = UpdateAPITokenLastUsed(updateCtx, db, apiToken.ID)
 
 	return user, apiToken, nil
 }

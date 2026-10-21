@@ -2922,6 +2922,49 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtyp
 	return items, nil
 }
 
+const listInterruptedExportJobs = `-- name: ListInterruptedExportJobs :many
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at FROM export_jobs
+WHERE status IN ('pending', 'running')
+ORDER BY id
+LIMIT 100
+`
+
+func (q *Queries) ListInterruptedExportJobs(ctx context.Context) ([]ExportJob, error) {
+	rows, err := q.db.Query(ctx, listInterruptedExportJobs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ExportJob{}
+	for rows.Next() {
+		var i ExportJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceID,
+			&i.CreatedBy,
+			&i.Status,
+			&i.Format,
+			&i.RequestJson,
+			&i.FileName,
+			&i.FilePath,
+			&i.ErrorMessage,
+			&i.RowsExported,
+			&i.BytesWritten,
+			&i.ExpiresAt,
+			&i.CompletedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listManagedSources = `-- name: ListManagedSources :many
 
 SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE managed = true ORDER BY id

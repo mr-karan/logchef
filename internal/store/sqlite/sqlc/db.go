@@ -324,6 +324,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.listExpiredExportJobPathsStmt, err = db.PrepareContext(ctx, listExpiredExportJobPaths); err != nil {
 		return nil, fmt.Errorf("error preparing query ListExpiredExportJobPaths: %w", err)
 	}
+	if q.listInterruptedExportJobsStmt, err = db.PrepareContext(ctx, listInterruptedExportJobs); err != nil {
+		return nil, fmt.Errorf("error preparing query ListInterruptedExportJobs: %w", err)
+	}
 	if q.listManagedSourcesStmt, err = db.PrepareContext(ctx, listManagedSources); err != nil {
 		return nil, fmt.Errorf("error preparing query ListManagedSources: %w", err)
 	}
@@ -1018,6 +1021,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing listExpiredExportJobPathsStmt: %w", cerr)
 		}
 	}
+	if q.listInterruptedExportJobsStmt != nil {
+		if cerr := q.listInterruptedExportJobsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing listInterruptedExportJobsStmt: %w", cerr)
+		}
+	}
 	if q.listManagedSourcesStmt != nil {
 		if cerr := q.listManagedSourcesStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing listManagedSourcesStmt: %w", cerr)
@@ -1472,6 +1480,7 @@ type Queries struct {
 	listCollectionsForUserStmt                 *sql.Stmt
 	listDashboardsStmt                         *sql.Stmt
 	listExpiredExportJobPathsStmt              *sql.Stmt
+	listInterruptedExportJobsStmt              *sql.Stmt
 	listManagedSourcesStmt                     *sql.Stmt
 	listManagedTeamsStmt                       *sql.Stmt
 	listManagedUsersStmt                       *sql.Stmt
@@ -1641,6 +1650,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listCollectionsForUserStmt:                 q.listCollectionsForUserStmt,
 		listDashboardsStmt:                         q.listDashboardsStmt,
 		listExpiredExportJobPathsStmt:              q.listExpiredExportJobPathsStmt,
+		listInterruptedExportJobsStmt:              q.listInterruptedExportJobsStmt,
 		listManagedSourcesStmt:                     q.listManagedSourcesStmt,
 		listManagedTeamsStmt:                       q.listManagedTeamsStmt,
 		listManagedUsersStmt:                       q.listManagedUsersStmt,

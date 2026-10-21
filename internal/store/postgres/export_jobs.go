@@ -143,3 +143,16 @@ func (s *Store) DeleteExpiredExportJobs(ctx context.Context, before time.Time) e
 	}
 	return nil
 }
+
+// ListInterruptedExportJobs returns a bounded batch of unfinished exports.
+func (s *Store) ListInterruptedExportJobs(ctx context.Context) ([]*models.ExportJob, error) {
+	rows, err := s.q.ListInterruptedExportJobs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("error listing interrupted exports: %w", err)
+	}
+	jobs := make([]*models.ExportJob, 0, len(rows))
+	for i := range rows {
+		jobs = append(jobs, exportJobToModel(rows[i]))
+	}
+	return jobs, nil
+}

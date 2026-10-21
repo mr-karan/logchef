@@ -223,6 +223,7 @@ type Querier interface {
 	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error)
+	ListInterruptedExportJobs(ctx context.Context) ([]ExportJob, error)
 	// Provisioning Queries
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)

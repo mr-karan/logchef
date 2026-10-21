@@ -256,22 +256,10 @@ func (a *App) Shutdown(ctx context.Context) error {
 	if a.server != nil {
 		a.Logger.Info("shutting down HTTP server")
 
-		serverDone := make(chan error, 1)
-		go func() {
-			serverDone <- a.server.Shutdown(serverCtx)
-		}()
-
-		// Wait for server shutdown or timeout
-		select {
-		case err := <-serverDone:
-			if err != nil {
-				a.Logger.Error("error shutting down server", "error", err)
-			} else {
-				a.Logger.Info("HTTP server shut down successfully")
-			}
-		case <-serverCtx.Done():
-			a.Logger.Warn("timeout shutting down HTTP server, continuing")
+		if err := a.server.Shutdown(serverCtx); err != nil {
+			return fmt.Errorf("error shutting down server: %w", err)
 		}
+		a.Logger.Info("HTTP server shut down successfully")
 	}
 
 	// Close ClickHouse manager (stops health checks and closes clients).

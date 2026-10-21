@@ -82,16 +82,6 @@ var queryTracker = &QueryTracker{
 	queries: make(map[string]*ActiveQuery),
 }
 
-func init() {
-	// Periodic cleanup of stale query tracker entries every 5 minutes
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		for range ticker.C {
-			queryTracker.Cleanup()
-		}
-	}()
-}
-
 // StartQuery registers a new active query atomically with admission control.
 func (qt *QueryTracker) StartQuery(class QueryClass, userID models.UserID, sourceID models.SourceID, teamID models.TeamID, sql string, cancel context.CancelFunc, maxPerUser, maxGlobal int) (string, error) {
 	queryID := uuid.New().String()

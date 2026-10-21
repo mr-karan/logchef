@@ -184,6 +184,7 @@ type QueryHistoryStore interface {
 
 // ExportJobStore persists asynchronous CSV/export job records.
 type ExportJobStore interface {
+	ListInterruptedExportJobs(ctx context.Context) ([]*models.ExportJob, error)
 	CreateExportJob(ctx context.Context, job *models.ExportJob) error
 	GetExportJob(ctx context.Context, id string) (*models.ExportJob, error)
 	UpdateExportJobRunning(ctx context.Context, id string, updatedAt time.Time) error
