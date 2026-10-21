@@ -177,6 +177,38 @@ describe("Explorer history navigation", () => {
     expectOpen(router, store, query, evidenceB);
   });
 
+  it("keeps the URL in step with a window chosen after picking a source", async () => {
+    const { router, store, query, urlState } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => urlState.selectSource(otherSource.id), store);
+
+    await expectOneRun(query, async () => store.setWindow({ kind: "relative", spec: "15m" }), store);
+    expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), t: "15m" });
+  });
+
+  it("runs only the latest navigation when Back lands before the previous source loads", async () => {
+    const { router, store, query } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+
+    let releaseOther: () => void = () => {};
+    const otherLoaded = new Promise<void>((resolve) => { releaseOther = resolve; });
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
+      if (sourceId === otherSource.id) await otherLoaded;
+      return ok(sourceId === otherSource.id ? otherSource : source) as never;
+    });
+
+    await expectOneRun(query, async () => {
+      await router.push({ path: "/logs/explore", query: evidenceOther });
+      await vi.waitFor(() => expect(router.currentRoute.value.query.limit).toBeDefined());
+      router.back();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.source).toBe(String(source.id)));
+      releaseOther();
+      await vi.waitFor(() => expect(store.sourceId).toBe(source.id));
+    }, store);
+    expectOpen(router, store, query, evidenceA);
+  });
+
   it("re-runs when the user chooses the same relative range again", async () => {
     const { router, store, query } = await mountExplorer();
     await settle(store);
