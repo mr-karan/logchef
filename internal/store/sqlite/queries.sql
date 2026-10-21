@@ -640,6 +640,12 @@ SET last_state = 'resolved',
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 WHERE id = ?;
 
+-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?;
+
 -- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',

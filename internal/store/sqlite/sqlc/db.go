@@ -465,6 +465,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.topUsersByQueriesStmt, err = db.PrepareContext(ctx, topUsersByQueries); err != nil {
 		return nil, fmt.Errorf("error preparing query TopUsersByQueries: %w", err)
 	}
+	if q.touchAlertEvaluatedStmt, err = db.PrepareContext(ctx, touchAlertEvaluated); err != nil {
+		return nil, fmt.Errorf("error preparing query TouchAlertEvaluated: %w", err)
+	}
 	if q.touchOAuthGrantStmt, err = db.PrepareContext(ctx, touchOAuthGrant); err != nil {
 		return nil, fmt.Errorf("error preparing query TouchOAuthGrant: %w", err)
 	}
@@ -1253,6 +1256,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing topUsersByQueriesStmt: %w", cerr)
 		}
 	}
+	if q.touchAlertEvaluatedStmt != nil {
+		if cerr := q.touchAlertEvaluatedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing touchAlertEvaluatedStmt: %w", cerr)
+		}
+	}
 	if q.touchOAuthGrantStmt != nil {
 		if cerr := q.touchOAuthGrantStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing touchOAuthGrantStmt: %w", cerr)
@@ -1519,6 +1527,7 @@ type Queries struct {
 	teamHasSourceStmt                          *sql.Stmt
 	topSourcesByQueriesStmt                    *sql.Stmt
 	topUsersByQueriesStmt                      *sql.Stmt
+	touchAlertEvaluatedStmt                    *sql.Stmt
 	touchOAuthGrantStmt                        *sql.Stmt
 	touchQueryShareStmt                        *sql.Stmt
 	updateAPITokenLastUsedStmt                 *sql.Stmt
@@ -1688,6 +1697,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		teamHasSourceStmt:                          q.teamHasSourceStmt,
 		topSourcesByQueriesStmt:                    q.topSourcesByQueriesStmt,
 		topUsersByQueriesStmt:                      q.topUsersByQueriesStmt,
+		touchAlertEvaluatedStmt:                    q.touchAlertEvaluatedStmt,
 		touchOAuthGrantStmt:                        q.touchOAuthGrantStmt,
 		touchQueryShareStmt:                        q.touchQueryShareStmt,
 		updateAPITokenLastUsedStmt:                 q.updateAPITokenLastUsedStmt,

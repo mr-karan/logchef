@@ -142,6 +142,14 @@ func (db *DB) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) er
 	return nil
 }
 
+// TouchAlertEvaluated records an evaluation without changing the alert state.
+func (db *DB) TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
+	if err := db.writeQueries.TouchAlertEvaluated(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to touch alert evaluated: %w", err)
+	}
+	return nil
+}
+
 // MarkAlertTriggered updates state when an alert fires.
 func (db *DB) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
 	if err := db.writeQueries.MarkAlertTriggered(ctx, int64(alertID)); err != nil {

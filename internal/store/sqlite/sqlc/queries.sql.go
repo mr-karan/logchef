@@ -4602,6 +4602,18 @@ func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesPa
 	return items, nil
 }
 
+const touchAlertEvaluated = `-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?
+`
+
+func (q *Queries) TouchAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.touchAlertEvaluatedStmt, touchAlertEvaluated, id)
+	return err
+}
+
 const touchOAuthGrant = `-- name: TouchOAuthGrant :exec
 UPDATE oauth_grants SET last_used_at = ? WHERE id = ?
 `

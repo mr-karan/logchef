@@ -128,6 +128,14 @@ func (s *Store) MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) 
 	return nil
 }
 
+// TouchAlertEvaluated records an evaluation without changing the alert state.
+func (s *Store) TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error {
+	if err := s.q.TouchAlertEvaluated(ctx, int64(alertID)); err != nil {
+		return fmt.Errorf("failed to touch alert evaluated: %w", err)
+	}
+	return nil
+}
+
 // MarkAlertTriggered updates state when an alert fires.
 func (s *Store) MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error {
 	if err := s.q.MarkAlertTriggered(ctx, int64(alertID)); err != nil {

@@ -165,8 +165,9 @@ func TestListActiveAlertsDue_TimestampFormats(t *testing.T) {
 // so any evaluation written before the query is due.
 func TestListActiveAlertsDue_AfterMark(t *testing.T) {
 	marks := map[string]func(*DB, context.Context, models.AlertID) error{
-		"MarkAlertEvaluated": (*DB).MarkAlertEvaluated,
-		"MarkAlertTriggered": (*DB).MarkAlertTriggered,
+		"MarkAlertEvaluated":  (*DB).MarkAlertEvaluated,
+		"TouchAlertEvaluated": (*DB).TouchAlertEvaluated,
+		"MarkAlertTriggered":  (*DB).MarkAlertTriggered,
 	}
 	for name, mark := range marks {
 		t.Run(name, func(t *testing.T) {

@@ -139,6 +139,7 @@ type AlertStore interface {
 	ListAlertsForUser(ctx context.Context, userID models.UserID) ([]*models.Alert, error)
 	ListActiveAlertsDue(ctx context.Context) ([]*models.Alert, error)
 	MarkAlertEvaluated(ctx context.Context, alertID models.AlertID) error
+	TouchAlertEvaluated(ctx context.Context, alertID models.AlertID) error
 	MarkAlertTriggered(ctx context.Context, alertID models.AlertID) error
 	InsertAlertHistory(ctx context.Context, alertID models.AlertID, status models.AlertStatus, value *float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error)
 	GetLatestUnresolvedAlertHistory(ctx context.Context, alertID models.AlertID) (*models.AlertHistoryEntry, error)

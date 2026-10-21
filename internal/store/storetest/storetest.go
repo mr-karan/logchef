@@ -763,6 +763,8 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Errorf("fresh active alert %d not returned by ListActiveAlertsDue", a.ID)
 	}
 
+	testAlertEvaluationState(t, ctx, s, a.ID)
+
 	// History round-trip.
 	val := 12.0
 	if _, err := s.InsertAlertHistory(ctx, a.ID, models.AlertStatusTriggered, &val, "fired", map[string]any{"k": "v"}); err != nil {
@@ -785,6 +787,52 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 	}
 	if err := s.DeleteAlert(ctx, a.ID); !errors.Is(err, models.ErrNotFound) {
 		t.Errorf("DeleteAlert(deleted) err = %v, want ErrNotFound", err)
+	}
+}
+
+func testAlertEvaluationState(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	for _, state := range []models.AlertState{models.AlertStateResolved, models.AlertStateFiring} {
+		t.Run("TouchAlertEvaluated/"+string(state), func(t *testing.T) {
+			if state == models.AlertStateFiring {
+				if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+					t.Fatal(err)
+				}
+			}
+			before, err := s.GetAlert(ctx, alertID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.TouchAlertEvaluated(ctx, alertID); err != nil {
+				t.Fatal(err)
+			}
+			after, err := s.GetAlert(ctx, alertID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if after.LastState != state {
+				t.Errorf("state = %s, want %s", after.LastState, state)
+			}
+			if after.LastEvaluatedAt == nil || after.LastEvaluatedAt.IsZero() {
+				t.Errorf("evaluation timestamp = %v, want nonzero", after.LastEvaluatedAt)
+			}
+			if after.UpdatedAt.Before(before.UpdatedAt) {
+				t.Errorf("updated timestamp moved backward from %v to %v", before.UpdatedAt, after.UpdatedAt)
+			}
+			if before.LastTriggeredAt == nil {
+				if after.LastTriggeredAt != nil {
+					t.Errorf("trigger timestamp = %v, want nil", after.LastTriggeredAt)
+				}
+			} else if after.LastTriggeredAt == nil || !after.LastTriggeredAt.Equal(*before.LastTriggeredAt) {
+				t.Errorf("trigger timestamp changed from %v to %v", before.LastTriggeredAt, after.LastTriggeredAt)
+			}
+		})
+	}
+	if err := s.MarkAlertEvaluated(ctx, alertID); err != nil {
+		t.Fatal(err)
+	}
+	if resolved, err := s.GetAlert(ctx, alertID); err != nil || resolved.LastState != models.AlertStateResolved {
+		t.Fatalf("state after MarkAlertEvaluated = %+v, %v; want resolved", resolved, err)
 	}
 }
 

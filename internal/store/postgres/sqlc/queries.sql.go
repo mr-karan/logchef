@@ -4461,6 +4461,18 @@ func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesPa
 	return items, nil
 }
 
+const touchAlertEvaluated = `-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = now(),
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) TouchAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, touchAlertEvaluated, id)
+	return err
+}
+
 const touchOAuthGrant = `-- name: TouchOAuthGrant :exec
 UPDATE oauth_grants SET last_used_at = $1 WHERE id = $2
 `

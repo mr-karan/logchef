@@ -631,6 +631,12 @@ SET last_state = 'resolved',
     updated_at = now()
 WHERE id = $1;
 
+-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = now(),
+    updated_at = now()
+WHERE id = $1;
+
 -- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',
