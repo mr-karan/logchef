@@ -97,7 +97,8 @@ export function useUrlState(): UrlStateReturn {
   const isReady = computed(() => state.value === 'ready');
 
   const pendingQueryResolve = ref(false);
-  let skipNextSync = false;
+  // The store's URL sync waits while a history entry is being pushed.
+  let pushInFlight = false;
   let pendingRouteSyncKey: string | null = null;
   let syncPaused = false;
   // Bumped per navigation Explorer applies, so a superseded one stops.
@@ -392,8 +393,7 @@ export function useUrlState(): UrlStateReturn {
       return;
     }
 
-    if (skipNextSync) {
-      skipNextSync = false;
+    if (pushInFlight) {
       return;
     }
 
@@ -423,20 +423,23 @@ export function useUrlState(): UrlStateReturn {
       return;
     }
 
-    skipNextSync = true;
     const query = normalizeQueryParams(exploreStore.urlQueryParameters as Record<string, unknown>);
     pendingRouteSyncKey = buildQueryKey(query);
 
+    pushInFlight = true;
     try {
-      await router.push({ path: '/logs/explore', query });
-      skipNextSync = false;
-    } catch (err: any) {
-      skipNextSync = false;
-      pendingRouteSyncKey = null;
-      if (err.name !== 'NavigationDuplicated') {
-        console.error('useUrlState: Error pushing history:', err);
+      // A redundant or aborted push resolves with a failure instead of throwing.
+      const failure = await router.push({ path: '/logs/explore', query });
+      if (failure) {
+        pendingRouteSyncKey = null;
       }
+    } catch (err) {
+      pendingRouteSyncKey = null;
+      console.error('useUrlState: Error pushing history:', err);
+    } finally {
+      pushInFlight = false;
     }
+    syncUrlFromStore();
   }
 
   async function selectTeam(teamId: number): Promise<void> {
