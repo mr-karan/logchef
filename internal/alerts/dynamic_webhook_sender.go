@@ -10,13 +10,15 @@ import (
 )
 
 type DynamicWebhookSender struct {
-	settings      SettingsReader
-	logger        *slog.Logger
-	allowedHosts  config.WebhookAllowlist
-	mu            sync.Mutex
-	sender        *WebhookSender
-	timeout       time.Duration
-	skipTLSVerify bool
+	settings             SettingsReader
+	logger               *slog.Logger
+	allowedHosts         config.WebhookAllowlist
+	defaultTimeout       time.Duration
+	defaultSkipTLSVerify bool
+	mu                   sync.Mutex
+	sender               *WebhookSender
+	timeout              time.Duration
+	skipTLSVerify        bool
 }
 
 func NewDynamicWebhookSender(settings SettingsReader, opts WebhookSenderOptions) *DynamicWebhookSender {
@@ -24,17 +26,22 @@ func NewDynamicWebhookSender(settings SettingsReader, opts WebhookSenderOptions)
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = 5 * time.Second
+	}
 	return &DynamicWebhookSender{
-		settings:     settings,
-		allowedHosts: opts.AllowedHosts,
-		logger:       logger.With("component", "dynamic_webhook_sender"),
+		settings:             settings,
+		defaultTimeout:       opts.Timeout,
+		defaultSkipTLSVerify: opts.SkipTLSVerify,
+		allowedHosts:         opts.AllowedHosts,
+		logger:               logger.With("component", "dynamic_webhook_sender"),
 	}
 }
 
 func (d *DynamicWebhookSender) Send(ctx context.Context, notification AlertNotification) error {
 	opts := WebhookSenderOptions{
-		Timeout:       d.settings.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: d.settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Timeout:       d.settings.GetDurationSetting(ctx, "alerts.request_timeout", d.defaultTimeout),
+		SkipTLSVerify: d.settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", d.defaultSkipTLSVerify),
 		Logger:        d.logger,
 		AllowedHosts:  d.allowedHosts,
 	}

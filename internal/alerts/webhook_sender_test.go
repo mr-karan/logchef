@@ -1,9 +1,13 @@
 package alerts
 
 import (
+	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -56,8 +61,8 @@ func TestWebhookResponseBodyBoundedInHistory(t *testing.T) {
 	if !ok {
 		t.Fatalf("missing delivery error in %v", history[0].Payload)
 	}
-	if len(deliveryError) > 512 || !strings.HasSuffix(deliveryError, " [truncated]") || strings.Contains(deliveryError, "private-response-tail") {
-		t.Fatalf("history did not bound the response error with a truncation marker, error length %d", len(deliveryError))
+	if len(deliveryError) > 512 || strings.Contains(deliveryError, "xxx") || strings.Contains(deliveryError, "private-response-tail") {
+		t.Fatalf("history retained the response body, error length %d", len(deliveryError))
 	}
 	if !strings.Contains(deliveryError, "status 502") {
 		t.Errorf("missing HTTP status in %q", deliveryError)
@@ -345,12 +350,130 @@ func TestWebhookAddressPolicy(t *testing.T) {
 		{"255.255.255.254", true}, {"fdff:ffff::1", true}, {"febf:ffff::1", true},
 		{"feff:ffff::1", true}, {"64:ff9b::7f00:1", true}, {"::ffff:100.100.100.200", true},
 		{"8.8.8.8", false}, {"100.128.0.1", false}, {"198.20.0.1", false},
-		{"2001:4860:4860::8888", false}, {"64:ff9b::808:808", false}, {"64:ff9b:1::808:808", false},
+		{"2001:4860:4860::8888", false}, {"64:ff9b::808:808", false}, {"64:ff9b:1::808:808", true},
 	} {
 		t.Run(tc.address, func(t *testing.T) {
 			if got := webhookAddressDenied(netip.MustParseAddr(tc.address)); got != tc.denied {
 				t.Errorf("address denied = %t, want %t", got, tc.denied)
 			}
 		})
+	}
+}
+
+func TestWebhookLocalNAT64Policy(t *testing.T) {
+	for _, address := range []string{"64:ff9b:1:0:a:0:100:0", "64:ff9b:1:0:7f:0:100:0", "64:ff9b:1:0:64:4000:100:0", "64:ff9b:1::808:808"} {
+		t.Run(address, func(t *testing.T) {
+			if !webhookAddressDenied(netip.MustParseAddr(address)) {
+				t.Fatal("local-use NAT64 address accepted")
+			}
+			sender := NewWebhookSender(WebhookSenderOptions{Timeout: 50 * time.Millisecond, AllowedHosts: webhookTestAllowlist(t, address)})
+			defer sender.client.CloseIdleConnections()
+			err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{"http://[" + address + "]/"}})
+			if err != nil && strings.Contains(err.Error(), "not allowed") {
+				t.Fatal("explicit host exception was denied")
+			}
+		})
+	}
+}
+
+func TestWebhookTransportErrorCategories(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"DNS", &net.DNSError{Err: "private resolver detail", Name: "internal.example"}, "DNS lookup failed"},
+		{"refused", &net.OpError{Op: "dial", Net: "tcp", Err: syscall.ECONNREFUSED}, "connection refused"},
+		{"TLS", &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}, "TLS verification failed"},
+		{"TLS record", tls.RecordHeaderError{Msg: "private TLS detail"}, "TLS handshake failed"},
+		{"timeout", context.DeadlineExceeded, "request timed out"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, alert, logger := newManagerTestAlert(t)
+			sender := NewWebhookSender(WebhookSenderOptions{})
+			sender.client.Transport = webhookErrorTransport{err: tc.err}
+			alert.WebhookURLs = []string{"https://internal.example/"}
+			want := "webhook delivery failed: webhook 1: " + tc.want
+			if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: alert.WebhookURLs}); err == nil || err.Error() != want {
+				t.Fatalf("API delivery error = %v, want %q", err, want)
+			}
+			manager := NewManager(Options{DB: db, Logger: logger, Sender: sender})
+			if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
+				t.Fatal(err)
+			}
+			history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
+			if err != nil || len(history) != 1 {
+				t.Fatalf("history count = %d, error = %v", len(history), err)
+			}
+			if got := history[0].Payload["delivery_error"]; got != want {
+				t.Fatalf("stored delivery error = %v, want %q", got, want)
+			}
+		})
+	}
+}
+
+type webhookErrorTransport struct{ err error }
+
+func (transport webhookErrorTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, transport.err
+}
+
+func TestWebhookCapsEachResponseExcerpt(t *testing.T) {
+	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = io.WriteString(w, strings.Repeat("x", 300))
+	}))
+	defer receiver.Close()
+	var logs bytes.Buffer
+	sender := NewWebhookSender(WebhookSenderOptions{Logger: slog.New(slog.NewJSONHandler(&logs, nil)), AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
+	defer sender.client.CloseIdleConnections()
+	err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL, receiver.URL}})
+	if err == nil || strings.Contains(err.Error(), "xxx") || !strings.Contains(err.Error(), "webhook 2: status 502") {
+		t.Fatalf("response error retained body or lost status: %v", err)
+	}
+	entries := strings.Split(strings.TrimSpace(logs.String()), "\n")
+	if len(entries) != 2 {
+		t.Fatalf("logged %d responses, want two", len(entries))
+	}
+	for _, entry := range entries {
+		var logged struct {
+			Excerpt string `json:"response_excerpt"`
+		}
+		if err := json.Unmarshal([]byte(entry), &logged); err != nil {
+			t.Fatal(err)
+		}
+		if len(logged.Excerpt) > 256 || !strings.HasSuffix(logged.Excerpt, " [truncated]") {
+			t.Fatalf("invalid excerpt length %d", len(logged.Excerpt))
+		}
+	}
+}
+
+func TestDynamicWebhookHonorsOptionDefaults(t *testing.T) {
+	db, _, logger := newManagerTestAlert(t)
+	release := make(chan struct{})
+	receiver := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/slow" {
+			<-release
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer receiver.Close()
+	defer close(release)
+	sender := NewDynamicWebhookSender(db, WebhookSenderOptions{Logger: logger, Timeout: 200 * time.Millisecond, SkipTLSVerify: true, AllowedHosts: webhookTestAllowlist(t, "127.0.0.1")})
+	if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}); err != nil {
+		t.Fatalf("option TLS default ignored: %v", err)
+	}
+	started := time.Now()
+	if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL + "/slow"}}); err == nil {
+		t.Fatal("timeout default ignored")
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("configured timeout exceeded one second")
+	}
+	if err := db.UpsertSetting(t.Context(), "alerts.tls_insecure_skip_verify", "false", "boolean", "alerts", "", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := sender.Send(t.Context(), AlertNotification{WebhookURLs: []string{receiver.URL}}); err == nil {
+		t.Fatal("saved TLS setting did not override option default")
 	}
 }

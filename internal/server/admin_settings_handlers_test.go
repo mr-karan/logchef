@@ -131,3 +131,75 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleTestWebhookTransportErrors(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		want string
+	}{
+		{"TLS", "TLS verification failed"},
+		{"refused", "connection refused"},
+		{"timeout", "request timed out"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			release := make(chan struct{})
+			receiver := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if tc.name == "timeout" {
+					<-release
+				}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			if tc.name == "TLS" {
+				receiver.StartTLS()
+			} else {
+				receiver.Start()
+			}
+			defer receiver.Close()
+			defer close(release)
+			if tc.name == "refused" {
+				receiver.Close()
+			}
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			db, err := sqlite.New(t.Context(), sqlite.Options{Logger: logger, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "settings.db")}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			allowlist, err := config.ParseWebhookAllowlist([]string{"127.0.0.1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			timeout := "1s"
+			if tc.name == "timeout" {
+				timeout = "30ms"
+			}
+			if err := db.UpsertSetting(t.Context(), "alerts.request_timeout", timeout, "string", "alerts", "", false); err != nil {
+				t.Fatal(err)
+			}
+			s := &Server{webhookSender: alerts.NewDynamicWebhookSender(db, alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}), sqlite: db, log: logger}
+			app := fiber.New()
+			app.Post("/test-webhook", func(c fiber.Ctx) error {
+				c.Locals("user", &models.User{Role: models.UserRoleAdmin, Email: "admin@example.com"})
+				return s.handleTestWebhook(c)
+			})
+			body, err := json.Marshal(TestWebhookRequest{WebhookURL: receiver.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			req := httptest.NewRequest(http.MethodPost, "/test-webhook", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			response, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer response.Body.Close()
+			responseBody, err := io.ReadAll(response.Body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if response.StatusCode != http.StatusBadGateway || !strings.Contains(string(responseBody), tc.want) || strings.Contains(string(responseBody), "127.0.0.1") {
+				t.Fatalf("API error = %s, want fixed %q without destination", responseBody, tc.want)
+			}
+		})
+	}
+}

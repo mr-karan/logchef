@@ -14,6 +14,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unicode/utf8"
 
 	"log/slog"
 
@@ -27,7 +28,7 @@ type WebhookSenderOptions struct {
 	AllowedHosts  config.WebhookAllowlist
 }
 
-const maxWebhookResponseBytes = 4096
+const maxWebhookResponseBytes = 256
 
 type WebhookSender struct {
 	client *http.Client
@@ -167,18 +168,17 @@ func (s *WebhookSender) Send(ctx context.Context, notification AlertNotification
 				errs = append(errs, fmt.Sprintf("webhook %d: status %d (body read error: %v)", index+1, response.StatusCode, sanitizeWebhookTransportError(readErr)))
 				continue
 			}
-			truncated := len(responseBody) > maxWebhookResponseBytes
-			if truncated {
-				responseBody = responseBody[:maxWebhookResponseBytes]
+			excerpt := strings.TrimSpace(strings.ToValidUTF8(string(responseBody), "?"))
+			if len(responseBody) > maxWebhookResponseBytes {
+				const marker = " [truncated]"
+				limit := min(len(excerpt), maxWebhookResponseBytes-len(marker))
+				for !utf8.ValidString(excerpt[:limit]) {
+					limit--
+				}
+				excerpt = excerpt[:limit] + marker
 			}
-			trimmed := strings.TrimSpace(string(responseBody))
-			if truncated {
-				trimmed += " [truncated]"
-			}
+			s.logger.Warn("webhook delivery failed", "webhook", index+1, "status", response.StatusCode, "response_excerpt", excerpt)
 			detail := fmt.Sprintf("webhook %d: status %d", index+1, response.StatusCode)
-			if trimmed != "" {
-				detail += fmt.Sprintf(" (%s)", trimmed)
-			}
 			errs = append(errs, detail)
 		}
 	}
@@ -208,21 +208,16 @@ var deniedWebhookPrefixes = []netip.Prefix{
 	netip.MustParsePrefix("fec0::/10"),
 	netip.MustParsePrefix("2002::/16"),
 	netip.MustParsePrefix("::/96"),
-}
-
-var translatedWebhookPrefixes = []netip.Prefix{
-	netip.MustParsePrefix("64:ff9b::/96"),
 	netip.MustParsePrefix("64:ff9b:1::/48"),
 }
 
+var translatedWebhookPrefix = netip.MustParsePrefix("64:ff9b::/96")
+
 func webhookAddressDenied(ip netip.Addr) bool {
 	ip = ip.Unmap().WithZone("")
-	for _, prefix := range translatedWebhookPrefixes {
-		if prefix.Contains(ip) {
-			addressBytes := ip.As16()
-			ip = netip.AddrFrom4([4]byte{addressBytes[12], addressBytes[13], addressBytes[14], addressBytes[15]})
-			break
-		}
+	if translatedWebhookPrefix.Contains(ip) {
+		addressBytes := ip.As16()
+		ip = netip.AddrFrom4([4]byte{addressBytes[12], addressBytes[13], addressBytes[14], addressBytes[15]})
 	}
 	if !ip.IsGlobalUnicast() {
 		return true
@@ -243,10 +238,22 @@ func sanitizeWebhookTransportError(err error) error {
 		return context.Canceled
 	}
 	if errors.Is(err, context.DeadlineExceeded) {
-		return context.DeadlineExceeded
+		return errors.New("request timed out")
 	}
 	if networkErr, ok := errors.AsType[net.Error](err); ok && networkErr.Timeout() {
 		return errors.New("request timed out")
+	}
+	if _, ok := errors.AsType[*net.DNSError](err); ok {
+		return errors.New("DNS lookup failed")
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return errors.New("connection refused")
+	}
+	if _, ok := errors.AsType[*tls.CertificateVerificationError](err); ok {
+		return errors.New("TLS verification failed")
+	}
+	if _, ok := errors.AsType[tls.RecordHeaderError](err); ok {
+		return errors.New("TLS handshake failed")
 	}
 	return errors.New("HTTP request failed")
 }
