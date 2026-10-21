@@ -5,6 +5,7 @@ import type { AlertThresholdOperator } from "@/api/alerts";
 import type { AskChefContext } from "@/stores/askChef";
 import { useSourcesStore } from "@/stores/sources";
 import { useTeamsStore } from "@/stores/teams";
+import { epochMs, formatInZone, isSameZonedDay } from "@/utils/timeWindow";
 
 const props = defineProps<{ context: AskChefContext }>();
 
@@ -22,14 +23,18 @@ const sourceLabel = computed(() => {
   return team ? `${team} / ${source}` : source;
 });
 
-function formatTime(ms: number, withDate: boolean): string {
-  return new Date(ms).toLocaleString(locale.value, withDate ? { dateStyle: "medium", timeStyle: "short" } : { timeStyle: "short" });
+function formatTime(ms: number, withDate: boolean, withSeconds = false): string {
+  const timeStyle = withSeconds ? "medium" : "short";
+  const opts: Intl.DateTimeFormatOptions = withDate ? { dateStyle: "medium", timeStyle } : { timeStyle };
+  return formatInZone(epochMs(ms), props.context.zone, opts, locale.value);
 }
 
+// A histogram bar can zoom to a few seconds, which minutes alone show as an empty window.
 const windowLabel = computed(() => {
-  const { start, end } = props.context;
-  const sameDay = new Date(start).toDateString() === new Date(end).toDateString();
-  return `${formatTime(start, true)} – ${formatTime(end, !sameDay)}`;
+  const { start, end, zone } = props.context;
+  const sameDay = isSameZonedDay(epochMs(start), epochMs(end), zone);
+  const withSeconds = start % 60_000 !== 0 || end % 60_000 !== 0;
+  return `${formatTime(start, true, withSeconds)} – ${formatTime(end, !sameDay, withSeconds)}`;
 });
 
 const details = computed(() => {

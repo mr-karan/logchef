@@ -1,10 +1,16 @@
 import { describe, it, expect } from "vitest";
 import {
   buildHistogramChartModel,
+  formatHistogramTimestamp,
+  formatTooltipTimestamp,
   parseGranularityToMilliseconds,
   getColorForGroupValue,
 } from "@/utils/histogram-chart";
 import type { HistogramData } from "@/services/HistogramService";
+import { zoneFromPreference } from "@/utils/timeWindow";
+
+// A browser zone that differs from the label zone, so browser-zone labels show up.
+process.env.TZ = "Asia/Kolkata";
 
 const MIN = 60_000;
 // Interval-aligned bucket timestamps (what ClickHouse toStartOfInterval returns).
@@ -214,5 +220,23 @@ describe("getColorForGroupValue", () => {
 
   it("falls back to a default color for an empty value", () => {
     expect(getColorForGroupValue("")).toBe("#5470C6");
+  });
+});
+
+describe("histogram labels", () => {
+  const utc = zoneFromPreference("utc");
+
+  it("render ticks and tooltips in the window's zone, not the browser's", () => {
+    const range = { start: Date.UTC(2026, 9, 19, 3), end: Date.UTC(2026, 9, 19, 5), zone: utc };
+    expect(formatHistogramTimestamp(Date.UTC(2026, 9, 19, 4), range, "1m")).toBe("04:00");
+    expect(formatTooltipTimestamp(Date.UTC(2026, 9, 19, 4), range)).toBe("04:00:00");
+  });
+
+  it("show the date when the window crosses midnight in its zone", () => {
+    // 17:00Z to 20:00Z stays on Oct 19 in UTC, but crosses midnight in IST.
+    const range = { start: Date.UTC(2026, 9, 19, 17), end: Date.UTC(2026, 9, 19, 20), zone: utc };
+    expect(formatHistogramTimestamp(Date.UTC(2026, 9, 19, 18), range, "1m")).toBe("18:00");
+    const crossing = { ...range, end: Date.UTC(2026, 9, 20, 1) };
+    expect(formatHistogramTimestamp(Date.UTC(2026, 9, 19, 18), crossing, "1m")).toMatch(/^(19 Oct|Oct 19), 18:00$/);
   });
 });

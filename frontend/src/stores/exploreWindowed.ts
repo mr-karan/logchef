@@ -1,6 +1,6 @@
 import { computed, markRaw, ref } from 'vue';
 import { defineStore } from 'pinia';
-import { fromAbsolute } from '@internationalized/date';
+import { epochMs, parseZoneId, zoneOffsetMs } from '@/utils/timeWindow';
 import { streamWindowedQuery, WindowedHTTPError, type LogRow, type SearchWindow, type WindowStatus, type WindowedRequest, type WindowedEvent } from '@/api/windowed';
 import type { HistogramDataPoint, QueryStats } from '@/api/explore';
 import { HistogramService } from '@/services/HistogramService';
@@ -152,16 +152,16 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
   }
 
   // Matches the backend count buckets: one zone offset, taken at the range start, shifts every bucket.
-  function zoneOffsetMs(request: WindowedRequest) {
+  function requestOffsetMs(request: WindowedRequest) {
     const reference = Date.parse(request.start_time ?? '');
-    if (!request.timezone || !Number.isFinite(reference)) return 0;
-    try { return fromAbsolute(reference, request.timezone).offset; }
-    catch { return 0; }
+    const zone = request.timezone ? parseZoneId(request.timezone) : null;
+    if (!zone || !Number.isFinite(reference)) return 0;
+    return zoneOffsetMs(epochMs(reference), zone);
   }
 
   function histogramFromRows() {
     const stepMs = Number.parseFloat(granularity.value) * (granularity.value.endsWith('h') ? 3600000 : granularity.value.endsWith('m') ? 60000 : 1000);
-    const offsetMs = snapshot ? zoneOffsetMs(snapshot.request) : 0;
+    const offsetMs = snapshot ? requestOffsetMs(snapshot.request) : 0;
     const buckets = new Map<string, number>();
     for (const rows of rowsByWindow.values()) for (const row of rows) {
       if (typeof row._time !== 'string') continue;

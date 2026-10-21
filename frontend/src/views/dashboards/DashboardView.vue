@@ -31,6 +31,7 @@ import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
 import { useDashboardsStore, DEFAULT_DASHBOARD_CACHE_TTL_SECONDS } from "@/stores/dashboards";
 import { useMetaStore } from "@/stores/meta";
+import { usePreferencesStore } from "@/stores/preferences";
 import {
   normalizeDashboardLayout,
   cellRect,
@@ -47,7 +48,8 @@ import {
   type GridGeometry,
 } from "@/utils/dashboardPanels";
 import type { DashboardPanel as PanelModel, DashboardLayoutItem } from "@/api/dashboards";
-import { QUICK_RANGES, quickRangeLabelMessage, type QuickRange } from "@/lib/quickRanges";
+import { QUICK_RANGES } from "@/lib/quickRanges";
+import { epochMs, formatInZone, windowLabel } from "@/utils/timeWindow";
 
 const { t, locale } = useI18n();
 
@@ -55,6 +57,7 @@ const route = useRoute();
 const router = useRouter();
 const store = useDashboardsStore();
 const metaStore = useMetaStore();
+const preferencesStore = usePreferencesStore();
 
 // Grid geometry. 12 columns; each layout row is ROW_HEIGHT px tall.
 const ROW_HEIGHT_PX = 60;
@@ -186,15 +189,13 @@ function selectCacheTtl(seconds: number) {
 // The relative range this dashboard opens with, saved in the panels blob.
 // Unset means viewers keep whatever range they already have.
 const defaultTimeRange = computed(() => store.editDraft?.default_time_range ?? null);
-function rangeLabel(range: QuickRange): string {
-  const { key, count } = quickRangeLabelMessage(range);
-  return t(key, { count }, count);
+function rangeLabel(spec: string): string {
+  const label = windowLabel({ kind: "relative", spec });
+  return label ? t(label.key, { count: label.count }, label.count) : spec;
 }
 const defaultTimeRangeLabel = computed(() => {
   const value = defaultTimeRange.value;
-  if (!value) return t("dashboards.defaultRangeNone");
-  const preset = QUICK_RANGES.find((r) => r.value === value);
-  return preset ? rangeLabel(preset) : value;
+  return value ? rangeLabel(value) : t("dashboards.defaultRangeNone");
 });
 
 // --- Edit-mode grid canvas (pointer-driven direct manipulation) -------------
@@ -413,7 +414,9 @@ const updatedLabel = computed(() => {
   const ts = store.current?.updated_at;
   if (!ts) return "";
   const d = new Date(ts);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleString(locale.value);
+  return Number.isNaN(d.getTime())
+    ? ""
+    : formatInZone(epochMs(d), preferencesStore.zone, { dateStyle: "medium", timeStyle: "medium" }, locale.value);
 });
 
 const creatorLabel = computed(
@@ -592,10 +595,10 @@ onBeforeRouteUpdate((to, from) => {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 v-for="range in QUICK_RANGES"
-                :key="range.value"
+                :key="range"
                 class="text-xs"
-                :class="{ 'font-semibold': range.value === defaultTimeRange }"
-                @click="store.setDraftDefaultTimeRange(range.value)"
+                :class="{ 'font-semibold': range === defaultTimeRange }"
+                @click="store.setDraftDefaultTimeRange(range)"
               >
                 {{ rangeLabel(range) }}
               </DropdownMenuItem>

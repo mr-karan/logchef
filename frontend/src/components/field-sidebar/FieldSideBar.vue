@@ -23,7 +23,7 @@ import {
   X,
 } from 'lucide-vue-next'
 import { useExploreStore } from '@/stores/explore'
-import { getLocalTimeZone } from '@internationalized/date'
+import { toRfc3339 } from '@/utils/timeWindow'
 import { cn } from '@/lib/utils'
 import { useVariables } from '@/composables/useVariables'
 import { useFieldValuesLoader } from '@/composables/useFieldValuesLoader'
@@ -197,25 +197,13 @@ const toggleField = async (field: FieldInfo) => {
   }
 }
 
-// Get time range in ISO8601 format for API calls
+// The resolved window as RFC3339 instants for API calls
 const getTimeRangeForApi = () => {
-  const timeRange = exploreStore.timeRange
-  if (!timeRange) {
+  if (!exploreStore.hasWindow) {
     return null
   }
-  
-  try {
-    // Convert DateValue to JS Date using the local timezone, then to ISO8601
-    const startDate = timeRange.start.toDate(getLocalTimeZone())
-    const endDate = timeRange.end.toDate(getLocalTimeZone())
-    
-    return { 
-      startTime: startDate.toISOString(),
-      endTime: endDate.toISOString()
-    }
-  } catch {
-    return null
-  }
+  const { start, end } = exploreStore.resolved
+  return { startTime: toRfc3339(start), endTime: toRfc3339(end) }
 }
 
 // Auto-expand threshold - fields with this many or fewer values are auto-expanded

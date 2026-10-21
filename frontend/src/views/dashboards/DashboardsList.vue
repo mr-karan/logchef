@@ -51,6 +51,8 @@ import { useDashboardsStore } from "@/stores/dashboards";
 import { useMetaStore } from "@/stores/meta";
 import { useAuthStore } from "@/stores/auth";
 import { useTeamsStore } from "@/stores/teams";
+import { usePreferencesStore } from "@/stores/preferences";
+import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useTableSearchSort, type SortDir } from "@/composables/useTableSearchSort";
 import { copyableDashboardPanels } from "@/utils/dashboardPanels";
 import type { Dashboard } from "@/api/dashboards";
@@ -62,6 +64,7 @@ const store = useDashboardsStore();
 const metaStore = useMetaStore();
 const authStore = useAuthStore();
 const teamsStore = useTeamsStore();
+const preferencesStore = usePreferencesStore();
 
 const isLoading = computed(() => store.isLoadingOperation("fetchDashboards"));
 const dashboards = computed(() => store.dashboards);
@@ -131,7 +134,7 @@ function panelTypeIcons(d: Dashboard) {
 
 function updatedLabel(d: Dashboard): string {
   const date = new Date(d.updated_at);
-  return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString(locale.value);
+  return Number.isNaN(date.getTime()) ? "" : formatInZone(epochMs(date), preferencesStore.zone, { dateStyle: "medium" }, locale.value);
 }
 
 // --- Create / duplicate dialog -----------------------------------------------

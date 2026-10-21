@@ -29,7 +29,7 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useUrlState } from "@/composables/useUrlState";
 import { useQuery } from "@/composables/useQuery";
 import { useTimeRange } from "@/composables/useTimeRange";
-import { supportsQueryLanguage, hasSourceCapability } from "@/lib/queryMetadata";
+import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
@@ -573,14 +573,10 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, d
   }
 }
 
+// Like the picker, a new window runs through the store's auto-run watcher.
 const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
   try {
-    if (handleHistogramTimeRangeZoom(range)) {
-      const zoomKey = `zoom-${Date.now()}`;
-      setTimeout(() => {
-        handleQueryExecution(zoomKey);
-      }, 50);
-    }
+    handleHistogramTimeRangeZoom(range);
   } catch (e) {
     console.error("Error handling histogram time range:", e);
     toast({
@@ -713,19 +709,6 @@ onBeforeRouteLeave(() => {
   exploreStore.stopLiveTail();
 });
 
-const calendarDatePartToDate = (value: any) => {
-  if (!value) return undefined;
-
-  return new Date(
-    value.year,
-    value.month - 1,
-    value.day,
-    "hour" in value ? value.hour : 0,
-    "minute" in value ? value.minute : 0,
-    "second" in value ? value.second : 0
-  );
-};
-
 const copyTextWithFallback = async (text: string) => {
   if (navigator.clipboard?.writeText) {
     try {
@@ -766,18 +749,16 @@ const handleCopyCliCommand = async () => {
   }
 
   try {
-    const timeRange = exploreStore.timeRange;
     const command = generateCliCommand({
       teamId: currentTeamId.value,
       sourceId: currentSourceId.value,
-      mode: exploreStore.activeMode,
+      language: exploreStore.activeMode === "logchefql" ? "logchefql" : getNativeQueryLanguageForSource(sourceDetails.value),
       query:
         exploreStore.activeMode === "logchefql"
           ? exploreStore.logchefqlCode
           : exploreStore.nativeQuery,
-      relativeTime: exploreStore.selectedRelativeTime || undefined,
-      absoluteStart: calendarDatePartToDate(timeRange?.start),
-      absoluteEnd: calendarDatePartToDate(timeRange?.end),
+      window: exploreStore.window,
+      resolved: exploreStore.resolved,
       limit: exploreStore.limit,
       timeout: exploreStore.queryTimeout,
     });
@@ -1350,7 +1331,7 @@ onMounted(async () => {
 
               <!-- Query Editor -->
               <template v-else-if="
-                currentSourceId && hasValidSource && exploreStore.timeRange
+                currentSourceId && hasValidSource && exploreStore.hasWindow
               ">
                 <div class="bg-card shadow-sm rounded-md overflow-hidden">
                   <QueryEditor 
@@ -1465,7 +1446,7 @@ onMounted(async () => {
               !isChangingContext &&
               currentSourceId &&
               hasValidSource &&
-              exploreStore.timeRange
+              exploreStore.hasWindow
             ">
               <!-- Unified Results Toolbar -->
               <WindowedSearchPanel />
@@ -1495,7 +1476,7 @@ onMounted(async () => {
               !isChangingContext &&
               currentSourceId &&
               hasValidSource &&
-              exploreStore.timeRange
+              exploreStore.hasWindow
             ">
               <!-- Results Area -->
               <div class="flex-1 overflow-hidden relative bg-background">

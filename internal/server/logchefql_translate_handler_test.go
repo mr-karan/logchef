@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"regexp"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
@@ -18,9 +18,9 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// Regression coverage for the /logchefql/translate bug where an RFC3339
-// start/end pair against a ClickHouse source silently omitted full_sql from an
-// otherwise-200 response instead of erroring like /logchefql/query does.
+// Regression coverage for /logchefql/translate: when the compiler rejects the
+// time range, the handler must return that error like /logchefql/query does,
+// not a 200 that silently omits full_sql.
 //
 // fakeTranslateStore is a store.Store stub implementing only GetSource and
 // TeamHasSource (for the global admin that requireTeamHasSource sees); every
@@ -39,15 +39,13 @@ func (f *fakeTranslateStore) TeamHasSource(context.Context, models.TeamID, model
 	return true, nil
 }
 
-// fakeClickHouseCompiler is a minimal datasource.Provider stub that simulates
-// the real ClickHouse compiler's time-format sensitivity (validateTimeFormat
-// in internal/logchefql requires "YYYY-MM-DD HH:MM:SS") without needing a live
-// ClickHouse connection.
+// fakeClickHouseCompiler is a minimal datasource.Provider stub. It fails a
+// time-bounded compile only with the artificial timeRangeErr a test injects;
+// it does not model how the real compiler parses times.
 type fakeClickHouseCompiler struct {
 	datasource.Provider
+	timeRangeErr error
 }
-
-var sqlTimeFormatRegex = regexp.MustCompile(`^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$`)
 
 func (f *fakeClickHouseCompiler) Type() models.SourceType               { return models.SourceTypeClickHouse }
 func (f *fakeClickHouseCompiler) Capabilities() []datasource.Capability { return nil }
@@ -87,21 +85,19 @@ func (f *fakeClickHouseCompiler) CompileLogchefQL(ctx context.Context, source *m
 	if req.StartTime == "" || req.EndTime == "" || req.Timezone == "" {
 		return compiled, nil
 	}
-	// Mirrors ClickHouseProvider.CompileLogchefQL -> logchefql.BuildFullQuery:
-	// building full_sql requires the SQL time format, same as /query.
-	if !sqlTimeFormatRegex.MatchString(req.StartTime) || !sqlTimeFormatRegex.MatchString(req.EndTime) {
-		return compiled, fmt.Errorf("invalid time format: expected 'YYYY-MM-DD HH:MM:SS', got %q/%q", req.StartTime, req.EndTime)
+	if f.timeRangeErr != nil {
+		return compiled, f.timeRangeErr
 	}
 	compiled.Query = fmt.Sprintf("SELECT * FROM logs WHERE 1=1 AND timestamp BETWEEN '%s' AND '%s'", req.StartTime, req.EndTime)
 	return compiled, nil
 }
 
-func newTranslateTestApp() *fiber.App {
+func newTranslateTestApp(timeRangeErr error) *fiber.App {
 	source := &models.Source{ID: 1, SourceType: models.SourceTypeClickHouse}
 
 	db := &fakeTranslateStore{source: source}
 	svc := datasource.NewService(db, slog.Default())
-	svc.Register(&fakeClickHouseCompiler{})
+	svc.Register(&fakeClickHouseCompiler{timeRangeErr: timeRangeErr})
 
 	s := &Server{datasources: svc, sqlite: db, log: slog.Default()}
 
@@ -133,10 +129,10 @@ func postTranslate(t *testing.T, app *fiber.App, body map[string]any) (status in
 	return resp.StatusCode, parsed
 }
 
-func TestHandleLogchefQLTranslateRejectsRFC3339Times(t *testing.T) {
+func TestHandleLogchefQLTranslatePropagatesTimeRangeCompileError(t *testing.T) {
 	t.Parallel()
 
-	app := newTranslateTestApp()
+	app := newTranslateTestApp(errors.New("artificial time range failure"))
 	status, body := postTranslate(t, app, map[string]any{
 		"query":      `level="error"`,
 		"start_time": "2026-07-10T00:00:00Z",
@@ -150,20 +146,19 @@ func TestHandleLogchefQLTranslateRejectsRFC3339Times(t *testing.T) {
 	if body["status"] != "error" {
 		t.Errorf("status field = %v, want %q", body["status"], "error")
 	}
-	message, _ := body["message"].(string)
-	if message == "" {
-		t.Errorf("expected a non-empty error message, got body: %v", body)
+	if body["message"] != "artificial time range failure" {
+		t.Errorf("message = %v, want the compiler error", body["message"])
 	}
 }
 
-func TestHandleLogchefQLTranslateAcceptsSQLFormatTimes(t *testing.T) {
+func TestHandleLogchefQLTranslateReturnsFullSQLWithTimeRange(t *testing.T) {
 	t.Parallel()
 
-	app := newTranslateTestApp()
+	app := newTranslateTestApp(nil)
 	status, body := postTranslate(t, app, map[string]any{
 		"query":      `level="error"`,
-		"start_time": "2026-07-10 00:00:00",
-		"end_time":   "2026-07-10 01:00:00",
+		"start_time": "2026-07-10T00:00:00Z",
+		"end_time":   "2026-07-10T01:00:00Z",
 		"timezone":   "UTC",
 	})
 
@@ -182,11 +177,11 @@ func TestHandleLogchefQLTranslateAcceptsSQLFormatTimes(t *testing.T) {
 
 // Without time params at all, translate should still succeed with SQL
 // (WHERE-only) but no full_sql — this is the documented preview-only mode and
-// must not regress from the RFC3339 fix above.
+// must not regress from the error path above.
 func TestHandleLogchefQLTranslateWithoutTimeParamsOmitsFullSQL(t *testing.T) {
 	t.Parallel()
 
-	app := newTranslateTestApp()
+	app := newTranslateTestApp(nil)
 	status, body := postTranslate(t, app, map[string]any{
 		"query": `level="error"`,
 	})

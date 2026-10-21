@@ -1,5 +1,6 @@
 import type { QueryHistoryRecord } from "@/api/explore";
 import { getExploreModeForQueryLanguage } from "@/lib/queryMetadata";
+import { epochMs, formatInZone, type ZoneId } from "@/utils/timeWindow";
 
 /**
  * Build the router query params that re-run a query-history entry in the log
@@ -36,7 +37,7 @@ export function buildHistoryRerunQuery(entry: QueryHistoryRecord): Record<string
  * older than a week. Accepts the backend's space-separated timestamps as well
  * as ISO strings.
  */
-export function formatHistoryTimeAgo(createdAt: string, nowMs: number = Date.now(), locale = "en"): string {
+export function formatHistoryTimeAgo(createdAt: string, zone: ZoneId, nowMs: number = Date.now(), locale = "en"): string {
   const normalized =
     createdAt.includes("T") || createdAt.includes("Z") || createdAt.includes("+")
       ? createdAt
@@ -57,7 +58,7 @@ export function formatHistoryTimeAgo(createdAt: string, nowMs: number = Date.now
   if (diffMinutes < 60) return relativeTime.format(-diffMinutes, "minute");
   if (diffHours < 24) return relativeTime.format(-diffHours, "hour");
   if (diffDays < 7) return relativeTime.format(-diffDays, "day");
-  return new Date(then).toLocaleDateString(locale);
+  return formatInZone(epochMs(then), zone, { dateStyle: "medium" }, locale);
 }
 
 /**

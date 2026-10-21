@@ -23,7 +23,6 @@ const windowed = useExploreWindowedStore()
 
 // Reactive computed properties
 const isExecutingQuery = computed(() => exploreStore.isLoadingOperation('executeQuery'))
-const timeRange = computed(() => exploreStore.timeRange ?? undefined)
 const groupByField = computed(() => exploreStore.groupByField === '__none__' ? undefined : exploreStore.groupByField)
 const sourceId = computed(() => exploreStore.sourceId)
 const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
@@ -39,7 +38,6 @@ const handleZoomTimeRange = (range: TimeRangeEvent) => {
   <div v-if="isHistogramEligible" class="histogram-container">
     <LogHistogram
       :key="`histogram-${sourceId}`"
-      :time-range="timeRange"
       :is-loading="isExecutingQuery && !windowed.active"
       :group-by="groupByField"
       @zoom-time-range="handleZoomTimeRange"

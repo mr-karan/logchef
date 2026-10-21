@@ -6,6 +6,7 @@ import { useThemeStore, type ThemeMode } from "./theme";
 import { useAuthStore } from "./auth";
 import { useMetaStore } from "./meta";
 import { isLocalePreference } from "@/i18n/locales";
+import { zoneFromPreference, type ZoneId } from "@/utils/timeWindow";
 
 interface PreferencesState {
   preferences: UserPreferences;
@@ -238,8 +239,12 @@ export const usePreferencesStore = defineStore("preferences", () => {
     return await savePreferences(partial, "updatePreferences");
   }
 
+  // The one zone every Explorer and dashboard time is shown and resolved in.
+  const zone = computed<ZoneId>(() => zoneFromPreference(preferences.value.timezone));
+
   return {
     preferences,
+    zone,
     isLoaded,
     isDefault,
     isLoading: state.isLoading,

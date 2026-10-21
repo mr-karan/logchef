@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { QUICK_RANGES, quickRangeLabelMessage, type QuickRange } from "@/lib/quickRanges";
+import { QUICK_RANGES, type QuickRange } from "@/lib/quickRanges";
 import { ref, computed, watch } from "vue";
-import { storeToRefs } from "pinia";
 import { Button } from "@/components/ui/button";
 import {
   Popover,
@@ -11,39 +10,39 @@ import {
 import { Input } from "@/components/ui/input";
 import { Calendar } from "@/components/ui/calendar";
 import { CalendarIcon, Clock, ChevronDown, Search } from "lucide-vue-next";
-import type { DateRange } from "reka-ui";
-import {
-  getLocalTimeZone,
-  now,
-  today,
-  ZonedDateTime,
-  toZoned,
-  CalendarDateTime,
-  type DateValue,
-  parseDateTime,
-} from "@internationalized/date";
+import { today, type DateValue } from "@internationalized/date";
 import { cn } from "@/lib/utils";
-import { usePreferencesStore } from "@/stores/preferences";
+import {
+  epochMs,
+  formatWallClock,
+  parseWallClock,
+  windowLabel,
+  type EpochMs,
+  type ResolvedWindow,
+  type TimeWindow,
+} from "@/utils/timeWindow";
 import { useI18n } from "vue-i18n";
 
 const { t, locale } = useI18n();
 
-
 interface Props {
-  modelValue?: DateRange | null;
+  modelValue: TimeWindow;
+  /** The window as the owner resolved it. The picker shows these instants in its zone. */
+  resolved: ResolvedWindow;
+  zonePreference: "utc" | "local";
   class?: string;
   disabled?: boolean;
-  selectedQuickRange?: string | null;
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  modelValue: null,
   class: "",
   disabled: false,
-  selectedQuickRange: null,
 });
 
-const emit = defineEmits(['update:modelValue', 'update:timezone']);
+const emit = defineEmits<{
+  "update:modelValue": [TimeWindow];
+  "update:zonePreference": ["utc" | "local"];
+}>();
 
 // UI state
 const showDatePicker = ref(false);
@@ -51,117 +50,81 @@ const showFromCalendar = ref(false);
 const showToCalendar = ref(false);
 const quickRangeSearch = ref("");
 
-// Timezone state
-const preferencesStore = usePreferencesStore();
-const { preferences } = storeToRefs(preferencesStore);
-const timezonePreference = computed({
-  get: () => preferences.value.timezone,
-  set: (value: "local" | "utc") => {
-    preferencesStore.updatePreferences({ timezone: value });
-  },
-});
-const currentTimezoneId = computed(() =>
-  timezonePreference.value === "local" ? getLocalTimeZone() : "UTC"
-);
+// Today in the picker's zone focuses the calendars.
+const todayDate = computed(() => today(props.resolved.zone));
 
-// Date state — today is used to focus/highlight the current date in calendars
-const todayDate = today(currentTimezoneId.value);
-const currentTime = now(currentTimezoneId.value);
-const dateRange = ref<{ start: DateValue; end: DateValue }>({
-  start: currentTime.subtract({ minutes: 15 }),
-  end: currentTime,
-});
+// Recently used absolute ranges, stored as instants and shown in the current zone.
+// Older entries stored zone-less wall-clock text and are dropped.
+const RECENT_RANGES_KEY = "logchef_recent_ranges";
+type RecentRange = { version: 2; start: EpochMs; end: EpochMs };
 
-// Selected quick range (synced with props)
-const selectedQuickRange = ref<string | null>(props.selectedQuickRange || null);
+function isRecentRange(value: unknown): value is RecentRange {
+  if (typeof value !== "object" || value === null) return false;
+  const { version, start, end } = value as Record<string, unknown>;
+  return version === 2 && Number.isFinite(start) && Number.isFinite(end);
+}
 
-// Recently used absolute ranges (stored in localStorage)
-const recentRanges = ref<Array<{ from: string; to: string; label: string }>>(
-  JSON.parse(localStorage.getItem("logchef_recent_ranges") || "[]")
-);
+function loadRecentRanges(): RecentRange[] {
+  try {
+    const stored: unknown = JSON.parse(localStorage.getItem(RECENT_RANGES_KEY) || "[]");
+    return Array.isArray(stored) ? stored.filter(isRecentRange) : [];
+  } catch {
+    return [];
+  }
+}
 
-// Draft state for absolute time inputs
-const draftState = ref({
-  from: "now-1h",
-  to: "now",
-});
+const recentRanges = ref<RecentRange[]>(loadRecentRanges());
+
+function rememberRange(start: EpochMs, end: EpochMs) {
+  const others = recentRanges.value.filter((r) => r.start !== start || r.end !== end);
+  recentRanges.value = [{ version: 2 as const, start, end }, ...others].slice(0, 5);
+  localStorage.setItem(RECENT_RANGES_KEY, JSON.stringify(recentRanges.value));
+}
+
+function recentRangeLabel(range: RecentRange): string {
+  const { zone } = props.resolved;
+  return t("time.range", { from: formatWallClock(range.start, zone), to: formatWallClock(range.end, zone) });
+}
+
+// Draft text for the absolute inputs, and the instants the text was written from.
+// Applying text the user did not edit keeps the window, or the instant of an
+// unedited wall-clock bound. A "now-15m" bound has no fixed instant.
+const draftState = ref({ from: "now-1h", to: "now" });
+let shown: { from: string; to: string; start: EpochMs | null; end: EpochMs | null } | null = null;
 
 const DATE_ONLY_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 const DATE_TIME_NO_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}$/;
 const DATE_TIME_WITH_SECONDS_REGEX = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/;
 
-// Quick ranges organized by category
 function quickRangeLabel(range: QuickRange): string {
-  const { key, count } = quickRangeLabelMessage(range);
-  return t(key, { count }, count);
+  const label = windowLabel({ kind: "relative", spec: range });
+  return label ? t(label.key, { count: label.count }, label.count) : range;
 }
 
 // Filtered quick ranges based on search
 const filteredQuickRanges = computed(() => {
   if (!quickRangeSearch.value) return QUICK_RANGES;
   const search = quickRangeSearch.value.toLowerCase();
-  return QUICK_RANGES.filter(r => 
+  return QUICK_RANGES.filter(r =>
     quickRangeLabel(r).toLowerCase().includes(search) ||
-    r.value.toLowerCase().includes(search)
+    r.toLowerCase().includes(search)
   );
 });
 
-// Initialize from props
-if (!props.modelValue?.start || !props.modelValue?.end) {
-  emit("update:modelValue", { start: dateRange.value.start, end: dateRange.value.end });
-}
+const selectedQuickRange = computed(() => (props.modelValue.kind === "relative" ? props.modelValue.spec : null));
 
-// Watch for changes in props.selectedQuickRange
+// Sync the draft text with the window and the instants it resolved to.
 watch(
-  () => props.selectedQuickRange,
-  (newValue) => {
-    if (newValue !== selectedQuickRange.value) {
-      selectedQuickRange.value = newValue;
-    }
+  () => [props.modelValue, props.resolved] as const,
+  ([window, { start, end, zone }]) => {
+    const isDuration = window.kind === "relative" && /^\d+[mhd]$/.test(window.spec);
+    const from = isDuration ? `now-${window.spec}` : formatWallClock(start, zone);
+    const to = isDuration ? "now" : formatWallClock(end, zone);
+    draftState.value = { from, to };
+    shown = isDuration ? { from, to, start: null, end: null } : { from, to, start, end };
   },
   { immediate: true }
 );
-
-// Sync internal state with external value
-watch(
-  () => props.modelValue,
-  (newValue) => {
-    if (newValue?.start && newValue?.end) {
-      dateRange.value = {
-        start: newValue.start,
-        end: newValue.end,
-      };
-      // Update draft state for absolute inputs
-      const start = toZoned(newValue.start as CalendarDateTime, currentTimezoneId.value);
-      const end = toZoned(newValue.end as CalendarDateTime, currentTimezoneId.value);
-      draftState.value = {
-        from: formatDateTime(start),
-        to: formatDateTime(end),
-      };
-    }
-  },
-  { immediate: true, deep: true }
-);
-
-// Watch for timezone changes
-watch(
-  () => timezonePreference.value,
-  (newValue) => {
-    emit("update:timezone", newValue === "local" ? getLocalTimeZone() : "UTC");
-  }
-);
-
-function formatDateTime(date: ZonedDateTime | null | undefined): string {
-  if (!date) return "";
-  try {
-    const isoString = date.toString();
-    const datePart = isoString.split("T")[0];
-    const timePart = isoString.split("T")[1].slice(0, 8);
-    return `${datePart} ${timePart}`;
-  } catch (e) {
-    return "";
-  }
-}
 
 function normalizeAbsoluteInput(value: string, defaultTime = "00:00:00"): string {
   const trimmed = value.trim();
@@ -200,58 +163,19 @@ function applyDefaultTime(type: "from" | "to", defaultTime = "00:00:00") {
   draftState.value[type] = `${match[1]} ${defaultTime}`;
 }
 
-function parseRelativeTime(input: string): ZonedDateTime | null {
+const NOW_UNIT_MS: Record<string, number> = { m: 60_000, h: 3_600_000, d: 86_400_000 };
+
+// "now", "now-Xm|h|d", or wall-clock text in the picker's zone.
+function parseInput(input: string, nowMs: number): EpochMs | null {
   const trimmed = input.trim().toLowerCase();
-  
-  // Handle "now"
-  if (trimmed === "now") {
-    return now(currentTimezoneId.value);
-  }
-  
-  // Handle "now-Xm/h/d" format
+  if (trimmed === "now") return epochMs(nowMs);
   const relativeMatch = trimmed.match(/^now-(\d+)(m|h|d)$/);
-  if (relativeMatch) {
-    const value = parseInt(relativeMatch[1]);
-    const unit = relativeMatch[2];
-    const current = now(currentTimezoneId.value);
-    
-    switch (unit) {
-      case 'm': return current.subtract({ minutes: value });
-      case 'h': return current.subtract({ hours: value });
-      case 'd': return current.subtract({ days: value });
-    }
-  }
-  
-  // Try to parse as absolute datetime
-  try {
-    // Handle "YYYY-MM-DD", "YYYY-MM-DD HH:mm", or "YYYY-MM-DD HH:mm:ss"
-    const absoluteMatch = trimmed.match(/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2})(?::(\d{2}))?)?$/);
-    if (absoluteMatch) {
-      const datePart = absoluteMatch[1];
-      const timePart = absoluteMatch[2] ? `${absoluteMatch[2]}:${absoluteMatch[3] ?? "00"}` : "00:00:00";
-      const dateString = `${datePart}T${timePart}`;
-      const calendarDate = parseDateTime(dateString);
-      return toZoned(calendarDate, currentTimezoneId.value);
-    }
-  } catch (e) {
-    console.error("Error parsing date:", e);
-  }
-  
-  return null;
+  if (relativeMatch) return epochMs(nowMs - Number(relativeMatch[1]) * NOW_UNIT_MS[relativeMatch[2]]);
+  return parseWallClock(normalizeAbsoluteInput(input), props.resolved.zone);
 }
 
 function applyQuickRange(range: QuickRange) {
-  const end = now(currentTimezoneId.value);
-  const start = end.subtract(range.duration);
-
-  dateRange.value = { start, end };
-  selectedQuickRange.value = `Last ${range.value}`;
-  draftState.value = {
-    from: `now-${range.value}`,
-    to: "now",
-  };
-  
-  emit("update:modelValue", { start, end });
+  emit("update:modelValue", { kind: "relative", spec: range });
   showDatePicker.value = false;
 }
 
@@ -259,55 +183,37 @@ function applyAbsoluteRange() {
   normalizeDraftInput("from");
   normalizeDraftInput("to");
 
-  const start = parseRelativeTime(draftState.value.from);
-  const end = parseRelativeTime(draftState.value.to);
-  
-  if (!start || !end) {
+  const { from, to } = draftState.value;
+  if (props.modelValue.kind === "relative" && shown?.from === from && shown.to === to) {
+    emit("update:modelValue", props.modelValue);
+    showDatePicker.value = false;
     return;
   }
-  
-  if (start.compare(end) > 0) {
+  const nowMs = Date.now();
+  const start = (shown?.from === from ? shown.start : null) ?? parseInput(from, nowMs);
+  const end = (shown?.to === to ? shown.end : null) ?? parseInput(to, nowMs);
+
+  if (start === null || end === null || start > end) {
     return;
   }
 
-  dateRange.value = { start, end };
-  selectedQuickRange.value = null;
-  
-  // Save to recent ranges
-  const rangeEntry = {
-    from: draftState.value.from,
-    to: draftState.value.to,
-    label: `${formatDateTime(start)} to ${formatDateTime(end)}`,
-  };
-  
-  // Add to recent, avoiding duplicates
-  const existingIndex = recentRanges.value.findIndex(
-    r => r.from === rangeEntry.from && r.to === rangeEntry.to
-  );
-  if (existingIndex !== -1) {
-    recentRanges.value.splice(existingIndex, 1);
-  }
-  recentRanges.value.unshift(rangeEntry);
-  recentRanges.value = recentRanges.value.slice(0, 5); // Keep only 5 recent
-  localStorage.setItem("logchef_recent_ranges", JSON.stringify(recentRanges.value));
-  
-  emit("update:modelValue", { start, end });
+  rememberRange(start, end);
+  emit("update:modelValue", { kind: "absolute", start, end });
   showDatePicker.value = false;
 }
 
-function applyRecentRange(range: { from: string; to: string }) {
-  draftState.value = { from: range.from, to: range.to };
-  applyAbsoluteRange();
+function applyRecentRange(range: RecentRange) {
+  rememberRange(range.start, range.end);
+  emit("update:modelValue", { kind: "absolute", start: range.start, end: range.end });
+  showDatePicker.value = false;
 }
 
 function handleCalendarSelect(type: 'from' | 'to', date: DateValue | undefined | null) {
   if (!date) return;
-  const zonedDate = toZoned(date as CalendarDateTime, currentTimezoneId.value);
   const defaultTime = type === "to" ? "23:59:59" : "00:00:00";
-  const formatted = `${formatDateTime(zonedDate).split(' ')[0]} ${defaultTime}`;
-  draftState.value[type] = formatted;
+  draftState.value[type] = `${date.toString().slice(0, 10)} ${defaultTime}`;
   normalizeDraftInput(type);
-  
+
   if (type === 'from') {
     showFromCalendar.value = false;
   } else {
@@ -317,23 +223,15 @@ function handleCalendarSelect(type: 'from' | 'to', date: DateValue | undefined |
 
 function clearRecentRanges() {
   recentRanges.value = [];
-  localStorage.removeItem("logchef_recent_ranges");
+  localStorage.removeItem(RECENT_RANGES_KEY);
 }
 
 // Display text for trigger button
 const triggerDisplayText = computed(() => {
-  if (selectedQuickRange.value) {
-    const range = QUICK_RANGES.find(range => selectedQuickRange.value === `Last ${range.value}`);
-    return range ? quickRangeLabel(range) : selectedQuickRange.value;
-  }
-  
-  if (!dateRange.value?.start || !dateRange.value?.end) {
-    return t("time.selectRange");
-  }
-  
-  const start = toZoned(dateRange.value.start as CalendarDateTime, currentTimezoneId.value);
-  const end = toZoned(dateRange.value.end as CalendarDateTime, currentTimezoneId.value);
-  return `${formatDateTime(start)} - ${formatDateTime(end)}`;
+  const label = windowLabel(props.modelValue);
+  if (label) return t(label.key, { count: label.count }, label.count);
+  const { start, end, zone } = props.resolved;
+  return `${formatWallClock(start, zone)} - ${formatWallClock(end, zone)}`;
 });
 
 // Function to open the date picker programmatically
@@ -341,20 +239,16 @@ function openDatePicker() {
   showDatePicker.value = true;
 }
 
-// Get current timezone display
-const timezoneDisplay = computed(() => {
-  if (timezonePreference.value === "local") {
-    return t("time.browser", { zone: getLocalTimeZone() });
-  }
-  return "UTC";
-});
+const isUtc = computed(() => props.zonePreference === "utc");
+const timezoneDisplay = computed(() => (isUtc.value ? "UTC" : t("time.browser", { zone: props.resolved.zone })));
 
-// Expose methods and computed properties to parent component
+function toggleZonePreference() {
+  emit("update:zonePreference", isUtc.value ? "local" : "utc");
+}
+
+// Expose methods to parent component
 defineExpose({
   openDatePicker,
-  selectedQuickRange,
-  selectedRangeText: triggerDisplayText,
-  currentTimezoneId,
 });
 </script>
 
@@ -473,7 +367,7 @@ defineExpose({
                   class="w-full text-left text-xs p-1.5 hover:bg-muted rounded truncate"
                   @click="applyRecentRange(range)"
                 >
-                  {{ t('time.range', { from: range.from, to: range.to }) }}
+                  {{ recentRangeLabel(range) }}
                 </button>
               </div>
             </div>
@@ -484,7 +378,7 @@ defineExpose({
                 <span class="text-xs text-muted-foreground">{{ timezoneDisplay }}</span>
                 <button 
                   class="text-xs text-primary hover:underline"
-                  @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
+                  @click="toggleZonePreference"
                 >
                   {{ t('time.change') }}
                 </button>
@@ -508,10 +402,10 @@ defineExpose({
             <div class="space-y-0.5 max-h-[320px] overflow-y-auto">
               <button
                 v-for="range in filteredQuickRanges"
-                :key="range.value"
+                :key="range"
                 :class="[
                   'w-full text-left px-3 py-2 text-sm rounded-md transition-colors',
-                  selectedQuickRange === `Last ${range.value}` 
+                  selectedQuickRange === range
                     ? 'bg-primary/10 text-primary border-l-2 border-primary' 
                     : 'hover:bg-muted'
                 ]"
@@ -534,10 +428,10 @@ defineExpose({
       variant="ghost"
       size="sm"
       class="h-7 px-2 text-xs bg-muted/60 hover:bg-muted text-muted-foreground hover:text-foreground font-normal"
-      @click="timezonePreference = timezonePreference === 'local' ? 'utc' : 'local'"
+      @click="toggleZonePreference"
        :title="t('pages.toggleTimezone')"
     >
-      {{ timezonePreference === "local" ? t('ui.local') : "UTC" }}
+      {{ isUtc ? "UTC" : t('ui.local') }}
     </Button>
   </div>
 </template>

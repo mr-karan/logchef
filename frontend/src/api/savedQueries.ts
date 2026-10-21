@@ -2,16 +2,18 @@ import { apiClient } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 
+export interface SavedQueryTimeRange {
+  relative?: string;
+  absolute?: {
+    start: number;
+    end: number;
+  };
+}
+
 export interface SavedQueryContent {
   version: number;
   sourceId: number | string;
-  timeRange: {
-    relative?: string;
-    absolute?: {
-      start: number;
-      end: number;
-    };
-  } | null;
+  timeRange: SavedQueryTimeRange | null;
   limit: number;
   content: string;
   variables?: VariableState[];

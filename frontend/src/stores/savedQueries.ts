@@ -37,43 +37,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     }
   );
 
-  const parseQueryContent = (query: SavedQuery): SavedQueryContent => {
-    try {
-      const content = JSON.parse(query.query_content) as Partial<SavedQueryContent>;
-
-      const isAbsoluteTimeRange = (tr: any): tr is { absolute: { start: number; end: number } } => {
-        return tr && typeof tr === 'object' && tr.absolute && typeof tr.absolute.start === 'number' && typeof tr.absolute.end === 'number';
-      };
-
-      const isNullTimeRange = content.timeRange === null;
-
-      return {
-        version: content.version ?? 1,
-        sourceId: content.sourceId ?? query.source_id,
-        timeRange: isNullTimeRange
-          ? null
-          : (isAbsoluteTimeRange(content.timeRange)
-              ? content.timeRange
-              : { absolute: { start: Date.now() - 3600000, end: Date.now() } }),
-        limit: typeof content.limit === 'number' ? content.limit : 100,
-        content: typeof content.content === 'string' ? content.content : '',
-        variables: Array.isArray(content.variables) ? content.variables : []
-      };
-    } catch (e) {
-      console.error("Error parsing query content:", e);
-      return {
-        version: 1,
-        sourceId: query.source_id,
-        timeRange: {
-          absolute: { start: Date.now() - 3600000, end: Date.now() },
-        },
-        limit: 100,
-        content: '',
-        variables: []
-      };
-    }
-  };
-
   const queries = computed(() => state.data.value.queries);
   const selectedQuery = computed(() => state.data.value.selectedQuery);
   const teams = computed(() => state.data.value.teams);
@@ -268,7 +231,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     selectedQuery,
     teams,
     selectedTeamId,
-    parseQueryContent,
     hasTeams,
     hasQueries,
     selectedTeam,

@@ -51,7 +51,7 @@
                 </span>
               </div>
               <span class="text-[11px] text-muted-foreground shrink-0">
-                {{ formatHistoryTimeAgo(entry.created_at, nowMs, locale) }}
+                {{ formatHistoryTimeAgo(entry.created_at, preferencesStore.zone, nowMs, locale) }}
               </span>
             </div>
 
@@ -107,6 +107,7 @@ import {
   formatHistoryDuration,
 } from "@/lib/queryHistory";
 import { useSourcesStore } from "@/stores/sources";
+import { usePreferencesStore } from "@/stores/preferences";
 
 const { t, locale } = useI18n();
 
@@ -114,6 +115,7 @@ const HISTORY_LIMIT = 100;
 
 const router = useRouter();
 const sourcesStore = useSourcesStore();
+const preferencesStore = usePreferencesStore();
 
 const isOpen = ref(false);
 const isLoading = ref(false);

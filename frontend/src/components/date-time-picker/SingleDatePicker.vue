@@ -43,6 +43,8 @@ const emit = defineEmits<{
 const showPicker = ref(false);
 const showCalendar = ref(false);
 
+// A variable's date is zone-less wall-clock text whose zone the user's SQL names,
+// so the browser zone here only round-trips its fields.
 const currentTimezoneId = computed(() => getLocalTimeZone());
 
 const timeValue = ref("00:00:00");

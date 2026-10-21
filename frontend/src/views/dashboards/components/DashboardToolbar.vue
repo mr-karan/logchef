@@ -1,8 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
 
-import { computed, ref } from "vue";
-import type { DateRange } from "reka-ui";
+import { computed } from "vue";
 import { RefreshCw, ChevronDown } from "lucide-vue-next";
 import { Button } from "@/components/ui/button";
 import {
@@ -13,16 +12,13 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { DateTimePicker } from "@/components/date-time-picker";
 import { useDashboardsStore } from "@/stores/dashboards";
-import {
-  timestampToCalendarDateTime,
-  parseRelativeTimeString,
-  calendarDateTimeToTimestamp,
-} from "@/utils/time";
+import { usePreferencesStore } from "@/stores/preferences";
+import { epochMs, formatInZone } from "@/utils/timeWindow";
 
 const { t } = useI18n();
 
 const store = useDashboardsStore();
-const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null);
+const preferencesStore = usePreferencesStore();
 
 const REFRESH_OPTIONS = [
   { get label() { return t('ui.off'); }, ms: 0 },
@@ -35,24 +31,11 @@ const refreshLabel = computed(
   () => REFRESH_OPTIONS.find((o) => o.ms === store.refreshIntervalMs)?.label ?? "Off"
 );
 
-// Feed the picker a DateRange derived from the store's effective (absolute) range.
-const pickerModel = computed<DateRange>(() => {
-  const range = store.effectiveRange;
-  return {
-    start: timestampToCalendarDateTime(range.start),
-    end: timestampToCalendarDateTime(range.end),
-  } as DateRange;
-});
-
-const selectedQuickRange = computed(() =>
-  store.timeRelative ? `Last ${store.timeRelative}` : null
-);
-
 // The window actually queried by the last refresh (may differ from the
 // selection when caching snaps a rolling range to a TTL bucket). Shown so users
 // can see what was executed rather than only what they picked.
 function fmtTime(ms: number): string {
-  return new Date(ms).toLocaleString(undefined, {
+  return formatInZone(epochMs(ms), preferencesStore.zone, {
     month: "short",
     day: "numeric",
     hour: "2-digit",
@@ -65,26 +48,6 @@ const appliedRangeLabel = computed(() => {
   if (!r) return null;
   return `${fmtTime(r.start)} → ${fmtTime(r.end)}`;
 });
-
-function handleRangeChange(value: any) {
-  const quick = dateTimePickerRef.value?.selectedQuickRange as string | null | undefined;
-  if (quick) {
-    const relative = quick.replace(/^Last\s+/i, "").trim();
-    try {
-      parseRelativeTimeString(relative);
-      store.setRelativeTime(relative);
-      return;
-    } catch {
-      // not a parseable relative preset — fall through to absolute
-    }
-  }
-  if (value?.start && value?.end) {
-    store.setAbsoluteRange(
-      calendarDateTimeToTimestamp(value.start),
-      calendarDateTimeToTimestamp(value.end)
-    );
-  }
-}
 
 function selectRefresh(ms: number) {
   store.setRefreshInterval(ms);
@@ -100,10 +63,11 @@ function manualRefresh() {
 <template>
   <div class="flex items-center gap-2 flex-wrap">
     <DateTimePicker
-      ref="dateTimePickerRef"
-      :model-value="pickerModel"
-      :selected-quick-range="selectedQuickRange"
-      @update:model-value="handleRangeChange"
+      :model-value="store.window"
+      :resolved="store.effectiveRange"
+      :zone-preference="preferencesStore.preferences.timezone"
+      @update:model-value="store.setWindow"
+      @update:zone-preference="preferencesStore.updatePreferences({ timezone: $event })"
     />
 
     <DropdownMenu>

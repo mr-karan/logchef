@@ -54,13 +54,13 @@ pub struct SqlArgs {
     #[arg(long, short = 's')]
     since: Option<String>,
 
-    /// Apply an absolute start time (YYYY-MM-DD HH:MM:SS), interpreted as
-    /// wall-clock in the effective timezone.
+    /// Apply an absolute start time: an RFC3339 instant, or YYYY-MM-DD
+    /// HH:MM:SS interpreted as wall-clock in the effective timezone.
     #[arg(long)]
     from: Option<String>,
 
-    /// Apply an absolute end time (YYYY-MM-DD HH:MM:SS), interpreted as
-    /// wall-clock in the effective timezone.
+    /// Apply an absolute end time: an RFC3339 instant, or YYYY-MM-DD
+    /// HH:MM:SS interpreted as wall-clock in the effective timezone.
     #[arg(long)]
     to: Option<String>,
 
@@ -540,18 +540,24 @@ fn vl_time_window(args: &SqlArgs, ctx: &Context) -> Result<Option<(String, Strin
         }
     };
 
+    // AutoSi keeps the fractional seconds of an RFC3339 bound the Explorer copied.
     Ok(Some((
-        start.to_rfc3339_opts(SecondsFormat::Secs, true),
-        end.to_rfc3339_opts(SecondsFormat::Secs, true),
+        start.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+        end.to_rfc3339_opts(SecondsFormat::AutoSi, true),
     )))
 }
 
-/// Parses a `YYYY-MM-DD HH:MM:SS` wall-clock string, interpreted in `tz`, into
-/// a UTC instant. Generic over the timezone so this file needs no direct
-/// chrono-tz dependency (the concrete zone comes from `resolve_timezone`).
+/// Parses an RFC3339 instant, or a `YYYY-MM-DD HH:MM:SS` wall-clock string
+/// interpreted in `tz`, into a UTC instant. Generic over the timezone so this
+/// file needs no direct chrono-tz dependency (the concrete zone comes from
+/// `resolve_timezone`).
 fn wall_clock_to_utc<Tz: chrono::TimeZone>(value: &str, tz: Tz) -> Result<DateTime<Utc>> {
-    let naive = NaiveDateTime::parse_from_str(value.trim(), "%Y-%m-%d %H:%M:%S")
-        .context("Invalid time format (expected YYYY-MM-DD HH:MM:SS)")?;
+    let value = value.trim();
+    if let Ok(instant) = DateTime::parse_from_rfc3339(value) {
+        return Ok(instant.with_timezone(&Utc));
+    }
+    let naive = NaiveDateTime::parse_from_str(value, "%Y-%m-%d %H:%M:%S")
+        .context("Invalid time format (expected RFC3339 or YYYY-MM-DD HH:MM:SS)")?;
     naive
         .and_local_timezone(tz)
         .single()
@@ -1196,6 +1202,87 @@ mod tests {
         assert_eq!(
             utc.to_rfc3339_opts(SecondsFormat::Secs, true),
             "2026-05-19T03:45:00Z"
+        );
+    }
+
+    #[test]
+    fn wall_clock_to_utc_reads_rfc3339_as_an_instant_in_any_zone() {
+        let tz = resolve_timezone(Some("Asia/Kolkata"));
+        for (value, expected) in [
+            ("2026-10-19T04:00:00.250Z", "2026-10-19T04:00:00.250Z"),
+            ("2026-10-19T09:30:00+05:30", "2026-10-19T04:00:00Z"),
+            // The second 01:30 of the New York fall-back day, by its offset.
+            ("2026-11-01T01:30:00-05:00", "2026-11-01T06:30:00Z"),
+        ] {
+            let utc = wall_clock_to_utc(value, tz).unwrap();
+            assert_eq!(
+                utc.to_rfc3339_opts(SecondsFormat::AutoSi, true),
+                expected,
+                "{value}"
+            );
+        }
+    }
+
+    #[derive(clap::Parser)]
+    struct SqlCommand {
+        #[command(flatten)]
+        args: SqlArgs,
+    }
+
+    fn sql_args(argv: &[&str]) -> SqlArgs {
+        use clap::Parser as _;
+        SqlCommand::try_parse_from(std::iter::once("sql").chain(argv.iter().copied()))
+            .unwrap()
+            .args
+    }
+
+    fn context_in(timezone: &str) -> Context {
+        Context {
+            server_url: "http://localhost".into(),
+            timeout_secs: 30,
+            auth: None,
+            defaults: logchef_core::config::ContextDefaults {
+                timezone: Some(timezone.into()),
+                ..Default::default()
+            },
+        }
+    }
+
+    #[test]
+    fn vl_time_window_keeps_explorer_rfc3339_bounds_exactly() {
+        let args = sql_args(&[
+            "--from",
+            "2026-10-19T04:00:00.000Z",
+            "--to",
+            "2026-10-19T05:00:00.125Z",
+            "*",
+        ]);
+        let window = vl_time_window(&args, &context_in("America/New_York")).unwrap();
+        assert_eq!(
+            window,
+            Some((
+                "2026-10-19T04:00:00Z".to_string(),
+                "2026-10-19T05:00:00.125Z".to_string()
+            ))
+        );
+    }
+
+    #[test]
+    fn vl_time_window_still_reads_wall_clock_in_the_configured_zone() {
+        let args = sql_args(&[
+            "--from",
+            "2026-05-19 09:15:00",
+            "--to",
+            "2026-05-19 09:45:00",
+            "*",
+        ]);
+        let window = vl_time_window(&args, &context_in("Asia/Kolkata")).unwrap();
+        assert_eq!(
+            window,
+            Some((
+                "2026-05-19T03:45:00Z".to_string(),
+                "2026-05-19T04:15:00Z".to_string()
+            ))
         );
     }
 }

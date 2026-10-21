@@ -10,6 +10,7 @@ import { applyAskChefEvent, buildTurnRequest, newSession, useAskChefStore, type 
 import { useAuthStore } from "../auth";
 import { useContextStore } from "../context";
 import { useExploreStore } from "../explore";
+import { parseZoneId, zoneFromPreference } from "@/utils/timeWindow";
 
 vi.mock("@/api/auth", () => ({
   authApi: { localLogin: vi.fn(), getSession: vi.fn(), logout: vi.fn() },
@@ -96,11 +97,13 @@ describe("applyAskChefEvent", () => {
 });
 
 describe("buildTurnRequest", () => {
+  const kolkata = parseZoneId("Asia/Kolkata") ?? zoneFromPreference("utc");
   const alertContext: AskChefContext = {
     teamId: 1,
     sourceId: 3,
     start: 1000,
     end: 2000,
+    zone: kolkata,
     mode: "logchefql",
     query: 'level="error"',
     subject: {
@@ -122,7 +125,7 @@ describe("buildTurnRequest", () => {
     applyAskChefEvent(session, done);
     session.transcript.push({ role: "user", text: "Which hosts?" }, { role: "assistant", steps: [], text: "", evidenceIds: [], done: null });
 
-    expect(buildTurnRequest(alertContext, session, "Show sample errors", "Asia/Kolkata")).toEqual({
+    expect(buildTurnRequest(alertContext, session, "Show sample errors")).toEqual({
       team_id: 1,
       source_id: 3,
       timezone: "Asia/Kolkata",
@@ -143,7 +146,7 @@ describe("buildTurnRequest", () => {
     }
     for (let n = 1; n <= 60; n++) session.evidence.set(`E${n}`, evidence(n));
 
-    const request = buildTurnRequest({ ...alertContext, subject: { kind: "explorer" } }, session, "next", "UTC");
+    const request = buildTurnRequest({ ...alertContext, subject: { kind: "explorer" } }, session, "next");
 
     expect(request.context).toEqual({ kind: "explorer", mode: "logchefql", query: 'level="error"', start: 1000, end: 2000 });
     expect(request.history).toHaveLength(20);
@@ -340,7 +343,7 @@ describe("useAskChefStore and the Explorer", () => {
     setActivePinia(createPinia());
     useContextStore().selectTeam(1);
     useContextStore().selectSource(3);
-    useExploreStore().setRelativeTimeRange("15m");
+    useExploreStore().setWindow({ kind: "relative", spec: "15m" });
     useExploreStore().setLogchefqlCode('level="error"');
   });
   afterEach(() => {
@@ -369,7 +372,7 @@ describe("useAskChefStore and the Explorer", () => {
 
     await store.send("What failed?");
     useExploreStore().setLogchefqlCode('level="warn"');
-    useExploreStore().setRelativeTimeRange("1h");
+    useExploreStore().setWindow({ kind: "relative", spec: "1h" });
     const before = Date.now();
     await store.send("And warnings?");
 

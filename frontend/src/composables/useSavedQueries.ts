@@ -12,20 +12,9 @@ import { TOAST_DURATION } from '@/lib/constants'
 import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
-import { getLocalTimeZone, CalendarDateTime, type DateValue } from '@internationalized/date'
+import { decodeStoredRange, encodeWindowForUrl } from '@/utils/timeWindowCodec'
 import type { Source } from "@/api/sources";
 import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
-
-function calendarDateTimeToTimestamp(dateTime: DateValue | null | undefined): number | null {
-  if (!dateTime) return null;
-  try {
-    const date = dateTime.toDate(getLocalTimeZone());
-    return date.getTime();
-  } catch (e) {
-    console.error("Error converting DateValue to timestamp:", e);
-    return null;
-  }
-}
 
 export function useSavedQueries(
     queries?: Ref<SavedQuery[] | undefined>,
@@ -293,45 +282,13 @@ export function useSavedQueries(
 
       if (content.limit) exploreStore.setLimit(content.limit)
 
-      if (content.timeRange === null) {
-        // Saved query has timeRange explicitly set to null — keep current range.
-      } else if (content.timeRange?.relative) {
-        exploreStore.setRelativeTimeRange(content.timeRange.relative);
-      } else if (content.timeRange?.absolute?.start && content.timeRange?.absolute?.end) {
-        try {
-          const startDate = new Date(content.timeRange.absolute.start);
-          const endDate = new Date(content.timeRange.absolute.end);
-
-          if (!isNaN(startDate.getTime()) && !isNaN(endDate.getTime())) {
-            const startDateTime = new CalendarDateTime(
-                startDate.getFullYear(),
-                startDate.getMonth() + 1,
-                startDate.getDate(),
-                startDate.getHours(),
-                startDate.getMinutes(),
-                startDate.getSeconds()
-            );
-
-            const endDateTime = new CalendarDateTime(
-                endDate.getFullYear(),
-                endDate.getMonth() + 1,
-                endDate.getDate(),
-                endDate.getHours(),
-                endDate.getMinutes(),
-                endDate.getSeconds()
-            );
-
-            exploreStore.setTimeConfiguration({
-              absoluteRange: {
-                start: startDateTime,
-                end: endDateTime
-              }
-            });
-          }
-        } catch (error) {
-          console.error("Error converting timestamps to CalendarDateTime:", error);
-        }
-      }
+      // A saved query without a time range keeps the current one.
+      const window = decodeStoredRange(content.timeRange, {
+        format: 'saved-query',
+        version: typeof content.version === 'number' ? content.version : 1,
+        prefZone: exploreStore.resolved.zone,
+      })
+      if (window) exploreStore.setWindow(window)
 
       if (Array.isArray(content.variables)) {
         try {
@@ -522,12 +479,7 @@ export function useSavedQueries(
 
     newQuery.limit = exploreStore.limit.toString();
 
-    const startTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.start);
-    const endTime = calendarDateTimeToTimestamp(exploreStore.timeRange?.end);
-    if (startTime !== null && endTime !== null) {
-      newQuery.start_time = startTime.toString();
-      newQuery.end_time = endTime.toString();
-    }
+    Object.assign(newQuery, encodeWindowForUrl(exploreStore.window));
 
     newQuery.mode = exploreStore.activeMode;
 

@@ -19,7 +19,16 @@ import {
 import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
-import { parseRelativeTimeString, calendarDateTimeToTimestamp } from "@/utils/time";
+import {
+  epochMs,
+  parseRelativeSpec,
+  relativeWindow,
+  resolveWindow,
+  toRfc3339,
+  type ResolvedWindow,
+  type TimeWindow,
+} from "@/utils/timeWindow";
+import { usePreferencesStore } from "@/stores/preferences";
 import { isCanceledError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
 
@@ -39,26 +48,13 @@ const TABLE_LIMIT_MAX = 1000;
 // a full refreshAllPanels per emission.
 const REFRESH_COALESCE_MS = 80;
 
-const DEFAULT_RELATIVE_TIME = "15m";
+const DEFAULT_WINDOW: TimeWindow = { kind: "relative", spec: "15m" };
 
 // UI fallback for the "Default" cache-TTL label shown in the edit toolbar when
 // the server advertises no policy (old server). The authoritative default now
 // comes from the server's dashboard_cache.default_ttl_seconds (see meta store);
 // this constant is only the last-resort display fallback.
 export const DEFAULT_DASHBOARD_CACHE_TTL_SECONDS = 600;
-// Panel queries run in the viewer's browser timezone (falling back to UTC if
-// it can't be resolved). This used to be hardcoded to UTC because the
-// VictoriaLogs histogram path mis-formatted a non-UTC zone as an
-// `offset=+05:30` clock string where VictoriaLogs expects a duration,
-// causing a 400; that's fixed in internal/victorialogs/querying.go.
-const PANEL_QUERY_TIMEZONE = (() => {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
-  } catch {
-    return "UTC";
-  }
-})();
-
 export type PanelStatus = "idle" | "loading" | "success" | "empty" | "error" | "locked";
 
 export interface PanelColumn {
@@ -74,7 +70,7 @@ export interface PanelState {
     granularity: string | null;
     groupBy: string | null;
     notice: string | null;
-    range: { start: number; end: number };
+    range: ResolvedWindow;
   };
   stat?: {
     value: number;
@@ -90,21 +86,16 @@ export interface PanelState {
   };
 }
 
-export interface EffectiveRange {
-  start: number; // epoch ms
-  end: number; // epoch ms
-}
 
 interface DashboardsState {
   dashboards: Dashboard[];
   current: Dashboard | null;
   panelStates: Record<string, PanelState>;
-  timeRelative: string | null;
-  timeAbsolute: EffectiveRange | null;
+  window: TimeWindow;
   // The range actually EXECUTED by the most recent refresh (snapped/moving),
   // for toolbar display. Distinct from `effectiveRange` (the user's SELECTED
   // range). null until the first refresh runs.
-  appliedRange: EffectiveRange | null;
+  appliedRange: ResolvedWindow | null;
   refreshIntervalMs: number;
   // Edit mode. `editDraft` is the working copy of the panel blob being mutated;
   // `editSnapshotJson` is the JSON of the blob at the moment Edit was entered,
@@ -149,32 +140,6 @@ function stableStringify(value: unknown): string {
   }
   return JSON.stringify(value);
 }
-
-// A UTC instant as RFC3339 (histogram + logs/query endpoint contract).
-function msToRfc3339(ms: number): string {
-  return new Date(ms).toISOString();
-}
-
-// A UTC instant as "YYYY-MM-DD HH:MM:SS" (logchefql translate/query endpoint
-// contract). Unlike the histogram/logs-query endpoints, these two do NOT
-// accept RFC3339 for ClickHouse-backed sources: the compiler bakes this
-// string straight into `toDateTime(str, tz)` and its validator rejects
-// anything but this exact layout (400 "invalid time format: expected
-// 'YYYY-MM-DD HH:MM:SS'"); `/translate` is worse — it silently omits
-// `full_sql` instead of erroring, which would run stat/timeseries panels
-// against the wrong (empty) query. So this format stays.
-function msToSqlDateTime(ms: number): string {
-  return new Date(ms).toISOString().slice(0, 19).replace("T", " ");
-}
-
-// Because msToSqlDateTime always emits a UTC wall-clock string, the timezone
-// used to interpret it must always be UTC too — sending the viewer's real
-// IANA zone here (as PANEL_QUERY_TIMEZONE does for the RFC3339 endpoints)
-// would tell the server to parse a UTC string as if it were local time in
-// that zone, shifting the query window by the zone's offset. This is the
-// bug this fix addresses: non-UTC viewers previously got a shifted window on
-// the two logchefql endpoints.
-const LOGCHEFQL_TIME_TIMEZONE = "UTC";
 
 function isAbort(err: unknown): boolean {
   return (
@@ -258,8 +223,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     dashboards: [],
     current: null,
     panelStates: {},
-    timeRelative: DEFAULT_RELATIVE_TIME,
-    timeAbsolute: null,
+    window: DEFAULT_WINDOW,
     appliedRange: null,
     refreshIntervalMs: 0,
     isEditing: false,
@@ -298,8 +262,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   const dashboards = computed(() => state.data.value.dashboards);
   const current = computed(() => state.data.value.current);
   const panelStates = computed(() => state.data.value.panelStates);
-  const timeRelative = computed(() => state.data.value.timeRelative);
-  const timeAbsolute = computed(() => state.data.value.timeAbsolute);
+  const preferencesStore = usePreferencesStore();
+  const timeWindow = computed(() => state.data.value.window);
   const appliedRange = computed(() => state.data.value.appliedRange);
   const refreshIntervalMs = computed(() => state.data.value.refreshIntervalMs);
 
@@ -319,75 +283,23 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     return stableStringify(draft) !== state.data.value.editSnapshotJson;
   });
 
-  const effectiveRange = computed<EffectiveRange>(() => {
-    const rel = state.data.value.timeRelative;
-    if (rel) {
-      try {
-        const { start, end } = parseRelativeTimeString(rel);
-        return {
-          start: calendarDateTimeToTimestamp(start),
-          end: calendarDateTimeToTimestamp(end),
-        };
-      } catch {
-        // fall through to absolute/default
-      }
-    }
-    if (state.data.value.timeAbsolute) {
-      return state.data.value.timeAbsolute;
-    }
-    const { start, end } = parseRelativeTimeString(DEFAULT_RELATIVE_TIME);
-    return {
-      start: calendarDateTimeToTimestamp(start),
-      end: calendarDateTimeToTimestamp(end),
-    };
-  });
+  const effectiveRange = computed<ResolvedWindow>(() =>
+    resolveWindow(state.data.value.window, preferencesStore.zone, epochMs(Date.now())),
+  );
 
   // Resolve the range to EXECUTE for a refresh, anchored on a caller-supplied
   // `nowMs` (captured once per refresh — do NOT read the memoized effectiveRange
-  // here, that's what freezes `now`). Classifies the current selection, derives
-  // the unsnapped base range from the existing time parsing, then delegates the
+  // here, that's what freezes `now`). Classifies the current selection, resolves
+  // the unsnapped base range in the preference zone, then delegates the
   // snap/moving-window decision to the pure resolveAppliedRange.
-  function computeAppliedRange(nowMs: number, effTtlSeconds: number): EffectiveRange {
-    const abs = state.data.value.timeAbsolute;
-    if (abs) {
-      return resolveAppliedRange({
-        kind: "absolute",
-        baseStart: abs.start,
-        baseEnd: abs.end,
-        durationMs: 0,
-        effTtlSeconds,
-        nowMs,
-      });
-    }
-    const rel = state.data.value.timeRelative ?? DEFAULT_RELATIVE_TIME;
-    const parse = (s: string) => {
-      const { start, end } = parseRelativeTimeString(s);
-      return { start: calendarDateTimeToTimestamp(start), end: calendarDateTimeToTimestamp(end) };
-    };
+  function computeAppliedRange(nowMs: number, effTtlSeconds: number): ResolvedWindow {
+    const window = state.data.value.window;
+    const { start, end, zone } = resolveWindow(window, preferencesStore.zone, epochMs(nowMs));
     // today/yesterday are calendar-boundary presets — never snapped.
-    const kind: "calendar" | "rolling" = rel === "today" || rel === "yesterday" ? "calendar" : "rolling";
-    try {
-      const { start, end } = parse(rel);
-      return resolveAppliedRange({
-        kind,
-        baseStart: start,
-        baseEnd: end,
-        durationMs: end - start,
-        effTtlSeconds,
-        nowMs,
-      });
-    } catch {
-      // Unparseable relative → fall back to the default rolling window.
-      const { start, end } = parse(DEFAULT_RELATIVE_TIME);
-      return resolveAppliedRange({
-        kind: "rolling",
-        baseStart: start,
-        baseEnd: end,
-        durationMs: end - start,
-        effTtlSeconds,
-        nowMs,
-      });
-    }
+    const kind =
+      window.kind === "absolute" ? "absolute" : parseRelativeSpec(window.spec)?.kind === "calendar" ? "calendar" : "rolling";
+    const applied = resolveAppliedRange({ kind, baseStart: start, baseEnd: end, durationMs: end - start, effTtlSeconds, nowMs });
+    return { start: epochMs(applied.start), end: epochMs(applied.end), zone };
   }
 
   function getPanelState(panelId: string): PanelState {
@@ -435,9 +347,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       // A dashboard with a saved default opens in that range; one without keeps
       // the range the viewer already has.
       const defaultRange = state.data.value.current?.panels?.default_time_range;
-      if (defaultRange) {
-        state.data.value.timeRelative = defaultRange;
-        state.data.value.timeAbsolute = null;
+      const defaultWindow = defaultRange ? relativeWindow(defaultRange) : null;
+      if (defaultWindow) {
+        state.data.value.window = defaultWindow;
       }
       if (state.data.value.current) {
         await refreshAllPanels();
@@ -485,15 +397,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     }, REFRESH_COALESCE_MS);
   }
 
-  function setRelativeTime(relative: string) {
-    state.data.value.timeRelative = relative;
-    state.data.value.timeAbsolute = null;
-    scheduleRefresh();
-  }
-
-  function setAbsoluteRange(start: number, end: number) {
-    state.data.value.timeAbsolute = { start, end };
-    state.data.value.timeRelative = null;
+  function setWindow(next: TimeWindow) {
+    state.data.value.window = next;
     scheduleRefresh();
   }
 
@@ -520,7 +425,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
   // silently breaking VictoriaLogs panels — see #119 A4.)
   async function resolveNativeQuery(
     panel: DashboardPanel,
-    range: EffectiveRange,
+    range: ResolvedWindow,
     signal: AbortSignal
   ): Promise<{ query: string; language: PanelQueryLanguage }> {
     if (panel.query_language === "clickhouse-sql" || panel.query_language === "logsql") {
@@ -531,9 +436,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       panel.source_id,
       {
         query: panel.query,
-        start_time: msToSqlDateTime(range.start),
-        end_time: msToSqlDateTime(range.end),
-        timezone: LOGCHEFQL_TIME_TIMEZONE,
+        start_time: toRfc3339(range.start),
+        end_time: toRfc3339(range.end),
+        timezone: range.zone,
         limit: panel.options?.limit,
       },
       signal
@@ -559,14 +464,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   async function fetchPanelData(
     panel: DashboardPanel,
-    range: EffectiveRange,
+    range: ResolvedWindow,
     signal: AbortSignal,
     // Result-cache directive attached to the (cacheable) panel request bodies.
     // Undefined => caching off for this refresh; the `cache` field is omitted.
     cache?: CacheDirective
   ): Promise<PanelState> {
-    const startIso = msToRfc3339(range.start);
-    const endIso = msToRfc3339(range.end);
+    const startIso = toRfc3339(range.start);
+    const endIso = toRfc3339(range.end);
 
     if (panel.type === "timeseries" || panel.type === "stat" || panel.type === "breakdown") {
       const groupBy = panel.type === "timeseries" || panel.type === "breakdown" ? panel.options?.group_by?.trim() || undefined : undefined;
@@ -585,7 +490,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         group_by: groupBy,
         start_time: startIso,
         end_time: endIso,
-        timezone: PANEL_QUERY_TIMEZONE,
+        timezone: range.zone,
         query_language: nativeLanguage,
         ...(cache ? { cache } : {}),
       };
@@ -609,7 +514,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
           granularity: data?.granularity ?? null,
           groupBy: groupBy ?? null,
           notice: data?.notice ?? null,
-          range: { start: range.start, end: range.end },
+          range,
         },
       };
     }
@@ -625,7 +530,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         limit,
         start_time: startIso,
         end_time: endIso,
-        timezone: PANEL_QUERY_TIMEZONE,
+        timezone: range.zone,
         query_language: panel.query_language,
         ...(cache ? { cache } : {}),
       };
@@ -643,9 +548,9 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       panel.source_id,
       {
         query: panel.query,
-        start_time: msToSqlDateTime(range.start),
-        end_time: msToSqlDateTime(range.end),
-        timezone: LOGCHEFQL_TIME_TIMEZONE,
+        start_time: toRfc3339(range.start),
+        end_time: toRfc3339(range.end),
+        timezone: range.zone,
         limit,
         ...(cache ? { cache } : {}),
       },
@@ -661,7 +566,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   async function executePanel(
     panel: DashboardPanel,
-    range: EffectiveRange,
+    range: ResolvedWindow,
     signal: AbortSignal,
     cache?: CacheDirective
   ) {
@@ -820,7 +725,8 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     if (!draft) return;
     const { default_time_range: _previous, ...rest } = draft;
     setDraft(relative ? { ...rest, default_time_range: relative } : rest);
-    if (relative) setRelativeTime(relative);
+    const window = relative ? relativeWindow(relative) : null;
+    if (window) setWindow(window);
   }
 
   // Add or replace a panel in the draft (by id), then reflow the layout so the
@@ -1125,8 +1031,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     dashboards,
     current,
     panelStates,
-    timeRelative,
-    timeAbsolute,
+    window: timeWindow,
     appliedRange,
     refreshIntervalMs,
     effectiveRange,
@@ -1150,8 +1055,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     deleteDashboard,
 
     // time + refresh
-    setRelativeTime,
-    setAbsoluteRange,
+    setWindow,
     setRefreshInterval,
     refreshAllPanels,
     clearCurrent,

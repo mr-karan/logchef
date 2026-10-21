@@ -2,6 +2,8 @@
 import { computed, ref, onMounted } from 'vue'
 import { VisXYContainer, VisLine, VisArea, VisTooltip } from '@unovis/vue'
 import { CurveType } from '@unovis/ts'
+import { usePreferencesStore } from '@/stores/preferences'
+import { epochMs, formatInZone } from '@/utils/timeWindow'
 
 interface SparklinePoint {
   bucket: string
@@ -110,20 +112,22 @@ const y = (d: { rows: number }) => d.rows
 
 const tooltipContainer = typeof document !== 'undefined' ? document.body : undefined
 
+const preferencesStore = usePreferencesStore()
+
 const formatBucket = (date: Date) => {
   if (showTime.value) {
-    return new Intl.DateTimeFormat(undefined, {
+    return formatInZone(epochMs(date), preferencesStore.zone, {
       month: 'short',
       day: '2-digit',
       hour: '2-digit',
       minute: '2-digit',
-    }).format(date)
+    })
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return formatInZone(epochMs(date), preferencesStore.zone, {
     month: 'short',
     day: '2-digit',
     year: 'numeric',
-  }).format(date)
+  })
 }
 
 const renderTooltip = (datum: { bucket: Date; rows: number }) => {

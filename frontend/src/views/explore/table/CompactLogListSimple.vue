@@ -18,6 +18,8 @@ import type { QueryStats } from '@/api/explore'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
 import { isPrimaryMessageField } from './fieldSemantics'
+import { usePreferencesStore } from '@/stores/preferences'
+import { epochMs, formatInZone } from '@/utils/timeWindow'
 
 const { t, locale } = useI18n();
 
@@ -31,7 +33,6 @@ interface Props {
   source?: Pick<Source, 'source_type' | 'capabilities'> | null
   timestampField?: string
   severityField?: string
-  timezone?: 'local' | 'utc'
   queryFields?: any[]
   regexHighlights?: Record<string, { pattern: string; isNegated: boolean }>
 }
@@ -45,7 +46,6 @@ const props = withDefaults(defineProps<Props>(), {
   teamId: 0,
   timestampField: 'timestamp',
   severityField: 'level',
-  timezone: 'local',
   queryFields: () => [],
   regexHighlights: () => ({})
 })
@@ -65,12 +65,7 @@ const pagination = ref<PaginationState>({
 const globalFilter = ref('')
 const columnVisibility = ref<VisibilityState>({})
 const columnOrder = ref<string[]>([])
-const displayTimezone = ref<'local' | 'utc'>(props.timezone)
-
-// Watch for external timezone prop changes
-watch(() => props.timezone, (newVal) => {
-  displayTimezone.value = newVal
-})
+const preferencesStore = usePreferencesStore()
 
 // Create proper column definitions for the table - ensure all columns have proper IDs
 const tableColumns = computed<ColumnDef<Record<string, any>>[]>(() => {
@@ -161,18 +156,18 @@ const formatTimestamp = (timestamp: any) => {
   if (isNaN(date.getTime())) return String(timestamp)
   
   // Use compact format: HH:mm:ss
-  const options: Intl.DateTimeFormatOptions = {
+  return formatInZone(epochMs(date), preferencesStore.zone, {
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
     hour12: false
-  }
-  
-  if (displayTimezone.value === 'utc') {
-    options.timeZone = 'UTC'
-  }
-  
-  return date.toLocaleString(undefined, options)
+  })
+}
+
+const formatTooltipTimestamp = (timestamp: any) => {
+  const date = new Date(timestamp)
+  if (isNaN(date.getTime())) return String(timestamp)
+  return formatInZone(epochMs(date), preferencesStore.zone, { dateStyle: 'medium', timeStyle: 'medium' }, locale.value)
 }
 
 // HTML escape utility to prevent XSS attacks
@@ -424,7 +419,6 @@ const handleClick = (event: MouseEvent, rowId: string) => {
       :is-loading="isLoading"
       :show-column-selector="false"
       :show-pagination="true"
-      @update:timezone="displayTimezone = $event"
       @update:globalFilter="globalFilter = $event"
     />
     
@@ -444,7 +438,7 @@ const handleClick = (event: MouseEvent, rowId: string) => {
             expandedRowId === row.id ? 'py-1 items-start' : 'py-0.5 min-h-[22px] items-center'
           ]"
           @click="handleClick($event, row.id)"
-          :title="t('pages.logRowTooltip', { timestamp: new Date(row.raw[props.timestampField]).toLocaleString(locale) })"
+          :title="t('pages.logRowTooltip', { timestamp: formatTooltipTimestamp(row.raw[props.timestampField]) })"
         >
           <!-- Timestamp (fixed width grid column) -->
           <span 

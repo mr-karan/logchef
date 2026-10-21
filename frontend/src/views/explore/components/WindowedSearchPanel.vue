@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
+import { useExploreStore } from '@/stores/explore';
+import { epochMs, formatInZone } from '@/utils/timeWindow';
 import { Button } from '@/components/ui/button';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { useExploreWindowedStore } from '@/stores/exploreWindowed';
 
 const { t } = useI18n();
 const store = useExploreWindowedStore();
+const exploreStore = useExploreStore();
 const failedSearch = computed(() => store.coverage.filter(w => store.canRetrySearch(w)));
 const failedCounts = computed(() => store.coverage.filter(w => w.count === 'failed'));
 const showFailedCounts = ref(false);
-function range(start: string, end: string) { return `${new Date(start).toLocaleString()} to ${new Date(end).toLocaleString()}`; }
+function range(start: string, end: string) {
+  const format = (iso: string) => formatInZone(epochMs(Date.parse(iso)), exploreStore.resolved.zone, { dateStyle: 'medium', timeStyle: 'medium' });
+  return `${format(start)} to ${format(end)}`;
+}
 </script>
 
 <template>
