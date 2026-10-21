@@ -1816,8 +1816,8 @@ export const useExploreStore = defineStore("explore", () => {
     const mode = state.data.value.activeMode === 'logchefql' ? 'logchefql' : 'native';
     const result = await aiStore.generateAiSql(naturalLanguageQuery, currentQuery, mode);
 
-    if (result.success && result.data && state.data.value.activeMode === 'native') {
-      state.data.value.nativeQuery = result.data.sql_query || '';
+    if (result.success && aiStore.generatedAiQuery?.mode === 'native') {
+      state.data.value.nativeQuery = aiStore.generatedAiQuery.query;
     }
 
     return result;
@@ -1952,7 +1952,7 @@ export const useExploreStore = defineStore("explore", () => {
     // AI state (delegated)
     isGeneratingAISQL: computed(() => aiStore.isGeneratingAISQL),
     aiSqlError: computed(() => aiStore.aiSqlError),
-    generatedAiSql: computed(() => aiStore.generatedAiSql),
+    generatedAiQuery: computed(() => aiStore.generatedAiQuery),
 
     // Histogram state (delegated)
     histogramData: computed(() => histogramStore.histogramData),

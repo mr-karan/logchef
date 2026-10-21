@@ -69,7 +69,7 @@ vi.mock("@/stores/exploreAI", () => ({
     clearState: vi.fn(),
     isGeneratingAISQL: false,
     aiSqlError: null,
-    generatedAiSql: null,
+    generatedAiQuery: null,
   }),
 }));
 
