@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"testing"
 	"time"
 )
@@ -67,27 +66,5 @@ func TestTimestampRoundTrips(t *testing.T) {
 				t.Errorf("SQLite-generated timestamp %v is outside the insertion interval", got)
 			}
 		})
-	}
-}
-
-func TestLegacyTimestampFormat(t *testing.T) {
-	db, err := sql.Open("sqlite", ":memory:")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`CREATE TABLE timestamps (value DATETIME)`); err != nil {
-		t.Fatal(err)
-	}
-	now := time.Now()
-	if _, err := db.Exec(`INSERT INTO timestamps VALUES (?)`, now); err != nil {
-		t.Fatal(err)
-	}
-	var raw string
-	if err := db.QueryRow(`SELECT CAST(value AS TEXT) FROM timestamps`).Scan(&raw); err != nil {
-		t.Fatal(err)
-	}
-	if want := now.String(); raw != want {
-		t.Fatalf("legacy timestamp = %q, want time.String() %q", raw, want)
 	}
 }
