@@ -422,7 +422,7 @@ func resolveQueryTimeout(cfg config.QueryConfig, requested *int) (*int, error) {
 
 // logchefQLSource loads the source and confirms it accepts LogchefQL.
 func logchefQLSource(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource) (*models.Source, error) {
-	source, err := GetSource(ctx, ds, src.SourceID())
+	source, err := LoadSource(ctx, ds, src.SourceID())
 	if err != nil {
 		return nil, err
 	}

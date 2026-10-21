@@ -50,7 +50,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 	if err := c.Bind().Body(&req); err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
 	}
-	source, err := core.GetSource(c.Context(), s.datasources, src.SourceID())
+	source, err := core.LoadSource(c.Context(), s.datasources, src.SourceID())
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 	}

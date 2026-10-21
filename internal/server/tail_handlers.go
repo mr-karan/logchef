@@ -47,7 +47,7 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 
 	// Gate on the source capability before any streaming setup so non-supporting
 	// sources get a clean 400.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)

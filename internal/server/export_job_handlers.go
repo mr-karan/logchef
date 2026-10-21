@@ -38,7 +38,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	// Gate exports behind the source capability before persisting a job or
 	// spawning the async worker. Non-supporting sources (e.g. VictoriaLogs) get
 	// a clean 400 instead of an async job failure.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		if errors.Is(err, core.ErrSourceNotFound) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
