@@ -90,6 +90,65 @@ func newTestCreateAlertRequest() *models.CreateAlertRequest {
 	}
 }
 
+func TestClickHouseAlertQueryValidation(t *testing.T) {
+	db := newTestDB(t)
+	log := discardLogger()
+	ctx := context.Background()
+	owner := newTestUser(t, db, "sql-owner@example.com", "Owner")
+	source := newTestSource(t, db, "sql-alerts")
+	ds := datasource.NewService(db, log)
+	ds.Register(datasource.NewClickHouseProvider(nil, log))
+
+	req := newTestCreateAlertRequest()
+	alert, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, query := range []string{
+		"DROP TABLE x",
+		"INSERT INTO x SELECT 1",
+		"/* c */ DROP TABLE x",
+		"SYSTEM SHUTDOWN",
+		"OPTIMIZE TABLE x",
+		"KILL QUERY WHERE 1",
+		"SELECT 1; DROP TABLE x",
+	} {
+		t.Run(query, func(t *testing.T) {
+			badRequest := newTestCreateAlertRequest()
+			badRequest.Query = query
+			if _, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, badRequest); !errors.Is(err, ErrInvalidAlertConfiguration) {
+				t.Errorf("CreateAlert() error = %v, want ErrInvalidAlertConfiguration", err)
+			}
+			if _, err := UpdateAlert(ctx, db, ds, log, alert.ID, &models.UpdateAlertRequest{Query: &query}); !errors.Is(err, ErrInvalidAlertConfiguration) {
+				t.Errorf("UpdateAlert() error = %v, want ErrInvalidAlertConfiguration", err)
+			}
+			stored, err := db.GetAlert(ctx, alert.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.Query != req.Query {
+				t.Errorf("stored query = %q, want %q", stored.Query, req.Query)
+			}
+		})
+	}
+
+	for _, aggregate := range []string{"count(*)", "sum(`duration`)", "avg(`duration`)", "min(`duration`)", "max(`duration`)"} {
+		t.Run(aggregate, func(t *testing.T) {
+			conditionRequest := newTestCreateAlertRequest()
+			conditionRequest.EditorMode = models.AlertEditorModeCondition
+			conditionRequest.ConditionJSON = `severity = "ERROR"`
+			conditionRequest.Query = "SELECT " + aggregate + " as value\nFROM default.logs\nWHERE (severity = 'ERROR') AND `timestamp` >= now() - toIntervalSecond(300)"
+			created, err := CreateAlert(ctx, db, ds, log, source.ID, owner.ID, conditionRequest)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if created.Query != conditionRequest.Query {
+				t.Errorf("query changed to %q, want %q", created.Query, conditionRequest.Query)
+			}
+		})
+	}
+}
+
 // TestCreateAlertFullLifecycle exercises CreateAlert -> GetAlert -> UpdateAlert
 // -> ListAlertsBySource/ForUser -> DeleteAlert -> GetAlert(not found) through a
 // real sqlite store with a fakeProvider standing in for ClickHouse/VictoriaLogs.

@@ -623,6 +623,9 @@ func (p *ClickHouseProvider) EvaluateAlert(ctx context.Context, source *models.S
 	if language := models.NormalizeQueryLanguage(req.Language); language != "" && language != models.QueryLanguageClickHouseSQL {
 		return nil, fmt.Errorf("clickhouse alerts require %q, got %q", models.QueryLanguageClickHouseSQL, language)
 	}
+	if err := clickhouse.ValidateSelectQuery(req.Query); err != nil {
+		return nil, &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+	}
 	if req.QueryTimeout == nil {
 		defaultTimeout := models.DefaultQueryTimeoutSeconds
 		req.QueryTimeout = &defaultTimeout

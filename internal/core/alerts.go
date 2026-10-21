@@ -143,7 +143,7 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	if ds == nil {
 		return fmt.Errorf("datasource service is required")
 	}
-	if err := ds.ValidateAlertSupport(ctx, sourceID, queryLanguage, editorMode); err != nil {
+	if err := ds.ValidateAlertSupport(ctx, sourceID, queryLanguage, editorMode, alert.Query); err != nil {
 		return err
 	}
 

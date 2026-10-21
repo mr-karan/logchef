@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/sync/singleflight"
 
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -188,7 +189,7 @@ func (s *Service) ValidateSavedQuerySupport(ctx context.Context, sourceID models
 	return nil
 }
 
-func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.SourceID, language models.QueryLanguage, mode models.AlertEditorMode) error {
+func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.SourceID, language models.QueryLanguage, mode models.AlertEditorMode, query string) error {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {
 		return err
@@ -202,6 +203,12 @@ func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.Sour
 	normalizedMode := models.NormalizeAlertEditorMode(mode)
 	if !supportsAlertEditorMode(provider.SupportedAlertEditorModes(), normalizedMode) {
 		return fmt.Errorf("%s does not support alert editor mode %q", source.SourceType, normalizedMode)
+	}
+
+	if normalizedLanguage == models.QueryLanguageClickHouseSQL {
+		if err := clickhouse.ValidateSelectQuery(query); err != nil {
+			return &ValidationError{Field: "query", Message: "invalid alert query", Err: err}
+		}
 	}
 
 	return nil

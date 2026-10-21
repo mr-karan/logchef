@@ -78,30 +78,44 @@ func (qb *QueryBuilder) BuildRawQuery(rawSQL string, limit int) (string, error) 
 	return result.SQL, nil
 }
 
-// BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit
-// default/max limit policy. The default limit is used for SQL without LIMIT;
-// the max limit is only a ceiling.
-func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
+// ValidateSelectQuery accepts a single SELECT statement without rewriting it.
+func ValidateSelectQuery(rawSQL string) error {
+	_, err := parseSelectQuery(rawSQL)
+	return err
+}
+
+func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 	// The parser lexer accepts ClickHouse's doubled apostrophes and keeps them
 	// in StringLiteral.Literal. Do not preprocess raw SQL: the formatter emits
 	// literal contents verbatim, while comments are intentionally omitted.
 	parser := clickhouseparser.NewParser(rawSQL)
 	stmts, err := parser.ParseStmts()
 	if err != nil {
-		return QueryBuildResult{}, fmt.Errorf("invalid SQL syntax: %w", err)
+		return nil, fmt.Errorf("invalid SQL syntax: %w", err)
 	}
 
 	if len(stmts) == 0 {
-		return QueryBuildResult{}, fmt.Errorf("no SQL statements found")
+		return nil, fmt.Errorf("no SQL statements found")
 	}
 	if len(stmts) > 1 {
-		return QueryBuildResult{}, fmt.Errorf("multiple SQL statements are not supported")
+		return nil, fmt.Errorf("multiple SQL statements are not supported")
 	}
 
 	stmt := stmts[0]
 	selectQuery, ok := stmt.(*clickhouseparser.SelectQuery)
 	if !ok {
-		return QueryBuildResult{}, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
+		return nil, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
+	}
+	return selectQuery, nil
+}
+
+// BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit
+// default/max limit policy. The default limit is used for SQL without LIMIT;
+// the max limit is only a ceiling.
+func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLimit, defaultLimit, maxLimit int) (QueryBuildResult, error) {
+	selectQuery, err := parseSelectQuery(rawSQL)
+	if err != nil {
+		return QueryBuildResult{}, err
 	}
 
 	// Mode-specific validation
@@ -128,7 +142,7 @@ func (qb *QueryBuilder) BuildRawQueryWithLimitPolicy(rawSQL string, requestedLim
 		return QueryBuildResult{}, fmt.Errorf("LIMIT must be a numeric literal")
 	}
 
-	result.SQL = formatSQL(stmt)
+	result.SQL = formatSQL(selectQuery)
 
 	return result, nil
 }
