@@ -825,6 +825,28 @@ func TestValidate(t *testing.T) {
 	})
 }
 
+// buildFullQuery parses, translates, and builds the executable SQL in one call.
+func buildFullQuery(params QueryBuildParams) (string, error) {
+	start, end, err := prepareTimeRange(params)
+	if err != nil {
+		return "", err
+	}
+
+	pq, parseErr := ParseLogchefQL(params.LogchefQL)
+	if parseErr != nil {
+		return "", convertParticipleError(parseErr)
+	}
+	translateResult := translateAST(ConvertToAST(pq), params.Schema)
+	if !translateResult.Valid {
+		if translateResult.Error != nil {
+			return "", translateResult.Error
+		}
+		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
+	}
+
+	return buildFullQueryFromTranslation(params, start, end, translateResult)
+}
+
 func TestBuildFullQuery(t *testing.T) {
 	t.Run("builds complete query", func(t *testing.T) {
 		params := QueryBuildParams{
@@ -838,7 +860,7 @@ func TestBuildFullQuery(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -875,7 +897,7 @@ func TestBuildFullQuery(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -898,7 +920,7 @@ func TestBuildFullQuery(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -936,7 +958,7 @@ func TestBuildFullQuery(t *testing.T) {
 			Limit:          50,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got %v", err)
 		}
@@ -1098,7 +1120,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err == nil {
 			t.Error("expected error for invalid time format")
 		}
@@ -1118,7 +1140,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err == nil {
 			t.Error("expected error for dangerous timezone")
 		}
@@ -1139,7 +1161,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err != nil {
 			t.Errorf("expected no error for valid timezone, got: %v", err)
 		}
@@ -1157,7 +1179,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err != nil {
 			t.Errorf("expected no error for timezone with colon offset, got: %v", err)
 		}
@@ -1174,7 +1196,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err == nil {
 			t.Error("expected error for invalid table name")
 		}
@@ -1194,7 +1216,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err == nil {
 			t.Error("expected error for invalid timestamp field")
 		}
@@ -1215,7 +1237,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error for @timestamp, got: %v", err)
 		}
@@ -1237,7 +1259,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -1261,7 +1283,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err == nil {
 			t.Error("expected error for impossible date 2024-99-99")
 		}
@@ -1278,7 +1300,7 @@ func TestTimeValidation(t *testing.T) {
 			Limit:          100,
 		}
 
-		_, err := BuildFullQuery(params)
+		_, err := buildFullQuery(params)
 		if err == nil {
 			t.Error("expected error for impossible hour 25:00:00")
 		}
@@ -1319,7 +1341,7 @@ func TestDuplicateTimestampAvoidance(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -1347,7 +1369,7 @@ func TestDuplicateTimestampAvoidance(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -1379,7 +1401,7 @@ func TestMapColumnFallback(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -1404,7 +1426,7 @@ func TestMapColumnFallback(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -1426,7 +1448,7 @@ func TestMapColumnFallback(t *testing.T) {
 			Limit:          100,
 		}
 
-		sql, err := BuildFullQuery(params)
+		sql, err := buildFullQuery(params)
 		if err != nil {
 			t.Fatalf("expected no error, got: %v", err)
 		}
@@ -1445,7 +1467,7 @@ func TestMapColumnFallback(t *testing.T) {
 
 func TestBuildFullQueryFractionalTimeRange(t *testing.T) {
 	params := QueryBuildParams{TableName: "logs.test", TimestampField: "timestamp", StartTime: "2026-10-01 10:43:44.840", EndTime: "2026-10-01 11:43:44.123456789", Timezone: "UTC", Limit: 100}
-	query, err := BuildFullQuery(params)
+	query, err := buildFullQuery(params)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1455,7 +1477,7 @@ func TestBuildFullQueryFractionalTimeRange(t *testing.T) {
 	}
 	for _, value := range []string{"2026-10-01 10:43:44.", "2026-10-01 10:43:44.1234567890", "2026-10-01 10:43:44.125' OR 1=1", "2026-02-30 10:43:44.125"} {
 		params.StartTime = value
-		if _, err := BuildFullQuery(params); err == nil {
+		if _, err := buildFullQuery(params); err == nil {
 			t.Errorf("invalid timestamp %q accepted", value)
 		}
 	}
@@ -1463,7 +1485,7 @@ func TestBuildFullQueryFractionalTimeRange(t *testing.T) {
 
 func TestBuildFullQueryAcceptsRFC3339(t *testing.T) {
 	build := func(start, end, timezone string) (string, error) {
-		return BuildFullQuery(QueryBuildParams{
+		return buildFullQuery(QueryBuildParams{
 			LogchefQL:      `field="value"`,
 			Schema:         testSchema,
 			TableName:      "logs.test",

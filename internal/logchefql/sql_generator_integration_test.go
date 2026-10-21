@@ -85,7 +85,7 @@ func TestRFC3339BoundsKeepInstantsAcrossDSTFoldClickHouse(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	sql, err := BuildFullQuery(QueryBuildParams{
+	sql, err := buildFullQuery(QueryBuildParams{
 		LogchefQL: `field="value"`, Schema: testSchema, TableName: "logs.test", TimestampField: "timestamp",
 		StartTime: "2026-11-01T05:30:00Z", EndTime: "2026-11-01T06:30:00Z", Timezone: "America/New_York", Limit: 1,
 	})
