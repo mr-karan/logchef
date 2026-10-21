@@ -8,6 +8,7 @@ import { logchefqlApi } from "@/api/logchefql";
 import { exploreApi } from "@/api/explore";
 import { useExploreStore } from "@/stores/explore";
 import { exploreWindowQuery } from "@/utils/alertExplore";
+import { contextRouterGuard } from "@/router/contextGuard";
 
 import { normalizeQueryParams, useUrlState } from "../useUrlState";
 
@@ -37,10 +38,12 @@ const source: Source = {
   updated_at: "",
   is_connected: true,
 };
+const otherSource: Source = { ...source, id: 4, name: "cart-logs", connection: { host: "", database: "logs", table_name: "cart" } };
 
 // Two evidence chips, as Ask Chef pushes them, with whole-second instants.
 const evidenceA = exploreWindowQuery({ teamId: 1, sourceId: 3, start: Date.UTC(2026, 9, 19, 4), end: Date.UTC(2026, 9, 19, 5), query: 'level="error"' });
 const evidenceB = exploreWindowQuery({ teamId: 1, sourceId: 3, start: Date.UTC(2026, 9, 18, 9), end: Date.UTC(2026, 9, 18, 10), query: 'service="cart"' });
+const evidenceOther = exploreWindowQuery({ teamId: 1, sourceId: 4, start: Date.UTC(2026, 9, 19, 6), end: Date.UTC(2026, 9, 19, 7), query: 'status=500' });
 
 describe("Explorer history navigation", () => {
   let unmount: (() => void) | undefined;
@@ -54,8 +57,10 @@ describe("Explorer history navigation", () => {
 
   async function mountExplorer() {
     vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team]) as never);
-    vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source]) as never);
-    vi.spyOn(sourcesApi, "getTeamSource").mockReturnValue(ok(source) as never);
+    vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source, otherSource]) as never);
+    vi.spyOn(sourcesApi, "getTeamSource").mockImplementation(
+      (_teamId: number, sourceId: number) => ok(sourceId === otherSource.id ? otherSource : source) as never,
+    );
     const query = vi.spyOn(logchefqlApi, "query").mockReturnValue(
       ok({ logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 }, generated_sql: "SELECT 1" }) as never,
     );
@@ -77,6 +82,7 @@ describe("Explorer history navigation", () => {
       },
     });
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/logs/explore", component: Explorer }] });
+    router.beforeEach(contextRouterGuard);
     await router.push({ path: "/logs/explore", query: { team: "1", source: "3" } });
     const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router);
     app.mount(document.createElement("div"));
@@ -84,7 +90,7 @@ describe("Explorer history navigation", () => {
     const store = useExploreStore();
     if (!urlState) throw new Error("explorer did not mount");
     await urlState.initialize();
-    return { router, store, query };
+    return { router, store, query, urlState };
   }
 
   async function settle(store: ReturnType<typeof useExploreStore>) {
@@ -134,6 +140,40 @@ describe("Explorer history navigation", () => {
       router.forward();
       await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceB.start));
     }, store);
+    expectOpen(router, store, query, evidenceB);
+  });
+
+  it("runs one query when Explorer opens", async () => {
+    const { store, query } = await mountExplorer();
+    await settle(store);
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a link to another source with the link's query and window", async () => {
+    const { router, store, query } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceOther }), store);
+    expect(store.sourceId).toBe(otherSource.id);
+    expectOpen(router, store, query, evidenceOther);
+  });
+
+  it("goes Back to the previous source's query after picking another source", async () => {
+    const { router, store, query, urlState } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+    store.setLogchefqlCode('unrun="edit"');
+
+    await expectOneRun(query, () => urlState.selectSource(otherSource.id), store);
+    expect(router.currentRoute.value.query.source).toBe(String(otherSource.id));
+
+    await expectOneRun(query, async () => {
+      router.back();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.source).toBe(String(source.id)));
+    }, store);
+    expect(store.sourceId).toBe(source.id);
     expectOpen(router, store, query, evidenceB);
   });
 
