@@ -206,7 +206,7 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 		hook.AfterQuery(ctx, query, err, duration)
 	}
 
-	return err // Return the error from the query function itself.
+	return classifyQueryError(err)
 }
 
 // Close terminates the underlying database connection with a timeout.

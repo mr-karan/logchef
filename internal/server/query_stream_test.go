@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -186,7 +188,7 @@ func TestQueryStreamWriter_ErrorBeforeBegin(t *testing.T) {
 	if got["status"] != "error" {
 		t.Fatalf("status = %v, want error", got["status"])
 	}
-	if got["message"] != "boom: syntax error" {
+	if got["message"] != logsQueryFailure {
 		t.Fatalf("message = %v", got["message"])
 	}
 	if got["error_type"] != string(models.DatabaseErrorType) {
@@ -224,7 +226,42 @@ func TestQueryStreamWriter_ErrorMidStreamStaysValidJSON(t *testing.T) {
 	if !ok || len(logs) != 1 {
 		t.Fatalf("expected 1 partial row, got %v", data["data"])
 	}
-	if data["error"] != "stream interrupted" {
+	if data["error"] != logsQueryFailure {
 		t.Fatalf("expected error field, got %v", data["error"])
+	}
+}
+
+func TestQueryStreamDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		message   string
+		errorType models.ErrorType
+	}{
+		{"validation", &datasource.ValidationError{Field: "query", Message: "Cannot parse query", Err: errors.New(internalDetail)}, "Cannot parse query", models.ValidationErrorType},
+		{"driver", errors.New(internalDetail), logsQueryFailure, models.DatabaseErrorType},
+	} {
+		for _, begun := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/begun=%t", tc.name, begun), func(t *testing.T) {
+				body := drainWriter(t, func(w *queryStreamWriter) {
+					if begun {
+						if err := w.Begin(nil); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := w.WriteError(tc.err); err != nil {
+						t.Fatal(err)
+					}
+				})
+				if begun {
+					data := body["data"].(map[string]any)
+					if data["error"] != tc.message {
+						t.Fatalf("error=%v, want %q", data["error"], tc.message)
+					}
+				} else if body["message"] != tc.message || body["error_type"] != string(tc.errorType) {
+					t.Fatalf("body=%v", body)
+				}
+			})
+		}
 	}
 }

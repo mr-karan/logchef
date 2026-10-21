@@ -75,7 +75,7 @@ func (s *Server) handleLogchefQLTranslate(c fiber.Ctx) error {
 		Limit:     req.Limit,
 	})
 	if err != nil {
-		return s.sendQueryError(c, src.SourceID(), err, "Failed to translate query")
+		return s.sendQueryError(c, src.SourceID(), err, "Failed to translate query", "Query translation")
 	}
 
 	response := TranslateResponse{
@@ -190,7 +190,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 
 	prepared, err := core.PrepareLogchefQLQuery(c.Context(), s.datasources, s.config.Query, src, req.LogchefQLQueryRequest)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure)
+		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
 	}
 	source, compiled, queryParams := prepared.Source, prepared.Compiled, prepared.Params
 	executableQuery := compiled.Query
@@ -248,7 +248,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 				return err
 			} else if err != nil {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "logchefql")
-				return writeDashboardStreamError(c, err)
+				return s.writeDashboardStreamError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, queryParams,
@@ -282,7 +282,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure)
+			return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
 		}
 	}
 
@@ -313,7 +313,7 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	// Execute via core function
 	result, err := core.QueryLogs(queryCtx, s.datasources, src, queryParams)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure)
+		return s.sendQueryError(c, sourceID, err, logchefQLQueryFailure, "LogchefQL querying")
 	}
 
 	// Log successful query execution

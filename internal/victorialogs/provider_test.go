@@ -3,6 +3,7 @@ package victorialogs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -856,5 +857,54 @@ func TestOrderFieldNamesPrioritizesMetadata(t *testing.T) {
 	want := []string{"_time", "level", "_msg", "service"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("unexpected ordered fields: got=%v want=%v", got, want)
+	}
+}
+
+func TestRejectedQueryDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ name, contentType, body, message string }{
+		{"plain", "text/plain; charset=utf-8", "remoteAddr: 127.0.0.1:1234; requestURI: /select/logsql/query?token=private; cannot parse\n\t query pipe", "cannot parse query pipe"},
+		{"html", "text/html", "<html>internal gateway details</html>", "Invalid query or query parameters"},
+		{"json", "application/json", `{"internal":"details"}`, "Invalid query or query parameters"},
+		{"bounded", "text/plain", strings.Repeat("界", 300), strings.Repeat("界", 240) + "..."},
+		{"malformed prefix", "text/plain", "remoteAddr: 127.0.0.1:1234", "Invalid query or query parameters"},
+		{"control characters", "text/plain", "invalid\x00query", "Invalid query or query parameters"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer upstream.Close()
+			conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: upstream.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
+			p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			_, err = p.QueryLogs(t.Context(), source, datasource.QueryRequest{RawQuery: "* | invalid"})
+			validation, ok := errors.AsType[*datasource.ValidationError](err)
+			if !ok || validation.Message != tc.message || validation.Err == nil || !strings.Contains(validation.Err.Error(), tc.body) {
+				t.Fatalf("error=%#v, want safe message %q and original cause", err, tc.message)
+			}
+		})
+	}
+}
+
+func TestHistogramRejectsInvalidWindow(t *testing.T) {
+	p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
+	for _, window := range []string{"2x", "0s", "-1m", "NaNd", "Infw", "1e99d"} {
+		t.Run(window, func(t *testing.T) {
+			_, err := p.Histogram(t.Context(), source, datasource.HistogramRequest{Window: window})
+			validation, ok := errors.AsType[*datasource.ValidationError](err)
+			if !ok || validation.Field != "window" || !strings.Contains(validation.Message, "positive duration") {
+				t.Fatalf("error=%v, want local window validation", err)
+			}
+		})
 	}
 }

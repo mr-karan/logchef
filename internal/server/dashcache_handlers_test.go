@@ -203,7 +203,7 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					wantStatus := http.StatusInternalServerError
 					wantErrorType := models.DatabaseErrorType
 					switch {
-					case sourceType == models.SourceTypeClickHouse:
+					case failure.partial:
 						wantStatus = http.StatusOK
 					case failure.name == "canceled" || failure.name == "deadline":
 						// A caller that went away is not a server failure.
@@ -227,7 +227,7 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					}
 					if failure.partial {
 						data, ok := uncached.body["data"].(map[string]any)
-						if !ok || data["error"] != failure.err.Error() {
+						if !ok || data["error"] != logsQueryFailure {
 							t.Fatalf("missing partial-stream error: %v", uncached.body)
 						}
 						logsKey := "data"

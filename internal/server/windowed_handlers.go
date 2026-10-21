@@ -36,7 +36,7 @@ func (s *Server) handleStreamFields(c fiber.Ctx) error {
 	defer cancel()
 	fields, err := s.datasources.StreamFields(ctx, src.SourceID())
 	if err != nil {
-		return s.sendQueryError(c, src.SourceID(), err, "Could not discover stream fields")
+		return s.sendQueryError(c, src.SourceID(), err, "Could not discover stream fields", "Stream field discovery")
 	}
 	return SendSuccess(c, fiber.StatusOK, fields)
 }
@@ -52,7 +52,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 	}
 	source, err := core.GetSource(c.Context(), s.datasources, src.SourceID())
 	if err != nil {
-		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
+		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 	}
 	if !source.IsVictoriaLogs() {
 		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, "Windowed search requires a VictoriaLogs source", models.ValidationErrorType)
@@ -63,7 +63,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 			Query: req.QueryText, StartTime: req.StartTime, EndTime: req.EndTime, Timezone: req.Timezone, Limit: req.Limit, QueryTimeout: req.QueryTimeout, Variables: req.Variables,
 		})
 		if err != nil {
-			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
+			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 		}
 		params = prepared.Params
 	} else {
@@ -72,7 +72,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		}
 		params, err = core.PrepareSQLQuery(s.config.Query, req.APIQueryRequest)
 		if err != nil {
-			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
+			return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 		}
 	}
 	plan, err := s.datasources.PrepareWindowedQuery(c.Context(), src.SourceID(), datasource.WindowedRequest{
@@ -82,7 +82,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusUnprocessableEntity, "Windowing is disabled or this query contains pipes. Run it through the standard query endpoint.", models.ValidationErrorType)
 	}
 	if err != nil {
-		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure)
+		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 	}
 	user := c.Locals("user").(*models.User)
 	class := QueryClassPreview

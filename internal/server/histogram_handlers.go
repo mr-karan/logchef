@@ -35,7 +35,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 
 	params, err := core.PrepareHistogram(req)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, histogramFailure)
+		return s.sendQueryError(c, sourceID, err, histogramFailure, "Histogram generation")
 	}
 
 	// Dashboard panel requests may opt into the per-dashboard result cache.
@@ -73,7 +73,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 			if handled, err := s.tryServeDashboardCache(c, key, effTTL, core.HistogramTimeout, fill); handled {
 				return err
 			} else if err != nil {
-				return s.sendQueryError(c, sourceID, err, histogramFailure)
+				return s.sendQueryError(c, sourceID, err, histogramFailure, "Histogram generation")
 			}
 		}
 	}
@@ -92,7 +92,7 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 			s.log.Warn("histogram request timed out", "source_id", sourceID, "timeout", core.HistogramTimeout)
 			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
 		}
-		return s.sendQueryError(c, sourceID, err, histogramFailure)
+		return s.sendQueryError(c, sourceID, err, histogramFailure, "Histogram generation")
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)

@@ -242,7 +242,7 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 	defer cancel()
 
 	if isDDLStatement(query) {
-		return models.QueryStats{}, fmt.Errorf("streaming DDL statements is not supported")
+		return models.QueryStats{}, &ValidationError{Message: "only SELECT queries are supported"}
 	}
 
 	var stats models.QueryStats
@@ -261,6 +261,9 @@ func (c *Client) QueryStream(ctx context.Context, query string, opts QueryOption
 		}()
 
 		hasRow := rows.Next()
+		if err := rows.Err(); err != nil {
+			return err
+		}
 		columnsInfo, scanDest, scanPtrs := prepareRowScan(rows)
 		if err := writer.Begin(columnsInfo); err != nil {
 			return err

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net"
 	"net/http"
 	"net/url"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -642,7 +645,10 @@ func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaL
 	}
 
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-	detail := sanitizeVictoriaLogsValidationBody(body)
+	detail := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"))
+	if detail != "" {
+		detail = ": " + detail
+	}
 	switch resp.StatusCode {
 	case http.StatusBadRequest:
 		return &datasource.ValidationError{
@@ -672,18 +678,32 @@ func (p *Provider) probeQueryEndpoint(ctx context.Context, conn models.VictoriaL
 	}
 }
 
-func sanitizeVictoriaLogsValidationBody(body []byte) string {
-	trimmed := strings.TrimSpace(string(body))
-	if trimmed == "" {
+func sanitizeVictoriaLogsValidationBody(body []byte, contentType string) string {
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || mediaType != "text/plain" || !utf8.Valid(body) {
 		return ""
 	}
-	trimmed = strings.ReplaceAll(trimmed, "\n", " ")
-	trimmed = strings.ReplaceAll(trimmed, "\t", " ")
-	trimmed = strings.Join(strings.Fields(trimmed), " ")
-	if len(trimmed) > 240 {
-		trimmed = trimmed[:240] + "..."
+	text := strings.TrimSpace(string(body))
+	if strings.HasPrefix(text, "remoteAddr:") {
+		_, remainder, ok := strings.Cut(text, "; requestURI:")
+		if !ok {
+			return ""
+		}
+		_, text, ok = strings.Cut(remainder, ";")
+		if !ok {
+			return ""
+		}
 	}
-	return ": " + trimmed
+	text = strings.Join(strings.Fields(text), " ")
+	if strings.ContainsFunc(text, unicode.IsControl) {
+		return ""
+	}
+	const maxDiagnosticRunes = 240
+	runes := []rune(text)
+	if len(runes) > maxDiagnosticRunes {
+		text = string(runes[:maxDiagnosticRunes]) + "..."
+	}
+	return text
 }
 
 func (p *Provider) updateHealth(sourceID models.SourceID, healthy bool, err error) {

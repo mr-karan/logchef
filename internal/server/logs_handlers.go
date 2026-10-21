@@ -12,7 +12,6 @@ import (
 	"github.com/google/uuid"
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
-	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -186,44 +185,6 @@ func (qt *QueryTracker) Cleanup() {
 
 const logsQueryFailure = "Failed to query logs"
 
-// Only typed validation messages are safe to return to callers.
-func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error, failure string) error {
-	reqErr, isRequestError := errors.AsType[*core.QueryRequestError](err)
-	admissionErr, isAdmissionError := errors.AsType[*QueryAdmissionError](err)
-	validationErr, isValidationError := errors.AsType[*datasource.ValidationError](err)
-	clickhouseErr, isClickhouseError := errors.AsType[*clickhouse.ValidationError](err)
-	switch {
-	case isRequestError:
-		return SendErrorWithType(c, fiber.StatusBadRequest, reqErr.Message, models.ValidationErrorType)
-	case isAdmissionError:
-		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
-	case errors.Is(err, context.Canceled):
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-	case errors.Is(err, context.DeadlineExceeded):
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-	case errors.Is(err, core.ErrSourceNotFound):
-		return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-	case errors.Is(err, core.ErrLogchefQLNotSupported):
-		return SendErrorWithType(c, fiber.StatusBadRequest, "LogchefQL is not supported for this source", models.ValidationErrorType)
-	case errors.Is(err, datasource.ErrOperationNotSupported):
-		return SendErrorWithType(c, fiber.StatusBadRequest, "This operation is not supported for this source type yet", models.ValidationErrorType)
-	case errors.Is(err, models.ErrHistogramBudgetExceeded):
-		return SendErrorWithType(c, fiber.StatusBadRequest, models.ErrHistogramBudgetExceeded.Error(), models.ValidationErrorType)
-	case isValidationError:
-		s.log.Warn("query validation failed", "error", err, "source_id", sourceID, "path", c.Path())
-		message := validationErr.Message
-		// Upstream response bodies can contain proxy and driver details.
-		if validationErr.Field == "victorialogs" {
-			message = "Invalid query or query parameters"
-		}
-		return SendErrorWithType(c, fiber.StatusBadRequest, message, models.ValidationErrorType)
-	case isClickhouseError:
-		return SendErrorWithType(c, fiber.StatusBadRequest, clickhouseErr.Message, models.ValidationErrorType)
-	}
-	s.log.Error("query failed", "error", err, "source_id", sourceID, "path", c.Path())
-	return SendErrorWithType(c, fiber.StatusInternalServerError, failure, models.DatabaseErrorType)
-}
-
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireTeamHasSource middleware.
 func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
@@ -246,7 +207,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 
 	params, err := core.PrepareSQLQuery(s.config.Query, req)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
 	}
 	processedQuery := params.RawQuery
 
@@ -256,10 +217,10 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
 	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
 	}
 	if err := datasource.ValidateSourceStreamFilters(source.SourceType, req.ExtraStreamFilters); err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
 	}
 	// Dashboard panel requests may opt into the per-dashboard result cache. The
 	// cache key is computed from the finalized (post-substitution) executable
@@ -304,7 +265,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 				return err
 			} else if err != nil {
 				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "sql")
-				return writeDashboardStreamError(c, err)
+				return s.writeDashboardStreamError(c, sourceID, err, logsQueryFailure, "Log querying")
 			}
 		}
 		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
@@ -333,7 +294,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.sendQueryError(c, sourceID, err, logsQueryFailure)
+			return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
 		}
 	}
 
@@ -364,7 +325,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// Execute query via core function with cancellable context.
 	result, err := core.QueryLogs(queryCtx, s.datasources, src, params)
 	if err != nil {
-		return s.sendQueryError(c, sourceID, err, logsQueryFailure)
+		return s.sendQueryError(c, sourceID, err, logsQueryFailure, "Log querying")
 	}
 
 	// Log successful query execution

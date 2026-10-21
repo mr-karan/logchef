@@ -357,7 +357,7 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), req.MaxLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(req.RawQuery, req.Limit, req.DefaultLimit, req.MaxLimit)
 	if err != nil {
-		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("invalid query syntax: %w", err)
+		return nil, "", clickhouse.QueryOptions{}, &clickhouse.ValidationError{Message: err.Error()}
 	}
 
 	opts := clickhouse.QueryOptions{

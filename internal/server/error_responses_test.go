@@ -6,15 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v3"
 
 	"github.com/mr-karan/logchef/internal/alerts"
+	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -171,7 +175,7 @@ func TestErrorResponses(t *testing.T) {
 		{
 			name: "histogram window the datasource rejects", method: http.MethodPost, path: sourcePath + "/logs/histogram",
 			body:   `{"query_text":"*","window":"2x",` + window + `}`,
-			status: fiber.StatusBadRequest, message: "Invalid query or query parameters",
+			status: fiber.StatusBadRequest, message: "invalid histogram window: use a positive duration such as 1m",
 		},
 		{
 			name: "ClickHouse histogram window that does not exist", method: http.MethodPost, path: chSourcePath + "/logs/histogram",
@@ -223,5 +227,140 @@ func TestErrorResponses(t *testing.T) {
 				t.Errorf("message leaks internal detail: %q", got.message)
 			}
 		})
+	}
+}
+
+func configureErrorResponseClickHouse(t *testing.T, env errorResponseEnv, addr string) {
+	t.Helper()
+	source, err := env.s.sqlite.GetSource(t.Context(), env.chSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.Connection = models.ConnectionInfo{Host: addr, Username: "default", Database: "system", TableName: "numbers"}
+	if err := env.s.sqlite.UpdateSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	manager := clickhouse.NewManager(env.s.log)
+	t.Cleanup(func() {
+		if err := manager.Close(); err != nil {
+			t.Error(err)
+		}
+	})
+	env.s.datasources.Register(datasource.NewClickHouseProvider(manager, env.s.log))
+	if err := env.s.datasources.InitializeSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClickHouseQueryFailureResponses(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR for read-only ClickHouse checks")
+	}
+	env := newErrorResponseServer(t, vlUpstream)
+	configureErrorResponseClickHouse(t, env, addr)
+	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs", env.team, env.chSource)
+	for _, tc := range []struct{ name, endpoint, body, reason string }{
+		{"parser", "/query", `{"query_text":"SELECT ("}`, "invalid SQL syntax"},
+		{"non-select", "/query", `{"query_text":"SHOW TABLES"}`, "only SELECT"},
+		{"identifier", "/query", `{"query_text":"SELECT missing_query_field FROM system.numbers"}`, "missing_query_field"},
+		{"type", "/query", `{"query_text":"SELECT plus(1, [1])"}`, "Illegal"},
+		{"aggregation", "/query", `{"query_text":"SELECT sum(number) FROM system.numbers WHERE sum(number) > 1"}`, "Aggregate"},
+		{"function", "/query", `{"query_text":"SELECT no_such_query_function(1)"}`, "no_such_query_function"},
+		{"histogram", "/histogram", `{"query_text":"SELECT missing_query_field FROM system.numbers","window":"1m","start_time":"2026-10-01T00:00:00Z","end_time":"2026-10-01T01:00:00Z"}`, "missing_query_field"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := doAuthzRequest(t, env.s, http.MethodPost, path+tc.endpoint, tc.body, withSession(env.cookie))
+			if got.status != 400 || !strings.Contains(got.message, tc.reason) {
+				t.Fatalf("status=%d message=%q, want 400 with %q", got.status, got.message, tc.reason)
+			}
+		})
+	}
+	t.Run("success", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, path+"/query", strings.NewReader(`{"query_text":"SELECT number FROM numbers(3)"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.AddCookie(env.cookie)
+		resp, err := env.s.app.Test(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body struct {
+			Status string `json:"status"`
+			Data   struct {
+				Data    []map[string]any `json:"data"`
+				QueryID string           `json:"query_id"`
+			} `json:"data"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if resp.StatusCode != http.StatusOK || body.Status != "success" || len(body.Data.Data) != 3 || body.Data.QueryID == "" {
+			t.Fatalf("status=%d body=%+v", resp.StatusCode, body)
+		}
+	})
+	t.Run("alert", func(t *testing.T) {
+		got := doAuthzRequest(t, env.s, http.MethodPost, "/api/v1/alerts/test", fmt.Sprintf(`{"source_id":%d,"query_language":"clickhouse-sql","editor_mode":"native","query":"SELECT missing_query_field FROM system.numbers","threshold_operator":"gt","threshold_value":1}`, env.chSource), withSession(env.cookie))
+		if got.status != 400 || !strings.Contains(got.message, "missing_query_field") {
+			t.Fatalf("status=%d message=%q", got.status, got.message)
+		}
+	})
+	t.Run("admin authentication", func(t *testing.T) {
+		body, err := json.Marshal(map[string]any{"name": "auth-check", "meta_ts_field": "timestamp", "source_type": "clickhouse", "connection": models.ConnectionInfo{Host: addr, Username: "logchef_nonexistent_query_error_test_user", Database: "system", TableName: "numbers"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, endpoint := range []struct{ method, path string }{
+			{http.MethodPost, "/api/v1/admin/sources/validate"},
+			{http.MethodPost, "/api/v1/admin/sources"},
+			{http.MethodPut, fmt.Sprintf("/api/v1/admin/sources/%d", env.chSource)},
+		} {
+			got := doAuthzRequest(t, env.s, endpoint.method, endpoint.path, string(body), withSession(env.cookie))
+			if got.status != 400 || !strings.Contains(got.message, "authentication failed") || strings.Contains(got.message, addr) || strings.Contains(got.message, "nonexistent_query_error") {
+				t.Fatalf("%s status=%d message=%q, want safe authentication cause", endpoint.path, got.status, got.message)
+			}
+		}
+	})
+}
+
+func TestDeadClickHouseQueryResponse(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatal(err)
+	}
+	env := newErrorResponseServer(t, vlUpstream)
+	configureErrorResponseClickHouse(t, env, addr)
+	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.chSource)
+	got := doAuthzRequest(t, env.s, http.MethodPost, path, `{"query_text":"SELECT 1"}`, withSession(env.cookie))
+	if got.status != 500 || got.message != logsQueryFailure {
+		t.Fatalf("status=%d message=%q, want 500 with generic message", got.status, got.message)
+	}
+}
+
+func TestVictoriaLogsQueryFailureResponse(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_VICTORIALOGS_URL")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_VICTORIALOGS_URL for read-only VictoriaLogs checks")
+	}
+	env := newErrorResponseServer(t, vlUpstream)
+	source, err := env.s.sqlite.GetSource(t.Context(), env.vlSource)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source.ConnectionConfig, err = json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: addr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.s.sqlite.UpdateSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.vlSource)
+	got := doAuthzRequest(t, env.s, http.MethodPost, path, `{"query_text":"* | no_such_pipe_for_test"}`, withSession(env.cookie))
+	if got.status != 400 || !strings.Contains(got.message, "no_such_pipe_for_test") || strings.Contains(got.message, "remoteAddr") || strings.Contains(got.message, "requestURI") || strings.Contains(got.message, "127.0.0.1") {
+		t.Fatalf("status=%d message=%q, want a cleaned parse reason", got.status, got.message)
 	}
 }
