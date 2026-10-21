@@ -39,38 +39,33 @@ type OIDCClaims struct {
 	Name          string `json:"name"`
 }
 
-// CheckEmailVerified validates the email_verified claim according to the
-// skip_email_verified_check configuration. The three cases are:
-//   - claim is true: always allowed.
-//   - claim is missing/null (nil): allowed only when skipCheck is true.
-//   - claim is explicitly false: always rejected, even when skipCheck is true.
-func CheckEmailVerified(claims OIDCClaims, skipCheck bool, log *slog.Logger, logCtx string) error {
-	switch {
-	case claims.EmailVerified != nil && *claims.EmailVerified:
-		// Email is verified, nothing to do.
+// CheckEmailVerified rejects explicitly false claims and optionally permits missing claims.
+func CheckEmailVerified(claims OIDCClaims, skipCheck bool) error {
+	if claims.EmailVerified != nil && *claims.EmailVerified {
 		return nil
-	case claims.EmailVerified != nil && !*claims.EmailVerified:
-		// Provider explicitly says email is NOT verified — always reject.
-		log.Warn(logCtx+": email_verified is explicitly false", "email", claims.Email)
-		return ErrOIDCEmailNotVerified
-	default:
-		// Claim is missing/null.
-		if skipCheck {
-			log.Warn(logCtx+": email_verified claim is missing, proceeding anyway (skip_email_verified_check=true)", "email", claims.Email)
-			return nil
-		}
-		log.Warn(logCtx+": email_verified claim is missing", "email", claims.Email)
-		return ErrOIDCEmailNotVerified
 	}
+	if claims.EmailVerified == nil && skipCheck {
+		return nil
+	}
+	return ErrOIDCEmailNotVerified
+}
+
+const oidcRequestTimeout = 10 * time.Second
+
+// callbackTransport restores cancellation that go-oidc strips from JWKS requests.
+type callbackTransport func(*http.Request) (*http.Response, error)
+
+func (t callbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t(req)
 }
 
 // OIDCProvider handles OIDC authentication interactions.
 type OIDCProvider struct {
-	provider  *oidc.Provider
-	verifier  *oidc.IDTokenVerifier
-	oauthConf *oauth2.Config
-	log       *slog.Logger
-	oidcCfg   *config.OIDCConfig
+	provider       *oidc.Provider
+	verifierConfig *oidc.Config
+	oauthConf      *oauth2.Config
+	log            *slog.Logger
+	oidcCfg        *config.OIDCConfig
 	// allowedIssuers, when non-empty, is the explicit set of acceptable `iss`
 	// claim values. It is populated only when the operator overrides issuer
 	// validation via config; otherwise it is nil and the go-oidc verifier
@@ -125,11 +120,11 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 	//     (see verify), which is the only way to support multi-realm IdPs that
 	//     share one JWKS across issuers.
 	allowedIssuers := normalizeIssuers(oidcCfg.AllowedIssuers)
-	verifier := provider.Verifier(&oidc.Config{
+	verifierConfig := &oidc.Config{
 		ClientID:        oidcCfg.ClientID,
 		SkipExpiryCheck: false,
 		SkipIssuerCheck: len(allowedIssuers) > 0,
-	})
+	}
 	if len(allowedIssuers) > 0 {
 		log.Info("OIDC issuer validation using explicit allow-list", "allowed_issuers", allowedIssuers)
 	}
@@ -140,7 +135,7 @@ func NewOIDCProvider(ctx context.Context, oidcCfg *config.OIDCConfig, log *slog.
 
 	return &OIDCProvider{
 		provider:       provider,
-		verifier:       verifier,
+		verifierConfig: verifierConfig,
 		oauthConf:      oauthConf,
 		log:            log,
 		oidcCfg:        oidcCfg,
@@ -159,7 +154,7 @@ func discoverProvider(ctx context.Context, providerURL string, retry discoveryRe
 	for attempt := 1; ; attempt++ {
 		transport := &discoveryTransport{}
 		attemptCtx, cancelAttempt := context.WithTimeout(ctx, retry.attemptTimeout)
-		attemptCtx = oidc.ClientContext(attemptCtx, &http.Client{Transport: transport})
+		attemptCtx = oidc.ClientContext(attemptCtx, &http.Client{Transport: transport, Timeout: oidcRequestTimeout})
 		provider, err := oidc.NewProvider(attemptCtx, providerURL)
 		cancelAttempt()
 		if err == nil {
@@ -183,10 +178,7 @@ func discoverProvider(ctx context.Context, providerURL string, retry discoveryRe
 	}
 }
 
-// discoveryTransport records whether the discovery request went out, its
-// response status, and whether reading the body failed, so a booting IdP can
-// be told apart from a broken config. go-oidc keeps this client for later JWKS
-// fetches, hence the atomics.
+// discoveryTransport tracks retryable network and response failures.
 type discoveryTransport struct {
 	sent       atomic.Bool
 	status     atomic.Int64
@@ -255,14 +247,20 @@ func normalizeIssuers(issuers []string) []string {
 // in the list. With no allow-list, the go-oidc verifier has already enforced
 // the single discovered issuer.
 func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDToken, error) {
-	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	ctx, cancel := context.WithTimeout(ctx, oidcRequestTimeout)
+	defer cancel()
+	client := &http.Client{Timeout: oidcRequestTimeout, Transport: callbackTransport(func(req *http.Request) (*http.Response, error) {
+		return http.DefaultTransport.RoundTrip(req.WithContext(ctx))
+	})}
+	// A request-scoped key set lets cancellation stop the JWKS fetch itself.
+	verifier := p.provider.VerifierContext(oidc.ClientContext(ctx, client), p.verifierConfig)
+	idToken, err := verifier.Verify(ctx, rawIDToken)
 	if err != nil {
 		return nil, err
 	}
 	if len(p.allowedIssuers) > 0 {
 		allowed := slices.Contains(p.allowedIssuers, idToken.Issuer)
 		if !allowed {
-			p.log.Warn("OIDC token issuer not in allow-list", "issuer", idToken.Issuer)
 			return nil, fmt.Errorf("%w: issuer %q not allowed", ErrOIDCInvalidToken, idToken.Issuer)
 		}
 	}
@@ -283,34 +281,34 @@ func (p *OIDCProvider) GetIssuer() string {
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
 func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
+	ctx, cancel := context.WithTimeout(ctx, oidcRequestTimeout)
+	defer cancel()
+	ctx = oidc.ClientContext(ctx, &http.Client{Timeout: oidcRequestTimeout})
+
 	// Exchange authorization code for OAuth2 tokens.
 	oauth2Token, err := p.oauthConf.Exchange(ctx, code)
 	if err != nil {
-		p.log.Error("failed to exchange code for token", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to exchange code for token: %w", ErrOIDCInvalidToken, err)
 	}
 
 	// Extract and verify the ID Token.
 	rawIDToken, ok := oauth2Token.Extra("id_token").(string)
 	if !ok {
-		p.log.Error("no id_token field in oauth2 token")
-		return nil, nil, ErrOIDCInvalidToken
+		return nil, nil, fmt.Errorf("%w: token response has no id_token", ErrOIDCInvalidToken)
 	}
 	idToken, err := p.verify(ctx, rawIDToken)
 	if err != nil {
-		p.log.Error("failed to verify ID token", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)
 	}
 
 	// Extract required claims.
 	var claims OIDCClaims
 	if err := idToken.Claims(&claims); err != nil {
-		p.log.Error("failed to parse ID token claims", "error", err)
 		return nil, nil, fmt.Errorf("%w: failed to parse ID token claims: %w", ErrOIDCInvalidToken, err)
 	}
 
 	// Verify email_verified claim.
-	if err := CheckEmailVerified(claims, p.oidcCfg.SkipEmailVerifiedCheck, p.log, "OIDC callback"); err != nil {
+	if err := CheckEmailVerified(claims, p.oidcCfg.SkipEmailVerifiedCheck); err != nil {
 		return nil, nil, err
 	}
 
@@ -323,22 +321,17 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		if errors.Is(err, core.ErrUserNotFound) {
 			provisioned, attempted, provErr := autoProvisionUser(ctx, db, log, authCfg.AutoProvision, claims.Email, claims.Name)
 			if provErr != nil {
-				p.log.Error("failed to auto-provision user", "error", provErr, "email", claims.Email)
 				return nil, nil, fmt.Errorf("failed to auto-provision user: %w", provErr)
 			}
 			if !attempted {
-				p.log.Warn("unauthorized user attempted login (user not found in db)", "email", claims.Email, "name", claims.Name)
 				return nil, nil, ErrUnauthorizedUser
 			}
 			user = provisioned
 		} else {
-			// Log other unexpected DB errors.
-			p.log.Error("failed to lookup user by email via core function", "error", err, "email", claims.Email)
 			return nil, nil, fmt.Errorf("failed to lookup user: %w", err)
 		}
 	}
 	if user.AccountType == models.UserAccountTypeService || user.Status == models.UserStatusInactive {
-		p.log.Warn("inactive user attempted login", "user_id", user.ID, "email", user.Email)
 		return nil, nil, ErrUserInactive
 	}
 
@@ -353,7 +346,6 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	// Create a new application session for the user.
 	session, err := core.CreateSession(ctx, db, log, user.ID, authCfg.SessionDuration, authCfg.MaxConcurrentSessions)
 	if err != nil {
-		// Error should have been logged within core.CreateSession.
 		return nil, nil, fmt.Errorf("failed to create session: %w", err)
 	}
 

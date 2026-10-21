@@ -156,7 +156,9 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 		finalURL = fmt.Sprintf("%s/auth/login?error=%s", targetURL, errCode)
 		s.log.Warn("authentication error during redirect",
 			"error_code", errCode,
-			"original_error", err.Error(),
+			"error", err,
+			"provider_error", c.Query("error"),
+			"error_description", c.Query("error_description"),
 			"redirect_url", finalURL,
 		)
 	}
@@ -220,7 +222,6 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	}
 
 	if providerError := c.Query("error"); providerError != "" {
-		s.log.Warn("OIDC provider rejected login", "error", providerError, "error_description", c.Query("error_description"))
 		if providerError == "access_denied" {
 			return s.redirectToFrontend(c, "", errAccessDenied)
 		}
@@ -231,14 +232,12 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	code := c.Query("code")
 
 	if code == "" {
-		s.log.Warn("OIDC callback missing 'code' parameter")
 		return s.redirectToFrontend(c, "", fmt.Errorf("authorization code missing"))
 	}
 
 	// Validate state against the value stored in the cookie.
 	storedState := c.Cookies(stateCookieName)
 	if err := validateState(state, storedState); err != nil {
-		s.log.Warn("OIDC state validation failed", "error", err)
 		return s.redirectToFrontend(c, "", fmt.Errorf("state validation failed: %w", err))
 	}
 
@@ -248,8 +247,6 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	// Process the OIDC callback using the provider and core functions.
 	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, state)
 	if err != nil {
-		// HandleCallback logs internal errors; map to frontend redirect error.
-		s.log.Error("OIDC callback handling failed", "error", err)
 		return s.redirectToFrontend(c, "", err)
 	}
 
