@@ -33,7 +33,7 @@ func IsSessionOnlySetting(key string) bool {
 		return true
 	}
 	switch key {
-	case "alerts.smtp_host", "alerts.smtp_port", "alerts.smtp_security", "alerts.tls_insecure_skip_verify", "ai.base_url":
+	case "alerts.smtp_host", "alerts.smtp_port", "alerts.smtp_security", "alerts.tls_insecure_skip_verify", "ai.base_url", "server.frontend_url":
 		return true
 	default:
 		return false

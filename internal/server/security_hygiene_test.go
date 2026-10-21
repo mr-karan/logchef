@@ -392,6 +392,7 @@ func TestSettingsSecretDestinationsRequireSession(t *testing.T) {
 		{"alerts.smtp_security", "tls", "string"},
 		{"alerts.tls_insecure_skip_verify", "true", "boolean"},
 		{"ai.base_url", "https://ai.example.com", "string"},
+		{"server.frontend_url", "https://frontend.example.com", "string"},
 		{"ai.api_key", "fixture-key", "string"},
 		{"custom.secret", "fixture-key", "string"},
 	} {

@@ -48,7 +48,6 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		attrs := []slog.Attr{
 			slog.String("method", c.Method()),
 			slog.String("route", redactedRequestPath(c)),
-			slog.String("path", redactedRequestPath(c)),
 			slog.Int("status", status),
 			slog.Int64("duration_ms", duration.Milliseconds()),
 		}
