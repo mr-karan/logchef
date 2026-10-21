@@ -291,7 +291,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const result = await state.withLoading("createSource", async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.createSource(payload),
-        successMessage: "Source created successfully",
+        successMessage: (await import("@/i18n")).i18n.global.t("sources.sourceCreated"),
         operationKey: "createSource"
       });
     });
@@ -308,7 +308,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const result = await state.withLoading(`deleteSource-${id}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.deleteSource(id),
-        successMessage: "Source deleted successfully",
+        successMessage: (await import("@/i18n")).i18n.global.t("sources.sourceDeleted"),
         operationKey: `deleteSource-${id}`,
         onSuccess: () => {
           // Remove from local state
@@ -561,7 +561,7 @@ export const useSourcesStore = defineStore("sources", () => {
     return await state.withLoading(`updateSource-${id}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.updateSource(id, payload),
-        successMessage: "Source updated successfully",
+        successMessage: (await import("@/i18n")).i18n.global.t("sources.sourceUpdated"),
         operationKey: `updateSource-${id}`,
         onSuccess: (data) => {
           // Ensure data is treated as a Source object

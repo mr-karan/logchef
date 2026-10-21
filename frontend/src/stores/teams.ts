@@ -100,9 +100,9 @@ export const useTeamsStore = defineStore("teams", () => {
     return found;
   }
 
-  function selectNextTeamIfCurrent(teamId: number) {
+  function selectNextTeamIfCurrent(teamId: number, candidates: readonly { id: number }[]) {
     if (contextStore.teamId !== teamId) return;
-    const next = teams.value.find((t) => t.id !== teamId);
+    const next = candidates.find((t) => t.id !== teamId);
     if (next) {
       contextStore.selectTeam(next.id);
     } else {
@@ -239,7 +239,7 @@ export const useTeamsStore = defineStore("teams", () => {
         state.data.value.adminTeams = state.data.value.adminTeams.filter(
           (t) => t.id !== teamId
         );
-        selectNextTeamIfCurrent(teamId);
+        selectNextTeamIfCurrent(teamId, teams.value);
 
         delete state.data.value.teamMembersMap[teamId];
         delete state.data.value.teamSourcesMap[teamId];
@@ -333,7 +333,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
           if (isCurrentUser) {
             state.data.value.userTeams = state.data.value.userTeams.filter(t => t.id !== teamId);
-            selectNextTeamIfCurrent(teamId);
+            selectNextTeamIfCurrent(teamId, userTeams.value);
 
             await loadUserTeams();
           }

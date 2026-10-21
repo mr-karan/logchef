@@ -96,7 +96,7 @@ describe("useTeamsStore", () => {
       expect(teams.userTeams.map((t) => t.id)).toEqual([2]);
     });
 
-    it("does not reselect a team the user left when falling back to admin teams", async () => {
+    it("clears the selection after the last membership ends even when admin teams remain", async () => {
       vi.spyOn(authApi, "localLogin").mockReturnValue(ok({}) as never);
       vi.spyOn(authApi, "getSession").mockReturnValue(ok({ user: { id: "7" }, session: {} }) as never);
       await useAuthStore().localLogin("user@example.com", "placeholder");
@@ -107,7 +107,7 @@ describe("useTeamsStore", () => {
 
       await teams.removeTeamMember(1, 7);
 
-      expect(useContextStore().teamId).toBe(2);
+      expect(useContextStore().teamId).toBeNull();
     });
 
     it("updates the member count in both team lists", async () => {
