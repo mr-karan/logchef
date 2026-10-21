@@ -27,6 +27,10 @@ const alertEvaluationTimeout = (models.DefaultQueryTimeoutSeconds + 30) * time.S
 
 const maxDeliveryAttempts = 3
 
+const deliveryBookkeepingTimeout = 2 * time.Second
+
+const deliveryAttemptTimeout = alertEvaluationTimeout + smtpDialTimeout + deliveryBookkeepingTimeout
+
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config      config.AlertsConfig
@@ -77,20 +81,13 @@ func NewManager(opts Options) *Manager {
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
 func (m *Manager) Start(ctx context.Context) {
 	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
 	if m.stopped || m.cancel != nil {
+		m.lifecycleMu.Unlock()
 		return
 	}
 	if !m.cfg.Enabled {
+		m.lifecycleMu.Unlock()
 		m.log.Debug("alerting disabled")
-		return
-	}
-	// One manager owns delivery reservations, as required by docs/src/content/docs/operations/database-backends.md.
-	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
-	err := m.db.RecoverAlertDeliveries(recoveryCtx)
-	cancel()
-	if err != nil {
-		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
 		return
 	}
 	interval := m.cfg.EvaluationInterval
@@ -98,9 +95,21 @@ func (m *Manager) Start(ctx context.Context) {
 		interval = time.Minute
 	}
 	ctx, m.cancel = context.WithCancel(ctx)
+	m.wg.Add(1)
+	m.lifecycleMu.Unlock()
+
+	// One manager owns delivery reservations, as required by docs/src/content/docs/operations/database-backends.md.
+	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
+	err := m.db.RecoverAlertDeliveries(recoveryCtx)
+	cancel()
+	if err != nil {
+		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
+	}
+
 	m.log.Debug("starting alert manager", "interval", interval)
 
-	m.wg.Go(func() {
+	go func() {
+		defer m.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -116,7 +125,7 @@ func (m *Manager) Start(ctx context.Context) {
 				return
 			}
 		}
-	})
+	}()
 }
 
 // Stop signals the manager to stop evaluating alerts.
@@ -300,6 +309,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		"status":                     string(models.AlertStatusTriggered),
 		"delivery_failed":            false,
 		"delivery_in_progress":       true,
+		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
 		"delivery_attempted":         attemptedIDs,
 		"delivery_attempts":          deliveryAttempts,
 		"delivery_pending":           selectedTargets,
@@ -322,6 +332,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		deliveryErr = errors.New("no pending notification targets remain")
 	}
 	historyPayload["delivery_in_progress"] = false
+	delete(historyPayload, "delivery_deadline_at")
 	historyPayload["delivery_pending"] = results.failedTargets()
 	historyPayload["delivery_retries_exhausted"] = deliveryErr != nil && deliveryAttempts >= maxDeliveryAttempts
 	delete(historyPayload, "delivery_error")
@@ -335,7 +346,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	} else {
 		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
-	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBookkeepingTimeout)
 	defer cancel()
 	if err := m.db.UpdateAlertHistoryPayload(bookkeepingCtx, history.ID, historyPayload); err != nil {
 		if models.IsNotFound(err) {
@@ -351,6 +362,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 func (m *Manager) suppressDuplicateDelivery(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, attempts int) error {
 	if attempts >= maxDeliveryAttempts && history.Payload["delivery_in_progress"] == true {
 		history.Payload["delivery_in_progress"] = false
+		delete(history.Payload, "delivery_deadline_at")
 		history.Payload["delivery_failed"] = true
 		history.Payload["delivery_retries_exhausted"] = true
 		history.Payload["delivery_error"] = "delivery interrupted"

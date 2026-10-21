@@ -452,3 +452,92 @@ func TestCanceledEvaluationDoesNotRecordFailure(t *testing.T) {
 		t.Fatalf("cancellation logged an evaluation error: %s", logs.String())
 	}
 }
+
+func TestManagerEvaluatesAfterStartupSweepFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.db")
+	db, alert, logger := newManagerTestAlertAtPath(t, path)
+	if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true}); err != nil {
+		t.Fatal(err)
+	}
+	failHistoryWrites(t, path, "BEFORE UPDATE OF payload_json ON alert_history")
+	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour}})
+	evaluated := make(chan struct{}, 1)
+	manager.evalFn = func(context.Context, *models.Alert) error { evaluated <- struct{}{}; return nil }
+	manager.Start(t.Context())
+	defer manager.Stop()
+	select {
+	case <-evaluated:
+	case <-time.After(time.Second):
+		t.Fatal("startup sweep failure prevented alert evaluation")
+	}
+}
+
+func TestManagerReservesDeliveryDeadline(t *testing.T) {
+	db, alert, logger := newManagerTestAlert(t)
+	for attempt := 1; attempt <= 2; attempt++ {
+		started := time.Now().UTC()
+		sender := alertSenderFunc(func(ctx context.Context, _ AlertNotification) error {
+			entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, ok := entry.Payload["delivery_deadline_at"].(string)
+			if !ok {
+				t.Errorf("reservation deadline = %v, want RFC 3339 UTC time", entry.Payload["delivery_deadline_at"])
+				return errors.New("retry")
+			}
+			deadline, err := time.Parse(time.RFC3339Nano, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound := alertEvaluationTimeout + smtpDialTimeout + deliveryBookkeepingTimeout
+			if deadline.Before(started.Add(bound)) || deadline.After(time.Now().UTC().Add(bound)) || !strings.HasSuffix(raw, "Z") {
+				t.Errorf("reservation deadline = %s, want current attempt plus %s in UTC", raw, bound)
+			}
+			return errors.New("retry")
+		})
+		manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+		if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
+			t.Fatal(err)
+		}
+		entry, err := db.GetLatestUnresolvedAlertHistory(t.Context(), alert.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := entry.Payload["delivery_deadline_at"]; exists {
+			t.Error("finished attempt retained its delivery deadline")
+		}
+	}
+}
+
+type blockedRecoveryStore struct {
+	store.Store
+	started chan struct{}
+}
+
+func (s *blockedRecoveryStore) RecoverAlertDeliveries(ctx context.Context) error {
+	close(s.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestManagerStopCancelsStartupSweep(t *testing.T) {
+	db, _, logger := newManagerTestAlert(t)
+	blocked := &blockedRecoveryStore{Store: db, started: make(chan struct{})}
+	manager := NewManager(Options{DB: blocked, Logger: logger, Config: config.AlertsConfig{Enabled: true}})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := make(chan struct{})
+	go func() { manager.Start(ctx); close(started) }()
+	<-blocked.started
+	stopped := make(chan struct{})
+	go func() { manager.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		cancel()
+		<-stopped
+		t.Error("Stop could not cancel the startup sweep")
+	}
+	<-started
+}

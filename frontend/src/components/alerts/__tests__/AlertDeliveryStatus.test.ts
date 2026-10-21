@@ -13,13 +13,34 @@ function render(entry: AlertHistoryEntry, inspect?: (element: HTMLDivElement) =>
   const app = createApp({ render: () => h(AlertDeliveryStatus, { entry }) });
   app.use(i18n);
   app.mount(element);
-  inspect?.(element);
-  const text = element.textContent ?? "";
-  app.unmount();
-  return text;
+  try {
+    inspect?.(element);
+    return element.textContent ?? "";
+  } finally {
+    app.unmount();
+  }
 }
 
 describe("alert history delivery status", () => {
+  it("shows a live retry using its deadline instead of the original trigger time", () => {
+    const entry = historyEntry({ delivery_in_progress: true, delivery_deadline_at: new Date(Date.now() + 60_000).toISOString() });
+    entry.triggered_at = new Date(Date.now() - 280_000).toISOString();
+    expect(render(entry)).toContain("Delivering");
+  });
+  it("shows interrupted delivery after its attempt deadline", () => {
+    const entry = historyEntry({ delivery_in_progress: true, delivery_deadline_at: new Date(Date.now() - 1_000).toISOString() });
+    expect(render(entry)).toContain("Delivery interrupted");
+  });
+  it("runs no timer for finished rows", () => {
+    vi.useFakeTimers();
+    try {
+      render(historyEntry({ delivery_in_progress: false }), () => {
+        expect(vi.getTimerCount()).toBe(0);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it("shows interrupted delivery after the delivery window", () => {
     const entry = historyEntry({ delivery_in_progress: true, delivery_failed: false });
     entry.triggered_at = "2026-01-01T00:00:00Z";

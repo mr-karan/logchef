@@ -241,7 +241,8 @@ func TestDeliveryRecovery(t *testing.T) {
 						}
 						entry, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
 							"delivery_attempts": attempts, "delivery_failed": false, "delivery_in_progress": true,
-							"delivery_pending": []string{"webhook:pending"},
+							"delivery_pending":     []string{"webhook:pending"},
+							"delivery_deadline_at": "2026-01-01T00:01:00Z",
 						})
 						if err != nil {
 							t.Fatal(err)
@@ -264,6 +265,9 @@ func TestDeliveryRecovery(t *testing.T) {
 						after, err := db.GetAlertHistoryEntry(t.Context(), alert.ID, entry.ID)
 						if err != nil {
 							t.Fatal(err)
+						}
+						if _, exists := after.Payload["delivery_deadline_at"]; exists {
+							t.Error("finalized attempt retained its deadline")
 						}
 						if after.Payload["delivery_in_progress"] != false || after.Payload["delivery_failed"] != true || after.Payload["delivery_error"] != "delivery interrupted" || after.Payload["delivery_retries_exhausted"] != (attempts == 3) {
 							t.Errorf("%s attempt %d payload = %v, want interrupted failure", action, attempts, after.Payload)
@@ -291,6 +295,7 @@ func TestDeliveryRecovery(t *testing.T) {
 				entry, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
 					"delivery_attempts": 3, "delivery_failed": false, "delivery_in_progress": true,
 					"delivery_retries_exhausted": true,
+					"delivery_deadline_at":       "2026-01-01T00:01:00Z",
 				})
 				if err != nil {
 					t.Fatal(err)
@@ -306,6 +311,9 @@ func TestDeliveryRecovery(t *testing.T) {
 				after, err := db.GetAlertHistoryEntry(t.Context(), alert.ID, entry.ID)
 				if err != nil {
 					t.Fatal(err)
+				}
+				if _, exists := after.Payload["delivery_deadline_at"]; exists {
+					t.Error("finalized attempt retained its deadline")
 				}
 				if after.Payload["delivery_failed"] != true || after.Payload["delivery_in_progress"] != false || after.Payload["delivery_retries_exhausted"] != true || after.Payload["delivery_error"] != "delivery interrupted" {
 					t.Errorf("recovered payload = %v, want failed, exhausted, and no longer in progress", after.Payload)

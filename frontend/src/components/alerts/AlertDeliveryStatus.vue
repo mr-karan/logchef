@@ -1,21 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { Badge } from "@/components/ui/badge";
 import { alertDeliveryFailure } from "@/stores/alertHistory";
 import type { AlertHistoryEntry } from "@/api/alerts";
 
 const props = defineProps<{ entry: AlertHistoryEntry }>();
-// Mirrors maxDeliveryAttempts * (alertEvaluationTimeout + the 2-second bookkeeping timeout) in internal/alerts/manager.go.
-const maximumDeliveryWindowMs = 3 * (60 + 30 + 2) * 1000;
 const now = ref(Date.now());
-let timer: ReturnType<typeof setInterval> | undefined;
-onMounted(() => { timer = setInterval(() => { now.value = Date.now(); }, 1000); });
-onUnmounted(() => { clearInterval(timer); });
-const interrupted = computed(() => props.entry.payload?.delivery_in_progress === true
-  && now.value - Date.parse(props.entry.triggered_at) >= maximumDeliveryWindowMs);
+const deliveryActive = computed(() => props.entry.status === "triggered"
+  && !props.entry.resolved_at && props.entry.payload?.delivery_in_progress === true);
+watch(deliveryActive, (active, _, onCleanup) => {
+  now.value = Date.now();
+  if (active) {
+    const timer = setInterval(() => { now.value = Date.now(); }, 1000);
+    onCleanup(() => { clearInterval(timer); });
+  }
+}, { immediate: true });
+const interrupted = computed(() => {
+  const deadline = props.entry.payload?.delivery_deadline_at;
+  // Older reservations only stored the original trigger time.
+  const deadlineMs = typeof deadline === "string"
+    ? Date.parse(deadline)
+    : Date.parse(props.entry.triggered_at) + 3 * (60 + 30 + 2) * 1000;
+  return deliveryActive.value && now.value >= deadlineMs;
+});
 const failure = computed(() => alertDeliveryFailure(props.entry));
-const inProgress = computed(() => props.entry.status === "triggered" && !props.entry.resolved_at && props.entry.payload?.delivery_in_progress === true && !interrupted.value);
+const inProgress = computed(() => deliveryActive.value && !interrupted.value);
 const { t } = useI18n();
 </script>
 

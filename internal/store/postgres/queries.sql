@@ -668,7 +668,7 @@ RETURNING *;
 
 -- name: InterruptAlertDeliveries :exec
 UPDATE alert_history
-SET payload_json = (payload_json::jsonb || jsonb_build_object(
+SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
     'delivery_in_progress', false,
     'delivery_failed', true,
     'delivery_error', 'delivery interrupted',

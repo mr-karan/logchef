@@ -37,7 +37,7 @@ func (d *DynamicEmailSender) Send(ctx context.Context, notification AlertNotific
 		From:          d.settings.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
 		ReplyTo:       d.settings.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
 		Security:      d.settings.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
-		Timeout:       d.settings.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
+		Timeout:       d.settings.GetDurationSetting(ctx, "alerts.request_timeout", smtpDialTimeout),
 		SkipTLSVerify: d.settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
 		Logger:        d.logger,
 	}

@@ -2238,7 +2238,7 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 
 const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
 UPDATE alert_history
-SET payload_json = json_set(payload_json,
+SET payload_json = json_set(json_remove(payload_json, '$.delivery_deadline_at'),
     '$.delivery_in_progress', json('false'),
     '$.delivery_failed', json('true'),
     '$.delivery_error', 'delivery interrupted',

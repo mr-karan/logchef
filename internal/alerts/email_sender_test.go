@@ -115,3 +115,40 @@ func TestSMTPErrorCategories(t *testing.T) {
 		})
 	}
 }
+
+func TestSMTPGreetingHonorsEvaluationDeadline(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		_, _ = io.Copy(io.Discard, conn)
+	}()
+	host, port, err := net.SplitHostPort(listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var portNumber int
+	if _, err := fmt.Sscan(port, &portNumber); err != nil {
+		t.Fatal(err)
+	}
+	sender := NewEmailSender(EmailSenderOptions{Host: host, Port: portNumber, From: "sender@example.com", Security: "none", Timeout: 2 * time.Second})
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	if err := sender.Send(ctx, AlertNotification{RecipientEmails: []string{"recipient@example.com"}}).Err(); err == nil {
+		t.Error("stalled SMTP greeting succeeded")
+	}
+	<-done
+	if time.Since(started) > time.Second {
+		t.Error("SMTP greeting exceeded the evaluation deadline by more than one second")
+	}
+}

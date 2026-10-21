@@ -15,6 +15,8 @@ import (
 	"log/slog"
 )
 
+const smtpDialTimeout = 5 * time.Second
+
 const (
 	smtpSecurityNone     = "none"
 	smtpSecurityStartTLS = "starttls"
@@ -64,7 +66,7 @@ func NewEmailSender(opts EmailSenderOptions) *EmailSender {
 	}
 	timeout := opts.Timeout
 	if timeout <= 0 {
-		timeout = 5 * time.Second
+		timeout = smtpDialTimeout
 	}
 	logger := opts.Logger
 	if logger == nil {
@@ -229,9 +231,11 @@ func (s *EmailSender) connect(ctx context.Context) (*smtp.Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	if s.timeout > 0 {
-		_ = conn.SetDeadline(time.Now().Add(s.timeout))
+	deadline := time.Now().Add(s.timeout)
+	if evaluationDeadline, ok := ctx.Deadline(); ok && evaluationDeadline.Before(deadline) {
+		deadline = evaluationDeadline
 	}
+	_ = conn.SetDeadline(deadline)
 	client, err := smtp.NewClient(conn, s.host)
 	if err != nil {
 		_ = conn.Close()
