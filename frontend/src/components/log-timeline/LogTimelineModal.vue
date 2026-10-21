@@ -11,7 +11,7 @@ import { Button } from '@/components/ui/button'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
-import { ref, watch } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import { exploreApi } from '@/api/explore'
 import { Clock, ArrowDown, ArrowUp } from 'lucide-vue-next'
 import { timestampIdentity } from './timestampIdentity'
@@ -75,8 +75,13 @@ const getTimestamp = (log: Record<string, any>) => {
     return log[tsField]
 }
 
+let contextRequestId = 0
+onScopeDispose(() => { contextRequestId++ })
+
 // Load context data when modal opens
 async function loadContextLogs() {
+    const requestId = ++contextRequestId
+    loadingMore.value = null
     const tsValue = getTimestamp(props.log)
     
     if (!tsValue) {
@@ -134,6 +139,8 @@ async function loadContextLogs() {
             after_limit: batchSize.value
         }, props.teamId)
 
+        if (requestId !== contextRequestId) return
+
         if (result.status === 'error') {
             throw new Error(result.data.error)
         }
@@ -143,6 +150,7 @@ async function loadContextLogs() {
             after_logs: result.data?.after_logs || []
         }
     } catch (error) {
+        if (requestId !== contextRequestId) return
         toast({
             get title() { return t('ui.error'); },
             description: error instanceof Error ? error.message : t('ui.failedToLoadLogContext'),
@@ -151,14 +159,17 @@ async function loadContextLogs() {
         })
         emit('update:isOpen', false)
     } finally {
-        isLoading.value = false
+        if (requestId === contextRequestId) isLoading.value = false
     }
 }
 
-watch(() => props.isOpen, (open) => {
-    if (open) {
+watch(() => [props.isOpen, props.log, props.sourceId, props.teamId, props.timestampField], () => {
+    if (props.isOpen) {
         loadContextLogs()
     } else {
+        contextRequestId++
+        isLoading.value = false
+        loadingMore.value = null
         // Reset state when modal closes
         contextLogs.value = null
         targetTimestamp.value = 0
@@ -174,7 +185,8 @@ watch(() => props.isOpen, (open) => {
 
 // Load more context logs using offset-based pagination
 async function loadMore(direction: 'before' | 'after') {
-    if (!contextLogs.value || !props.sourceId || !props.teamId || !targetTimestamp.value) return
+    if (loadingMore.value || !contextLogs.value || !props.sourceId || !props.teamId || !targetTimestamp.value) return
+    const requestId = contextRequestId
 
     loadingMore.value = direction
     try {
@@ -195,6 +207,8 @@ async function loadMore(direction: 'before' | 'after') {
             before_offset: currentBeforeOffset,
             after_offset: currentAfterOffset,
         }, props.teamId)
+
+        if (requestId !== contextRequestId) return
 
         if (result.status === 'error') {
             throw new Error(result.data.error)
@@ -219,6 +233,7 @@ async function loadMore(direction: 'before' | 'after') {
             }
         }
     } catch (error) {
+        if (requestId !== contextRequestId) return
         toast({
             get title() { return t('ui.error'); },
             description: error instanceof Error ? error.message : t('ui.failedToLoadMoreLogs'),
@@ -226,7 +241,7 @@ async function loadMore(direction: 'before' | 'after') {
             duration: TOAST_DURATION.ERROR,
         })
     } finally {
-        loadingMore.value = null
+        if (requestId === contextRequestId) loadingMore.value = null
     }
 }
 

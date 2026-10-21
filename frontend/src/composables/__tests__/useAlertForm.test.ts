@@ -16,7 +16,8 @@ function mountForm() {
   const app = createApp({ setup() { form = useAlertForm(props, vi.fn()); return () => h('div') } })
   app.use(createPinia()).use(i18n).mount(host)
   if (!form) throw new Error('Form did not mount')
-  return { form, props, unmount: () => app.unmount() }
+  let unmounted = false
+  return { form, props, unmount: () => { if (!unmounted) app.unmount(); unmounted = true } }
 }
 
 describe('alert condition translation ownership', () => {

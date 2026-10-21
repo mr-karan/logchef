@@ -5,6 +5,7 @@ import { api } from '../config'
 import { apiClient } from '../apiUtils'
 import { useBaseStore } from '@/stores/base'
 import { hasShownErrorToast } from '@/api/error-handler'
+import router from '@/router'
 
 vi.mock('vue-sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -12,7 +13,7 @@ vi.mock('vue-sonner', () => ({
 
 vi.mock('@/router', () => ({
   default: {
-    push: vi.fn(),
+    push: vi.fn().mockResolvedValue(undefined),
     currentRoute: { value: { name: 'Home' } },
     options: { history: { location: '/logs/explore' } },
   },
@@ -92,7 +93,6 @@ describe('session expiration ownership', () => {
   afterEach(() => { api.defaults.adapter = originalAdapter })
 
   it('shows one toast and starts one login navigation for parallel 401 responses', async () => {
-    const { default: router } = await import('@/router')
     let finishNavigation: (() => void) | undefined
     const navigation = new Promise<void>(resolve => { finishNavigation = resolve })
     vi.mocked(router.push).mockImplementationOnce(() => navigation)
@@ -101,16 +101,16 @@ describe('session expiration ownership', () => {
     api.defaults.adapter = respondWith(401, { status: 'error', message: 'unauthorized' })
     const requests = Array.from({ length: 3 }, () => api.get('/teams').catch((error: unknown) => error))
     await vi.waitFor(() => expect(router.push).toHaveBeenCalled())
-    expect(router.push).toHaveBeenCalledTimes(1)
-    expect(toast.error).toHaveBeenCalledTimes(1)
-    finishNavigation?.()
+    try {
+      expect(router.push).toHaveBeenCalledTimes(1)
+      expect(toast.error).toHaveBeenCalledTimes(1)
+    } finally { finishNavigation?.() }
     const rejections = await Promise.all(requests)
     expect(rejections.every(hasShownErrorToast)).toBe(true)
     expect(router.push).toHaveBeenCalledTimes(1)
   })
 
   it('allows another expiration after the previous login navigation completes', async () => {
-    const { default: router } = await import('@/router')
     vi.clearAllMocks()
     api.defaults.adapter = respondWith(401, { status: 'error', message: 'unauthorized' })
     await api.get('/teams').catch(() => {})
@@ -120,7 +120,6 @@ describe('session expiration ownership', () => {
   })
 
   it('does not toast or navigate again for a late 401 on the login page', async () => {
-    const { default: router } = await import('@/router')
     router.currentRoute.value.name = 'Login'
     vi.clearAllMocks()
     api.defaults.adapter = respondWith(401, { status: 'error', message: 'unauthorized' })

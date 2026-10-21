@@ -33,7 +33,10 @@ export const useAlertsStore = defineStore("alerts", () => {
     state.data.value.selectedAlertId = alertId;
   }
 
+  let listRequestId = 0;
+
   function clearAlerts() {
+    listRequestId++;
     state.data.value.alerts = [];
     state.data.value.selectedAlertId = null;
   }
@@ -47,11 +50,22 @@ export const useAlertsStore = defineStore("alerts", () => {
 
   async function fetchAlerts(_teamId?: number | undefined, sourceId?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
+    const requestId = ++listRequestId;
     const key = sourceId ? `fetchAlerts-${sourceId}` : 'fetchAlerts-all';
     return await state.callApi<Alert[]>({
-      apiCall: () => alertsApi.list(sourceId),
+      apiCall: async () => {
+        try {
+          const response = await alertsApi.list(sourceId);
+          if (requestId !== listRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
+          return response;
+        } catch (error) {
+          if (requestId !== listRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
+          throw error;
+        }
+      },
       operationKey: key,
       onSuccess: (response) => {
+        if (requestId !== listRequestId) return;
         state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
         // Clear selected alert if it no longer exists in the new list.
         if (

@@ -64,6 +64,22 @@ describe('alert request ownership', () => {
     expect(store.entries).toEqual([])
   })
 
+  it.each(['list', 'history'] as const)('does not publish an old %s failure after the newer request succeeds', async kind => {
+    const store = kind === 'list' ? useAlertsStore() : useAlertHistoryStore()
+    const load = kind === 'list'
+      ? (id: number) => useAlertsStore().fetchAlerts(undefined, id)
+      : (id: number) => useAlertHistoryStore().loadHistory(id)
+    const old = load(1)
+    const current = load(2)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    network.requests[1].succeed(kind === 'list' ? [alert(2)] : [history(2)])
+    await current
+    network.requests[0].fail('Old request failed')
+    await old
+    expect(store.error).toBeNull()
+    expect(store.isLoading).toBe(false)
+  })
+
   it('does not resolve another alert history after switching context', async () => {
     const store = useAlertHistoryStore()
     const initial = store.loadHistory(1)
