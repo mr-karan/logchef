@@ -179,6 +179,5 @@ export async function streamTurn(
     if (err instanceof StreamHTTPError) throw new AskChefError(err.status === 404 ? "disabled" : "failed", err.message);
     throw err;
   }
-  if (outcome === "no-body") throw new AskChefError("protocol", "Ask Chef returned no stream");
   if (outcome === "eof") throw new AskChefError("protocol", "Connection closed before Ask Chef finished");
 }

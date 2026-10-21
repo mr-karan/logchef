@@ -57,7 +57,6 @@ export async function streamWindowedQuery(teamId: number, sourceId: number, requ
       onEvent(parsed);
       if (parsed.type === 'end') ended = true;
     });
-    if (outcome === 'no-body') throw new Error('Windowed query returned no stream');
     if (outcome === 'eof' && !ended) throw new Error('Connection closed before the windowed query finished');
   } finally {
     signal.removeEventListener('abort', cancelServerQuery);

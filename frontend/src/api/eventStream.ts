@@ -1,10 +1,8 @@
 import { createSSEParser, type SSEEvent } from "@/lib/sse";
-import { showErrorToast } from "@/api/error-handler";
 import type { APIErrorResponse } from "@/api/types";
-import { useAuthStore } from "@/stores/auth";
-import router from "@/router";
+import { expireSession } from "./session";
 
-export type StreamOutcome = "stop" | "eof" | "aborted" | "no-body";
+export type StreamOutcome = "stop" | "eof" | "aborted";
 
 export interface StreamRequest {
   method: "GET" | "POST";
@@ -15,7 +13,7 @@ export interface StreamRequest {
 }
 
 export class StreamHTTPError extends Error {
-  constructor(public status: number, public apiError: APIErrorResponse) {
+  constructor(public status: number, apiError: APIErrorResponse) {
     super(apiError.message);
     this.name = "StreamHTTPError";
   }
@@ -35,16 +33,6 @@ async function readAPIError(response: Response, label: string): Promise<APIError
     error_type: typeof body.error_type === "string" ? body.error_type : "HTTPError",
     data: body.data,
   };
-}
-
-// Matches the axios interceptor's 401 flow, which fetch-based streams bypass.
-function expireSession(): void {
-  useAuthStore().clearState();
-  const isOnLoginPage = window.location.pathname.includes("/login") || router.currentRoute.value.name === "Login";
-  if (!isOnLoginPage) {
-    showErrorToast({ status: "error", message: "Your session has expired. Please log in again.", error_type: "AuthenticationError" });
-  }
-  router.push({ name: "Login", query: { redirect: router.options.history.location }, replace: true });
 }
 
 export async function streamSSE(
@@ -69,10 +57,10 @@ export async function streamSSE(
     if (!response.ok) {
       const apiError = await readAPIError(response, request.label);
       if (signal.aborted) return "aborted";
-      if (response.status === 401) expireSession();
+      if (response.status === 401) expireSession({ toast: true });
       throw new StreamHTTPError(response.status, apiError);
     }
-    if (!response.body) return signal.aborted ? "aborted" : "no-body";
+    if (!response.body) throw new Error(`${request.label} returned no stream`);
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();

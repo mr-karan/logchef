@@ -5,6 +5,7 @@ import router from "@/router";
 import { useAuthStore } from "@/stores/auth";
 import * as errorHandler from "@/api/error-handler";
 import type { SSEEvent } from "@/lib/sse";
+import { expireSession } from "../session";
 import { streamTurn } from "../askChef";
 import { subscribeToTail } from "../explore";
 import { streamWindowedQuery } from "../windowed";
@@ -64,6 +65,22 @@ describe("streamSSE", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("rejects a missing response body with the request label", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+
+    await expect(streamSSE("/s", request(), () => {})).rejects.toThrow("Test stream returned no stream");
+  });
+
+  it("resolves aborted when a bodyless response arrives after abort", async () => {
+    const controller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      controller.abort();
+      return new Response(null, { status: 200 });
+    }));
+
+    await expect(streamSSE("/s", request({ signal: controller.signal }), () => {})).resolves.toBe("aborted");
   });
 
   it("sends a JSON body with SSE headers and exposes response headers on open", async () => {
@@ -202,7 +219,7 @@ describe("streamSSE", () => {
     ).rejects.toThrow("bad frame");
   });
 
-  it("parses a JSON error body on a 4xx into the API error shape", async () => {
+  it("preserves the status and message from a JSON HTTP error", async () => {
     failWith(422, JSON.stringify({ status: "error", message: "unknown field foo", error_type: "ValidationError" }));
 
     const err = await streamSSE("/s", request(), () => {}).catch((e: unknown) => e);
@@ -211,7 +228,6 @@ describe("streamSSE", () => {
     expect(err).toMatchObject({
       status: 422,
       message: "unknown field foo",
-      apiError: { status: "error", message: "unknown field foo", error_type: "ValidationError" },
     });
   });
 
@@ -221,7 +237,6 @@ describe("streamSSE", () => {
     await expect(streamSSE("/s", request(), () => {})).rejects.toMatchObject({
       status: 502,
       message: "Test stream failed (502)",
-      apiError: { status: "error", message: "Test stream failed (502)", error_type: "HTTPError" },
     });
   });
 
@@ -249,19 +264,52 @@ describe("streamSSE", () => {
   });
 });
 
+describe("expireSession", () => {
+  beforeEach(() => setActivePinia(createPinia()));
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([
+    { toast: true, path: "/explore", notifications: 1 },
+    { toast: false, path: "/explore", notifications: 0 },
+    { toast: true, path: "/auth/login", notifications: 0 },
+  ])("clears auth and redirects with toast=$toast at $path", ({ toast, path, notifications }) => {
+    const previousPath = window.location.href;
+    window.history.replaceState(null, "", path);
+    try {
+      const push = vi.spyOn(router, "push").mockResolvedValue(undefined);
+      const clearState = vi.spyOn(useAuthStore(), "clearState");
+      const showErrorToast = vi.spyOn(errorHandler, "showErrorToast").mockImplementation(() => {});
+
+      expireSession({ toast });
+
+      expect(clearState).toHaveBeenCalledTimes(1);
+      expect(showErrorToast).toHaveBeenCalledTimes(notifications);
+      expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location }, replace: true });
+    } finally {
+      window.history.replaceState(null, "", previousPath);
+    }
+  });
+});
+
 const callers = [
-  { name: "live tail", run: (signal: AbortSignal) => subscribeToTail("/tail", signal, {}) },
-  { name: "windowed query", run: (signal: AbortSignal) => streamWindowedQuery(1, 2, { query_text: "", query_language: "logchefql" }, signal, () => {}) },
-  { name: "Ask Chef", run: (signal: AbortSignal) => streamTurn({
+  { name: "live tail", label: "Live tail request", run: (signal: AbortSignal) => subscribeToTail("/tail", signal, {}) },
+  { name: "windowed query", label: "Windowed query", run: (signal: AbortSignal) => streamWindowedQuery(1, 2, { query_text: "", query_language: "logchefql" }, signal, () => {}) },
+  { name: "Ask Chef", label: "Ask Chef request", run: (signal: AbortSignal) => streamTurn({
     team_id: 1, source_id: 2, timezone: "UTC", context: { kind: "explorer", start: 0, end: 1 }, history: [], evidence: [], message: "Explain these logs",
   }, () => {}, signal) },
 ];
 
-describe.each(callers)("$name authentication", ({ run }) => {
+describe.each(callers)("$name stream errors", ({ run, label }) => {
   beforeEach(() => setActivePinia(createPinia()));
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("rejects a missing response body with the request label", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(null, { status: 200 })));
+
+    await expect(run(new AbortController().signal)).rejects.toThrow(`${label} returned no stream`);
   });
 
   it("expires the session once on a 401", async () => {

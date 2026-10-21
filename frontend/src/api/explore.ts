@@ -457,8 +457,6 @@ export async function subscribeToTail(
     }
   );
 
-  if (outcome === "no-body") throw new Error("Live tail stream did not return a readable body");
-
   // A silent EOF would leave the UI showing "Live" forever.
   if (outcome === "eof") {
     callbacks.onEnd?.({
