@@ -38,6 +38,7 @@ func TestPublicQueryErrorDistributedDiagnostics(t *testing.T) {
 				{"stack", "limit exceeded. Stack trace:\n0. DB::Exception", true},
 				{"nested remote", "limit exceeded. Received from shard.example:9000", false},
 				{"while executing", "limit exceeded. While executing Remote:", true},
+				{"schema path", "Path in the 'format_schema' setting shouldn't go outside the 'format_schema_path' directory: /var/lib/clickhouse/format_schemas/ (../../x.proto not in /var/lib/clickhouse/format_schemas/)", false},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					cause := &ch.Exception{Code: code, Message: tc.message}

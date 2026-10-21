@@ -36,8 +36,8 @@ func publicQueryError(err error) error {
 		message, _, _ = strings.Cut(message, "Stack trace:")
 		message, _, _ = strings.Cut(message, "While executing ")
 		message = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(message), ":"))
-		// Shard addresses only arrive through the "Received from" prefix; other text echoes the user's query.
-		if message == "" || strings.Contains(message, "Received from ") {
+		// Shard addresses only arrive through the "Received from" prefix and schema path errors name a server directory; other text echoes the user's query.
+		if message == "" || strings.Contains(message, "Received from ") || strings.Contains(message, "format_schema_path") {
 			return err
 		}
 		return &QueryError{Message: message, Err: err}
