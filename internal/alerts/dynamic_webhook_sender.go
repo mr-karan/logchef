@@ -4,19 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/store"
 )
 
 type DynamicWebhookSender struct {
-	settings SettingsReader
+	settings store.SettingsReader
 	logger   *slog.Logger
 }
 
-func NewDynamicWebhookSender(settings SettingsReader, logger *slog.Logger) *DynamicWebhookSender {
+func NewDynamicWebhookSender(settings store.SettingGetter, logger *slog.Logger) *DynamicWebhookSender {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &DynamicWebhookSender{
-		settings: settings,
+		settings: store.SettingsReader{SettingGetter: settings},
 		logger:   logger.With("component", "dynamic_webhook_sender"),
 	}
 }

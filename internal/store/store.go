@@ -250,16 +250,9 @@ type TeamStore interface {
 	UserHasSourceAccess(ctx context.Context, userID models.UserID, sourceID models.SourceID) (bool, error)
 }
 
-// SettingsStore persists system settings. The typed getters return a default
-// when a key is absent or unparseable; the list/upsert/delete methods manage
-// the raw entries.
+// SettingsStore persists system settings.
 type SettingsStore interface {
 	GetSetting(ctx context.Context, key string) (string, error)
-	GetSettingWithDefault(ctx context.Context, key, defaultValue string) string
-	GetBoolSetting(ctx context.Context, key string, defaultValue bool) bool
-	GetIntSetting(ctx context.Context, key string, defaultValue int) int
-	GetFloat64Setting(ctx context.Context, key string, defaultValue float64) float64
-	GetDurationSetting(ctx context.Context, key string, defaultValue time.Duration) time.Duration
 	ListSettings(ctx context.Context) ([]*models.SystemSetting, error)
 	ListSettingsByCategory(ctx context.Context, category string) ([]*models.SystemSetting, error)
 	UpsertSetting(ctx context.Context, key, value, valueType, category, description string, isSensitive bool) error

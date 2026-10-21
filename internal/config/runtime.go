@@ -3,21 +3,13 @@ package config
 import (
 	"context"
 	"log"
-	"time"
-)
 
-// SettingsStore defines the interface for retrieving settings from the database.
-type SettingsStore interface {
-	GetSettingWithDefault(ctx context.Context, key, defaultValue string) string
-	GetBoolSetting(ctx context.Context, key string, defaultValue bool) bool
-	GetIntSetting(ctx context.Context, key string, defaultValue int) int
-	GetFloat64Setting(ctx context.Context, key string, defaultValue float64) float64
-	GetDurationSetting(ctx context.Context, key string, defaultValue time.Duration) time.Duration
-}
+	"github.com/mr-karan/logchef/internal/store"
+)
 
 // LoadRuntimeConfig loads configuration from both static config and database.
 // Database values override static config values for non-essential settings.
-func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, store SettingsStore) *Config {
+func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, settings store.SettingGetter) *Config {
 	// Start with the static configuration
 	cfg := *staticConfig
 	if cfg.Alerts.EvaluationInterval <= 0 {
@@ -34,36 +26,38 @@ func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, store Settings
 	}
 
 	// If no store is provided, return static config only
-	if store == nil {
+	if settings == nil {
 		log.Println("no settings store provided, using static configuration only")
 		return &cfg
 	}
+
+	reader := store.SettingsReader{SettingGetter: settings}
 
 	// Override with database settings for runtime-configurable values
 
 	// Alerts configuration (only essential scheduling settings in config struct)
 	// SMTP and delivery settings are read directly from DB by the alerts manager
-	cfg.Alerts.Enabled = store.GetBoolSetting(ctx, "alerts.enabled", cfg.Alerts.Enabled)
-	cfg.Alerts.EvaluationInterval = store.GetDurationSetting(ctx, "alerts.evaluation_interval", cfg.Alerts.EvaluationInterval)
-	cfg.Alerts.DefaultLookback = store.GetDurationSetting(ctx, "alerts.default_lookback", cfg.Alerts.DefaultLookback)
-	cfg.Alerts.HistoryLimit = store.GetIntSetting(ctx, "alerts.history_limit", cfg.Alerts.HistoryLimit)
+	cfg.Alerts.Enabled = reader.GetBoolSetting(ctx, "alerts.enabled", cfg.Alerts.Enabled)
+	cfg.Alerts.EvaluationInterval = reader.GetDurationSetting(ctx, "alerts.evaluation_interval", cfg.Alerts.EvaluationInterval)
+	cfg.Alerts.DefaultLookback = reader.GetDurationSetting(ctx, "alerts.default_lookback", cfg.Alerts.DefaultLookback)
+	cfg.Alerts.HistoryLimit = reader.GetIntSetting(ctx, "alerts.history_limit", cfg.Alerts.HistoryLimit)
 
 	// AI configuration
-	cfg.AI.Enabled = store.GetBoolSetting(ctx, "ai.enabled", cfg.AI.Enabled)
-	cfg.AI.APIKey = store.GetSettingWithDefault(ctx, "ai.api_key", cfg.AI.APIKey)
-	cfg.AI.BaseURL = store.GetSettingWithDefault(ctx, "ai.base_url", cfg.AI.BaseURL)
-	cfg.AI.Model = store.GetSettingWithDefault(ctx, "ai.model", cfg.AI.Model)
-	cfg.AI.MaxTokens = store.GetIntSetting(ctx, "ai.max_tokens", cfg.AI.MaxTokens)
-	cfg.AI.Temperature = float32(store.GetFloat64Setting(ctx, "ai.temperature", float64(cfg.AI.Temperature)))
-	cfg.AI.ReasoningEffort = store.GetSettingWithDefault(ctx, "ai.reasoning_effort", cfg.AI.ReasoningEffort)
+	cfg.AI.Enabled = reader.GetBoolSetting(ctx, "ai.enabled", cfg.AI.Enabled)
+	cfg.AI.APIKey = reader.GetSettingWithDefault(ctx, "ai.api_key", cfg.AI.APIKey)
+	cfg.AI.BaseURL = reader.GetSettingWithDefault(ctx, "ai.base_url", cfg.AI.BaseURL)
+	cfg.AI.Model = reader.GetSettingWithDefault(ctx, "ai.model", cfg.AI.Model)
+	cfg.AI.MaxTokens = reader.GetIntSetting(ctx, "ai.max_tokens", cfg.AI.MaxTokens)
+	cfg.AI.Temperature = float32(reader.GetFloat64Setting(ctx, "ai.temperature", float64(cfg.AI.Temperature)))
+	cfg.AI.ReasoningEffort = reader.GetSettingWithDefault(ctx, "ai.reasoning_effort", cfg.AI.ReasoningEffort)
 
 	// Auth session management
-	cfg.Auth.SessionDuration = store.GetDurationSetting(ctx, "auth.session_duration", cfg.Auth.SessionDuration)
-	cfg.Auth.MaxConcurrentSessions = store.GetIntSetting(ctx, "auth.max_concurrent_sessions", cfg.Auth.MaxConcurrentSessions)
-	cfg.Auth.DefaultTokenExpiry = store.GetDurationSetting(ctx, "auth.default_token_expiry", cfg.Auth.DefaultTokenExpiry)
+	cfg.Auth.SessionDuration = reader.GetDurationSetting(ctx, "auth.session_duration", cfg.Auth.SessionDuration)
+	cfg.Auth.MaxConcurrentSessions = reader.GetIntSetting(ctx, "auth.max_concurrent_sessions", cfg.Auth.MaxConcurrentSessions)
+	cfg.Auth.DefaultTokenExpiry = reader.GetDurationSetting(ctx, "auth.default_token_expiry", cfg.Auth.DefaultTokenExpiry)
 
 	// Server frontend URL
-	frontendURL := store.GetSettingWithDefault(ctx, "server.frontend_url", cfg.Server.FrontendURL)
+	frontendURL := reader.GetSettingWithDefault(ctx, "server.frontend_url", cfg.Server.FrontendURL)
 	if frontendURL != "" {
 		cfg.Server.FrontendURL = frontendURL
 	}

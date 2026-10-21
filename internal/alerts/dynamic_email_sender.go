@@ -4,26 +4,21 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/mr-karan/logchef/internal/store"
 )
 
-type SettingsReader interface {
-	GetSettingWithDefault(ctx context.Context, key, defaultValue string) string
-	GetIntSetting(ctx context.Context, key string, defaultValue int) int
-	GetBoolSetting(ctx context.Context, key string, defaultValue bool) bool
-	GetDurationSetting(ctx context.Context, key string, defaultValue time.Duration) time.Duration
-}
-
 type DynamicEmailSender struct {
-	settings SettingsReader
+	settings store.SettingsReader
 	logger   *slog.Logger
 }
 
-func NewDynamicEmailSender(settings SettingsReader, logger *slog.Logger) *DynamicEmailSender {
+func NewDynamicEmailSender(settings store.SettingGetter, logger *slog.Logger) *DynamicEmailSender {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &DynamicEmailSender{
-		settings: settings,
+		settings: store.SettingsReader{SettingGetter: settings},
 		logger:   logger.With("component", "dynamic_email_sender"),
 	}
 }

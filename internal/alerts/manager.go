@@ -484,9 +484,10 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 		return trimmed
 	}
 
-	base := strings.TrimSpace(m.db.GetSettingWithDefault(ctx, "alerts.frontend_url", ""))
+	settings := store.SettingsReader{SettingGetter: m.db}
+	base := strings.TrimSpace(settings.GetSettingWithDefault(ctx, "alerts.frontend_url", ""))
 	if base == "" {
-		base = strings.TrimSpace(m.db.GetSettingWithDefault(ctx, "alerts.external_url", ""))
+		base = strings.TrimSpace(settings.GetSettingWithDefault(ctx, "alerts.external_url", ""))
 	}
 	if base == "" {
 		return ""

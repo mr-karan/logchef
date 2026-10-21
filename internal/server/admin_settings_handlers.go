@@ -13,6 +13,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -393,16 +394,17 @@ type TestWebhookRequest struct {
 }
 
 func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
+	settings := store.SettingsReader{SettingGetter: s.sqlite}
 	return alerts.EmailSenderOptions{
-		Host:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
-		Port:          s.sqlite.GetIntSetting(ctx, "alerts.smtp_port", 587),
-		Username:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
-		Password:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
-		From:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
-		ReplyTo:       s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
-		Security:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
-		Timeout:       s.sqlite.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Host:          settings.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
+		Port:          settings.GetIntSetting(ctx, "alerts.smtp_port", 587),
+		Username:      settings.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
+		Password:      settings.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
+		From:          settings.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
+		ReplyTo:       settings.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
+		Security:      settings.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
+		Timeout:       settings.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: settings.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	}
 }
@@ -505,9 +507,10 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Webhook URL must use http or https scheme")
 	}
 
+	settings := store.SettingsReader{SettingGetter: s.sqlite}
 	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
+		Timeout:       settings.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: settings.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	})
 

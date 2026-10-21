@@ -25,7 +25,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
-	t.Run("SettingsDurationFallback", func(t *testing.T) { testSettingsDurationFallback(t, ctx, s) })
+	t.Run("SettingsParsing", func(t *testing.T) { testSettingsParsing(t, ctx, s) })
 	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
 	t.Run("CollectionTeams", func(t *testing.T) { testCollectionTeams(t, ctx, s) })
@@ -232,18 +232,65 @@ func testSessions(t *testing.T, ctx context.Context, s store.Store) {
 	}
 }
 
-func testSettingsDurationFallback(t *testing.T, ctx context.Context, s store.Store) {
-	for _, value := range []string{"0s", "-1h", "invalid", "3m"} {
-		if err := s.UpsertSetting(ctx, "alerts.request_timeout", value, "duration", "alerts", "", false); err != nil {
-			t.Fatal(err)
-		}
-		want := 5 * time.Second
-		if value == "3m" {
-			want = 3 * time.Minute
-		}
-		if got := s.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second); got != want {
-			t.Errorf("duration %q = %v, want %v", value, got, want)
-		}
+func testSettingsParsing(t *testing.T, ctx context.Context, s store.Store) {
+	reader := store.SettingsReader{SettingGetter: s}
+	for _, tc := range []struct {
+		name, value string
+		missing     bool
+		text        string
+		boolean     bool
+		integer     int
+		decimal     float64
+		duration    time.Duration
+	}{
+		{name: "missing", missing: true, text: "fallback", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "empty", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "invalid", value: "invalid", text: "invalid", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "zero", value: "0", text: "0", duration: time.Second},
+		{name: "negative", value: "-2", text: "-2", boolean: true, integer: -2, decimal: -2, duration: time.Second},
+		{name: "positive", value: "2", text: "2", boolean: true, integer: 2, decimal: 2, duration: time.Second},
+		{name: "float", value: "2.5", text: "2.5", boolean: true, integer: 42, decimal: 2.5, duration: time.Second},
+		{name: "duration", value: "3m", text: "3m", boolean: true, integer: 42, decimal: 1.5, duration: 3 * time.Minute},
+		{name: "zero duration", value: "0s", text: "0s", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+		{name: "negative duration", value: "-1h", text: "-1h", boolean: true, integer: 42, decimal: 1.5, duration: time.Second},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			const key = "test.parsing"
+			if err := s.DeleteSetting(ctx, key); err != nil {
+				t.Fatal(err)
+			}
+			if !tc.missing {
+				if err := s.UpsertSetting(ctx, key, tc.value, "string", "alerts", "", false); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if got := reader.GetSettingWithDefault(ctx, key, "fallback"); got != tc.text {
+				t.Errorf("string = %q, want %q", got, tc.text)
+			}
+			if got := reader.GetBoolSetting(ctx, key, true); got != tc.boolean {
+				t.Errorf("bool = %v, want %v", got, tc.boolean)
+			}
+			if got := reader.GetIntSetting(ctx, key, 42); got != tc.integer {
+				t.Errorf("int = %v, want %v", got, tc.integer)
+			}
+			if got := reader.GetFloat64Setting(ctx, key, 1.5); got != tc.decimal {
+				t.Errorf("float = %v, want %v", got, tc.decimal)
+			}
+			if got := reader.GetDurationSetting(ctx, key, time.Second); got != tc.duration {
+				t.Errorf("duration = %v, want %v", got, tc.duration)
+			}
+		})
+	}
+	for _, value := range []string{"1", "t", "T", "TRUE", "true", "True", "0", "f", "F", "FALSE", "false", "False"} {
+		t.Run(value, func(t *testing.T) {
+			if err := s.UpsertSetting(ctx, "test.bool", value, "boolean", "alerts", "", false); err != nil {
+				t.Fatal(err)
+			}
+			want := value == "1" || value == "t" || value == "T" || value == "TRUE" || value == "true" || value == "True"
+			if got := reader.GetBoolSetting(ctx, "test.bool", !want); got != want {
+				t.Errorf("bool %q = %v, want %v", value, got, want)
+			}
+		})
 	}
 }
 
@@ -281,7 +328,7 @@ func testSettings(t *testing.T, ctx context.Context, s store.Store) {
 	if v, err := s.GetSetting(ctx, "alerts.enabled"); err != nil || v != "true" {
 		t.Errorf("GetSetting = %q / %v", v, err)
 	}
-	if !s.GetBoolSetting(ctx, "alerts.enabled", false) {
+	if !(store.SettingsReader{SettingGetter: s}).GetBoolSetting(ctx, "alerts.enabled", false) {
 		t.Error("GetBoolSetting = false, want true")
 	}
 	list, err := s.ListSettings(ctx)
