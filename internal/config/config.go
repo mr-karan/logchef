@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -514,8 +515,8 @@ var defaultOIDCScopes = []string{"openid", "email", "profile"}
 // reasoning-capable models.
 var ValidReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
 
-// Load reads case-insensitive TOML keys and LOGCHEF_ environment overrides.
-// Missing, unreadable or malformed files and case-colliding file keys are errors.
+// Load reads case-insensitive TOML schema keys and LOGCHEF_ environment overrides.
+// Missing, unreadable or malformed files and case-colliding schema keys are errors.
 // An empty path uses only environment variables, such as LOGCHEF_SERVER__PORT.
 func Load(path string) (*Config, error) {
 	k := koanf.New(".")
@@ -526,11 +527,11 @@ func Load(path string) (*Config, error) {
 		if err := scratch.Load(file.Provider(path), toml.Parser()); err != nil {
 			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
 		}
-		normalized, err := lowercaseConfigKeys(scratch.Raw(), "")
+		normalized, err := lowercaseKeys(scratch.Raw(), "", reflect.TypeFor[Config]())
 		if err != nil {
 			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
 		}
-		if err := k.Load(configMap(normalized.(map[string]any)), nil); err != nil {
+		if err := k.Load(configMap(normalized), nil); err != nil {
 			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
 		}
 		log.Printf("loaded configuration from file: %s", path)
@@ -584,34 +585,61 @@ func (m configMap) ReadBytes() ([]byte, error) {
 	return nil, fmt.Errorf("config map does not support reading bytes")
 }
 
-func lowercaseConfigKeys(value any, path string) (any, error) {
-	switch value := value.(type) {
-	case map[string]any:
-		normalized := make(map[string]any, len(value))
-		for key, child := range value {
-			lower := strings.ToLower(key)
-			childPath := lower
-			if path != "" {
-				childPath = path + "." + lower
-			}
-			if _, exists := normalized[lower]; exists {
-				return nil, fmt.Errorf("case collision at config key %q", childPath)
-			}
-			var err error
-			normalized[lower], err = lowercaseConfigKeys(child, childPath)
-			if err != nil {
-				return nil, err
-			}
+func lowercaseKeys(value map[string]any, path string, schema reflect.Type) (map[string]any, error) {
+	fields := make(map[string]reflect.Type, schema.NumField())
+	for field := range schema.Fields() {
+		key, _, _ := strings.Cut(field.Tag.Get("koanf"), ",")
+		if key != "" && key != "-" {
+			fields[strings.ToLower(key)] = field.Type
 		}
-		return normalized, nil
-	case []any:
-		for i, child := range value {
-			var err error
-			value[i], err = lowercaseConfigKeys(child, fmt.Sprintf("%s[%d]", path, i))
-			if err != nil {
-				return nil, err
-			}
+	}
+	normalized := make(map[string]any, len(value))
+	for key, child := range value {
+		lower := strings.ToLower(key)
+		field, exists := fields[lower]
+		if !exists {
+			normalized[key] = child
+			continue
 		}
+		childPath := lower
+		if path != "" {
+			childPath = path + "." + lower
+		}
+		if _, exists := normalized[lower]; exists {
+			return nil, fmt.Errorf("case collision at config key %q", childPath)
+		}
+		var err error
+		normalized[lower], err = lowercaseValue(child, childPath, field)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+func lowercaseValue(value any, path string, schema reflect.Type) (any, error) {
+	for schema.Kind() == reflect.Pointer {
+		schema = schema.Elem()
+	}
+	switch schema.Kind() {
+	case reflect.Struct:
+		if value, ok := value.(map[string]any); ok {
+			return lowercaseKeys(value, path, schema)
+		}
+	case reflect.Slice:
+		if value, ok := value.([]any); ok {
+			normalized := make([]any, len(value))
+			for i, child := range value {
+				var err error
+				normalized[i], err = lowercaseValue(child, fmt.Sprintf("%s[%d]", path, i), schema.Elem())
+				if err != nil {
+					return nil, err
+				}
+			}
+			return normalized, nil
+		}
+	default:
+		return value, nil
 	}
 	return value, nil
 }

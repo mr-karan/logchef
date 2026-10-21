@@ -665,3 +665,95 @@ Redirect_URIs = ["https://example.com/callback"]
 		t.Errorf("auth.oauth.clients[0] = %+v, want the configured client", client)
 	}
 }
+
+func TestLoad_PreservesProvisioningConnectionKeys(t *testing.T) {
+	tests := []struct {
+		name       string
+		connection string
+		payload    string
+	}{
+		{
+			name:       "options",
+			connection: "options = { CustomerID = \"tenant-a\" }",
+			payload:    `{"options":{"CustomerID":"tenant-a"}}`,
+		},
+		{
+			name:       "headers",
+			connection: "headers = { X-Api-Key = \"example-key\" }",
+			payload:    `{"headers":{"X-Api-Key":"example-key"}}`,
+		},
+		{
+			name:       "case-distinct options",
+			connection: "options = { CustomerID = \"tenant-a\", customerid = \"tenant-b\" }",
+			payload:    `{"options":{"CustomerID":"tenant-a","customerid":"tenant-b"}}`,
+		},
+		{
+			name:       "nested maps in arrays",
+			connection: "Options = [{ Tags = { CustomerID = \"tenant-a\" } }]",
+			payload:    `{"Options":[{"Tags":{"CustomerID":"tenant-a"}}]}`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearLogchefEnv(t)
+			cfg, err := Load(writeConfig(t, `
+[[Provisioning.Sources]]
+Name = "example"
+[Provisioning.Sources.Connection]
+`+tt.connection))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if len(cfg.Provisioning.Sources) != 1 {
+				t.Fatalf("provisioning.sources = %v, want one source", cfg.Provisioning.Sources)
+			}
+			payload, err := cfg.Provisioning.Sources[0].ConnectionPayload()
+			if err != nil {
+				t.Fatalf("ConnectionPayload: %v", err)
+			}
+			if string(payload) != tt.payload {
+				t.Errorf("ConnectionPayload() = %s, want %s", payload, tt.payload)
+			}
+		})
+	}
+}
+
+func TestLoad_InlineAndSeparateProvisioningConnectionMatch(t *testing.T) {
+	clearLogchefEnv(t)
+	const block = `
+[[sources]]
+name = "example"
+[sources.connection.options]
+CustomerID = "tenant-a"
+[sources.connection.headers]
+X-Api-Key = "example-key"
+`
+	inlineBlock := strings.ReplaceAll(block, "[[sources]]", "[[provisioning.sources]]")
+	inlineBlock = strings.ReplaceAll(inlineBlock, "[sources.", "[provisioning.sources.")
+	inline, err := Load(writeConfig(t, inlineBlock))
+	if err != nil {
+		t.Fatalf("Load inline provisioning: %v", err)
+	}
+	provPath := filepath.Join(t.TempDir(), "provisioning.toml")
+	if err := os.WriteFile(provPath, []byte(block), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	separate, err := Load(writeConfig(t, fmt.Sprintf("\n[provisioning]\nfile = %q\n", provPath)))
+	if err != nil {
+		t.Fatalf("Load separate provisioning: %v", err)
+	}
+	if len(inline.Provisioning.Sources) != 1 || len(separate.Provisioning.Sources) != 1 {
+		t.Fatalf("want one source in both inline and separate provisioning")
+	}
+	inlinePayload, err := inline.Provisioning.Sources[0].ConnectionPayload()
+	if err != nil {
+		t.Fatalf("inline ConnectionPayload: %v", err)
+	}
+	separatePayload, err := separate.Provisioning.Sources[0].ConnectionPayload()
+	if err != nil {
+		t.Fatalf("separate ConnectionPayload: %v", err)
+	}
+	if string(inlinePayload) != string(separatePayload) {
+		t.Errorf("inline ConnectionPayload() = %s, separate = %s", inlinePayload, separatePayload)
+	}
+}
