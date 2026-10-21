@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 	"os"
 	"path/filepath"
@@ -325,7 +326,11 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 
 	stats, err := client.QueryStream(queryCtx, buildResult.SQL, opts, writer)
 	if err != nil {
-		s.log.Error("failed to execute export job", "error", err, "source_id", sourceID, "job_id", jobID)
+		level := slog.LevelError
+		if errors.Is(queryCtx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+			level = slog.LevelDebug
+		}
+		s.log.Log(queryCtx, level, "failed to execute export job", "error", err, "source_id", sourceID, "job_id", jobID)
 		_ = tmpFile.Close()
 		s.failExportJob(queryCtx, jobID, filePath, exportFailureMessage(err))
 		return
@@ -350,7 +355,11 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	metadataCtx, metadataCancel := context.WithTimeout(queryCtx, time.Second)
 	defer metadataCancel()
 	if err := s.sqlite.CompleteExportJob(metadataCtx, jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
-		s.log.Error("failed to complete export job", "error", err, "job_id", jobID)
+		level := slog.LevelError
+		if errors.Is(queryCtx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+			level = slog.LevelDebug
+		}
+		s.log.Log(queryCtx, level, "failed to complete export job", "error", err, "job_id", jobID)
 		s.failExportJob(queryCtx, jobID, filePath, "Failed to persist export metadata")
 		return
 	}

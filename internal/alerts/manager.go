@@ -136,7 +136,7 @@ func (m *Manager) StopWithContext(ctx context.Context) error {
 func (m *Manager) evaluateCycle(ctx context.Context) {
 	alerts, err := m.db.ListActiveAlertsDue(ctx)
 	if err != nil {
-		m.log.Error("failed to fetch alerts for evaluation", "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to fetch alerts for evaluation", "error", err)
 		return
 	}
 	if len(alerts) == 0 {
@@ -148,11 +148,7 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 			return
 		}
 		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
-			if ctx.Err() != nil && errors.Is(err, context.Canceled) {
-				m.log.Debug("alert evaluation failed", "alert_id", alert.ID, "error", err)
-			} else {
-				m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
-			}
+			m.log.Log(ctx, evaluationLogLevel(ctx, err), "alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
 	}
 }
@@ -223,15 +219,28 @@ func (m *Manager) evaluateAlert(ctx context.Context, alert *models.Alert) error 
 	return m.handleResolved(ctx, alert, value)
 }
 
+func evaluationLogLevel(ctx context.Context, err error) slog.Level {
+	if errors.Is(ctx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+		return slog.LevelDebug
+	}
+	return slog.LevelError
+}
+
 func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert, evalErr error) {
 	if alert == nil || evalErr == nil {
 		return
 	}
+	if errors.Is(ctx.Err(), context.Canceled) && errors.Is(evalErr, context.Canceled) {
+		return
+	}
+	// Evaluation deadlines must not prevent recording genuine failures.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
 
 	// Update last_evaluated_at even on error so the alert respects its frequency_seconds
 	// instead of being re-evaluated every cycle
 	if err := m.db.MarkAlertEvaluated(ctx, alert.ID); err != nil {
-		m.log.Error("failed to mark alert evaluated after error", "alert_id", alert.ID, "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to mark alert evaluated after error", "alert_id", alert.ID, "error", err)
 	}
 
 	errorMessage := fmt.Sprintf("Evaluation failed: %v", evalErr)
@@ -245,7 +254,7 @@ func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert
 
 	_, err := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusError, nil, errorMessage, errorPayload)
 	if err != nil {
-		m.log.Error("failed to insert error history entry", "alert_id", alert.ID, "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to insert error history entry", "alert_id", alert.ID, "error", err)
 		return
 	}
 
@@ -272,7 +281,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	}
 
 	if markErr := m.db.MarkAlertTriggered(ctx, alert.ID); markErr != nil {
-		m.log.Error("failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
+		m.log.Log(ctx, evaluationLogLevel(ctx, markErr), "failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
 	}
 
 	// If already active and delivery succeeded previously, suppress duplicate notification
@@ -331,7 +340,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 		// Insert new history entry
 		_, insertErr := m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
 		if insertErr != nil {
-			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
+			m.log.Log(ctx, evaluationLogLevel(ctx, insertErr), "failed to insert alert history", "alert_id", alert.ID, "error", insertErr)
 		} else {
 			if pruneErr := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); pruneErr != nil {
 				m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", pruneErr)
@@ -340,7 +349,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	} else {
 		// Update existing history entry to reflect the retry outcome
 		if updateErr := m.db.UpdateAlertHistoryPayload(ctx, history.ID, historyPayload); updateErr != nil {
-			m.log.Error("failed to update alert history payload after retry", "alert_id", alert.ID, "history_id", history.ID, "error", updateErr)
+			m.log.Log(ctx, evaluationLogLevel(ctx, updateErr), "failed to update alert history payload after retry", "alert_id", alert.ID, "history_id", history.ID, "error", updateErr)
 		}
 	}
 
@@ -349,7 +358,7 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 
 func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value float64) error {
 	if err := m.db.MarkAlertEvaluated(ctx, alert.ID); err != nil {
-		m.log.Error("failed to mark alert evaluated", "alert_id", alert.ID, "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to mark alert evaluated", "alert_id", alert.ID, "error", err)
 	}
 
 	entry, err := m.db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)

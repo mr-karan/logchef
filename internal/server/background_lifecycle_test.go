@@ -212,7 +212,13 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	if err := db.UpdateSource(ctx, source); err != nil {
 		t.Fatal(err)
 	}
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	logPath := filepath.Join(t.TempDir(), "export.log")
+	output, err := os.Create(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer output.Close()
+	log := slog.New(slog.NewTextHandler(output, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	manager := clickhouse.NewManager(log)
 	t.Cleanup(func() { _ = manager.Close() })
 	if err := manager.AddSource(ctx, source); err != nil {
@@ -271,6 +277,13 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		t.Fatal(err)
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), "level=ERROR") {
+		t.Errorf("export shutdown logged errors: %s", data)
 	}
 	job, err := db.GetExportJob(ctx, result.Data.ID)
 	if err != nil {

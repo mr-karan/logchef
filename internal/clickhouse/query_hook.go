@@ -2,6 +2,7 @@ package clickhouse
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 )
@@ -69,7 +70,11 @@ func (h *LogQueryHook) BeforeQuery(ctx context.Context, query string) (context.C
 // Success is only logged if Verbose is true.
 func (h *LogQueryHook) AfterQuery(ctx context.Context, query string, err error, duration time.Duration) {
 	if err != nil {
-		h.logger.Error("query failed",
+		level := slog.LevelError
+		if errors.Is(err, context.Canceled) {
+			level = slog.LevelDebug
+		}
+		h.logger.Log(ctx, level, "query failed",
 			"query", query,
 			"error", err,
 			"duration_ms", duration.Milliseconds(),
