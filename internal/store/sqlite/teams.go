@@ -161,13 +161,6 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 
 	err = db.writeQueries.AddTeamMember(ctx, params)
 	if err != nil {
-		// Check for primary key violation (user already member of team).
-		if IsUniqueConstraintError(err) && (strings.Contains(err.Error(), "team_id") || strings.Contains(err.Error(), "user_id")) {
-			// This is often not a fatal error; could indicate an attempt to re-add.
-			// Consider returning nil or a specific "already exists" error depending on desired behavior.
-			db.log.Warn("attempted to add existing team member", "team_id", teamID, "user_id", userID)
-			return nil // Or return fmt.Errorf("user %d is already a member of team %d", userID, teamID)
-		}
 		db.log.Error("failed to add team member record", "error", err, "team_id", teamID, "user_id", userID)
 		return fmt.Errorf("error adding team member: %w", err)
 	}

@@ -176,9 +176,10 @@ ORDER BY t.created_at DESC;
 -- Team Members
 
 -- name: AddTeamMember :exec
--- Add a member to a team
+-- Add a member to a team; adding an existing member is a no-op and keeps their role.
 INSERT INTO team_members (team_id, user_id, role)
-VALUES ($1, $2, $3);
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING;
 
 -- name: GetTeamMember :one
 -- Get a team member

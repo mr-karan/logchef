@@ -201,14 +201,7 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 	if err := s.AddTeamSource(ctx, team.ID, src.ID); err != nil {
 		t.Fatalf("AddTeamSource: %v", err)
 	}
-	if err := s.AddTeamSource(ctx, team.ID, src.ID); err != nil {
-		t.Fatalf("AddTeamSource duplicate: %v", err)
-	}
-	if err := s.WithTx(ctx, func(tx store.StoreOps) error {
-		return tx.AddTeamSource(ctx, team.ID, src.ID)
-	}); err != nil {
-		t.Fatalf("AddTeamSource duplicate in transaction: %v", err)
-	}
+	assertDuplicateLinksAreNoOps(t, ctx, s, team.ID, alice.ID, src.ID)
 	assertSourceAccess(t, ctx, s, team.ID, alice.ID, src.ID, true)
 	// Negative case: an unlinked source must report no access (no error).
 	other := mkSource(t, ctx, s, "unlinked")
@@ -217,6 +210,27 @@ func testTeams(t *testing.T, ctx context.Context, s store.Store) {
 	srcs, err := s.ListTeamSources(ctx, team.ID)
 	if err != nil || len(srcs) != 1 {
 		t.Fatalf("ListTeamSources: %v / %d", err, len(srcs))
+	}
+}
+
+// assertDuplicateLinksAreNoOps checks that re-adding a member or source succeeds, keeps the member's role, and leaves a transaction committable.
+func assertDuplicateLinksAreNoOps(t *testing.T, ctx context.Context, s store.Store, teamID models.TeamID, userID models.UserID, sourceID models.SourceID) {
+	t.Helper()
+	if err := s.AddTeamSource(ctx, teamID, sourceID); err != nil {
+		t.Fatalf("AddTeamSource duplicate: %v", err)
+	}
+	if err := s.WithTx(ctx, func(tx store.StoreOps) error {
+		return tx.AddTeamSource(ctx, teamID, sourceID)
+	}); err != nil {
+		t.Fatalf("AddTeamSource duplicate in transaction: %v", err)
+	}
+	if err := s.WithTx(ctx, func(tx store.StoreOps) error {
+		return tx.AddTeamMember(ctx, teamID, userID, models.TeamRoleMember)
+	}); err != nil {
+		t.Fatalf("AddTeamMember duplicate in transaction: %v", err)
+	}
+	if m, err := s.GetTeamMember(ctx, teamID, userID); err != nil || m == nil || m.Role != models.TeamRoleAdmin {
+		t.Fatalf("duplicate AddTeamMember changed membership: %v / %+v", err, m)
 	}
 }
 

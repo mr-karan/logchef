@@ -81,6 +81,7 @@ const addTeamMember = `-- name: AddTeamMember :exec
 
 INSERT INTO team_members (team_id, user_id, role)
 VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING
 `
 
 type AddTeamMemberParams struct {
@@ -90,7 +91,7 @@ type AddTeamMemberParams struct {
 }
 
 // Team Members
-// Add a member to a team
+// Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.db.Exec(ctx, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
 	return err
