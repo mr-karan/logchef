@@ -576,7 +576,7 @@ const showVariablesConfig = ref(false);
 const showAiDialog = ref(false);
 const isGeneratingAi = computed(() => exploreStore.isGeneratingAISQL);
 const aiError = computed(() => exploreStore.aiSqlError);
-const generatedSql = computed(() => exploreStore.generatedAiSql);
+const generatedSql = computed(() => exploreStore.generatedAiQuery?.query ?? null);
 
 // Live tail. The store owns the tail lifecycle and the arm/capability logic;
 // this component just surfaces the toggle next to Run.
@@ -970,23 +970,32 @@ const handleAiDialogSubmit = (payload: { naturalLanguageQuery: string; currentQu
   });
 };
 
-const handleAiInsert = (sql: string) => {
-  // AI always generates raw SQL — write it directly to the SQL store
-  // before triggering mode switch so translation cannot overwrite it.
-  exploreStore.setNativeQuery(sql);
+const handleAiInsert = () => {
+  const generated = exploreStore.generatedAiQuery;
+  if (!generated) return;
+  const { query } = generated;
+  const mode: EditorMode = generated.mode === 'logchefql' ? 'logchefql' : 'clickhouse-sql';
+
+  // Write the query to the store of its own mode before the mode switch, so
+  // translation cannot overwrite it.
+  if (mode === 'logchefql') {
+    exploreStore.setLogchefqlCode(query);
+  } else {
+    exploreStore.setNativeQuery(query);
+  }
   exploreStore.clearActiveSavedQuerySelection();
-  editorContent.value = sql;
+  editorContent.value = query;
 
   emit('change', {
-    query: sql,
-    mode: 'clickhouse-sql',
+    query,
+    mode,
     isUserInput: false,
   });
 
-  // Switch to SQL tab if not already there (mirrors handleLoadQueryFromHistory)
-  if (props.activeMode !== 'clickhouse-sql') {
+  // Switch to the query's tab if not already there (mirrors handleLoadQueryFromHistory)
+  if (props.activeMode !== mode) {
     nextTick(() => {
-      emit('update:activeMode', 'clickhouse-sql' as EditorMode, true);
+      emit('update:activeMode', mode, true);
     });
   }
 

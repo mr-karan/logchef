@@ -6,10 +6,26 @@ import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useContextStore } from "@/stores/context";
 
+export type AIQueryMode = "logchefql" | "native";
+
+// A generated query and the editor mode it was written for.
+export interface GeneratedAIQuery {
+  query: string;
+  mode: AIQueryMode;
+}
+
 interface AIState {
   isGenerating: boolean;
   error: string | null;
-  generatedSql: string | null;
+  generated: GeneratedAIQuery | null;
+}
+
+// The server names the language it wrote; older servers name none, so fall
+// back to the mode that was asked for.
+function generatedMode(language: string | undefined, requested: AIQueryMode | undefined): AIQueryMode {
+  if (language === "logchefql") return "logchefql";
+  if (language) return "native";
+  return requested ?? "native";
 }
 
 export const useExploreAIStore = defineStore("exploreAI", () => {
@@ -18,23 +34,23 @@ export const useExploreAIStore = defineStore("exploreAI", () => {
   const state = ref<AIState>({
     isGenerating: false,
     error: null,
-    generatedSql: null,
+    generated: null,
   });
 
   const isGeneratingAISQL = computed(() => state.value.isGenerating);
   const aiSqlError = computed(() => state.value.error);
-  const generatedAiSql = computed(() => state.value.generatedSql);
+  const generatedAiQuery = computed(() => state.value.generated);
 
   function clearState() {
     state.value.isGenerating = false;
     state.value.error = null;
-    state.value.generatedSql = null;
+    state.value.generated = null;
   }
 
   async function generateAiSql(
     naturalLanguageQuery: string,
     currentQuery?: string,
-    mode?: "logchefql" | "native"
+    mode?: AIQueryMode
   ): Promise<{
     success: boolean;
     data?: AIGenerateSQLResponse;
@@ -42,7 +58,7 @@ export const useExploreAIStore = defineStore("exploreAI", () => {
   }> {
     state.value.isGenerating = true;
     state.value.error = null;
-    state.value.generatedSql = null;
+    state.value.generated = null;
 
     try {
       const teamsStore = useTeamsStore();
@@ -71,7 +87,7 @@ export const useExploreAIStore = defineStore("exploreAI", () => {
       const response = await exploreApi.generateAISQL(sourceId, request, currentTeamId);
 
       if (response.data) {
-        state.value.generatedSql = response.data.sql_query || '';
+        state.value.generated = { query: response.data.sql_query || '', mode: generatedMode(response.data.language, mode) };
         return { success: true, data: response.data };
       } else {
         const errorMsg = 'Failed to generate SQL';
@@ -93,7 +109,7 @@ export const useExploreAIStore = defineStore("exploreAI", () => {
   return {
     isGeneratingAISQL,
     aiSqlError,
-    generatedAiSql,
+    generatedAiQuery,
 
     clearState,
     generateAiSql,
