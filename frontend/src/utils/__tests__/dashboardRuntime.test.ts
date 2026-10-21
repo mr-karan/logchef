@@ -1,6 +1,15 @@
 import { describe, it, expect } from "vitest";
-import { resolveEffectiveCacheTtl, resolveAppliedRange } from "../dashboards";
+import {
+  classifyPanelError,
+  clampTableLimit,
+  execSignature,
+  resolveAppliedRange,
+  resolveEffectiveCacheTtl,
+  stableStringify,
+  unwrap,
+} from "../dashboardRuntime";
 import type { DashboardCachePolicy } from "@/api/meta";
+import type { DashboardPanel } from "@/api/dashboards";
 
 // A well-formed server policy: caching on, 10m default, 1h max.
 const POLICY: DashboardCachePolicy = {
@@ -180,5 +189,109 @@ describe("resolveAppliedRange", () => {
       });
       expect(r).toEqual({ start: baseStart, end: baseEnd });
     });
+  });
+});
+
+describe("stableStringify", () => {
+  it("ignores object key order", () => {
+    expect(stableStringify({ a: 1, b: { c: 2, d: 3 } })).toBe(stableStringify({ b: { d: 3, c: 2 }, a: 1 }));
+  });
+
+  it("keeps array order significant", () => {
+    expect(stableStringify([1, 2])).not.toBe(stableStringify([2, 1]));
+  });
+
+  it("distinguishes different values", () => {
+    expect(stableStringify({ a: 1 })).not.toBe(stableStringify({ a: 2 }));
+  });
+
+  it("handles primitives and null", () => {
+    expect(stableStringify(null)).toBe("null");
+    expect(stableStringify("x")).toBe('"x"');
+    expect(stableStringify([{ b: 1, a: null }])).toBe('[{"a":null,"b":1}]');
+  });
+});
+
+describe("classifyPanelError", () => {
+  it("marks an AuthorizationError as locked", () => {
+    expect(classifyPanelError({ error_type: "AuthorizationError", message: "no access" })).toEqual({
+      locked: true,
+      message: "no access",
+    });
+  });
+
+  it("uses the message of a plain error", () => {
+    expect(classifyPanelError(new Error("boom"))).toEqual({ locked: false, message: "boom" });
+  });
+
+  it("prefers the API message over the Error message", () => {
+    const err = Object.assign(new Error("generic"), { message: "specific" });
+    expect(classifyPanelError(err).message).toBe("specific");
+  });
+
+  it.each([undefined, null, "str", 42, {}])("falls back for %j", (err) => {
+    expect(classifyPanelError(err)).toEqual({ locked: false, message: "Failed to load panel" });
+  });
+});
+
+describe("clampTableLimit", () => {
+  it.each<[string, number | undefined, number]>([
+    ["undefined → default", undefined, 100],
+    ["0 → default", 0, 100],
+    ["negative → default", -5, 100],
+    ["NaN → default", NaN, 100],
+    ["Infinity → default", Infinity, 100],
+    ["fraction below 1 clamps up to 1", 0.5, 1],
+    ["1.9 floors to 1", 1.9, 1],
+    ["in range passes through", 250, 250],
+    ["max passes through", 1000, 1000],
+    ["above max clamps", 100000, 1000],
+  ])("%s", (_name, value, expected) => {
+    expect(clampTableLimit(value)).toBe(expected);
+  });
+});
+
+describe("execSignature", () => {
+  const base: DashboardPanel = {
+    id: "p1",
+    title: "A",
+    type: "table",
+    team_id: 1,
+    source_id: 2,
+    query: "level:error",
+    query_language: "logchefql",
+    options: { limit: 50 },
+  };
+
+  it("ignores fields that do not affect the fetched result", () => {
+    expect(execSignature({ ...base, id: "p2", title: "B" })).toBe(execSignature(base));
+  });
+
+  it.each<[string, Partial<DashboardPanel>]>([
+    ["type", { type: "stat" }],
+    ["query", { query: "level:warn" }],
+    ["query language", { query_language: "clickhouse-sql" }],
+    ["team", { team_id: 9 }],
+    ["source", { source_id: 9 }],
+    ["limit", { options: { limit: 10 } }],
+    ["group by", { options: { limit: 50, group_by: "host" } }],
+  ])("changes when %s changes", (_name, patch) => {
+    expect(execSignature({ ...base, ...patch })).not.toBe(execSignature(base));
+  });
+});
+
+describe("unwrap", () => {
+  it("returns the data of a success response", () => {
+    expect(unwrap({ status: "success", data: { n: 1 } })).toEqual({ n: 1 });
+  });
+
+  it("throws an error response as-is", () => {
+    const resp = { status: "error" as const, message: "bad", error_type: "ValidationError" };
+    expect(() => unwrap(resp)).toThrow();
+    try {
+      unwrap(resp);
+    } catch (e) {
+      expect(e).toBe(resp);
+    }
   });
 });

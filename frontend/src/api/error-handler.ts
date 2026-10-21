@@ -122,6 +122,11 @@ export function isCanceledError(error: unknown): boolean {
   return false;
 }
 
+/** Checks if an error came from an aborted or canceled request (fetch AbortError or our CanceledError). */
+export function isAbortError(error: unknown): boolean {
+  return isCanceledError(error) || (error instanceof Error && error.name === "AbortError");
+}
+
 /** Returns true when an interceptor already surfaced this error to the user. */
 export function hasShownErrorToast(error: unknown): boolean {
   return Boolean(error && typeof error === "object" && "_toastShown" in error && (error as APIErrorResponse)._toastShown);
