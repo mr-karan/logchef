@@ -602,3 +602,66 @@ func TestLoad_EmptyPathUsesEnvironmentOnly(t *testing.T) {
 		t.Errorf("tail.max_global = %d, want default %d", cfg.Tail.MaxGlobal, defaultTailMaxGlobal)
 	}
 }
+
+func TestLoad_CapitalizedSectionWithEnvironmentOverride(t *testing.T) {
+	clearLogchefEnv(t)
+	t.Setenv("LOGCHEF_AI__MAX_TOKENS", "512")
+	cfg, err := Load(writeConfig(t, "\n[AI]\nModel = \"gpt-4.1\"\nMax_Tokens = 2048\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.AI.Model != "gpt-4.1" {
+		t.Errorf("ai.model = %q, want gpt-4.1", cfg.AI.Model)
+	}
+	if cfg.AI.MaxTokens != 512 {
+		t.Errorf("ai.max_tokens = %d, want 512", cfg.AI.MaxTokens)
+	}
+}
+
+func TestLoad_RejectsCaseCollisions(t *testing.T) {
+	tests := []struct {
+		name  string
+		extra string
+		key   string
+	}{
+		{"keys", "\n[server]\nPort = 9000\nport = 9001\n", "server.port"},
+		{"sections", "\n[server]\nport = 9000\n[Server]\nhost = \"localhost\"\n", "server"},
+		{"nested sections", "\n[auth.Local]\nenabled = true\n[auth.local]\nadmin_email = \"admin@example.com\"\n", "auth.local"},
+		{"array tables", "\n[[auth.oauth.clients]]\nID = \"client-a\"\nid = \"client-b\"\n", "auth.oauth.clients[0].id"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearLogchefEnv(t)
+			path := writeConfig(t, tt.extra)
+			_, err := Load(path)
+			if err == nil {
+				t.Fatal("expected an error for config keys that differ only in case")
+			}
+			for _, want := range []string{path, "case collision", tt.key} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error %q does not contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+func TestLoad_CapitalizedArrayTables(t *testing.T) {
+	clearLogchefEnv(t)
+	cfg, err := Load(writeConfig(t, `
+[[auth.OAuth.Clients]]
+ID = "client-a"
+Name = "Example client"
+Redirect_URIs = ["https://example.com/callback"]
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(cfg.Auth.OAuth.Clients) != 1 {
+		t.Fatalf("auth.oauth.clients = %v, want one client", cfg.Auth.OAuth.Clients)
+	}
+	client := cfg.Auth.OAuth.Clients[0]
+	if client.ID != "client-a" || client.Name != "Example client" || len(client.RedirectURIs) != 1 || client.RedirectURIs[0] != "https://example.com/callback" {
+		t.Errorf("auth.oauth.clients[0] = %+v, want the configured client", client)
+	}
+}

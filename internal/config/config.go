@@ -514,16 +514,23 @@ var defaultOIDCScopes = []string{"openid", "email", "profile"}
 // reasoning-capable models.
 var ValidReasoningEfforts = []string{"none", "low", "medium", "high", "xhigh", "max"}
 
-// Load loads the configuration from a TOML file and environment variables. A
-// file that is missing or does not parse is an error; pass an empty path to
-// configure from the environment alone. Environment variables with the prefix
-// LOGCHEF_ can override file values. E.g., LOGCHEF_SERVER__PORT will override server.port
+// Load reads case-insensitive TOML keys and LOGCHEF_ environment overrides.
+// Missing, unreadable or malformed files and case-colliding file keys are errors.
+// An empty path uses only environment variables, such as LOGCHEF_SERVER__PORT.
 func Load(path string) (*Config, error) {
 	k := koanf.New(".")
 
 	// An empty path means environment-only configuration.
 	if path != "" {
-		if err := k.Load(file.Provider(path), toml.Parser()); err != nil {
+		scratch := koanf.New(".")
+		if err := scratch.Load(file.Provider(path), toml.Parser()); err != nil {
+			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
+		}
+		normalized, err := lowercaseConfigKeys(scratch.Raw(), "")
+		if err != nil {
+			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
+		}
+		if err := k.Load(configMap(normalized.(map[string]any)), nil); err != nil {
 			return nil, fmt.Errorf("error loading config file %q: %w", path, err)
 		}
 		log.Printf("loaded configuration from file: %s", path)
@@ -565,6 +572,48 @@ func Load(path string) (*Config, error) {
 	}
 
 	return &cfg, nil
+}
+
+type configMap map[string]any
+
+func (m configMap) Read() (map[string]any, error) {
+	return m, nil
+}
+
+func (m configMap) ReadBytes() ([]byte, error) {
+	return nil, fmt.Errorf("config map does not support reading bytes")
+}
+
+func lowercaseConfigKeys(value any, path string) (any, error) {
+	switch value := value.(type) {
+	case map[string]any:
+		normalized := make(map[string]any, len(value))
+		for key, child := range value {
+			lower := strings.ToLower(key)
+			childPath := lower
+			if path != "" {
+				childPath = path + "." + lower
+			}
+			if _, exists := normalized[lower]; exists {
+				return nil, fmt.Errorf("case collision at config key %q", childPath)
+			}
+			var err error
+			normalized[lower], err = lowercaseConfigKeys(child, childPath)
+			if err != nil {
+				return nil, err
+			}
+		}
+		return normalized, nil
+	case []any:
+		for i, child := range value {
+			var err error
+			value[i], err = lowercaseConfigKeys(child, fmt.Sprintf("%s[%d]", path, i))
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	return value, nil
 }
 
 // loadProvisioningFile loads cfg.Provisioning.File (resolved relative to the
@@ -916,16 +965,6 @@ func defaultConfig() Config {
 	}
 }
 
-// hasKey reports whether k holds key, ignoring case like Unmarshal does.
-func hasKey(k *koanf.Koanf, key string) bool {
-	for _, have := range k.Keys() {
-		if strings.EqualFold(have, key) {
-			return true
-		}
-	}
-	return false
-}
-
 // normalize resolves what defaultConfig cannot express: defaults that depend
 // on other keys, values where zero or less is invalid and falls back to the
 // default, and cross-field limits. It uses k only where an explicit value
@@ -936,12 +975,12 @@ func normalize(k *koanf.Koanf, cfg *Config) { //nolint:gocyclo // flat per-key t
 	// Default the model to gpt-4o only for the OpenAI provider — "gpt-4o" is not
 	// a valid Bedrock model id, so leaving it empty lets validateConfig fail fast
 	// and require an explicit Bedrock model id.
-	if !hasKey(k, "ai.model") && cfg.AI.Provider != "bedrock" {
+	if !k.Exists("ai.model") && cfg.AI.Provider != "bedrock" {
 		cfg.AI.Model = defaultAIModel
 	}
 
 	// query.max_limit is the deprecated alias of query.max_preview_limit.
-	if !hasKey(k, "query.max_preview_limit") && cfg.Query.MaxLimit > 0 {
+	if !k.Exists("query.max_preview_limit") && cfg.Query.MaxLimit > 0 {
 		cfg.Query.MaxPreviewLimit = cfg.Query.MaxLimit
 	}
 	if cfg.Query.MaxLimit == 0 {
