@@ -582,9 +582,12 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 	}
 
 	// Warn if result set is unexpectedly large
-	if result.Stats.Truncated {
+	switch {
+	case result.Stats.Truncated && result.Stats.TruncatedReason == "byte_limit":
+		warnings = append(warnings, fmt.Sprintf("Results were cut off by the response size limit after %d rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).", len(result.Logs)))
+	case result.Stats.Truncated:
 		warnings = append(warnings, fmt.Sprintf("Results were capped at %d buffered rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).", len(result.Logs)))
-	} else if len(result.Logs) > 1 {
+	case len(result.Logs) > 1:
 		warnings = append(warnings, fmt.Sprintf("Query returned %d rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).", len(result.Logs)))
 	}
 

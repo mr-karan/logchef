@@ -596,3 +596,26 @@ func TestCompareAlertThreshold(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateQueryWarningsNamesTruncationCause(t *testing.T) {
+	const query = "SELECT count() AS value FROM logs WHERE ts > now() - INTERVAL 5 MINUTE"
+	rows := []map[string]any{{"value": 1}, {"value": 2}, {"value": 3}}
+
+	tests := []struct {
+		name   string
+		stats  models.QueryStats
+		prefix string
+	}{
+		{"byte limit", models.QueryStats{Truncated: true, TruncatedReason: "byte_limit"}, "Results were cut off by the response size limit after 3 rows."},
+		{"row limit", models.QueryStats{Truncated: true, TruncatedReason: "row_limit"}, "Results were capped at 3 buffered rows."},
+		{"complete", models.QueryStats{}, "Query returned 3 rows."},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			warnings := generateQueryWarnings(query, time.Millisecond, &models.QueryResult{Logs: rows, Stats: tc.stats})
+			if len(warnings) != 1 || !strings.HasPrefix(warnings[0], tc.prefix) {
+				t.Fatalf("warnings = %q, want one starting with %q", warnings, tc.prefix)
+			}
+		})
+	}
+}
