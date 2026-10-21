@@ -55,7 +55,7 @@ const inspectionError = computed(() => {
 async function loadSourceInspection(sourceId: string, refresh: boolean) {
   failedInspectionSourceId.value = null
   const result = await sourcesStore.getSourceInspection(Number(sourceId), refresh)
-  if (!result.success) {
+  if (!result.success && sourceId === selectedSourceId.value) {
     failedInspectionSourceId.value = sourceId
   }
 }

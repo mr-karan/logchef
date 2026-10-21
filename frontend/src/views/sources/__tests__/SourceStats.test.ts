@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, nextTick } from "vue";
+import { createApp, nextTick, reactive } from "vue";
 import { createPinia } from "pinia";
 import { i18n } from "@/i18n";
 import type { Source, SourceActivity, SourceInspection } from "@/api/sources";
@@ -7,12 +7,15 @@ import type { Source, SourceActivity, SourceInspection } from "@/api/sources";
 const server = {
   inspectionFails: true,
   activityFails: true,
+  pendingInspections: null as Map<number, (message: string) => void> | null,
 };
+const route = reactive({ query: { sourceId: "7" } as Record<string, string> });
 
 const source: Source = {
   id: 7, name: "app logs", _meta_is_auto_created: false, source_type: "clickhouse", _meta_ts_field: "timestamp",
   connection: {}, ttl_days: 7, created_at: "", updated_at: "", is_connected: true,
 };
+const otherSource: Source = { ...source, id: 8, name: "audit logs" };
 const inspection: SourceInspection = { details: [], storage: [], schema: null };
 const activity: SourceActivity = { rows_1h: 1, rows_24h: 2, latest_ts: null, hourly_buckets: [] };
 
@@ -22,14 +25,22 @@ const fail = (message: string) => Promise.reject({ status: "error", message, err
 vi.mock("@/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/api/sources")>()),
   sourcesApi: {
-    listAllSourcesForAdmin: () => ok([source]),
-    getAdminSourceInspection: () => (server.inspectionFails ? fail("stats timed out") : ok(inspection)),
+    listAllSourcesForAdmin: () => ok([source, otherSource]),
+    getAdminSourceInspection: (sourceId: number) => {
+      const pending = server.pendingInspections;
+      if (pending) {
+        return new Promise((_, reject) => {
+          pending.set(sourceId, (message) => reject({ status: "error", message, error_type: "DatabaseError" }));
+        });
+      }
+      return server.inspectionFails ? fail("stats timed out") : ok(inspection);
+    },
     getAdminSourceActivity: () => (server.activityFails ? fail("activity timed out") : ok(activity)),
   },
 }));
 vi.mock("vue-router", async (importOriginal) => ({
   ...(await importOriginal<typeof import("vue-router")>()),
-  useRoute: () => ({ query: { sourceId: "7" } }),
+  useRoute: () => route,
   useRouter: () => ({ replace: vi.fn() }),
 }));
 vi.mock("@/views/sources/components/SourceInspectionOverview.vue", () => ({
@@ -88,6 +99,8 @@ afterEach(() => {
   host = null;
   server.inspectionFails = true;
   server.activityFails = true;
+  server.pendingInspections = null;
+  route.query = { sourceId: "7" };
 });
 
 describe("SourceStats", () => {
@@ -118,5 +131,22 @@ describe("SourceStats", () => {
 
     expect(inspectionAlert(root)).toBeUndefined();
     expect(root.querySelector(".overview-stub")).not.toBeNull();
+  });
+
+  it("keeps the selected source's failure when an earlier source fails later", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    const pending = new Map<number, (message: string) => void>();
+    server.pendingInspections = pending;
+    const root = await render();
+
+    route.query = { sourceId: "8" };
+    await flush();
+    pending.get(8)?.("stats timed out");
+    await flush();
+    expect(inspectionAlert(root)).toBeDefined();
+
+    pending.get(7)?.("stats timed out");
+    await flush();
+    expect(inspectionAlert(root)).toBeDefined();
   });
 });
