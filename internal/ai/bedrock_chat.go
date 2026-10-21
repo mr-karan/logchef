@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -29,14 +28,11 @@ type BedrockChat struct {
 
 // NewBedrockChat builds a BedrockChat for region.
 func NewBedrockChat(ctx context.Context, region string) (*BedrockChat, error) {
-	if region == "" {
-		return nil, errors.New("AWS region is required for the bedrock provider (set ai.region)")
-	}
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	client, err := newBedrockClient(ctx, region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config for bedrock: %w", err)
+		return nil, err
 	}
-	client := bedrockruntime.NewFromConfig(awsCfg)
+
 	return &BedrockChat{open: func(ctx context.Context, in *bedrockruntime.ConverseStreamInput) (*bedrockruntime.ConverseStreamEventStream, error) {
 		out, err := client.ConverseStream(ctx, in)
 		if err != nil {
