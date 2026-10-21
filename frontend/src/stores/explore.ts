@@ -1622,6 +1622,12 @@ export const useExploreStore = defineStore("explore", () => {
   }
 
   let lastAutoExecKey: string | null = null;
+  // URL state runs the query itself once it has applied a navigation.
+  let autoRunHeld = false;
+
+  function holdAutoRun(held: boolean) {
+    autoRunHeld = held;
+  }
   
   watch(
     () => contextStore.sourceId,
@@ -1673,6 +1679,10 @@ export const useExploreStore = defineStore("explore", () => {
 
       const execKey = `${newDetails.id}-${revision}`;
       if (execKey === lastAutoExecKey) return;
+      if (autoRunHeld) {
+        lastAutoExecKey = execKey;
+        return;
+      }
 
       // Skip if a query was already executed (e.g., by URL state initialization),
       // unless the user just chose a window.
@@ -1771,6 +1781,7 @@ export const useExploreStore = defineStore("explore", () => {
     // Actions
     setSource,
     suppressNextSourceReset,
+    holdAutoRun,
     setWindow,
     setLimit,
     setQueryTimeout,
