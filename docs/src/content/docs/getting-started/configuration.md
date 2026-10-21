@@ -127,6 +127,10 @@ skip_email_verified_check = false
 `oidc.skip_email_verified_check` is useful for providers such as Cloudflare Access that do not emit
 the `email_verified` claim. It does not bypass an explicit `email_verified=false` response.
 
+At startup Logchef fetches `provider_url` discovery. If the provider is unreachable, Logchef retries
+for up to 60 seconds, then exits with an error so your supervisor (Docker, systemd, Kubernetes) can
+restart it.
+
 ### Logchef OAuth
 
 Logchef OAuth lets the [Logchef CLI](/integration/cli) and AI assistants sign in with a browser consent, instead of a copied API token. The same server also serves the [MCP endpoint](/integration/mcp-server) at `/mcp`. OAuth is **off by default**. When it is off, no OAuth route, metadata, or `/mcp` endpoint exists.
