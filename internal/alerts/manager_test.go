@@ -16,6 +16,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -74,6 +75,12 @@ func newManagerTestAlertAtPath(t *testing.T, path string) (*sqlite.DB, *models.A
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	return db, createManagerTestAlert(t, db), logger
+}
+
+func createManagerTestAlert(t *testing.T, db store.Store) *models.Alert {
+	t.Helper()
+	ctx := t.Context()
 	source := &models.Source{
 		Name: "logs.alerts", MetaTSField: "timestamp",
 		Connection: models.ConnectionInfo{Host: "localhost:9000", Database: "logs", TableName: "alerts"},
@@ -94,7 +101,7 @@ func newManagerTestAlertAtPath(t *testing.T, path string) (*sqlite.DB, *models.A
 	if err := db.CreateAlert(ctx, alert); err != nil {
 		t.Fatal(err)
 	}
-	return db, alert, logger
+	return alert
 }
 
 func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {

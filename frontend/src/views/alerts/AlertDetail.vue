@@ -349,7 +349,7 @@ onMounted(async () => {
                     </div>
                   </div>
 
-                  <AlertDeliveryStatus :failure="entry.deliveryFailure" />
+                  <AlertDeliveryStatus :entry="entry" />
 
                   <!-- Resolution Info -->
                   <div v-if="entry.resolved_at" class="text-xs text-muted-foreground">

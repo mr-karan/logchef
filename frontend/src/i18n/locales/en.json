@@ -1453,6 +1453,7 @@
   "askChef.stop": "Stop",
   "askChef.failed": "Ask Chef could not answer. Try again.",
   "askChef.disabled": "Ask Chef is turned off on this server.",
+  "alerts.delivering": "Delivering",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

@@ -736,6 +736,7 @@
   "askChef.stop": "Detener",
   "askChef.failed": "Ask Chef no pudo responder. Inténtalo de nuevo.",
   "askChef.disabled": "Ask Chef está desactivado en este servidor.",
+  "alerts.delivering": "Delivering",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

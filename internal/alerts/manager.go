@@ -253,13 +253,8 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	alreadyActive := err == nil && prevHistory != nil
 
 	deliveryAttempts, shouldRetryDelivery := deliveryRetryState(prevHistory)
-
 	if alreadyActive && !shouldRetryDelivery {
-		if err := m.db.TouchAlertEvaluated(ctx, alert.ID); err != nil {
-			return err
-		}
-		m.log.Debug("suppressing duplicate alert notification", "alert_id", alert.ID, "delivery_attempts", deliveryAttempts)
-		return nil
+		return m.suppressDuplicateDelivery(ctx, alert.ID, prevHistory, deliveryAttempts)
 	}
 
 	m.log.Info("alert triggered",
@@ -283,9 +278,6 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	if shouldRetryDelivery {
 		notification.deliveryTargets = pendingDeliveryTargets(prevHistory.Payload)
 		notification.attemptedTargets = storedDeliveryTargets(prevHistory.Payload, "delivery_attempted")
-		if notification.attemptedTargets == nil {
-			notification.attemptedTargets = make(map[DeliveryTargetID]struct{})
-		}
 	}
 	selectedTargets := notification.targetIDs()
 	attemptedIDs := notification.attemptedTargetIDs()
@@ -338,9 +330,30 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	if err := m.db.UpdateAlertHistoryPayload(bookkeepingCtx, history.ID, historyPayload); err != nil {
-		m.log.Error("failed to update alert history payload after delivery", "alert_id", alert.ID, "history_id", history.ID, "error", err)
+		if models.IsNotFound(err) {
+			m.log.Debug("alert history resolved during delivery", "alert_id", alert.ID, "history_id", history.ID)
+		} else {
+			m.log.Error("failed to update alert history payload after delivery", "alert_id", alert.ID, "history_id", history.ID, "error", err)
+		}
 	}
 
+	return nil
+}
+
+func (m *Manager) suppressDuplicateDelivery(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, attempts int) error {
+	if attempts >= maxDeliveryAttempts && history.Payload["delivery_in_progress"] == true {
+		history.Payload["delivery_in_progress"] = false
+		history.Payload["delivery_failed"] = true
+		history.Payload["delivery_retries_exhausted"] = true
+		history.Payload["delivery_error"] = "delivery interrupted"
+		if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, history.Payload); err != nil && !models.IsNotFound(err) {
+			m.log.Error("failed to record interrupted alert delivery", "alert_id", alertID, "history_id", history.ID, "error", err)
+		}
+	}
+	if err := m.db.TouchAlertEvaluated(ctx, alertID); err != nil {
+		return err
+	}
+	m.log.Debug("suppressing duplicate alert notification", "alert_id", alertID, "delivery_attempts", attempts)
 	return nil
 }
 

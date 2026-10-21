@@ -83,7 +83,7 @@ func pendingDeliveryTargets(payload map[string]any) map[DeliveryTargetID]struct{
 
 func storedDeliveryTargets(payload map[string]any, field string) map[DeliveryTargetID]struct{} {
 	values, exists := payload[field]
-	if !exists {
+	if !exists || values == nil {
 		return nil
 	}
 	targets := make(map[DeliveryTargetID]struct{})
@@ -133,6 +133,10 @@ func deliveryRetryState(history *models.AlertHistoryEntry) (attempts int, retry 
 }
 
 func (n AlertNotification) attemptedTargetIDs() []string {
+	// Legacy pending-only rows must keep their unknown attempted-target ledger.
+	if n.deliveryTargets != nil && n.attemptedTargets == nil {
+		return nil
+	}
 	targets := make(map[DeliveryTargetID]struct{})
 	maps.Copy(targets, n.attemptedTargets)
 	for _, target := range n.targetIDs() {

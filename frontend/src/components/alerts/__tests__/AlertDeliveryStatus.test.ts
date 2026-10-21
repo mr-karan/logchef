@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { createApp, h } from "vue";
 import { i18n } from "@/i18n";
 import AlertDeliveryStatus from "../AlertDeliveryStatus.vue";
-import { alertDeliveryFailure } from "@/stores/alertHistory";
 import type { AlertHistoryEntry } from "@/api/alerts";
 
 function historyEntry(payload: Record<string, unknown>): AlertHistoryEntry {
@@ -11,7 +10,7 @@ function historyEntry(payload: Record<string, unknown>): AlertHistoryEntry {
 
 function render(entry: AlertHistoryEntry, inspect?: (element: HTMLDivElement) => void): string {
   const element = document.createElement("div");
-  const app = createApp({ render: () => h(AlertDeliveryStatus, { failure: alertDeliveryFailure(entry) }) });
+  const app = createApp({ render: () => h(AlertDeliveryStatus, { entry }) });
   app.use(i18n);
   app.mount(element);
   inspect?.(element);
@@ -21,6 +20,15 @@ function render(entry: AlertHistoryEntry, inspect?: (element: HTMLDivElement) =>
 }
 
 describe("alert history delivery status", () => {
+  it("shows delivery in progress", () => {
+    expect(render(historyEntry({ delivery_in_progress: true, delivery_failed: false }))).toContain("Delivering");
+  });
+  it("hides delivery in progress after manual resolution", () => {
+    const entry = historyEntry({ delivery_in_progress: true, delivery_failed: false });
+    expect(render(entry)).toContain("Delivering");
+    expect(render({ ...entry, status: "resolved" })).not.toContain("Delivering");
+    expect(render({ ...entry, resolved_at: "2026-01-01T00:01:00Z" })).not.toContain("Delivering");
+  });
   it("shows the stored failure and exhausted retries", () => {
     const text = render(historyEntry({ delivery_failed: true, delivery_error: "webhook 2: status 500", delivery_retries_exhausted: true }));
     expect(text).toContain("Delivery failed");

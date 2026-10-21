@@ -309,5 +309,8 @@ func sanitizeSMTPError(err error) error {
 	if reply, ok := errors.AsType[*textproto.Error](err); ok && (reply.Code == 530 || reply.Code == 534 || reply.Code == 535 || reply.Code == 538) {
 		return errSMTPAuth
 	}
-	return errors.New("smtp message rejected by server")
+	if reply, ok := errors.AsType[*textproto.Error](err); ok && reply.Code >= 400 && reply.Code < 600 {
+		return errors.New("smtp message rejected by server")
+	}
+	return errors.New("smtp connection failed")
 }

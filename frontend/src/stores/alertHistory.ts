@@ -35,10 +35,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     limit: 100,
   });
 
-  const entries = computed(() => state.data.value.entries.map((entry) => ({
-    ...entry,
-    deliveryFailure: alertDeliveryFailure(entry),
-  })));
+  const entries = computed(() => state.data.value.entries);
   const currentAlertId = computed(() => state.data.value.currentAlertId);
   const hasHistory = computed(() => entries.value.length > 0);
 

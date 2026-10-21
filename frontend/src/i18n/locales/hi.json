@@ -736,6 +736,7 @@
   "askChef.stop": "रोकें",
   "askChef.failed": "Ask Chef जवाब नहीं दे सका। दोबारा कोशिश करें।",
   "askChef.disabled": "इस सर्वर पर Ask Chef बंद है।",
+  "alerts.delivering": "Delivering",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

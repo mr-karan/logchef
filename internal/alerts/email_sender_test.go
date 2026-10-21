@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/textproto"
 	"strings"
@@ -101,6 +102,10 @@ func TestSMTPErrorCategories(t *testing.T) {
 		{"TLS", &tls.CertificateVerificationError{Err: errors.New("private certificate details")}, "smtp TLS failed"},
 		{"auth", &textproto.Error{Code: 535, Msg: "private authentication details"}, "smtp authentication failed"},
 		{"timeout", fmt.Errorf("private server: %w", context.DeadlineExceeded), "smtp request timed out"},
+		{"reset", &net.OpError{Op: "read", Err: syscall.ECONNRESET}, "smtp connection failed"},
+		{"host unreachable", &net.OpError{Op: "dial", Err: syscall.EHOSTUNREACH}, "smtp connection failed"},
+		{"network unreachable", &net.OpError{Op: "dial", Err: syscall.ENETUNREACH}, "smtp connection failed"},
+		{"greeting EOF", fmt.Errorf("private server: %w", io.EOF), "smtp connection failed"},
 		{"rejected", &textproto.Error{Code: 550, Msg: "private recipient details"}, "smtp message rejected by server"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
