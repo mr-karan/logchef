@@ -18,10 +18,11 @@ watch(deliveryActive, (active, _, onCleanup) => {
 }, { immediate: true });
 const interrupted = computed(() => {
   const deadline = props.entry.payload?.delivery_deadline_at;
+  const parsed = typeof deadline === "string" ? Date.parse(deadline) : Number.NaN;
   // Older reservations only stored the original trigger time.
-  const deadlineMs = typeof deadline === "string"
-    ? Date.parse(deadline)
-    : Date.parse(props.entry.triggered_at) + 3 * (60 + 30 + 2) * 1000;
+  const deadlineMs = Number.isNaN(parsed)
+    ? Date.parse(props.entry.triggered_at) + 3 * (60 + 30 + 2) * 1000
+    : parsed;
   return deliveryActive.value && now.value >= deadlineMs;
 });
 const failure = computed(() => alertDeliveryFailure(props.entry));

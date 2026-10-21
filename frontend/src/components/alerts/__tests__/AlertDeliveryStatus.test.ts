@@ -31,6 +31,11 @@ describe("alert history delivery status", () => {
     const entry = historyEntry({ delivery_in_progress: true, delivery_deadline_at: new Date(Date.now() - 1_000).toISOString() });
     expect(render(entry)).toContain("Delivery interrupted");
   });
+  it("falls back to the trigger window when the deadline cannot be parsed", () => {
+    const entry = historyEntry({ delivery_in_progress: true, delivery_deadline_at: "not-a-time" });
+    entry.triggered_at = new Date(Date.now() - 600_000).toISOString();
+    expect(render(entry)).toContain("Delivery interrupted");
+  });
   it("runs no timer for finished rows", () => {
     vi.useFakeTimers();
     try {

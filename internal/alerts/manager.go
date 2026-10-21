@@ -102,7 +102,7 @@ func (m *Manager) Start(ctx context.Context) {
 	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
 	err := m.db.RecoverAlertDeliveries(recoveryCtx)
 	cancel()
-	if err != nil {
+	if err != nil && !errors.Is(err, context.Canceled) {
 		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
 	}
 
