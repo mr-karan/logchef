@@ -59,9 +59,8 @@ func TestManagerRemoveSourceLeavesNoSeriesAfterInFlightWork(t *testing.T) {
 	source := &models.Source{ID: 9101, Name: "removed-source"}
 	source.Connection.Host = addr
 
-	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
 	hook := blockingQueryHook{entered: make(chan struct{}), release: make(chan struct{})}
-	m.AddQueryHook(hook)
+	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)), hook)
 	if err := m.AddSource(context.Background(), source); err != nil {
 		t.Fatal(err)
 	}
