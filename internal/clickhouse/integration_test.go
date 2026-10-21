@@ -36,7 +36,7 @@ func integrationClient(t *testing.T) (*Client, context.Context) {
 func TestFieldValuesAndSchemaClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	table := fmt.Sprintf("logchef_driver_test_%d", time.Now().UnixNano())
-	conn := client.connection()
+	conn := client.conn
 	if err := conn.Exec(ctx, "CREATE TABLE "+table+" (ts DateTime64(9, 'Asia/Kolkata'), msg String, n Nullable(Int16), attributes Map(String,String), category LowCardinality(Nullable(String)) COMMENT 'category description') ENGINE=MergeTree ORDER BY (ts, msg)"); err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestReadonlyDDLClickHouse(t *testing.T) {
 		table := fmt.Sprintf("logchef_readonly_test_%d", time.Now().UnixNano())
 		_, err = client.Query(ctx, "CREATE TABLE "+table+" (n UInt8) ENGINE=Memory")
 		if err == nil {
-			_ = base.connection().Exec(ctx, "DROP TABLE "+table)
+			_ = base.conn.Exec(ctx, "DROP TABLE "+table)
 			t.Fatalf("source readonly=%d did not reject DDL", readonly)
 		}
 	}

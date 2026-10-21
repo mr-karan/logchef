@@ -15,7 +15,7 @@ func TestQueryBuilderClickHousePreservesLiteralValues(t *testing.T) {
 	}
 
 	var marker, escaped, empty string
-	if err := client.connection().QueryRow(ctx, built).Scan(&marker, &escaped, &empty); err != nil {
+	if err := client.conn.QueryRow(ctx, built).Scan(&marker, &escaped, &empty); err != nil {
 		t.Fatalf("execute built query %q: %v", built, err)
 	}
 	if marker != "___ESCAPED_QUOTE___" || escaped != "it's" || empty != "" {
@@ -27,7 +27,7 @@ func TestQueryBuilderClickHousePreservesLiteralValues(t *testing.T) {
 		t.Fatal(err)
 	}
 	marker, escaped, empty = "", "", "not empty"
-	if err := client.connection().QueryRow(ctx, withoutLimit).Scan(&marker, &escaped, &empty); err != nil {
+	if err := client.conn.QueryRow(ctx, withoutLimit).Scan(&marker, &escaped, &empty); err != nil {
 		t.Fatalf("execute limit-free query %q: %v", withoutLimit, err)
 	}
 	if marker != "___ESCAPED_QUOTE___" || escaped != "it's" || empty != "" {

@@ -136,11 +136,11 @@ func TestQueryScannedWorkClickHouse(t *testing.T) {
 	if _, err := client.Query(ctx, "CREATE TABLE "+table+" (number UInt64) ENGINE=Memory"); err != nil {
 		t.Fatal(err)
 	}
-	defer client.connection().Exec(ctx, "DROP TABLE "+table)
+	defer client.conn.Exec(ctx, "DROP TABLE "+table)
 	if createCounter.Get()-beforeCreate != 1 {
 		t.Fatalf("DDL counted %d times", createCounter.Get()-beforeCreate)
 	}
-	if err := client.connection().Exec(ctx, "INSERT INTO "+table+" SELECT number FROM numbers(100000)"); err != nil {
+	if err := client.conn.Exec(ctx, "INSERT INTO "+table+" SELECT number FROM numbers(100000)"); err != nil {
 		t.Fatal(err)
 	}
 	var profiles atomic.Int64

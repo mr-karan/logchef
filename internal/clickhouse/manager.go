@@ -14,7 +14,6 @@ import (
 
 // Default values
 const (
-	DefaultQueryLimit          = 100
 	HealthCheckTimeout         = 1 * time.Second // Reduce to 1 second for faster health checks
 	DefaultHealthCheckInterval = 30 * time.Second
 )
@@ -44,7 +43,6 @@ func NewManager(log *slog.Logger) *Manager {
 
 	// Apply default hooks for basic logging.
 	m.AddQueryHook(NewLogQueryHook(log, false))
-	m.AddQueryHook(NewStructuredQueryLoggerHook(log))
 
 	return m
 }

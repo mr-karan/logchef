@@ -459,9 +459,3 @@ func (c *Client) GetAllFilterableFieldValues(ctx context.Context, database, tabl
 	wg.Wait()
 	return results, nil //nolint:nilerr // on cancellation, return the fields already fetched
 }
-
-// GetAllLowCardinalityFieldValues is deprecated, use GetAllFilterableFieldValues instead.
-// Kept for backwards compatibility.
-func (c *Client) GetAllLowCardinalityFieldValues(ctx context.Context, database, table string, params AllFieldValuesParams) (map[string]*FieldValuesResult, error) {
-	return c.GetAllFilterableFieldValues(ctx, database, table, params)
-}
