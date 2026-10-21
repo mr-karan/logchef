@@ -201,6 +201,7 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	return c.SendFile(job.FilePath, fiber.SendFile{ByteRange: true})
 }
 
+// authorizeExportJob writes the error response and returns false on failure; the caller must then return nil.
 func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {

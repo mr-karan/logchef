@@ -19,18 +19,13 @@ import (
 
 // handleGenerateAISQL handles the generation of SQL from natural language queries
 func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
-	if err := s.validateAIConfig(); err != nil {
-		return err(c)
-	}
-
-	sourceID, _, ok := s.parseSourceTeamIDs(c)
+	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
 	}
 
-	user := c.Locals("user").(*models.User)
-	if user == nil {
-		return SendErrorWithType(c, http.StatusUnauthorized, "Unauthorized", models.AuthenticationErrorType)
+	if err := s.validateAIConfig(); err != nil {
+		return err(c)
 	}
 
 	var req models.GenerateSQLRequest
@@ -41,7 +36,7 @@ func (s *Server) handleGenerateAISQL(c fiber.Ctx) error {
 		return SendErrorWithType(c, http.StatusBadRequest, "Natural language query is required", models.ValidationErrorType)
 	}
 
-	source, schemaJSON, tableName, ok := s.getSourceSchemaForAI(c, sourceID)
+	source, schemaJSON, tableName, ok := s.getSourceSchemaForAI(c, src.SourceID())
 	if !ok {
 		return nil
 	}
@@ -96,20 +91,7 @@ func (s *Server) validateAIConfig() func(fiber.Ctx) error {
 	return nil
 }
 
-func (s *Server) parseSourceTeamIDs(c fiber.Ctx) (models.SourceID, models.TeamID, bool) {
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		s.sendLoadFailure(c, http.StatusBadRequest, "Invalid source ID", models.ValidationErrorType)
-		return 0, 0, false
-	}
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		s.sendLoadFailure(c, http.StatusBadRequest, "Invalid team ID", models.ValidationErrorType)
-		return 0, 0, false
-	}
-	return sourceID, teamID, true
-}
-
+// getSourceSchemaForAI writes the error response and returns false on failure; the caller must then return nil.
 func (s *Server) getSourceSchemaForAI(c fiber.Ctx, sourceID models.SourceID) (source *models.Source, schemaJSON, tableName string, ok bool) {
 	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
 	if err != nil {

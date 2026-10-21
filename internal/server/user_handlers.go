@@ -40,6 +40,7 @@ func (s *Server) handleGetUser(c fiber.Ctx) error {
 // loadHumanUser parses :userID and returns the user only if it's a human account.
 // Service principals are managed via /admin/service-accounts/* and must not leak
 // through the human-user CRUD path.
+// On failure it writes the error response and returns false; the caller must then return nil.
 func (s *Server) loadHumanUser(c fiber.Ctx) (*models.User, bool) {
 	userIDStr := c.Params("userID")
 	if userIDStr == "" {
@@ -398,6 +399,7 @@ func (s *Server) handleDeleteServiceAccount(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Service account deleted successfully"})
 }
 
+// loadServiceAccount writes the error response and returns false on failure; the caller must then return nil.
 func (s *Server) loadServiceAccount(c fiber.Ctx) (*models.User, bool) {
 	userID, err := core.ParseUserID(c.Params("userID"))
 	if err != nil {
