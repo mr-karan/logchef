@@ -775,6 +775,7 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListAlertHistory: %v / %d", err, len(hist))
 	}
 	testAlertHistoryEntry(t, ctx, s, hist[0])
+	t.Run("PruneAlertHistoryPreservesFiring", func(t *testing.T) { testAlertHistoryPruning(t, ctx, s, a.ID) })
 
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
 		t.Fatalf("DeleteAlert: %v", err)
@@ -938,5 +939,41 @@ func testWithTxNoNesting(t *testing.T, ctx context.Context, s store.Store) {
 	})
 	if err != nil {
 		t.Fatalf("outer WithTx: %v", err)
+	}
+}
+
+func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+		"delivery_attempts": 3, "delivery_failed": true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const keep = 2
+	for range keep + 1 {
+		if _, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusError, nil, "evaluation failed", nil); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
+			t.Fatal(err)
+		}
+	}
+	latest, err := s.GetLatestUnresolvedAlertHistory(ctx, alertID)
+	if err != nil || latest.ID != entry.ID || latest.Payload["delivery_attempts"] != float64(3) {
+		t.Fatalf("unresolved history after pruning = %+v, %v; want firing entry %d with 3 attempts", latest, err, entry.ID)
+	}
+	history, err := s.ListAlertHistory(ctx, alertID, 10)
+	if err != nil || len(history) != keep+2 {
+		t.Fatalf("history after pruning = %d entries, %v; want 2 unresolved and %d recent entries", len(history), err, keep)
+	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetAlertHistoryEntry(ctx, alertID, entry.ID); !models.IsNotFound(err) {
+		t.Errorf("resolved history after pruning error = %v, want not found", err)
 	}
 }

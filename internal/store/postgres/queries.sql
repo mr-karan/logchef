@@ -699,6 +699,7 @@ LIMIT $2;
 -- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
+  AND target.status <> 'triggered'
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep

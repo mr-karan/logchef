@@ -240,7 +240,7 @@ func (s *Store) ListAlertHistory(ctx context.Context, alertID models.AlertID, li
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries for an alert.
+// PruneAlertHistory keeps the most recent N entries and all unresolved firings.
 func (s *Store) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil

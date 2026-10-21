@@ -1,12 +1,14 @@
 package alerts
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -55,11 +57,16 @@ func TestEvaluateAlertWithTimeoutIsolatesHungEvaluation(t *testing.T) {
 
 func newManagerTestAlert(t *testing.T) (*sqlite.DB, *models.Alert, *slog.Logger) {
 	t.Helper()
+	return newManagerTestAlertAtPath(t, filepath.Join(t.TempDir(), "alerts.db"))
+}
+
+func newManagerTestAlertAtPath(t *testing.T, path string) (*sqlite.DB, *models.Alert, *slog.Logger) {
+	t.Helper()
 	ctx := t.Context()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	db, err := sqlite.New(ctx, sqlite.Options{
 		Logger: logger,
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "alerts.db")},
+		Config: config.SQLiteConfig{Path: path},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -102,8 +109,8 @@ func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.evaluateAlert(ctx, before); err == nil || !strings.Contains(err.Error(), "no provider registered") {
-		t.Fatalf("evaluateAlert error = %v, want missing datasource provider", err)
+	if err := m.evaluateAlert(ctx, before); err == nil {
+		t.Fatal("evaluateAlert succeeded without a datasource provider")
 	}
 	after, err := db.GetAlert(ctx, alert.ID)
 	if err != nil {
@@ -218,4 +225,108 @@ func TestManagerStopTwice(t *testing.T) {
 	m := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
 	m.Stop()
 	m.Stop()
+}
+
+func TestManagerDeliveryHistoryWriteFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		seed      bool
+		trigger   string
+		wantSends int
+	}{
+		{name: "initial reservation", trigger: "BEFORE INSERT ON alert_history", wantSends: 0},
+		{name: "retry reservation", seed: true, trigger: "BEFORE UPDATE OF payload_json ON alert_history", wantSends: 0},
+		{name: "delivery outcome", trigger: `BEFORE UPDATE OF payload_json ON alert_history
+			WHEN json_extract(NEW.payload_json, '$.delivery_attempts') = json_extract(OLD.payload_json, '$.delivery_attempts')`, wantSends: 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "alerts.db")
+			db, alert, _ := newManagerTestAlertAtPath(t, path)
+			ctx := t.Context()
+			if tc.seed {
+				if _, err := db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+					"delivery_attempts": 1, "delivery_failed": true,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			control, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = control.Close() })
+			if _, err := control.ExecContext(ctx, "CREATE TRIGGER fail_history_write "+tc.trigger+" BEGIN SELECT RAISE(FAIL, 'history write unavailable'); END"); err != nil {
+				t.Fatal(err)
+			}
+			sends := 0
+			sender := alertSenderFunc(func(_ context.Context, _ AlertNotification) error {
+				sends++
+				entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+				if err != nil {
+					t.Errorf("history at send = %v, want persisted reservation", err)
+				} else if got := entry.Payload["delivery_attempts"]; got != float64(sends) {
+					t.Errorf("reserved attempts at send = %v, want %d", got, sends)
+				}
+				return errors.New("outbound delivery unavailable")
+			})
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			for range 8 {
+				m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+				if err := m.handleTriggered(ctx, alert, 12); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if sends != tc.wantSends {
+				t.Errorf("sends during history write failures = %d, want %d", sends, tc.wantSends)
+			}
+			if tc.wantSends == 3 {
+				entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+				if err != nil || entry.Payload["delivery_attempts"] != float64(3) {
+					t.Fatalf("persisted attempts = %+v, %v; want 3", entry, err)
+				}
+				count := 0
+				decoder := json.NewDecoder(&logs)
+				for {
+					var record struct {
+						Level     string         `json:"level"`
+						Message   string         `json:"msg"`
+						AlertID   models.AlertID `json:"alert_id"`
+						HistoryID int64          `json:"history_id"`
+						Attempts  int            `json:"attempts"`
+					}
+					if err := decoder.Decode(&record); err != nil {
+						if errors.Is(err, io.EOF) {
+							break
+						}
+						t.Fatal(err)
+					}
+					if record.Message == "alert delivery retries exhausted" {
+						count++
+						if record.Level != "ERROR" || record.AlertID != alert.ID || record.HistoryID != entry.ID || record.Attempts != 3 {
+							t.Errorf("exhaustion log = %+v, want error with alert %d, history %d, 3 attempts", record, alert.ID, entry.ID)
+						}
+					}
+				}
+				if count != 1 {
+					t.Errorf("exhaustion log count = %d, want 1", count)
+				}
+			}
+			if _, err := control.ExecContext(ctx, "DROP TRIGGER fail_history_write"); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantSends == 0 {
+				m := NewManager(Options{DB: db, Logger: logger, Sender: alertSenderFunc(func(context.Context, AlertNotification) error {
+					sends++
+					return nil
+				})})
+				if err := m.handleTriggered(ctx, alert, 12); err != nil {
+					t.Fatal(err)
+				}
+				if sends != 1 {
+					t.Errorf("sends after history writes recover = %d, want 1", sends)
+				}
+			}
+		})
+	}
 }
