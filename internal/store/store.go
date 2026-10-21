@@ -278,7 +278,7 @@ type TokenStore interface {
 }
 
 // OAuthStore persists Logchef's OAuth authorization server state: pending
-// authorization requests, device authorizations, grants and token hashes.
+// authorization requests, grants and token hashes.
 // Every code and token argument is a models.OAuthSecretHash; plaintext never
 // reaches storage. now is passed in so every expiry check uses the caller's
 // clock.
@@ -303,23 +303,6 @@ type OAuthStore interface {
 	// code revokes its grant and returns models.ErrOAuthCodeReplay. Unknown,
 	// expired or revoked codes return models.ErrOAuthInvalidGrant.
 	ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecretHash, now time.Time) (*models.OAuthAuthRequest, error)
-
-	// CreateOAuthDeviceAuthorization returns models.ErrConflict when the user
-	// code hash is already in use.
-	CreateOAuthDeviceAuthorization(ctx context.Context, d models.NewOAuthDeviceAuthorization) error
-	// GetPendingOAuthDeviceAuthorization returns an undecided, unexpired
-	// request by user code, or models.ErrNotFound.
-	GetPendingOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, now time.Time) (*models.OAuthDeviceAuthorization, error)
-	ApproveOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) (*models.OAuthGrant, error)
-	DenyOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) error
-	// RecordDevicePoll records one token-endpoint poll and reports its status
-	// in one conditional update. The poll interval applies only to requests
-	// that are not expired or denied. Unknown, consumed or other-client
-	// device codes return models.ErrNotFound.
-	RecordDevicePoll(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (models.OAuthDevicePoll, error)
-	// ConsumeDeviceCode marks an approved, unexpired code used, once, and
-	// returns its grant. Anything else returns models.ErrOAuthInvalidGrant.
-	ConsumeDeviceCode(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (*models.OAuthGrant, error)
 
 	// IssueOAuthTokens stores a new access token, and a refresh token when
 	// issue.RefreshHash is set, for an active grant. A revoked grant returns
@@ -348,8 +331,8 @@ type OAuthStore interface {
 	RevokeGrantByToken(ctx context.Context, tokenHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) error
 	// ListGrantsForUser returns userID's active grants, newest first.
 	ListGrantsForUser(ctx context.Context, userID models.UserID) ([]*models.OAuthGrant, error)
-	// DeleteExpiredOAuthRows removes expired requests, device authorizations
-	// and access tokens. Refresh rows, consumed ones included, stay until no
+	// DeleteExpiredOAuthRows removes expired requests and access
+	// tokens. Refresh rows, consumed ones included, stay until no
 	// token of their grant is live, so replays are still detected.
 	DeleteExpiredOAuthRows(ctx context.Context, now time.Time) error
 }

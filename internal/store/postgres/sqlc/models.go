@@ -149,24 +149,6 @@ type OauthAuthRequest struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
-type OauthDeviceAuthorization struct {
-	DeviceCodeHash string             `json:"device_code_hash"`
-	UserCodeHash   string             `json:"user_code_hash"`
-	ClientID       string             `json:"client_id"`
-	Resource       string             `json:"resource"`
-	Scopes         string             `json:"scopes"`
-	OfflineAccess  bool               `json:"offline_access"`
-	IntervalSecs   int32              `json:"interval_secs"`
-	LastPolledAt   pgtype.Timestamptz `json:"last_polled_at"`
-	UserID         pgtype.Int8        `json:"user_id"`
-	GrantID        pgtype.Int8        `json:"grant_id"`
-	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
-	DeniedAt       pgtype.Timestamptz `json:"denied_at"`
-	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
 type OauthGrant struct {
 	ID            int64              `json:"id"`
 	UserID        int64              `json:"user_id"`

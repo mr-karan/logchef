@@ -114,44 +114,6 @@ func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) er
 	return err
 }
 
-const approveOAuthDeviceAuthorization = `-- name: ApproveOAuthDeviceAuthorization :one
-UPDATE oauth_device_authorizations
-SET approved_at = $1::timestamptz, user_id = $2
-WHERE user_code_hash = $3
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > $1::timestamptz
-RETURNING device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at
-`
-
-type ApproveOAuthDeviceAuthorizationParams struct {
-	Now          pgtype.Timestamptz `json:"now"`
-	UserID       pgtype.Int8        `json:"user_id"`
-	UserCodeHash string             `json:"user_code_hash"`
-}
-
-func (q *Queries) ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
-	row := q.db.QueryRow(ctx, approveOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
-	var i OauthDeviceAuthorization
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const authenticateOAuthAccessToken = `-- name: AuthenticateOAuthAccessToken :one
 SELECT g.id, g.user_id, g.client_id, g.resource, g.scopes, g.offline_access, g.created_at, g.last_used_at, g.revoked_at, g.revoke_reason, u.id, u.email, u.full_name, u.role, u.status, u.last_login_at, u.last_active_at, u.managed, u.account_type, u.created_at, u.updated_at, u.password_hash
 FROM oauth_access_tokens a
@@ -334,33 +296,6 @@ func (q *Queries) ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuth
 		&i.CreatedAt,
 	)
 	return i, err
-}
-
-const consumeOAuthDeviceCode = `-- name: ConsumeOAuthDeviceCode :one
-UPDATE oauth_device_authorizations
-SET consumed_at = $1::timestamptz
-WHERE device_code_hash = $2
-  AND oauth_device_authorizations.client_id = $3
-  AND approved_at IS NOT NULL
-  AND consumed_at IS NULL
-  AND expires_at > $1::timestamptz
-  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
-RETURNING grant_id
-`
-
-type ConsumeOAuthDeviceCodeParams struct {
-	Now            pgtype.Timestamptz `json:"now"`
-	DeviceCodeHash string             `json:"device_code_hash"`
-	ClientID       string             `json:"client_id"`
-}
-
-// Single-use consumption of an approved code. Expiry is checked here, before
-// consumption, so an approved but expired code never issues tokens.
-func (q *Queries) ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (pgtype.Int8, error) {
-	row := q.db.QueryRow(ctx, consumeOAuthDeviceCode, arg.Now, arg.DeviceCodeHash, arg.ClientID)
-	var grant_id pgtype.Int8
-	err := row.Scan(&grant_id)
-	return grant_id, err
 }
 
 const consumeOAuthRefreshToken = `-- name: ConsumeOAuthRefreshToken :one
@@ -750,40 +685,6 @@ func (q *Queries) CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAut
 	return err
 }
 
-const createOAuthDeviceAuthorization = `-- name: CreateOAuthDeviceAuthorization :exec
-INSERT INTO oauth_device_authorizations (
-    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
-    interval_secs, expires_at, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-`
-
-type CreateOAuthDeviceAuthorizationParams struct {
-	DeviceCodeHash string             `json:"device_code_hash"`
-	UserCodeHash   string             `json:"user_code_hash"`
-	ClientID       string             `json:"client_id"`
-	Resource       string             `json:"resource"`
-	Scopes         string             `json:"scopes"`
-	OfflineAccess  bool               `json:"offline_access"`
-	IntervalSecs   int32              `json:"interval_secs"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error {
-	_, err := q.db.Exec(ctx, createOAuthDeviceAuthorization,
-		arg.DeviceCodeHash,
-		arg.UserCodeHash,
-		arg.ClientID,
-		arg.Resource,
-		arg.Scopes,
-		arg.OfflineAccess,
-		arg.IntervalSecs,
-		arg.ExpiresAt,
-		arg.CreatedAt,
-	)
-	return err
-}
-
 const createOAuthGrant = `-- name: CreateOAuthGrant :one
 INSERT INTO oauth_grants (user_id, client_id, resource, scopes, offline_access, created_at)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -1097,15 +998,6 @@ func (q *Queries) DeleteExpiredOAuthAuthRequests(ctx context.Context, now pgtype
 	return err
 }
 
-const deleteExpiredOAuthDeviceAuthorizations = `-- name: DeleteExpiredOAuthDeviceAuthorizations :exec
-DELETE FROM oauth_device_authorizations WHERE expires_at <= $1
-`
-
-func (q *Queries) DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt pgtype.Timestamptz) error {
-	_, err := q.db.Exec(ctx, deleteExpiredOAuthDeviceAuthorizations, expiresAt)
-	return err
-}
-
 const deleteExpiredOAuthRefreshFamilies = `-- name: DeleteExpiredOAuthRefreshFamilies :exec
 DELETE FROM oauth_refresh_tokens
 WHERE NOT EXISTS (
@@ -1215,28 +1107,6 @@ DELETE FROM sessions WHERE user_id = $1
 func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 	_, err := q.db.Exec(ctx, deleteUserSessions, userID)
 	return err
-}
-
-const denyOAuthDeviceAuthorization = `-- name: DenyOAuthDeviceAuthorization :execrows
-UPDATE oauth_device_authorizations
-SET denied_at = $1::timestamptz, user_id = $2
-WHERE user_code_hash = $3
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > $1::timestamptz
-`
-
-type DenyOAuthDeviceAuthorizationParams struct {
-	Now          pgtype.Timestamptz `json:"now"`
-	UserID       pgtype.Int8        `json:"user_id"`
-	UserCodeHash string             `json:"user_code_hash"`
-}
-
-func (q *Queries) DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error) {
-	result, err := q.db.Exec(ctx, denyOAuthDeviceAuthorization, arg.Now, arg.UserID, arg.UserCodeHash)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const failExportJob = `-- name: FailExportJob :one
@@ -1666,41 +1536,6 @@ func (q *Queries) GetOAuthRefreshTokenState(ctx context.Context, tokenHash strin
 		&i.OauthGrant.LastUsedAt,
 		&i.OauthGrant.RevokedAt,
 		&i.OauthGrant.RevokeReason,
-	)
-	return i, err
-}
-
-const getPendingOAuthDeviceAuthorization = `-- name: GetPendingOAuthDeviceAuthorization :one
-SELECT device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at FROM oauth_device_authorizations
-WHERE user_code_hash = $1
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > $2::timestamptz
-`
-
-type GetPendingOAuthDeviceAuthorizationParams struct {
-	UserCodeHash string             `json:"user_code_hash"`
-	Now          pgtype.Timestamptz `json:"now"`
-}
-
-func (q *Queries) GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error) {
-	row := q.db.QueryRow(ctx, getPendingOAuthDeviceAuthorization, arg.UserCodeHash, arg.Now)
-	var i OauthDeviceAuthorization
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -3989,70 +3824,6 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) 
 	return items, nil
 }
 
-const recordOAuthDevicePoll = `-- name: RecordOAuthDevicePoll :one
-UPDATE oauth_device_authorizations
-SET interval_secs = CASE WHEN (expires_at > $1::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > $1::timestamptz - make_interval(secs => interval_secs)) THEN interval_secs + 5 ELSE interval_secs END,
-    last_polled_at = CASE WHEN (expires_at > $1::timestamptz AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > $1::timestamptz - make_interval(secs => interval_secs)) THEN last_polled_at ELSE $1::timestamptz END
-WHERE device_code_hash = $2
-  AND client_id = $3
-  AND consumed_at IS NULL
-RETURNING device_code_hash, user_code_hash, client_id, resource, scopes, offline_access, interval_secs, last_polled_at, user_id, grant_id, approved_at, denied_at, consumed_at, expires_at, created_at, CAST(last_polled_at = $1::timestamptz AS BOOLEAN) AS on_time
-`
-
-type RecordOAuthDevicePollParams struct {
-	Now            pgtype.Timestamptz `json:"now"`
-	DeviceCodeHash string             `json:"device_code_hash"`
-	ClientID       string             `json:"client_id"`
-}
-
-type RecordOAuthDevicePollRow struct {
-	DeviceCodeHash string             `json:"device_code_hash"`
-	UserCodeHash   string             `json:"user_code_hash"`
-	ClientID       string             `json:"client_id"`
-	Resource       string             `json:"resource"`
-	Scopes         string             `json:"scopes"`
-	OfflineAccess  bool               `json:"offline_access"`
-	IntervalSecs   int32              `json:"interval_secs"`
-	LastPolledAt   pgtype.Timestamptz `json:"last_polled_at"`
-	UserID         pgtype.Int8        `json:"user_id"`
-	GrantID        pgtype.Int8        `json:"grant_id"`
-	ApprovedAt     pgtype.Timestamptz `json:"approved_at"`
-	DeniedAt       pgtype.Timestamptz `json:"denied_at"`
-	ConsumedAt     pgtype.Timestamptz `json:"consumed_at"`
-	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	OnTime         bool               `json:"on_time"`
-}
-
-// Record one poll. An early poll on a nonterminal request (not expired, not
-// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
-// last_polled_at, so on_time is false. Expired and denied requests are
-// never slowed down: they report their terminal state on every poll. Every
-// SET expression reads the pre-update row.
-func (q *Queries) RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error) {
-	row := q.db.QueryRow(ctx, recordOAuthDevicePoll, arg.Now, arg.DeviceCodeHash, arg.ClientID)
-	var i RecordOAuthDevicePollRow
-	err := row.Scan(
-		&i.DeviceCodeHash,
-		&i.UserCodeHash,
-		&i.ClientID,
-		&i.Resource,
-		&i.Scopes,
-		&i.OfflineAccess,
-		&i.IntervalSecs,
-		&i.LastPolledAt,
-		&i.UserID,
-		&i.GrantID,
-		&i.ApprovedAt,
-		&i.DeniedAt,
-		&i.ConsumedAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-		&i.OnTime,
-	)
-	return i, err
-}
-
 const removeCollectionItem = `-- name: RemoveCollectionItem :exec
 DELETE FROM collection_items WHERE collection_id = $1 AND saved_query_id = $2
 `
@@ -4259,20 +4030,6 @@ type SetOAuthAuthRequestGrantParams struct {
 
 func (q *Queries) SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error {
 	_, err := q.db.Exec(ctx, setOAuthAuthRequestGrant, arg.GrantID, arg.ID)
-	return err
-}
-
-const setOAuthDeviceAuthorizationGrant = `-- name: SetOAuthDeviceAuthorizationGrant :exec
-UPDATE oauth_device_authorizations SET grant_id = $1 WHERE device_code_hash = $2
-`
-
-type SetOAuthDeviceAuthorizationGrantParams struct {
-	GrantID        pgtype.Int8 `json:"grant_id"`
-	DeviceCodeHash string      `json:"device_code_hash"`
-}
-
-func (q *Queries) SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error {
-	_, err := q.db.Exec(ctx, setOAuthDeviceAuthorizationGrant, arg.GrantID, arg.DeviceCodeHash)
 	return err
 }
 

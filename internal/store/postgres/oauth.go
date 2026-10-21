@@ -157,152 +157,6 @@ func (s *Store) ConsumeAuthCode(ctx context.Context, codeHash models.OAuthSecret
 	return nil, models.ErrOAuthCodeReplay
 }
 
-func (s *Store) CreateOAuthDeviceAuthorization(ctx context.Context, d models.NewOAuthDeviceAuthorization) error {
-	scopes, err := marshalTokenScopes(d.Scopes)
-	if err != nil {
-		return err
-	}
-	err = s.q.CreateOAuthDeviceAuthorization(ctx, sqlc.CreateOAuthDeviceAuthorizationParams{
-		DeviceCodeHash: d.DeviceCodeHash.Hex(),
-		UserCodeHash:   d.UserCodeHash.Hex(),
-		ClientID:       string(d.ClientID),
-		Resource:       d.Resource,
-		Scopes:         scopes,
-		OfflineAccess:  d.OfflineAccess,
-		IntervalSecs:   int32(d.Interval / time.Second), //nolint:gosec // G115: poll interval in seconds, small bounded value
-		ExpiresAt:      ts(d.ExpiresAt),
-		CreatedAt:      ts(d.CreatedAt),
-	})
-	if isUniqueViolation(err) {
-		return models.ErrConflict
-	}
-	if err != nil {
-		return fmt.Errorf("creating oauth device authorization: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) GetPendingOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, now time.Time) (*models.OAuthDeviceAuthorization, error) {
-	row, err := s.q.GetPendingOAuthDeviceAuthorization(ctx, sqlc.GetPendingOAuthDeviceAuthorizationParams{
-		UserCodeHash: userCodeHash.Hex(),
-		Now:          ts(now),
-	})
-	if notFound(err) {
-		return nil, models.ErrNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("getting oauth device authorization: %w", err)
-	}
-	d := deviceFromRow(row)
-	return &d, nil
-}
-
-func (s *Store) ApproveOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) (*models.OAuthGrant, error) {
-	var grant *models.OAuthGrant
-	err := s.inTx(ctx, func(q sqlc.Querier) error {
-		d, err := q.ApproveOAuthDeviceAuthorization(ctx, sqlc.ApproveOAuthDeviceAuthorizationParams{
-			Now:          ts(now),
-			UserID:       int8Val(int64(userID)),
-			UserCodeHash: userCodeHash.Hex(),
-		})
-		if notFound(err) {
-			return models.ErrNotFound
-		}
-		if err != nil {
-			return fmt.Errorf("approving oauth device authorization: %w", err)
-		}
-		row, err := q.CreateOAuthGrant(ctx, sqlc.CreateOAuthGrantParams{
-			UserID:        int64(userID),
-			ClientID:      d.ClientID,
-			Resource:      d.Resource,
-			Scopes:        d.Scopes,
-			OfflineAccess: d.OfflineAccess,
-			CreatedAt:     ts(now),
-		})
-		if err != nil {
-			return fmt.Errorf("creating oauth grant: %w", err)
-		}
-		if err := q.SetOAuthDeviceAuthorizationGrant(ctx, sqlc.SetOAuthDeviceAuthorizationGrantParams{
-			GrantID:        int8Val(row.ID),
-			DeviceCodeHash: d.DeviceCodeHash,
-		}); err != nil {
-			return fmt.Errorf("linking oauth grant: %w", err)
-		}
-		grant = grantFromRow(row)
-		return nil
-	})
-	return grant, err
-}
-
-func (s *Store) DenyOAuthDeviceAuthorization(ctx context.Context, userCodeHash models.OAuthSecretHash, userID models.UserID, now time.Time) error {
-	n, err := s.q.DenyOAuthDeviceAuthorization(ctx, sqlc.DenyOAuthDeviceAuthorizationParams{
-		Now:          ts(now),
-		UserID:       int8Val(int64(userID)),
-		UserCodeHash: userCodeHash.Hex(),
-	})
-	if err != nil {
-		return fmt.Errorf("denying oauth device authorization: %w", err)
-	}
-	if n == 0 {
-		return models.ErrNotFound
-	}
-	return nil
-}
-
-func (s *Store) RecordDevicePoll(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (models.OAuthDevicePoll, error) {
-	row, err := s.q.RecordOAuthDevicePoll(ctx, sqlc.RecordOAuthDevicePollParams{
-		Now:            ts(now),
-		DeviceCodeHash: deviceCodeHash.Hex(),
-		ClientID:       string(clientID),
-	})
-	if notFound(err) {
-		return models.OAuthDevicePoll{}, models.ErrNotFound
-	}
-	if err != nil {
-		return models.OAuthDevicePoll{}, fmt.Errorf("recording oauth device poll: %w", err)
-	}
-	if !row.OnTime {
-		return models.OAuthDevicePoll{Status: models.DevicePollSlowDown}, nil
-	}
-	d := deviceFromRow(sqlc.OauthDeviceAuthorization{
-		DeviceCodeHash: row.DeviceCodeHash,
-		UserCodeHash:   row.UserCodeHash,
-		ClientID:       row.ClientID,
-		Resource:       row.Resource,
-		Scopes:         row.Scopes,
-		OfflineAccess:  row.OfflineAccess,
-		IntervalSecs:   row.IntervalSecs,
-		LastPolledAt:   row.LastPolledAt,
-		UserID:         row.UserID,
-		GrantID:        row.GrantID,
-		ApprovedAt:     row.ApprovedAt,
-		DeniedAt:       row.DeniedAt,
-		ConsumedAt:     row.ConsumedAt,
-		ExpiresAt:      row.ExpiresAt,
-		CreatedAt:      row.CreatedAt,
-	})
-	return models.OAuthDevicePoll{Status: devicePollStatus(d, now), Authorization: d}, nil
-}
-
-func (s *Store) ConsumeDeviceCode(ctx context.Context, deviceCodeHash models.OAuthSecretHash, clientID models.OAuthClientID, now time.Time) (*models.OAuthGrant, error) {
-	grantID, err := s.q.ConsumeOAuthDeviceCode(ctx, sqlc.ConsumeOAuthDeviceCodeParams{
-		Now:            ts(now),
-		DeviceCodeHash: deviceCodeHash.Hex(),
-		ClientID:       string(clientID),
-	})
-	if notFound(err) {
-		return nil, models.ErrOAuthInvalidGrant
-	}
-	if err != nil {
-		return nil, fmt.Errorf("consuming oauth device code: %w", err)
-	}
-	row, err := s.q.GetOAuthGrant(ctx, grantID.Int64)
-	if err != nil {
-		return nil, fmt.Errorf("getting oauth grant: %w", err)
-	}
-	return grantFromRow(row), nil
-}
-
 func (s *Store) IssueOAuthTokens(ctx context.Context, grantID models.OAuthGrantID, issue models.OAuthTokenIssue, now time.Time) error {
 	return s.inTx(ctx, func(q sqlc.Querier) error {
 		return issueOAuthTokens(ctx, q, int64(grantID), issue, now)
@@ -425,9 +279,6 @@ func (s *Store) DeleteExpiredOAuthRows(ctx context.Context, now time.Time) error
 		if err := q.DeleteExpiredOAuthAuthRequests(ctx, at); err != nil {
 			return fmt.Errorf("deleting expired oauth auth requests: %w", err)
 		}
-		if err := q.DeleteExpiredOAuthDeviceAuthorizations(ctx, at); err != nil {
-			return fmt.Errorf("deleting expired oauth device authorizations: %w", err)
-		}
 		if err := q.DeleteExpiredOAuthAccessTokens(ctx, at); err != nil {
 			return fmt.Errorf("deleting expired oauth access tokens: %w", err)
 		}
@@ -514,19 +365,6 @@ func classifyRefreshToken(ctx context.Context, q sqlc.Querier, tokenHash models.
 	return models.RefreshOutcome{Kind: models.RefreshOK, Grant: *grantFromRow(row.OauthGrant)}, nil
 }
 
-func devicePollStatus(d models.OAuthDeviceAuthorization, now time.Time) models.OAuthDevicePollStatus {
-	switch {
-	case !now.Before(d.ExpiresAt):
-		return models.DevicePollExpired
-	case d.DeniedAt != nil:
-		return models.DevicePollDenied
-	case d.ApprovedAt != nil:
-		return models.DevicePollApproved
-	default:
-		return models.DevicePollPending
-	}
-}
-
 func grantFromRow(row sqlc.OauthGrant) *models.OAuthGrant {
 	return &models.OAuthGrant{
 		ID:            models.OAuthGrantID(row.ID),
@@ -556,22 +394,6 @@ func authRequestFromRow(row sqlc.OauthAuthRequest) *models.OAuthAuthRequest {
 		GrantID:       grantIDPtr(row.GrantID),
 		DecidedAt:     tsPtr(row.DecidedAt),
 		Denied:        row.Denied,
-		ExpiresAt:     row.ExpiresAt.Time,
-		CreatedAt:     row.CreatedAt.Time,
-	}
-}
-
-func deviceFromRow(row sqlc.OauthDeviceAuthorization) models.OAuthDeviceAuthorization {
-	return models.OAuthDeviceAuthorization{
-		ClientID:      models.OAuthClientID(row.ClientID),
-		Resource:      row.Resource,
-		Scopes:        unmarshalTokenScopes(row.Scopes),
-		OfflineAccess: row.OfflineAccess,
-		Interval:      time.Duration(row.IntervalSecs) * time.Second,
-		UserID:        userIDPtr(row.UserID),
-		GrantID:       grantIDPtr(row.GrantID),
-		ApprovedAt:    tsPtr(row.ApprovedAt),
-		DeniedAt:      tsPtr(row.DeniedAt),
 		ExpiresAt:     row.ExpiresAt.Time,
 		CreatedAt:     row.CreatedAt.Time,
 	}

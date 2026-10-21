@@ -1238,72 +1238,10 @@ WHERE a.id_hash = sqlc.arg(id_hash)
   AND u.status = 'active'
   AND u.account_type = 'human';
 
--- name: CreateOAuthDeviceAuthorization :exec
-INSERT INTO oauth_device_authorizations (
-    device_code_hash, user_code_hash, client_id, resource, scopes, offline_access,
-    interval_secs, expires_at, created_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-
--- name: GetPendingOAuthDeviceAuthorization :one
-SELECT * FROM oauth_device_authorizations
-WHERE user_code_hash = sqlc.arg(user_code_hash)
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now);
-
--- name: ApproveOAuthDeviceAuthorization :one
-UPDATE oauth_device_authorizations
-SET approved_at = sqlc.arg(now), user_id = sqlc.arg(user_id)
-WHERE user_code_hash = sqlc.arg(user_code_hash)
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now)
-RETURNING *;
-
--- name: DenyOAuthDeviceAuthorization :execrows
-UPDATE oauth_device_authorizations
-SET denied_at = sqlc.arg(now), user_id = sqlc.arg(user_id)
-WHERE user_code_hash = sqlc.arg(user_code_hash)
-  AND approved_at IS NULL AND denied_at IS NULL AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now);
-
--- name: SetOAuthDeviceAuthorizationGrant :exec
-UPDATE oauth_device_authorizations SET grant_id = ? WHERE device_code_hash = ?;
-
--- name: RecordOAuthDevicePoll :one
--- Record one poll. An early poll on a nonterminal request (not expired, not
--- denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
--- last_polled_at, so on_time is false. Expired and denied requests are
--- never slowed down: they report their terminal state on every poll. Every
--- SET expression reads the pre-update row.
-UPDATE oauth_device_authorizations
-SET interval_secs = CASE WHEN (expires_at > sqlc.arg(now) AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > sqlc.arg(now) - interval_secs * 1000) THEN interval_secs + 5 ELSE interval_secs END,
-    last_polled_at = CASE WHEN (expires_at > sqlc.arg(now) AND denied_at IS NULL AND last_polled_at IS NOT NULL AND last_polled_at > sqlc.arg(now) - interval_secs * 1000) THEN last_polled_at ELSE sqlc.arg(now) END
-WHERE device_code_hash = sqlc.arg(device_code_hash)
-  AND client_id = sqlc.arg(client_id)
-  AND consumed_at IS NULL
-RETURNING client_id, resource, scopes, offline_access, interval_secs, user_id,
-    grant_id, approved_at, denied_at, expires_at, created_at,
-    CASE WHEN last_polled_at = sqlc.arg(now) THEN 1 ELSE 0 END AS on_time;
-
--- name: ConsumeOAuthDeviceCode :one
--- Single-use consumption of an approved code. Expiry is checked here, before
--- consumption, so an approved but expired code never issues tokens.
-UPDATE oauth_device_authorizations
-SET consumed_at = sqlc.arg(now)
-WHERE device_code_hash = sqlc.arg(device_code_hash)
-  AND oauth_device_authorizations.client_id = sqlc.arg(client_id)
-  AND approved_at IS NOT NULL
-  AND consumed_at IS NULL
-  AND expires_at > sqlc.arg(now)
-  AND grant_id IN (SELECT g.id FROM oauth_grants g WHERE g.revoked_at IS NULL)
-RETURNING grant_id;
-
 -- name: DeleteExpiredOAuthAuthRequests :exec
 DELETE FROM oauth_auth_requests
 WHERE expires_at <= sqlc.arg(now)
   AND (code_expires_at IS NULL OR code_expires_at <= sqlc.arg(now));
-
--- name: DeleteExpiredOAuthDeviceAuthorizations :exec
-DELETE FROM oauth_device_authorizations WHERE expires_at <= ?;
 
 -- name: DeleteExpiredOAuthAccessTokens :exec
 DELETE FROM oauth_access_tokens WHERE expires_at <= ?;
