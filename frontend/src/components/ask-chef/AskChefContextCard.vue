@@ -23,15 +23,18 @@ const sourceLabel = computed(() => {
   return team ? `${team} / ${source}` : source;
 });
 
-function formatTime(ms: number, withDate: boolean): string {
-  const opts: Intl.DateTimeFormatOptions = withDate ? { dateStyle: "medium", timeStyle: "short" } : { timeStyle: "short" };
+function formatTime(ms: number, withDate: boolean, withSeconds = false): string {
+  const timeStyle = withSeconds ? "medium" : "short";
+  const opts: Intl.DateTimeFormatOptions = withDate ? { dateStyle: "medium", timeStyle } : { timeStyle };
   return formatInZone(epochMs(ms), props.context.zone, opts, locale.value);
 }
 
+// A histogram bar can zoom to a few seconds, which minutes alone show as an empty window.
 const windowLabel = computed(() => {
   const { start, end, zone } = props.context;
   const sameDay = isSameZonedDay(epochMs(start), epochMs(end), zone);
-  return `${formatTime(start, true)} – ${formatTime(end, !sameDay)}`;
+  const withSeconds = start % 60_000 !== 0 || end % 60_000 !== 0;
+  return `${formatTime(start, true, withSeconds)} – ${formatTime(end, !sameDay, withSeconds)}`;
 });
 
 const details = computed(() => {

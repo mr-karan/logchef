@@ -69,4 +69,11 @@ describe("AskChefContextCard", () => {
     await nextTick();
     expect(root.textContent?.replace(/\s/g, " ")).toContain("Oct 19, 2026, 4:00 AM – 5:00 AM");
   });
+
+  it("shows seconds for a window inside one minute", async () => {
+    const start = Date.UTC(2026, 9, 19, 4, 34, 10);
+    const root = render({ context: { ...context, start, end: start + 10_000 } });
+    await nextTick();
+    expect(root.textContent?.replace(/\s/g, " ")).toContain("Oct 19, 2026, 4:34:10 AM – 4:34:20 AM");
+  });
 });
