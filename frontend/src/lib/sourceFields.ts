@@ -1,6 +1,6 @@
 import type { Source } from "@/api/sources";
 
-export interface SourceFieldLike {
+interface SourceFieldLike {
   name: string;
   type: string;
   isTimestamp?: boolean;

@@ -10,23 +10,23 @@ import type {
 // The dashboard grid is 12 columns wide. Panel widths are restricted to a small
 // set of presets (mirrors the server-side validation in pkg/models/dashboards.go)
 // and heights are clamped to 1..6 rows.
-export const DASHBOARD_GRID_COLUMNS = 12;
-export const ALLOWED_PANEL_WIDTHS = [2, 3, 4, 6, 8, 9, 12] as const;
-export const MIN_PANEL_HEIGHT = 1;
-export const MAX_PANEL_HEIGHT = 6;
-export const DEFAULT_PANEL_WIDTH = 6;
-export const DEFAULT_PANEL_HEIGHT = 2;
+const DASHBOARD_GRID_COLUMNS = 12;
+const ALLOWED_PANEL_WIDTHS = [2, 3, 4, 6, 8, 9, 12] as const;
+const MIN_PANEL_HEIGHT = 1;
+const MAX_PANEL_HEIGHT = 6;
+const DEFAULT_PANEL_WIDTH = 6;
+const DEFAULT_PANEL_HEIGHT = 2;
 export const MAX_DASHBOARD_PANELS = 24;
-export const DASHBOARD_PANELS_VERSION = 1;
+const DASHBOARD_PANELS_VERSION = 1;
 // Sanity bound on the blob's cache_ttl_seconds (server also clamps to max_ttl at
 // request time); mirrors the validation in internal/core/dashboards.go.
-export const MAX_DASHBOARD_CACHE_TTL_SECONDS = 86400;
+const MAX_DASHBOARD_CACHE_TTL_SECONDS = 86400;
 
 const VALID_PANEL_TYPES: readonly DashboardPanelType[] = ["timeseries", "stat", "table", "breakdown"];
 // Mirrors pkg/models.QueryLanguage's Valid() set (server: query.go).
 const VALID_QUERY_LANGUAGES: readonly PanelQueryLanguage[] = ["logchefql", "clickhouse-sql", "logsql"];
 
-export interface NormalizedPanel {
+interface NormalizedPanel {
   panel: DashboardPanel;
   x: number;
   y: number;
@@ -311,13 +311,13 @@ export interface GridGeometry {
   rowHeight: number;
 }
 
-export interface GridCell {
+interface GridCell {
   col: number;
   row: number;
 }
 
 /** Pixel rect of a grid placement, relative to the canvas origin. */
-export interface PixelRect {
+interface PixelRect {
   left: number;
   top: number;
   width: number;

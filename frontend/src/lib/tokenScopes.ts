@@ -24,7 +24,7 @@ export type TokenScope =
   | "settings:read"
   | "settings:write";
 
-export interface TokenScopeOption {
+interface TokenScopeOption {
   value: TokenScope;
   labelKey: string;
   descriptionKey: string;

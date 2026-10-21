@@ -1,6 +1,6 @@
 import type { DemoLoginCredentials } from "@/api/meta";
 
-export interface LoginFields {
+interface LoginFields {
   email: string;
   password: string;
 }

@@ -9,7 +9,7 @@
 
 // --- Types ---
 
-export type LogchefQLContext =
+type LogchefQLContext =
   | { suggest: "fields"; partial: string }
   | { suggest: "operators"; key: string }
   | { suggest: "values"; key: string; operator: string; partial: string; quote: '"' | "'" | null; contextQuery: string }

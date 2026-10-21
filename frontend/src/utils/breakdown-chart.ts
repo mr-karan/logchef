@@ -2,7 +2,7 @@ import type { HistogramDataPoint } from "@/api/explore";
 import { getColorForGroupValue } from "@/utils/histogram-chart";
 
 export const BREAKDOWN_OTHER_COLOR = "#6E7074";
-export const MAX_DONUT_SLICES = 11;
+const MAX_DONUT_SLICES = 11;
 
 export interface BreakdownCategory {
   /** Original grouped value. `isOther` is the structural discriminator. */
@@ -15,7 +15,7 @@ export interface BreakdownCategory {
   isNull: boolean;
 }
 
-export interface BreakdownChartModel {
+interface BreakdownChartModel {
   categories: BreakdownCategory[];
   total: number;
 }

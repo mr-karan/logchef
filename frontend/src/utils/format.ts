@@ -50,7 +50,7 @@ export function formatSourceName(source: Source): string {
   return `Source ${source.id}`;
 }
 
-export interface SourceConnectionDetail {
+interface SourceConnectionDetail {
   label: string;
   value: string;
   monospace?: boolean;
