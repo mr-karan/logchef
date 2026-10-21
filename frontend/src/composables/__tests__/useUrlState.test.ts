@@ -40,8 +40,11 @@ const source: Source = {
 };
 const otherSource: Source = { ...source, id: 4, name: "cart-logs", connection: { host: "", database: "logs", table_name: "cart" } };
 const sqlOnlySource: Source = { ...source, id: 5, name: "audit-logs", query_languages: ["clickhouse-sql"] };
+const otherTeam: UserTeamMembership = { ...team, id: 2, name: "search" };
+const otherTeamSource: Source = { ...source, id: 7, name: "search-logs" };
 
-const sourceById = (id: number) => [source, otherSource, sqlOnlySource].find((s) => s.id === id) ?? source;
+const sourceById = (id: number) => [source, otherSource, sqlOnlySource, otherTeamSource].find((s) => s.id === id) ?? source;
+const sourcesOfTeam = (teamId: number) => (teamId === otherTeam.id ? [otherTeamSource] : [source, otherSource, sqlOnlySource]);
 
 // Two evidence chips, as Ask Chef pushes them, with whole-second instants.
 const evidenceA = exploreWindowQuery({ teamId: 1, sourceId: 3, start: Date.UTC(2026, 9, 19, 4), end: Date.UTC(2026, 9, 19, 5), query: 'level="error"' });
@@ -59,8 +62,8 @@ describe("Explorer history navigation", () => {
   });
 
   async function mountExplorer() {
-    vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team]) as never);
-    vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([source, otherSource, sqlOnlySource]) as never);
+    vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team, otherTeam]) as never);
+    vi.spyOn(sourcesApi, "listTeamSources").mockImplementation((teamId: number) => ok(sourcesOfTeam(teamId)) as never);
     vi.spyOn(sourcesApi, "getTeamSource").mockImplementation(
       (_teamId: number, sourceId: number) => ok(sourceById(sourceId)) as never,
     );
@@ -98,7 +101,7 @@ describe("Explorer history navigation", () => {
 
   async function settle(store: ReturnType<typeof useExploreStore>) {
     await vi.waitFor(() => expect(store.isExecutingQuery).toBe(false));
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setImmediate(resolve));
   }
 
   function expectOpen(
@@ -121,6 +124,25 @@ describe("Explorer history navigation", () => {
     const calls = query.mock.calls.slice(before);
     expect(calls).toHaveLength(1);
     expect((calls[0][3] as { signal: AbortSignal }).signal.aborted).toBe(false);
+  }
+
+  // Runs a navigation race, then outwaits the superseded navigation's 5s
+  // context wait, so a late superseded navigation would show up here.
+  async function raceAndOutwait(
+    query: ReturnType<typeof vi.spyOn>,
+    store: ReturnType<typeof useExploreStore>,
+    race: () => Promise<unknown>,
+  ) {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await expectOneRun(query, race, store);
+      const before = query.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(6000);
+      await settle(store);
+      expect(query.mock.calls.length).toBe(before);
+    } finally {
+      vi.useRealTimers();
+    }
   }
 
   it("reopens each evidence link on Back and Forward instead of the saved draft", async () => {
@@ -201,14 +223,15 @@ describe("Explorer history navigation", () => {
       return ok(sourceById(sourceId)) as never;
     });
 
-    await expectOneRun(query, async () => {
+    await raceAndOutwait(query, store, async () => {
       await router.push({ path: "/logs/explore", query: evidenceOther });
-      await vi.waitFor(() => expect(router.currentRoute.value.query.limit).toBeDefined());
+      await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id));
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.source).toBe(String(source.id)));
       releaseOther();
       await vi.waitFor(() => expect(store.sourceId).toBe(source.id));
-    }, store);
+    });
+    expect(store.sourceId).toBe(source.id);
     expectOpen(router, store, query, evidenceA);
   });
 
@@ -224,12 +247,49 @@ describe("Explorer history navigation", () => {
       return ok(sourceById(sourceId)) as never;
     });
 
-    await expectOneRun(query, async () => {
+    await raceAndOutwait(query, store, async () => {
       await router.push({ path: "/logs/explore", query: evidenceOther });
-      await vi.waitFor(() => expect(router.currentRoute.value.query.limit).toBeDefined());
+      await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id));
       await router.push({ path: "/logs/explore", query: evidenceB });
       releaseOther();
       await vi.waitFor(() => expect(store.sourceId).toBe(source.id));
+    });
+    expect(store.sourceId).toBe(source.id);
+    expectOpen(router, store, query, evidenceB);
+  });
+
+  it("goes Back to the previous team's query after picking another team", async () => {
+    const { router, store, query, urlState } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+
+    await expectOneRun(query, () => urlState.selectTeam(otherTeam.id), store);
+    expect(router.currentRoute.value.query).toMatchObject({ team: String(otherTeam.id), source: String(otherTeamSource.id) });
+
+    await expectOneRun(query, async () => {
+      router.back();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.team).toBe(String(team.id)));
+    }, store);
+    expect(store.sourceId).toBe(source.id);
+    expectOpen(router, store, query, evidenceA);
+  });
+
+  it("keeps Back and Forward working after re-picking the current source", async () => {
+    const { router, store, query, urlState } = await mountExplorer();
+    await settle(store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+
+    await urlState.selectSource(source.id);
+    await settle(store);
+
+    await expectOneRun(query, async () => {
+      router.back();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceA.start));
+    }, store);
+    await expectOneRun(query, async () => {
+      router.forward();
+      await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceB.start));
     }, store);
     expectOpen(router, store, query, evidenceB);
   });
