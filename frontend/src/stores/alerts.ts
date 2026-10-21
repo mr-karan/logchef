@@ -6,7 +6,6 @@ import { useMetaStore } from "./meta";
 
 interface AlertsState {
   alerts: Alert[];
-  selectedAlertId: number | null;
 }
 
 function sortAlerts(a: Alert, b: Alert) {
@@ -18,23 +17,12 @@ function sortAlerts(a: Alert, b: Alert) {
 export const useAlertsStore = defineStore("alerts", () => {
   const state = useBaseStore<AlertsState>({
     alerts: [],
-    selectedAlertId: null,
   });
 
   const alerts = computed(() => state.data.value.alerts);
-  const selectedAlertId = computed(() => state.data.value.selectedAlertId);
-  const selectedAlert = computed(() =>
-    alerts.value.find((alert) => alert.id === state.data.value.selectedAlertId) || null
-  );
-  const hasAlerts = computed(() => alerts.value.length > 0);
-
-  function setSelectedAlert(alertId: number | null) {
-    state.data.value.selectedAlertId = alertId;
-  }
 
   function clearAlerts() {
     state.data.value.alerts = [];
-    state.data.value.selectedAlertId = null;
   }
 
   // Belt-and-braces: even if the router guard is bypassed (bookmarked URL
@@ -53,13 +41,6 @@ export const useAlertsStore = defineStore("alerts", () => {
         operationKey: key,
         onSuccess: (response) => {
           state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
-          // Clear selected alert if it no longer exists in the new list.
-          if (
-            state.data.value.selectedAlertId &&
-            !state.data.value.alerts.some((alert) => alert.id === state.data.value.selectedAlertId)
-          ) {
-            state.data.value.selectedAlertId = null;
-          }
         },
         defaultData: [],
         showToast: false,
@@ -80,9 +61,6 @@ export const useAlertsStore = defineStore("alerts", () => {
 
   function removeAlert(alertId: number) {
     state.data.value.alerts = state.data.value.alerts.filter((alert) => alert.id !== alertId);
-    if (state.data.value.selectedAlertId === alertId) {
-      state.data.value.selectedAlertId = null;
-    }
   }
 
   async function createAlert(_teamId: number | undefined, sourceId: number, payload: Omit<CreateAlertRequest, "source_id">) {
@@ -95,7 +73,6 @@ export const useAlertsStore = defineStore("alerts", () => {
         onSuccess: (response) => {
           if (response) {
             upsertAlert(response);
-            state.data.value.selectedAlertId = response.id;
           }
         },
       });
@@ -164,13 +141,9 @@ export const useAlertsStore = defineStore("alerts", () => {
     isLoading: state.isLoading,
     loadingStates: state.loadingStates,
     alerts,
-    selectedAlert,
-    selectedAlertId,
-    hasAlerts,
 
     // utils
     isLoadingOperation: state.isLoadingOperation,
-    setSelectedAlert,
     clearAlerts,
     fetchAlerts,
     createAlert,

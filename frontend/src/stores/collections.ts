@@ -16,7 +16,6 @@ import { useBaseStore } from "./base";
 
 interface CollectionsState {
   collections: Collection[];
-  selectedId: number | null;
   members: Record<number, CollectionMember[]>;
   teams: Record<number, CollectionTeam[]>;
   items: Record<number, CollectionItem[]>;
@@ -25,26 +24,18 @@ interface CollectionsState {
 export const useCollectionsStore = defineStore("collections", () => {
   const state = useBaseStore<CollectionsState>({
     collections: [],
-    selectedId: null,
     members: {},
     teams: {},
     items: {},
   });
 
   const collections = computed(() => state.data.value.collections);
-  const selectedCollection = computed(() =>
-    collections.value.find((c) => c.id === state.data.value.selectedId) ?? null
-  );
   const personalCollection = computed(() =>
     collections.value.find((c) => c.is_personal) ?? null
   );
   const sharedCollections = computed(() =>
     collections.value.filter((c) => !c.is_personal)
   );
-
-  function setSelected(id: number | null) {
-    state.data.value.selectedId = id;
-  }
 
   async function fetchCollections() {
     return await state.withLoading("listCollections", async () => {
@@ -104,7 +95,6 @@ export const useCollectionsStore = defineStore("collections", () => {
           delete state.data.value.members[id];
           delete state.data.value.teams[id];
           delete state.data.value.items[id];
-          if (state.data.value.selectedId === id) state.data.value.selectedId = null;
         },
       });
     });
@@ -239,11 +229,9 @@ export const useCollectionsStore = defineStore("collections", () => {
     isLoadingOperation: state.isLoadingOperation,
 
     collections,
-    selectedCollection,
     personalCollection,
     sharedCollections,
 
-    setSelected,
     fetchCollections,
     createCollection,
     updateCollection,

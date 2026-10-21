@@ -10,7 +10,7 @@ import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import { useBaseStore } from "./base";
 import { useContextStore } from "./context";
 
-export interface SavedQueriesState {
+interface SavedQueriesState {
   queries: SavedQuery[];
   // allQueries backs the admin "All queries" browse surface. Kept separate from
   // `queries` so it doesn't clobber the explorer dropdown's per-source list.
@@ -42,9 +42,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   const teams = computed(() => state.data.value.teams);
   const selectedTeamId = computed(() => contextStore.teamId);
 
-  const hasTeams = computed(() => (teams.value?.length || 0) > 0);
   const hasQueries = computed(() => (queries.value?.length || 0) > 0);
-  const selectedTeam = computed(() => teams.value?.find((t) => t.id === selectedTeamId.value) || null);
 
   async function fetchUserTeams() {
     return await state.withLoading('fetchUserTeams', async () => {
@@ -60,10 +58,6 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         defaultData: []
       });
     });
-  }
-
-  function setSelectedTeam(teamId: number) {
-    contextStore.selectTeam(teamId);
   }
 
   // list fetches saved queries the user can see. Optional sourceId narrows to one source.
@@ -205,25 +199,9 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     });
   }
 
-
-  function resetState() {
-    state.data.value = {
-      queries: [],
-      allQueries: [],
-      selectedQuery: null,
-      teams: [],
-    };
-    state.error.value = null;
-  }
-
   return {
     isLoading: state.isLoading,
     error: state.error,
-    // Export the ref itself (not an unwrapped `.value` snapshot) - resetState()
-    // replaces `state.data.value` wholesale, and a snapshot taken here at
-    // store-setup time would keep pointing at the pre-reset object forever
-    // after that, so callers reading `store.data` post-reset would see stale
-    // data. Mirrors collections.ts, which does this correctly.
     data: state.data,
 
     queries,
@@ -231,19 +209,15 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     selectedQuery,
     teams,
     selectedTeamId,
-    hasTeams,
     hasQueries,
-    selectedTeam,
 
     fetchUserTeams,
-    setSelectedTeam,
     list,
     listAll,
     fetchById,
     create,
     update,
     remove,
-    resetState,
 
     isLoadingOperation: state.isLoadingOperation,
   };

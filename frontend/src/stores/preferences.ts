@@ -11,7 +11,6 @@ import { zoneFromPreference, type ZoneId } from "@/utils/timeWindow";
 interface PreferencesState {
   preferences: UserPreferences;
   isLoaded: boolean;
-  isDefault: boolean;
 }
 
 const STORAGE_KEY = "logchef_user_preferences";
@@ -123,12 +122,10 @@ export const usePreferencesStore = defineStore("preferences", () => {
   const state = useBaseStore<PreferencesState>({
     preferences: initialPreferences,
     isLoaded: false,
-    isDefault: false,
   });
 
   const preferences = computed(() => state.data.value.preferences);
   const isLoaded = computed(() => state.data.value.isLoaded);
-  const isDefault = computed(() => state.data.value.isDefault);
 
   function applyPreferences(next: UserPreferences, options?: { syncTheme?: boolean }) {
     const normalized = normalizePreferences(next);
@@ -184,11 +181,9 @@ export const usePreferencesStore = defineStore("preferences", () => {
           locale: serverPreferences.locale,
         });
         applyPreferences(merged);
-        state.data.value.isDefault = true;
         if (!preferencesEqual(serverPreferences, merged)) await savePreferences(merged, "syncPreferences");
       } else {
         applyPreferences(serverPreferences);
-        state.data.value.isDefault = false;
       }
       if ((authStore.user?.id ?? null) === userId && revision === preferencesRevision) {
         state.data.value.isLoaded = true;
@@ -245,8 +240,6 @@ export const usePreferencesStore = defineStore("preferences", () => {
   return {
     preferences,
     zone,
-    isLoaded,
-    isDefault,
     isLoading: state.isLoading,
     error: state.error,
     loadPreferences,

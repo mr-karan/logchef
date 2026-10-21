@@ -96,21 +96,10 @@ export const useFieldValuesStore = defineStore('exploreFieldValues', () => {
     return best?.result ?? null
   }
 
-  /**
-   * Clear all cached data.
-   */
-  function clearAll() {
-    entries.value = new Map()
-    summaries.value = new Map()
-    fieldIndex.clear()
-  }
-
   return {
     entries,
-    summaries,
     populateFromFetch,
     getFieldSummary,
     findCachedValues,
-    clearAll,
   }
 })
