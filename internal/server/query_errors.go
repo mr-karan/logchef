@@ -12,6 +12,10 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+type queryErrorLogKey struct{}
+
+var queryErrorLoggedKey queryErrorLogKey
+
 const (
 	logsQueryOperation      = "Log querying"
 	logchefQLQueryOperation = "LogchefQL querying"
@@ -36,7 +40,7 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 		return queryErrorResponse{fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType}
 	case errors.Is(err, context.Canceled):
 		return queryErrorResponse{fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType}
-	case clickhouse.IsTimeoutError(err):
+	case clickhouse.IsQueryTimeoutError(err):
 		return queryErrorResponse{fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType}
 	case errors.Is(err, core.ErrSourceNotFound), errors.Is(err, models.ErrNotFound):
 		return queryErrorResponse{fiber.StatusNotFound, "Source not found", models.NotFoundErrorType}
@@ -61,6 +65,7 @@ func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error
 	response := classifyQueryError(err, failure, operation)
 	if response.status >= fiber.StatusInternalServerError {
 		s.log.Error("query failed", "error", err, "source_id", sourceID, "path", c.Path())
+		c.Locals(queryErrorLoggedKey, true)
 	} else if datasource.IsValidationError(err) {
 		s.log.Warn("query validation failed", "error", err, "source_id", sourceID, "path", c.Path())
 	}

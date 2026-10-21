@@ -15,6 +15,7 @@ import (
 	"math"
 	"math/big"
 	"net"
+	"net/url"
 	"reflect"
 	"strconv"
 	"strings"
@@ -369,6 +370,21 @@ const (
 	chExceptionTimeoutExceeded int32 = 159 // TIMEOUT_EXCEEDED: max_execution_time exceeded server-side.
 	chExceptionSocketTimeout   int32 = 209 // SOCKET_TIMEOUT: the connection's socket timed out mid-query.
 )
+
+// IsQueryTimeoutError reports query deadlines separately from transport timeouts.
+func IsQueryTimeoutError(err error) bool {
+	if exception, ok := errors.AsType[*clickhouse.Exception](err); ok {
+		return exception.Code == chExceptionTimeoutExceeded || exception.Code == chExceptionSocketTimeout
+	}
+	if _, ok := errors.AsType[*net.OpError](err); ok {
+		return false
+	}
+	// Client.Timeout also wraps DeadlineExceeded, but has its own transport budget.
+	if requestErr, ok := errors.AsType[*url.Error](err); ok {
+		return requestErr.Err == context.DeadlineExceeded //nolint:errorlint // Client.Timeout's wrapper must remain a transport failure.
+	}
+	return errors.Is(err, context.DeadlineExceeded)
+}
 
 // IsTimeoutError reports whether a context, ClickHouse, or network error indicates a timeout.
 func IsTimeoutError(err error) bool {
