@@ -235,7 +235,10 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 
 	params, err := core.PrepareSourceSQLQuery(c.Context(), s.datasources, s.config.Query, src, req)
 	if err != nil {
-		return sendQueryRequestError(c, err)
+		if _, ok := errors.AsType[*core.QueryRequestError](err); ok {
+			return sendQueryRequestError(c, err)
+		}
+		return s.handleLogsQueryError(c, src.SourceID(), err)
 	}
 	processedQuery := params.RawQuery
 

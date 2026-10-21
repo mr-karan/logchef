@@ -74,9 +74,12 @@ func TestLogchefQLIdentifiersAndValuesRoundTripVictoriaLogs(t *testing.T) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	for _, value := range []string{`\`, `'`, `\'`, `\' OR 1=1 --`, "`", `[[info]]`, `a\nb`, "a\nb\x00c", `a"b`} {
+	for _, value := range []string{`\`, `'`, `\'`, `\' OR 1=1 --`, "`", `[[info]]`, `a\nb`, "a\nb\x00c", `a"b`, " padded ", "\t"} {
 		t.Run(value, func(t *testing.T) {
 			field := "field" + value
+			if value == " padded " || value == "\t" {
+				field = value
+			}
 			result := logchefql.TranslateToLogsQL(quoteLogchefQL(field)+"="+quoteLogchefQL(value), nil)
 			if !result.Valid {
 				t.Fatalf("translate: %+v", result.Error)

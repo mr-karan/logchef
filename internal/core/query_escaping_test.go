@@ -15,6 +15,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/internal/victorialogs"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -67,7 +68,7 @@ func TestPreparedQueriesRoundTripVictoriaLogs(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			windowed, err := PrepareSQLQuery(cfg, req, source.SourceType)
+			windowed, err := prepareSQLQuery(cfg, req, template.LogsQL)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -75,7 +76,7 @@ func TestPreparedQueriesRoundTripVictoriaLogs(t *testing.T) {
 			for _, text := range []string{`* | generate_sequence 1 | format '{{value}}' as value | fields value`, `* | generate_sequence 1 | format "{{value}}" as value | fields value`} {
 				quotedReq := req
 				quotedReq.QueryText = text
-				quoted, err := PrepareSQLQuery(cfg, quotedReq, source.SourceType)
+				quoted, err := prepareSQLQuery(cfg, quotedReq, template.LogsQL)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -147,6 +148,26 @@ func TestNativeTemplatePreparationUsesMetadataOnly(t *testing.T) {
 	}
 	if query.RawQuery != `SELECT '\\'''` || histogram.Query != query.RawQuery {
 		t.Fatalf("query %q, histogram %q", query.RawQuery, histogram.Query)
+	}
+	for _, queryText := range []string{
+		"SELECT 1 [[ WHERE level={{missing}} ]]",
+		"SELECT 1 -- {{ignored}}",
+	} {
+		prepared, err := PrepareSourceSQLQuery(ctx, ds, cfg, src, models.APIQueryRequest{QueryText: queryText})
+		if err != nil {
+			t.Fatal(err)
+		}
+		histogram, err := PrepareSourceHistogram(ctx, ds, src, models.APIHistogramRequest{QueryText: queryText})
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := queryText
+		if strings.Contains(queryText, "[[") {
+			want = "SELECT 1 "
+		}
+		if prepared.RawQuery != want || histogram.Query != want {
+			t.Fatalf("query %q, histogram %q; want %q", prepared.RawQuery, histogram.Query, want)
+		}
 	}
 	if err := db.DeleteSource(ctx, source.ID); err != nil {
 		t.Fatal(err)

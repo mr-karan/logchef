@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Escape template values and field names for SQL, LogsQL, and LogchefQL to keep
+  quotes and backslashes from changing query structure.
+- Recognize optional blocks by balanced brackets and an unquoted variable,
+  using each query language's string and comment syntax. Ignore variables in
+  comments and preserve SQL arrays that do not meet the optional-block rule.
+
 ## [2.4.0] - 2026-10-13
 
 VictoriaLogs windowed search is opt-in. Enable it in the source form or

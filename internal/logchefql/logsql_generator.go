@@ -101,7 +101,7 @@ type LogsQLGenerator struct {
 func NewLogsQLGenerator(options *LogsQLTranslateOptions) *LogsQLGenerator {
 	generator := &LogsQLGenerator{}
 	if options != nil {
-		generator.defaultTimestampField = strings.TrimSpace(options.DefaultTimestampField)
+		generator.defaultTimestampField = options.DefaultTimestampField
 	}
 	return generator
 }
@@ -356,17 +356,13 @@ func (g *LogsQLGenerator) buildFieldsPipe(selectFields []SelectField) (string, *
 }
 
 func (g *LogsQLGenerator) formatFieldName(fieldName string) string {
-	trimmed := strings.TrimSpace(fieldName)
-	if trimmed == "" {
+	if fieldName == "" {
 		return ""
 	}
-	// Decide purely from the field's value -- the AST may hold the
-	// unquoted name even when the user quoted it in LogchefQL, so we can't
-	// rely on how the source query was written.
-	if isSafeLogsQLFieldName(trimmed) {
-		return trimmed
+	if isSafeLogsQLFieldName(fieldName) {
+		return fieldName
 	}
-	return strconv.Quote(trimmed)
+	return strconv.Quote(fieldName)
 }
 
 func (g *LogsQLGenerator) formatValue(value any) (string, *ParseError) {

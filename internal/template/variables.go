@@ -58,27 +58,35 @@ func isValueProvided(value any) bool {
 
 // SubstituteVariables formats template values as ClickHouse SQL literals.
 func SubstituteVariables(sql string, variables []Variable) (string, error) {
-	return substituteVariables(sql, variables, clickHouseSQL)
+	return substituteVariables(sql, variables, ClickHouseSQL)
 }
 
 // SubstituteLogsQLVariables formats template values as LogsQL literals.
 func SubstituteLogsQLVariables(query string, variables []Variable) (string, error) {
-	return substituteVariables(query, variables, logsQL)
+	return substituteVariables(query, variables, LogsQL)
 }
 
-type queryDialect uint8
+// Dialect selects the query language used to scan template syntax.
+type Dialect uint8
 
 const (
-	clickHouseSQL queryDialect = iota
-	logsQL
+	// ClickHouseSQL scans SQL strings, identifiers, heredocs, and comments.
+	ClickHouseSQL Dialect = iota
+	// LogsQL scans escaped strings, raw strings, and hash comments.
+	LogsQL
+	// LogchefQL scans escaped strings without comments.
+	LogchefQL
 )
 
-func substituteVariables(sql string, variables []Variable, dialect queryDialect) (string, error) {
-	if len(variables) == 0 {
-		sql = ProcessOptionalClauses(sql, nil)
-		return sql, nil
+// Substitute formats template values and removes optional blocks for this dialect.
+func (dialect Dialect) Substitute(query string, variables []Variable) (string, error) {
+	if dialect == LogchefQL {
+		return SubstituteLogchefQLVariables(query, variables)
 	}
+	return substituteVariables(query, variables, dialect)
+}
 
+func substituteVariables(sql string, variables []Variable, dialect Dialect) (string, error) {
 	// Build lookup map and validate names.
 	varMap := make(map[string]Variable, len(variables))
 	for _, v := range variables {
@@ -89,16 +97,16 @@ func substituteVariables(sql string, variables []Variable, dialect queryDialect)
 	}
 
 	// Process optional clauses first - removes blocks with missing variables
-	sql = ProcessOptionalClauses(sql, varMap)
+	sql = processOptionalClauses(sql, varMap, dialect)
 
 	return substituteTemplateTokens(sql, varMap, dialect)
 }
 
-func substituteTemplateTokens(query string, variables map[string]Variable, dialect queryDialect) (string, error) {
+func substituteTemplateTokens(query string, variables map[string]Variable, dialect Dialect) (string, error) {
 	var result strings.Builder
 	start := 0
 	for i := 0; i < len(query); {
-		end := quotedOrCommentEnd(query, i)
+		end := quotedOrCommentEnd(query, i, dialect)
 		if end == i {
 			i++
 			continue
@@ -126,7 +134,7 @@ func substituteTemplateTokens(query string, variables map[string]Variable, diale
 	return result.String(), nil
 }
 
-func substituteVariableTokens(token string, quote byte, variables map[string]Variable, dialect queryDialect) (string, error) {
+func substituteVariableTokens(token string, quote byte, variables map[string]Variable, dialect Dialect) (string, error) {
 	if quote != 0 {
 		for _, match := range variablePattern.FindAllStringIndex(token, -1) {
 			backslashes := 0
@@ -150,7 +158,7 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 			substitutionErr = fmt.Errorf("variable {{%s}} requires a value", name)
 			return match
 		}
-		if quote != 0 && (quote == '`' || quote == '$' || dialect == clickHouseSQL && quote == '"') {
+		if quote != 0 && (quote == '`' || quote == '$' || dialect == ClickHouseSQL && quote == '"') {
 			substitutionErr = fmt.Errorf("variable %s: template values cannot be used inside identifier or raw-string quotes", name)
 			return match
 		}
@@ -165,7 +173,7 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 		}
 		if quote != 0 && variable.Type != TypeNumber {
 			formatted = formatted[1 : len(formatted)-1]
-			if dialect == logsQL && quote == '\'' {
+			if dialect == LogsQL && quote == '\'' {
 				formatted = strings.NewReplacer(`\"`, `"`, "'", "\\'").Replace(formatted)
 			}
 		}
@@ -174,7 +182,7 @@ func substituteVariableTokens(token string, quote byte, variables map[string]Var
 	return result, substitutionErr
 }
 
-func formatValue(v Variable, dialect queryDialect) (string, error) {
+func formatValue(v Variable, dialect Dialect) (string, error) {
 	varType := v.Type
 	if varType == TypeText {
 		varType = TypeString
@@ -205,7 +213,7 @@ func isArrayValue(value any) bool {
 	}
 }
 
-func formatArray(value any, varType VariableType, dialect queryDialect) (string, error) {
+func formatArray(value any, varType VariableType, dialect Dialect) (string, error) {
 	var items []string
 
 	switch arr := value.(type) {
@@ -236,7 +244,7 @@ func formatArray(value any, varType VariableType, dialect queryDialect) (string,
 	return strings.Join(items, ", "), nil
 }
 
-func formatSingleValue(value any, varType VariableType, dialect queryDialect) (string, error) {
+func formatSingleValue(value any, varType VariableType, dialect Dialect) (string, error) {
 	switch varType {
 	case TypeString, TypeText:
 		return formatString(value, dialect)
@@ -250,7 +258,7 @@ func formatSingleValue(value any, varType VariableType, dialect queryDialect) (s
 }
 
 // formatString escapes and quotes a string value.
-func formatString(value any, dialect queryDialect) (string, error) {
+func formatString(value any, dialect Dialect) (string, error) {
 	var s string
 	switch val := value.(type) {
 	case string:
@@ -264,7 +272,7 @@ func formatString(value any, dialect queryDialect) (string, error) {
 	default:
 		s = fmt.Sprintf("%v", val)
 	}
-	if dialect == logsQL {
+	if dialect == LogsQL {
 		return strconv.Quote(s), nil
 	}
 	return "'" + queryescape.ClickHouseString(s) + "'", nil
@@ -342,27 +350,12 @@ func formatDate(value any) (string, error) {
 	}
 }
 
-// ExtractVariableNames returns all unique variable names found in the SQL.
-func ExtractVariableNames(sql string) []string {
-	matches := variablePattern.FindAllStringSubmatch(sql, -1)
-	seen := make(map[string]bool)
-	names := make([]string, 0, len(matches))
-
-	for _, m := range matches {
-		if len(m) == 2 && !seen[m[1]] {
-			names = append(names, m[1])
-			seen[m[1]] = true
-		}
-	}
-	return names
-}
-
-func formatDialectDate(value any, dialect queryDialect) (string, error) {
+func formatDialectDate(value any, dialect Dialect) (string, error) {
 	formatted, err := formatDate(value)
 	if err != nil {
 		return "", err
 	}
-	if dialect == logsQL {
+	if dialect == LogsQL {
 		return strconv.Quote(formatted[1 : len(formatted)-1]), nil
 	}
 	return formatted, nil

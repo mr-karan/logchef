@@ -57,9 +57,7 @@ type LogchefQLCompileError struct {
 func (e *LogchefQLCompileError) Error() string { return fmt.Sprintf("compiling LogchefQL: %v", e.Err) }
 func (e *LogchefQLCompileError) Unwrap() error { return e.Err }
 
-// PrepareSQLQuery applies the configured timeout and limit policy and template
-// substitution to a raw query request. The returned QueryTimeout is never nil.
-func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, sourceType models.SourceType) (datasource.QueryRequest, error) {
+func prepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, dialect template.Dialect) (datasource.QueryRequest, error) {
 	timeout, err := resolveQueryTimeout(cfg, req.QueryTimeout)
 	if err != nil {
 		return datasource.QueryRequest{}, err
@@ -68,16 +66,9 @@ func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, sourceT
 		return datasource.QueryRequest{}, &QueryRequestError{Message: err.Error()}
 	}
 
-	requiredVars := template.ExtractVariableNames(req.QueryText)
-	if len(requiredVars) > 0 && len(req.Variables) == 0 {
-		return datasource.QueryRequest{}, queryRequestErrorf("Query contains template variables (%s) but no variables were provided. Please define variable values before executing.", strings.Join(requiredVars, ", "))
-	}
-	query := req.QueryText
-	if len(req.Variables) > 0 {
-		query, err = substituteNativeVariables(req.QueryText, req.Variables, sourceType)
-		if err != nil {
-			return datasource.QueryRequest{}, queryRequestErrorf("Variable substitution failed: %v", err)
-		}
+	query, err := dialect.Substitute(req.QueryText, templateVariables(req.Variables))
+	if err != nil {
+		return datasource.QueryRequest{}, queryRequestErrorf("Variable substitution failed: %v", err)
 	}
 
 	params := datasource.QueryRequest{
@@ -103,18 +94,11 @@ func PrepareSQLQuery(cfg config.QueryConfig, req models.APIQueryRequest, sourceT
 
 // PrepareSourceSQLQuery selects template quoting from the source's native dialect.
 func PrepareSourceSQLQuery(ctx context.Context, ds *datasource.Service, cfg config.QueryConfig, src access.AuthorizedSource, req models.APIQueryRequest) (datasource.QueryRequest, error) {
-	sourceType := models.SourceTypeClickHouse
-	if len(req.Variables) > 0 {
-		source, err := ds.LoadSource(ctx, src.SourceID())
-		if errors.Is(err, models.ErrNotFound) {
-			return datasource.QueryRequest{}, ErrSourceNotFound
-		}
-		if err != nil {
-			return datasource.QueryRequest{}, err
-		}
-		sourceType = source.SourceType
+	dialect, err := nativeTemplateDialect(ctx, ds, src)
+	if err != nil {
+		return datasource.QueryRequest{}, err
 	}
-	return PrepareSQLQuery(cfg, req, sourceType)
+	return prepareSQLQuery(cfg, req, dialect)
 }
 
 // RunQuery prepares and runs a raw query with no streaming. One deadline,
@@ -333,9 +317,7 @@ func TranslateLogchefQL(ctx context.Context, ds *datasource.Service, src access.
 	return translation, nil
 }
 
-// PrepareHistogram validates a histogram request, substitutes template
-// variables and applies the window, timezone and timeout defaults.
-func PrepareHistogram(req models.APIHistogramRequest, sourceType models.SourceType) (HistogramParams, error) {
+func prepareHistogram(req models.APIHistogramRequest, dialect template.Dialect) (HistogramParams, error) {
 	if strings.TrimSpace(req.QueryText) == "" {
 		return HistogramParams{}, &QueryRequestError{Message: "query_text parameter is required"}
 	}
@@ -343,17 +325,9 @@ func PrepareHistogram(req models.APIHistogramRequest, sourceType models.SourceTy
 		return HistogramParams{}, &QueryRequestError{Message: err.Error()}
 	}
 
-	requiredVars := template.ExtractVariableNames(req.QueryText)
-	if len(requiredVars) > 0 && len(req.Variables) == 0 {
-		return HistogramParams{}, queryRequestErrorf("Query contains template variables (%s) but no variables were provided. Please define variable values before executing.", strings.Join(requiredVars, ", "))
-	}
-	query := req.QueryText
-	if len(req.Variables) > 0 {
-		substituted, err := substituteNativeVariables(req.QueryText, req.Variables, sourceType)
-		if err != nil {
-			return HistogramParams{}, queryRequestErrorf("Variable substitution failed: %v", err)
-		}
-		query = substituted
+	query, err := dialect.Substitute(req.QueryText, templateVariables(req.Variables))
+	if err != nil {
+		return HistogramParams{}, queryRequestErrorf("Variable substitution failed: %v", err)
 	}
 
 	window := req.Window
@@ -398,25 +372,25 @@ func PrepareHistogram(req models.APIHistogramRequest, sourceType models.SourceTy
 
 // PrepareSourceHistogram selects template quoting from the source's native dialect.
 func PrepareSourceHistogram(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource, req models.APIHistogramRequest) (HistogramParams, error) {
-	sourceType := models.SourceTypeClickHouse
-	if len(req.Variables) > 0 {
-		source, err := ds.LoadSource(ctx, src.SourceID())
-		if errors.Is(err, models.ErrNotFound) {
-			return HistogramParams{}, ErrSourceNotFound
-		}
-		if err != nil {
-			return HistogramParams{}, err
-		}
-		sourceType = source.SourceType
+	dialect, err := nativeTemplateDialect(ctx, ds, src)
+	if err != nil {
+		return HistogramParams{}, err
 	}
-	return PrepareHistogram(req, sourceType)
+	return prepareHistogram(req, dialect)
 }
 
-func substituteNativeVariables(query string, variables []models.TemplateVariable, sourceType models.SourceType) (string, error) {
-	if models.NormalizeSourceType(sourceType) == models.SourceTypeVictoriaLogs {
-		return template.SubstituteLogsQLVariables(query, templateVariables(variables))
+func nativeTemplateDialect(ctx context.Context, ds *datasource.Service, src access.AuthorizedSource) (template.Dialect, error) {
+	source, err := ds.LoadSource(ctx, src.SourceID())
+	if errors.Is(err, models.ErrNotFound) {
+		return 0, ErrSourceNotFound
 	}
-	return template.SubstituteVariables(query, templateVariables(variables))
+	if err != nil {
+		return 0, err
+	}
+	if source.IsVictoriaLogs() {
+		return template.LogsQL, nil
+	}
+	return template.ClickHouseSQL, nil
 }
 
 // RunHistogram prepares and runs a histogram. HistogramTimeout covers

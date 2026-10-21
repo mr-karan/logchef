@@ -36,7 +36,10 @@ func (s *Server) handleGetHistogram(c fiber.Ctx) error {
 
 	params, err := core.PrepareSourceHistogram(c.Context(), s.datasources, src, req)
 	if err != nil {
-		return sendQueryRequestError(c, err)
+		if _, ok := errors.AsType[*core.QueryRequestError](err); ok {
+			return sendQueryRequestError(c, err)
+		}
+		return s.handleLogsQueryError(c, src.SourceID(), err)
 	}
 
 	// Dashboard panel requests may opt into the per-dashboard result cache.

@@ -1,59 +1,10 @@
 import {useVariableStore, type VariableState} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
 import type { TemplateVariable } from "@/api/explore";
+import { extractTemplateVariables, type TemplateDialect } from "@/utils/template";
+export type { ExtractedVariable } from "@/utils/template";
 
-const createVariablePattern = () => /\{\{\s*([a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}/g;
-// Regex to match [[ ... ]] optional clauses (non-greedy)
-const createOptionalClausePattern = () => /\[\[(.+?)\]\]/gs;
-
-export function extractVariableNames(sql: string): string[] {
-    const matches = sql.matchAll(createVariablePattern());
-    const seen = new Set<string>();
-    const names: string[] = [];
-
-    for (const match of matches) {
-        const name = match[1];
-        if (!seen.has(name)) {
-            names.push(name);
-            seen.add(name);
-        }
-    }
-    return names;
-}
-
-export interface ExtractedVariable {
-    name: string;
-    isOptional: boolean;
-}
-
-export function extractVariablesWithOptional(sql: string): ExtractedVariable[] {
-    const optionalVarNames = new Set<string>();
-    
-    const optionalMatches = sql.matchAll(createOptionalClausePattern());
-    for (const match of optionalMatches) {
-        const clauseContent = match[1];
-        const varMatches = clauseContent.matchAll(createVariablePattern());
-        for (const varMatch of varMatches) {
-            optionalVarNames.add(varMatch[1]);
-        }
-    }
-
-    const seen = new Set<string>();
-    const results: ExtractedVariable[] = [];
-    const allMatches = sql.matchAll(createVariablePattern());
-
-    for (const match of allMatches) {
-        const name = match[1];
-        if (!seen.has(name)) {
-            results.push({
-                name,
-                isOptional: optionalVarNames.has(name)
-            });
-            seen.add(name);
-        }
-    }
-    return results;
-}
+export const extractVariablesWithOptional = extractTemplateVariables;
 
 export function useVariables() {
     const variableStore = useVariableStore();
@@ -123,8 +74,8 @@ export function useVariables() {
         }));
     };
 
-    const ensureVariablesFromSql = (sql: string): string[] => {
-        const extractedVars = extractVariablesWithOptional(sql);
+    const ensureVariablesFromSql = (sql: string, dialect: TemplateDialect = 'clickhouse-sql'): string[] => {
+        const extractedVars = extractVariablesWithOptional(sql, dialect);
         const newlyCreated: string[] = [];
 
         for (const { name, isOptional } of extractedVars) {
@@ -148,8 +99,8 @@ export function useVariables() {
         return newlyCreated;
     };
 
-    const validateVariablesForSql = (sql: string): { hasVariables: boolean; missingValues: string[] } => {
-        const extractedVars = extractVariablesWithOptional(sql);
+    const validateVariablesForSql = (sql: string, dialect: TemplateDialect = 'clickhouse-sql'): { hasVariables: boolean; missingValues: string[] } => {
+        const extractedVars = extractVariablesWithOptional(sql, dialect);
         if (extractedVars.length === 0) {
             return { hasVariables: false, missingValues: [] };
         }

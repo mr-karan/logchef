@@ -130,7 +130,7 @@ sets) only appears for sources that support it: currently ClickHouse only.
 
 ## Query Variables
 
-Use `{{variable_name}}` in native SQL to create input fields:
+Use `{{variable_name}}` in SQL, LogsQL, or LogchefQL to create input fields:
 
 ```sql
 SELECT * FROM logs
@@ -139,9 +139,23 @@ WHERE service = {{ service }}
 LIMIT {{ limit }}
 ```
 
-Variables support text, number, date, dropdown, and multi-select input types. Wrap optional clauses in `[[ ]]` to auto-remove them when the variable is empty.
+Variables support text, number, date, dropdown, and multi-select input types.
+A `[[ ... ]]` block is optional when its square brackets are balanced and it
+contains at least one `{{variable}}` outside strings and comments. Logchef removes
+the block if any variable used in it has no value. Variables in comments do not
+count. String and comment syntax follows the query language.
 
-Variable support is currently designed around SQL-native workflows.
+For example, `_time:5m [[ level:={{level}} ]]` adds the filter only when `level`
+has a value. SQL arrays such as `[[1,2],[3]]` and `[[and(1,1)]]` stay unchanged.
+A single-element nested array containing an unquoted variable, such as
+`[[{{value}}]]`, is ambiguous and is treated as an optional block. Use
+`[ [{{value}}] ]` to preserve that array. LogsQL always processes `[[ ... ]]` as
+optional-block syntax when the block meets the rule above.
+
+Text and date values use the target language's escaping rules. Values can appear
+unquoted or inside ordinary string quotes. Template values inside identifier,
+heredoc, or raw string quotes are rejected. LogchefQL variables require a single
+value.
 
 ## Query History
 

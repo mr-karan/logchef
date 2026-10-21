@@ -1,33 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
-import { extractVariableNames, extractVariablesWithOptional, useVariables } from '../useVariables'
+import { extractVariablesWithOptional, useVariables } from '../useVariables'
 import { useVariableStore } from '@/stores/variables'
-
-describe('extractVariableNames', () => {
-  it('extracts unique variable names', () => {
-    const sql = 'SELECT * FROM logs WHERE env = {{ environment }} AND host = {{ hostname }}'
-    expect(extractVariableNames(sql)).toEqual(['environment', 'hostname'])
-  })
-
-  it('returns empty array for no variables', () => {
-    expect(extractVariableNames('SELECT * FROM logs')).toEqual([])
-  })
-
-  it('deduplicates repeated variable names', () => {
-    const sql = '{{ env }} AND {{ env }} AND {{ host }}'
-    expect(extractVariableNames(sql)).toEqual(['env', 'host'])
-  })
-
-  it('handles whitespace inside braces', () => {
-    const sql = '{{  env  }} AND {{env}}'
-    expect(extractVariableNames(sql)).toEqual(['env'])
-  })
-
-  it('matches valid identifier patterns only', () => {
-    const sql = '{{ _private }} AND {{ var_1 }}'
-    expect(extractVariableNames(sql)).toEqual(['_private', 'var_1'])
-  })
-})
+import type { TemplateDialect } from '@/utils/template'
 
 describe('extractVariablesWithOptional', () => {
   it('marks variables inside [[ ]] as optional', () => {
@@ -53,6 +28,33 @@ describe('extractVariablesWithOptional', () => {
 
   it('returns empty array for no variables', () => {
     expect(extractVariablesWithOptional('SELECT 1')).toEqual([])
+  })
+})
+
+describe('optional block scanner regressions', () => {
+  it.each([
+    ["SELECT '[[{{v}}]]'", [{ name: 'v', isOptional: false }]],
+    ["SELECT [[ '{{v}}' ]]", [{ name: 'v', isOptional: false }]],
+    ['SELECT [[{{v}}],[3]]', [{ name: 'v', isOptional: false }]],
+    ['SELECT [[ {{v}} ]', [{ name: 'v', isOptional: false }]],
+    ['WHERE [[ host = {{v}} ]]', [{ name: 'v', isOptional: true }]],
+    ['SELECT 1 [[, {{v}} ]]', [{ name: 'v', isOptional: true }]],
+    ['SELECT {{v}} [[ AND x={{v}} ]]', [{ name: 'v', isOptional: false }]],
+    ['SELECT 1 [[ WHERE 0 AND {{v}}=1 -- {{ignored}}\n]]', [{ name: 'v', isOptional: true }]],
+  ])('classifies %s', (query, expected) => {
+    expect(extractVariablesWithOptional(query)).toEqual(expected)
+  })
+})
+
+describe('dialect optional blocks', () => {
+  it.each([
+    ['logsql', 'path:/api/* [[ level:={{v}} ]]'],
+    ['logsql', 'service:my--svc [[ level:={{v}} ]]'],
+    ['logsql', '* | format `raw\\` as a [[ | format {{v}} as b ]]'],
+    ['logchefql', 'service=my--svc [[ AND level={{v}} ]]'],
+    ['logchefql', 'service=my#svc [[ AND level={{v}} ]]'],
+  ] satisfies [TemplateDialect, string][])('scans %s %s', (dialect, query) => {
+    expect(extractVariablesWithOptional(query, dialect)).toEqual([{ name: 'v', isOptional: true }])
   })
 })
 

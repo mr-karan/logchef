@@ -9,6 +9,7 @@ import (
 
 	clickhouseparser "github.com/AfterShip/clickhouse-sql-parser/parser"
 
+	"github.com/mr-karan/logchef/internal/queryescape"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -200,7 +201,7 @@ func (c *Client) GetHistogramData(ctx context.Context, tableName, timestampField
 }
 
 func windowToIntervalFunc(window TimeWindow, timestampField, timezone string) (string, error) {
-	timestampField = quoteIdentifier(timestampField)
+	timestampField = queryescape.ClickHouseIdentifier(timestampField)
 	switch window {
 	case TimeWindow1s:
 		// toStartOfSecond only supports DateTime64 in some ClickHouse builds.
@@ -246,7 +247,7 @@ func (c *Client) buildHistogramQuery(baseQuery, timestampField, intervalFunc, gr
 	// Keep the original group value through the aggregate/rank/join chain so
 	// nullable values retain their identity. Convert only the displayed top-N
 	// value, after the null-safe join has assigned its rank.
-	quotedGroupBy := quoteIdentifier(groupBy)
+	quotedGroupBy := queryescape.ClickHouseIdentifier(groupBy)
 	modifiedQuery, err = c.ensureTimestampInQuery(modifiedQuery, groupBy)
 	if err != nil {
 		return "", fmt.Errorf("adding histogram group column: %w", err)
@@ -421,14 +422,14 @@ func (c *Client) ensureTimestampInQuery(query, timestampField string) (string, e
 	first := selection.SelectItems[0]
 	if isUnmodifiedWildcard(first) {
 		pos := first.Pos() + 1
-		return query[:pos] + ", " + quoteIdentifier(timestampField) + query[pos:], nil
+		return query[:pos] + ", " + queryescape.ClickHouseIdentifier(timestampField) + query[pos:], nil
 	}
 	pos := first.Pos()
 	// The parser reports quoted identifier positions inside the opening quote.
 	if pos > 0 && (query[pos-1] == '`' || query[pos-1] == '"' || query[pos-1] == '\'') {
 		pos--
 	}
-	return query[:pos] + quoteIdentifier(timestampField) + ", " + query[pos:], nil
+	return query[:pos] + queryescape.ClickHouseIdentifier(timestampField) + ", " + query[pos:], nil
 }
 
 func isUnmodifiedWildcard(item *clickhouseparser.SelectItem) bool {
@@ -496,7 +497,7 @@ func (c *Client) GetSurroundingLogs(ctx context.Context, tableName, timestampFie
 	var totalExecutionMs float64
 
 	quotedTableName := quoteTableName(tableName)
-	quotedTimestampField := quoteIdentifier(timestampField)
+	quotedTimestampField := queryescape.ClickHouseIdentifier(timestampField)
 	// Preserve the caller's full timestamp precision. Context rows can use
 	// DateTime64(9), so reducing this value to milliseconds can move a row
 	// across the before/after boundary.
@@ -572,7 +573,7 @@ func quoteTableName(name string) string {
 	parts := strings.Split(strings.TrimSpace(name), ".")
 	quoted := make([]string, 0, len(parts))
 	for _, part := range parts {
-		quoted = append(quoted, quoteIdentifier(part))
+		quoted = append(quoted, queryescape.ClickHouseIdentifier(part))
 	}
 	return strings.Join(quoted, ".")
 }

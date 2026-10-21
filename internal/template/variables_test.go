@@ -389,7 +389,7 @@ func TestProcessOptionalClauses(t *testing.T) {
 			name:   "optional block with no variables - kept as-is",
 			sql:    "SELECT * FROM logs WHERE 1=1 [[ AND active = true ]]",
 			varMap: map[string]Variable{},
-			want:   "SELECT * FROM logs WHERE 1=1  AND active = true ",
+			want:   "SELECT * FROM logs WHERE 1=1 [[ AND active = true ]]",
 		},
 		{
 			name:   "nil varMap",
@@ -401,7 +401,7 @@ func TestProcessOptionalClauses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := ProcessOptionalClauses(tt.sql, tt.varMap)
+			got := processOptionalClauses(tt.sql, tt.varMap, ClickHouseSQL)
 			if got != tt.want {
 				t.Errorf("ProcessOptionalClauses() = %q, want %q", got, tt.want)
 			}
@@ -523,64 +523,15 @@ func TestIsValueProvided(t *testing.T) {
 	}
 }
 
-func TestExtractVariableNames(t *testing.T) {
-	tests := []struct {
-		name string
-		sql  string
-		want []string
-	}{
-		{
-			name: "single variable",
-			sql:  "SELECT * FROM logs WHERE host = {{hostname}}",
-			want: []string{"hostname"},
-		},
-		{
-			name: "multiple unique variables",
-			sql:  "SELECT * FROM logs WHERE host = {{host}} AND status = {{status}}",
-			want: []string{"host", "status"},
-		},
-		{
-			name: "duplicate variables",
-			sql:  "SELECT * FROM logs WHERE host = {{host}} OR origin = {{host}}",
-			want: []string{"host"},
-		},
-		{
-			name: "no variables",
-			sql:  "SELECT * FROM logs",
-			want: []string{},
-		},
-		{
-			name: "variable with whitespace",
-			sql:  "SELECT * FROM logs WHERE host = {{ hostname }}",
-			want: []string{"hostname"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractVariableNames(tt.sql)
-			if len(got) != len(tt.want) {
-				t.Errorf("ExtractVariableNames() = %v, want %v", got, tt.want)
-				return
-			}
-			for i, name := range got {
-				if name != tt.want[i] {
-					t.Errorf("ExtractVariableNames()[%d] = %q, want %q", i, name, tt.want[i])
-				}
-			}
-		})
-	}
-}
-
 func TestOptionalClausesPreserveLiteralSyntax(t *testing.T) {
 	for _, query := range []string{
 		`SELECT '[[info]]'`, `SELECT "[[field]]"`, "SELECT `[[field]]`", `SELECT [[1,2],[3]]`,
 		`SELECT [['a'],['b']]`, `SELECT [[{{value}}],[3]]`, `SELECT 'it''s [[info]]'`, `SELECT 'it\'s [[info]]'`,
-		`SELECT $tag$[[info]]$tag$`, `SELECT $$[[info]]$$`, `SELECT [[field + 1]]`, `SELECT [[length('text')]]`, `SELECT [[{{value}}+1]]`, `SELECT [[field={{value}}]]`,
+		`SELECT $tag$[[info]]$tag$`, `SELECT $$[[info]]$$`, `SELECT [[field + 1]]`, `SELECT [[length('text')]]`,
 		`SELECT 1 -- [[comment]]`, "SELECT 1 /* [[comment]] */",
 	} {
 		t.Run(query, func(t *testing.T) {
-			got := ProcessOptionalClauses(query, map[string]Variable{"value": {Name: "value", Type: TypeNumber, Value: 1}})
+			got := processOptionalClauses(query, map[string]Variable{"value": {Name: "value", Type: TypeNumber, Value: 1}}, ClickHouseSQL)
 			if got != query {
 				t.Fatalf("got %q, want %q", got, query)
 			}
@@ -592,7 +543,7 @@ func TestOptionalClausesPreserveLiteralSyntax(t *testing.T) {
 		{`SELECT 1 [[ AND x IN [[1],[2]] AND y={{value}} ]]`, `SELECT 1  AND x IN [[1],[2]] AND y={{value}} `},
 	} {
 		t.Run(tt.query, func(t *testing.T) {
-			got := ProcessOptionalClauses(tt.query, map[string]Variable{"value": {Name: "value", Type: TypeNumber, Value: 1}})
+			got := processOptionalClauses(tt.query, map[string]Variable{"value": {Name: "value", Type: TypeNumber, Value: 1}}, ClickHouseSQL)
 			if got != tt.want {
 				t.Fatalf("got %q, want %q", got, tt.want)
 			}

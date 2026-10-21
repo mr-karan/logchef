@@ -8,7 +8,7 @@ import (
 
 func TestPrepareFieldValuesQueryUsesLogchefQLVariableTypes(t *testing.T) {
 	query, err := prepareFieldValuesQuery(
-		`service="{{ service }}" and event_id>{{ event_id }} [[level="{{ level }}"]]`,
+		`service="{{ service }}" and event_id>{{ event_id }} [[level={{ level }}]]`,
 		models.QueryLanguageLogchefQL,
 		[]models.TemplateVariable{
 			{Name: "service", Type: "string", Value: `api's`},
@@ -52,7 +52,7 @@ func TestParseFieldValuesVariables(t *testing.T) {
 
 func TestSubstituteTranslateVariablesPreservesEmbeddedValuesAndOptionalClauses(t *testing.T) {
 	req := &TranslateRequest{
-		Query: `message="prefix {{ trade_id }}" [[and level="{{ level }}"]]`,
+		Query: `message="prefix {{ trade_id }}" [[and level={{ level }}]]`,
 		Variables: []models.TemplateVariable{
 			{Name: "trade_id", Type: "text", Value: `api's`},
 		},
