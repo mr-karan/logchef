@@ -128,7 +128,7 @@ func New(opts ServerOptions) *Server {
 				code = e.Code // Use Fiber's error code if available.
 			}
 			// Log the internal error details.
-			log.Error("request error", "path", c.Path(), "method", c.Method(), "error", err.Error())
+			log.Error("request error", "path", c.Route().Path, "method", c.Method(), "error", err.Error())
 			// Return a standardized JSON error response to the client.
 			return SendError(c, code, err.Error()) // Assumes SendError is defined elsewhere.
 		},

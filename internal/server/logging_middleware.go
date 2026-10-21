@@ -47,7 +47,7 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// Build canonical log line — one line per request with all useful context
 		attrs := []slog.Attr{
 			slog.String("method", c.Method()),
-			slog.String("path", path),
+			slog.String("path", c.Route().Path),
 			slog.Int("status", status),
 			slog.Int64("duration_ms", duration.Milliseconds()),
 		}
