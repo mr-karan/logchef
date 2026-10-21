@@ -229,6 +229,63 @@ func TestDeliveryRecovery(t *testing.T) {
 				t.Cleanup(func() { _ = db.Close() })
 				return db, createManagerTestAlert(t, db), logger
 			}
+			for _, action := range []string{"resolve", "startup inactive", "deactivate"} {
+				t.Run("interrupted "+action, func(t *testing.T) {
+					for _, attempts := range []int{1, 3} {
+						db, alert, logger := open(t)
+						if action == "startup inactive" {
+							alert.IsActive = false
+							if err := db.UpdateAlert(t.Context(), alert); err != nil {
+								t.Fatal(err)
+							}
+						}
+						entry, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+							"delivery_attempts": attempts, "delivery_failed": false, "delivery_in_progress": true,
+							"delivery_pending": []string{"webhook:pending"},
+						})
+						if err != nil {
+							t.Fatal(err)
+						}
+						m := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true}})
+						switch action {
+						case "resolve":
+							if err := m.handleResolved(t.Context(), alert, 0); err != nil {
+								t.Fatal(err)
+							}
+						case "startup inactive":
+							m.Start(t.Context())
+							m.Stop()
+						case "deactivate":
+							alert.IsActive = false
+							if err := db.UpdateAlert(t.Context(), alert); err != nil {
+								t.Fatal(err)
+							}
+						}
+						after, err := db.GetAlertHistoryEntry(t.Context(), alert.ID, entry.ID)
+						if err != nil {
+							t.Fatal(err)
+						}
+						if after.Payload["delivery_in_progress"] != false || after.Payload["delivery_failed"] != true || after.Payload["delivery_error"] != "delivery interrupted" || after.Payload["delivery_retries_exhausted"] != (attempts == 3) {
+							t.Errorf("%s attempt %d payload = %v, want interrupted failure", action, attempts, after.Payload)
+						}
+						if action == "resolve" && (after.Status != models.AlertStatusResolved || after.ResolvedAt == nil) {
+							t.Errorf("history not resolved: %+v", after)
+						}
+						if action == "startup inactive" {
+							m = NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true}})
+							m.Start(t.Context())
+							m.Stop()
+							again, err := db.GetAlertHistoryEntry(t.Context(), alert.ID, entry.ID)
+							if err != nil {
+								t.Fatal(err)
+							}
+							if !reflect.DeepEqual(after, again) {
+								t.Errorf("second sweep changed history: %+v", again)
+							}
+						}
+					}
+				})
+			}
 			t.Run("interrupted final attempt", func(t *testing.T) {
 				db, alert, logger := open(t)
 				entry, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{

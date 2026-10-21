@@ -71,6 +71,9 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
+	if !alert.IsActive && !db.inTx {
+		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.UpdateAlert(ctx, alert) })
+	}
 
 	params, err := alertUpdateParams(alert)
 	if err != nil {
@@ -81,6 +84,11 @@ func (db *DB) UpdateAlert(ctx context.Context, alert *models.Alert) error {
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to update alert: %w", err)
+	}
+	if !alert.IsActive {
+		if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: int64(alert.ID)}); err != nil {
+			return fmt.Errorf("failed to interrupt alert deliveries: %w", err)
+		}
 	}
 	return nil
 }
@@ -207,6 +215,9 @@ func (db *DB) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, 
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
 	if !db.inTx {
 		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
+	}
+	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{HistoryID: historyID}); err != nil {
+		return fmt.Errorf("failed to interrupt alert delivery: %w", err)
 	}
 	alertID, err := db.writeQueries.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{Message: nullString(message), ID: historyID})
 	if err != nil {
@@ -450,4 +461,12 @@ func nullFloat64(value *float64) sql.NullFloat64 {
 		return sql.NullFloat64{}
 	}
 	return sql.NullFloat64{Float64: *value, Valid: true}
+}
+
+// RecoverAlertDeliveries finalizes delivery reservations left by a stopped manager.
+func (db *DB) RecoverAlertDeliveries(ctx context.Context) error {
+	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{}); err != nil {
+		return fmt.Errorf("failed to recover alert deliveries: %w", err)
+	}
+	return nil
 }

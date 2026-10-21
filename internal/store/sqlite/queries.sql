@@ -675,6 +675,18 @@ INSERT INTO alert_history (
 VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
+-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = json_set(payload_json,
+    '$.delivery_in_progress', json('false'),
+    '$.delivery_failed', json('true'),
+    '$.delivery_error', 'delivery interrupted',
+    '$.delivery_retries_exhausted', json(CASE WHEN COALESCE(json_extract(payload_json, '$.delivery_attempts'), 1) >= 3 THEN 'true' ELSE 'false' END))
+WHERE status = 'triggered'
+  AND json_extract(payload_json, '$.delivery_in_progress') = 1
+  AND (CAST(sqlc.arg(history_id) AS INTEGER) = 0 OR id = sqlc.arg(history_id))
+  AND (CAST(sqlc.arg(alert_id) AS INTEGER) = 0 OR alert_id = sqlc.arg(alert_id));
+
 -- name: ResolveAlertHistory :one
 UPDATE alert_history
 SET status = 'resolved',

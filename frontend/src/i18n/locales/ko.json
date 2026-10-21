@@ -737,6 +737,7 @@
   "askChef.failed": "Ask Chef가 답하지 못했습니다. 다시 시도하세요.",
   "askChef.disabled": "이 서버에서는 Ask Chef가 꺼져 있습니다.",
   "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "전송 중단",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

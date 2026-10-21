@@ -737,6 +737,7 @@
   "askChef.failed": "Ask Chef は回答できませんでした。再試行してください。",
   "askChef.disabled": "このサーバーでは Ask Chef が無効です。",
   "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "配信が中断されました",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

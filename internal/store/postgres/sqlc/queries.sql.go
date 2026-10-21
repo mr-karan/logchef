@@ -2237,6 +2237,29 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 	return id, err
 }
 
+const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = (payload_json::jsonb || jsonb_build_object(
+    'delivery_in_progress', false,
+    'delivery_failed', true,
+    'delivery_error', 'delivery interrupted',
+    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
+WHERE status = 'triggered'
+  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
+  AND ($1::bigint = 0 OR id = $1)
+  AND ($2::bigint = 0 OR alert_id = $2)
+`
+
+type InterruptAlertDeliveriesParams struct {
+	HistoryID int64 `json:"history_id"`
+	AlertID   int64 `json:"alert_id"`
+}
+
+func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
+	_, err := q.db.Exec(ctx, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
+	return err
+}
+
 const isSourceManaged = `-- name: IsSourceManaged :one
 SELECT managed FROM sources WHERE id = $1
 `

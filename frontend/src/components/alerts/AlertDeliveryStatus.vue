@@ -1,19 +1,30 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { Badge } from "@/components/ui/badge";
 import { alertDeliveryFailure } from "@/stores/alertHistory";
 import type { AlertHistoryEntry } from "@/api/alerts";
 
 const props = defineProps<{ entry: AlertHistoryEntry }>();
+// Mirrors maxDeliveryAttempts * (alertEvaluationTimeout + the 2-second bookkeeping timeout) in internal/alerts/manager.go.
+const maximumDeliveryWindowMs = 3 * (60 + 30 + 2) * 1000;
+const now = ref(Date.now());
+let timer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => { timer = setInterval(() => { now.value = Date.now(); }, 1000); });
+onUnmounted(() => { clearInterval(timer); });
+const interrupted = computed(() => props.entry.payload?.delivery_in_progress === true
+  && now.value - Date.parse(props.entry.triggered_at) >= maximumDeliveryWindowMs);
 const failure = computed(() => alertDeliveryFailure(props.entry));
-const inProgress = computed(() => props.entry.status === "triggered" && !props.entry.resolved_at && props.entry.payload?.delivery_in_progress === true);
+const inProgress = computed(() => props.entry.status === "triggered" && !props.entry.resolved_at && props.entry.payload?.delivery_in_progress === true && !interrupted.value);
 const { t } = useI18n();
 </script>
 
 <template>
   <div v-if="inProgress" role="status">
     <Badge variant="secondary">{{ t('alerts.delivering') }}</Badge>
+  </div>
+  <div v-else-if="interrupted" role="status">
+    <Badge variant="destructive">{{ t('alerts.deliveryInterrupted') }}</Badge>
   </div>
   <div v-else-if="failure" class="space-y-1 text-sm" role="status">
     <Badge variant="destructive">{{ t('alerts.deliveryFailed') }}</Badge>

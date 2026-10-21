@@ -1,11 +1,11 @@
-import { describe, expect, it } from "vitest";
-import { createApp, h } from "vue";
+import { describe, expect, it, vi } from "vitest";
+import { createApp, h, nextTick } from "vue";
 import { i18n } from "@/i18n";
 import AlertDeliveryStatus from "../AlertDeliveryStatus.vue";
 import type { AlertHistoryEntry } from "@/api/alerts";
 
 function historyEntry(payload: Record<string, unknown>): AlertHistoryEntry {
-  return { id: 1, alert_id: 1, status: "triggered", triggered_at: "2026-01-01T00:00:00Z", created_at: "2026-01-01T00:00:00Z", payload };
+  return { id: 1, alert_id: 1, status: "triggered", triggered_at: new Date().toISOString(), created_at: new Date().toISOString(), payload };
 }
 
 function render(entry: AlertHistoryEntry, inspect?: (element: HTMLDivElement) => void): string {
@@ -20,6 +20,31 @@ function render(entry: AlertHistoryEntry, inspect?: (element: HTMLDivElement) =>
 }
 
 describe("alert history delivery status", () => {
+  it("shows interrupted delivery after the delivery window", () => {
+    const entry = historyEntry({ delivery_in_progress: true, delivery_failed: false });
+    entry.triggered_at = "2026-01-01T00:00:00Z";
+    const text = render(entry);
+    expect(text).toContain("Delivery interrupted");
+    expect(text).not.toContain("Delivering");
+  });
+  it("expires the delivering badge while the page remains open", async () => {
+    vi.useFakeTimers();
+    const element = document.createElement("div");
+    const entry = historyEntry({ delivery_in_progress: true });
+    const app = createApp({ render: () => h(AlertDeliveryStatus, { entry }) });
+    app.use(i18n);
+    app.mount(element);
+    try {
+      expect(element.textContent).toContain("Delivering");
+      await vi.advanceTimersByTimeAsync(276_000);
+      await nextTick();
+      expect(element.textContent).toContain("Delivery interrupted");
+      expect(element.textContent).not.toContain("Delivering");
+    } finally {
+      app.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("shows delivery in progress", () => {
     expect(render(historyEntry({ delivery_in_progress: true, delivery_failed: false }))).toContain("Delivering");
   });

@@ -146,6 +146,7 @@ type AlertStore interface {
 	// GetAlertHistoryEntry returns models.ErrNotFound when the alert has no
 	// entry with that ID.
 	GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, historyID int64) (*models.AlertHistoryEntry, error)
+	RecoverAlertDeliveries(ctx context.Context) error
 	ResolveAlertHistory(ctx context.Context, historyID int64, message string) error
 	UpdateAlertHistoryPayload(ctx context.Context, historyID int64, payload map[string]any) error
 	ListAlertHistory(ctx context.Context, alertID models.AlertID, limit int) ([]*models.AlertHistoryEntry, error)

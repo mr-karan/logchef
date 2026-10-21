@@ -2236,6 +2236,29 @@ func (q *Queries) InsertQueryHistory(ctx context.Context, arg InsertQueryHistory
 	return id, err
 }
 
+const interruptAlertDeliveries = `-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = json_set(payload_json,
+    '$.delivery_in_progress', json('false'),
+    '$.delivery_failed', json('true'),
+    '$.delivery_error', 'delivery interrupted',
+    '$.delivery_retries_exhausted', json(CASE WHEN COALESCE(json_extract(payload_json, '$.delivery_attempts'), 1) >= 3 THEN 'true' ELSE 'false' END))
+WHERE status = 'triggered'
+  AND json_extract(payload_json, '$.delivery_in_progress') = 1
+  AND (CAST(?1 AS INTEGER) = 0 OR id = ?1)
+  AND (CAST(?2 AS INTEGER) = 0 OR alert_id = ?2)
+`
+
+type InterruptAlertDeliveriesParams struct {
+	HistoryID int64 `json:"history_id"`
+	AlertID   int64 `json:"alert_id"`
+}
+
+func (q *Queries) InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error {
+	_, err := q.exec(ctx, q.interruptAlertDeliveriesStmt, interruptAlertDeliveries, arg.HistoryID, arg.AlertID)
+	return err
+}
+
 const isSourceManaged = `-- name: IsSourceManaged :one
 SELECT managed FROM sources WHERE id = ?
 `

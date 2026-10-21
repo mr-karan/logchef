@@ -737,6 +737,7 @@
   "askChef.failed": "Ask Chef non è riuscito a rispondere. Riprova.",
   "askChef.disabled": "Ask Chef è disattivato su questo server.",
   "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Invio interrotto",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

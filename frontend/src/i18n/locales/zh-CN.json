@@ -1454,6 +1454,7 @@
   "askChef.failed": "Ask Chef 无法回答。请重试。",
   "askChef.disabled": "此服务器已关闭 Ask Chef。",
   "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "投递中断",
   "alerts.deliveryFailed": "Delivery failed",
   "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

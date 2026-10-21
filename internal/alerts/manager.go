@@ -85,6 +85,14 @@ func (m *Manager) Start(ctx context.Context) {
 		m.log.Debug("alerting disabled")
 		return
 	}
+	// One manager owns delivery reservations, as required by docs/src/content/docs/operations/database-backends.md.
+	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
+	err := m.db.RecoverAlertDeliveries(recoveryCtx)
+	cancel()
+	if err != nil {
+		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
+		return
+	}
 	interval := m.cfg.EvaluationInterval
 	if interval <= 0 {
 		interval = time.Minute
