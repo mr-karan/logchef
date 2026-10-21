@@ -362,7 +362,7 @@ func (s *Server) handleGetCurrentUser(c fiber.Ctx) error {
 }
 
 // localLoginLimiter guards the local login endpoint against brute force:
-// 10 attempts/min per IP, 5 attempts/min per email.
+// 10 attempts/min per IPv4 address or IPv6 /64, 5 attempts/min per email.
 var localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 
 // handleLocalLogin authenticates a user with email+password (local auth).

@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -52,9 +53,18 @@ func NewLoginRateLimiter(window time.Duration, perIP, perEmail int) *LoginRateLi
 	}
 }
 
-// Allow records an attempt and reports whether it is within both limits.
+// Allow normalizes client IPs and reports whether an attempt is within both limits.
 func (l *LoginRateLimiter) Allow(ip, email string) bool {
+	ip = strings.TrimSpace(ip)
+	if addr, err := netip.ParseAddr(ip); err == nil {
+		addr = addr.Unmap()
+		if addr.Is6() {
+			ip = netip.PrefixFrom(addr, 64).Masked().String()
+		} else {
+			ip = addr.String()
+		}
+	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.ips.Allow(strings.TrimSpace(ip)) && l.emails.Allow(strings.ToLower(strings.TrimSpace(email)))
+	return l.ips.Allow(ip) && l.emails.Allow(strings.ToLower(strings.TrimSpace(email)))
 }

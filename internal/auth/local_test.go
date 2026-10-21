@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"fmt"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -104,5 +105,92 @@ func TestLoginRateLimiterBlockedIPPreservesEmailWindow(t *testing.T) {
 	}
 	if l.Allow("fresh-ip", "victim@example.com") {
 		t.Fatal("blocked IP flood reset victim email limit")
+	}
+}
+
+func TestLoginRateLimiterRotatingIPFloodPreservesEmailWindow(t *testing.T) {
+	for _, samePrefix := range []bool{true, false} {
+		t.Run(fmt.Sprintf("same_prefix=%t", samePrefix), func(t *testing.T) {
+			l := NewLoginRateLimiter(time.Hour, 10, 5)
+			for range 5 {
+				if !l.Allow("192.0.2.1", "victim@example.com") {
+					t.Fatal("victim budget exhausted early")
+				}
+			}
+			for i := range 1000 {
+				ip := fmt.Sprintf("2001:db8::%x", i+1)
+				if !samePrefix {
+					ip = fmt.Sprintf("2001:db8:%x::1", i+1)
+				}
+				for j := range 10 {
+					l.Allow(ip, fmt.Sprintf("flood-%d-%d@example.com", i, j))
+					if len(l.ips.keys) > MaxLimiterKeys || len(l.emails.keys) > MaxLimiterKeys {
+						t.Fatal("flood exceeded limiter memory bound")
+					}
+				}
+			}
+			if l.Allow("192.0.2.2", "victim@example.com") {
+				t.Fatal("rotating IP flood reset victim email limit")
+			}
+		})
+	}
+}
+
+func TestLoginRateLimiterIPv6PrefixBudget(t *testing.T) {
+	l := NewLoginRateLimiter(time.Hour, 10, 5)
+	for i := range 10 {
+		if !l.Allow(fmt.Sprintf("2001:db8:1:2::%x", i+1), fmt.Sprintf("user-%d@example.com", i)) {
+			t.Fatalf("prefix attempt %d rejected before budget", i+1)
+		}
+	}
+	if l.Allow("2001:db8:1:2:ffff::1", "fresh@example.com") {
+		t.Fatal("new address bypassed shared IPv6 /64 budget")
+	}
+	for _, ip := range []string{"2001:db8:1:3::1", "192.0.2.1", "192.0.2.2"} {
+		if !l.Allow(ip, "fresh@example.com") {
+			t.Fatalf("independent IP budget rejected for %s", ip)
+		}
+	}
+}
+
+func TestWindowLimiterCapacityPreservesExhaustedWindows(t *testing.T) {
+	l := NewWindowLimiter(time.Hour, 2)
+	for range 2 {
+		if !l.Allow("victim") {
+			t.Fatal("victim budget exhausted early")
+		}
+	}
+	for i := range MaxLimiterKeys * 2 {
+		if !l.Allow(strconv.Itoa(i)) {
+			t.Fatalf("new key %d rejected", i)
+		}
+		if len(l.keys) > MaxLimiterKeys || l.expiry.Len() > MaxLimiterKeys || l.evictable.Len() > MaxLimiterKeys {
+			t.Fatal("limiter exceeded memory bound")
+		}
+	}
+	if l.Allow("victim") {
+		t.Fatal("capacity eviction reset exhausted window")
+	}
+}
+
+func TestWindowLimiterAllBlockedAdmitsNewKeys(t *testing.T) {
+	l := NewWindowLimiter(time.Hour, 1)
+	for i := range MaxLimiterKeys * 2 {
+		key := strconv.Itoa(i)
+		if !l.Allow(key) {
+			t.Fatalf("new key %d rejected", i)
+		}
+		if l.Allow(key) {
+			t.Fatalf("key %d bypassed its budget", i)
+		}
+		if len(l.keys) > MaxLimiterKeys || l.expiry.Len() > MaxLimiterKeys || l.evictable.Len() > MaxLimiterKeys {
+			t.Fatal("limiter exceeded memory bound")
+		}
+	}
+	if !l.Allow("0") {
+		t.Fatal("oldest blocked window was not evicted")
+	}
+	if l.Allow(strconv.Itoa(MaxLimiterKeys*2 - 1)) {
+		t.Fatal("newest blocked window was evicted")
 	}
 }

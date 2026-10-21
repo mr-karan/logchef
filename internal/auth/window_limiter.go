@@ -6,22 +6,24 @@ import (
 	"time"
 )
 
-// MaxLimiterKeys bounds memory by evicting the oldest window to admit new keys.
+// MaxLimiterKeys bounds the number of tracked windows.
 const MaxLimiterKeys = 10_000
 
 // WindowLimiter counts requests per key in fixed windows ordered by expiration.
 type WindowLimiter struct {
-	mu     sync.Mutex
-	window time.Duration
-	limit  int
-	keys   map[string]*list.Element
-	expiry list.List
+	mu        sync.Mutex
+	window    time.Duration
+	limit     int
+	keys      map[string]*list.Element
+	expiry    list.List
+	evictable list.List
 }
 
 type limiterWindow struct {
-	key   string
-	start time.Time
-	count int
+	key       string
+	start     time.Time
+	count     int
+	evictable *list.Element
 }
 
 // NewWindowLimiter allows up to limit requests per key within each window.
@@ -42,8 +44,7 @@ func (l *WindowLimiter) Allow(key string) bool {
 		if now.Sub(w.start) < l.window {
 			break
 		}
-		delete(l.keys, w.key)
-		l.expiry.Remove(head)
+		l.remove(head)
 	}
 	if element, ok := l.keys[key]; ok {
 		w := element.Value.(*limiterWindow)
@@ -51,13 +52,34 @@ func (l *WindowLimiter) Allow(key string) bool {
 			return false
 		}
 		w.count++
+		if w.count == l.limit {
+			l.evictable.Remove(w.evictable)
+			w.evictable = nil
+		}
 		return true
 	}
 	if len(l.keys) >= MaxLimiterKeys {
+		// Evict the oldest window under its limit; if all are blocked, the oldest one, so new users are still admitted.
 		head := l.expiry.Front()
-		delete(l.keys, head.Value.(*limiterWindow).key)
-		l.expiry.Remove(head)
+		if candidate := l.evictable.Front(); candidate != nil {
+			head = candidate.Value.(*list.Element)
+		}
+		l.remove(head)
 	}
-	l.keys[key] = l.expiry.PushBack(&limiterWindow{key: key, start: now, count: 1})
+	w := &limiterWindow{key: key, start: now, count: 1}
+	element := l.expiry.PushBack(w)
+	l.keys[key] = element
+	if w.count < l.limit {
+		w.evictable = l.evictable.PushBack(element)
+	}
 	return true
+}
+
+func (l *WindowLimiter) remove(element *list.Element) {
+	w := element.Value.(*limiterWindow)
+	delete(l.keys, w.key)
+	l.expiry.Remove(element)
+	if w.evictable != nil {
+		l.evictable.Remove(w.evictable)
+	}
 }
