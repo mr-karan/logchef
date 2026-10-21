@@ -257,6 +257,13 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 }
 
 // UpdateUser updates a user while preserving an active admin and revoking deactivated sessions.
+// requestMayRemoveAdmin reports whether an update could leave its target
+// without an active admin role. Unknown values count as removals.
+func requestMayRemoveAdmin(u models.User) bool {
+	return (u.Role != "" && u.Role != models.UserRoleAdmin) ||
+		(u.Status != "" && u.Status != models.UserStatusActive)
+}
+
 func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
@@ -264,7 +271,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 
 	// Decide from the request alone so the advisory lock is always taken
 	// before the row lock and never after a stale read.
-	mayRemoveAdmin := updateData.Role == models.UserRoleMember || updateData.Status == models.UserStatusInactive
+	mayRemoveAdmin := requestMayRemoveAdmin(updateData)
 	var deactivated bool
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if mayRemoveAdmin {

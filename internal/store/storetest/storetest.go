@@ -105,6 +105,24 @@ func assertSourceAccess(t *testing.T, ctx context.Context, s store.Store, teamID
 
 // --- domains ---
 
+func verifyUserLastLogin(t *testing.T, ctx context.Context, s store.Store, user *models.User) {
+	t.Helper()
+	loginAt := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	if err := s.UpdateUserLastLogin(ctx, user.ID, loginAt); err != nil {
+		t.Fatalf("UpdateUserLastLogin: %v", err)
+	}
+	afterLogin, err := s.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser after login: %v", err)
+	}
+	if afterLogin.LastLoginAt == nil || !afterLogin.LastLoginAt.Equal(loginAt) {
+		t.Errorf("last_login_at = %v, want %v", afterLogin.LastLoginAt, loginAt)
+	}
+	if afterLogin.Email != user.Email || afterLogin.Role != user.Role || afterLogin.Status != user.Status {
+		t.Errorf("UpdateUserLastLogin changed other fields: %+v", afterLogin)
+	}
+}
+
 func testUsers(t *testing.T, ctx context.Context, s store.Store) {
 	u := mkUser(t, ctx, s, "alice@test.dev")
 
@@ -115,6 +133,8 @@ func testUsers(t *testing.T, ctx context.Context, s store.Store) {
 	if got.AccountType != models.UserAccountTypeHuman {
 		t.Errorf("default account_type = %q, want human", got.AccountType)
 	}
+
+	verifyUserLastLogin(t, ctx, s, got)
 
 	byEmail, err := s.GetUserByEmail(ctx, "alice@test.dev")
 	if err != nil || byEmail.ID != u.ID {
