@@ -2,7 +2,6 @@ package clickhouse
 
 import (
 	"errors"
-	"regexp"
 	"strings"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
@@ -16,8 +15,6 @@ type QueryError struct {
 
 func (e *QueryError) Error() string { return e.Message }
 func (e *QueryError) Unwrap() error { return e.Err }
-
-var queryErrorAddress = regexp.MustCompile(`(?:[a-zA-Z0-9_.-]+|\[[0-9a-fA-F:.%]+\]):[0-9]+|\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b|(?:[0-9a-fA-F]*:){2,}[0-9a-fA-F:.]*`)
 
 func publicQueryError(err error) error {
 	exception, ok := errors.AsType[*clickhouse.Exception](err)
@@ -38,8 +35,9 @@ func publicQueryError(err error) error {
 		}
 		message, _, _ = strings.Cut(message, "Stack trace:")
 		message, _, _ = strings.Cut(message, "While executing ")
-		message = strings.TrimSpace(message)
-		if message == "" || queryErrorAddress.MatchString(message) {
+		message = strings.TrimSpace(strings.TrimRight(strings.TrimSpace(message), ":"))
+		// Shard addresses only arrive through the "Received from" prefix; other text echoes the user's query.
+		if message == "" || strings.Contains(message, "Received from ") {
 			return err
 		}
 		return &QueryError{Message: message, Err: err}

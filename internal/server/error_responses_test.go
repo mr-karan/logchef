@@ -438,6 +438,9 @@ func TestClickHouseResourceFailureResponses(t *testing.T) {
 		{"remote rows read 158", "SELECT * FROM remote('127.0.0.2', system.query_log) SETTINGS max_rows_to_read=1, prefer_localhost_replica=0", 400, "rows"},
 		{"remote bytes read 307", "SELECT * FROM remote('127.0.0.2', system.query_log) SETTINGS max_bytes_to_read=1, prefer_localhost_replica=0", 400, "bytes"},
 		{"remote result rows 70", "SELECT number FROM remote('127.0.0.2', system.numbers) LIMIT 100 SETTINGS max_result_rows=1, result_overflow_mode='throw', prefer_localhost_replica=0", 400, "max rows"},
+		{"time literal in query", "SELECT missing_query_field FROM system.numbers WHERE toDateTime('2026-10-01 10:00:00', 'UTC') < now()", 400, "missing_query_field"},
+		{"ip literal in query", "SELECT missing_query_field FROM system.numbers WHERE toString(number) = '10.0.0.1'", 400, "missing_query_field"},
+		{"remote cast 70", "SELECT accurateCast(number, 'UInt8') FROM remote('127.0.0.2', system.numbers) LIMIT 1000 SETTINGS prefer_localhost_replica=0", 400, "accurateCast"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer

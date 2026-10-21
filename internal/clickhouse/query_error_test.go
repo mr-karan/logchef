@@ -36,10 +36,8 @@ func TestPublicQueryErrorDistributedDiagnostics(t *testing.T) {
 			}{
 				{"remote", "Received from shard.example:9000. DB::Exception: limit exceeded. While executing Remote. Stack trace:\n0. DB::Exception", true},
 				{"stack", "limit exceeded. Stack trace:\n0. DB::Exception", true},
-				{"host port", "failure on shard.example:9000", false},
-				{"ipv4", "failure on 192.0.2.1", false},
-				{"ipv6", "failure on [2001:db8::1]", false},
-				{"bare ipv6", "failure on 2001:db8::1", false},
+				{"nested remote", "limit exceeded. Received from shard.example:9000", false},
+				{"while executing", "limit exceeded. While executing Remote:", true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					cause := &ch.Exception{Code: code, Message: tc.message}
