@@ -14,7 +14,7 @@ import (
 const (
 	oauthMigrationVersion      = 33
 	dropDeviceMigrationVersion = 36
-	beforeDropDeviceVersion    = 34
+	beforeDropDeviceVersion    = dropDeviceMigrationVersion - 1
 )
 
 var oauthTables = []string{
