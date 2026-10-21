@@ -141,6 +141,7 @@ describe("SourceStats", () => {
 
     route.query = { sourceId: "8" };
     await flush();
+    expect(pending.has(7) && pending.has(8)).toBe(true);
     pending.get(8)?.("stats timed out");
     await flush();
     expect(inspectionAlert(root)).toBeDefined();
