@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   buildHistogramChartModel,
+  buildHistogramTooltip,
   formatHistogramTimestamp,
   formatTooltipTimestamp,
   parseGranularityToMilliseconds,
@@ -238,5 +239,40 @@ describe("histogram labels", () => {
     expect(formatHistogramTimestamp(Date.UTC(2026, 9, 19, 18), range, "1m")).toBe("18:00");
     const crossing = { ...range, end: Date.UTC(2026, 9, 20, 1) };
     expect(formatHistogramTimestamp(Date.UTC(2026, 9, 19, 18), crossing, "1m")).toMatch(/^(19 Oct|Oct 19), 18:00$/);
+  });
+});
+
+describe("buildHistogramTooltip", () => {
+  it("renders escaped labels, a safe color, precise time, and grouped counts", () => {
+    const html = buildHistogramTooltip({
+      datum: { ts: 0, bucket: iso(0), bucketEndTs: MIN, total: 12, first: 5, second: 7 },
+      series: [
+        { key: "first", label: '<img src=x onerror="alert(1)">', color: 'red;"><img src=x>' },
+        { key: "second", label: "info", color: "#5470C6" },
+      ],
+      range: { start: 0, end: MIN, zone: zoneFromPreference("utc") },
+      totalLabel: "Total <events>",
+    });
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    expect(host.querySelector("img")).toBeNull();
+    expect(html).toContain("background:var(--chart-1)");
+    expect(html).toContain("background:#5470C6");
+    expect(host.textContent).toContain('Total <events>12');
+    expect(host.textContent).toContain('00:00:00');
+    expect([...host.querySelectorAll("strong")].map((element) => element.textContent)).toEqual(["12", "5", "7"]);
+  });
+
+  it("omits the redundant total for a single series and defaults a missing value to zero", () => {
+    const html = buildHistogramTooltip({
+      datum: { ts: 0, bucket: iso(0), bucketEndTs: MIN, total: 0 },
+      series: [{ key: "count", label: "Logs", color: "#5470C6" }],
+      range: { start: 0, end: MIN, zone: zoneFromPreference("utc") },
+      totalLabel: "Total",
+    });
+    expect(html).not.toContain("Total");
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    expect(host.querySelector("strong")?.textContent).toBe("0");
   });
 });

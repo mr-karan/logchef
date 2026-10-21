@@ -26,6 +26,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import ConfirmDialog from "@/components/ui/ConfirmDialog.vue";
 import DashboardToolbar from "./components/DashboardToolbar.vue";
 import DashboardPanel from "./components/DashboardPanel.vue";
 import PanelBuilderDrawer from "./components/PanelBuilderDrawer.vue";
@@ -382,10 +383,21 @@ const movePlaceholder = computed(() => {
 function startEdit() {
   store.enterEdit();
 }
+const pendingDiscard = ref<'cancel' | 'leave' | null>(null);
+const discardOpen = computed({
+  get: () => pendingDiscard.value !== null,
+  set: (open: boolean) => { if (!open) pendingDiscard.value = null; },
+});
+
 function cancelEdit() {
-  if (store.isDirty && !window.confirm("Discard unsaved changes to this dashboard?")) {
+  if (store.isDirty) {
+    pendingDiscard.value = 'cancel';
     return;
   }
+  discardEdit();
+}
+
+function discardEdit() {
   editorOpen.value = false;
   editingPanelId.value = null;
   pendingNewPanelId.value = null;
@@ -399,11 +411,18 @@ async function saveEdit() {
 }
 
 function goBack() {
-  // The in-app Back control honors the same dirty guard as route navigation.
-  if (store.isEditing && store.isDirty && !window.confirm("Discard unsaved changes and leave?")) {
+  if (store.isEditing && store.isDirty) {
+    pendingDiscard.value = 'leave';
     return;
   }
   router.push("/dashboards");
+}
+
+function confirmDiscard() {
+  const action = pendingDiscard.value;
+  pendingDiscard.value = null;
+  discardEdit();
+  if (action === 'leave') router.push("/dashboards");
 }
 
 function panelOuterHeight(rowSpan: number): number {
@@ -497,7 +516,7 @@ onBeforeRouteLeave(() => {
   // Guard against leaving with unsaved edits (browser confirm; the in-app Back
   // control routes through goBack() which applies the same check).
   if (store.isEditing && store.isDirty) {
-    if (!window.confirm("You have unsaved changes to this dashboard. Leave anyway?")) {
+    if (!window.confirm(t('dashboards.unsavedLeaveConfirmation'))) {
       return false;
     }
   }
@@ -511,7 +530,7 @@ onBeforeRouteLeave(() => {
 onBeforeRouteUpdate((to, from) => {
   if (to.params.id === from.params.id) return true;
   if (store.isEditing && store.isDirty) {
-    if (!window.confirm("You have unsaved changes to this dashboard. Leave anyway?")) {
+    if (!window.confirm(t('dashboards.unsavedLeaveConfirmation'))) {
       return false;
     }
   }
@@ -522,6 +541,14 @@ onBeforeRouteUpdate((to, from) => {
 
 <template>
   <div class="mx-auto w-full max-w-[1600px] px-4 py-4">
+    <ConfirmDialog
+      v-model:open="discardOpen"
+      :title="t('dashboards.discardChangesTitle')"
+      :description="t('dashboards.discardChangesConfirmation')"
+      :confirm-text="t('dashboards.discardChanges')"
+      destructive
+      @confirm="confirmDiscard"
+    />
     <!-- Header -->
     <div class="mb-4 flex items-start justify-between gap-4 flex-wrap">
       <div class="min-w-0">

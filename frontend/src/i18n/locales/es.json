@@ -735,5 +735,9 @@
   "askChef.send": "Enviar",
   "askChef.stop": "Detener",
   "askChef.failed": "Ask Chef no pudo responder. Inténtalo de nuevo.",
-  "askChef.disabled": "Ask Chef está desactivado en este servidor."
+  "askChef.disabled": "Ask Chef está desactivado en este servidor.",
+  "dashboards.discardChangesTitle": "¿Descartar cambios?",
+  "dashboards.discardChangesConfirmation": "¿Descartar los cambios sin guardar en este panel?",
+  "dashboards.discardChanges": "Descartar cambios",
+  "dashboards.unsavedLeaveConfirmation": "Tienes cambios sin guardar en este panel. ¿Salir de todos modos?"
 }

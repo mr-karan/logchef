@@ -735,5 +735,9 @@
   "askChef.send": "भेजें",
   "askChef.stop": "रोकें",
   "askChef.failed": "Ask Chef जवाब नहीं दे सका। दोबारा कोशिश करें।",
-  "askChef.disabled": "इस सर्वर पर Ask Chef बंद है।"
+  "askChef.disabled": "इस सर्वर पर Ask Chef बंद है।",
+  "dashboards.discardChangesTitle": "बदलाव छोड़ें?",
+  "dashboards.discardChangesConfirmation": "इस डैशबोर्ड के बिना सहेजे बदलाव छोड़ें?",
+  "dashboards.discardChanges": "बदलाव छोड़ें",
+  "dashboards.unsavedLeaveConfirmation": "इस डैशबोर्ड में बिना सहेजे बदलाव हैं। फिर भी बाहर जाएँ?"
 }

@@ -1452,5 +1452,9 @@
   "askChef.send": "Send",
   "askChef.stop": "Stop",
   "askChef.failed": "Ask Chef could not answer. Try again.",
-  "askChef.disabled": "Ask Chef is turned off on this server."
+  "askChef.disabled": "Ask Chef is turned off on this server.",
+  "dashboards.discardChangesTitle": "Discard changes?",
+  "dashboards.discardChangesConfirmation": "Discard unsaved changes to this dashboard?",
+  "dashboards.discardChanges": "Discard changes",
+  "dashboards.unsavedLeaveConfirmation": "You have unsaved changes to this dashboard. Leave anyway?"
 }

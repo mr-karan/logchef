@@ -735,5 +735,9 @@
   "askChef.send": "보내기",
   "askChef.stop": "중지",
   "askChef.failed": "Ask Chef가 답하지 못했습니다. 다시 시도하세요.",
-  "askChef.disabled": "이 서버에서는 Ask Chef가 꺼져 있습니다."
+  "askChef.disabled": "이 서버에서는 Ask Chef가 꺼져 있습니다.",
+  "dashboards.discardChangesTitle": "변경 사항을 삭제할까요?",
+  "dashboards.discardChangesConfirmation": "이 대시보드의 저장하지 않은 변경 사항을 삭제할까요?",
+  "dashboards.discardChanges": "변경 사항 삭제",
+  "dashboards.unsavedLeaveConfirmation": "이 대시보드에 저장하지 않은 변경 사항이 있습니다. 그래도 나갈까요?"
 }

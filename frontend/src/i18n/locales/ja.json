@@ -735,5 +735,9 @@
   "askChef.send": "送信",
   "askChef.stop": "停止",
   "askChef.failed": "Ask Chef は回答できませんでした。再試行してください。",
-  "askChef.disabled": "このサーバーでは Ask Chef が無効です。"
+  "askChef.disabled": "このサーバーでは Ask Chef が無効です。",
+  "dashboards.discardChangesTitle": "変更を破棄しますか？",
+  "dashboards.discardChangesConfirmation": "このダッシュボードの未保存の変更を破棄しますか？",
+  "dashboards.discardChanges": "変更を破棄",
+  "dashboards.unsavedLeaveConfirmation": "このダッシュボードには未保存の変更があります。このまま移動しますか？"
 }

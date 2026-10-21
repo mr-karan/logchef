@@ -1,7 +1,7 @@
+import { sanitizeChartColor } from "@/utils/histogram-chart";
 import { describe, it, expect } from "vitest";
 import { escapeHtml } from "@/lib/html";
 import {
-  sanitizeChartColor,
   resolveBarMode,
   shouldUseCrosshairYStacked,
 } from "@/views/dashboards/components/PanelTimeseries.vue";

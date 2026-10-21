@@ -735,5 +735,9 @@
   "askChef.send": "傳送",
   "askChef.stop": "停止",
   "askChef.failed": "Ask Chef 無法回答。請重試。",
-  "askChef.disabled": "此伺服器已關閉 Ask Chef。"
+  "askChef.disabled": "此伺服器已關閉 Ask Chef。",
+  "dashboards.discardChangesTitle": "放棄變更？",
+  "dashboards.discardChangesConfirmation": "放棄此儀表板尚未儲存的變更？",
+  "dashboards.discardChanges": "放棄變更",
+  "dashboards.unsavedLeaveConfirmation": "此儀表板有尚未儲存的變更。仍要離開？"
 }

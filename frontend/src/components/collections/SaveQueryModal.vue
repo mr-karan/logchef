@@ -253,78 +253,31 @@ onMounted(async () => {
   if (!selectedCollectionId.value && collectionsStore.personalCollection) {
     selectedCollectionId.value = String(collectionsStore.personalCollection.id);
   }
-
-  // Initialize form with data if provided
-  if (props.editData) {
-    // We're editing an existing query
-    name.value = props.editData.name || '';
-    description.value = props.editData.description || '';
-    queryId.value = props.editData.id?.toString() || '';
-
-    try {
-      const content = JSON.parse(props.editData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from editData", e);
-    }
-  } else if (props.initialData) {
-    // Creating new query with initial data OR editing with initialData + isEditMode
-    name.value = props.initialData.name || '';
-    description.value = props.initialData.description || '';
-    // Set queryId if editing (isEditMode is true and initialData has an id)
-    queryId.value = props.isEditMode ? (props.initialData.id?.toString() || '') : '';
-
-    try {
-      const content = JSON.parse(props.initialData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from initialData", e);
-    }
-  }
-
-  // Also check URL parameters for editing existing query
-  if (route.query.id && !props.initialData && !props.editData) {
-    queryId.value = route.query.id.toString();
-  }
 });
 
-// Watch for changes in initialData or editData
-watch([() => props.initialData, () => props.editData], ([newInitialData, newEditData]) => {
-  if (newEditData) {
-    // Editing existing query takes precedence
-    name.value = newEditData.name || '';
-    description.value = newEditData.description || '';
-    queryId.value = newEditData.id?.toString() || '';
-
+function initFromProps() {
+  const data = props.editData || props.initialData;
+  name.value = data?.name || '';
+  description.value = data?.description || '';
+  queryId.value = isEditing.value ? data?.id?.toString() || '' : '';
+  if (!data) queryId.value = route.query.id?.toString() || '';
+  saveTimestampUserModified.value = false;
+  saveTimestamp.value = !data;
+  if (data?.query_content) {
     try {
-      const content = JSON.parse(newEditData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from editData in watcher", e);
-    }
-  } else if (newInitialData) {
-    // Creating new query OR editing with initialData + isEditMode
-    name.value = newInitialData.name || '';
-    description.value = newInitialData.description || '';
-    // Set queryId if editing (isEditMode is true and initialData has an id)
-    queryId.value = props.isEditMode ? (newInitialData.id?.toString() || '') : '';
-
-    try {
-      const content = JSON.parse(newInitialData.query_content);
-      if (content.timeRange && (content.timeRange.absolute || content.timeRange.relative)) {
-        saveTimestamp.value = true;
-      }
-    } catch (e) {
-      console.error("Failed to parse query content from initialData in watcher", e);
+      const content = JSON.parse(data.query_content);
+      saveTimestamp.value = !!(content.timeRange?.absolute || content.timeRange?.relative);
+    } catch (error) {
+      console.error("Failed to parse saved query content", error);
     }
   }
-}, { deep: true });
+}
+
+watch(
+  [() => props.initialData, () => props.editData, () => props.isEditMode, () => props.isOpen],
+  initFromProps,
+  { immediate: true },
+);
 
 // Prepare query content with proper structure
 function prepareQueryContent(saveTimestamp: boolean): string {

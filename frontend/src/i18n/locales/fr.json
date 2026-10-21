@@ -735,5 +735,9 @@
   "askChef.send": "Envoyer",
   "askChef.stop": "Arrêter",
   "askChef.failed": "Ask Chef n'a pas pu répondre. Réessayez.",
-  "askChef.disabled": "Ask Chef est désactivé sur ce serveur."
+  "askChef.disabled": "Ask Chef est désactivé sur ce serveur.",
+  "dashboards.discardChangesTitle": "Abandonner les modifications ?",
+  "dashboards.discardChangesConfirmation": "Abandonner les modifications non enregistrées de ce tableau de bord ?",
+  "dashboards.discardChanges": "Abandonner les modifications",
+  "dashboards.unsavedLeaveConfirmation": "Ce tableau de bord contient des modifications non enregistrées. Quitter quand même ?"
 }
