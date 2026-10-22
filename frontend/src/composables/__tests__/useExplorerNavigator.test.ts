@@ -356,6 +356,53 @@ describe("Explorer history navigation", () => {
     } finally { network.restore(); }
   });
 
+  it.each(['share', 'saved'] as const)('handles a denied %s resolver with one local toast and no forbidden redirect', async entry => {
+    const { router, query, forbidden, toastError, store } = await mountExplorer(evidenceA);
+    await settle();
+    const shown = { ...router.currentRoute.value.query };
+    const network = controlledApi(config => entry === 'share'
+      ? config.url === '/query-shares/denied'
+      : !!config.url?.startsWith('/saved-queries/42/resolve'));
+    await setLocale('fr');
+    try {
+      await router.push({ path: '/logs/explore', query: entry === 'share' ? { share: 'denied' } : { team: '1', id: '42' } });
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      network.requests[0]?.respond(403, { status: 'error', message: 'Denied', error_type: 'AuthorizationError' });
+      await flush();
+      await flush();
+
+      expect(forbidden).not.toHaveBeenCalled();
+      expect(router.currentRoute.value.path).toBe('/logs/explore');
+      expect(router.currentRoute.value.query).toEqual(shown);
+      expect(store.sourceId).toBe(source.id);
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t('explore.linkOpenFailed'), expect.objectContaining({
+        description: i18n.global.t('explore.sourceAccessDenied'),
+      }));
+    } finally { network.restore(); }
+  });
+
+  it.each(['url', 'share', 'saved'] as const)('opens a fallback for an unavailable source in a %s link without running its query', async entry => {
+    const requestedSourceId = 900;
+    const location: Record<string, string> = entry === 'share' ? { share: 'tok' }
+      : entry === 'saved' ? { team: '1', id: '42' }
+      : { team: '1', source: String(requestedSourceId), mode: 'logchefql', q: 'private="yes"' };
+    await setLocale('fr');
+    const { router, nav, store, query, toastError } = await mountExplorer(location, () => {
+      vi.spyOn(exploreApi, 'getQueryShare').mockReturnValue(ok({ ...shareOnOtherSource, source_id: requestedSourceId }) as never);
+      vi.spyOn(savedQueriesApi, 'resolve').mockReturnValue(ok({ ...savedOnOtherSource, source_id: requestedSourceId, query_content: savedContent('private="yes"') }) as never);
+    });
+    await settle();
+
+    expect(nav.status.value).toBe('ready');
+    expect(store.sourceId).toBe(source.id);
+    expect(router.currentRoute.value.query.source).toBe(String(source.id));
+    expect(query).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t('explore.linkOpenFailed'), expect.objectContaining({
+      description: i18n.global.t('explore.sourceUnavailableFallback', { sourceId: requestedSourceId, sourceName: source.name }),
+    }));
+  });
+
   it("does not repeat an error toast already shown by the interceptor", async () => {
     const { nav, toastError } = await mountExplorer();
     await settle();
