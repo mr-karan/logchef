@@ -1822,6 +1822,18 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 	return i, err
 }
 
+const getTriggeredAlertHistoryAlertID = `-- name: GetTriggeredAlertHistoryAlertID :one
+SELECT alert_id FROM alert_history
+WHERE id = ? AND status = 'triggered'
+`
+
+func (q *Queries) GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error) {
+	row := q.queryRow(ctx, q.getTriggeredAlertHistoryAlertIDStmt, getTriggeredAlertHistoryAlertID, id)
+	var alert_id int64
+	err := row.Scan(&alert_id)
+	return alert_id, err
+}
+
 const getUser = `-- name: GetUser :one
 SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE id = ?
 `
@@ -4096,27 +4108,6 @@ type RemoveTeamSourceParams struct {
 func (q *Queries) RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error {
 	_, err := q.exec(ctx, q.removeTeamSourceStmt, removeTeamSource, arg.TeamID, arg.SourceID)
 	return err
-}
-
-const resolveAlertHistory = `-- name: ResolveAlertHistory :one
-UPDATE alert_history
-SET status = 'resolved',
-    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    message = ?
-WHERE id = ? AND status = 'triggered'
-RETURNING alert_id
-`
-
-type ResolveAlertHistoryParams struct {
-	Message sql.NullString `json:"message"`
-	ID      int64          `json:"id"`
-}
-
-func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error) {
-	row := q.queryRow(ctx, q.resolveAlertHistoryStmt, resolveAlertHistory, arg.Message, arg.ID)
-	var alert_id int64
-	err := row.Scan(&alert_id)
-	return alert_id, err
 }
 
 const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec

@@ -201,10 +201,7 @@ func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, messag
 	if s.pool != nil {
 		return s.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
 	}
-	if err := s.q.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{HistoryID: historyID}); err != nil {
-		return fmt.Errorf("failed to interrupt alert delivery: %w", err)
-	}
-	alertID, err := s.q.ResolveAlertHistory(ctx, sqlc.ResolveAlertHistoryParams{Message: text(message), ID: historyID})
+	alertID, err := s.q.GetTriggeredAlertHistoryAlertID(ctx, historyID)
 	if err != nil {
 		if notFound(err) {
 			return models.ErrNotFound
