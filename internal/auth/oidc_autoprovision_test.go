@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -11,7 +12,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,8 +32,10 @@ import (
 // the spec's allowance for an httptest-based substitute for a full browser
 // OIDC dance.
 type fakeOIDCServer struct {
-	srv *httptest.Server
-	key *rsa.PrivateKey
+	srv             *httptest.Server
+	key             *rsa.PrivateKey
+	jwksRequests    atomic.Int64
+	jwksUnavailable atomic.Bool
 
 	mu     sync.Mutex
 	tokens map[string]OIDCClaims // authorization code -> claims to embed in the id_token
@@ -58,6 +63,11 @@ func newFakeOIDCServer(t *testing.T) *fakeOIDCServer {
 		})
 	})
 	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		f.jwksRequests.Add(1)
+		if f.jwksUnavailable.Load() {
+			http.Error(w, "unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{
 			Keys: []jose.JSONWebKey{{
@@ -364,4 +374,42 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 
 func discardLoggerAP() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestCallbackFailureLeavesLoggingToCaller(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		claims OIDCClaims
+		skip   bool
+		want   error
+	}{
+		{"unverified", OIDCClaims{Email: "user@example.com", EmailVerified: new(false)}, false, ErrOIDCEmailNotVerified},
+		{"missing verification", OIDCClaims{Email: "user@example.com"}, false, ErrOIDCEmailNotVerified},
+		{"unknown user", OIDCClaims{Email: "user@example.com", EmailVerified: new(true)}, false, ErrUnauthorizedUser},
+		{"missing verification allowed but unknown user", OIDCClaims{Email: "user@example.com"}, true, ErrUnauthorizedUser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fake := newFakeOIDCServer(t)
+			fake.registerCode("code", tc.claims)
+			var logs bytes.Buffer
+			log := slog.New(slog.NewTextHandler(&logs, nil))
+			cfg := testOIDCConfig(fake)
+			cfg.SkipEmailVerifiedCheck = tc.skip
+			p, err := NewOIDCProvider(t.Context(), cfg, log)
+			if err != nil {
+				t.Fatal(err)
+			}
+			logs.Reset()
+			_, _, err = p.HandleCallback(t.Context(), newAuthTestDB(t), log, &config.AuthConfig{}, "code", "state")
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+			if !strings.Contains(err.Error(), "email="+tc.claims.Email) {
+				t.Errorf("callback error lost identity: %v", err)
+			}
+			if logs.Len() != 0 {
+				t.Fatalf("provider logged a failure before the caller handled it: %s", logs.String())
+			}
+		})
+	}
 }

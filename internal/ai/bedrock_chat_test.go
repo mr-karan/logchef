@@ -241,3 +241,9 @@ func TestBedrockToolSpecFromMCPSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestNewBedrockChatRequiresRegion(t *testing.T) {
+	if _, err := NewBedrockChat(t.Context(), ""); err == nil {
+		t.Fatal("empty region accepted")
+	}
+}

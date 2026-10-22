@@ -7,16 +7,18 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strconv"
 	"testing"
 	"testing/fstest"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/auth"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 )
 
 func TestWindowLimiterAllowsUpToLimit(t *testing.T) {
-	l := newWindowLimiter(time.Minute, 3)
+	l := auth.NewWindowLimiter(time.Minute, 3)
 	for i := 1; i <= 3; i++ {
 		if !l.Allow("k") {
 			t.Fatalf("request %d rejected, want allowed", i)
@@ -31,7 +33,7 @@ func TestWindowLimiterAllowsUpToLimit(t *testing.T) {
 }
 
 func TestWindowLimiterIsolatesKeys(t *testing.T) {
-	l := newWindowLimiter(time.Minute, 1)
+	l := auth.NewWindowLimiter(time.Minute, 1)
 	if !l.Allow("a") {
 		t.Fatal("first request for a rejected")
 	}
@@ -45,7 +47,7 @@ func TestWindowLimiterIsolatesKeys(t *testing.T) {
 }
 
 func TestWindowLimiterEmptyKeyAlwaysAllowed(t *testing.T) {
-	l := newWindowLimiter(time.Minute, 1)
+	l := auth.NewWindowLimiter(time.Minute, 1)
 	for i := range 5 {
 		if !l.Allow("") {
 			t.Fatalf("empty key rejected on request %d", i)
@@ -54,7 +56,7 @@ func TestWindowLimiterEmptyKeyAlwaysAllowed(t *testing.T) {
 }
 
 func TestWindowLimiterResetsAfterWindow(t *testing.T) {
-	l := newWindowLimiter(20*time.Millisecond, 1)
+	l := auth.NewWindowLimiter(20*time.Millisecond, 1)
 	if !l.Allow("k") {
 		t.Fatal("first request rejected")
 	}
@@ -68,20 +70,20 @@ func TestWindowLimiterResetsAfterWindow(t *testing.T) {
 }
 
 func TestWindowLimiterPrunesStaleKeys(t *testing.T) {
-	l := newWindowLimiter(20*time.Millisecond, 5)
+	l := auth.NewWindowLimiter(time.Second, 5)
 	l.Allow("stale")
-	if got := len(l.keys); got != 1 {
-		t.Fatalf("keys after first insert = %d, want 1", got)
+	for i := 1; i < 10_000; i++ {
+		l.Allow(strconv.Itoa(i))
 	}
-	// After the window elapses, a call for a different key should prune the
-	// stale one during its lazy prune pass.
-	time.Sleep(30 * time.Millisecond)
-	l.Allow("fresh")
-	if _, ok := l.keys["stale"]; ok {
-		t.Fatal("stale key was not pruned")
+	if !l.Allow("overflow") {
+		t.Fatal("new key rejected at capacity")
 	}
-	if _, ok := l.keys["fresh"]; !ok {
-		t.Fatal("fresh key missing after insert")
+	time.Sleep(1100 * time.Millisecond)
+	if !l.Allow("fresh") {
+		t.Fatal("expired keys did not release capacity")
+	}
+	if !l.Allow("stale") {
+		t.Fatal("expired key did not get a new window")
 	}
 }
 

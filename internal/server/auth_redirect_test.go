@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -69,8 +70,9 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 				if wrapped {
 					loginErr = fmt.Errorf("callback failed: %w", loginErr)
 				}
+				var logs bytes.Buffer
 				s := &Server{
-					log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
+					log:    slog.New(slog.NewTextHandler(&logs, nil)),
 					config: &config.Config{Server: config.ServerConfig{FrontendURL: "https://logchef.example/"}},
 				}
 				app := fiber.New()
@@ -84,6 +86,13 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 				defer resp.Body.Close()
 				if resp.StatusCode != http.StatusTemporaryRedirect {
 					t.Errorf("status = %d, want %d", resp.StatusCode, http.StatusTemporaryRedirect)
+				}
+				level := "WARN"
+				if tc.code == "auth_error" {
+					level = "ERROR"
+				}
+				if !strings.Contains(logs.String(), "level="+level) {
+					t.Errorf("authentication failure log = %s, want level %s", logs.String(), level)
 				}
 				want := "https://logchef.example/auth/login?error=" + tc.code
 				if got := resp.Header.Get("Location"); got != want {
@@ -184,9 +193,55 @@ func TestHandleCallbackErrors(t *testing.T) {
 			if got := resp.Header.Get("Location"); got != want {
 				t.Errorf("Location = %q, want %q", got, want)
 			}
+			if got := strings.Count(strings.TrimSpace(logs.String()), "\n") + 1; got != 1 {
+				t.Errorf("callback logged %d lines, want one: %s", got, logs.String())
+			}
+			if !strings.Contains(logs.String(), "error_code="+tc.code) {
+				t.Errorf("missing stable error code: %s", logs.String())
+			}
 			if strings.Contains(tc.query, "error_description=") && !strings.Contains(logs.String(), "error_description=provider-detail") {
 				t.Error("IdP error description missing from server log")
 			}
 		})
+	}
+}
+
+func TestCallbackTokenFailureLogsOnce(t *testing.T) {
+	var idp *httptest.Server
+	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/.well-known/openid-configuration" {
+			_ = json.NewEncoder(w).Encode(map[string]string{"issuer": idp.URL, "jwks_uri": idp.URL + "/jwks"})
+			return
+		}
+		_, _ = io.WriteString(w, `{"access_token":"token","token_type":"Bearer"}`)
+	}))
+	defer idp.Close()
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, nil))
+	provider, err := auth.NewOIDCProvider(t.Context(), &config.OIDCConfig{ProviderURL: idp.URL, TokenURL: idp.URL + "/token"}, log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logs.Reset()
+	s := &Server{log: log, config: &config.Config{}, oidcProvider: provider}
+	app := fiber.New()
+	app.Get("/callback", s.handleCallback)
+	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
+	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("Location"); got != "/auth/login?error=invalid_token" {
+		t.Fatalf("redirect = %q", got)
+	}
+	if got := strings.Count(strings.TrimSpace(logs.String()), "\n") + 1; got != 1 {
+		t.Fatalf("callback logged %d lines, want one: %s", got, logs.String())
+	}
+	if !strings.Contains(logs.String(), "error_code=invalid_token") {
+		t.Fatalf("missing stable error code: %s", logs.String())
 	}
 }

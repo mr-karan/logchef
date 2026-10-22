@@ -61,7 +61,6 @@ func CreateSession(ctx context.Context, db store.StoreOps, log *slog.Logger, use
 	// Check concurrent sessions before creating a new one
 	sessionCount, err := db.CountUserSessions(ctx, userID)
 	if err != nil {
-		log.Error("failed to count user sessions before creation", "error", err, "user_id", userID)
 		return nil, fmt.Errorf("failed to count user sessions: %w", err)
 	}
 
@@ -73,8 +72,6 @@ func CreateSession(ctx context.Context, db store.StoreOps, log *slog.Logger, use
 			"max_sessions", maxConcurrent,
 		)
 		if err := RevokeUserSessions(ctx, db, log, userID); err != nil {
-			// Don't necessarily fail the login, but log the error
-			log.Error("failed to delete existing user sessions while enforcing limit", "error", err, "user_id", userID)
 			return nil, fmt.Errorf("failed to delete existing user sessions: %w", err)
 		}
 	}
@@ -89,7 +86,6 @@ func CreateSession(ctx context.Context, db store.StoreOps, log *slog.Logger, use
 
 	// Save session to database
 	if err := db.CreateSession(ctx, session); err != nil {
-		log.Error("failed to create session in db", "error", err, "user_id", userID)
 		return nil, fmt.Errorf("failed to create session: %w", err)
 	}
 

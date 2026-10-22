@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
-	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/document"
 	"github.com/aws/aws-sdk-go-v2/service/bedrockruntime/types"
@@ -31,19 +30,15 @@ type bedrockProvider struct {
 // newBedrockProvider builds a bedrockProvider. Credentials are resolved through
 // the default AWS credential chain; only the region comes from Logchef config.
 func newBedrockProvider(ctx context.Context, cfg ProviderConfig, logger *slog.Logger) (*bedrockProvider, error) {
-	if cfg.Region == "" {
-		return nil, fmt.Errorf("AWS region is required for the bedrock provider (set ai.region)")
-	}
-
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
+	client, err := newBedrockClient(ctx, cfg.Region)
 	if err != nil {
-		return nil, fmt.Errorf("failed to load AWS config for bedrock: %w", err)
+		return nil, err
 	}
 
 	logger.Debug("using AWS Bedrock provider", "region", cfg.Region)
 
 	return &bedrockProvider{
-		client: bedrockruntime.NewFromConfig(awsCfg),
+		client: client,
 		logger: logger.With("component", "bedrock_provider"),
 	}, nil
 }
