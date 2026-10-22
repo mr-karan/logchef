@@ -36,15 +36,8 @@ var (
 // label is plenty — the owner can rename via the UI if they want.
 const personalCollectionName = "My Collection"
 
-// EnsurePersonalCollection returns the user's personal collection, creating it
-// (and the owner-membership row) on first call. Behavior:
-//   - If the row exists, return it. The owner-membership row is also there
-//     (FK + creation flow guarantees it) — no extra writes.
-//   - If the row is missing, create it. If we lose a race against another
-//     concurrent creator (the unique partial index on
-//     `collections(created_by) WHERE is_personal=1` enforces one-per-user),
-//     we re-fetch and return the row the winner wrote.
-func EnsurePersonalCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, user *models.User) (*models.Collection, error) {
+// EnsurePersonalCollection returns the personal collection, creating it atomically with its owner.
+func EnsurePersonalCollection(ctx context.Context, db store.Store, log *slog.Logger, user *models.User) (*models.Collection, error) {
 	if user == nil {
 		return nil, fmt.Errorf("user is required to ensure personal collection")
 	}
@@ -56,7 +49,18 @@ func EnsurePersonalCollection(ctx context.Context, db store.StoreOps, log *slog.
 		return nil, fmt.Errorf("error fetching personal collection: %w", err)
 	}
 
-	created, err := db.CreateCollection(ctx, personalCollectionName, "", true, user.ID)
+	var created *models.Collection
+	err = db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		created, err = tx.CreateCollection(ctx, personalCollectionName, "", true, user.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.AddCollectionMember(ctx, created.ID, user.ID, models.CollectionRoleOwner, &user.ID); err != nil {
+			return fmt.Errorf("error initializing personal collection: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		// Race: another goroutine wrote the row between our GetPersonalCollection
 		// check and our INSERT. The unique partial index turns the second insert
@@ -71,18 +75,13 @@ func EnsurePersonalCollection(ctx context.Context, db store.StoreOps, log *slog.
 		}
 		return nil, err
 	}
-	if err := db.AddCollectionMember(ctx, created.ID, user.ID, models.CollectionRoleOwner, &user.ID); err != nil {
-		log.Error("failed to add owner to personal collection", "error", err, "user_id", user.ID, "collection_id", created.ID)
-		_ = db.DeleteCollection(ctx, created.ID)
-		return nil, fmt.Errorf("error initializing personal collection: %w", err)
-	}
 	created.CallerRole = models.CollectionRoleOwner
 	created.MemberCount = 1
 	return created, nil
 }
 
 // ListCollectionsForUser returns the user's collections (auto-creating personal).
-func ListCollectionsForUser(ctx context.Context, db store.StoreOps, log *slog.Logger, user *models.User) ([]*models.Collection, error) {
+func ListCollectionsForUser(ctx context.Context, db store.Store, log *slog.Logger, user *models.User) ([]*models.Collection, error) {
 	if _, err := EnsurePersonalCollection(ctx, db, log, user); err != nil {
 		return nil, err
 	}
@@ -94,18 +93,25 @@ func ListCollectionsForUser(ctx context.Context, db store.StoreOps, log *slog.Lo
 }
 
 // CreateCollection creates a shared collection owned by the caller.
-func CreateCollection(ctx context.Context, db store.StoreOps, log *slog.Logger, name, description string, createdBy models.UserID) (*models.Collection, error) {
+func CreateCollection(ctx context.Context, db store.Store, log *slog.Logger, name, description string, createdBy models.UserID) (*models.Collection, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("name is required")
 	}
-	collection, err := db.CreateCollection(ctx, name, description, false, createdBy)
+	var collection *models.Collection
+	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		var err error
+		collection, err = tx.CreateCollection(ctx, name, description, false, createdBy)
+		if err != nil {
+			return err
+		}
+		if err := tx.AddCollectionMember(ctx, collection.ID, createdBy, models.CollectionRoleOwner, &createdBy); err != nil {
+			return fmt.Errorf("failed to add owner: %w", err)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	if err := db.AddCollectionMember(ctx, collection.ID, createdBy, models.CollectionRoleOwner, &createdBy); err != nil {
-		_ = db.DeleteCollection(ctx, collection.ID)
-		return nil, fmt.Errorf("failed to add owner: %w", err)
 	}
 	collection.CallerRole = models.CollectionRoleOwner
 	collection.MemberCount = 1
