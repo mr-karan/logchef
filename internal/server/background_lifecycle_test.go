@@ -331,7 +331,7 @@ func TestExportJobCancelledAtShutdown(t *testing.T) {
 	app := fiber.New()
 	app.Use(requestContext(context.Background()))
 	path := fmt.Sprintf("/teams/%d/sources/%d/exports", team.ID, source.ID)
-	withUser(app, http.MethodPost, "/teams/:teamID/sources/:sourceID/exports", user, srv.handleCreateExportJob)
+	withAuthorizedSource(app, srv, "/teams/:teamID/sources/:sourceID/exports", user, srv.handleCreateExportJob)
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"raw_sql":"SELECT number, sleepEachRow(0.00001) FROM system.numbers LIMIT 10000000","format":"csv","limit":10000000,"query_timeout":60}`))
 	req.Header.Set("Content-Type", "application/json")
 	response := testRequest(t, app, req)

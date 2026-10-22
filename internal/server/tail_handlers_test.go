@@ -135,8 +135,8 @@ func TestHandleTailLogsInvalidParams(t *testing.T) {
 
 	s := &Server{}
 	app := fiber.New()
-	// No middleware/user context — exercises the pre-auth param validation only.
-	app.Get("/teams/:teamID/sources/:sourceID/logs/tail", s.handleTailLogs)
+	// The route's source middleware rejects malformed IDs before any lookup.
+	app.Get("/teams/:teamID/sources/:sourceID/logs/tail", s.requireTeamHasSource(models.TokenScopeLogsRead), s.handleTailLogs)
 
 	t.Run("invalid source ID returns 400", func(t *testing.T) {
 		t.Parallel()

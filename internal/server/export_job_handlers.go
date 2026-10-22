@@ -17,20 +17,17 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
-	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
+	sourceID, teamID := src.SourceID(), src.TeamID()
 	user := currentUser(c)
 	if user == nil {
 		return sendMissingUser(c)
@@ -111,19 +108,26 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 }
 
 func (s *Server) handleGetExportJob(c fiber.Ctx) error {
-	job, ok := s.authorizeExportJob(c)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
+	}
+	job, ok := s.authorizeExportJob(c, src)
 	if !ok {
 		return nil
 	}
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
 	}
-	teamID, _ := core.ParseTeamID(c.Params("teamID"))
-	return SendSuccess(c, fiber.StatusOK, exportJobResponse(teamID, job))
+	return SendSuccess(c, fiber.StatusOK, exportJobResponse(src.TeamID(), job))
 }
 
 func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
-	job, ok := s.authorizeExportJob(c)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
+	}
+	job, ok := s.authorizeExportJob(c, src)
 	if !ok {
 		return nil
 	}
@@ -166,17 +170,7 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 }
 
 // authorizeExportJob writes the error response and returns false on failure; the caller must then return nil.
-func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-		return nil, false
-	}
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-		return nil, false
-	}
+func (s *Server) authorizeExportJob(c fiber.Ctx, src access.AuthorizedSource) (*models.ExportJob, bool) {
 	exportID := strings.TrimSpace(c.Params("exportID"))
 	if exportID == "" {
 		s.sendLoadFailure(c, fiber.StatusBadRequest, "Export ID is required", models.ValidationErrorType)
@@ -198,11 +192,10 @@ func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
 		s.sendLoadFailure(c, fiber.StatusInternalServerError, "Failed to get export job", models.GeneralErrorType)
 		return nil, false
 	}
-	if job.SourceID != sourceID {
+	if job.SourceID != src.SourceID() {
 		s.sendLoadFailure(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
 		return nil, false
 	}
-	_ = teamID // teamID in the URL is an auth gate via middleware; no need to compare on the row
 	if !hasGlobalAdminBypass(c) && job.CreatedBy != user.ID {
 		s.sendLoadFailure(c, fiber.StatusForbidden, "You do not have access to this export", models.AuthorizationErrorType)
 		return nil, false
