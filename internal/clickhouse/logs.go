@@ -422,18 +422,18 @@ func isUnmodifiedWildcard(item *clickhouseparser.SelectItem) bool {
 func selectsColumn(selection *clickhouseparser.SelectQuery, name string) bool {
 	for _, item := range selection.SelectItems {
 		if item.Alias != nil {
-			if item.Alias.Name == name {
+			if identIs(item.Alias, name) {
 				return true
 			}
 			continue
 		}
 		switch expr := item.Expr.(type) {
 		case *clickhouseparser.Ident:
-			if expr.Name == name {
+			if identIs(expr, name) {
 				return true
 			}
 		case *clickhouseparser.NestedIdentifier:
-			if expr.DotIdent != nil && expr.DotIdent.Name == name || expr.DotIdent == nil && expr.Ident.Name == name {
+			if expr.DotIdent != nil && identIs(expr.DotIdent, name) || expr.DotIdent == nil && identIs(expr.Ident, name) {
 				return true
 			}
 		}
