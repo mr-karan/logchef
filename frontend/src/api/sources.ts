@@ -223,8 +223,8 @@ export const sourcesApi = {
   // Source management
   listAllSourcesForAdmin: () =>
     apiClient.get<Source[]>("/admin/sources"),
-  listTeamSources: (teamId: number) =>
-    apiClient.get<Source[]>(`/teams/${teamId}/sources`),
+  listTeamSources: (teamId: number, options?: { signal?: AbortSignal }) =>
+    apiClient.get<Source[]>(`/teams/${teamId}/sources`, options),
   getTeamSource: (teamId: number, sourceId: number) =>
     apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`),
   createSource: (payload: CreateSourcePayload) =>

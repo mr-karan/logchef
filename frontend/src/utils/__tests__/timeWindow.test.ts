@@ -181,8 +181,17 @@ describe("zone-explicit helpers", () => {
     expect(sqlTimeCondition("timestamp", { start: at("2026-10-19T04:00:00Z"), end: at("2026-10-19T05:00:00Z"), zone: NEW_YORK })).toBe(
       "`timestamp` BETWEEN toDateTime('2026-10-19 00:00:00', 'America/New_York') AND toDateTime('2026-10-19 01:00:00', 'America/New_York')",
     );
-    expect(sqlTimeCondition("`ts`", { start: at("2026-11-01T06:30:00Z"), end: at("2026-11-01T08:00:00Z"), zone: NEW_YORK })).toBe(
+    expect(sqlTimeCondition("ts", { start: at("2026-11-01T06:30:00Z"), end: at("2026-11-01T08:00:00Z"), zone: NEW_YORK })).toBe(
       "`ts` BETWEEN toDateTime('2026-11-01 06:30:00', 'UTC') AND toDateTime('2026-11-01 03:00:00', 'America/New_York')",
+    );
+  });
+});
+
+describe("timestamp identifier escaping", () => {
+  it("quotes backticks and backslashes as one raw field name", () => {
+    const window = { start: epochMs(0), end: epochMs(1000), zone: UTC };
+    expect(sqlTimeCondition("event`time\\path", window)).toBe(
+      "`event\\x60time\\\\path` BETWEEN toDateTime('1970-01-01 00:00:00', 'UTC') AND toDateTime('1970-01-01 00:00:01', 'UTC')",
     );
   });
 });

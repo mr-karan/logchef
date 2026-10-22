@@ -138,8 +138,9 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   };
 }
 
-interface LiveRequest<R> {
+interface LiveRequest<A, R> {
   request: string;
+  args: A;
   controller: AbortController;
   replacement?: Promise<R>;
 }
@@ -154,15 +155,15 @@ export function createLatestRequests<A extends unknown[], R>(options: {
   slot?: (...args: NoInfer<A>) => string;
   load: (signal: AbortSignal, ...args: A) => Promise<R>;
 }) {
-  const live = new Map<string, LiveRequest<R>>();
-  const pending = new Set<LiveRequest<R>>();
+  const live = new Map<string, LiveRequest<A, R>>();
+  const pending = new Set<LiveRequest<A, R>>();
 
   function run(args: A, callerSignal?: AbortSignal): Promise<R> {
     if (callerSignal?.aborted) return options.load(callerSignal, ...args);
 
     const request = options.request(...args);
     const slot = options.slot?.(...args) ?? request;
-    const current: LiveRequest<R> = { request, controller: new AbortController() };
+    const current: LiveRequest<A, R> = { request, args, controller: new AbortController() };
     callerSignal?.addEventListener("abort", () => current.controller.abort(), { once: true });
 
     const previous = live.get(slot);
@@ -186,11 +187,16 @@ export function createLatestRequests<A extends unknown[], R>(options: {
     return result;
   }
 
+  // After a mutation, a live load may hold a response from before it; restart it so its callers adopt a fresh one.
+  function invalidate() {
+    for (const current of [...live.values()]) void run(current.args).catch(() => undefined);
+  }
+
   function cancelAll() {
     for (const request of pending) request.controller.abort();
     pending.clear();
     live.clear();
   }
 
-  return { run, cancelAll };
+  return { run, invalidate, cancelAll };
 }

@@ -1,3 +1,4 @@
+import { quoteClickHouseIdentifier } from '@/utils/clickhouse';
 import { sqlTimeCondition, type ResolvedWindow } from '@/utils/timeWindow';
 
 export function generateDefaultSql(params: {
@@ -10,12 +11,6 @@ export function generateDefaultSql(params: {
   return `SELECT *
 FROM ${tableName}
 WHERE ${sqlTimeCondition(tsField, window)}
-ORDER BY \`${tsField}\` DESC
+ORDER BY ${quoteClickHouseIdentifier(tsField)} DESC
 LIMIT ${limit}`;
 }
-
-export const SqlManager = {
-  generateDefaultSql(params: Parameters<typeof generateDefaultSql>[0]) {
-    return { success: true, sql: generateDefaultSql(params), warnings: [] };
-  },
-};

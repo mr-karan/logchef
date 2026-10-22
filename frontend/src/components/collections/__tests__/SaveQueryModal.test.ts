@@ -118,7 +118,7 @@ vi.mock("@/stores/sources", () => ({
   useSourcesStore: () => ({
     teamSources: [],
     currentSourceDetails: null,
-    loadTeamSources: vi.fn(() => Promise.resolve()),
+    loadCurrentTeamSources: vi.fn(() => Promise.resolve()),
   }),
 }));
 vi.mock("@/stores/explore", () => ({

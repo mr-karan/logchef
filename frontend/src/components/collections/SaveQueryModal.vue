@@ -211,7 +211,7 @@ onMounted(async () => {
 
     // Then load sources for the current team
     if (currentTeamId.value) {
-      promises.push(sourcesStore.loadTeamSources(currentTeamId.value));
+      promises.push(sourcesStore.loadCurrentTeamSources());
     }
   }
 

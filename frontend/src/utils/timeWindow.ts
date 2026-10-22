@@ -1,6 +1,7 @@
 // The Explorer's time model. A window is plain data (a relative spec or two
 // UTC instants). Wall clock exists only at the edges (picker text, SQL text,
 // labels), and every wall-clock function takes its zone explicitly.
+import { quoteClickHouseIdentifier } from "./clickhouse";
 import {
   CalendarDateTime,
   fromAbsolute,
@@ -202,6 +203,6 @@ function sqlBound(ms: EpochMs, zone: ZoneId): string {
 
 /** The ClickHouse BETWEEN clause for the resolved window, in its own zone. A fold bound is written in UTC. */
 export function sqlTimeCondition(tsField: string, window: ResolvedWindow): string {
-  const field = tsField.includes("`") ? tsField : `\`${tsField}\``;
+  const field = quoteClickHouseIdentifier(tsField);
   return `${field} BETWEEN ${sqlBound(window.start, window.zone)} AND ${sqlBound(window.end, window.zone)}`;
 }

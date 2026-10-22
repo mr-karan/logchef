@@ -109,6 +109,7 @@ import { useExploreStore } from "../explore";
 import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
 import { usePreferencesStore } from "../preferences";
+import { useVariableStore } from "../variables";
 
 function relative(spec: string): TimeWindow {
   const window = relativeWindow(spec);
@@ -938,5 +939,68 @@ describe("explore store", () => {
       await store.executeQuery();
       expect(store.lastExecutedState?.compilation).toEqual({ conditions: [], fieldsUsed: [] });
     });
+  });
+});
+
+describe("explore template dialect on load", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+    mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+    mocks.teamsState.currentTeamId = 1;
+    useContextStore().selectTeam(1);
+    useContextStore().selectSource(2);
+  });
+
+  const cases = [
+    { mode: "native", language: "logsql", query: "service:my--svc [[ level:={{level}} ]]" },
+    { mode: "logchefql", language: "logchefql", query: "service=my#svc [[ AND level={{level}} ]]" },
+  ] as const;
+
+  for (const { mode, language, query } of cases) {
+    it.each(["url", "draft", "saved", "share"])(`detects ${language} variables from %s`, (path) => {
+      const store = useExploreStore();
+      if (path === "url") {
+        store.initializeFromUrl({ mode, ...(mode === "native" ? { sql: query } : { q: query }) });
+      } else if (path === "draft") {
+        localStorage.setItem("logchef.explore.draft.1.2", JSON.stringify({
+          version: 2, mode, nativeQuery: query, logchefqlCode: query,
+        }));
+        store.initializeFromUrl({});
+      } else if (path === "saved") {
+        store.hydrateFromResolvedQuery({
+          id: 1, name: "Template", query_language: language,
+          query_content: JSON.stringify({ content: query }),
+        });
+      } else {
+        store.hydrateFromQueryShare({
+          token: "template", source_id: 2, team_id: 1, share_url: "/s/template",
+          created_at: "", expires_at: "", created_by: 1,
+          payload: { version: 1, mode, query, limit: 100, time_range: { relative: "15m" } },
+        });
+      }
+      expect(useVariableStore().allVariables).toMatchObject([{ name: "level", isOptional: true }]);
+    });
+  }
+});
+
+describe("explore template dialect after a mode switch", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+    mocks.sourcesState.currentSourceDetails = CH_SOURCE;
+    mocks.teamsState.currentTeamId = 1;
+    useContextStore().selectTeam(1);
+    useContextStore().selectSource(1);
+  });
+
+  it("scans native SQL with the source dialect after a LogchefQL saved query", () => {
+    const store = useExploreStore();
+    store.hydrateFromResolvedQuery({
+      id: 1, name: "Template", query_language: "logchefql",
+      query_content: JSON.stringify({ content: "level={{a}}" }),
+    });
+    store.setActiveMode("native");
+    expect(store.templateDialect).toBe("clickhouse-sql");
   });
 });

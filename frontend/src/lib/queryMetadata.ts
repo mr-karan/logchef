@@ -1,4 +1,5 @@
 export type QueryLanguage = "logchefql" | "clickhouse-sql" | "logsql";
+export type NativeQueryLanguage = Exclude<QueryLanguage, "logchefql">;
 export type SavedQueryEditorMode = "builder" | "native";
 export type AlertEditorMode = "condition" | "native";
 
@@ -84,7 +85,7 @@ export function isVictoriaLogsSource(source: SourceDescriptor): boolean {
   return getNativeQueryLanguageForSource(source) === "logsql";
 }
 
-export function getNativeQueryLanguageForSource(source: SourceDescriptor): QueryLanguage {
+export function getNativeQueryLanguageForSource(source: SourceDescriptor): NativeQueryLanguage {
   return supportsQueryLanguage(source, "logsql") ? "logsql" : "clickhouse-sql";
 }
 
@@ -117,7 +118,8 @@ export function resolveSavedQueryMetadata(input: {
     queryLanguage = getNativeQueryLanguageForSource(source);
   }
 
-  if (!supportsQueryLanguage(source, queryLanguage)) {
+  const sourceKnown = !!(source.source_type || source.query_languages?.length);
+  if (sourceKnown && !supportsQueryLanguage(source, queryLanguage)) {
     queryLanguage = getNativeQueryLanguageForSource(source);
   }
 

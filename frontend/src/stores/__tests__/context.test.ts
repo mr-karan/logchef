@@ -71,12 +71,21 @@ describe('useContextStore', () => {
       expect(store.sourceId).toBeNull()
     })
 
-    it('persists sourceId per team in localStorage', () => {
+    it('does not remember a source until it is confirmed', () => {
       const store = useContextStore()
       store.selectTeam(1)
       store.selectSource(10)
+      expect(store.getStoredSourceForTeam(1)).toBeNull()
+    })
+
+    it('remembers confirmed sources per team in localStorage', () => {
+      const store = useContextStore()
+      store.selectTeam(1)
+      store.selectSource(10)
+      store.rememberCurrentSource()
       store.selectTeam(2)
       store.selectSource(20)
+      store.rememberCurrentSource()
 
       const stored = JSON.parse(localStorage.getItem('logchef_context')!)
       expect(stored.sourcePerTeam[1]).toBe(10)
@@ -118,6 +127,7 @@ describe('useContextStore', () => {
       const store = useContextStore()
       store.selectTeam(1)
       store.selectSource(10)
+      store.rememberCurrentSource()
 
       const defaults = store.getStoredDefaults()
       expect(defaults.teamId).toBe(1)
@@ -137,6 +147,7 @@ describe('useContextStore', () => {
       const store = useContextStore()
       store.selectTeam(1)
       store.selectSource(10)
+      store.rememberCurrentSource()
 
       expect(store.getStoredSourceForTeam(1)).toBe(10)
     })
