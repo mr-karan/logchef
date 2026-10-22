@@ -52,9 +52,9 @@ describe("useTeamSourceContext", () => {
     const { applyContextSelection } = useTeamSourceContext();
 
     const superseded = applyContextSelection(2, 7, { maxWaitMs: 50 });
-    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(2));
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(2, expect.anything()));
     const current = applyContextSelection(9, 91);
-    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(9));
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(9, expect.anything()));
     releases.get(2)?.();
     await new Promise((resolve) => setTimeout(resolve, 20));
     releases.get(9)?.();
