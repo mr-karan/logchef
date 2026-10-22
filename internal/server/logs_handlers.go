@@ -264,17 +264,16 @@ type previewQuery struct {
 	source *models.Source
 	params datasource.QueryRequest
 	cfg    queryStreamConfig
-	// columnsSource orders buffered columns by the source schema. The SQL
-	// endpoint passes nil and keeps the result order.
-	columnsSource   *models.Source
-	mode            string
-	trackedQuery    string
-	requestedLimit  int
-	historyQuery    string
-	historyLanguage models.QueryLanguage
-	cacheable       bool
-	cacheKey        [32]byte
-	cacheTTL        time.Duration
+	// orderColumnsBySchema uses source schema order for inferred columns; false sorts by name.
+	orderColumnsBySchema bool
+	mode                 string
+	trackedQuery         string
+	requestedLimit       int
+	historyQuery         string
+	historyLanguage      models.QueryLanguage
+	cacheable            bool
+	cacheKey             [32]byte
+	cacheTTL             time.Duration
 }
 
 // executePreviewQuery serves q from the dashboard cache when it is cacheable,
@@ -364,11 +363,15 @@ func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQu
 
 // bufferedResponse has the same keys as the streamed response for q.
 func (q previewQuery) bufferedResponse(result *models.QueryResult, queryID string) map[string]any {
+	var columnsSource *models.Source
+	if q.orderColumnsBySchema {
+		columnsSource = q.source
+	}
 	resp := map[string]any{
 		"query_id":    queryID,
 		q.cfg.logsKey: result.Logs,
 		"stats":       result.Stats,
-		"columns":     core.ResultColumns(q.columnsSource, result),
+		"columns":     core.ResultColumns(columnsSource, result),
 		"warnings":    result.Warnings,
 	}
 	if q.cfg.includeGenerated {
