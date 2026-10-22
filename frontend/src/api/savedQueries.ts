@@ -1,5 +1,6 @@
 import { apiClient } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
+import type { TeamSummary } from "./teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 
 export interface SavedQueryTimeRange {
@@ -59,15 +60,6 @@ export interface ResolvedSavedQuery extends SavedQuery {
 }
 
 /**
- * Team information
- */
-export interface Team {
-  id: number;
-  name: string;
-  description?: string;
-}
-
-/**
  * Saved Queries API client
  */
 export const savedQueriesApi = {
@@ -111,5 +103,5 @@ export const savedQueriesApi = {
     return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`);
   },
 
-  getUserTeams: () => apiClient.get<Team[]>("/me/teams"),
+  getUserTeams: () => apiClient.get<TeamSummary[]>("/me/teams"),
 };

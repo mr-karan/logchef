@@ -74,7 +74,7 @@ export interface QueryRequest {
 export interface QueryResponse {
   conditions?: FilterCondition[] | null;
   fields_used?: string[] | null;
-  logs: Record<string, any>[];
+  logs: Record<string, unknown>[];
   columns: { name: string; type: string }[];
   stats: {
     execution_time_ms: number;

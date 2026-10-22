@@ -83,8 +83,7 @@ function goBack() {
 
 async function handleUpdate(payload: UpdateAlertRequest) {
   if (!alert.value) return;
-  // Alerts are no longer team-scoped — drop the team/source guards.
-  await alertsStore.updateAlert(undefined, undefined, alert.value.id, payload);
+  await alertsStore.updateAlert(alert.value.id, payload);
 }
 
 function confirmDelete() {
@@ -93,7 +92,7 @@ function confirmDelete() {
 
 async function handleDelete() {
   if (!alert.value) return;
-  const result = await alertsStore.deleteAlert(undefined, undefined, alert.value.id);
+  const result = await alertsStore.deleteAlert(alert.value.id);
   if (result.success) {
     goBack();
   }
@@ -144,8 +143,6 @@ async function loadHistory() {
 async function handleResolve(_historyId: number, message: string) {
   if (!alertId.value) return;
   const result = await alertHistoryStore.resolveAlert(
-    undefined,
-    undefined,
     alertId.value,
     { message }
   );
@@ -167,7 +164,7 @@ watch(alertId, (id) => {
   alertHistoryStore.setCurrentContext(id || null);
   if (!id) return;
   if (!alert.value) {
-    void alertsStore.refreshAlert(undefined, undefined, id);
+    void alertsStore.refreshAlert(id);
   }
   if (currentTab.value === "history") {
     void loadHistory();

@@ -1,9 +1,9 @@
 import { escapeHtml } from "@/lib/html";
 import type { ChartConfig } from "@/components/ui/chart";
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import { epochMs, formatInZone, isSameZonedDay, type ZoneId } from "@/utils/timeWindow";
 
-export interface HistogramChartSeries {
+interface HistogramChartSeries {
   key: string;
   label: string;
   color: string;
@@ -16,7 +16,7 @@ export interface HistogramChartRow extends Record<string, number | string> {
   total: number;
 }
 
-export interface HistogramChartModel {
+interface HistogramChartModel {
   rows: HistogramChartRow[];
   series: HistogramChartSeries[];
   chartConfig: ChartConfig;
@@ -139,7 +139,7 @@ export function formatCompactCount(value: number): string {
 }
 
 /** A chart's time range plus the zone its labels render in. */
-export interface HistogramLabelRange {
+interface HistogramLabelRange {
   start: number;
   end: number;
   zone: ZoneId;
@@ -234,7 +234,7 @@ function inferBucketWidthMs(sortedTimestamps: number[], fallback = 60_000): numb
 }
 
 export function buildHistogramChartModel(
-  buckets: HistogramData[],
+  buckets: HistogramDataPoint[],
   granularity?: string | null,
   forceGrouped = false,
 ): HistogramChartModel {

@@ -1,5 +1,6 @@
 import { apiClient } from "./apiUtils";
-import type { Team } from "./types";
+import type { TeamSummary } from "./teams";
+import type { ColumnInfo } from "./explore";
 import type { QueryLanguage } from "@/lib/queryMetadata";
 import type { TemplateVariable } from "@/api/logchefql";
 
@@ -120,18 +121,13 @@ export interface Source {
   sort_keys?: string[];
 }
 
-export interface ColumnInfo {
-  name: string;
-  type: string;
-}
-
 export interface SourceWithTeamsResponse {
   source: Source;
-  teams: Team[];
+  teams: TeamSummary[];
 }
 
 export interface SourceWithTeams extends Source {
-  teams: Team[];
+  teams: SourceWithTeamsResponse["teams"];
 }
 
 export interface CreateSourcePayload {

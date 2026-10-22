@@ -1,6 +1,6 @@
 import type { Source } from "@/api/sources";
 
-export interface SourceFieldLike {
+interface SourceFieldLike {
   name: string;
   type: string;
   isTimestamp?: boolean;
@@ -86,13 +86,13 @@ export function isPrimaryMessageField(name: string): boolean {
   );
 }
 
-export function unwrapFieldType(type: string): string {
+function unwrapFieldType(type: string): string {
   return type
     .replace(/LowCardinality\(([^)]+)\)/gi, "$1")
     .replace(/Nullable\(([^)]+)\)/gi, "$1");
 }
 
-export function isComplexFieldType(type: string): boolean {
+function isComplexFieldType(type: string): boolean {
   const lowerType = unwrapFieldType(type).toLowerCase();
   return (
     lowerType.startsWith("map(") ||

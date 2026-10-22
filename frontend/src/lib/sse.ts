@@ -13,12 +13,12 @@
 //   event: notice\ndata:{..} -> message {event: "notice", data: "{..}"}
 //   event: end\ndata: {..}   -> message {event: "end", data: "{..}"}
 
-export interface SSEComment {
+interface SSEComment {
   type: "comment";
   text: string;
 }
 
-export interface SSEMessage {
+interface SSEMessage {
   type: "message";
   event: string;
   data: string;
@@ -26,7 +26,7 @@ export interface SSEMessage {
 
 export type SSEEvent = SSEComment | SSEMessage;
 
-export interface SSEParser {
+interface SSEParser {
   /** Feed a decoded text chunk; returns any events completed by this chunk. */
   push(chunk: string): SSEEvent[];
 }

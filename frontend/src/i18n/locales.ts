@@ -15,7 +15,7 @@ export const locales = [
 export type Locale = (typeof locales)[number]["code"];
 export type LocalePreference = Locale | "auto";
 
-export function isLocale(value: unknown): value is Locale {
+function isLocale(value: unknown): value is Locale {
   return locales.some((locale) => locale.code === value);
 }
 

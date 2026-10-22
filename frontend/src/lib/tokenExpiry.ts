@@ -1,8 +1,8 @@
 import { formatDate } from "@/utils/format";
 
-export type BadgeVariant = "default" | "destructive" | "success" | "outline" | "secondary";
+type BadgeVariant = "default" | "destructive" | "success" | "outline" | "secondary";
 
-export type ExpiryStatus =
+type ExpiryStatus =
     | { kind: "never"; variant: BadgeVariant; isExpired: false }
     | { kind: "expired"; date: string; variant: BadgeVariant; isExpired: true }
     | { kind: "expiringSoon"; days: number; variant: BadgeVariant; isExpired: false }

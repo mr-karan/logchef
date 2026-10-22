@@ -1,6 +1,6 @@
 import {useVariableStore, type VariableState} from "@/stores/variables.ts";
 import {storeToRefs} from "pinia";
-import type { TemplateVariable } from "@/api/explore";
+import type { TemplateVariable } from "@/api/logchefql";
 import { extractTemplateVariables, type TemplateDialect } from "@/utils/template";
 export type { ExtractedVariable } from "@/utils/template";
 

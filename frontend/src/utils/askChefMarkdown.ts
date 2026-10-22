@@ -11,13 +11,13 @@ export type AnswerBlock =
   | { kind: "paragraph"; inlines: InlineToken[] }
   | { kind: "list"; items: InlineToken[][] };
 
-export interface AnswerDocument {
+interface AnswerDocument {
   body: AnswerBlock[];
   // The closing "Not established" section, or null when the answer has none.
   notEstablished: AnswerBlock[] | null;
 }
 
-export interface EvidenceLookup {
+interface EvidenceLookup {
   has(id: EvidenceId): boolean;
 }
 

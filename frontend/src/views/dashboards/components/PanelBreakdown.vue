@@ -3,7 +3,7 @@ import { useI18n } from "vue-i18n";
 
 import { computed } from "vue";
 import { VisDonut, VisSingleContainer } from "@unovis/vue";
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import {
   buildBreakdownChartModel,
   buildDonutBreakdownChartModel,
@@ -13,7 +13,7 @@ import {
 const { t } = useI18n();
 
 interface Props {
-  buckets: HistogramData[];
+  buckets: HistogramDataPoint[];
   groupBy: string;
   notice?: string | null;
   height?: number;

@@ -15,7 +15,8 @@ import {
   type PanelQueryLanguage,
   type CacheDirective,
 } from "@/api/dashboards";
-import { HistogramService, type HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
+import { calculateOptimalGranularity } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
 import {
   epochMs,
@@ -70,7 +71,7 @@ export interface PanelState {
   /** The window the shown result ran over; a queued panel keeps its old one. */
   range?: ResolvedWindow;
   timeseries?: {
-    buckets: HistogramData[];
+    buckets: HistogramDataPoint[];
     granularity: string | null;
     groupBy: string | null;
     notice: string | null;
@@ -80,7 +81,7 @@ export interface PanelState {
     value: number;
   };
   breakdown?: {
-    buckets: HistogramData[];
+    buckets: HistogramDataPoint[];
     groupBy: string;
     notice: string | null;
   };
@@ -374,7 +375,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         return { status: "error", error: "Breakdown panels require a group-by field." };
       }
       const { query: queryText, language: nativeLanguage } = await resolveNativeQuery(panel, range, signal);
-      const window = HistogramService.calculateOptimalGranularity(startIso, endIso);
+      const window = calculateOptimalGranularity(startIso, endIso);
 
       // query_language is advisory today (the native endpoints interpret
       // query_text by source type) but is sent so a VictoriaLogs source runs

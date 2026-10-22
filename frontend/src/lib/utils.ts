@@ -8,12 +8,16 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-export function valueUpdater<T extends Updater<any>>(
-  updaterOrValue: T,
-  ref: Ref
+function isUpdaterFunction<T>(value: Updater<T>): value is (previous: T) => T {
+  return typeof value === "function";
+}
+
+export function valueUpdater<T>(
+  updaterOrValue: Updater<T>,
+  ref: Ref<T>
 ) {
   ref.value =
-    typeof updaterOrValue === "function"
+    isUpdaterFunction(updaterOrValue)
       ? updaterOrValue(ref.value)
       : updaterOrValue;
   return ref.value;
@@ -116,18 +120,13 @@ const severityColumnNames = new Set([
   "loglevel",
 ]);
 
-// Keep track of dynamically added fields from source metadata
-const dynamicSeverityFields = new Set<string>();
-
 // Function to get severity badge classes
 export function getSeverityClasses(
   value: unknown,
   columnName: string
 ): string | null {
-  // Check if column is in standard list or dynamically registered
   if (
-    (!severityColumnNames.has(columnName.toLowerCase()) &&
-     !dynamicSeverityFields.has(columnName.toLowerCase())) ||
+    !severityColumnNames.has(columnName.toLowerCase()) ||
     typeof value !== "string"
   ) {
     return null;
@@ -200,9 +199,9 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
 
   // Find all timestamp matches
   while ((match = timestampRegex.exec(value)) !== null) {
-    // Ensure timestamp matches don't overlap with already found HTTP methods
+    const timestampMatch = match;
     const overlaps = matches.some(m =>
-      (match!.index < m.index + m.length && match!.index + match![0].length > m.index)
+      timestampMatch.index < m.index + m.length && timestampMatch.index + timestampMatch[0].length > m.index
     );
     if (!overlaps) {
       matches.push({
@@ -248,12 +247,8 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
       results.push(
         h('span', { class: methodClass }, method)
       );
-    } else if (currentMatch.type === 'timestamp' || timestampRegex.test(value)) {
-      // If it's a timestamp match or the entire value is a timestamp
-      const match = currentMatch.type === 'timestamp' ? currentMatch : {
-        value,
-        groups: timestampRegex.exec(value)?.slice(1)
-      };
+    } else if (currentMatch.type === 'timestamp') {
+      const match = currentMatch;
 
       if (match.groups) {
         const [datePart, separator, timePart, offsetPart = ''] = match.groups;
@@ -285,31 +280,6 @@ export function formatLogContent(value: string, isStatusColumn: boolean = false)
   // Add any remaining text after the last match
   if (lastIndex < value.length) {
     results.push(value.substring(lastIndex));
-  }
-
-  // If no matches were found and the entire string is a timestamp, format it
-  if (results.length === 0 && timestampRegex.test(value)) {
-    const match = timestampRegex.exec(value);
-    if (match) {
-      const [_, datePart, separator, timePart, offsetPart = ''] = match;
-
-      const children = [
-        h('span', { class: 'timestamp-date' }, datePart),
-        h('span', { class: 'timestamp-separator' }, separator),
-        h('span', { class: 'timestamp-time' }, timePart),
-      ];
-
-      if (offsetPart) {
-        children.push(h('span', { class: 'timestamp-offset' }, offsetPart));
-      }
-
-      return [h('span', { class: 'timestamp' }, children)];
-    }
-  }
-
-  // If no matches were found, return the original string wrapped in an array
-  if (results.length === 0 && value.length > 0) {
-    return [value];
   }
 
   return results;
