@@ -12,7 +12,7 @@ import (
 
 func TestCallbackReusesSigningKeys(t *testing.T) {
 	fake := newFakeOIDCServer(t)
-	fake.registerCode("code", OIDCClaims{Email: "user@example.com", EmailVerified: new(true)})
+	fake.registerCode("code", OIDCClaims{Email: "user@example.com", EmailVerified: new(true)}, "nonce")
 	log := discardLoggerAP()
 	p, err := NewOIDCProvider(t.Context(), testOIDCConfig(fake), log)
 	if err != nil {
@@ -20,7 +20,7 @@ func TestCallbackReusesSigningKeys(t *testing.T) {
 	}
 	db := newAuthTestDB(t)
 	for i := range 20 {
-		_, _, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "state")
+		_, _, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "nonce")
 		if !errors.Is(err, ErrUnauthorizedUser) {
 			t.Fatalf("signed login %d = %v, want unauthorized user after verification", i+1, err)
 		}
@@ -29,7 +29,7 @@ func TestCallbackReusesSigningKeys(t *testing.T) {
 		t.Errorf("20 signed logins fetched JWKS %d times, want 1", got)
 	}
 	fake.jwksUnavailable.Store(true)
-	_, _, err = p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "state")
+	_, _, err = p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "nonce")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("cached signing key during JWKS outage = %v, want unauthorized user after verification", err)
 	}
@@ -41,14 +41,14 @@ func TestCallbackReusesSigningKeys(t *testing.T) {
 func TestCallbackDatabaseOutlivesIDPDeadline(t *testing.T) {
 	fake := newFakeOIDCServer(t)
 	claims := OIDCClaims{Email: "user@example.com", EmailVerified: new(true)}
-	fake.registerCode("code", claims)
+	fake.registerCode("code", claims, "nonce")
 	log := discardLoggerAP()
 	p, err := NewOIDCProvider(t.Context(), testOIDCConfig(fake), log)
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.requestTimeout = 100 * time.Millisecond
-	raw, err := fake.signIDToken(claims)
+	raw, err := fake.signIDToken(claims, "nonce")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestCallbackDatabaseOutlivesIDPDeadline(t *testing.T) {
 			t.Errorf("database writer transaction: %v", err)
 		}
 	}()
-	_, session, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}, "code", "state")
+	_, session, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}, "code", "nonce")
 	if err != nil {
 		t.Fatalf("database work inherited the IdP deadline: %v", err)
 	}

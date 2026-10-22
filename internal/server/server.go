@@ -78,6 +78,8 @@ type Server struct {
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
 	askChefTurns  askChefTurns
 
+	localLoginLimiter *auth.LoginRateLimiter
+
 	listener        net.Listener
 	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
 	backgroundMu    sync.Mutex
@@ -206,6 +208,10 @@ func New(opts ServerOptions) *Server {
 		tokenLastQueued: make(map[int]time.Time),
 		stop:            make(chan struct{}),
 		cancelRequests:  cancelRequests,
+	}
+
+	if opts.Config.Auth.Local.Enabled {
+		s.localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
 	}
 
 	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())

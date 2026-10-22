@@ -306,8 +306,8 @@ const handleAddSource = async () => {
 }
 
 watch(teamId, async (id, _previousId, onCleanup) => {
-    let active = true
-    onCleanup(() => { active = false })
+    const teamRequests = new AbortController()
+    onCleanup(() => teamRequests.abort())
 
     if (isNaN(id) || id <= 0) {
         toast({
@@ -328,13 +328,13 @@ watch(teamId, async (id, _previousId, onCleanup) => {
             await teamsStore.loadUserTeams()
         }
 
-        if (!active) return
-        await teamsStore.getTeam(id)
+        if (teamRequests.signal.aborted) return
+        await teamsStore.getTeam(id, teamRequests.signal)
 
-        if (!active) return
+        if (teamRequests.signal.aborted) return
         await Promise.all([
-            teamsStore.listTeamMembers(id),
-            teamsStore.listTeamSources(id)
+            teamsStore.listTeamMembers(id, teamRequests.signal),
+            teamsStore.listTeamSources(id, teamRequests.signal)
         ])
 
     } catch (error) {
@@ -345,7 +345,7 @@ watch(teamId, async (id, _previousId, onCleanup) => {
             variant: 'destructive',
         })
     } finally {
-        if (active) isLoading.value = false
+        if (!teamRequests.signal.aborted) isLoading.value = false
     }
 }, { immediate: true })
 </script>

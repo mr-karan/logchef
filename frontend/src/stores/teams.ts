@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { computed } from "vue";
-import { useBaseStore } from "./base";
+import { createLatestRequests, useBaseStore } from "./base";
 import {
   teamsApi,
   type Team,
@@ -31,6 +31,12 @@ export const useTeamsStore = defineStore("teams", () => {
     teamSourcesMap: {},
     teamMembersMap: {},
   });
+
+  const userTeamLoads = createLatestRequests({ request: () => "userTeams", load: fetchUserTeams });
+  const adminTeamLoads = createLatestRequests({ request: () => "adminTeams", load: fetchAdminTeams });
+  const teamLoads = createLatestRequests({ request: (teamId: number) => String(teamId), load: fetchTeam });
+  const memberLoads = createLatestRequests({ request: (teamId: number) => String(teamId), load: fetchTeamMembers });
+  const sourceLoads = createLatestRequests({ request: (teamId: number) => String(teamId), load: fetchTeamSources });
 
   const authStore = useAuthStore();
   const contextStore = useContextStore();
@@ -82,6 +88,7 @@ export const useTeamsStore = defineStore("teams", () => {
   });
 
   function clearState() {
+    for (const loads of [userTeamLoads, adminTeamLoads, teamLoads, memberLoads, sourceLoads]) loads.cancelAll();
     state.data.value.teamMembersMap = {};
     state.data.value.teamSourcesMap = {};
   }
@@ -111,8 +118,12 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function loadUserTeams() {
+    return await userTeamLoads.run([]);
+  }
+
+  async function fetchUserTeams(signal: AbortSignal) {
     return await state.callApi({
-      apiCall: teamsApi.listUserTeams,
+      apiCall: () => teamsApi.listUserTeams({ signal }),
       operationKey: "loadUserTeams",
       onSuccess: async (response) => {
         // Simple, focused approach: Always work with the data array from the standard API response
@@ -128,13 +139,16 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function loadAdminTeams(forceReload = false) {
+    if (!forceReload && state.data.value.adminTeams.length > 0) {
+      return { success: true, data: state.data.value.adminTeams };
+    }
+    return await adminTeamLoads.run([]);
+  }
+
+  async function fetchAdminTeams(signal: AbortSignal) {
     return await state.withLoading('loadAdminTeams', async () => {
       try {
-        if (!forceReload && state.data.value.adminTeams.length > 0) {
-          return { success: true, data: state.data.value.adminTeams };
-        }
-
-        const response = await teamsApi.listAllTeams();
+        const response = await teamsApi.listAllTeams({ signal });
 
         if (isSuccessResponse(response) && response.data) {
           state.data.value.adminTeams = response.data as TeamWithMemberCount[];
@@ -143,7 +157,12 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: "Failed to load admin teams", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, 'loadAdminTeams');
+        return state.handleError(
+          signal.aborted
+            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
+            : error as Error,
+          'loadAdminTeams',
+        );
       }
     });
   }
@@ -189,10 +208,14 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
-  async function getTeam(teamId: number) {
+  async function getTeam(teamId: number, signal?: AbortSignal) {
+    return await teamLoads.run([teamId], signal);
+  }
+
+  async function fetchTeam(signal: AbortSignal, teamId: number) {
     return await state.withLoading(`getTeam-${teamId}`, async () => {
       try {
-        const response = await teamsApi.getTeam(teamId);
+        const response = await teamsApi.getTeam(teamId, { signal });
 
         if (isSuccessResponse(response) && response.data) {
           const teamData = { ...response.data, member_count: response.data.member_count || 0 };
@@ -205,7 +228,12 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: 'Team not found', error_type: 'NotFound' } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, `getTeam-${teamId}`);
+        return state.handleError(
+          signal.aborted
+            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
+            : error as Error,
+          `getTeam-${teamId}`,
+        );
       }
     });
   }
@@ -247,10 +275,14 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
-  async function listTeamMembers(teamId: number) {
+  async function listTeamMembers(teamId: number, signal?: AbortSignal) {
+    return await memberLoads.run([teamId], signal);
+  }
+
+  async function fetchTeamMembers(signal: AbortSignal, teamId: number) {
     return await state.withLoading(`listTeamMembers-${teamId}`, async () => {
       try {
-        const response = await teamsApi.listTeamMembers(teamId);
+        const response = await teamsApi.listTeamMembers(teamId, { signal });
 
         if (isSuccessResponse(response)) {
           const membersData = response.data;
@@ -262,7 +294,12 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: "Failed to load team members", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, `listTeamMembers-${teamId}`);
+        return state.handleError(
+          signal.aborted
+            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
+            : error as Error,
+          `listTeamMembers-${teamId}`,
+        );
       }
     });
   }
@@ -347,10 +384,14 @@ export const useTeamsStore = defineStore("teams", () => {
     });
   }
 
-  async function listTeamSources(teamId: number) {
+  async function listTeamSources(teamId: number, signal?: AbortSignal) {
+    return await sourceLoads.run([teamId], signal);
+  }
+
+  async function fetchTeamSources(signal: AbortSignal, teamId: number) {
     return await state.withLoading(`listTeamSources-${teamId}`, async () => {
       try {
-        const response = await teamsApi.listTeamSources(teamId);
+        const response = await teamsApi.listTeamSources(teamId, { signal });
 
         if (isSuccessResponse(response)) {
           const sourcesData = response.data;
@@ -362,7 +403,12 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: "Failed to load team sources", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, `listTeamSources-${teamId}`);
+        return state.handleError(
+          signal.aborted
+            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
+            : error as Error,
+          `listTeamSources-${teamId}`,
+        );
       }
     });
   }

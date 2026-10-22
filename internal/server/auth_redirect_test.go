@@ -56,6 +56,7 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 	}{
 		{"IdP access denied", errAccessDenied, "access_denied"},
 		{"invalid state", errInvalidState, "session_expired"},
+		{"invalid nonce", auth.ErrOIDCInvalidNonce, "session_expired"},
 		{"unauthorized", auth.ErrUnauthorizedUser, "unauthorized"},
 		{"inactive", auth.ErrUserInactive, "user_inactive"},
 		{"invalid token", auth.ErrOIDCInvalidToken, "invalid_token"},
@@ -230,6 +231,7 @@ func TestCallbackTokenFailureLogsOnce(t *testing.T) {
 	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
 	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
+	req.AddCookie(&http.Cookie{Name: nonceCookieName, Value: "test-browser-secret"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)

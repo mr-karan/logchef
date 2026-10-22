@@ -19,8 +19,10 @@ describe('alert request ownership', () => {
   it('keeps the latest source list after an older source responds', async () => {
     const store = useAlertsStore()
     const old = store.fetchAlerts(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     const current = store.fetchAlerts(2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    expect(network.requests[0].config.signal?.aborted).toBe(true)
     network.requests[1].succeed([alert(2)])
     await current
     network.requests[0].succeed([alert(1)])
@@ -42,8 +44,10 @@ describe('alert request ownership', () => {
   it.each([false, true])('keeps the latest history, including repeat requests for one alert (%s)', async sameAlert => {
     const store = useAlertHistoryStore()
     const old = store.loadHistory(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     const current = store.loadHistory(sameAlert ? 1 : 2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    expect(network.requests[0].config.signal?.aborted).toBe(true)
     network.requests[1].succeed([history(sameAlert ? 1 : 2, 20)])
     await current
     network.requests[0].succeed([history(1, 10)])
@@ -68,6 +72,7 @@ describe('alert request ownership', () => {
       ? (id: number) => useAlertsStore().fetchAlerts(id)
       : (id: number) => useAlertHistoryStore().loadHistory(id)
     const old = load(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     const current = load(2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))
     network.requests[1].succeed(kind === 'list' ? [alert(2)] : [history(2)])

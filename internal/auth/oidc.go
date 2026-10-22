@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/subtle"
 	"errors"
 	"fmt"
 	"io"
@@ -26,6 +27,7 @@ var (
 	ErrUnauthorizedUser     = errors.New("unauthorized user")
 	ErrUserInactive         = errors.New("user inactive")
 	ErrOIDCInvalidToken     = errors.New("invalid OIDC token")
+	ErrOIDCInvalidNonce     = errors.New("invalid OIDC nonce")
 	ErrOIDCEmailNotVerified = errors.New("email not verified")
 )
 
@@ -48,6 +50,13 @@ func CheckEmailVerified(claims OIDCClaims, skipCheck bool) error {
 		return nil
 	}
 	return ErrOIDCEmailNotVerified
+}
+
+func checkOIDCNonce(expected, claim string) error {
+	if expected == "" || subtle.ConstantTimeCompare([]byte(claim), []byte(expected)) != 1 {
+		return ErrOIDCInvalidNonce
+	}
+	return nil
 }
 
 const oidcRequestTimeout = 10 * time.Second
@@ -253,9 +262,9 @@ func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDT
 	return idToken, nil
 }
 
-// GetAuthURL returns the URL for the OIDC authorization endpoint with the given state.
-func (p *OIDCProvider) GetAuthURL(state string) string {
-	return p.oauthConf.AuthCodeURL(state)
+// GetAuthURL returns the OIDC authorization URL with state and nonce binding.
+func (p *OIDCProvider) GetAuthURL(state, nonce string) string {
+	return p.oauthConf.AuthCodeURL(state, oidc.Nonce(nonce))
 }
 
 // GetIssuer returns the OIDC issuer URL.
@@ -266,7 +275,7 @@ func (p *OIDCProvider) GetIssuer() string {
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
-func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, state string) (*models.User, *models.Session, error) {
+func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, nonce string) (*models.User, *models.Session, error) {
 	idpCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
 	defer cancel()
 
@@ -292,6 +301,9 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 			return nil, nil, fmt.Errorf("failed to verify ID token: %w", err)
 		}
 		return nil, nil, fmt.Errorf("%w: failed to verify ID token: %w", ErrOIDCInvalidToken, err)
+	}
+	if err := checkOIDCNonce(nonce, idToken.Nonce); err != nil {
+		return nil, nil, err
 	}
 
 	cancel()
