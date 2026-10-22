@@ -1101,6 +1101,14 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 		t.Fatal(err)
 	}
 	alertID := alert.ID
+	var legacyIDs []int64
+	for range 3 {
+		legacy, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		legacyIDs = append(legacyIDs, legacy.ID)
+	}
 	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{
 		"delivery_attempts": 3, "delivery_failed": true,
 	})
@@ -1124,6 +1132,11 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	if err != nil || len(history) != keep+1 {
 		t.Fatalf("history after pruning = %d entries, %v; want the firing entry and %d recent entries", len(history), err, keep)
 	}
+	for _, id := range legacyIDs {
+		if _, err := s.GetAlertHistoryEntry(ctx, alertID, id); !models.IsNotFound(err) {
+			t.Errorf("legacy duplicate %d after pruning error = %v, want not found", id, err)
+		}
+	}
 	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved"); err != nil {
 		t.Fatal(err)
 	}
@@ -1132,6 +1145,30 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	}
 	if _, err := s.GetAlertHistoryEntry(ctx, alertID, entry.ID); !models.IsNotFound(err) {
 		t.Errorf("resolved history after pruning error = %v, want not found", err)
+	}
+	if latest, err := s.GetLatestUnresolvedAlertHistory(ctx, alertID); !models.IsNotFound(err) {
+		t.Errorf("unresolved history after resolution = %+v, %v; want not found", latest, err)
+	}
+	t.Run("RecentDuplicates", func(t *testing.T) { testRecentDuplicatePruning(t, ctx, s, alertID) })
+}
+
+func testRecentDuplicatePruning(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	var ids []int64
+	for range 3 {
+		entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "legacy firing", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, entry.ID)
+	}
+	const keep = 2
+	if err := s.PruneAlertHistory(ctx, alertID, keep); err != nil {
+		t.Fatal(err)
+	}
+	recent, err := s.ListAlertHistory(ctx, alertID, 10)
+	if err != nil || len(recent) != keep || recent[0].ID != ids[2] || recent[1].ID != ids[1] {
+		t.Fatalf("recent duplicate history = %+v, %v; want the newest %d entries", recent, err, keep)
 	}
 }
 
