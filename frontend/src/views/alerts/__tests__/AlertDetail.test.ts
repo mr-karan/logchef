@@ -54,6 +54,59 @@ describe('AlertDetail route changes', () => {
     return pending
   }
 
+  async function loadFirstHistory() {
+    await vi.waitFor(() => expect(network.requests.some(r => r.config.url === '/alerts/1')).toBe(true))
+    request('/alerts/1').succeed(alert(1))
+    await vi.waitFor(() => expect(network.requests.some(r => r.config.url?.startsWith('/alerts/1/history'))).toBe(true))
+    request('/alerts/1/history').succeed(history(1, 'Cached history'))
+    await vi.waitFor(() => expect(host.textContent).toContain('Cached history'))
+  }
+
+  function selectedTab() {
+    return host.querySelector('[role="tab"][aria-selected="true"]')?.textContent
+  }
+
+  it('follows the tab query when the alert changes', async () => {
+    await loadFirstHistory()
+    await router.push('/alerts/2?tab=edit')
+    await vi.waitFor(() => expect(network.requests.some(r => r.config.url === '/alerts/2')).toBe(true))
+    request('/alerts/2').succeed(alert(2))
+    await vi.waitFor(() => expect(selectedTab()).toBe('Configuration'))
+    expect(network.requests.filter(r => r.config.url?.startsWith('/alerts/2/history'))).toHaveLength(0)
+  })
+
+  it('follows query changes and reloads cached history on back and forward', async () => {
+    await loadFirstHistory()
+    await router.push('/alerts/1?tab=edit')
+    await vi.waitFor(() => expect(selectedTab()).toBe('Configuration'))
+    const previousRequests = network.requests.length
+
+    router.back()
+    await vi.waitFor(() => expect(selectedTab()).toBe('History'))
+    await vi.waitFor(() => expect(network.requests.slice(previousRequests).filter(r => r.config.url?.startsWith('/alerts/1/history'))).toHaveLength(1))
+    const reload = network.requests.slice(previousRequests).find(r => r.config.url?.startsWith('/alerts/1/history'))
+    if (!reload) throw new Error('Missing history reload')
+    reload.succeed(history(1, 'Fresh history'))
+    await vi.waitFor(() => expect(host.textContent).toContain('Fresh history'))
+
+    router.forward()
+    await vi.waitFor(() => expect(selectedTab()).toBe('Configuration'))
+  })
+
+  it('writes tab clicks to the query and reloads existing history', async () => {
+    await loadFirstHistory()
+    const configuration = host.querySelector<HTMLButtonElement>('[role="tab"][data-state="inactive"]')
+    if (!configuration) throw new Error('Missing configuration tab')
+    configuration.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }))
+    await vi.waitFor(() => expect(router.currentRoute.value.query.tab).toBe('edit'))
+    const previousRequests = network.requests.length
+    const historyTab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'History')
+    if (!historyTab) throw new Error('Missing history tab')
+    historyTab.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }))
+    await vi.waitFor(() => expect(router.currentRoute.value.query.tab).toBe('history'))
+    await vi.waitFor(() => expect(network.requests.slice(previousRequests).filter(r => r.config.url?.startsWith('/alerts/1/history'))).toHaveLength(1))
+  })
+
   it.each(['loaded', 'history', 'details'])('loads the next alert while mounted with old %s responses', async pending => {
     await vi.waitFor(() => expect(network.requests.some(r => r.config.url === '/alerts/1')).toBe(true))
     if (pending !== 'details') request('/alerts/1').succeed(alert(1))

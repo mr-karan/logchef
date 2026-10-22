@@ -46,7 +46,12 @@ function formatEventTime(timestamp: string): string {
 }
 
 const alertId = computed(() => Number(route.params.alertID));
-const currentTab = ref<"edit" | "history">(route.query.tab === "history" ? "history" : "edit");
+const currentTab = computed({
+  get: () => route.query.tab === "history" ? "history" : "edit",
+  set: (tab: string | number) => {
+    void router.push({ query: { ...route.query, tab: tab === "history" ? "history" : "edit" } });
+  },
+});
 const showDeleteDialog = ref(false);
 
 const alert = computed(() => {
@@ -154,22 +159,13 @@ async function handleResolve(_historyId: number, message: string) {
   }
 }
 
-watch(
-  currentTab,
-  async (tab) => {
-    if (tab === "history" && !historyEntries.value.length) {
-      await loadHistory();
-    }
-  }
-);
-
-watch(alertId, (id) => {
+watch([alertId, currentTab], ([id, tab]) => {
   alertHistoryStore.setCurrentContext(id || null);
   if (!id) return;
   if (!alert.value) {
     void alertsStore.refreshAlert(undefined, undefined, id);
   }
-  if (currentTab.value === "history") {
+  if (tab === "history") {
     void loadHistory();
   }
 }, { immediate: true });
