@@ -26,19 +26,9 @@ const (
 	stateCookieTTL = 5 * time.Minute
 )
 
-// Define Auth/OIDC specific errors used within handlers, especially for redirect mapping.
 var (
-	// Note: Some errors might overlap with core definitions but are kept here
-	// for mapping purposes within redirectToFrontend.
-	ErrSessionNotFound           = errors.New("session not found")
-	ErrSessionExpired            = errors.New("session expired")
-	ErrUserNotFound              = errors.New("user not found")
-	ErrTeamNotFound              = errors.New("team not found")
-	ErrUnauthorizedUser          = errors.New("unauthorized user")
-	ErrUserInactive              = errors.New("user inactive")
-	ErrOIDCProviderNotConfigured = errors.New("OIDC provider not configured") // This one might belong in auth/oidc.go
-	ErrOIDCInvalidToken          = errors.New("invalid OIDC token")
-	ErrOIDCEmailNotVerified      = errors.New("email not verified")
+	errInvalidState = errors.New("invalid login state")
+	errAccessDenied = errors.New("access denied by identity provider")
 )
 
 // generateState generates a cryptographically secure random string used for the OIDC state parameter.
@@ -67,27 +57,27 @@ func generateState() (string, error) {
 // It verifies the format, expiration (based on timestamp), and performs a constant-time comparison.
 func validateState(state, storedState string) error {
 	if state == "" || storedState == "" {
-		return errors.New("state validation failed: missing state parameter")
+		return fmt.Errorf("%w: missing state parameter or cookie", errInvalidState)
 	}
 
 	// Basic format check.
 	parts := strings.Split(storedState, ".")
 	if len(parts) != 3 {
-		return errors.New("state validation failed: invalid state format")
+		return fmt.Errorf("%w: invalid state format", errInvalidState)
 	}
 
 	// Check timestamp for expiration.
 	timestamp, err := strconv.ParseInt(parts[2], 10, 64)
 	if err != nil {
-		return fmt.Errorf("state validation failed: invalid timestamp in state: %w", err)
+		return fmt.Errorf("%w: invalid timestamp in state: %w", errInvalidState, err)
 	}
 	if time.Since(time.Unix(timestamp, 0)) > stateCookieTTL {
-		return errors.New("state validation failed: state has expired")
+		return fmt.Errorf("%w: state has expired", errInvalidState)
 	}
 
 	// Constant-time comparison to mitigate timing attacks.
 	if !secureCompare(state, storedState) {
-		return errors.New("state validation failed: state mismatch")
+		return fmt.Errorf("%w: state mismatch", errInvalidState)
 	}
 
 	return nil
@@ -148,24 +138,20 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 		var errCode string
 		// Map known auth errors to specific codes for the frontend.
 		switch {
-		// Use errors defined in this file first for mapping
-		case errors.Is(err, ErrSessionNotFound), errors.Is(err, core.ErrSessionNotFound):
-			errCode = "session_not_found"
-		case errors.Is(err, ErrSessionExpired), errors.Is(err, core.ErrSessionExpired):
+		case errors.Is(err, errAccessDenied):
+			errCode = "access_denied"
+		case errors.Is(err, errInvalidState):
 			errCode = "session_expired"
-		case errors.Is(err, ErrOIDCInvalidToken):
+		case errors.Is(err, auth.ErrOIDCInvalidToken):
 			errCode = "invalid_token"
-		case errors.Is(err, ErrOIDCEmailNotVerified):
+		case errors.Is(err, auth.ErrOIDCEmailNotVerified):
 			errCode = "email_not_verified"
-		case errors.Is(err, ErrUnauthorizedUser):
+		case errors.Is(err, auth.ErrUnauthorizedUser):
 			errCode = "unauthorized"
-		case errors.Is(err, ErrUserInactive):
+		case errors.Is(err, auth.ErrUserInactive):
 			errCode = "user_inactive"
-		// Add mappings for other relevant core errors if needed
-		case errors.Is(err, core.ErrUserNotFound):
-			errCode = "user_not_found" // Example mapping
 		default:
-			errCode = "auth_error" // Generic code for other errors.
+			errCode = "auth_error"
 		}
 		finalURL = fmt.Sprintf("%s/auth/login?error=%s", targetURL, errCode)
 		s.log.Warn("authentication error during redirect",
@@ -231,6 +217,14 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot handle callback")
 		return SendError(c, fiber.StatusInternalServerError, "Authentication provider not configured")
+	}
+
+	if providerError := c.Query("error"); providerError != "" {
+		s.log.Warn("OIDC provider rejected login", "error", providerError, "error_description", c.Query("error_description"))
+		if providerError == "access_denied" {
+			return s.redirectToFrontend(c, "", errAccessDenied)
+		}
+		return s.redirectToFrontend(c, "", errors.New("identity provider returned an error"))
 	}
 
 	state := c.Query("state")

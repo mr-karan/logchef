@@ -23,15 +23,10 @@ import (
 
 // Define OIDC/Auth specific errors.
 var (
-	ErrSessionNotFound      = errors.New("session not found") // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
-	ErrSessionExpired       = errors.New("session expired")   // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/session)
-	ErrUserNotFound         = errors.New("user not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
-	ErrTeamNotFound         = errors.New("team not found")    // Referenced in HandleCallback error mapping logic? (Keep for now, though defined in core/users)
 	ErrUnauthorizedUser     = errors.New("unauthorized user")
 	ErrUserInactive         = errors.New("user inactive")
 	ErrOIDCInvalidToken     = errors.New("invalid OIDC token")
 	ErrOIDCEmailNotVerified = errors.New("email not verified")
-	ErrAdminNotFound        = errors.New("admin not found") // May not be needed if admin check moves to core
 )
 
 // OIDCClaims represents the claims extracted from an OIDC ID token.
