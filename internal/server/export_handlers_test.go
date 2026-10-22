@@ -180,7 +180,7 @@ func TestExportOptionalBlocksWithoutVariables(t *testing.T) {
 				handler = s.handleCreateExportJob
 			}
 			app := fiber.New()
-			withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/export", user, handler)
+			withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
 			req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID),
 				strings.NewReader(`{"query_text":"SELECT 1 AS value [[WHERE 1={{x}}]]","format":"ndjson"}`))
 			req.Header.Set("Content-Type", "application/json")

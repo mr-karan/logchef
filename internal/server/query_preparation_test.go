@@ -40,7 +40,7 @@ func TestQueryPreparationErrorStatus(t *testing.T) {
 					handler = s.handleGetHistogram
 				}
 				app := fiber.New()
-				withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, func(c fiber.Ctx) error {
+				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, func(c fiber.Ctx) error {
 					switch failure.name {
 					case "missing source":
 						if err := s.sqlite.DeleteSource(t.Context(), source.ID); err != nil {

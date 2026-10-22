@@ -87,7 +87,9 @@
     "Enabled": false,
     "EvaluationInterval": 60000000000,
     "DefaultLookback": 300000000000,
-    "HistoryLimit": 0
+    "HistoryLimit": 0,
+    "WebhookAllowedHosts": null,
+    "WebhookAllowlist": {}
   },
   "Query": {
     "MaxLimit": 0,

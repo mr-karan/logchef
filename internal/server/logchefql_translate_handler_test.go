@@ -101,7 +101,7 @@ func newTranslateTestApp(timeRangeErr error) *fiber.App {
 
 	app := fiber.New()
 	admin := &models.User{ID: 1, Role: models.UserRoleAdmin}
-	withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/logchefql/translate", admin, s.handleLogchefQLTranslate)
+	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/logchefql/translate", admin, s.handleLogchefQLTranslate)
 	return app
 }
 

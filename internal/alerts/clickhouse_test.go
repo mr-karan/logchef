@@ -75,7 +75,8 @@ func TestManagerEvaluatesNumericTypesClickHouse(t *testing.T) {
 func TestManagerStopCancelsClickHouseQuery(t *testing.T) {
 	manager, alert, client := clickHouseAlertManager(t)
 	marker := fmt.Sprintf("alert_stop_%d", time.Now().UnixNano())
-	alert.Query = "SELECT sleep(3) AS value /* " + marker + " */"
+	// Alert SQL runs as re-rendered from its parse tree, which drops comments.
+	alert.Query = "SELECT sleep(3) AS value WHERE '" + marker + "' != ''"
 	if err := manager.db.UpdateAlert(t.Context(), alert); err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +88,7 @@ func TestManagerStopCancelsClickHouseQuery(t *testing.T) {
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		result, err := client.Query(ctx, "SELECT count() AS value FROM system.processes WHERE startsWith(query, 'SELECT sleep(3)') AND position(query, '"+marker+"') > 0")
+		result, err := client.Query(ctx, "SELECT count() AS value FROM system.processes WHERE position(query, 'sleep(3)') > 0 AND position(query, '"+marker+"') > 0 AND position(query, 'system.processes') = 0")
 		if err != nil {
 			t.Fatal(err)
 		}

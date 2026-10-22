@@ -44,7 +44,7 @@ func TestRawQueryRejectsStreamFiltersBeforeStreaming(t *testing.T) {
 	}
 	app := fiber.New()
 	user, src := authorizeTestSource(t, s.sqlite, source.ID)
-	withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, s.handleQueryLogs)
+	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, s.handleQueryLogs)
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID), strings.NewReader(`{"query_text":"SELECT * FROM logs","extra_stream_filters":["{app=\"api\"}"]}`))
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := app.Test(req)
@@ -136,7 +136,7 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 						handler = s.handleLogchefQLQuery
 					}
 					user, src := authorizeTestSource(t, s.sqlite, source.ID)
-					withAuthorizedSource(app, s, http.MethodPost, "/teams/:teamID/sources/:sourceID/query", user, handler)
+					withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, handler)
 					path := fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID)
 					body := `{"query_text":"SELECT * FROM logs","query":"level=\"error\"","start_time":"2026-09-01 00:00:00","end_time":"2026-09-01 01:00:00"`
 					if endpoint == "logs" {

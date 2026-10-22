@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -41,6 +42,13 @@ func TestLogchefQLIdentifiersRoundTripClickHouse(t *testing.T) {
 			inner := "SELECT unhex('" + hex.EncodeToString([]byte(value)) + "') AS \"" + strings.NewReplacer("\\", "\\\\", "\"", "\\\"").Replace(field) + "\""
 			query := "SELECT " + result.SelectClause + " FROM (" + inner + ") WHERE " + result.SQL
 			built, err := clickhouse.NewExtendedQueryBuilder("", 0).BuildRawQuery(query, 0)
+			// The SQL validator rejects backslash escapes in quoted identifiers.
+			if strings.ContainsAny(field, "`\\") {
+				if !errors.Is(err, clickhouse.ErrInvalidQuery) {
+					t.Fatalf("build %q: err = %v, want ErrInvalidQuery", query, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("build %q: %v", query, err)
 			}

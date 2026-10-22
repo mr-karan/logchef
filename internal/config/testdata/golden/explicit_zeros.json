@@ -87,7 +87,9 @@
     "Enabled": false,
     "EvaluationInterval": 0,
     "DefaultLookback": 0,
-    "HistoryLimit": 0
+    "HistoryLimit": 0,
+    "WebhookAllowedHosts": null,
+    "WebhookAllowlist": {}
   },
   "Query": {
     "MaxLimit": 0,
