@@ -108,12 +108,12 @@ export interface TestAlertQueryResponse {
 }
 
 export const alertsApi = {
-  list: (sourceId?: number) => {
+  list: (sourceId?: number, options?: { signal?: AbortSignal }) => {
     const url =
       sourceId !== undefined && sourceId !== null
         ? `/alerts?source_id=${sourceId}`
         : "/alerts";
-    return apiClient.get<Alert[]>(url);
+    return apiClient.get<Alert[]>(url, options);
   },
   get: (alertId: number) =>
     apiClient.get<Alert>(`/alerts/${alertId}`),
@@ -125,9 +125,9 @@ export const alertsApi = {
     apiClient.delete<{ message: string }>(`/alerts/${alertId}`),
   resolve: (alertId: number, payload: ResolveAlertRequest) =>
     apiClient.post<{ message: string }>(`/alerts/${alertId}/resolve`, payload),
-  history: (alertId: number, limit?: number) => {
+  history: (alertId: number, limit?: number, options?: { signal?: AbortSignal }) => {
     const search = limit ? `?limit=${encodeURIComponent(limit)}` : "";
-    return apiClient.get<AlertHistoryEntry[]>(`/alerts/${alertId}/history${search}`);
+    return apiClient.get<AlertHistoryEntry[]>(`/alerts/${alertId}/history${search}`, options);
   },
   testQuery: (payload: TestAlertQueryRequest) =>
     apiClient.post<TestAlertQueryResponse>("/alerts/test", payload),

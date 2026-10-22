@@ -137,3 +137,60 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     callApi,
   };
 }
+
+interface LiveRequest<R> {
+  request: string;
+  controller: AbortController;
+  replacement?: Promise<R>;
+}
+
+/**
+ * Loads without a caller signal supersede the previous load in their slot.
+ * Only these loads can replace an older caller's result for the same request.
+ * Caller-controlled loads leave earlier loads running so their cancellation stays local.
+ */
+export function createLatestRequests<A extends unknown[], R>(options: {
+  request: (...args: A) => string;
+  slot?: (...args: NoInfer<A>) => string;
+  load: (signal: AbortSignal, ...args: A) => Promise<R>;
+}) {
+  const live = new Map<string, LiveRequest<R>>();
+  const pending = new Set<LiveRequest<R>>();
+
+  function run(args: A, callerSignal?: AbortSignal): Promise<R> {
+    if (callerSignal?.aborted) return options.load(callerSignal, ...args);
+
+    const request = options.request(...args);
+    const slot = options.slot?.(...args) ?? request;
+    const current: LiveRequest<R> = { request, controller: new AbortController() };
+    callerSignal?.addEventListener("abort", () => current.controller.abort(), { once: true });
+
+    const previous = live.get(slot);
+    live.set(slot, current);
+    pending.add(current);
+    if (!callerSignal) previous?.controller.abort();
+
+    const result = options.load(current.controller.signal, ...args)
+      .then(
+        (value) => current.replacement ?? value,
+        (error: unknown) => {
+          if (current.replacement) return current.replacement;
+          throw error;
+        },
+      )
+      .finally(() => {
+        pending.delete(current);
+        if (live.get(slot) === current) live.delete(slot);
+      });
+    if (!callerSignal && previous?.request === request) previous.replacement = result;
+    return result;
+  }
+
+  function cancelAll() {
+    for (const request of pending) request.controller.abort();
+    pending.clear();
+    live.clear();
+  }
+
+  return { run, cancelAll };
+}

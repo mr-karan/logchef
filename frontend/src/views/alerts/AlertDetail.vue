@@ -46,7 +46,13 @@ function formatEventTime(timestamp: string): string {
 }
 
 const alertId = computed(() => Number(route.params.alertID));
-const currentTab = ref<"edit" | "history">(route.query.tab === "history" ? "history" : "edit");
+const currentTab = computed({
+  get: () => route.query.tab === "history" ? "history" : "edit",
+  set: (tab: string | number) => {
+    const { tab: _tab, ...query } = route.query;
+    void router.replace({ query: tab === "history" ? { ...query, tab } : query });
+  },
+});
 const showDeleteDialog = ref(false);
 
 const alert = computed(() => {
@@ -78,7 +84,8 @@ function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outli
 }
 
 function goBack() {
-  router.push({ name: "AlertsOverview", query: route.query });
+  const { tab: _tab, ...query } = route.query;
+  router.push({ name: "AlertsOverview", query });
 }
 
 async function handleUpdate(payload: UpdateAlertRequest) {
@@ -151,22 +158,13 @@ async function handleResolve(_historyId: number, message: string) {
   }
 }
 
-watch(
-  currentTab,
-  async (tab) => {
-    if (tab === "history" && !historyEntries.value.length) {
-      await loadHistory();
-    }
-  }
-);
-
-watch(alertId, (id) => {
+watch([alertId, currentTab], ([id, tab]) => {
   alertHistoryStore.setCurrentContext(id || null);
   if (!id) return;
   if (!alert.value) {
     void alertsStore.refreshAlert(id);
   }
-  if (currentTab.value === "history") {
+  if (tab === "history") {
     void loadHistory();
   }
 }, { immediate: true });
@@ -183,7 +181,7 @@ watch(alertId, (id) => {
     <!-- Header Section -->
     <div class="flex items-start justify-between gap-4">
       <div class="flex items-start gap-3">
-        <Button variant="ghost" size="icon" @click="goBack">
+        <Button variant="ghost" size="icon" :aria-label="t('ui.goBack')" @click="goBack">
           <ArrowLeft class="h-5 w-5" />
         </Button>
         <div class="space-y-1">
