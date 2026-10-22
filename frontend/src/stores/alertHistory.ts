@@ -1,7 +1,7 @@
 import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
-import { useBaseStore } from "./base";
+import { createLatestRequests, useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
 import { i18n } from "@/i18n";
 
@@ -39,10 +39,16 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
   const currentAlertId = computed(() => state.data.value.currentAlertId);
 
   let historyRequestId = 0;
+  const historyLoads = createLatestRequests({
+    request: (alertId: number, limit: number) => `${alertId}:${limit}`,
+    slot: () => "history",
+    load: fetchHistory,
+  });
 
   function setCurrentContext(alertId: number | null) {
     if (alertId !== state.data.value.currentAlertId || alertId === null) {
       historyRequestId++;
+      historyLoads.cancelAll();
       state.data.value.entries = [];
     }
     state.data.value.currentAlertId = alertId;
@@ -61,22 +67,15 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
   async function loadHistory(alertId: number, _teamId?: number | null, _sourceId?: number | null, limit?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     setCurrentContext(alertId);
-    const requestId = ++historyRequestId;
-    const effectiveLimit = limit ?? state.data.value.limit;
+    historyRequestId++;
+    return await historyLoads.run([alertId, limit ?? state.data.value.limit]);
+  }
+
+  async function fetchHistory(signal: AbortSignal, alertId: number, limit: number) {
     return await state.callApi<AlertHistoryEntry[]>({
-      apiCall: async () => {
-        try {
-          const response = await alertsApi.history(alertId, effectiveLimit);
-          if (requestId !== historyRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
-          return response;
-        } catch (error) {
-          if (requestId !== historyRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
-          throw error;
-        }
-      },
+      apiCall: () => alertsApi.history(alertId, limit, { signal }),
       operationKey: `loadHistory-${alertId}`,
       onSuccess: (response) => {
-        if (requestId !== historyRequestId) return;
         state.data.value.entries = response ?? [];
       },
       defaultData: [],

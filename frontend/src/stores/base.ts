@@ -137,3 +137,55 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     callApi,
   };
 }
+
+interface LiveRequest<R> {
+  request: string;
+  controller: AbortController;
+  replacement?: Promise<R>;
+}
+
+/**
+ * Keeps one live load per slot. A newer load aborts the older one, so the older
+ * response never reaches the API interceptors or the store. The older caller gets
+ * the newer result when both asked for the same request, and its own cancel otherwise.
+ */
+export function createLatestRequests<A extends unknown[], R>(options: {
+  request: (...args: A) => string;
+  slot?: (...args: NoInfer<A>) => string;
+  load: (signal: AbortSignal, ...args: A) => Promise<R>;
+}) {
+  const live = new Map<string, LiveRequest<R>>();
+
+  function run(args: A, callerSignal?: AbortSignal): Promise<R> {
+    const request = options.request(...args);
+    const slot = options.slot?.(...args) ?? request;
+    const current: LiveRequest<R> = { request, controller: new AbortController() };
+    callerSignal?.addEventListener("abort", () => current.controller.abort(), { once: true });
+    if (callerSignal?.aborted) current.controller.abort();
+
+    const previous = live.get(slot);
+    live.set(slot, current);
+    previous?.controller.abort();
+
+    const result = options.load(current.controller.signal, ...args)
+      .then(
+        (value) => current.replacement ?? value,
+        (error: unknown) => {
+          if (current.replacement) return current.replacement;
+          throw error;
+        },
+      )
+      .finally(() => {
+        if (live.get(slot) === current) live.delete(slot);
+      });
+    if (previous?.request === request) previous.replacement = result;
+    return result;
+  }
+
+  function cancelAll() {
+    for (const request of live.values()) request.controller.abort();
+    live.clear();
+  }
+
+  return { run, cancelAll };
+}

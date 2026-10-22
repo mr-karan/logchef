@@ -1,7 +1,7 @@
 import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type Alert, type CreateAlertRequest, type UpdateAlertRequest } from "@/api/alerts";
-import { useBaseStore } from "./base";
+import { createLatestRequests, useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
 import { i18n } from "@/i18n";
 
@@ -22,10 +22,14 @@ export const useAlertsStore = defineStore("alerts", () => {
 
   const alerts = computed(() => state.data.value.alerts);
 
-  let listRequestId = 0;
+  const listLoads = createLatestRequests({
+    request: (sourceId?: number) => String(sourceId ?? ""),
+    slot: () => "list",
+    load: fetchAlertList,
+  });
 
   function clearAlerts() {
-    listRequestId++;
+    listLoads.cancelAll();
     state.data.value.alerts = [];
   }
 
@@ -38,22 +42,15 @@ export const useAlertsStore = defineStore("alerts", () => {
 
   async function fetchAlerts(_teamId?: number | undefined, sourceId?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
-    const requestId = ++listRequestId;
+    return await listLoads.run([sourceId]);
+  }
+
+  async function fetchAlertList(signal: AbortSignal, sourceId?: number) {
     const key = sourceId ? `fetchAlerts-${sourceId}` : 'fetchAlerts-all';
     return await state.callApi<Alert[]>({
-      apiCall: async () => {
-        try {
-          const response = await alertsApi.list(sourceId);
-          if (requestId !== listRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
-          return response;
-        } catch (error) {
-          if (requestId !== listRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
-          throw error;
-        }
-      },
+      apiCall: () => alertsApi.list(sourceId, { signal }),
       operationKey: key,
       onSuccess: (response) => {
-        if (requestId !== listRequestId) return;
         state.data.value.alerts = (response ?? []).slice().sort(sortAlerts);
       },
       defaultData: [],

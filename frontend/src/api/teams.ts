@@ -56,9 +56,9 @@ export interface TeamWithMemberCount extends Team {
 }
 
 export const teamsApi = {
-  listUserTeams: () => apiClient.get<UserTeamMembership[]>("/me/teams"),
-  listAllTeams: () => apiClient.get<TeamWithMemberCount[]>("/admin/teams"),
-  getTeam: (id: number) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`),
+  listUserTeams: (options?: { signal?: AbortSignal }) => apiClient.get<UserTeamMembership[]>("/me/teams", options),
+  listAllTeams: (options?: { signal?: AbortSignal }) => apiClient.get<TeamWithMemberCount[]>("/admin/teams", options),
+  getTeam: (id: number, options?: { signal?: AbortSignal }) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`, options),
   createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>
     apiClient.put<Team>(`/teams/${id}`, data),
@@ -66,16 +66,16 @@ export const teamsApi = {
     apiClient.delete<{ message: string }>(`/admin/teams/${id}`),
 
   // Team members
-  listTeamMembers: (teamId: number) =>
-    apiClient.get<TeamMember[]>(`/teams/${teamId}/members`),
+  listTeamMembers: (teamId: number, options?: { signal?: AbortSignal }) =>
+    apiClient.get<TeamMember[]>(`/teams/${teamId}/members`, options),
   addTeamMember: (teamId: number, data: AddTeamMemberRequest) =>
     apiClient.post<TeamMember>(`/teams/${teamId}/members`, data),
   removeTeamMember: (teamId: number, userId: number) =>
     apiClient.delete<{ message: string }>(`/teams/${teamId}/members/${userId}`),
 
   // Team sources
-  listTeamSources: (teamId: number) =>
-    apiClient.get<Source[]>(`/teams/${teamId}/sources`),
+  listTeamSources: (teamId: number, options?: { signal?: AbortSignal }) =>
+    apiClient.get<Source[]>(`/teams/${teamId}/sources`, options),
   addTeamSource: (teamId: number, sourceId: number) =>
     apiClient.post<Source>(`/teams/${teamId}/sources`, { source_id: sourceId }),
   removeTeamSource: (teamId: number, sourceId: number) =>
