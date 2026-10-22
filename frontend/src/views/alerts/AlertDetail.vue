@@ -49,7 +49,8 @@ const alertId = computed(() => Number(route.params.alertID));
 const currentTab = computed({
   get: () => route.query.tab === "history" ? "history" : "edit",
   set: (tab: string | number) => {
-    void router.push({ query: { ...route.query, tab: tab === "history" ? "history" : "edit" } });
+    const { tab: _tab, ...query } = route.query;
+    void router.replace({ query: tab === "history" ? { ...query, tab } : query });
   },
 });
 const showDeleteDialog = ref(false);
@@ -83,7 +84,8 @@ function mapSeverityVariant(severity: Alert["severity"]): "destructive" | "outli
 }
 
 function goBack() {
-  router.push({ name: "AlertsOverview", query: route.query });
+  const { tab: _tab, ...query } = route.query;
+  router.push({ name: "AlertsOverview", query });
 }
 
 async function handleUpdate(payload: UpdateAlertRequest) {
@@ -182,7 +184,7 @@ watch([alertId, currentTab], ([id, tab]) => {
     <!-- Header Section -->
     <div class="flex items-start justify-between gap-4">
       <div class="flex items-start gap-3">
-        <Button variant="ghost" size="icon" @click="goBack">
+        <Button variant="ghost" size="icon" :aria-label="t('ui.goBack')" @click="goBack">
           <ArrowLeft class="h-5 w-5" />
         </Button>
         <div class="space-y-1">

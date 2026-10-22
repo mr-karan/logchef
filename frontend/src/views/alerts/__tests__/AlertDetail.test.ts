@@ -32,7 +32,7 @@ describe('AlertDetail route changes', () => {
   let historyStore: ReturnType<typeof useAlertHistoryStore>
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/alerts/:alertID', component: AlertDetail }],
+    routes: [{ path: '/alerts', name: 'AlertsOverview', component: { render: () => null } }, { path: '/alerts/:alertID', component: AlertDetail }],
   })
 
   beforeEach(async () => {
@@ -98,13 +98,37 @@ describe('AlertDetail route changes', () => {
     const configuration = host.querySelector<HTMLButtonElement>('[role="tab"][data-state="inactive"]')
     if (!configuration) throw new Error('Missing configuration tab')
     configuration.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }))
-    await vi.waitFor(() => expect(router.currentRoute.value.query.tab).toBe('edit'))
+    await vi.waitFor(() => expect(selectedTab()).toBe('Configuration'))
+    expect(router.currentRoute.value.query).not.toHaveProperty('tab')
     const previousRequests = network.requests.length
     const historyTab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'History')
     if (!historyTab) throw new Error('Missing history tab')
     historyTab.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }))
     await vi.waitFor(() => expect(router.currentRoute.value.query.tab).toBe('history'))
     await vi.waitFor(() => expect(network.requests.slice(previousRequests).filter(r => r.config.url?.startsWith('/alerts/1/history'))).toHaveLength(1))
+  })
+
+  it('switches tabs without adding history entries', async () => {
+    await loadFirstHistory()
+    await router.push('/alerts/1?tab=history&marker=1')
+    const configuration = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find(tab => tab.textContent === 'Configuration')
+    if (!configuration) throw new Error('Missing configuration tab')
+    configuration.dispatchEvent(new MouseEvent('mousedown', { button: 0, bubbles: true }))
+    await vi.waitFor(() => expect(selectedTab()).toBe('Configuration'))
+
+    router.back()
+    await vi.waitFor(() => expect(router.currentRoute.value.fullPath).toBe('/alerts/1?tab=history'))
+  })
+
+  it('leaves the tab out of the overview query', async () => {
+    await loadFirstHistory()
+    await router.push('/alerts/1?tab=history&source=3')
+    const back = host.querySelector<HTMLButtonElement>('button[aria-label="Go back"]')
+    if (!back) throw new Error('Missing back button')
+    back.click()
+
+    await vi.waitFor(() => expect(router.currentRoute.value.name).toBe('AlertsOverview'))
+    expect(router.currentRoute.value.query).toEqual({ source: '3' })
   })
 
   it.each(['loaded', 'history', 'details'])('loads the next alert while mounted with old %s responses', async pending => {
