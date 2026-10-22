@@ -21,9 +21,6 @@ func TestMetadataLateErrorsClickHouse(t *testing.T) {
 			defer cancel()
 			source := &models.Source{Name: t.Name()}
 			client.metrics = metrics.NewClickHouseMetrics(source)
-			successes := queryCounter(source, "select", "success")
-			failures := queryCounter(source, "select", "failure")
-			beforeSuccess, beforeFailure := successes.Get(), failures.Get()
 			query := "SELECT number FROM numbers(10) SETTINGS max_block_size=1, max_threads=1"
 			if failure == "iteration" || failure == "close" {
 				query = "SELECT number, throwIf(number = 5) FROM numbers(10) SETTINGS max_block_size=1, max_threads=1"
@@ -34,7 +31,7 @@ func TestMetadataLateErrorsClickHouse(t *testing.T) {
 			consumed := false
 			start := time.Now()
 			err := client.queryMetadata(ctx, query, func(rows driver.Rows) error {
-				if successes.Get() != beforeSuccess || failures.Get() != beforeFailure {
+				if queryCount(t, source, "select", "success") != 0 || queryCount(t, source, "select", "failure") != 0 {
 					t.Fatal("completion recorded before row consumption")
 				}
 				if !rows.Next() {
@@ -74,8 +71,8 @@ func TestMetadataLateErrorsClickHouse(t *testing.T) {
 			if failure == "cancellation" && (!errors.Is(err, context.Canceled) || time.Since(start) > 3*time.Second) {
 				t.Fatalf("cancellation did not stop the reader promptly: duration=%s error=%v", time.Since(start), err)
 			}
-			if successes.Get() != beforeSuccess || failures.Get()-beforeFailure != 1 {
-				t.Fatalf("success count=%d failure count=%d", successes.Get()-beforeSuccess, failures.Get()-beforeFailure)
+			if successes, failures := queryCount(t, source, "select", "success"), queryCount(t, source, "select", "failure"); successes != 0 || failures != 1 {
+				t.Fatalf("success count=%d failure count=%d", successes, failures)
 			}
 			if _, err := client.Query(context.Background(), "SELECT 1"); err != nil {
 				t.Fatalf("connection unusable after metadata failure: %v", err)
@@ -88,9 +85,6 @@ func TestMetadataMetricsOnceClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	source := &models.Source{Name: t.Name()}
 	client.metrics = metrics.NewClickHouseMetrics(source)
-	successes := queryCounter(source, "select", "success")
-	failures := queryCounter(source, "select", "failure")
-	beforeSuccess, beforeFailure := successes.Get(), failures.Get()
 	if _, _, _, err := client.getTableEngine(ctx, "system", "tables"); err != nil {
 		t.Fatal(err)
 	}
@@ -103,7 +97,7 @@ func TestMetadataMetricsOnceClickHouse(t *testing.T) {
 	if _, err := client.getSortKeys(ctx, "system", "tables"); err != nil {
 		t.Fatal(err)
 	}
-	if successes.Get()-beforeSuccess != 4 || failures.Get() != beforeFailure {
-		t.Fatalf("success count=%d failure count=%d", successes.Get()-beforeSuccess, failures.Get()-beforeFailure)
+	if successes, failures := queryCount(t, source, "select", "success"), queryCount(t, source, "select", "failure"); successes != 4 || failures != 0 {
+		t.Fatalf("success count=%d failure count=%d", successes, failures)
 	}
 }

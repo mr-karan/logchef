@@ -1221,13 +1221,13 @@
       "pluginVersion": "11.6.1",
       "targets": [
         {
-          "expr": "rate(logchef_session_operations_total[5m])",
+          "expr": "sum by (operation, result, user_role) (rate(logchef_session_operations_total[5m]))",
           "interval": "",
-          "legendFormat": "{{operation}} - {{result}} ({{user_email}})",
+          "legendFormat": "{{operation}} - {{result}} ({{user_role}})",
           "refId": "A"
         }
       ],
-      "title": "Session Operations by User",
+      "title": "Session Operations by Role",
       "type": "timeseries"
     }
   ],

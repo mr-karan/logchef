@@ -200,6 +200,9 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 
 // Close releases the underlying connection pool.
 func (c *Client) Close() error {
+	if c.metrics != nil {
+		c.metrics.Unregister()
+	}
 	return c.conn.Close()
 }
 
