@@ -214,7 +214,7 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 				continue
 			}
 			if len(email) > models.MaxEmailLength {
-				errs = append(errs, fmt.Sprintf("%s: email must be at most 254 bytes", memberPrefix))
+				errs = append(errs, fmt.Sprintf("%s: email must be at most %d bytes", memberPrefix, models.MaxEmailLength))
 			}
 			if memberSeen[email] {
 				errs = append(errs, fmt.Sprintf("%s: duplicate email %q", memberPrefix, member.Email))
@@ -276,7 +276,7 @@ func ResolveConfig(cfg *config.ProvisioningConfig) {
 	for i := range cfg.Teams {
 		for j := range cfg.Teams[i].Members {
 			member := &cfg.Teams[i].Members[j]
-			member.Email = strings.ToLower(strings.TrimSpace(member.Email))
+			member.Email = models.NormalizeEmail(member.Email)
 			member.Role = strings.ToLower(member.Role)
 			if member.Role == "" {
 				member.Role = "member"

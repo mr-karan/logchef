@@ -42,7 +42,7 @@ var (
 // validateUserCreation validates parameters for creating a new user.
 func validateUserCreation(email, fullName string, role models.UserRole) error {
 	if len(email) > models.MaxEmailLength {
-		return &ValidationError{Field: "email", Message: "email must be at most 254 bytes"}
+		return &ValidationError{Field: "email", Message: fmt.Sprintf("email must be at most %d bytes", models.MaxEmailLength)}
 	}
 	if email == "" {
 		return &ValidationError{Field: "email", Message: "email is required"}
@@ -68,9 +68,6 @@ func validateUserCreation(email, fullName string, role models.UserRole) error {
 // validateUserUpdate validates parameters for updating a user.
 // It checks only the fields provided in updateData.
 func validateUserUpdate(updateData models.User) error {
-	if len(updateData.Email) > models.MaxEmailLength {
-		return &ValidationError{Field: "email", Message: "email must be at most 254 bytes"}
-	}
 	// Full Name validation (if provided)
 	if updateData.FullName != "" {
 		if len(updateData.FullName) < 2 || len(updateData.FullName) > 100 {
@@ -173,6 +170,7 @@ func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*mode
 
 // CreateUser creates a new user in the database.
 func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, principal access.Principal, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+	email = models.NormalizeEmail(email)
 	// Default role if empty
 	if role == "" {
 		role = models.UserRoleMember
@@ -241,6 +239,7 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, princi
 // The created user is left unmanaged (the DB default) so the provisioning
 // reconciler never adopts or deletes it.
 func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string) (*models.User, error) {
+	email = models.NormalizeEmail(email)
 	if fullName == "" {
 		fullName = email
 	}

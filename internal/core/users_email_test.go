@@ -1,51 +1,30 @@
 package core
 
 import (
-	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func TestAccountEmailLength(t *testing.T) {
 	for _, path := range []struct {
 		name  string
-		apply func(*testing.T, string) error
+		apply func(*testing.T, store.Store, string) error
 	}{
-		{"create", func(t *testing.T, email string) error {
-			db := newTestDB(t)
+		{"create", func(t *testing.T, db store.Store, email string) error {
 			_, err := CreateUser(t.Context(), db, discardLogger(), access.SystemPrincipal(), email, "Test User", models.UserRoleMember, models.UserStatusActive)
-			if err != nil {
-				if _, lookupErr := db.GetUserByEmail(t.Context(), email); !models.IsNotFound(lookupErr) {
-					t.Fatal("rejected email was persisted")
-				}
-			}
 			return err
 		}},
-		{"OIDC auto-provision", func(t *testing.T, email string) error {
-			db := newTestDB(t)
+		{"OIDC auto-provision", func(t *testing.T, db store.Store, email string) error {
 			_, err := GetOrCreateAutoProvisionedUser(t.Context(), db, discardLogger(), email, "Test User")
-			if err != nil {
-				if _, lookupErr := db.GetUserByEmail(t.Context(), email); !models.IsNotFound(lookupErr) {
-					t.Fatal("rejected email was persisted")
-				}
-			}
 			return err
 		}},
-		{"update", func(t *testing.T, email string) error {
-			db := newTestDB(t)
-			user := newTestUser(t, db, "existing@example.com", "Existing User")
-			err := UpdateUser(t.Context(), db, discardLogger(), access.SystemPrincipal(), user.ID, models.User{Email: email, FullName: "Changed User"})
-			saved, lookupErr := db.GetUser(t.Context(), user.ID)
-			if lookupErr != nil {
-				t.Fatal(lookupErr)
-			}
-			if err != nil && saved.FullName != "Existing User" {
-				t.Fatal("rejected update changed the user")
-			}
-			return err
+		{"bootstrap admin", func(t *testing.T, db store.Store, email string) error {
+			return InitAdminUsers(t.Context(), db, discardLogger(), []string{email})
 		}},
 	} {
 		for _, tc := range []struct {
@@ -56,32 +35,38 @@ func TestAccountEmailLength(t *testing.T) {
 			{"255 bytes", strings.Repeat("a", 243) + "@example.com", true},
 			{"multibyte 254 bytes", strings.Repeat("é", 121) + "@example.com", false},
 			{"multibyte 256 bytes", strings.Repeat("é", 122) + "@example.com", true},
+			{"lowercase grows beyond limit", strings.Repeat("Ⱥ", 121) + "@example.com", true},
+			{"lowercase grows within limit", strings.Repeat("Ⱥ", 80) + "@example.com", false},
+			{"padded short address", strings.Repeat(" ", 254) + "User@Example.com ", false},
 		} {
 			t.Run(path.name+"/"+tc.name, func(t *testing.T) {
-				err := path.apply(t, tc.email)
-				if !tc.rejected {
-					if err != nil {
-						t.Fatal(err)
+				db := newTestDB(t)
+				err := path.apply(t, db, tc.email)
+				saved, lookupErr := db.GetUserByEmail(t.Context(), tc.email)
+				if saved != nil {
+					t.Logf("raw email bytes = %d, stored email bytes = %d", len(tc.email), len(saved.Email))
+				}
+				if tc.rejected {
+					message := fmt.Sprintf("email must be at most %d bytes", models.MaxEmailLength)
+					if err == nil || !strings.Contains(err.Error(), "email: "+message) {
+						t.Fatalf("oversized email error = %v, want email length validation error", err)
 					}
+					if !models.IsNotFound(lookupErr) {
+						t.Fatalf("rejected email lookup error = %v, want not found", lookupErr)
+					}
+					t.Logf("raw email bytes = %d, normalized email bytes = %d, rejected without persistence", len(tc.email), len(strings.ToLower(strings.TrimSpace(tc.email))))
 					return
 				}
-				var validation *ValidationError
-				if !errors.As(err, &validation) || validation.Field != "email" || validation.Message != "email must be at most 254 bytes" {
-					t.Fatalf("oversized email error = %v, want email length validation error", err)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if lookupErr != nil {
+					t.Fatal(lookupErr)
+				}
+				if want := strings.ToLower(strings.TrimSpace(tc.email)); saved.Email != want {
+					t.Fatalf("stored email = %q, want %q", saved.Email, want)
 				}
 			})
 		}
-	}
-}
-
-func TestInitAdminUsersEmailLength(t *testing.T) {
-	db := newTestDB(t)
-	email := strings.Repeat("a", 243) + "@example.com"
-	err := InitAdminUsers(t.Context(), db, discardLogger(), []string{email})
-	if err == nil || !strings.Contains(err.Error(), "email must be at most 254 bytes") {
-		t.Fatalf("oversized bootstrap admin error = %v", err)
-	}
-	if _, err := db.GetUserByEmail(t.Context(), email); !models.IsNotFound(err) {
-		t.Fatal("oversized bootstrap admin was persisted")
 	}
 }

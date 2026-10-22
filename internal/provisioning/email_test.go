@@ -23,6 +23,9 @@ func TestReconcileEmailLength(t *testing.T) {
 		}{
 			{"254 bytes", strings.Repeat("a", 242) + "@example.com", false},
 			{"255 bytes", strings.Repeat("a", 243) + "@example.com", true},
+			{"lowercase grows beyond limit", strings.Repeat("Ⱥ", 121) + "@example.com", true},
+			{"lowercase grows within limit", strings.Repeat("Ⱥ", 80) + "@example.com", false},
+			{"padded short address", strings.Repeat(" ", 254) + "User@Example.com ", false},
 			{"multibyte 256 bytes", strings.Repeat("é", 122) + "@example.com", true},
 		} {
 			t.Run(backend.name+"/"+tc.name, func(t *testing.T) {
@@ -33,8 +36,12 @@ func TestReconcileEmailLength(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if _, err := db.GetUserByEmail(t.Context(), tc.email); err != nil {
+					saved, err := db.GetUserByEmail(t.Context(), tc.email)
+					if err != nil {
 						t.Fatal(err)
+					}
+					if want := strings.ToLower(strings.TrimSpace(tc.email)); saved.Email != want {
+						t.Fatalf("stored email = %q, want %q", saved.Email, want)
 					}
 					return
 				}

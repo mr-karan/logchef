@@ -178,7 +178,7 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(finalURL)
 }
 
-// handleLogin initiates the OIDC authentication flow.
+// handleLogin stores state, a nonce secret and a PKCE verifier in cookies and sends state, the secret's hash and the S256 challenge.
 func (s *Server) handleLogin(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot initiate login")

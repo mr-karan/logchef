@@ -57,6 +57,7 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 			current.state, current.nonce = other.state, other.nonce
 			current.callbackState = other.callbackState
 		}, wantExchange: true, wantCleared: true},
+		{name: "foreign login injects code", anotherLogin: true, mutate: func(current, other *loginCookies) { *current = *other }, wantExchange: true, wantCleared: true, errorCode: "invalid_token"},
 		{name: "missing nonce cookie", mutate: func(current, _ *loginCookies) { current.nonce = nil }, wantCleared: true},
 		{name: "swapped nonce cookie", mutate: func(current, _ *loginCookies) { current.nonce.Value = "other-browser-secret" }, wantExchange: true, wantCleared: true},
 		{name: "URL nonce as cookie", mutate: func(current, _ *loginCookies) { current.nonce.Value = nonceFromSecret(current.nonce.Value) }, wantExchange: true, wantCleared: true},
