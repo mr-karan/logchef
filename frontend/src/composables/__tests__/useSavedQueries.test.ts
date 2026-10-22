@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   },
   savedQueriesStore: {
     data: { queries: [] as Array<{ id: number; name: string; source_id: number }> },
+    get queries() { return this.data.queries; },
     create: vi.fn(),
     update: vi.fn(),
     list: vi.fn(() => Promise.resolve({ success: true, data: [] })),

@@ -6,6 +6,7 @@ import { toast } from "vue-sonner";
 import { api } from "@/api/config";
 import { useSavedQueries } from "../useSavedQueries";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
+import { useContextStore } from "@/stores/context";
 import { useCollectionsStore } from "@/stores/collections";
 
 vi.mock("vue-sonner", () => ({
@@ -67,9 +68,11 @@ describe("saved query notifications", () => {
     app.use(createPinia()).use(router).mount(document.createElement("div"));
     try {
       expect(queries).toBeDefined();
+      useContextStore().selectTeam(1);
+      useContextStore().selectSource(7);
       const result = await queries?.handleSaveQuery(formData);
 
-      expect(result?.success).toBe(true);
+      expect(result?.id).toBe(99);
       expect(useSavedQueriesStore().queries.map(query => query.id)).toEqual([99]);
       expect(useCollectionsStore().data.items[3].map(item => item.query.id)).toEqual([99]);
       expect(requests.filter(request => request === "post /collections/3/items")).toHaveLength(1);

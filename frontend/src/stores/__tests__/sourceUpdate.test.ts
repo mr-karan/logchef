@@ -3,6 +3,7 @@ import { createPinia, disposePinia, setActivePinia } from 'pinia'
 import type { Source } from '@/api/sources'
 import { controlledApi } from '@/test/controlledApi'
 import { useSourcesStore } from '../sources'
+import { useContextStore } from '../context'
 
 const source: Source = {
   id: 1, name: 'Logs', source_type: 'clickhouse',
@@ -28,8 +29,10 @@ describe('source update caches', () => {
     const other = { ...source, id: 2, name: 'Other logs' }
     const original = { ...source, description: 'Old description' }
     store.sources.push(original, other)
-    store.teamSources.push(original, other)
-    await store.loadSourceDetails(1)
+    const context = useContextStore()
+    context.selectTeam(1)
+    context.selectSource(1)
+    store.holdResolved(1, [original, other], original, store.getMetadataGeneration())
     const inspection = store.getSourceInspection(1)
     const activity = store.getSourceActivity(1)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))

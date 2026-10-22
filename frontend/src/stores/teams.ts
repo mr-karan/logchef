@@ -130,10 +130,6 @@ export const useTeamsStore = defineStore("teams", () => {
         // Simple, focused approach: Always work with the data array from the standard API response
         if (Array.isArray(response)) {
           state.data.value.userTeams = response;
-
-          if (!contextStore.teamId) {
-            contextStore.restoreTeam(response.map((team) => team.id));
-          }
         }
       },
     });
