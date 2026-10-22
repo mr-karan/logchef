@@ -1,6 +1,6 @@
 import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
-import { settingsApi, type SettingsByCategory, type SystemSetting, type UpdateSettingRequest } from "@/api/settings";
+import { settingsApi, type SettingsByCategory, type UpdateSettingRequest } from "@/api/settings";
 import { computed } from "vue";
 
 interface SettingsState {
@@ -11,9 +11,6 @@ export const useSettingsStore = defineStore("settings", () => {
   const state = useBaseStore<SettingsState>({
     settingsByCategory: [],
   });
-
-  // Computed properties
-  const settingsByCategory = computed(() => state.data.value.settingsByCategory || []);
 
   // Get all settings as a flat array
   const allSettings = computed(() => {
@@ -46,33 +43,6 @@ export const useSettingsStore = defineStore("settings", () => {
         operationKey: 'loadSettings',
         onSuccess: (response) => {
           state.data.value.settingsByCategory = (response as SettingsByCategory[]) || [];
-        },
-        showToast: false,
-      });
-    });
-  }
-
-  // Load settings for a specific category
-  async function loadSettingsForCategory(category: string) {
-    return await state.withLoading(`loadCategory-${category}`, async () => {
-      return await state.callApi({
-        apiCall: () => settingsApi.listSettingsByCategory(category),
-        operationKey: `loadCategory-${category}`,
-        onSuccess: (response) => {
-          // Update the specific category in our state
-          const settings = (response as SystemSetting[]) || [];
-          const existingCategoryIndex = state.data.value.settingsByCategory.findIndex(
-            (c) => c.category === category
-          );
-
-          if (existingCategoryIndex !== -1) {
-            state.data.value.settingsByCategory[existingCategoryIndex].settings = settings;
-          } else {
-            state.data.value.settingsByCategory.push({
-              category,
-              settings,
-            });
-          }
         },
         showToast: false,
       });
@@ -139,14 +109,11 @@ export const useSettingsStore = defineStore("settings", () => {
 
   return {
     // State
-    settingsByCategory,
-    allSettings,
     isLoading: state.isLoading,
     error: state.error,
 
     // Actions
     loadSettings,
-    loadSettingsForCategory,
     updateSetting,
     deleteSetting,
     testEmail,

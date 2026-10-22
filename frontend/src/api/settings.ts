@@ -42,9 +42,6 @@ export interface TestNotificationResponse {
 export const settingsApi = {
   listSettings: () => apiClient.get<SettingsByCategory[]>("/admin/settings"),
 
-  listSettingsByCategory: (category: string) =>
-    apiClient.get<SystemSetting[]>(`/admin/settings/category/${category}`),
-
   getSetting: (key: string) =>
     apiClient.get<{ key: string; value: string }>(`/admin/settings/${key}`),
 

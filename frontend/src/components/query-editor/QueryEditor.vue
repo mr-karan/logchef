@@ -508,7 +508,6 @@ interface QueryEditorProps {
   placeholder?: string
   tsField?: string
   showFieldsPanel?: boolean
-  useCurrentTeam?: boolean
   class?: string
   isExecuting?: boolean
   canExecute?: boolean
@@ -525,7 +524,6 @@ const props = withDefaults(defineProps<QueryEditorProps>(), {
   placeholder: '',
   tsField: 'timestamp',
   showFieldsPanel: false,
-  useCurrentTeam: true,
   class: '',
   isExecuting: false,
   canExecute: true,

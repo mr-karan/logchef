@@ -1,14 +1,6 @@
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
-import type { AxiosError } from "axios";
-
-export interface APIErrorResponse {
-  status: "error";
-  message: string;
-  error_type: string;
-  data?: any;
-  _toastShown?: boolean;
-}
+import type { APIErrorResponse } from "@/api/types";
 
 // Error type mapping
 const ERROR_TITLES: Record<string, string> = {
@@ -32,24 +24,6 @@ export function formatErrorMessage(error: unknown): string {
     if (response.status === "error") return response.message;
   }
 
-  // Axios error
-  if (error && typeof error === "object" && "isAxiosError" in error) {
-    const axiosError = error as AxiosError<APIErrorResponse>;
-
-    // Network error (no response)
-    if (!axiosError.response) {
-      return "Network error: Unable to connect to the server";
-    }
-
-    // Server error with proper format
-    if (axiosError.response.data?.status === "error") {
-      return axiosError.response.data.message;
-    }
-
-    // Fallback to status text
-    return `Server error: ${axiosError.response.statusText || "Unknown error"}`;
-  }
-
   // Standard Error object
   if (error instanceof Error) return error.message;
 
@@ -66,14 +40,6 @@ export function getErrorType(error: unknown): string {
     const response = error as APIErrorResponse;
     if (response.status === "error" && response.error_type) {
       return response.error_type;
-    }
-  }
-
-  // Axios error
-  if (error && typeof error === "object" && "isAxiosError" in error) {
-    const axiosError = error as AxiosError<APIErrorResponse>;
-    if (axiosError.response?.data?.error_type) {
-      return axiosError.response.data.error_type;
     }
   }
 

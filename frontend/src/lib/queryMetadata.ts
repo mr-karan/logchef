@@ -32,17 +32,6 @@ function getSupportedQueryLanguages(source: SourceDescriptor): QueryLanguage[] {
     : ["logchefql", "clickhouse-sql"];
 }
 
-function getSupportedSavedQueryEditorModes(source: SourceDescriptor): SavedQueryEditorMode[] {
-  const explicit = typeof source === "string" ? null : source?.saved_query_editor_modes;
-  if (explicit && explicit.length > 0) {
-    return explicit.filter(
-      (mode): mode is SavedQueryEditorMode => mode === "builder" || mode === "native"
-    );
-  }
-
-  return ["builder", "native"];
-}
-
 function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode[] {
   const explicit = typeof source === "string" ? null : source?.alert_editor_modes;
   if (explicit && explicit.length > 0) {
@@ -56,10 +45,6 @@ function getSupportedAlertEditorModes(source: SourceDescriptor): AlertEditorMode
 
 export function supportsQueryLanguage(source: SourceDescriptor, language: QueryLanguage): boolean {
   return getSupportedQueryLanguages(source).includes(language);
-}
-
-export function supportsSavedQueryEditorMode(source: SourceDescriptor, mode: SavedQueryEditorMode): boolean {
-  return getSupportedSavedQueryEditorModes(source).includes(mode);
 }
 
 export function supportsAlertEditorMode(source: SourceDescriptor, mode: AlertEditorMode): boolean {

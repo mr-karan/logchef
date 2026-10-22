@@ -6,13 +6,6 @@ export interface FieldInfo {
   isSeverity?: boolean;
 }
 
-// Query execution state
-export interface QueryExecutionState {
-  timeRange: string;
-  limit: number;
-  query: string;
-}
-
 // Query save form data
 export interface SaveQueryFormData {
   name: string;

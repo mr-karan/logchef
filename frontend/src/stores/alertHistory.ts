@@ -3,7 +3,6 @@ import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
-import type { APIErrorResponse } from "@/api/types";
 
 interface AlertHistoryState {
   entries: AlertHistoryEntry[];
@@ -20,7 +19,6 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
 
   const entries = computed(() => state.data.value.entries);
   const currentAlertId = computed(() => state.data.value.currentAlertId);
-  const hasHistory = computed(() => entries.value.length > 0);
 
   function setCurrentContext(alertId: number | null) {
     state.data.value.currentAlertId = alertId;
@@ -56,19 +54,6 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     });
   }
 
-  async function resolveCurrentAlert(message?: string) {
-    const alertId = state.data.value.currentAlertId;
-    if (!alertId) {
-      const error: APIErrorResponse = {
-        status: "error",
-        message: "Missing alert context",
-        error_type: "ValidationError",
-      };
-      return { success: false, error };
-    }
-    return resolveAlert(undefined, undefined, alertId, { message });
-  }
-
   async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     return await state.withLoading(`resolveAlert-${alertId}`, async () => {
@@ -100,12 +85,9 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     loadingStates: state.loadingStates,
     entries,
     currentAlertId,
-    hasHistory,
     isLoadingOperation: state.isLoadingOperation,
     loadHistory,
     resolveAlert,
-    resolveCurrentAlert,
-    setCurrentContext,
     setLimit,
   };
 });
