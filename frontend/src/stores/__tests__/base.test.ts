@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { toast } from 'vue-sonner'
-import { useBaseStore } from '../base'
+import { createLatestRequests, useBaseStore } from '../base'
 
 vi.mock('vue-sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -147,5 +147,26 @@ describe('useBaseStore', () => {
     reload.resolve()
     await op
     expect(store.isLoadingOperation('createUser')).toBe(false)
+  })
+})
+
+describe('createLatestRequests', () => {
+  it('hands a live caller the result of a load restarted by invalidate', async () => {
+    const responses = [deferred<string>(), deferred<string>()]
+    const signals: AbortSignal[] = []
+    const loads = createLatestRequests({
+      request: (id: number) => String(id),
+      load: (signal: AbortSignal) => {
+        signals.push(signal)
+        return responses[signals.length - 1].promise
+      },
+    })
+    const caller = loads.run([1])
+    loads.invalidate()
+    expect(signals).toHaveLength(2)
+    expect(signals[0].aborted).toBe(true)
+    responses[0].resolve('before mutation')
+    responses[1].resolve('after mutation')
+    expect(await caller).toBe('after mutation')
   })
 })

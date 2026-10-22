@@ -13,7 +13,7 @@ import type {
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
-import { useBaseStore } from "./base";
+import { createLatestRequests, useBaseStore } from "./base";
 import { i18n } from "@/i18n";
 
 type SourceActivityRequestResult = {
@@ -94,14 +94,13 @@ export const useSourcesStore = defineStore("sources", () => {
 
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
-  const teamSourceRequests = new Map<number, Promise<{ success: boolean; data?: Source[] | null; error?: APIErrorResponse | null }>>();
-  let teamContextVersion = 0;
   const sourceActivityRequests = new Map<number, Promise<SourceActivityRequestResult>>();
-
-  watch(() => contextStore.teamId, () => {
-    teamContextVersion++;
-    teamSourceRequests.clear();
-  }, { flush: "sync" });
+  const { execute } = useApiQuery<Source[]>();
+  const teamSourceLoads = createLatestRequests({
+    request: (teamId: number) => String(teamId),
+    slot: () => "currentTeam",
+    load: fetchTeamSources,
+  });
 
   // Hydration state
   const isHydrated = ref(false);
@@ -143,13 +142,16 @@ export const useSourcesStore = defineStore("sources", () => {
   // Watch team changes and auto-load sources
   watch(
     () => contextStore.teamId,
-    async (newTeamId, _oldTeamId) => {
+    async (newTeamId, _oldTeamId, onCleanup) => {
       // Prevent duplicate processing
       if (newTeamId === lastProcessedTeamId) {
         return;
       }
 
       lastProcessedTeamId = newTeamId;
+      let superseded = false;
+      onCleanup(() => { superseded = true; });
+      const isCurrent = () => !superseded && contextStore.teamId === newTeamId;
       
       // Clear previous state
       state.data.value.teamSourcesError = null;
@@ -157,16 +159,14 @@ export const useSourcesStore = defineStore("sources", () => {
       state.data.value.currentSourceDetails = null;
 
       if (!newTeamId) {
+        teamSourceLoads.cancelAll();
         state.data.value.isLoadingTeamSources = false;
         return;
       }
 
       state.data.value.isLoadingTeamSources = true;
-      const pending = loadTeamSources(newTeamId);
-      const version = teamContextVersion;
-      const isCurrent = () => version === teamContextVersion;
       try {
-        await pending;
+        await loadCurrentTeamSources();
 
         if (!isCurrent()) {
           return;
@@ -243,6 +243,8 @@ export const useSourcesStore = defineStore("sources", () => {
         return;
       }
 
+      contextStore.rememberCurrentSource();
+
       try {
         state.data.value.isLoadingSourceDetails = true;
         await loadSourceDetails(newSourceId);
@@ -289,23 +291,22 @@ export const useSourcesStore = defineStore("sources", () => {
     return isHydrated.value;
   }
 
-  function loadTeamSources(teamId: number, _version?: number) {
-    const pending = teamSourceRequests.get(teamId);
-    if (pending) return pending;
-    const version = teamContextVersion;
-    const { execute } = useApiQuery<Source[]>();
-    const promise = state.withLoading(`loadTeamSources-${teamId}`, async () => {
+  // Loads the current team's sources into teamSources. A newer load for the same team hands its result to earlier callers.
+  async function loadCurrentTeamSources() {
+    const teamId = contextStore.teamId;
+    if (!teamId) return { success: false, data: null, error: null };
+    return await teamSourceLoads.run([teamId]);
+  }
+
+  async function fetchTeamSources(signal: AbortSignal, teamId: number) {
+    return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
       state.error.value = null;
-      const result = await execute(() => sourcesApi.listTeamSources(teamId), { defaultData: [], showToast: false });
-      if (contextStore.teamId !== teamId || version !== teamContextVersion) return { success: false, data: null, error: null };
+      const result = await execute(() => sourcesApi.listTeamSources(teamId, { signal }), { defaultData: [], showToast: false });
+      if (signal.aborted || contextStore.teamId !== teamId) return result;
       if (result.success) state.data.value.teamSources = result.data ?? [];
       else state.error.value = result.error ?? null;
       return result;
-    }).finally(() => {
-      if (teamSourceRequests.get(teamId) === promise) teamSourceRequests.delete(teamId);
     });
-    teamSourceRequests.set(teamId, promise);
-    return promise;
   }
 
   async function createSource(payload: CreateSourcePayload) {
@@ -701,7 +702,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     // Actions
     loadSources,
-    loadTeamSources,
+    loadCurrentTeamSources,
     createSource,
     updateSource,
     deleteSource,

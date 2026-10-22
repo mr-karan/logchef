@@ -208,6 +208,7 @@ describe('navigation request ownership', () => {
   it('ignores an old saved-query failure after a new list succeeds', async () => {
     const store = useSavedQueriesStore()
     const old = store.list(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     const current = store.list(2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))
     network.requests[1].succeed([query(2)])

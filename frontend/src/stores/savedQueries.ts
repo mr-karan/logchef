@@ -5,11 +5,10 @@ import {
   type SavedQuery,
   type SavedQueryContent,
 } from "@/api/savedQueries";
-import type { APIErrorResponse } from "@/api/types";
 import type { TeamSummary } from "@/api/teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import { useApiQuery } from "@/composables/useApiQuery";
-import { useBaseStore } from "./base";
+import { createLatestRequests, useBaseStore } from "./base";
 import { useContextStore } from "./context";
 import { i18n } from "@/i18n";
 
@@ -31,21 +30,19 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   });
 
   const contextStore = useContextStore();
-  let listVersion = 0;
-  let inFlightList: {
-    sourceId: number | undefined;
-    promise: Promise<{ success: boolean; data?: SavedQuery[] | null; error?: APIErrorResponse | null }>;
-  } | null = null;
+  const { execute } = useApiQuery<SavedQuery[]>();
+  const listLoads = createLatestRequests({
+    request: (sourceId?: number) => String(sourceId ?? "all"),
+    slot: () => "queries",
+    load: fetchList,
+  });
 
   watch(
     [() => contextStore.teamId, () => contextStore.sourceId],
     () => {
-      listVersion++;
-      inFlightList = null;
       state.data.value.queries = [];
       state.data.value.selectedQuery = null;
-    },
-    { flush: "sync" },
+    }
   );
 
   const queries = computed(() => state.data.value.queries);
@@ -70,23 +67,21 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   // list fetches saved queries the user can see. Optional sourceId narrows to one source.
-  function list(sourceId?: number) {
-    if (inFlightList && inFlightList.sourceId === sourceId) return inFlightList.promise;
-    const version = ++listVersion;
+  async function list(sourceId?: number) {
+    return await listLoads.run([sourceId]);
+  }
+
+  async function fetchList(signal: AbortSignal, sourceId?: number) {
     const key = sourceId ? `listSavedQueries-${sourceId}` : 'listSavedQueries';
-    const { execute } = useApiQuery<SavedQuery[]>();
-    const promise = state.withLoading(key, async () => {
+    const { teamId, sourceId: contextSourceId } = contextStore;
+    return await state.withLoading(key, async () => {
       state.error.value = null;
-      const result = await execute(() => savedQueriesApi.list(sourceId), { defaultData: [], showToast: false });
-      if (version !== listVersion) return { success: false, data: null, error: null };
+      const result = await execute(() => savedQueriesApi.list(sourceId, { signal }), { defaultData: [], showToast: false });
+      if (signal.aborted || contextStore.teamId !== teamId || contextStore.sourceId !== contextSourceId) return result;
       if (result.success) state.data.value.queries = result.data ?? [];
       else state.error.value = result.error ?? null;
       return result;
-    }).finally(() => {
-      if (inFlightList?.promise === promise) inFlightList = null;
     });
-    inFlightList = { sourceId, promise };
-    return promise;
   }
 
   const allQueries = computed(() => state.data.value.allQueries);
@@ -150,6 +145,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
           state.data.value.queries.unshift(response);
           state.data.value.selectedQuery = response;
         }
+        listLoads.invalidate();
       }
     });
   }
@@ -181,6 +177,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
             };
           }
         }
+        listLoads.invalidate();
       }
     });
   }
@@ -198,6 +195,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
         if (state.data.value.selectedQuery?.id === Number(queryId)) {
           state.data.value.selectedQuery = null;
         }
+        listLoads.invalidate();
       }
     });
   }

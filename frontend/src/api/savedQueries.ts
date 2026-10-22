@@ -63,12 +63,12 @@ export interface ResolvedSavedQuery extends SavedQuery {
  * Saved Queries API client
  */
 export const savedQueriesApi = {
-  list: (sourceId?: number) => {
+  list: (sourceId?: number, options?: { signal?: AbortSignal }) => {
     const url =
       sourceId !== undefined && sourceId !== null
         ? `/saved-queries?source_id=${sourceId}`
         : "/saved-queries";
-    return apiClient.get<SavedQuery[]>(url);
+    return apiClient.get<SavedQuery[]>(url, options);
   },
 
   // listAll returns every saved query across all sources (global-admin only),

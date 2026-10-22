@@ -61,15 +61,20 @@ export const useContextStore = defineStore('context', () => {
     saveToStorage(persisted)
   }
 
+  // A selected source may be stale (old links, revoked access), so only rememberCurrentSource persists it.
   function selectSource(newSourceId: number) {
     if (!hasTeam.value) {
       console.warn(`ContextStore: Cannot select source ${newSourceId} without team`)
       return
     }
     sourceId.value = newSourceId
+  }
 
+  // Called once the team's source list confirms the current source.
+  function rememberCurrentSource() {
+    if (teamId.value === null || sourceId.value === null) return
     const persisted = loadFromStorage()
-    persisted.sourcePerTeam[teamId.value!] = newSourceId
+    persisted.sourcePerTeam[teamId.value] = sourceId.value
     saveToStorage(persisted)
   }
 
@@ -153,6 +158,7 @@ export const useContextStore = defineStore('context', () => {
     hasValidContext,
     selectTeam,
     selectSource,
+    rememberCurrentSource,
     clearSource,
     clear,
     clearStorage,

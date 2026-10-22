@@ -1,4 +1,4 @@
-import { ref, computed, watch, type Ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
@@ -9,19 +9,13 @@ import type { VariableState } from '@/stores/variables'
 import { useTeamPermissions } from '@/composables/useTeamPermissions'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
-import { getErrorMessage, type APIErrorResponse } from '@/api/types'
+import { getErrorMessage } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
 import { decodeStoredRange, encodeWindowForUrl } from '@/utils/timeWindowCodec'
-import type { Source } from "@/api/sources";
 import { getExploreModeForQueryLanguage, resolveSavedQueryMetadata } from "@/lib/queryMetadata";
 
-export function useSavedQueries(
-    queries?: Ref<SavedQuery[] | undefined>,
-    _currentSource?: Ref<Source | undefined>
-) {
-  const localQueries = ref<SavedQuery[]>([]);
-  const queriesRef = queries || localQueries;
+export function useSavedQueries() {
   const router = useRouter()
   const route = useRoute()
   const exploreStore = useExploreStore()
@@ -33,27 +27,14 @@ export function useSavedQueries(
 
   const showSaveQueryModal = ref(false)
   const editingQuery = ref<SavedQuery | null>(null)
-  const isLoading = ref(false)
+  const isUpdating = ref(false)
   const isLoadingQueryDetails = ref(false)
   const openingQueryId = ref<number | null>(null)
   const searchQuery = ref('')
   const saveAsNewQuery = ref(false)
-  let sourceQueryVersion = 0
-  let inFlightSourceQueries: {
-    sourceId: number;
-    promise: Promise<{ success: boolean; data?: SavedQuery[] | null; error?: APIErrorResponse | string | null }>;
-  } | null = null
-
-  watch(
-    [() => contextStore.teamId, () => contextStore.sourceId],
-    () => {
-      sourceQueryVersion++
-      inFlightSourceQueries = null
-      queriesRef.value = []
-      isLoading.value = false
-    },
-    { flush: 'sync' },
-  )
+  const queriesRef = computed(() => savedQueriesStore.queries)
+  const isLoading = computed(() =>
+    isUpdating.value || savedQueriesStore.isLoadingOperation(`listSavedQueries-${contextStore.sourceId}`))
 
   const isEditingExistingQuery = computed(() => !!route.query.id);
 
@@ -265,11 +246,7 @@ export function useSavedQueries(
       const metadata = resolveSavedQueryMetadata({
         query_language: queryData.query_language,
         editor_mode: queryData.editor_mode,
-        source_type: _currentSource?.value?.source_type ?? (queryData.query_language === "logsql" ? "victorialogs" : "clickhouse"),
-        query_languages: _currentSource?.value?.query_languages,
-        saved_query_editor_modes: _currentSource?.value?.saved_query_editor_modes,
       })
-      const isLogchefQL = metadata.queryLanguage === 'logchefql'
       const queryToLoad = content.content || ''
 
       exploreStore.clearError()
@@ -290,7 +267,7 @@ export function useSavedQueries(
         contextStore.selectSource(queryData.source_id);
       }
 
-      if (isLogchefQL) {
+      if (metadata.queryLanguage === 'logchefql') {
         exploreStore.setLogchefqlCode(queryToLoad)
       } else {
         exploreStore.setNativeQuery(queryToLoad, metadata.queryLanguage)
@@ -439,37 +416,20 @@ export function useSavedQueries(
 
   // loadSourceQueries fetches saved queries for a single source. teamId is no
   // longer needed — visibility is gated by source access via any team membership.
-  function loadSourceQueries(sourceId: number) {
-    if (inFlightSourceQueries?.sourceId === sourceId) return inFlightSourceQueries.promise
-    const version = ++sourceQueryVersion
-    isLoading.value = true
+  async function loadSourceQueries(sourceId: number) {
     searchQuery.value = ''
-    const promise = (async () => {
-      if (!sourceId) {
-        queriesRef.value = []
-        isLoading.value = false
-        return { success: false, error: 'No source ID provided' }
-      }
+    if (!sourceId) return { success: false, error: 'No source ID provided' }
 
-      const result = await savedQueriesStore.list(sourceId)
-      if (version !== sourceQueryVersion) return { success: false }
-
-      isLoading.value = false
-      queriesRef.value = result.success ? result.data ?? [] : []
-      if (result.error) {
-        toast({
-          title: 'Error',
-          description: result.error.message,
-          variant: 'destructive',
-          duration: TOAST_DURATION.ERROR,
-        })
-      }
-      return result
-    })().finally(() => {
-      if (inFlightSourceQueries?.promise === promise) inFlightSourceQueries = null
-    })
-    inFlightSourceQueries = { sourceId, promise }
-    return promise
+    const result = await savedQueriesStore.list(sourceId)
+    if (result.error && contextStore.sourceId === sourceId) {
+      toast({
+        title: 'Error',
+        description: result.error.message,
+        variant: 'destructive',
+        duration: TOAST_DURATION.ERROR,
+      })
+    }
+    return result
   }
 
   function createNewQuery(sourceId?: number) {
@@ -508,7 +468,7 @@ export function useSavedQueries(
         editor_mode: 'builder' | 'native';
       }
   ) {
-    isLoading.value = true;
+    isUpdating.value = true;
     try {
       const result = await savedQueriesStore.update(queryId, {
         name: updateData.name,
@@ -532,7 +492,7 @@ export function useSavedQueries(
       });
       throw error;
     } finally {
-      isLoading.value = false;
+      isUpdating.value = false;
     }
   }
 
