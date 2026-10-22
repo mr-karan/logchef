@@ -77,7 +77,12 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
     return await state.withLoading(key, async () => {
       state.error.value = null;
       const result = await execute(() => savedQueriesApi.list(sourceId, { signal }), { defaultData: [], showToast: false });
-      if (signal.aborted || contextStore.teamId !== teamId || contextStore.sourceId !== contextSourceId) return result;
+      if (
+        signal.aborted ||
+        contextStore.teamId !== teamId ||
+        contextStore.sourceId !== contextSourceId ||
+        (sourceId !== undefined && sourceId !== contextStore.sourceId)
+      ) return result;
       if (result.success) state.data.value.queries = result.data ?? [];
       else state.error.value = result.error ?? null;
       return result;

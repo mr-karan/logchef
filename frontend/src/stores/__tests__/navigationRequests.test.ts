@@ -160,7 +160,30 @@ describe('navigation request ownership', () => {
     expect(store.queries).toEqual([])
   })
 
+  it('does not publish an invalidated old-source list under the current source', async () => {
+    const context = useContextStore()
+    context.selectTeam(1)
+    context.selectSource(1)
+    const store = useSavedQueriesStore()
+    const pending = store.list(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+    context.selectSource(2)
+    await nextTick()
+    const removing = store.remove(77)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    network.requests[1].succeed({ message: 'Deleted' })
+    expect((await removing).success).toBe(true)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(3))
+    expect(network.requests[2].config.url).toBe('/saved-queries?source_id=1')
+    network.requests[2].succeed([query(5, 1)])
+    await pending
+    expect(context.sourceId).toBe(2)
+    expect(store.queries).toEqual([])
+  })
+
   it('gives concurrent same-source callers the latest list', async () => {
+    useContextStore().selectTeam(1)
+    useContextStore().selectSource(1)
     const store = useSavedQueriesStore()
     const first = store.list(1)
     const second = store.list(1)
@@ -206,9 +229,12 @@ describe('navigation request ownership', () => {
   })
 
   it('ignores an old saved-query failure after a new list succeeds', async () => {
+    useContextStore().selectTeam(1)
+    useContextStore().selectSource(1)
     const store = useSavedQueriesStore()
     const old = store.list(1)
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+    useContextStore().selectSource(2)
     const current = store.list(2)
     await vi.waitFor(() => expect(network.requests).toHaveLength(2))
     network.requests[1].succeed([query(2)])
@@ -272,6 +298,8 @@ describe('navigation request ownership', () => {
   })
 
   it('keeps composable queries when the dropdown loads the same source concurrently', async () => {
+    useContextStore().selectTeam(1)
+    useContextStore().selectSource(1)
     const queries = await savedQueries()
     const first = queries.loadSourceQueries(1)
     const second = useSavedQueriesStore().list(1)
@@ -283,6 +311,8 @@ describe('navigation request ownership', () => {
   })
 
   it('shares a composable load between concurrent same-source callers', async () => {
+    useContextStore().selectTeam(1)
+    useContextStore().selectSource(1)
     const queries = await savedQueries()
     const first = queries.loadSourceQueries(1)
     const second = queries.loadSourceQueries(1)
