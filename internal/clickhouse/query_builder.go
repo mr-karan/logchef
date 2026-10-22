@@ -111,51 +111,68 @@ func parseSelectQuery(rawSQL string) (*clickhouseparser.SelectQuery, error) {
 	if !ok {
 		return nil, fmt.Errorf("only SELECT queries are supported: %w", ErrInvalidQuery)
 	}
-	if err := checkIdentifiers(selectQuery); err != nil {
+	if err := checkIdentifiers(rawSQL, selectQuery); err != nil {
 		return nil, err
 	}
 	return selectQuery, nil
 }
 
-// checkIdentifiers rejects quoted identifiers with escapes ClickHouse could
-// lex past the parser's closing quote, and names it lexes as $$ heredocs.
-func checkIdentifiers(query *clickhouseparser.SelectQuery) error {
+// checkIdentifiers rejects quoted identifiers that ClickHouse reads as a
+// different token or a different name than the parser does, and names it
+// lexes as $$ heredocs.
+func checkIdentifiers(rawSQL string, query *clickhouseparser.SelectQuery) error {
 	var err error
 	clickhouseparser.Walk(query, func(node clickhouseparser.Expr) bool {
 		ident, ok := node.(*clickhouseparser.Ident)
 		if !ok {
 			return true
 		}
+		// The parser ends a quoted token at the first matching quote, so
+		// NameEnd indexes it. ClickHouse reads a doubled one as an embedded quote.
+		start, closing := int(ident.NamePos)-1, int(ident.NameEnd)
 		switch {
-		case ident.QuoteType != clickhouseparser.Unquoted && !hasOnlyIdentifierEscapes(ident.Name):
-			err = fmt.Errorf("quoted identifiers support only the \\\\ and \\x60 escapes: %q: %w", ident.Name, ErrInvalidQuery)
-		case ident.QuoteType == clickhouseparser.Unquoted && strings.HasPrefix(ident.Name, "$"):
-			err = fmt.Errorf("identifiers starting with $ are not supported: %q: %w", ident.Name, ErrInvalidQuery)
+		case ident.QuoteType == clickhouseparser.Unquoted:
+			if strings.HasPrefix(ident.Name, "$") {
+				err = fmt.Errorf("identifiers starting with $ are not supported: %q: %w", ident.Name, ErrInvalidQuery)
+			}
+		case closing+1 < len(rawSQL) && rawSQL[closing+1] == rawSQL[closing]:
+			err = fmt.Errorf("doubled quotes inside quoted identifiers are not supported, write a backtick as \\x60: %s: %w", rawSQL[start:closing+2], ErrInvalidQuery)
+		default:
+			if _, ok := decodeQuotedIdentifier(ident.Name); !ok {
+				err = fmt.Errorf("quoted identifiers support only the \\\\ and \\x60 escapes: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
+			}
 		}
 		return err == nil
 	})
 	return err
 }
 
-// hasOnlyIdentifierEscapes reports whether every backslash in a quoted
-// identifier starts \\ or \x60, the escapes queryescape writes. The parser
-// ends the token at the first quote and keeps the escapes verbatim, and
-// ClickHouse reads these two without consuming that quote.
-func hasOnlyIdentifierEscapes(name string) bool {
-	for i := 0; i < len(name); i++ {
-		if name[i] != '\\' {
+// decodeQuotedIdentifier returns the name ClickHouse reads from the body of a
+// quoted identifier. It reports false for any escape other than \\ and \x60,
+// the ones queryescape writes: ClickHouse would decode it to another name or
+// consume the closing quote.
+func decodeQuotedIdentifier(body string) (string, bool) {
+	if !strings.Contains(body, `\`) {
+		return body, true
+	}
+	var name strings.Builder
+	for i := 0; i < len(body); i++ {
+		if body[i] != '\\' {
+			name.WriteByte(body[i])
 			continue
 		}
-		switch rest := name[i+1:]; {
+		switch rest := body[i+1:]; {
 		case strings.HasPrefix(rest, `\`):
+			name.WriteByte('\\')
 			i++
 		case strings.HasPrefix(rest, "x60"):
+			name.WriteByte('`')
 			i += 3
 		default:
-			return false
+			return "", false
 		}
 	}
-	return true
+	return name.String(), true
 }
 
 // BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit

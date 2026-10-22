@@ -1,6 +1,12 @@
 package clickhouse
 
-import "testing"
+import (
+	"errors"
+	"reflect"
+	"testing"
+
+	"github.com/mr-karan/logchef/internal/queryescape"
+)
 
 func TestQueryBuilderClickHousePreservesLiteralValues(t *testing.T) {
 	client, ctx := integrationClient(t)
@@ -35,26 +41,81 @@ func TestQueryBuilderClickHousePreservesLiteralValues(t *testing.T) {
 	}
 }
 
-func TestQuotedIdentifierEscapesClickHouse(t *testing.T) {
+func TestQuotedIdentifiersMatchClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	qb := NewExtendedQueryBuilder("", 0)
-	for _, tc := range quotedIdentifierEscapes {
-		if tc.name == "" {
-			continue
+	query := func(t *testing.T, sql string) ([]string, []any) {
+		t.Helper()
+		rows, err := client.conn.Query(ctx, sql)
+		if err != nil {
+			t.Fatalf("execute %q: %v", sql, err)
 		}
-		ident := tc.quote + tc.body + tc.quote
-		t.Run(ident, func(t *testing.T) {
-			built, err := qb.BuildRawQuery("SELECT 1 AS "+ident+", 2 AS marker", 0)
-			if err != nil {
+		defer rows.Close()
+		var values []any
+		for rows.Next() {
+			row := make([]any, len(rows.ColumnTypes()))
+			for i, column := range rows.ColumnTypes() {
+				row[i] = reflect.New(column.ScanType()).Interface()
+			}
+			if err := rows.Scan(row...); err != nil {
 				t.Fatal(err)
 			}
-			rows, err := client.conn.Query(ctx, built)
-			if err != nil {
-				t.Fatalf("execute %q: %v", built, err)
+			for _, value := range row {
+				values = append(values, reflect.ValueOf(value).Elem().Interface())
 			}
-			defer rows.Close()
-			if got := rows.Columns(); len(got) != 2 || got[0] != tc.name || got[1] != "marker" {
-				t.Fatalf("columns = %q, want [%q marker]", got, tc.name)
+		}
+		if err := rows.Err(); err != nil {
+			t.Fatal(err)
+		}
+		return rows.Columns(), values
+	}
+
+	var queries []string
+	for _, tc := range acceptedQuotedIdentifiers {
+		ident := tc.quote + tc.body + tc.quote
+		source := " FROM (SELECT 11 AS " + queryescape.ClickHouseIdentifier(tc.name) + ", 22 AS marker)"
+		queries = append(queries,
+			"SELECT 1 AS "+ident+", 2 AS marker",
+			"SELECT "+ident+", marker"+source,
+			"SELECT marker "+ident+source,
+			"SELECT marker"+source+" WHERE "+ident+" = 11",
+		)
+	}
+	queries = append(queries,
+		"SELECT `a`\"b\" FROM (SELECT 11 AS a, 22 AS b)",
+		"SELECT \"a\"`b` FROM (SELECT 11 AS a, 22 AS b)",
+		"SELECT `a` `b` FROM (SELECT 11 AS a, 22 AS b)",
+		"SELECT `a`,`b` FROM (SELECT 11 AS a, 22 AS b)",
+	)
+	for _, sql := range queries {
+		t.Run(sql, func(t *testing.T) {
+			built, err := qb.BuildRawQuery(sql, 0)
+			if err != nil {
+				t.Fatalf("BuildRawQuery: %v", err)
+			}
+			wantColumns, wantValues := query(t, sql)
+			gotColumns, gotValues := query(t, built)
+			if !reflect.DeepEqual(gotColumns, wantColumns) || !reflect.DeepEqual(gotValues, wantValues) {
+				t.Fatalf("built %q returned %q %v, want %q %v", built, gotColumns, gotValues, wantColumns, wantValues)
+			}
+		})
+	}
+
+	// ClickHouse reads each as one identifier holding an embedded quote, so it
+	// returns 11. The parser splits it into a column and an alias that selects 22.
+	for _, sql := range []string{
+		"SELECT `a``b` FROM (SELECT 11 AS \"a`b\", 22 AS a)",
+		"SELECT `a\\x60``b` FROM (SELECT 11 AS \"a``b\", 22 AS \"a`\")",
+		"SELECT `a\\\\``b` FROM (SELECT 11 AS \"a\\\\`b\", 22 AS \"a\\\\\")",
+		"SELECT \"a\\\\\"\"b\" FROM (SELECT 11 AS `a\\\\\"b`, 22 AS `a\\\\`)",
+		"SELECT \"a\"\"b\" FROM (SELECT 11 AS `a\"b`, 22 AS a)",
+	} {
+		t.Run(sql, func(t *testing.T) {
+			if _, values := query(t, sql); !reflect.DeepEqual(values, []any{uint8(11)}) {
+				t.Fatalf("ClickHouse returned %v, want [11]", values)
+			}
+			if built, err := qb.BuildRawQuery(sql, 0); !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", built, err)
 			}
 		})
 	}

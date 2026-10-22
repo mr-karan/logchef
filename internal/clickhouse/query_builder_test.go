@@ -327,9 +327,8 @@ func TestFormatSelectQuery(t *testing.T) {
 	}
 }
 
-// quotedIdentifierEscapes maps identifier bodies to the name ClickHouse reads.
-// An empty name marks a body ClickHouse lexes differently, so it must fail.
-var quotedIdentifierEscapes = []struct {
+// acceptedQuotedIdentifiers maps quoted identifiers to the name ClickHouse reads.
+var acceptedQuotedIdentifiers = []struct {
 	quote, body, name string
 }{
 	{"`", `a\\b`, `a\b`},
@@ -344,36 +343,56 @@ var quotedIdentifierEscapes = []struct {
 	{`"`, `a\x60b`, "a`b"},
 	{`"`, `a\\b`, `a\b`},
 	{`"`, "a`b", "a`b"},
-	{"`", `a\`, ""},
-	{"`", `a\\\`, ""},
-	{"`", `a\x6`, ""},
-	{"`", `a\x`, ""},
-	{"`", `a\x6gb`, ""},
-	{"`", `a\X60b`, ""},
-	{"`", `a\x41b`, ""},
-	{"`", `a\"b`, ""},
-	{"`", `a\'b`, ""},
-	{"`", `a\nb`, ""},
-	{"`", `a\0b`, ""},
-	{"`", `a\é`, ""},
-	{`"`, `a\`, ""},
-	{`"`, `a\x6`, ""},
+	{`"`, "a``b", "a``b"},
+	{"`", `a"b`, `a"b`},
+}
+
+// rejectedQuotedIdentifiers lists column references ClickHouse reads as a
+// different token or a different name than the parser does.
+var rejectedQuotedIdentifiers = []string{
+	// ClickHouse reads past the parser's closing quote.
+	"`a\\`",
+	"`a\\\\\\`",
+	"`a\\x6`",
+	"`a\\x`",
+	`"a\"`,
+	`"a\x6"`,
+	// ClickHouse reads a doubled quote as one embedded quote.
+	"`a``b`",
+	`"a""b"`,
+	"````",
+	"`a\\x60``b`",
+	"`a\\\\``b`",
+	`"a\x60""b"`,
+	`"a\\""b"`,
+	"`t`.`a``b`",
+	// Escapes outside the allowlist. ClickHouse decodes most to another name.
+	"`a\\x6gb`",
+	"`a\\X60b`",
+	"`a\\x41b`",
+	"`a\\\"b`",
+	"`a\\'b`",
+	"`a\\nb`",
+	"`a\\0b`",
+	"`a\\é`",
 }
 
 func TestQuotedIdentifierEscapes(t *testing.T) {
 	qb := NewExtendedQueryBuilder("", 0)
-	for _, tc := range quotedIdentifierEscapes {
+	for _, tc := range acceptedQuotedIdentifiers {
 		ident := tc.quote + tc.body + tc.quote
 		t.Run(ident, func(t *testing.T) {
 			got, err := qb.BuildRawQuery("SELECT 1 AS "+ident+", 2 AS marker", 0)
-			if tc.name == "" {
-				if !errors.Is(err, ErrInvalidQuery) {
-					t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
-				}
-				return
-			}
 			if err != nil || !strings.Contains(got, "1 AS "+ident+", 2 AS marker") {
 				t.Fatalf("BuildRawQuery = %q, %v; want %s kept verbatim", got, err, ident)
+			}
+		})
+	}
+	for _, ident := range rejectedQuotedIdentifiers {
+		t.Run(ident, func(t *testing.T) {
+			got, err := qb.BuildRawQuery("SELECT "+ident+" FROM logs", 0)
+			if !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
 			}
 		})
 	}
