@@ -1,85 +1,60 @@
 package auth
 
 import (
-	"container/list"
+	"hash/maphash"
 	"sync"
 	"time"
 )
 
-// MaxLimiterKeys bounds the number of tracked windows.
-const MaxLimiterKeys = 10_000
+// 65,536 buckets keep each limiter near 1.5 MiB without retaining keys.
+const limiterBucketCount = 1 << 16
 
-// WindowLimiter counts requests per key in fixed windows ordered by expiration.
+// WindowLimiter counts requests in bounded, keyed hash buckets.
 type WindowLimiter struct {
-	mu        sync.Mutex
-	window    time.Duration
-	limit     int
-	keys      map[string]*list.Element
-	expiry    list.List
-	evictable list.List
+	mu      sync.Mutex
+	window  time.Duration
+	limit   int
+	seed    maphash.Seed
+	base    time.Time
+	buckets [limiterBucketCount]limiterWindow
 }
 
 type limiterWindow struct {
-	key       string
-	start     time.Time
-	count     int
-	evictable *list.Element
+	epoch    int64
+	current  int
+	previous int
 }
 
 // NewWindowLimiter allows up to limit requests per key within each window.
 func NewWindowLimiter(window time.Duration, limit int) *WindowLimiter {
-	return &WindowLimiter{window: window, limit: limit, keys: make(map[string]*list.Element)}
+	return &WindowLimiter{window: window, limit: limit, seed: maphash.MakeSeed(), base: time.Now()}
 }
 
 // Allow records an attempt and reports whether the key is within its limit.
 func (l *WindowLimiter) Allow(key string) bool {
-	if key == "" {
-		return true
-	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	now := time.Now()
-	for head := l.expiry.Front(); head != nil; head = l.expiry.Front() {
-		w := head.Value.(*limiterWindow)
-		if now.Sub(w.start) < l.window {
-			break
-		}
-		l.remove(head)
-	}
-	if element, ok := l.keys[key]; ok {
-		w := element.Value.(*limiterWindow)
-		if w.count >= l.limit {
-			return false
-		}
-		w.count++
-		if w.count == l.limit {
-			l.evictable.Remove(w.evictable)
-			w.evictable = nil
-		}
-		return true
-	}
-	if len(l.keys) >= MaxLimiterKeys {
-		// Evict the oldest window under its limit; if all are blocked, the oldest one, so new users are still admitted.
-		head := l.expiry.Front()
-		if candidate := l.evictable.Front(); candidate != nil {
-			head = candidate.Value.(*list.Element)
-		}
-		l.remove(head)
-	}
-	w := &limiterWindow{key: key, start: now, count: 1}
-	element := l.expiry.PushBack(w)
-	l.keys[key] = element
-	if w.count < l.limit {
-		w.evictable = l.evictable.PushBack(element)
-	}
-	return true
+	return l.allowAt(key, time.Since(l.base))
 }
 
-func (l *WindowLimiter) remove(element *list.Element) {
-	w := element.Value.(*limiterWindow)
-	delete(l.keys, w.key)
-	l.expiry.Remove(element)
-	if w.evictable != nil {
-		l.evictable.Remove(w.evictable)
+func (l *WindowLimiter) allowAt(key string, elapsed time.Duration) bool {
+	if key == "" || l.window <= 0 {
+		return true
 	}
+	w := &l.buckets[maphash.String(l.seed, key)%limiterBucketCount]
+	epoch := int64(elapsed / l.window)
+	if epoch != w.epoch {
+		w.previous = 0
+		if epoch-w.epoch == 1 {
+			w.previous = w.current
+		}
+		w.current = 0
+		w.epoch = epoch
+	}
+	// Keep both windows so collisions stay conservative and a lone key resets within two windows.
+	if w.current+w.previous >= l.limit {
+		return false
+	}
+	w.current++
+	return true
 }
