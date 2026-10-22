@@ -3,8 +3,7 @@ import type { ComputedRef, Ref } from "vue";
 import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
-import { useToast } from "@/composables/useToast";
-import { formatErrorTypeToTitle, hasShownErrorToast, isCanceledError } from "@/api/error-handler";
+import { hasShownErrorToast, isCanceledError, showErrorToast } from "@/api/error-handler";
 
 export interface BaseState<T> {
   data: Ref<T>;
@@ -70,12 +69,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     error.value = apiError;
 
     if (!hasShownErrorToast(err)) {
-      const { toast } = useToast();
-      toast({
-        title: formatErrorTypeToTitle(errorType),
-        description: errorMessage,
-        variant: 'destructive',
-      });
+      showErrorToast(apiError);
     }
 
     return { success: false as const, error: apiError };
