@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "載入查詢出錯",
   "ui.explorerError": "日誌瀏覽器錯誤",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "探索器初始化失敗。請重新整理頁面。",
-  "ui.loadingContextData": "正在載入上下文資料…",
-  "ui.loadingSourceDetails": "正在載入資料來源詳細資料…",
   "ui.pausedDuringLiveTail": "即時日誌串流期間暫停",
   "ui.timeRangeIsControlledInYourSQLQuery": "時間範圍由 SQL 查詢控制",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "筆數限制由 SQL 查詢中的 LIMIT 子句控制",

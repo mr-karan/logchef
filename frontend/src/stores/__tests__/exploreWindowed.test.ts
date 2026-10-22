@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import { createPinia, setActivePinia } from 'pinia';
+import { sourcesApi, type Source } from '@/api/sources';
+import { useSourcesStore } from '../sources';
+import { useExploreStore } from '../explore';
+import { useContextStore } from '../context';
 import { useExploreWindowedStore } from '../exploreWindowed';
 import type { LogRow, WindowedEvent, WindowedRequest } from '@/api/windowed';
 
@@ -57,6 +61,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   useExploreWindowedStore().stop();
+  vi.restoreAllMocks();
+  localStorage.clear();
   globalThis.fetch = originalFetch;
   server.closeAllConnections();
   await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
@@ -73,6 +79,44 @@ function start(histogram = true, overrides: Partial<WindowedRequest> = {}) {
 }
 
 describe('windowed explorer over HTTP', () => {
+  it.each(['retry', 'skip', 'older'])('shows rows after Stop followed by %s without marking the stopped query successful', async action => {
+    const source: Source = {
+      id: 1, name: 'logs', source_type: 'victorialogs', _meta_is_auto_created: false,
+      _meta_ts_field: '_time', connection: { base_url: 'http://logs.test', optimizer: { enabled: true, histogram_enabled: false } },
+      ttl_days: 1, created_at: '', updated_at: '', is_connected: true,
+    };
+    vi.spyOn(sourcesApi, 'listTeamSources').mockResolvedValue({ status: 'success', data: [source] });
+    vi.spyOn(sourcesApi, 'getTeamSource').mockResolvedValue({ status: 'success', data: source });
+    const context = useContextStore();
+    context.selectTeam(1);
+    context.selectSource(1);
+    const sources = useSourcesStore();
+    await vi.waitFor(() => expect(sources.currentSourceDetails?.id).toBe(1));
+    const explore = useExploreStore();
+    explore.open({ teamId: 1, sourceId: 1, content: { kind: 'query', mode: 'native', text: '*', window: { kind: 'relative', spec: '1h' }, limit: 2 } });
+    explore.setNativeQuery('level:error');
+    respond = req => {
+      if (req.count) return [event({ type: 'end' })];
+      if (req.window_index === 0) return [event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('retried')], cursor: 'second' }), event({ type: 'end', cursor: 'second' })];
+      if (req.skip_window === 0 || req.cursor === 'second') return [event({ type: 'rows', window: windows[1], status: 'complete', logs: [row('older', windows[1].start)] }), event({ type: 'end', complete: true })];
+      return null;
+    };
+    const running = explore.executeQuery();
+    const windowed = useExploreWindowedStore();
+    await vi.waitFor(() => expect(windowed.skippableWindow?.index).toBe(0));
+    await explore.cancelQuery();
+    await running;
+    expect(explore.lastExecutedState).toBeUndefined();
+    expect(explore.isQueryStateDirty).toBe(true);
+    expect(JSON.parse(localStorage.getItem('logchef.explore.draft.1.1') ?? '{}').nativeQuery).toBe('level:error');
+    if (action === 'skip') await windowed.skipWindow();
+    else {
+      await windowed.retrySearch(windowed.coverage[0]);
+      if (action === 'older') await windowed.loadOlder();
+    }
+    expect(explore.logs.map(log => log._msg)).toEqual(action === 'retry' ? ['retried'] : action === 'skip' ? ['older'] : ['retried', 'older']);
+  });
+
   it('uses exact JSON stream filters and builds a complete first-page histogram without counts', async () => {
     respond = () => [event({ type: 'plan', windows }), event({ type: 'rows', window: windows[0], status: 'complete', logs: [row('one')] }), event({ type: 'end', complete: true })];
     const { store, loaded, finished } = start();

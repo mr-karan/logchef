@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { setActivePinia, createPinia } from "pinia";
 import { nextTick } from "vue";
 import type { Source } from "@/api/sources";
+import type { ResolvedSavedQuery } from "@/api/savedQueries";
+import { parseExploreLocation } from "@/lib/exploreLocation";
 import { epochMs, relativeWindow, type TimeWindow } from "@/utils/timeWindow";
 
 // A non-UTC browser zone, so any browser-zone wall clock shows up as a shift.
@@ -13,8 +15,8 @@ process.env.TZ = "Asia/Kolkata";
 // The explore store pulls in a large dependency graph (sources/teams stores,
 // the histogram/AI sub-stores, the logs + logchefql API modules). We stub the
 // pieces that would otherwise hit the network or add unrelated noise, but
-// keep the real context store (already covered by context.test.ts) so the
-// source/team-switching watchers under test run against real reactivity.
+// keep the real context store (already covered by context.test.ts) so open()
+// and the source watchers under test run against real reactivity.
 //
 // `sourcesState`/`teamsState` are plain `reactive()` objects rather than
 // vi.fn()-returned plain objects: the store watches `sourcesStore.currentSourceDetails`
@@ -32,6 +34,7 @@ const mocks = vi.hoisted(() => ({
   sourcesState: null as unknown as { currentSourceDetails: Source | null; teamSources: Source[]; isLoadingTeamSources: boolean },
   teamsState: null as unknown as { currentTeamId: number | null },
   logchefqlQuery: vi.fn(),
+  logchefqlValidate: vi.fn(),
   exploreGetLogs: vi.fn(),
   exploreCancelQuery: vi.fn(),
   exploreCreateQueryShare: vi.fn(),
@@ -101,11 +104,11 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/api/logchefql")>();
   return {
     ...actual,
-    logchefqlApi: { ...actual.logchefqlApi, query: mocks.logchefqlQuery },
+    logchefqlApi: { ...actual.logchefqlApi, query: mocks.logchefqlQuery, validate: mocks.logchefqlValidate },
   };
 });
 
-import { useExploreStore } from "../explore";
+import { useExploreStore, type OpenedLocation } from "../explore";
 import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
 import { usePreferencesStore } from "../preferences";
@@ -135,6 +138,24 @@ function makeSource(overrides: Partial<Source> = {}): Source {
     is_connected: true,
     ...overrides,
   };
+}
+
+// Opens what an Explorer URL names, as the navigator does once the team and source are loaded.
+function openUrl(params: Record<string, string>): boolean {
+  const { teamId, sourceId, target } = parseExploreLocation(params);
+  if (target.kind === "saved" || target.kind === "share") throw new Error("openUrl opens drafts and queries only");
+  return useExploreStore().open({ teamId: teamId ?? 1, sourceId, content: target });
+}
+
+function savedQuery(overrides: Partial<ResolvedSavedQuery>): ResolvedSavedQuery {
+  return {
+    id: 7, source_id: 1, resolved_team_id: 1, name: "Q", description: "", query_language: "logchefql",
+    editor_mode: "builder", query_content: "{}", created_at: "", updated_at: "", ...overrides,
+  };
+}
+
+function savedContent(saved: ResolvedSavedQuery): Extract<OpenedLocation["content"], { kind: "saved" }> {
+  return { kind: "saved", saved, queryContent: JSON.parse(saved.query_content) };
 }
 
 // A ClickHouse source: supports both logchefql and clickhouse-sql (default).
@@ -177,9 +198,6 @@ describe("explore store", () => {
     });
 
     it("clears an active share selection when the mode actually changes", async () => {
-      // A share selection is only considered "dirty" (and thus cleared) once
-      // a snapshot has been recorded, which happens via createQueryShare —
-      // setActiveShareToken alone (no snapshot) is not enough to arm this.
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
       contextStore.selectSource(10);
@@ -188,7 +206,8 @@ describe("explore store", () => {
       mocks.exploreCreateQueryShare.mockResolvedValue({ data: { token: "share-token" } });
 
       const store = useExploreStore();
-      await store.createQueryShare();
+      const share = await store.createQueryShare();
+      store.setActiveShareToken(share?.token ?? null);
       expect(store.activeShareToken).toBe("share-token");
 
       store.setActiveMode("native");
@@ -219,13 +238,12 @@ describe("explore store", () => {
       expect(store.activeShareToken).toBe("share-token");
     });
 
-    it("clears logchefql content when the source loses logchefql support", async () => {
-      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
-      const store = useExploreStore();
-      store.setLogchefqlCode('level="error"');
-
+    it("drops LogchefQL from a link opened on a source without LogchefQL", () => {
       mocks.sourcesState.currentSourceDetails = SQL_ONLY_SOURCE;
-      await nextTick();
+      const store = useExploreStore();
+      store.setNativeQuery("SELECT 1");
+
+      openUrl({ team: "1", source: String(SQL_ONLY_SOURCE.id), mode: "logchefql", q: 'level="error"' });
 
       expect(store.activeMode).toBe("native");
       expect(store.logchefqlCode).toBe("");
@@ -233,35 +251,10 @@ describe("explore store", () => {
       // The default SQL generator in executeQuery will produce a valid query.
       expect(store.nativeQuery).toBe("");
     });
-
-    it("clears both query slots when auto-migrating regardless of prior native content", async () => {
-      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
-      const store = useExploreStore();
-      store.setLogchefqlCode('level="error"');
-      store.setNativeQuery("SELECT 1");
-
-      mocks.sourcesState.currentSourceDetails = SQL_ONLY_SOURCE;
-      await nextTick();
-
-      // Both slots are cleared because the source change resets query state.
-      // The previous nativeQuery belonged to a different source.
-      expect(store.nativeQuery).toBe("");
-      expect(store.logchefqlCode).toBe("");
-    });
-
-    it("re-normalizes the active mode when the new source regains logchefql support", async () => {
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      const store = useExploreStore();
-      expect(store.activeMode).toBe("logchefql");
-
-      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
-      await nextTick();
-      expect(store.activeMode).toBe("logchefql");
-    });
   });
 
   describe("source switching", () => {
-    it("resets logs, columns and query content when the source id changes", async () => {
+    it("resets logs, columns and query content when it opens another source", () => {
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
       contextStore.selectSource(10);
@@ -269,16 +262,16 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.setLogchefqlCode('level="error"');
 
-      contextStore.selectSource(20);
-      await nextTick(); // the sourceId watcher runs on the next flush
+      openUrl({ team: "1", source: "20" });
 
+      expect(contextStore.sourceId).toBe(20);
       expect(store.logchefqlCode).toBe("");
       expect(store.nativeQuery).toBe("");
       expect(store.logs).toEqual([]);
       expect(store.hasExecutedQuery).toBe(false);
     });
 
-    it("suppressNextSourceReset skips exactly one reset for the given source", async () => {
+    it("resets the query when it opens a team without sources", () => {
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
       contextStore.selectSource(10);
@@ -286,26 +279,8 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.setLogchefqlCode('level="error"');
 
-      store.suppressNextSourceReset(20);
-      contextStore.selectSource(20);
-      await nextTick();
-      expect(store.logchefqlCode).toBe('level="error"'); // reset suppressed
-
-      contextStore.selectSource(10);
-      await nextTick();
-      expect(store.logchefqlCode).toBe(""); // suppression was one-shot; this reset fires
-    });
-
-    it("switching teams cascades into a source reset via the context store", async () => {
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(10);
-
-      const store = useExploreStore();
-      store.setLogchefqlCode('level="error"');
-
-      contextStore.selectTeam(2); // context store clears sourceId when the team changes
-      await nextTick();
+      expect(store.open({ teamId: 2, sourceId: null, content: { kind: "draft" } })).toBe(false);
+      expect(contextStore.teamId).toBe(2);
       expect(contextStore.sourceId).toBeNull();
       expect(store.logchefqlCode).toBe("");
     });
@@ -342,6 +317,45 @@ describe("explore store", () => {
       await store.executeQuery();
       expect(store.window).toEqual(absolute(0, 1_000_000));
       expect(store.resolved).toMatchObject({ start: 0, end: 1_000_000 });
+    });
+  });
+
+  describe("Run validation", () => {
+    function validatedStore(code: string) {
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(VL_SOURCE.id);
+      const store = useExploreStore();
+      store.setLogchefqlCode(code);
+      return store;
+    }
+
+    it("accepts valid LogchefQL for a VictoriaLogs source without requiring a table name", async () => {
+      mocks.logchefqlValidate.mockResolvedValue({ data: { valid: true } });
+      const store = validatedStore('lvl="WARN"');
+
+      expect(await store.validateQuery()).toBe(true);
+      expect(mocks.logchefqlValidate).toHaveBeenCalledWith(1, 2, 'lvl="WARN"');
+      expect(store.error).toBeNull();
+    });
+
+    it("rejects LogchefQL that the server says is invalid and shows why", async () => {
+      mocks.logchefqlValidate.mockResolvedValue({ data: { valid: false, error: { code: "PARSE_ERROR", message: "Expected a field value" } } });
+      const store = validatedStore('lvl="WARN"');
+
+      expect(await store.validateQuery()).toBe(false);
+      expect(store.error?.message).toBe("Expected a field value");
+    });
+
+    it("validates a quoted variable without doubling its quotes", async () => {
+      mocks.logchefqlValidate.mockResolvedValue({ data: { valid: true } });
+      const store = validatedStore('p.resp.FillNumber="{{ trade_id }}"|p.order_number');
+
+      expect(await store.validateQuery()).toBe(true);
+      expect(mocks.logchefqlValidate).toHaveBeenCalledWith(1, 2, 'p.resp.FillNumber="__VAR_trade_id__"|p.order_number');
+      expect(store.logchefqlCode).toBe('p.resp.FillNumber="{{ trade_id }}"|p.order_number');
     });
   });
 
@@ -432,7 +446,7 @@ describe("explore store", () => {
         const preferences = usePreferencesStore();
         const store = useExploreStore();
         await preferences.updatePreferences({ timezone: "utc" });
-        store.initializeFromUrl({ team: "1", source: String(VL_SOURCE.id), t: "today", mode: "logchefql", q: "" });
+        openUrl({ team: "1", source: String(VL_SOURCE.id), t: "today", mode: "logchefql", q: "" });
         await store.executeQuery();
 
         expect(mocks.logchefqlQuery.mock.lastCall?.[2]).toMatchObject({
@@ -462,7 +476,7 @@ describe("explore store", () => {
         data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 }, generated_sql: "SELECT 1" },
       });
 
-      store.initializeFromUrl({ team: "1", source: String(CH_SOURCE.id), start: String(start), end: String(end), mode: "logchefql", q: "" });
+      openUrl({ team: "1", source: String(CH_SOURCE.id), start: String(start), end: String(end), mode: "logchefql", q: "" });
       await store.executeQuery();
 
       expect(mocks.logchefqlQuery.mock.lastCall?.[2]).toMatchObject({
@@ -587,11 +601,8 @@ describe("explore store", () => {
 
       const store = useExploreStore();
       store.setWindow(relative("15m"));
-      store.setSelectedQueryId("42");
+      store.markSavedQuery(savedQuery({ id: 42, name: "errors", query_content: JSON.stringify({ version: 1, content: "", limit: 100 }) }));
 
-      // hasDivergedFromSavedQuery is false here because no savedQuerySnapshot
-      // was hydrated (selectedQueryId was set directly) — so the "id" param
-      // takes priority and every other param is dropped.
       const params = store.urlQueryParameters;
       expect(params).toEqual({ team: "1", source: "10", id: "42" });
     });
@@ -618,56 +629,37 @@ describe("explore store", () => {
     });
   });
 
-  describe("initializeFromUrl", () => {
-    it("defaults the time range to 15m when nothing is present", () => {
+  describe("open", () => {
+    it("defaults the time range to 15m and runs nothing without a source", () => {
       const store = useExploreStore();
-      const result = store.initializeFromUrl({});
+      expect(openUrl({})).toBe(false);
       expect(store.window).toEqual(relative("15m"));
-      expect(result.shouldExecute).toBe(false); // no source selected yet
     });
 
     it('selects the source from the "source" param', () => {
       const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      const store = useExploreStore();
-      store.initializeFromUrl({ source: "10" });
+      openUrl({ team: "1", source: "10" });
       expect(contextStore.sourceId).toBe(10);
     });
 
     it("legacy q param without an explicit mode selects logchefql mode", () => {
       const store = useExploreStore();
-      store.initializeFromUrl({ q: 'level="error"' });
+      openUrl({ q: 'level="error"' });
       expect(store.activeMode).toBe("logchefql");
       expect(store.logchefqlCode).toBe('level="error"');
     });
 
     it("legacy sql param without an explicit mode selects native mode", () => {
       const store = useExploreStore();
-      store.initializeFromUrl({ sql: "SELECT 1" });
+      openUrl({ sql: "SELECT 1" });
       expect(store.activeMode).toBe("native");
       expect(store.nativeQuery).toBe("SELECT 1");
-    });
-
-    it("an explicit id param defers to saved-query resolution instead of executing immediately", () => {
-      const store = useExploreStore();
-      const result = store.initializeFromUrl({ id: "99" });
-      expect(result).toMatchObject({ needsResolve: true, queryId: "99", shouldExecute: false });
-      expect(store.selectedQueryId).toBe("99");
-    });
-
-    it("a share param requests share resolution instead of executing immediately", () => {
-      const store = useExploreStore();
-      const result = store.initializeFromUrl({ share: "tok" });
-      expect(result).toMatchObject({ needsShareResolve: true, shareToken: "tok", shouldExecute: false });
-      expect(store.activeShareToken).toBe("tok");
     });
   });
 
   // ---------------------------------------------------------------------------
-  // #102 — draft persistence must survive a reload. On a fresh load
-  // initializeFromUrl sets the window and limit (each could persist a draft)
-  // while the query text is still empty; without suppression those overwrite
-  // the saved draft before it is restored.
+  // #102 — draft persistence must survive a reload. Opening a location must
+  // not persist a draft before it restores the saved one.
   // ---------------------------------------------------------------------------
   describe("draft round-trip on reload (#102)", () => {
     it("preserves an unsaved query across a simulated reload", () => {
@@ -686,7 +678,7 @@ describe("explore store", () => {
       ctx2.selectTeam(1);
 
       const store2 = useExploreStore();
-      store2.initializeFromUrl({ team: "1", source: "10" });
+      openUrl({ team: "1", source: "10" });
 
       expect(store2.logchefqlCode).toBe('level="error"');
       expect(store2.activeMode).toBe("logchefql");
@@ -723,30 +715,30 @@ describe("explore store", () => {
       saveDraft();
       const store = useExploreStore();
 
-      const result = store.initializeFromUrl({ team: "1", source: "10", start: "1000", end: "2000", mode: "logchefql", q: "" });
+      const result = openUrl({ team: "1", source: "10", start: "1000", end: "2000", mode: "logchefql", q: "" });
 
       expect(store.logchefqlCode).toBe("");
       expect(store.activeMode).toBe("logchefql");
       expect(store.window).toEqual(absolute(1000, 2000));
       expect(store.urlQueryParameters).toMatchObject({ start: "1000", end: "2000" });
-      expect(result.shouldExecute).toBe(true);
+      expect(result).toBe(true);
     });
 
     it("opens a link that names only a time or a mode without the draft's query", () => {
       saveDraft();
       const store = useExploreStore();
-      store.initializeFromUrl({ team: "1", source: "10", t: "1h" });
+      openUrl({ team: "1", source: "10", t: "1h" });
       expect(store.logchefqlCode).toBe("");
       expect(store.window).toEqual(relative("1h"));
 
       saveDraft();
       const next = useExploreStore();
-      next.initializeFromUrl({ team: "1", source: "10", mode: "logchefql" });
+      openUrl({ team: "1", source: "10", mode: "logchefql" });
       expect(next.logchefqlCode).toBe("");
       expect(next.window).not.toEqual(relative("7d"));
     });
 
-    it("brings back a source's unrun draft after switching away and back", async () => {
+    it("brings back a source's unrun draft after switching away and back", () => {
       mocks.teamsState.currentTeamId = 1;
       const ctx = useContextStore();
       ctx.selectTeam(1);
@@ -754,12 +746,10 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.setLogchefqlCode('level="debug"');
 
-      ctx.selectSource(11);
-      await nextTick();
+      openUrl({ team: "1", source: "11" });
       expect(store.logchefqlCode).toBe("");
 
-      ctx.selectSource(10);
-      await nextTick();
+      openUrl({ team: "1", source: "10" });
       expect(store.logchefqlCode).toBe('level="debug"');
       expect(JSON.parse(localStorage.getItem("logchef.explore.draft.1.10") ?? "{}")).toMatchObject({ logchefqlCode: 'level="debug"' });
     });
@@ -768,7 +758,7 @@ describe("explore store", () => {
       saveDraft();
       const store = useExploreStore();
 
-      store.initializeFromUrl({ team: "1", source: "10" });
+      openUrl({ team: "1", source: "10" });
 
       expect(store.logchefqlCode).toBe('level="debug"');
       expect(store.window).toEqual(relative("7d"));
@@ -787,16 +777,14 @@ describe("explore store", () => {
       const store = useExploreStore();
       store.setNativeQuery("SELECT old"); // stale content in the other slot
 
-      store.hydrateFromResolvedQuery({
-        id: 7,
+      store.open({ teamId: 1, sourceId: CH_SOURCE.id, content: savedContent(savedQuery({
         name: "My Query",
-        query_language: "logchefql",
         query_content: JSON.stringify({
           content: 'level="error"',
           limit: 100,
           timeRange: { relative: "15m" },
         }),
-      });
+      })) });
 
       expect(store.activeMode).toBe("logchefql");
       expect(store.logchefqlCode).toBe('level="error"');
@@ -807,16 +795,14 @@ describe("explore store", () => {
       mocks.sourcesState.currentSourceDetails = SQL_ONLY_SOURCE;
       const store = useExploreStore();
 
-      store.hydrateFromResolvedQuery({
+      store.open({ teamId: 1, sourceId: SQL_ONLY_SOURCE.id, content: savedContent(savedQuery({
         id: 8,
-        name: "Q",
-        query_language: "logchefql",
         query_content: JSON.stringify({
           content: "some content",
           limit: 100,
           timeRange: { relative: "15m" },
         }),
-      });
+      })) });
 
       // Mode coerced to native → content lands in the visible native slot,
       // NOT in the hidden logchefql editor.
@@ -861,8 +847,8 @@ describe("explore store", () => {
       return { ctx, store, resolveQuery: (v: any) => resolveQuery(v) };
     }
 
-    it("aborts the in-flight query when the source changes", async () => {
-      const { ctx, resolveQuery, store } = armInFlightLogchefql();
+    it("aborts the in-flight query when it opens another source", async () => {
+      const { resolveQuery, store } = armInFlightLogchefql();
 
       const abortSpy = vi.spyOn(AbortController.prototype, "abort");
       const exec = store.executeQuery();
@@ -875,10 +861,7 @@ describe("explore store", () => {
 
       mocks.sourcesState.currentSourceDetails = VL_SOURCE; // id 2
       mocks.sourcesState.teamSources = [VL_SOURCE];
-      ctx.selectSource(2);
-      await nextTick();
-
-      // onSourceChange aborted the in-flight run's controller.
+      openUrl({ team: "1", source: "2" });
       expect(abortSpy.mock.calls.length).toBeGreaterThan(abortsBeforeSwitch);
 
       resolveQuery({ data: { logs: [], columns: [], stats: {} } });

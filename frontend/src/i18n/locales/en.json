@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "Error Loading Query",
   "ui.explorerError": "Explorer Error",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "Error initializing the explorer. Please try refreshing the page.",
-  "ui.loadingContextData": "Loading context data...",
-  "ui.loadingSourceDetails": "Loading source details...",
   "ui.pausedDuringLiveTail": "Paused during live tail",
   "ui.timeRangeIsControlledInYourSQLQuery": "Time range is controlled in your SQL query",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "Limit is controlled by LIMIT clause in your SQL query",

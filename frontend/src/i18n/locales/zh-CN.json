@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "加载查询出错",
   "ui.explorerError": "日志浏览器错误",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "浏览器初始化失败。请刷新页面。",
-  "ui.loadingContextData": "正在加载上下文数据…",
-  "ui.loadingSourceDetails": "正在加载数据源详情…",
   "ui.pausedDuringLiveTail": "实时日志流期间暂停",
   "ui.timeRangeIsControlledInYourSQLQuery": "时间范围由 SQL 查询控制",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "条数限制由 SQL 查询中的 LIMIT 子句控制",

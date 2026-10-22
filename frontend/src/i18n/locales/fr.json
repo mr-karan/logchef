@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "Erreur de chargement de la requête",
   "ui.explorerError": "Erreur de l’explorateur",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "Impossible d’initialiser l’explorateur. Actualisez la page.",
-  "ui.loadingContextData": "Chargement du contexte…",
-  "ui.loadingSourceDetails": "Chargement des détails de la source…",
   "ui.pausedDuringLiveTail": "En pause pendant le flux en direct",
   "ui.timeRangeIsControlledInYourSQLQuery": "La période est définie dans votre requête SQL",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "La limite est définie par la clause LIMIT de votre requête SQL",

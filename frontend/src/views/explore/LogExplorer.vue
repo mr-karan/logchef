@@ -5,12 +5,11 @@ import {
   ref,
   computed,
   watch,
-  onMounted,
   onBeforeUnmount,
   nextTick,
 } from "vue";
 import { storeToRefs } from "pinia";
-import { useRoute, useRouter, onBeforeRouteLeave } from "vue-router";
+import { useRouter, onBeforeRouteLeave } from "vue-router";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
@@ -26,9 +25,8 @@ import CompactLogList from "./table/CompactLogListSimple.vue";
 import SaveQueryModal from "@/components/collections/SaveQueryModal.vue";
 import QueryEditor from "@/components/query-editor/QueryEditor.vue";
 import { useSavedQueries } from "@/composables/useSavedQueries";
-import { useUrlState } from "@/composables/useUrlState";
+import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
 import { useQuery } from "@/composables/useQuery";
-import { useTimeRange } from "@/composables/useTimeRange";
 import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
 import { useVariables } from "@/composables/useVariables";
 
@@ -39,6 +37,7 @@ import type { SaveQueryFormData } from "@/views/explore/types";
 import type { SavedQuery } from "@/api/savedQueries";
 import type { FilterCondition } from "@/api/logchefql";
 import { generateCliCommand } from "@/utils/cliCommand";
+import { epochMs } from "@/utils/timeWindow";
 
 // Type alias for backwards compatibility
 type QueryCondition = FilterCondition;
@@ -60,7 +59,6 @@ import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 const { t } = useI18n();
 
 // Router and stores
-const route = useRoute();
 const router = useRouter();
 const exploreStore = useExploreStore();
 const teamsStore = useTeamsStore();
@@ -71,23 +69,18 @@ const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
 const { getVariablesForApi } = useVariables();
 
-const urlState = useUrlState();
-const isInitializing = computed(() => urlState.state.value !== 'ready');
-const initializationError = urlState.error;
-
 const {
   logchefQuery,
   sqlQuery,
   activeMode,
-  queryError,
   isExecutingQuery,
   canExecuteQuery,
   changeMode,
-  executeQuery,
-  handleTimeRangeUpdate,
 } = useQuery();
 
-const { handleHistogramTimeRangeZoom } = useTimeRange();
+const nav = useExplorerNavigator();
+const isInitializing = computed(() => nav.status.value === 'loading' || nav.status.value === 'error');
+const initializationError = nav.error;
 
 // Use the new clean team/source management
 const contextStore = useContextStore();
@@ -125,22 +118,8 @@ const availableFields = computed(() => {
   return [...sourceDetails.value.columns].sort((a, b) => a.name.localeCompare(b.name));
 });
 
-// Simple loading state for UI (replacement for isChangingContext)
-const isChangingContext = computed(() => {
-  const teamLoading = sourcesStore.isLoadingTeamSources;
-  const sourceLoading = sourcesStore.isLoadingSourceDetails;
-  return teamLoading || sourceLoading;
-});
 const isExporting = ref(false);
 let exportAbortController: AbortController | null = null;
-
-async function handleTeamChange(teamId: number) {
-  await urlState.selectTeam(teamId);
-}
-
-async function handleSourceChange(sourceId: number) {
-  await urlState.selectSource(sourceId);
-}
 
 const {
   showSaveQueryModal,
@@ -148,8 +127,6 @@ const {
   handleSaveAsNewQueryClick: openSaveAsNewModalFlow,
   closeSaveQueryModal,
   handleSaveQuery: processSaveQueryFromComposable,
-  loadSavedQuery,
-  loadSourceQueries,
 } = useSavedQueries();
 
 // Create default empty parsed query state
@@ -178,19 +155,6 @@ const windowedStore = useExploreWindowedStore();
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
 const isHistogramVisible = ref(true);
 
-// Query execution deduplication
-const executingQueryId = ref<string | null>(null);
-const lastQueryTime = ref<number>(0);
-
-// CoordinationError retry backoff. The store returns CoordinationError while
-// source details are still catching up with the selected source id; we retry,
-// but cap attempts with exponential backoff so a source that never converges
-// can't livelock the UI re-executing ~10x/sec forever. See #101.
-const MAX_COORDINATION_RETRIES = 8;
-const COORDINATION_RETRY_BASE_MS = 100;
-const COORDINATION_RETRY_MAX_MS = 3000;
-const coordinationRetries = ref(0);
-
 // Display mode for table vs compact view (table is default)
 const displayMode = computed({
   get: () => preferences.value.display_mode,
@@ -204,8 +168,9 @@ const showLoadingState = computed(
   () => isInitializing.value && !initializationError.value
 );
 
+// A location is opening, or its first query has yet to start.
 const isInitialQueryPending = computed(() => {
-  return canExecuteQuery.value && !exploreStore.hasExecutedQuery && !isExecutingQuery.value;
+  return nav.status.value === 'navigating' || (canExecuteQuery.value && !exploreStore.hasExecutedQuery && !isExecutingQuery.value);
 });
 
 const showNoTeamsState = computed(
@@ -235,20 +200,12 @@ const showSourceNotConnectedState = computed(() => {
   ) {
     return false;
   }
-  // Don't show while details for the *current* source are loading
-  if (sourcesStore.isLoadingSourceDetailsForId(currentSourceId.value)) {
-    return false;
-  }
   // Show only if details *have* loaded AND the source is invalid/disconnected
   return (
     sourcesStore.currentSourceDetails?.id === currentSourceId.value &&
     !sourcesStore.hasValidCurrentSource
   );
 });
-
-const queryIdFromUrl = computed(
-  () => route.query.id as string | undefined
-);
 
 // Can save or update query?
 const canSaveOrUpdateQuery = computed(() => {
@@ -316,111 +273,6 @@ const regexHighlights = computed(() => {
 
   return highlights;
 });
-
-// Function to execute a query and handle URL history
-// Modify the function to include a debouncingKey parameter to prevent duplicate executions
-const handleQueryExecution = async (debouncingKey = "") => {
-  try {
-    // Get current timestamp for deduplication
-    const now = Date.now();
-
-    // Create a unique execution ID
-    const executionId = `${debouncingKey || "query"}-${now}`;
-
-    // Prevent execution if:
-    // 1. A query is already executing, or
-    // 2. The last query executed too recently (within 300ms) - UNLESS it's a source change
-    const lastExecTime = exploreStore.lastExecutionTimestamp || 0;
-    const timeSinceLastQuery = now - lastExecTime;
-    const isSourceChange = debouncingKey.includes('source-change');
-    const shouldDebounce = lastExecTime > 0 && timeSinceLastQuery < 300 && !isSourceChange;
-
-    if (isExecutingQuery.value || shouldDebounce) {
-      return;
-    }
-
-    // Reset the coordination backoff whenever a fresh (non-retry) execution
-    // starts, so each new user action gets the full retry budget.
-    if (!debouncingKey.includes('-retry')) {
-      coordinationRetries.value = 0;
-    }
-
-    // Set executing state
-    executingQueryId.value = executionId;
-    lastQueryTime.value = now;
-
-    const result = await executeQuery();
-
-    if (result && !result.success && result.error && 'error_type' in result.error && result.error.error_type === 'CoordinationError') {
-      if (coordinationRetries.value >= MAX_COORDINATION_RETRIES) {
-        // Source details never converged — stop retrying to avoid a livelock,
-        // and release the executing lock so a later user action can proceed.
-        console.warn('LogExplorer: source coordination did not converge; giving up retries');
-        coordinationRetries.value = 0;
-        if (executingQueryId.value === executionId) {
-          executingQueryId.value = null;
-        }
-        return result;
-      }
-
-      const attempt = coordinationRetries.value++;
-      const delay = Math.min(COORDINATION_RETRY_BASE_MS * 2 ** attempt, COORDINATION_RETRY_MAX_MS);
-      setTimeout(() => {
-        if (executingQueryId.value === executionId) {
-          handleQueryExecution(`${debouncingKey}-retry`);
-        }
-      }, delay);
-      return result;
-    }
-
-    // Any non-coordination outcome means coordination converged (or was never
-    // the issue) — clear the backoff counter.
-    coordinationRetries.value = 0;
-
-    if (result && result.success && !isInitializing.value) {
-      await urlState.pushHistoryEntry();
-
-      if (activeMode.value === 'native') {
-        handleTimeRangeUpdate();
-      }
-    }
-
-    // Clear execution state
-    executingQueryId.value = null;
-    return result;
-  } catch (error) {
-    console.error("Error during query execution:", error);
-    executingQueryId.value = null;
-    return {
-      success: false,
-      error: {
-        message: error instanceof Error ? error.message : String(error),
-      },
-      data: null,
-    };
-  }
-};
-
-// Function to cancel the currently running query
-const handleCancelQuery = async () => {
-  await exploreStore.cancelQuery();
-  executingQueryId.value = null;
-};
-
-// Load saved queries when source changes
-watch(
-  () => currentSourceId.value,
-  async (newSourceId, _oldSourceId) => {
-    if (isInitializing.value) return;
-    if (!newSourceId || !currentTeamId.value) return;
-    try {
-      await loadSourceQueries(newSourceId);
-    } catch (e) {
-      console.error('Error loading saved queries for source:', e);
-    }
-  },
-  { immediate: false }
-)
 
 // Function to handle drill-down from DataTable to add a filter condition
 const handleDrillDown = (data: {
@@ -494,8 +346,7 @@ const updateSqlValue = (newValue: string, _isUserInput = false) => {
 
 // New handler for the Save/Update button
 const handleSaveOrUpdateClick = async () => {
-  // Check if we have a query_id in the URL or in the exploreStore
-  const queryId = queryIdFromUrl.value || exploreStore.selectedQueryId;
+  const queryId = exploreStore.selectedQueryId;
 
   // Check if we can save
   if (!canSaveOrUpdateQuery.value) {
@@ -544,21 +395,20 @@ const handleSaveOrUpdateClick = async () => {
 // Handle updating an existing query
 async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, done?: () => void) {
   try {
-    const response = await savedQueriesStore.update(queryId, {
-      name: formData.name,
-      description: formData.description,
-      query_language: formData.query_language,
-      editor_mode: formData.editor_mode,
-      query_content: formData.query_content,
-    });
-
-    if (response && response.success) {
+    const saved = await nav.recordAfter(async () => {
+      const response = await savedQueriesStore.update(queryId, {
+        name: formData.name,
+        description: formData.description,
+        query_language: formData.query_language,
+        editor_mode: formData.editor_mode,
+        query_content: formData.query_content,
+      });
+      if (!response.success) throw new Error(getErrorMessage(response.error) || "Failed to update query");
+      return response.data ?? null;
+    }, exploreStore.markSavedQuery);
+    if (saved) {
       showSaveQueryModal.value = false;
       editQueryData.value = null;
-    } else if (response) {
-      throw new Error(
-        getErrorMessage(response.error) || "Failed to update query"
-      );
     }
   } catch (error) {
     console.error("Error updating query:", error);
@@ -573,19 +423,12 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, d
   }
 }
 
-// Like the picker, a new window runs through the store's auto-run watcher.
 const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
-  try {
-    handleHistogramTimeRangeZoom(range);
-  } catch (e) {
-    console.error("Error handling histogram time range:", e);
-    toast({
-      get title() { return t('ui.timeRangeError'); },
-      get description() { return t('ui.thereWasAnErrorUpdatingTheTimeRangeFromChartSelection'); },
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
+  const current = exploreStore.resolved;
+  const start = epochMs(range.start);
+  const end = epochMs(range.end);
+  if (Math.abs(current.start - start) < 1000 && Math.abs(current.end - end) < 1000) return;
+  nav.setWindow({ kind: 'absolute', start, end });
 };
 
 // Open the date picker programmatically
@@ -781,16 +624,9 @@ const handleCopyCliCommand = async () => {
 
 const handleShare = async () => {
   try {
-    const share = await exploreStore.createQueryShare();
+    const share = await nav.recordAfter(() => exploreStore.createQueryShare(), (created) => exploreStore.setActiveShareToken(created.token));
     if (!share?.share_url) return;
 
-    const currentQuery = {
-      team: String(currentTeamId.value ?? ""),
-      source: String(currentSourceId.value ?? ""),
-      share: share.token,
-    };
-
-    await router.replace({ query: currentQuery });
     await copyTextWithFallback(share.share_url);
 
     toast({
@@ -1037,120 +873,18 @@ const filteredSortKeys = computed(() => {
 // New handler for save-as-new request from QueryEditor
 const handleRequestSaveAsNew = () => {
   editQueryData.value = null; // Ensure modal opens in "new query" mode
-  openSaveAsNewModalFlow(); // Keep the current route query from selecting update mode.
+  openSaveAsNewModalFlow(); // Keep the open saved query from selecting update mode.
 };
 
 // Wrapper for the modal's @save event
 const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => void) => {
   try {
-    await processSaveQueryFromComposable(formData);
+    await nav.recordAfter(() => processSaveQueryFromComposable(formData), exploreStore.markSavedQuery);
   } finally {
     done?.();
   }
 };
 
-// Handle saved query id changes from URL, especially when component is kept alive
-watch(
-  () => route.query.id,
-  async (newQueryId, oldQueryId) => {
-    // Skip if it's the same query ID or we're initializing
-    if (newQueryId === oldQueryId || isInitializing.value) {
-      return;
-    }
-
-    // If query ID was removed, clear the saved query state
-    if (!newQueryId && oldQueryId) {
-      exploreStore.setSelectedQueryId(null);
-      exploreStore.setActiveSavedQueryName(null);
-      return;
-    }
-
-    // Wait for context alignment, then recompute URL params after wait
-    let urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
-    let urlSource = route.query.source ? parseInt(route.query.source as string) : null;
-
-    if (!urlTeam || !urlSource || urlTeam !== currentTeamId.value || urlSource !== currentSourceId.value) {
-      for (let i = 0; i < 5; i++) {
-        await new Promise(r => setTimeout(r, 100));
-        if (
-          route.query.team && route.query.source &&
-          parseInt(route.query.team as string) === (currentTeamId.value ?? 0) &&
-          parseInt(route.query.source as string) === (currentSourceId.value ?? 0)
-        ) {
-          break;
-        }
-      }
-      // Recompute after polling to avoid stale values
-      urlTeam = route.query.team ? parseInt(route.query.team as string) : null;
-      urlSource = route.query.source ? parseInt(route.query.source as string) : null;
-    }
-
-    if (newQueryId) {
-      try {
-        isLoadingQuery.value = true;
-
-        const fetchResult = await savedQueriesStore.fetchById(newQueryId as string);
-
-        if (fetchResult.success && savedQueriesStore.selectedQuery) {
-          exploreStore.setGroupByField("__none__");
-
-          const loadResult = await loadSavedQuery(savedQueriesStore.selectedQuery);
-
-          if (loadResult) {
-            // Wait for the source SCHEMA (currentSourceDetails), not just the source
-            // id, before executing — prepareQueryForExecution throws "No source
-            // selected" until the schema loads. The fresh-load path gates on this in
-            // useUrlState.checkReadiness(); this KeepAlive watcher path must too,
-            // otherwise opening a saved query for an un-warmed source races and fails
-            // on first open (works on retry once the schema is cached).
-            for (let i = 0; i < 30; i++) {
-              if (sourcesStore.currentSourceDetails?.id === currentSourceId.value) break;
-              await new Promise((r) => setTimeout(r, 100));
-            }
-
-            await handleQueryExecution("query-from-url");
-
-            nextTick(() => {
-              queryEditorRef.value?.focus(true);
-            });
-          }
-        } else {
-          console.error("Failed to load query:", fetchResult.error);
-          toast({
-            get title() { return t('ui.errorLoadingQuery'); },
-            description: fetchResult.error?.message || "Failed to load the selected query",
-            variant: "destructive",
-            duration: TOAST_DURATION.ERROR,
-          });
-        }
-      } catch (error) {
-        console.error("Error loading query from URL:", error);
-        toast({
-          get title() { return t('ui.error'); },
-          description: getErrorMessage(error),
-          variant: "destructive",
-          duration: TOAST_DURATION.ERROR,
-        });
-      } finally {
-        isLoadingQuery.value = false;
-      }
-    }
-  }
-);
-
-onMounted(async () => {
-  try {
-    await urlState.initialize();
-  } catch (error) {
-    console.error("Error during LogExplorer mount:", error);
-    toast({
-      get title() { return t('ui.explorerError'); },
-      get description() { return t('ui.errorInitializingTheExplorerPleaseTryRefreshingThePage'); },
-      variant: "destructive",
-      duration: TOAST_DURATION.ERROR,
-    });
-  }
-});
 </script>
 
 <template>
@@ -1176,7 +910,7 @@ onMounted(async () => {
         <h2 class='text-xl font-semibold'>{{ t('ui.unableToLoadExplorer') }}</h2>
         <p class="text-muted-foreground max-w-md">{{ initializationError }}</p>
         <div class="flex gap-3">
-          <Button variant="outline" @click="urlState.initialize()">
+          <Button variant="outline" @click="nav.retry()">
             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2">
               <path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
@@ -1217,8 +951,8 @@ onMounted(async () => {
             :current-source-id="currentSourceId"
             :available-teams="availableTeams"
             :available-sources="availableSources"
-            @update:team="handleTeamChange"
-            @update:source="handleSourceChange"
+            @update:team="nav.selectTeam"
+            @update:source="nav.selectSource"
           />
         </div>
         <!-- Empty state content -->
@@ -1239,8 +973,8 @@ onMounted(async () => {
             :current-source-id="currentSourceId"
             :available-teams="availableTeams"
             :available-sources="availableSources"
-            @update:team="handleTeamChange"
-            @update:source="handleSourceChange"
+            @update:team="nav.selectTeam"
+            @update:source="nav.selectSource"
           />
         </div>
 
@@ -1285,8 +1019,10 @@ onMounted(async () => {
           :available-teams="availableTeams"
           :available-sources="availableSources"
           :selected-source="sourceDetails"
-          @update:team="handleTeamChange"
-          @update:source="handleSourceChange"
+          @update:team="nav.selectTeam"
+          @update:source="nav.selectSource"
+          @update:window="nav.setWindow"
+          @update:limit="nav.setLimit"
         />
 
         <!-- Main Content Area -->
@@ -1305,32 +1041,8 @@ onMounted(async () => {
           <ResizablePanel id="explore-main" :order="1" class="flex flex-col h-full min-w-0 overflow-hidden">
             <!-- Query Editor Section -->
             <div class="px-4 py-3">
-              <!-- Loading indicator during context changes -->
-              <template v-if="
-                isChangingContext ||
-                (currentSourceId && sourcesStore.isLoadingSourceDetails)
-              ">
-                <div
-                  class="flex items-center justify-center text-muted-foreground p-6 border rounded-md bg-card shadow-sm animate-pulse">
-                  <div class="flex items-center space-x-2">
-                    <svg class="animate-spin h-5 w-5 text-primary" xmlns="http://www.w3.org/2000/svg" fill="none"
-                      viewBox="0 0 24 24">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                      <path class="opacity-75" fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
-                      </path>
-                    </svg>
-                    <span>{{
-                      isChangingContext
-                        ? t('ui.loadingContextData')
-                        : t('ui.loadingSourceDetails')
-                    }}</span>
-                  </div>
-                </div>
-              </template>
-
               <!-- Query Editor -->
-              <template v-else-if="
+              <template v-if="
                 currentSourceId && hasValidSource && exploreStore.hasWindow
               ">
                 <div class="bg-card shadow-sm rounded-md overflow-hidden">
@@ -1355,14 +1067,14 @@ onMounted(async () => {
                     @change="(event) => event.mode === 'logchefql'
                       ? updateLogchefqlValue(event.query, event.isUserInput)
                       : updateSqlValue(event.query, event.isUserInput)"
-                    @submit="() => handleQueryExecution('editor-submit')" 
-                    @execute="() => handleQueryExecution('editor-run-button')"
-                    @cancel-query="handleCancelQuery"
+                    @execute="nav.run"
+                    @new-query="nav.newQuery"
+                    @cancel-query="nav.cancel()"
                     @update:query-timeout="exploreStore.setQueryTimeout($event)"
                     @update:activeMode="(mode, isModeSwitchOnly) =>
                       changeMode(mode === 'logchefql' ? 'logchefql' : 'native', isModeSwitchOnly)"
                     @toggle-fields="showFieldsPanel = !showFieldsPanel" 
-                    @select-saved-query="loadSavedQuery"
+                    @select-saved-query="nav.openSavedQuery"
                     @save-query="handleSaveOrUpdateClick" 
                     @save-query-as-new="handleRequestSaveAsNew"
                     @generate-ai-sql="handleGenerateAISQL" 
@@ -1438,12 +1150,11 @@ onMounted(async () => {
               </template>
 
               <!-- Query Error Component -->
-              <QueryError :query-error="queryError" />
+              <QueryError />
             </div>
 
             <!-- Results Toolbar + Histogram Section -->
             <div v-if="
-              !isChangingContext &&
               currentSourceId &&
               hasValidSource &&
               exploreStore.hasWindow
@@ -1473,7 +1184,6 @@ onMounted(async () => {
 
             <!-- Results Section -->
             <div class="flex-1 overflow-hidden flex flex-col" v-if="
-              !isChangingContext &&
               currentSourceId &&
               hasValidSource &&
               exploreStore.hasWindow
@@ -1536,7 +1246,7 @@ onMounted(async () => {
 
                 <!-- Empty Results State Component -->
                 <EmptyResultsState v-else :has-executed-query="exploreStore.hasExecutedQuery"
-                  :can-execute-query="canExecuteQuery" @run-default-query="handleQueryExecution('default-query')"
+                  :can-execute-query="canExecuteQuery" @run-default-query="nav.run"
                   @open-date-picker="openDatePicker" />
               </div>
             </div>

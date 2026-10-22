@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "Error al cargar la consulta",
   "ui.explorerError": "Error del explorador",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "Error al iniciar el explorador. Recarga la página.",
-  "ui.loadingContextData": "Cargando datos de contexto…",
-  "ui.loadingSourceDetails": "Cargando detalles de la fuente…",
   "ui.pausedDuringLiveTail": "En pausa durante el flujo en vivo",
   "ui.timeRangeIsControlledInYourSQLQuery": "El intervalo se controla en tu consulta SQL",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "El límite se controla mediante LIMIT en tu consulta SQL",
