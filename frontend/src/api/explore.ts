@@ -275,22 +275,6 @@ export const exploreApi = {
     );
   },
 
-  cancelQuery: (sourceId: number, queryId: string, teamId: number) => {
-    if (!teamId) {
-      throw new Error("Team ID is required for cancelling queries");
-    }
-    if (!sourceId) {
-      throw new Error("Source ID is required for cancelling queries");
-    }
-    if (!queryId) {
-      throw new Error("Query ID is required for cancelling queries");
-    }
-    return apiClient.post<{message: string; query_id: string}>(
-      `/teams/${teamId}/sources/${sourceId}/logs/query/${queryId}/cancel`,
-      {}
-    );
-  },
-
   createExportJob: (sourceId: number, params: ExportLogsRequest, teamId: number) => {
     if (!teamId) {
       throw new Error("Team ID is required for creating exports");

@@ -83,6 +83,8 @@ const dateTimePickerRef = ref<InstanceType<typeof DateTimePicker> | null>(null)
 
 // Limit options
 const currentLimit = computed(() => exploreStore.limit)
+// The picker shows the editor's window, resolved when it changes.
+const resolved = computed(() => exploreStore.resolveNow())
 
 // ClickHouse native SQL owns its own time/LIMIT clauses. VictoriaLogs native mode does not.
 const isNativeSqlMode = computed(() =>
@@ -150,7 +152,7 @@ function copyCliCommand() {
         ? exploreStore.logchefqlCode
         : exploreStore.nativeQuery,
     window: exploreStore.window,
-    resolved: exploreStore.resolved,
+    resolved: exploreStore.resolveNow(),
     limit: exploreStore.limit,
     timeout: exploreStore.queryTimeout,
   })
@@ -212,7 +214,7 @@ defineExpose({
               <DateTimePicker
                 ref="dateTimePickerRef"
                 :model-value="exploreStore.window"
-                :resolved="exploreStore.resolved"
+                :resolved="resolved"
                 :zone-preference="preferencesStore.preferences.timezone"
                 :disabled="true"
                 class="opacity-50 pointer-events-none"
@@ -228,7 +230,7 @@ defineExpose({
         v-else
         ref="dateTimePickerRef"
         :model-value="exploreStore.window"
-        :resolved="exploreStore.resolved"
+        :resolved="resolved"
         :zone-preference="preferencesStore.preferences.timezone"
         @update:model-value="emit('update:window', $event)"
         @update:zone-preference="handleZonePreferenceChange"

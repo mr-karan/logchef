@@ -36,7 +36,6 @@ const mocks = vi.hoisted(() => ({
   logchefqlQuery: vi.fn(),
   logchefqlValidate: vi.fn(),
   exploreGetLogs: vi.fn(),
-  exploreCancelQuery: vi.fn(),
   exploreCreateQueryShare: vi.fn(),
   histogramFetch: vi.fn(),
 }));
@@ -92,7 +91,6 @@ vi.mock("@/api/explore", async (importOriginal) => {
     exploreApi: {
       ...actual.exploreApi,
       getLogs: mocks.exploreGetLogs,
-      cancelQuery: mocks.exploreCancelQuery,
       createQueryShare: mocks.exploreCreateQueryShare,
     },
     buildTailUrl: vi.fn(() => "ws://mock-tail"),
@@ -109,6 +107,7 @@ vi.mock("@/api/logchefql", async (importOriginal) => {
 });
 
 import { useExploreStore, type OpenedLocation } from "../explore";
+import { useExploreRuns } from "../exploreRuns";
 import { useAskChefStore } from "../askChef";
 import { useContextStore } from "../context";
 import { usePreferencesStore } from "../preferences";
@@ -169,7 +168,42 @@ const VL_SOURCE = makeSource({
 // A source explicitly restricted to SQL only (no LogchefQL support).
 const SQL_ONLY_SOURCE = makeSource({ id: 3, query_languages: ["clickhouse-sql"] });
 
+const ok = <T>(data: T) => ({ status: "success" as const, data });
+const NO_LOGS = { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } };
+
+// Explorer showing `source` with a team, as the navigator leaves it before a run.
+function exploreSource(source: Source, window: TimeWindow = relative("15m")) {
+  mocks.teamsState.currentTeamId = 1;
+  mocks.sourcesState.currentSourceDetails = source;
+  mocks.sourcesState.teamSources = [source];
+  const contextStore = useContextStore();
+  contextStore.selectTeam(1);
+  contextStore.selectSource(source.id);
+  mocks.logchefqlQuery.mockResolvedValue(ok(NO_LOGS));
+  const store = useExploreStore();
+  store.setWindow(window);
+  return { store, runs: useExploreRuns() };
+}
+
+const settled = (runs: ReturnType<typeof useExploreRuns>) => vi.waitFor(() => expect(runs.isRunning).toBe(false));
+
+// The LogchefQL requests that ran `text`. Stores left by earlier tests may also query.
+const requestsFor = (text: string) => mocks.logchefqlQuery.mock.calls.filter((call) => call[2].query === text).map((call) => call[2]);
+
 describe("explore store", () => {
+  // Shares the editor's query and selects the share, as Explorer's Share button does.
+  async function shareEditorQuery(token: string) {
+    useContextStore().selectTeam(1);
+    useContextStore().selectSource(10);
+    mocks.teamsState.currentTeamId = 1;
+    mocks.exploreCreateQueryShare.mockResolvedValue({ data: { token } });
+    const store = useExploreStore();
+    const share = await store.createQueryShare();
+    if (!share) throw new Error("share was not created");
+    store.markShare(share);
+    return store;
+  }
+
   beforeEach(() => {
     setActivePinia(createPinia());
     localStorage.clear();
@@ -198,16 +232,8 @@ describe("explore store", () => {
     });
 
     it("clears an active share selection when the mode actually changes", async () => {
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(10);
-      mocks.teamsState.currentTeamId = 1;
       mocks.sourcesState.currentSourceDetails = CH_SOURCE;
-      mocks.exploreCreateQueryShare.mockResolvedValue({ data: { token: "share-token" } });
-
-      const store = useExploreStore();
-      const share = await store.createQueryShare();
-      store.setActiveShareToken(share?.token ?? null);
+      const store = await shareEditorQuery("share-token");
       expect(store.activeShareToken).toBe("share-token");
 
       store.setActiveMode("native");
@@ -230,10 +256,9 @@ describe("explore store", () => {
       expect(mocks.exploreCreateQueryShare.mock.lastCall?.[1]).toMatchObject({ mode: "sql", query: "SELECT 1" });
     });
 
-    it("leaves the share selection untouched on a no-op mode switch", () => {
+    it("leaves the share selection untouched on a no-op mode switch", async () => {
       mocks.sourcesState.currentSourceDetails = CH_SOURCE;
-      const store = useExploreStore();
-      store.setActiveShareToken("share-token");
+      const store = await shareEditorQuery("share-token");
       store.setActiveMode("logchefql"); // already the active mode -> no-op
       expect(store.activeShareToken).toBe("share-token");
     });
@@ -254,7 +279,7 @@ describe("explore store", () => {
   });
 
   describe("source switching", () => {
-    it("resets logs, columns and query content when it opens another source", () => {
+    it("resets the query content when it opens another source", () => {
       const contextStore = useContextStore();
       contextStore.selectTeam(1);
       contextStore.selectSource(10);
@@ -267,8 +292,6 @@ describe("explore store", () => {
       expect(contextStore.sourceId).toBe(20);
       expect(store.logchefqlCode).toBe("");
       expect(store.nativeQuery).toBe("");
-      expect(store.logs).toEqual([]);
-      expect(store.hasExecutedQuery).toBe(false);
     });
 
     it("resets the query when it opens a team without sources", () => {
@@ -286,7 +309,7 @@ describe("explore store", () => {
     });
   });
 
-  describe("relative time re-resolution on executeQuery", () => {
+  describe("run windows", () => {
     beforeEach(() => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-01-01T00:00:00Z"));
@@ -295,94 +318,72 @@ describe("explore store", () => {
       vi.useRealTimers();
     });
 
-    it("re-resolves the relative time window on every execution instead of reusing a stale one", async () => {
-      const store = useExploreStore();
-      store.setWindow(relative("15m"));
-      const firstEnd = store.resolved.end;
-
+    it("resolves a relative window when each run starts", async () => {
+      const { runs } = exploreSource(VL_SOURCE, relative("15m"));
+      runs.run({ mode: "logchefql", text: 'at="each run"' });
+      await settled(runs);
       vi.setSystemTime(new Date("2026-01-01T00:10:00Z"));
-      // No team is selected, so this fails fast inside withLoading — but the
-      // relative-time refresh at the top of executeQuery runs unconditionally
-      // before that guard, which is exactly the behavior being pinned here.
-      await store.executeQuery();
+      runs.run({ mode: "logchefql", text: 'at="each run"' });
+      await settled(runs);
 
-      expect(store.window).toEqual(relative("15m"));
-      expect(store.resolved.end).toBe(Date.parse("2026-01-01T00:10:00Z"));
-      expect(store.resolved.end).not.toBe(firstEnd);
+      expect(requestsFor('at="each run"').map((request) => request.end_time)).toEqual(["2026-01-01T00:00:00.000Z", "2026-01-01T00:10:00.000Z"]);
     });
 
-    it("leaves an absolute time range untouched across executions", async () => {
-      const store = useExploreStore();
-      store.setWindow(absolute(0, 1_000_000));
-      await store.executeQuery();
-      expect(store.window).toEqual(absolute(0, 1_000_000));
-      expect(store.resolved).toMatchObject({ start: 0, end: 1_000_000 });
+    it("leaves an absolute window as it is across runs", async () => {
+      const { runs } = exploreSource(VL_SOURCE, absolute(0, 1_000_000));
+      runs.run({ mode: "logchefql", text: 'at="absolute"' });
+      await settled(runs);
+      runs.run({ mode: "logchefql", text: 'at="absolute"' });
+      await settled(runs);
+
+      expect(requestsFor('at="absolute"').map((request) => [request.start_time, request.end_time])).toEqual([
+        ["1970-01-01T00:00:00.000Z", "1970-01-01T00:16:40.000Z"],
+        ["1970-01-01T00:00:00.000Z", "1970-01-01T00:16:40.000Z"],
+      ]);
     });
   });
 
   describe("Run validation", () => {
-    function validatedStore(code: string) {
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(VL_SOURCE.id);
-      const store = useExploreStore();
-      store.setLogchefqlCode(code);
-      return store;
+    async function validatedRun(code: string) {
+      const { runs } = exploreSource(VL_SOURCE);
+      runs.run({ mode: "logchefql", text: code }, { validate: true });
+      await settled(runs);
+      return runs;
     }
 
     it("accepts valid LogchefQL for a VictoriaLogs source without requiring a table name", async () => {
-      mocks.logchefqlValidate.mockResolvedValue({ data: { valid: true } });
-      const store = validatedStore('lvl="WARN"');
+      mocks.logchefqlValidate.mockResolvedValue(ok({ valid: true }));
+      const runs = await validatedRun('lvl="WARN"');
 
-      expect(await store.validateQuery()).toBe(true);
       expect(mocks.logchefqlValidate).toHaveBeenCalledWith(1, 2, 'lvl="WARN"');
-      expect(store.error).toBeNull();
+      expect(requestsFor('lvl="WARN"')).toHaveLength(1);
+      expect(runs.error).toBeNull();
     });
 
     it("rejects LogchefQL that the server says is invalid and shows why", async () => {
-      mocks.logchefqlValidate.mockResolvedValue({ data: { valid: false, error: { code: "PARSE_ERROR", message: "Expected a field value" } } });
-      const store = validatedStore('lvl="WARN"');
+      mocks.logchefqlValidate.mockResolvedValue(ok({ valid: false, error: { code: "PARSE_ERROR", message: "Expected a field value" } }));
+      const runs = await validatedRun('lvl="WARN"');
 
-      expect(await store.validateQuery()).toBe(false);
-      expect(store.error?.message).toBe("Expected a field value");
+      expect(runs.error).toBe("Expected a field value");
+      expect(mocks.logchefqlQuery).not.toHaveBeenCalled();
     });
 
     it("validates a quoted variable without doubling its quotes", async () => {
-      mocks.logchefqlValidate.mockResolvedValue({ data: { valid: true } });
-      const store = validatedStore('p.resp.FillNumber="{{ trade_id }}"|p.order_number');
+      mocks.logchefqlValidate.mockResolvedValue(ok({ valid: true }));
+      await validatedRun('p.resp.FillNumber="{{ trade_id }}"|p.order_number');
 
-      expect(await store.validateQuery()).toBe(true);
       expect(mocks.logchefqlValidate).toHaveBeenCalledWith(1, 2, 'p.resp.FillNumber="__VAR_trade_id__"|p.order_number');
-      expect(store.logchefqlCode).toBe('p.resp.FillNumber="{{ trade_id }}"|p.order_number');
+      expect(requestsFor('p.resp.FillNumber="{{ trade_id }}"|p.order_number')).toHaveLength(1);
     });
   });
 
   describe("LogchefQL execution", () => {
     it("sends a VictoriaLogs query through the source-aware LogchefQL endpoint", async () => {
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      mocks.sourcesState.teamSources = [VL_SOURCE];
+      const { runs } = exploreSource(VL_SOURCE);
+      const execution = runs.run({ mode: "logchefql", text: 'lvl="WARN"' });
+      await settled(runs);
 
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(VL_SOURCE.id);
-
-      const store = useExploreStore();
-      store.setWindow(relative("15m"));
-      store.setLogchefqlCode('lvl="WARN"');
-      mocks.logchefqlQuery.mockResolvedValue({
-        data: {
-          logs: [],
-          columns: [],
-          stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 },
-        },
-      });
-
-      const result = await store.executeQuery();
-
-      expect(result.success).toBe(true);
+      expect(execution?.status).toBe("succeeded");
       expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
         1,
         VL_SOURCE.id,
@@ -401,55 +402,29 @@ describe("explore store", () => {
       );
     });
 
-    function exploreVictoriaLogsWith(window: TimeWindow) {
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      mocks.sourcesState.teamSources = [VL_SOURCE];
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(VL_SOURCE.id);
-      const store = useExploreStore();
-      store.setWindow(window);
-      mocks.logchefqlQuery.mockResolvedValue({
-        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
-      });
-      return store;
-    }
-
     it("sends the window as RFC3339 instants with the preference zone", async () => {
-      const store = exploreVictoriaLogsWith(absolute(Date.UTC(2026, 7, 8, 4, 30), Date.UTC(2026, 7, 8, 4, 45)));
-      await store.executeQuery();
+      const { runs } = exploreSource(VL_SOURCE, absolute(Date.UTC(2026, 7, 8, 4, 30), Date.UTC(2026, 7, 8, 4, 45)));
+      runs.run({ mode: "logchefql", text: 'at="rfc3339"' });
+      await settled(runs);
 
-      expect(mocks.logchefqlQuery).toHaveBeenCalledWith(
-        1,
-        VL_SOURCE.id,
-        expect.objectContaining({
-          start_time: "2026-08-08T04:30:00.000Z",
-          end_time: "2026-08-08T04:45:00.000Z",
-          timezone: store.resolved.zone,
-        }),
-        expect.anything(),
-      );
+      expect(requestsFor('at="rfc3339"')[0]).toMatchObject({
+        start_time: "2026-08-08T04:30:00.000Z",
+        end_time: "2026-08-08T04:45:00.000Z",
+        timezone: usePreferencesStore().zone,
+      });
     });
 
     it("resolves today at midnight in the preference zone, not the browser's", async () => {
       vi.useFakeTimers();
       vi.setSystemTime(new Date("2026-10-19T20:45:00Z")); // already Oct 20 in the IST browser
       try {
-        mocks.teamsState.currentTeamId = 1;
-        mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-        mocks.sourcesState.teamSources = [VL_SOURCE];
-        useContextStore().selectTeam(1);
-        mocks.logchefqlQuery.mockResolvedValue({
-          data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
-        });
-        const preferences = usePreferencesStore();
-        const store = useExploreStore();
-        await preferences.updatePreferences({ timezone: "utc" });
-        openUrl({ team: "1", source: String(VL_SOURCE.id), t: "today", mode: "logchefql", q: "" });
-        await store.executeQuery();
+        const { runs } = exploreSource(VL_SOURCE);
+        await usePreferencesStore().updatePreferences({ timezone: "utc" });
+        openUrl({ team: "1", source: String(VL_SOURCE.id), t: "today", mode: "logchefql", q: 'at="today"' });
+        runs.run({ mode: "logchefql", text: 'at="today"' });
+        await settled(runs);
 
-        expect(mocks.logchefqlQuery.mock.lastCall?.[2]).toMatchObject({
+        expect(requestsFor('at="today"')[0]).toMatchObject({
           start_time: "2026-10-19T00:00:00.000Z",
           end_time: "2026-10-19T20:45:00.000Z",
           timezone: "UTC",
@@ -464,76 +439,72 @@ describe("explore store", () => {
     it("opens a link's start and end ms as instants for the query and the histogram", async () => {
       const start = Date.UTC(2026, 9, 19, 4);
       const end = Date.UTC(2026, 9, 19, 5);
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
-      mocks.sourcesState.teamSources = [CH_SOURCE];
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      const preferences = usePreferencesStore();
-      const store = useExploreStore();
-      await preferences.updatePreferences({ timezone: "utc" });
-      mocks.logchefqlQuery.mockResolvedValue({
-        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 }, generated_sql: "SELECT 1" },
-      });
+      const { runs } = exploreSource(CH_SOURCE);
+      await usePreferencesStore().updatePreferences({ timezone: "utc" });
+      mocks.logchefqlQuery.mockResolvedValue(ok({ ...NO_LOGS, generated_sql: "SELECT 1" }));
 
-      openUrl({ team: "1", source: String(CH_SOURCE.id), start: String(start), end: String(end), mode: "logchefql", q: "" });
-      await store.executeQuery();
+      openUrl({ team: "1", source: String(CH_SOURCE.id), start: String(start), end: String(end), mode: "logchefql", q: 'at="evidence"' });
+      runs.run({ mode: "logchefql", text: 'at="evidence"' });
+      await settled(runs);
 
-      expect(mocks.logchefqlQuery.mock.lastCall?.[2]).toMatchObject({
+      expect(requestsFor('at="evidence"')[0]).toMatchObject({
         start_time: new Date(start).toISOString(),
         end_time: new Date(end).toISOString(),
         timezone: "UTC",
       });
-      expect(mocks.histogramFetch.mock.lastCall?.[0]).toMatchObject({ window: { start, end, zone: "UTC" } });
+      expect(mocks.histogramFetch.mock.lastCall?.[0]).toMatchObject({ queryText: "SELECT 1", window: { start, end, zone: "UTC" } });
     });
   });
 
   describe("Ask Chef context window", () => {
-    // Ask Chef reads its window before the query runs: watchers left by
-    // earlier tests reset the context store while the query is awaited.
     const QUERY = 'ask="chef"';
 
-    function exploreVictoriaLogs() {
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE;
-      mocks.sourcesState.teamSources = [VL_SOURCE];
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(VL_SOURCE.id);
-      mocks.logchefqlQuery.mockResolvedValue({
-        data: { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 } },
-      });
-      const store = useExploreStore();
-      store.setLogchefqlCode(QUERY);
-      return store;
-    }
-
-    // Stores left by earlier tests may also query, so read this store's request by its query.
-    async function logQueryWindow(): Promise<{ start: number; end: number; zone: string }> {
-      await useExploreStore().executeQuery();
-      const request = mocks.logchefqlQuery.mock.calls.filter((call) => call[2].query === QUERY).at(-1)?.[2];
+    // The window of the log query that runs right after Ask Chef opened.
+    async function logQueryWindow(runs: ReturnType<typeof useExploreRuns>): Promise<{ start: number; end: number; zone: string }> {
+      runs.run({ mode: "logchefql", text: QUERY });
+      await settled(runs);
+      const request = requestsFor(QUERY).at(-1);
       return { start: Date.parse(request.start_time), end: Date.parse(request.end_time), zone: request.timezone };
     }
 
     it("is the window the log query reads for an absolute range", async () => {
-      exploreVictoriaLogs().setWindow(absolute(Date.UTC(2026, 7, 8, 4, 30), Date.UTC(2026, 7, 8, 4, 45)));
+      const { store, runs } = exploreSource(VL_SOURCE, absolute(Date.UTC(2026, 7, 8, 4, 30), Date.UTC(2026, 7, 8, 4, 45)));
+      store.setLogchefqlCode(QUERY);
 
       const askChef = useAskChefStore();
       askChef.openForExplorer();
 
-      expect(askChef.context).toMatchObject(await logQueryWindow());
+      expect(askChef.context).toMatchObject(await logQueryWindow(runs));
     });
 
     it("is the window the log query reads for a relative range", async () => {
-      vi.useFakeTimers();
+      vi.useFakeTimers({ toFake: ["Date"] });
       vi.setSystemTime(new Date("2026-08-08T10:00:00Z"));
       try {
-        exploreVictoriaLogs().setWindow(relative("1h"));
+        const { store, runs } = exploreSource(VL_SOURCE, relative("1h"));
+        store.setLogchefqlCode(QUERY);
 
         const askChef = useAskChefStore();
         askChef.openForExplorer();
 
-        expect(askChef.context).toMatchObject(await logQueryWindow());
+        expect(askChef.context).toMatchObject(await logQueryWindow(runs));
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("is the window of the results Explorer shows once a query ran", async () => {
+      vi.useFakeTimers({ toFake: ["Date"] });
+      vi.setSystemTime(new Date("2026-08-08T10:00:00Z"));
+      try {
+        const { runs } = exploreSource(VL_SOURCE, relative("1h"));
+        const ran = await logQueryWindow(runs);
+        vi.setSystemTime(new Date("2026-08-08T10:30:00Z"));
+
+        const askChef = useAskChefStore();
+        askChef.openForExplorer();
+
+        expect(askChef.context).toMatchObject(ran);
       } finally {
         vi.useRealTimers();
       }
@@ -607,15 +578,10 @@ describe("explore store", () => {
       expect(params).toEqual({ team: "1", source: "10", id: "42" });
     });
 
-    it("prefers the share token over time/limit params", () => {
-      const contextStore = useContextStore();
-      contextStore.selectTeam(1);
-      contextStore.selectSource(10);
-      mocks.teamsState.currentTeamId = 1;
-
+    it("prefers the share token over time/limit params", async () => {
       const store = useExploreStore();
       store.setWindow(relative("15m"));
-      store.setActiveShareToken("tok123");
+      await shareEditorQuery("tok123");
 
       const params = store.urlQueryParameters;
       expect(params).toEqual({ team: "1", source: "10", share: "tok123" });
@@ -813,130 +779,82 @@ describe("explore store", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // #101 — a query in flight when the source changes must be aborted, and its
-  // late response must never populate results under the new source.
+  // #101: a query in flight when Explorer enters another location is aborted,
+  // and its late response never shows there.
   // ---------------------------------------------------------------------------
   describe("async races on source switch (#101)", () => {
     function armInFlightLogchefql() {
-      mocks.teamsState.currentTeamId = 1;
-      mocks.sourcesState.currentSourceDetails = CH_SOURCE; // id 1
-      mocks.sourcesState.teamSources = [CH_SOURCE];
-      const ctx = useContextStore();
-      ctx.selectTeam(1);
-      ctx.selectSource(1);
-
-      const store = useExploreStore();
-      store.setWindow(relative("15m"));
+      const { store, runs } = exploreSource(CH_SOURCE);
       store.setLogchefqlCode('level="error"');
-
-      // The FIRST query call (this store's executeQuery, invoked synchronously
-      // below) gets a controllable deferred. Setup-store watchers from earlier
-      // tests are never disposed and share this reactive mock state, so they can
-      // fire their own executeQuery when we mutate the source — those extra
-      // calls fall through to an already-resolved default and must NOT hijack
-      // our deferred resolver.
-      let resolveQuery: (value: any) => void = () => {};
-      mocks.logchefqlQuery.mockReset();
-      mocks.logchefqlQuery.mockImplementationOnce(
-        () => new Promise((resolve) => { resolveQuery = resolve; })
-      );
-      mocks.logchefqlQuery.mockImplementation(() =>
-        Promise.resolve({ data: { logs: [], columns: [], stats: {} } })
-      );
-
-      return { ctx, store, resolveQuery: (v: any) => resolveQuery(v) };
+      let resolveQuery: (value: unknown) => void = () => {};
+      mocks.logchefqlQuery.mockImplementationOnce(() => new Promise((resolve) => { resolveQuery = resolve; }));
+      runs.run(store.editorQuery);
+      return { store, runs, resolveQuery: (value: unknown) => resolveQuery(value) };
     }
 
-    it("aborts the in-flight query when it opens another source", async () => {
-      const { resolveQuery, store } = armInFlightLogchefql();
+    it("aborts the in-flight query when Explorer enters another location", async () => {
+      const { runs, resolveQuery } = armInFlightLogchefql();
+      const signal: AbortSignal = mocks.logchefqlQuery.mock.lastCall?.[3].signal;
 
-      const abortSpy = vi.spyOn(AbortController.prototype, "abort");
-      const exec = store.executeQuery();
-      await Promise.resolve();
-      await nextTick();
-
-      // Measure only the aborts triggered by the source switch (other layers
-      // may create/abort their own controllers).
-      const abortsBeforeSwitch = abortSpy.mock.calls.length;
-
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE; // id 2
-      mocks.sourcesState.teamSources = [VL_SOURCE];
-      openUrl({ team: "1", source: "2" });
-      expect(abortSpy.mock.calls.length).toBeGreaterThan(abortsBeforeSwitch);
-
-      resolveQuery({ data: { logs: [], columns: [], stats: {} } });
-      await exec;
-      abortSpy.mockRestore();
+      runs.enter(null);
+      expect(signal.aborted).toBe(true);
+      expect(runs.isRunning).toBe(false);
+      resolveQuery(ok(NO_LOGS));
     });
 
-    it("drops a stale response that resolves after the source switched", async () => {
-      const { ctx, resolveQuery, store } = armInFlightLogchefql();
+    it("drops a stale response that resolves after Explorer entered another location", async () => {
+      const { runs, resolveQuery } = armInFlightLogchefql();
 
-      const exec = store.executeQuery();
+      runs.enter(null);
+      resolveQuery(ok({
+        logs: [{ msg: "stale" }],
+        columns: [{ name: "msg", type: "String" }],
+        stats: {},
+        conditions: [{ field: 'msg', operator: '~', value: 'stale', is_regex: true }],
+        fields_used: ['msg'],
+      }));
+      await nextTick();
       await Promise.resolve();
-      await nextTick();
 
-      mocks.sourcesState.currentSourceDetails = VL_SOURCE; // id 2
-      mocks.sourcesState.teamSources = [VL_SOURCE];
-      ctx.selectSource(2);
-      await nextTick();
-
-      // Response for the OLD source (1) arrives after the switch to 2.
-      resolveQuery({
-        data: {
-          logs: [{ msg: "stale" }],
-          columns: [{ name: "msg", type: "String" }],
-          stats: {},
-          conditions: [{ field: 'msg', operator: '~', value: 'stale', is_regex: true }],
-          fields_used: ['msg'],
-        },
-      });
-      const result = await exec;
-
-      expect(store.logs).toEqual([]); // stale result never applied
-      expect(result.error?.error_type).toBe("StaleResponse");
-      expect(store.lastExecutedState?.compilation).toBeUndefined();
+      expect(runs.shown).toBeNull();
+      expect(runs.results).toBeNull();
     });
 
     it("pairs compiled metadata with the executed query rather than later editor changes", async () => {
-      const { store, resolveQuery } = armInFlightLogchefql();
-      const exec = store.executeQuery();
-      await nextTick();
+      const { store, runs, resolveQuery } = armInFlightLogchefql();
       store.setLogchefqlCode('level="warn"');
       store.setLimit(500);
       store.setActiveMode('native');
       const conditions = [{ field: 'level', operator: '=', value: 'error', is_regex: false }];
-      resolveQuery({ data: {
+      resolveQuery(ok({
         logs: [{ level: 'error' }], columns: [], stats: {},
         generated_query: "SELECT * FROM logs WHERE level = 'error'",
         conditions, fields_used: ['level'],
-      } });
-      await exec;
-      expect(store.lastExecutedState).toMatchObject({
-        mode: 'logchefql', logchefqlQuery: 'level="error"', limit: 100,
-        compilation: { conditions, fieldsUsed: ['level'] },
-      });
+      }));
+      await settled(runs);
+      expect(runs.shown).toMatchObject({ query: { mode: 'logchefql', text: 'level="error"' }, limit: 100 });
+      expect(runs.results?.compilation).toEqual({ conditions, fieldsUsed: ['level'] });
       expect(store.logchefqlCode).toBe('level="warn"');
 
       store.setNativeQuery('SELECT 1');
-      mocks.exploreGetLogs.mockResolvedValue({ status: 'success', data: { data: [{ n: 1 }], columns: [], stats: {} } });
-      await store.executeQuery();
-      expect(store.lastExecutedState?.mode).toBe('native');
-      expect(store.lastExecutedState?.compilation).toBeUndefined();
+      mocks.exploreGetLogs.mockResolvedValue(ok({ data: [{ n: 1 }], columns: [], stats: {} }));
+      runs.run(store.editorQuery);
+      await settled(runs);
+      expect(runs.shown?.query.mode).toBe('native');
+      expect(runs.results?.compilation).toBeNull();
     });
 
     it("clears compiled filters after executing an empty LogchefQL query", async () => {
-      const { store, resolveQuery } = armInFlightLogchefql();
-      const exec = store.executeQuery();
-      await nextTick();
-      resolveQuery({ data: { logs: [], columns: [], stats: {}, fields_used: ['level'],
+      const { store, runs, resolveQuery } = armInFlightLogchefql();
+      resolveQuery(ok({ logs: [], columns: [], stats: {}, fields_used: ['level'],
         conditions: [{ field: 'level', operator: '=', value: 'error', is_regex: false }],
-      } });
-      await exec;
+      }));
+      await settled(runs);
       store.setLogchefqlCode('');
-      mocks.logchefqlQuery.mockResolvedValue({ data: { logs: [], columns: [], stats: {}, conditions: null, fields_used: null } });
-      await store.executeQuery();
-      expect(store.lastExecutedState?.compilation).toEqual({ conditions: [], fieldsUsed: [] });
+      mocks.logchefqlQuery.mockResolvedValue(ok({ logs: [], columns: [], stats: {}, conditions: null, fields_used: null }));
+      runs.run(store.editorQuery);
+      await settled(runs);
+      expect(runs.results?.compilation).toEqual({ conditions: [], fieldsUsed: [] });
     });
   });
 });

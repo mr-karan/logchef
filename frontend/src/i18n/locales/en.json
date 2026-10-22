@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "Stop live tail",
   "ui.run": "Run",
   "ui.executeQueryCtrlEnter": "Execute query (Ctrl+Enter)",
-  "ui.cancelling": "Cancelling...",
   "ui.cancelRunningQueryEscape": "Cancel running query (Escape)",
   "ui.showSyntaxHelp": "Show syntax help",
   "ui.syntax": "Syntax",

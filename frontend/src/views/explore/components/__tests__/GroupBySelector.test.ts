@@ -4,7 +4,8 @@ import { i18n } from '@/i18n'
 import GroupBySelector from '../GroupBySelector.vue'
 
 const setGroupByField = vi.hoisted(() => vi.fn())
-vi.mock('@/stores/explore', () => ({ useExploreStore: () => ({ groupByField: '', setGroupByField }) }))
+vi.mock('@/stores/exploreHistogram', () => ({ useExploreHistogramStore: () => ({ groupByField: '' }) }))
+vi.mock('@/stores/exploreRuns', () => ({ useExploreRuns: () => ({ setGroupByField }) }))
 vi.mock('@/stores/sources', () => ({ useSourcesStore: () => ({
   currentSourceDetails: { _meta_ts_field: 'timestamp', _meta_severity_field: 'level', sort_keys: ['service'] },
 }) }))

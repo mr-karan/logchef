@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "लाइव लॉग रोकें",
   "ui.run": "चलाएँ",
   "ui.executeQueryCtrlEnter": "क्वेरी चलाएँ (Ctrl+Enter)",
-  "ui.cancelling": "रद्द हो रहा है…",
   "ui.cancelRunningQueryEscape": "चलती क्वेरी रद्द करें (Escape)",
   "ui.showSyntaxHelp": "सिंटैक्स सहायता दिखाएँ",
   "ui.syntax": "सिंटैक्स",

@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
-import { computed, ref } from "vue";
+import { computed, onActivated, ref } from "vue";
 import {
   VisAxis,
   VisStackedBar,
   VisStackedBarSelectors,
   VisXYContainer,
 } from "@unovis/vue";
-import { useExploreStore } from "@/stores/explore";
+import { useExploreRuns } from "@/stores/exploreRuns";
+import { useExploreHistogramStore } from "@/stores/exploreHistogram";
+import { usePreferencesStore } from "@/stores/preferences";
 import {
   ChartContainer,
   ChartCrosshair,
@@ -41,16 +43,21 @@ const emit = defineEmits<{
   (e: "zoom-time-range", range: { start: Date; end: Date }): void;
 }>();
 
-const exploreStore = useExploreStore();
+const histogram = useExploreHistogramStore();
+const runs = useExploreRuns();
+const windowed = computed(() => runs.shown?.search);
+const preferences = usePreferencesStore();
+const activation = ref(0);
+onActivated(() => activation.value++);
 
-const histogramData = computed(() => exploreStore.histogramData);
-const histogramError = computed(() => exploreStore.histogramError);
-const histogramNotice = computed(() => exploreStore.histogramNotice);
+const histogramData = computed(() => windowed.value?.histogram ?? histogram.histogramData);
+const histogramError = computed(() => histogram.histogramError);
+const histogramNotice = computed(() => histogram.histogramNotice);
 const isChartLoading = computed(
-  () => props.isLoading || exploreStore.isLoadingHistogram,
+  () => props.isLoading || (windowed.value ? windowed.value.isCounting && windowed.value.histogram.length === 0 : histogram.isLoadingHistogram),
 );
 const currentGranularity = computed(
-  () => exploreStore.histogramGranularity || undefined,
+  () => windowed.value?.granularity ?? histogram.histogramGranularity ?? undefined,
 );
 
 const chartHeight = computed(() => Number.parseInt(props.height, 10) || 180);
@@ -74,7 +81,7 @@ const chartModel = computed(() =>
   buildHistogramChartModel(
     histogramData.value,
     currentGranularity.value,
-    Boolean(exploreStore.groupByField && exploreStore.groupByField !== "__none__"),
+    Boolean(histogram.groupByField && histogram.groupByField !== "__none__"),
   ),
 );
 
@@ -93,7 +100,7 @@ const chartRange = computed(() => {
     return {
       start: Date.now() - chartModel.value.bucketWidthMs,
       end: Date.now(),
-      zone: exploreStore.resolved.zone,
+      zone: preferences.zone,
     };
   }
 
@@ -102,7 +109,7 @@ const chartRange = computed(() => {
   return {
     start: first.ts,
     end: last.bucketEndTs,
-    zone: exploreStore.resolved.zone,
+    zone: preferences.zone,
   };
 });
 
@@ -280,6 +287,7 @@ const formatXAxisTick = computed(() => {
         @contextmenu="onContextMenu"
       >
         <VisXYContainer
+          :key="activation"
           :data="chartModel.rows"
           :height="chartHeight"
           :margin="CHART_MARGIN"

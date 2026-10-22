@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "Arrêter les logs en direct",
   "ui.run": "Exécuter",
   "ui.executeQueryCtrlEnter": "Exécuter la requête (Ctrl+Entrée)",
-  "ui.cancelling": "Annulation…",
   "ui.cancelRunningQueryEscape": "Annuler la requête en cours (Échap)",
   "ui.showSyntaxHelp": "Afficher l’aide syntaxique",
   "ui.syntax": "Syntaxe",

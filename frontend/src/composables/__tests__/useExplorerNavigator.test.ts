@@ -1,25 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createApp, defineComponent, h } from "vue";
+import { createApp, defineComponent, h, KeepAlive, type VNode } from "vue";
 import { createPinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { teamsApi, type UserTeamMembership } from "@/api/teams";
 import { sourcesApi, type Source } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
-import { exploreApi } from "@/api/explore";
-import { savedQueriesApi } from "@/api/savedQueries";
+import { exploreApi, type QueryParams } from "@/api/explore";
+import { savedQueriesApi, type ResolvedSavedQuery } from "@/api/savedQueries";
+import { streamWindowedQuery, type WindowedEvent, type WindowedRequest } from "@/api/windowed";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { useExploreStore } from "@/stores/explore";
+import { useExploreRuns } from "@/stores/exploreRuns";
 import { useSourcesStore } from "@/stores/sources";
-import { epochMs } from "@/utils/timeWindow";
+import { useExploreHistogramStore } from "@/stores/exploreHistogram";
+import { useVariableStore } from "@/stores/variables";
+import { epochMs, parseZoneId, sqlTimeCondition, type TimeWindow } from "@/utils/timeWindow";
 import { exploreWindowQuery } from "@/utils/alertExplore";
 import { contextRouterGuard } from "@/router/contextGuard";
 import { i18n } from "@/i18n";
 import FieldSideBar from "@/components/field-sidebar/FieldSideBar.vue";
+import WindowedSearchPanel from "@/views/explore/components/WindowedSearchPanel.vue";
 
 import { useExplorerNavigator } from "../useExplorerNavigator";
 import { useQuery } from "../useQuery";
 import { useSavedQueries } from "../useSavedQueries";
+
+vi.mock("@/api/windowed", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/api/windowed")>();
+  return { ...actual, streamWindowedQuery: vi.fn(actual.streamWindowedQuery) };
+});
 
 // Real router, history and stores. Only the HTTP API boundaries are stubbed.
 const ok = <T>(data: T) => Promise.resolve({ status: "success" as const, data });
@@ -41,9 +51,13 @@ const sqlOnlySource: Source = { ...source, id: 5, name: "audit-logs", query_lang
 const otherTeam: UserTeamMembership = { ...team, id: 2, name: "search" };
 const otherTeamSource: Source = { ...source, id: 7, name: "search-logs" };
 const offlineSource: Source = { ...source, id: 6, name: "legacy-search-logs", is_connected: false };
+const windowedSource: Source = {
+  ...source, id: 8, name: "edge-logs", source_type: "victorialogs", _meta_ts_field: "_time",
+  connection: { base_url: "http://logs.test", optimizer: { enabled: true, histogram_enabled: false } },
+};
 
-const sourceById = (id: number) => [source, otherSource, sqlOnlySource, otherTeamSource, offlineSource].find((s) => s.id === id) ?? source;
-const sourcesOfTeam = (teamId: number) => (teamId === otherTeam.id ? [otherTeamSource] : [source, otherSource, sqlOnlySource]);
+const sourceById = (id: number) => [source, otherSource, sqlOnlySource, otherTeamSource, offlineSource, windowedSource].find((s) => s.id === id) ?? source;
+const sourcesOfTeam = (teamId: number) => (teamId === otherTeam.id ? [otherTeamSource] : [source, otherSource, sqlOnlySource, windowedSource]);
 
 const savedOnOtherSource = {
   id: 42, source_id: otherSource.id, resolved_team_id: team.id, name: "cart errors", description: "",
@@ -63,6 +77,27 @@ const saveForm = {
 const savedFromForm = { ...savedOnOtherSource, id: 77, source_id: source.id, query_content: saveForm.query_content };
 const noLogs = { logs: [], columns: [], stats: { execution_time_ms: 1, rows_read: 0, bytes_read: 0 }, generated_sql: "SELECT 1" };
 const listFailure = { status: "error", message: "Sources are unavailable", error_type: "ServerError" };
+
+// A request that stays open until its signal aborts, as a canceled request does.
+const untilAborted = (signal?: AbortSignal) =>
+  new Promise<never>((_resolve, reject) => signal?.addEventListener("abort", () => reject(new DOMException("Request canceled", "AbortError")), { once: true }));
+
+// Streams each windowed search as `respond` returns it. A stream without an end event stays open until it is aborted.
+const searchWindows = [
+  { index: 0, start: "2026-09-01T00:01:00Z", end: "2026-09-01T00:02:00Z" },
+  { index: 1, start: "2026-09-01T00:00:00Z", end: "2026-09-01T00:01:00Z" },
+];
+function streamWindows(respond: (request: WindowedRequest) => WindowedEvent[]) {
+  vi.mocked(streamWindowedQuery).mockImplementation(async (_teamId, _sourceId, request, signal, onEvent) => {
+    await Promise.resolve();
+    const events = request.count ? [{ type: "end" as const, complete: true }] : respond(request);
+    for (const event of events) onEvent(event);
+    if (events.at(-1)?.type !== "end") await untilAborted(signal);
+  });
+}
+const windowRows = (window: (typeof searchWindows)[number], message: string, cursor?: string): WindowedEvent => (
+  { type: "rows", window, status: "complete", logs: [{ _time: window.start, _msg: message }], cursor, complete: false }
+);
 
 function deferred() {
   let release: () => void = () => {};
@@ -108,6 +143,7 @@ describe("Explorer history navigation", () => {
     setActivePinia(pinia);
     // App.vue creates the explore store before the first navigation.
     const store = useExploreStore();
+    const runs = useExploreRuns();
     let nav: ReturnType<typeof useExplorerNavigator> | undefined;
     let saved: ReturnType<typeof useSavedQueries> | undefined;
     let editor: ReturnType<typeof useQuery> | undefined;
@@ -119,7 +155,12 @@ describe("Explorer history navigation", () => {
         return () => null;
       },
     });
-    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: "/logs/explore", component: Explorer }] });
+    // Like the app's logs layout: other logs pages keep Explorer alive, pages outside it unmount it.
+    const Logs = defineComponent({
+      render: () => h(RouterView, null, { default: ({ Component }: { Component?: VNode }) => h(KeepAlive, null, { default: () => Component }) }),
+    });
+    const routes = [{ path: "/logs", component: Logs, children: [{ path: "explore", component: Explorer }, { path: "library", component: { render: () => null } }] }];
+    const router = createRouter({ history: createMemoryHistory(), routes });
     router.beforeEach(contextRouterGuard);
     await router.push({ path: "/logs/explore", query: location });
     const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router);
@@ -130,13 +171,20 @@ describe("Explorer history navigation", () => {
     if (!opened || !saved || !shownEditor) throw new Error("explorer did not mount");
     await vi.waitFor(() => expect(opened.status.value).not.toBe("loading"));
     // What Explorer's query error banner shows.
-    const banner = () => store.error?.message ?? null;
-    return { router, store, query, nav: opened, saved, editor: shownEditor, banner, pinia };
+    const banner = () => runs.error ?? store.error?.message ?? null;
+    // Whether the editor shows Cancel and Esc stops the query.
+    const isRunning = () => runs.isRunning;
+    // The rows the results table shows.
+    const rows = () => runs.results?.rows ?? [];
+    return { router, store, query, nav: opened, saved, editor: shownEditor, banner, isRunning, rows, pinia };
   }
 
-  async function settle(store: ReturnType<typeof useExploreStore>) {
-    await vi.waitFor(() => expect(store.isExecutingQuery).toBe(false));
-    await new Promise((resolve) => setImmediate(resolve));
+  // Lets late responses and validations land.
+  const flush = () => new Promise((resolve) => setImmediate(resolve));
+
+  async function settle() {
+    await vi.waitFor(() => expect(useExploreRuns().isRunning).toBe(false));
+    await flush();
   }
 
   function expectOpen(
@@ -152,19 +200,19 @@ describe("Explorer history navigation", () => {
   }
 
   // Each navigation runs exactly one query, and nothing aborts it.
-  async function expectOneRun(query: ReturnType<typeof vi.spyOn>, navigate: () => Promise<unknown>, store: ReturnType<typeof useExploreStore>) {
+  async function expectOneRun(query: ReturnType<typeof vi.spyOn>, navigate: () => Promise<unknown>) {
     const before = query.mock.calls.length;
     await navigate();
-    await settle(store);
+    await settle();
     const calls = query.mock.calls.slice(before);
     expect(calls).toHaveLength(1);
     expect((calls[0][3] as { signal: AbortSignal }).signal.aborted).toBe(false);
   }
 
-  async function expectNoRun(query: ReturnType<typeof vi.spyOn>, navigate: () => Promise<unknown>, store: ReturnType<typeof useExploreStore>) {
+  async function expectNoRun(query: ReturnType<typeof vi.spyOn>, navigate: () => Promise<unknown>) {
     const before = query.mock.calls.length;
     await navigate();
-    await settle(store);
+    await settle();
     expect(query.mock.calls.length).toBe(before);
   }
 
@@ -172,16 +220,15 @@ describe("Explorer history navigation", () => {
   // navigation would show up here.
   async function raceAndOutwait(
     query: ReturnType<typeof vi.spyOn>,
-    store: ReturnType<typeof useExploreStore>,
     race: () => Promise<unknown>,
     expectRuns = expectOneRun,
   ) {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     try {
-      await expectRuns(query, race, store);
+      await expectRuns(query, race);
       const before = query.mock.calls.length;
       await vi.advanceTimersByTimeAsync(6000);
-      await settle(store);
+      await settle();
       expect(query.mock.calls.length).toBe(before);
     } finally {
       vi.useRealTimers();
@@ -190,74 +237,74 @@ describe("Explorer history navigation", () => {
 
   it("reopens each evidence link on Back and Forward instead of the saved draft", async () => {
     const { router, store, query } = await mountExplorer();
-    await settle(store);
+    await settle();
 
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     expectOpen(router, store, query, evidenceA);
 
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
     expectOpen(router, store, query, evidenceB);
 
     await expectOneRun(query, async () => {
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceA.start));
-    }, store);
+    });
     expectOpen(router, store, query, evidenceA);
 
     await expectOneRun(query, async () => {
       router.forward();
       await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceB.start));
-    }, store);
+    });
     expectOpen(router, store, query, evidenceB);
   });
 
   it("runs one query when Explorer opens", async () => {
-    const { store, query } = await mountExplorer();
-    await settle(store);
+    const { query } = await mountExplorer();
+    await settle();
     expect(query).toHaveBeenCalledTimes(1);
   });
 
   it("opens a link to another source with the link's query and window", async () => {
     const { router, store, query } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceOther }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceOther }));
     expect(store.sourceId).toBe(otherSource.id);
     expectOpen(router, store, query, evidenceOther);
   });
 
   it("goes Back to the previous source's query after picking another source", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
     store.setLogchefqlCode('unrun="edit"');
 
-    await expectOneRun(query, () => nav.selectSource(otherSource.id), store);
+    await expectOneRun(query, () => nav.selectSource(otherSource.id));
     expect(router.currentRoute.value.query.source).toBe(String(otherSource.id));
 
     await expectOneRun(query, async () => {
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.source).toBe(String(source.id)));
-    }, store);
+    });
     expect(store.sourceId).toBe(source.id);
     expectOpen(router, store, query, evidenceB);
   });
 
   it("keeps the URL in step with a window chosen after picking a source", async () => {
-    const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => nav.selectSource(otherSource.id), store);
+    const { router, query, nav } = await mountExplorer();
+    await settle();
+    await expectOneRun(query, () => nav.selectSource(otherSource.id));
 
-    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "15m" }), store);
+    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "15m" }));
     expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), t: "15m" });
   });
 
   it("runs nothing when Back returns to the shown query before the next source loads", async () => {
     const { router, store, query } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
     let releaseOther: () => void = () => {};
     const otherLoaded = new Promise<void>((resolve) => { releaseOther = resolve; });
@@ -266,7 +313,7 @@ describe("Explorer history navigation", () => {
       return ok(sourceById(sourceId)) as never;
     });
 
-    await raceAndOutwait(query, store, async () => {
+    await raceAndOutwait(query, async () => {
       await router.push({ path: "/logs/explore", query: evidenceOther });
       await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id));
       router.back();
@@ -279,8 +326,8 @@ describe("Explorer history navigation", () => {
 
   it("opens the last of two quick links when the first source is still loading", async () => {
     const { router, store, query } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
     let releaseOther: () => void = () => {};
     const otherLoaded = new Promise<void>((resolve) => { releaseOther = resolve; });
@@ -289,7 +336,7 @@ describe("Explorer history navigation", () => {
       return ok(sourceById(sourceId)) as never;
     });
 
-    await raceAndOutwait(query, store, async () => {
+    await raceAndOutwait(query, async () => {
       await router.push({ path: "/logs/explore", query: evidenceOther });
       await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id));
       await router.push({ path: "/logs/explore", query: evidenceB });
@@ -302,43 +349,43 @@ describe("Explorer history navigation", () => {
 
   it("goes Back to the previous team's query after picking another team", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
-    await expectOneRun(query, () => nav.selectTeam(otherTeam.id), store);
+    await expectOneRun(query, () => nav.selectTeam(otherTeam.id));
     expect(router.currentRoute.value.query).toMatchObject({ team: String(otherTeam.id), source: String(otherTeamSource.id) });
 
     await expectOneRun(query, async () => {
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.team).toBe(String(team.id)));
-    }, store);
+    });
     expect(store.sourceId).toBe(source.id);
     expectOpen(router, store, query, evidenceA);
   });
 
   it("keeps Back and Forward working after re-picking the current source", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
 
     await nav.selectSource(source.id);
-    await settle(store);
+    await settle();
 
     await expectOneRun(query, async () => {
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceA.start));
-    }, store);
+    });
     await expectOneRun(query, async () => {
       router.forward();
       await vi.waitFor(() => expect(router.currentRoute.value.query.start).toBe(evidenceB.start));
-    }, store);
+    });
     expectOpen(router, store, query, evidenceB);
   });
 
   it("pushes the mode the picked source supports", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
+    await settle();
     vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
       await new Promise((resolve) => setTimeout(resolve, 80));
       return ok(sourceById(sourceId)) as never;
@@ -346,37 +393,37 @@ describe("Explorer history navigation", () => {
 
     await nav.selectSource(sqlOnlySource.id);
     await vi.waitFor(() => expect(store.activeMode).toBe("native"));
-    await settle(store);
+    await settle();
     expect(query).toHaveBeenCalledTimes(1);
     expect(router.currentRoute.value.query).toMatchObject({ source: String(sqlOnlySource.id), mode: "native" });
   });
 
   it("re-runs when the user chooses the same relative range again", async () => {
-    const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    const { router, query, nav } = await mountExplorer();
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
-    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "15m" }), store);
-    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "15m" }), store);
+    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "15m" }));
+    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "15m" }));
     expect(router.currentRoute.value.query).toMatchObject({ t: "15m", q: evidenceA.q });
   });
   it("runs one query on a fresh load whose source details arrive after the link is read", async () => {
-    const { store, query } = await mountExplorer(evidenceA, () => {
+    const { query } = await mountExplorer(evidenceA, () => {
       vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
         await new Promise((resolve) => setTimeout(resolve, 80));
         return ok(sourceById(sourceId)) as never;
       });
     });
-    await settle(store);
+    await settle();
     expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceA.q });
   });
 
   it("runs one query for a saved query link on another source", async () => {
-    const { router, store, query } = await mountExplorer({ team: "1", source: "3", id: "42" }, () => {
+    const { router, query } = await mountExplorer({ team: "1", source: "3", id: "42" }, () => {
       vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok({ ...savedOnOtherSource, query_content: savedContent('saved="yes"') }) as never);
     });
-    await settle(store);
+    await settle();
     expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.lastCall?.[1]).toBe(otherSource.id);
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'saved="yes"', limit: 50 });
@@ -384,21 +431,21 @@ describe("Explorer history navigation", () => {
   });
 
   it("opens a saved query picked on another source with one run", async () => {
-    const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
+    const { router, query, nav } = await mountExplorer();
+    await settle();
     vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok({ ...savedOnOtherSource, query_content: savedContent('picked="yes"') }) as never);
 
-    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }), store);
+    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }));
     expect(query.mock.lastCall?.[1]).toBe(otherSource.id);
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'picked="yes"' });
     expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), id: "42" });
   });
 
   it("runs one query for a share link on another source", async () => {
-    const { router, store, query } = await mountExplorer({ team: "1", source: "3", share: "tok" }, () => {
+    const { router, query } = await mountExplorer({ team: "1", source: "3", share: "tok" }, () => {
       vi.spyOn(exploreApi, "getQueryShare").mockReturnValue(ok(shareOnOtherSource) as never);
     });
-    await settle(store);
+    await settle();
     expect(query).toHaveBeenCalledTimes(1);
     expect(query.mock.lastCall?.[1]).toBe(otherSource.id);
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'shared="yes"', limit: 50 });
@@ -406,10 +453,10 @@ describe("Explorer history navigation", () => {
   });
 
   it("shows the server's error for a share link it cannot open, and runs nothing", async () => {
-    const { store, query, nav } = await mountExplorer({ share: "gone" }, () => {
+    const { query, nav } = await mountExplorer({ share: "gone" }, () => {
       vi.spyOn(exploreApi, "getQueryShare").mockRejectedValue({ status: "error", message: "Share link expired", error_type: "NotFoundError" });
     });
-    await settle(store);
+    await settle();
     expect(nav.status.value).toBe("error");
     expect(nav.error.value).toBe("Share link expired");
     expect(query).not.toHaveBeenCalled();
@@ -417,14 +464,14 @@ describe("Explorer history navigation", () => {
 
   it("opens the first connected source of a picked team", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
+    await settle();
     vi.mocked(sourcesApi.listTeamSources).mockImplementation(
       (teamId: number) => ok(teamId === otherTeam.id ? [offlineSource, otherTeamSource] : sourcesOfTeam(teamId)) as never,
     );
 
     const before = query.mock.calls.length;
     await nav.selectTeam(otherTeam.id);
-    await settle(store);
+    await settle();
     expect(store.sourceId).toBe(otherTeamSource.id);
     expect(query.mock.calls.length - before).toBe(1);
     expect(router.currentRoute.value.query).toMatchObject({ team: String(otherTeam.id), source: String(otherTeamSource.id) });
@@ -432,15 +479,15 @@ describe("Explorer history navigation", () => {
 
   it("writes the restored draft of a bare team and source link to the URL", async () => {
     const { router, store } = await mountExplorer();
-    await settle(store);
+    await settle();
     expect(store.logchefqlCode).toBe('draft="yes"');
     expect(router.currentRoute.value.query).toMatchObject({ team: "1", source: "3", mode: "logchefql", q: 'draft="yes"', t: "7d", limit: "100" });
   });
 
   it("records the default SQL a SQL-only source runs, and reopening that URL runs it", async () => {
     const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
-    const { router, store } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) }, () => localStorage.clear());
-    await settle(store);
+    const { router } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) }, () => localStorage.clear());
+    await settle();
     expect(native).toHaveBeenCalledTimes(1);
     const sent = native.mock.lastCall?.[1].query_text;
     expect(sent).toContain("FROM logs.checkout");
@@ -450,13 +497,13 @@ describe("Explorer history navigation", () => {
     unmount?.();
     native.mockClear();
     const reopened = await mountExplorer(recorded);
-    await settle(reopened.store);
+    await settle();
     expect(native).toHaveBeenCalledTimes(1);
     expect(native.mock.lastCall?.[1].query_text).toBe(sent);
 
     reopened.store.setNativeQuery("");
     await reopened.nav.run();
-    await settle(reopened.store);
+    await settle();
     expect(native).toHaveBeenCalledTimes(2);
     expect(reopened.router.currentRoute.value.query.sql).toBe(native.mock.lastCall?.[1].query_text);
     expect(reopened.store.nativeQuery).toBe(native.mock.lastCall?.[1].query_text);
@@ -464,7 +511,7 @@ describe("Explorer history navigation", () => {
 
   it("runs nothing for a Run that a link supersedes while its query is validated", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
+    await settle();
     const validation = deferred();
     vi.mocked(logchefqlApi.validate).mockImplementation(async () => {
       await validation.done;
@@ -479,13 +526,13 @@ describe("Explorer history navigation", () => {
       await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceA.q }));
       validation.release();
       await running;
-    }, store);
+    });
     expectOpen(router, store, query, evidenceA);
   });
 
   it("releases validation immediately on Stop and never runs its late result", async () => {
-    const { store, query, nav, editor } = await mountExplorer();
-    await settle(store);
+    const { store, query, nav, isRunning } = await mountExplorer();
+    await settle();
     const validation = deferred();
     vi.mocked(logchefqlApi.validate).mockImplementation(async () => {
       await validation.done;
@@ -493,18 +540,18 @@ describe("Explorer history navigation", () => {
     });
     store.setLogchefqlCode('stopped="yes"');
     const calls = query.mock.calls.length;
-    const running = nav.run();
-    await vi.waitFor(() => expect(editor.isExecutingQuery.value).toBe(true));
-    await nav.cancel();
-    expect(editor.isExecutingQuery.value).toBe(false);
+    nav.run();
+    await vi.waitFor(() => expect(isRunning()).toBe(true));
+    nav.cancel();
+    expect(isRunning()).toBe(false);
     validation.release();
-    await running;
+    await flush();
     expect(query).toHaveBeenCalledTimes(calls);
   });
 
   it("opens a picked source when Stop cancels the query that ran before the pick", async () => {
     const { router, store, query, nav } = await mountExplorer(evidenceA);
-    await settle(store);
+    await settle();
     const response = deferred();
     query.mockImplementationOnce(async () => {
       await response.done;
@@ -516,54 +563,52 @@ describe("Explorer history navigation", () => {
       return ok(sourceById(sourceId)) as never;
     });
     store.setLogchefqlCode('slow="yes"');
-    const running = nav.run();
+    nav.run();
     await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
 
     await router.push({ path: "/logs/explore", query: { team: "1", source: String(otherSource.id) } });
     expect(nav.status.value).toBe("navigating");
-    await nav.cancel();
+    nav.cancel();
     details.release();
     response.release();
-    await running;
 
     await vi.waitFor(() => expect(nav.status.value).toBe("ready"));
-    await settle(store);
+    await settle();
     expect(store.sourceId).toBe(otherSource.id);
     expect(query.mock.lastCall?.[1]).toBe(otherSource.id);
     expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), mode: "logchefql" });
   });
 
   it("releases superseded validation without letting it clear a newer Run's loading state", async () => {
-    const { router, store, nav, editor } = await mountExplorer();
-    await settle(store);
+    const { router, store, nav, isRunning, banner } = await mountExplorer();
+    await settle();
     const old = deferred();
     const newer = deferred();
     vi.mocked(logchefqlApi.validate)
       .mockImplementationOnce(async () => { await old.done; return ok({ valid: false, error: { message: "Old error", code: "PARSE_ERROR" } }); })
       .mockImplementationOnce(async () => { await newer.done; return ok({ valid: true }); });
     store.setLogchefqlCode('old="yes"');
-    const oldRun = nav.run();
-    await vi.waitFor(() => expect(editor.isExecutingQuery.value).toBe(true));
+    nav.run();
+    await vi.waitFor(() => expect(isRunning()).toBe(true));
     await router.push({ path: "/logs/explore", query: { team: "1", source: "3", mode: "native", sql: "" } });
     await vi.waitFor(() => expect(store.activeMode).toBe("native"));
-    expect(editor.isExecutingQuery.value).toBe(false);
+    expect(isRunning()).toBe(false);
     store.setActiveMode("logchefql");
     store.setLogchefqlCode('newer="yes"');
-    const newRun = nav.run();
+    nav.run();
     await vi.waitFor(() => expect(logchefqlApi.validate).toHaveBeenCalledTimes(2));
     old.release();
-    await oldRun;
-    expect(editor.isExecutingQuery.value).toBe(true);
-    expect(store.error).toBeNull();
+    await flush();
+    expect(isRunning()).toBe(true);
+    expect(banner()).toBeNull();
     newer.release();
-    await newRun;
-    await settle(store);
+    await settle();
   });
 
   it("pushes one history entry with the query a Run ran, not the edits typed while it ran", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     const response = deferred();
     query.mockImplementationOnce(async () => {
       await response.done;
@@ -578,35 +623,35 @@ describe("Explorer history navigation", () => {
       store.setLogchefqlCode('typed="later"');
       response.release();
       await running;
-    }, store);
+    });
     expect(router.currentRoute.value.query.q).toBe('ran="yes"');
     expect(store.logchefqlCode).toBe('typed="later"');
 
     await expectOneRun(query, async () => {
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.q).toBe(evidenceA.q));
-    }, store);
+    });
   });
 
   it("runs nothing and records nothing for a Run whose LogchefQL is invalid", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     vi.mocked(logchefqlApi.validate).mockReturnValue(
       ok({ valid: false, error: { code: "PARSE_ERROR", message: "Expected a field value" } }) as never,
     );
     store.setLogchefqlCode("level=");
 
-    await expectNoRun(query, () => nav.run(), store);
+    await expectNoRun(query, async () => nav.run());
     expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
   });
 
   it("runs once and replaces the URL when the limit changes", async () => {
-    const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    const { router, query, nav } = await mountExplorer();
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
-    await expectOneRun(query, async () => nav.setLimit(500), store);
+    await expectOneRun(query, async () => nav.setLimit(500));
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceA.q, limit: 500 });
     expect(router.currentRoute.value.query).toMatchObject({ q: evidenceA.q, limit: "500" });
 
@@ -620,21 +665,24 @@ describe("Explorer history navigation", () => {
     ["limit", (nav: ReturnType<typeof useExplorerNavigator>) => nav.setLimit(500)],
   ])("replays the last-run text on a %s change and preserves an invalid draft", async (_change, change) => {
     const { router, store, query, nav } = await mountExplorer(evidenceA);
-    await settle(store);
+    await settle();
     store.setLogchefqlCode('level="error" and');
-    await expectOneRun(query, async () => change(nav), store);
+    await expectOneRun(query, async () => change(nav));
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceA.q });
     expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
     expect(store.logchefqlCode).toBe('level="error" and');
-    expect(store.isQueryStateDirty).toBe(true);
     expect(JSON.parse(localStorage.getItem('logchef.explore.draft.1.3') ?? '{}').logchefqlCode).toBe('level="error" and');
     expect(logchefqlApi.validate).not.toHaveBeenCalled();
   });
 
+  // Explorer opens evidence A, whose run shows one row.
+  const openWithRows = () => mountExplorer(evidenceA, () => {
+    vi.mocked(logchefqlApi.query).mockReturnValueOnce(ok({ ...noLogs, logs: [{ msg: "A" }] }) as never);
+  });
+
   it.each(["stopped", "failed"])("keeps the last successful query after a %s Run", async (outcome) => {
-    const { router, store, query, nav } = await mountExplorer(evidenceA);
-    await settle(store);
-    const successful = store.lastExecutedState;
+    const { router, store, query, nav, rows } = await openWithRows();
+    await settle();
     const response = deferred();
     query.mockImplementationOnce(async (_team, _source, _request, options) => {
       await response.done;
@@ -642,77 +690,72 @@ describe("Explorer history navigation", () => {
       throw new Error("Query failed");
     });
     store.setLogchefqlCode('service="cart"');
-    const running = nav.run();
+    nav.run();
     await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'service="cart"' }));
-    if (outcome === "stopped") await nav.cancel();
+    if (outcome === "stopped") nav.cancel();
     response.release();
-    await running;
-    await settle(store);
+    await settle();
 
-    expect(store.lastExecutedState).toEqual(successful);
-    expect(store.isQueryStateDirty).toBe(true);
+    expect(rows()).toEqual([{ msg: "A" }]);
     expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
-    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "1h" }), store);
+    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "1h" }));
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceA.q });
     expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
     expect(store.logchefqlCode).toBe('service="cart"');
-    expect(store.isQueryStateDirty).toBe(true);
   });
 
   it.each([
     ["window", (nav: ReturnType<typeof useExplorerNavigator>) => nav.setWindow({ kind: "relative", spec: "1h" })],
     ["limit", (nav: ReturnType<typeof useExplorerNavigator>) => nav.setLimit(500)],
   ])("replays the in-flight query on a %s change without marking it successful early", async (_change, change) => {
-    const { router, store, query, nav } = await mountExplorer(evidenceA);
-    await settle(store);
-    const successful = store.lastExecutedState;
+    const { router, store, query, nav, rows } = await openWithRows();
+    await settle();
     const response = deferred();
     query.mockImplementationOnce(async () => {
       await response.done;
       return ok(noLogs);
     });
     store.setLogchefqlCode('service="cart"');
-    const running = nav.run();
+    nav.run();
     await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'service="cart"' }));
-    const pending = store.lastExecutedState;
+    expect(rows()).toEqual([{ msg: "A" }]);
+    expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
     store.setLogchefqlCode('service="cart" and');
-    await expectOneRun(query, async () => change(nav), store);
+    await expectOneRun(query, async () => change(nav));
     response.release();
-    await running;
+    await flush();
 
-    expect(pending).toEqual(successful);
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'service="cart"' });
     expect(router.currentRoute.value.query.q).toBe('service="cart"');
     expect(store.logchefqlCode).toBe('service="cart" and');
-    expect(store.isQueryStateDirty).toBe(true);
   });
 
   it("replays the opened query when its first execution fails and the editor has unrun text", async () => {
-    const { store, query, nav } = await mountExplorer(evidenceA, () => {
+    const { store, query, nav, banner } = await mountExplorer(evidenceA, () => {
       vi.mocked(logchefqlApi.query).mockRejectedValueOnce(new Error("Query failed"));
     });
-    await settle(store);
-    expect(store.lastExecutedState).toBeUndefined();
+    await settle();
+    expect(banner()).toContain("Query failed");
     store.setLogchefqlCode('level="error" and');
-    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "1h" }), store);
+    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "1h" }));
     expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceA.q });
     expect(store.logchefqlCode).toBe('level="error" and');
   });
 
   it("replays the last-run native query even after an unrun mode change", async () => {
     const { router, store, query, nav } = await mountExplorer(evidenceA);
-    await settle(store);
+    await settle();
     const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs) as never);
     store.setActiveMode("native");
     store.setNativeQuery("SELECT 1");
     await nav.run();
-    await settle(store);
+    await settle();
     store.setNativeQuery("SELECT broken");
     store.setActiveMode("logchefql");
     store.setLogchefqlCode('invalid="draft" and');
     const before = query.mock.calls.length;
     nav.setWindow({ kind: "relative", spec: "1h" });
-    await settle(store);
+    await settle();
     expect(native).toHaveBeenCalledTimes(2);
     expect(native.mock.lastCall?.[1]).toMatchObject({ query_text: "SELECT 1" });
     expect(query).toHaveBeenCalledTimes(before);
@@ -725,10 +768,10 @@ describe("Explorer history navigation", () => {
 
   it("runs New query once and replaces the URL with its defaults", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
 
-    await expectOneRun(query, async () => nav.newQuery(), store);
+    await expectOneRun(query, async () => nav.newQuery());
     expect(store.logchefqlCode).toBe("");
     expect(router.currentRoute.value.query).toMatchObject({ q: "", t: "15m", limit: "100" });
 
@@ -737,14 +780,14 @@ describe("Explorer history navigation", () => {
   });
 
   it("opens the URL again on Retry after it failed to open", async () => {
-    const { router, store, query, nav } = await mountExplorer({ share: "tok" }, () => {
+    const { router, query, nav } = await mountExplorer({ share: "tok" }, () => {
       vi.spyOn(exploreApi, "getQueryShare")
         .mockRejectedValueOnce({ status: "error", message: "Share service is down", error_type: "ServerError" })
         .mockReturnValue(ok(shareOnOtherSource) as never);
     });
     expect(nav.status.value).toBe("error");
 
-    await expectOneRun(query, () => nav.retry(), store);
+    await expectOneRun(query, () => nav.retry());
     expect(nav.status.value).toBe("ready");
     expect(nav.error.value).toBeNull();
     expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), share: "tok" });
@@ -752,7 +795,7 @@ describe("Explorer history navigation", () => {
 
   it("applies a window chosen while a team pick loads to that team", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
+    await settle();
     const teamLoaded = deferred();
     vi.mocked(sourcesApi.listTeamSources).mockImplementation(async (teamId: number) => {
       if (teamId === otherTeam.id) await teamLoaded.done;
@@ -767,7 +810,7 @@ describe("Explorer history navigation", () => {
       teamLoaded.release();
       await picking;
       await vi.waitFor(() => expect(store.sourceId).toBe(otherTeamSource.id));
-    }, store);
+    });
     expect(nav.status.value).toBe("ready");
     expect(router.currentRoute.value.query).toMatchObject({ team: String(otherTeam.id), source: String(otherTeamSource.id), t: "1h" });
   });
@@ -777,11 +820,11 @@ describe("Explorer history navigation", () => {
     ["its content is not JSON", () => vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok({ ...savedOnOtherSource, query_content: "{broken" }) as never)],
   ])("keeps the shown query when a saved query fails to open because %s", async (_reason, stub) => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     stub();
 
-    await expectNoRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }), store);
+    await expectNoRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }));
     expect(nav.status.value).toBe("ready");
     expect(nav.error.value).toBeNull();
     expect(store.sourceId).toBe(source.id);
@@ -791,14 +834,14 @@ describe("Explorer history navigation", () => {
 
   it("keeps the shown query and the link when the linked team's sources fail to load", async () => {
     const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     vi.mocked(sourcesApi.listTeamSources).mockImplementation((teamId: number) =>
       teamId === otherTeam.id ? Promise.reject(listFailure) : (ok(sourcesOfTeam(teamId)) as never),
     );
     const link = { team: String(otherTeam.id), source: String(otherTeamSource.id), q: 'a="b"', t: "1h" };
 
-    await expectNoRun(query, () => router.push({ path: "/logs/explore", query: link }), store);
+    await expectNoRun(query, () => router.push({ path: "/logs/explore", query: link }));
     expect(router.currentRoute.value.query).toEqual(link);
     expect(nav.status.value).toBe("ready");
     expect(store.sourceId).toBe(source.id);
@@ -816,51 +859,51 @@ describe("Explorer history navigation", () => {
   });
 
   it("clears a failed query's error when the next link opens", async () => {
-    const { router, store, query } = await mountExplorer();
-    await settle(store);
+    const { router, query, banner } = await mountExplorer();
+    await settle();
     query.mockRejectedValueOnce(new Error("Connection reset"));
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
-    expect(store.error?.message).toContain("Connection reset");
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
+    expect(banner()).toContain("Connection reset");
 
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
-    expect(store.error).toBeNull();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
+    expect(banner()).toBeNull();
   });
 
   it("drops an older query's late results when a link on the same source runs nothing", async () => {
-    const { router, store, query } = await mountExplorer();
-    await settle(store);
+    const { router, store, query, isRunning, rows } = await mountExplorer();
+    await settle();
     const response = deferred();
     query.mockImplementationOnce(async () => {
       await response.done;
       return ok({ ...noLogs, logs: [{ msg: "evidence A" }] }) as never;
     });
     await router.push({ path: "/logs/explore", query: evidenceA });
-    await vi.waitFor(() => expect(store.isExecutingQuery).toBe(true));
+    await vi.waitFor(() => expect(isRunning()).toBe(true));
 
     await router.push({ path: "/logs/explore", query: { team: "1", source: "3", mode: "native", sql: "" } });
     await vi.waitFor(() => expect(store.activeMode).toBe("native"));
     response.release();
-    await settle(store);
-    expect(store.logs).toEqual([]);
+    await settle();
+    expect(rows()).toEqual([]);
   });
 
   it("opens a link to the source another page picked while Explorer stayed open", async () => {
     const { router, store, query } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     useContextStore().selectSource(otherSource.id);
     const link = { ...store.urlQueryParameters };
     expect(link.source).toBe(String(otherSource.id));
 
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: link }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: link }));
     expect(query.mock.lastCall?.[1]).toBe(otherSource.id);
   });
 
   it("keeps an edited saved query selected so Update remains available", async () => {
     const { store, query, nav, saved } = await mountExplorer();
-    await settle(store);
+    await settle();
     vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok({ ...savedOnOtherSource, query_content: savedContent('picked="yes"') }) as never);
-    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }), store);
+    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }));
     expect(saved.isEditingExistingQuery.value).toBe(true);
 
     store.setLogchefqlCode('picked="edited"');
@@ -871,16 +914,16 @@ describe("Explorer history navigation", () => {
 
   it("records an edited saved Run inline while keeping Update available until an inline URL opens", async () => {
     const { router, store, query, nav, saved } = await mountExplorer();
-    await settle(store);
+    await settle();
     vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok({ ...savedOnOtherSource, query_content: savedContent('picked="yes"') }) as never);
-    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }), store);
+    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }));
     store.setLogchefqlCode('picked="edited"');
-    await expectOneRun(query, () => nav.run(), store);
+    await expectOneRun(query, async () => nav.run());
     expect(router.currentRoute.value.query).toMatchObject({ mode: "logchefql", q: 'picked="edited"', limit: "50", t: "1h" });
     expect(router.currentRoute.value.query.id).toBeUndefined();
     expect(store.selectedQueryId).toBe("42");
     expect(saved.isEditingExistingQuery.value).toBe(true);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
     router.back();
     await vi.waitFor(() => expect(store.logchefqlCode).toBe('picked="edited"'));
     expect(store.selectedQueryId).toBeNull();
@@ -888,12 +931,12 @@ describe("Explorer history navigation", () => {
 
   it("updates the selected query with the editor text and clears its modified state", async () => {
     const { store, query, nav, saved } = await mountExplorer();
-    await settle(store);
+    await settle();
     const original = { ...savedOnOtherSource, query_content: savedContent('picked="yes"') };
     vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok(original) as never);
     vi.spyOn(savedQueriesApi, "list").mockReturnValue(ok([]) as never);
     const update = vi.spyOn(savedQueriesApi, "update").mockImplementation((_id, data) => ok({ ...original, ...data }) as never);
-    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }), store);
+    await expectOneRun(query, () => nav.openSavedQuery({ id: 42, source_id: otherSource.id }));
     store.setLogchefqlCode('picked="updated"');
     const content = savedContent('picked="updated"');
     const result = await nav.recordAfter(() => saved.handleSaveQuery({ ...saveForm, source_id: otherSource.id, query_content: content }), store.markSavedQuery);
@@ -906,7 +949,7 @@ describe("Explorer history navigation", () => {
   it("detects edits after Save as new and records their Run inline", async () => {
     const explorer = await mountExplorer();
     const { router, store, query, nav } = explorer;
-    await settle(store);
+    await settle();
     stubShareAndSave();
     store.setLogchefqlCode('saved="yes"');
     await save(explorer);
@@ -915,7 +958,7 @@ describe("Explorer history navigation", () => {
     store.setLogchefqlCode('saved="edited"');
     expect(store.hasDivergedFromSavedQuery).toBe(true);
     expect(store.selectedQueryId).toBe("77");
-    await expectOneRun(query, () => nav.run(), store);
+    await expectOneRun(query, async () => nav.run());
     expect(router.currentRoute.value.query.q).toBe('saved="edited"');
     expect(router.currentRoute.value.query.id).toBeUndefined();
     expect(store.selectedQueryId).toBe("77");
@@ -923,7 +966,7 @@ describe("Explorer history navigation", () => {
 
   it("keeps a removed team source out of a navigation that was resolving it", async () => {
     const { router, store, query } = await mountExplorer();
-    await settle(store);
+    await settle();
     const sources = useSourcesStore();
     router.addRoute({ path: "/manage", component: defineComponent({ render: () => null }) });
     await router.push({ path: "/manage", query: { team: "1", source: "3" } });
@@ -947,7 +990,7 @@ describe("Explorer history navigation", () => {
     const queriesBefore = query.mock.calls.length;
     oldDetails.release();
     await vi.waitFor(() => expect(query.mock.calls.length).toBeGreaterThan(queriesBefore));
-    await settle(store);
+    await settle();
     expect({
       path: router.currentRoute.value.path,
       selected: store.sourceId,
@@ -960,7 +1003,7 @@ describe("Explorer history navigation", () => {
     const { router, store, query, nav } = await mountExplorer(undefined, () => {
       vi.mocked(sourcesApi.listTeamSources).mockImplementation(teamId => ok(teamId === team.id ? [source, otherSource, offlineSource] : sourcesOfTeam(teamId)));
     });
-    await settle(store);
+    await settle();
     const details = vi.mocked(sourcesApi.getTeamSource);
     details.mockClear();
     const before = query.mock.calls.length;
@@ -970,13 +1013,13 @@ describe("Explorer history navigation", () => {
     expect(details).toHaveBeenCalledTimes(1);
     expect(query).toHaveBeenCalledTimes(before);
     details.mockImplementation((_team, id) => ok({ ...sourceById(id), is_connected: true }));
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: { team: "1", source: String(offlineSource.id), q: 'retry="yes"' } }), store);
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: { team: "1", source: String(offlineSource.id), q: 'retry="yes"' } }));
     expect(details).toHaveBeenCalledTimes(2);
   });
 
   it("loads only the requested team's metadata with empty localStorage", async () => {
-    const { store, query } = await mountExplorer({ team: String(otherTeam.id), source: String(otherTeamSource.id), q: 'first="yes"' }, () => localStorage.clear());
-    await settle(store);
+    const { query } = await mountExplorer({ team: String(otherTeam.id), source: String(otherTeamSource.id), q: 'first="yes"' }, () => localStorage.clear());
+    await settle();
     expect({ lists: vi.mocked(sourcesApi.listTeamSources).mock.calls.length, details: vi.mocked(sourcesApi.getTeamSource).mock.calls.length }).toEqual({ lists: 1, details: 1 });
     expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id);
     expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
@@ -984,13 +1027,13 @@ describe("Explorer history navigation", () => {
   });
 
   it("makes no metadata request on a same-source Back or Forward, one on a source pick and two on a team pick", async () => {
-    const { router, store, query, nav } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+    const { router, query, nav } = await mountExplorer();
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
     const metadataRequests = async (navigate: () => Promise<unknown>) => {
       const [lists, details] = [vi.mocked(sourcesApi.listTeamSources).mock.calls.length, vi.mocked(sourcesApi.getTeamSource).mock.calls.length];
-      await expectOneRun(query, navigate, store);
+      await expectOneRun(query, navigate);
       return [vi.mocked(sourcesApi.listTeamSources).mock.calls.length - lists, vi.mocked(sourcesApi.getTeamSource).mock.calls.length - details];
     };
 
@@ -1008,7 +1051,7 @@ describe("Explorer history navigation", () => {
 
   it("fetches a team for another page after a navigation to that team was superseded", async () => {
     const { router, store } = await mountExplorer();
-    await settle(store);
+    await settle();
     const teamLoaded = deferred();
     vi.mocked(sourcesApi.listTeamSources).mockImplementation(async (teamId: number) => {
       if (teamId === otherTeam.id) await teamLoaded.done;
@@ -1019,7 +1062,7 @@ describe("Explorer history navigation", () => {
     await router.push({ path: "/logs/explore", query: { team: "1", source: String(otherSource.id) } });
     teamLoaded.release();
     await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id));
-    await settle(store);
+    await settle();
     expect(store.sourceId).toBe(otherSource.id);
 
     vi.mocked(sourcesApi.getTeamSource).mockImplementation(
@@ -1035,7 +1078,7 @@ describe("Explorer history navigation", () => {
 
   // What Explorer's Share and Save buttons do once their API call returns.
   type Mounted = Awaited<ReturnType<typeof mountExplorer>>;
-  const share = ({ store, nav }: Mounted) => nav.recordAfter(() => store.createQueryShare(), (created) => store.setActiveShareToken(created.token));
+  const share = ({ store, nav }: Mounted) => nav.recordAfter(() => store.createQueryShare(), store.markShare);
   const save = ({ store, nav, saved }: Mounted) => nav.recordAfter(() => saved.handleSaveQuery({ ...saveForm, query_content: JSON.stringify({ version: 1, sourceId: store.sourceId, limit: store.limit, content: store.logchefqlCode }) }), store.markSavedQuery);
   const stubShareAndSave = () => [
     vi.spyOn(exploreApi, "createQueryShare").mockReturnValue(ok(shareForm) as never),
@@ -1046,7 +1089,7 @@ describe("Explorer history navigation", () => {
   it.each([["Share", share], ["Save", save]])("ignores a %s while a navigation loads, and the navigation still opens", async (_action, act) => {
     const explorer = await mountExplorer();
     const { router, store, nav } = explorer;
-    await settle(store);
+    await settle();
     const [createShare, createSaved] = stubShareAndSave();
     const detailsLoaded = deferred();
     vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId: number, sourceId: number) => {
@@ -1060,7 +1103,7 @@ describe("Explorer history navigation", () => {
     detailsLoaded.release();
 
     await vi.waitFor(() => expect(store.sourceId).toBe(otherSource.id));
-    await settle(store);
+    await settle();
     expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), mode: "logchefql" });
     expect(createShare).not.toHaveBeenCalled();
     expect(createSaved).not.toHaveBeenCalled();
@@ -1074,7 +1117,7 @@ describe("Explorer history navigation", () => {
     async (_action, act, method) => {
       const explorer = await mountExplorer();
       const { router, store, query } = explorer;
-      await settle(store);
+      await settle();
       stubShareAndSave();
       const response = deferred();
       const api = method === "createQueryShare" ? vi.mocked(exploreApi.createQueryShare) : vi.mocked(savedQueriesApi.create);
@@ -1085,10 +1128,10 @@ describe("Explorer history navigation", () => {
 
       const acting = act(explorer);
       await vi.waitFor(() => expect(api).toHaveBeenCalled());
-      await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }), store);
+      await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceB }));
       response.release();
       await acting;
-      await settle(store);
+      await settle();
 
       expect(router.currentRoute.value.query).toEqual({ ...evidenceB, limit: "100" });
       expect(store.activeShareToken).toBeNull();
@@ -1099,7 +1142,7 @@ describe("Explorer history navigation", () => {
   it("records a Share that returns after a Run it overlapped", async () => {
     const explorer = await mountExplorer();
     const { router, store, nav, query } = explorer;
-    await settle(store);
+    await settle();
     stubShareAndSave();
     const ran = deferred();
     query.mockImplementation(async () => {
@@ -1120,17 +1163,17 @@ describe("Explorer history navigation", () => {
     ran.release();
     await running;
     await vi.waitFor(() => expect(router.currentRoute.value.query.q).toBe('ran="yes"'));
-    await settle(store);
+    await settle();
     shared.release();
 
-    expect(await sharing).toEqual(shareForm);
+    expect(await sharing).toMatchObject(shareForm);
     expect(router.currentRoute.value.query).toMatchObject({ share: shareForm.token });
   });
 
   it("records a Share that returns after Stop cancelled the running query", async () => {
     const explorer = await mountExplorer();
     const { router, store, nav, query } = explorer;
-    await settle(store);
+    await settle();
     stubShareAndSave();
     const ran = deferred();
     query.mockImplementationOnce(async () => {
@@ -1151,16 +1194,16 @@ describe("Explorer history navigation", () => {
     await nav.cancel();
     shared.release();
 
-    expect(await sharing).toEqual(shareForm);
+    expect(await sharing).toMatchObject(shareForm);
     expect(router.currentRoute.value.query).toMatchObject({ share: shareForm.token });
     ran.release();
     await running;
   });
 
   it("holds the editor while a Run validates, and runs only the text it validated", async () => {
-    const { router, store, query, nav, editor } = await mountExplorer();
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    const { router, store, query, nav, isRunning } = await mountExplorer();
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     const validation = deferred();
     vi.mocked(logchefqlApi.validate).mockImplementation(async () => {
       await validation.done;
@@ -1168,16 +1211,17 @@ describe("Explorer history navigation", () => {
     });
     store.setLogchefqlCode('validated="yes"');
 
-    await expectNoRun(query, async () => {
-      const running = nav.run();
+    await expectOneRun(query, async () => {
+      nav.run();
       await vi.waitFor(() => expect(logchefqlApi.validate).toHaveBeenCalled());
-      expect(editor.isExecutingQuery.value).toBe(true);
+      expect(isRunning()).toBe(true);
       // A field click edits the query without the editor.
       store.setLogchefqlCode('validated="yes" and');
       validation.release();
-      await running;
-    }, store);
-    expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
+    });
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'validated="yes"' });
+    expect(router.currentRoute.value.query.q).toBe('validated="yes"');
+    expect(store.logchefqlCode).toBe('validated="yes" and');
   });
 
   it.each([
@@ -1187,16 +1231,16 @@ describe("Explorer history navigation", () => {
   ])("clears an invalid Run's error after %s", async (_next, next) => {
     const explorer = await mountExplorer();
     const { router, store, query, nav, banner } = explorer;
-    await settle(store);
-    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }), store);
+    await settle();
+    await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
     vi.mocked(logchefqlApi.validate).mockReturnValue(
       ok({ valid: false, error: { code: "PARSE_ERROR", message: "Missing boolean operator" } }) as never,
     );
     store.setLogchefqlCode('level="error" service="x"');
-    await expectNoRun(query, () => nav.run(), store);
+    await expectNoRun(query, async () => nav.run());
     expect(banner()).toBe("Missing boolean operator");
 
-    await expectOneRun(query, async () => next(explorer), store);
+    await expectOneRun(query, async () => next(explorer));
     expect(banner()).toBeNull();
   });
 
@@ -1206,7 +1250,7 @@ describe("Explorer history navigation", () => {
     ["limit", (nav: ReturnType<typeof useExplorerNavigator>) => nav.setLimit(500)],
   ])("filters sidebar values with executed text after a %s change", async (_change, change) => {
     const { store, query, nav, pinia } = await mountExplorer(evidenceA);
-    await settle(store);
+    await settle();
     const fieldValues = vi.spyOn(sourcesApi, "getFieldValues").mockImplementation(
       (_teamId, _sourceId, fieldName, fieldType) => ok({ field_name: fieldName, field_type: fieldType, is_low_cardinality: false, values: [], total_distinct: 0 }),
     );
@@ -1218,7 +1262,7 @@ describe("Explorer history navigation", () => {
       await vi.waitFor(() => expect(fieldValues).toHaveBeenCalledTimes(1));
       fieldValues.mockClear();
       store.setLogchefqlCode('level="error" and');
-      await expectOneRun(query, async () => change(nav), store);
+      await expectOneRun(query, async () => change(nav));
       await vi.waitFor(() => expect(fieldValues).toHaveBeenCalledTimes(1));
       expect(fieldValues.mock.lastCall?.slice(8, 10)).toEqual(["logchefql", evidenceA.q]);
       expect(store.logchefqlCode).toBe('level="error" and');
@@ -1226,7 +1270,7 @@ describe("Explorer history navigation", () => {
       fieldValues.mockClear();
       store.setActiveMode("native");
       store.setNativeQuery("SELECT broken");
-      await expectOneRun(query, async () => change(nav), store);
+      await expectOneRun(query, async () => change(nav));
       await vi.waitFor(() => expect(fieldValues).toHaveBeenCalledTimes(1));
       expect(fieldValues.mock.lastCall?.slice(8, 10)).toEqual(["logchefql", evidenceA.q]);
     } finally {
@@ -1245,19 +1289,842 @@ describe("Explorer history navigation", () => {
     }).use(pinia).use(i18n);
     sidebar.mount(document.createElement("div"));
     try {
-      await settle(store);
+      await settle();
       const loads = async (navigate: () => Promise<unknown>) => {
         const before = fieldValues.mock.calls.length;
-        await expectOneRun(query, navigate, store);
+        await expectOneRun(query, navigate);
         await new Promise((resolve) => setTimeout(resolve, 10));
         return fieldValues.mock.calls.length - before;
       };
 
       expect(await loads(() => router.push({ path: "/logs/explore", query: evidenceA }))).toBe(1);
       store.setLogchefqlCode('level="warn"');
-      expect(await loads(() => nav.run())).toBe(1);
+      expect(await loads(async () => nav.run())).toBe(1);
     } finally {
       sidebar.unmount();
     }
+  });
+
+  // The literal bounds of the SQL sent equal the window the request names, which spans `span` and ends at `end`.
+  // vi.waitFor advances the fake clock, so a window resolved while Explorer mounts has no exact end.
+  function expectSqlWindow(request: QueryParams | undefined, span: number, end?: number) {
+    const zone = parseZoneId(request?.timezone ?? "");
+    if (!request || !zone) throw new Error("no native request was sent");
+    const window = { start: epochMs(Date.parse(request.start_time ?? "")), end: epochMs(Date.parse(request.end_time ?? "")), zone };
+    expect(window.end - window.start).toBe(span);
+    if (end !== undefined) expect(window.end).toBe(end);
+    expect(request.query_text).toContain(sqlTimeCondition("timestamp", window));
+  }
+
+  const idleStart = Date.UTC(2026, 9, 21, 9);
+  const idle = 30 * 60_000;
+
+  it("generates default SQL from the window its Run sends after an idle tab", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const { nav } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id), mode: "native", sql: "", t: "15m" });
+      await settle();
+      expect(native).not.toHaveBeenCalled();
+
+      vi.setSystemTime(idleStart + idle);
+      await nav.run();
+      await settle();
+      expect(native).toHaveBeenCalledTimes(1);
+      expectSqlWindow(native.mock.lastCall?.[1], 15 * 60_000, idleStart + idle);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    ["a relative window", { kind: "relative", spec: "1h" } as TimeWindow, idleStart + idle, 3_600_000],
+    ["a zoom", { kind: "absolute", start: epochMs(idleStart - 600_000), end: epochMs(idleStart - 300_000) } as TimeWindow, idleStart - 300_000, 300_000],
+  ])("regenerates the default SQL that ran over %s chosen after an idle tab", async (_change, window, end, span) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const { router, nav } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) }, () => localStorage.clear());
+      await settle();
+      expectSqlWindow(native.mock.lastCall?.[1], 15 * 60_000);
+
+      vi.setSystemTime(idleStart + idle);
+      nav.setWindow(window);
+      await settle();
+      expect(native).toHaveBeenCalledTimes(2);
+      expectSqlWindow(native.mock.lastCall?.[1], span, end);
+      expect(router.currentRoute.value.query.sql).toBe(native.mock.lastCall?.[1].query_text);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["failed", "stopped"])("replays a %s same-source link's own query on a window change", async (outcome) => {
+    const { router, store, query, nav } = await mountExplorer(evidenceA);
+    await settle();
+    query.mockImplementationOnce((_team, _source, _request, options) =>
+      outcome === "failed" ? Promise.reject(new Error("Query failed")) : untilAborted(options?.signal));
+    await router.push({ path: "/logs/explore", query: evidenceB });
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceB.q }));
+    if (outcome === "stopped") await nav.cancel();
+    await settle();
+
+    await expectOneRun(query, async () => nav.setWindow({ kind: "relative", spec: "1h" }));
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: evidenceB.q });
+    expect(router.currentRoute.value.query).toMatchObject({ q: evidenceB.q, t: "1h" });
+    expect(store.logchefqlCode).toBe(evidenceB.q);
+  });
+
+  const windowedLink = { team: "1", source: String(windowedSource.id), mode: "logchefql", q: 'level="info"', t: "15m" };
+  const shownPage = [{ type: "plan", windows: [searchWindows[0]], complete: false }, windowRows(searchWindows[0], "info"), { type: "end", complete: true }] as WindowedEvent[];
+  // A search that shows newer rows and offers Load older.
+  const pagedSearch = () => streamWindows((request) => request.cursor === "second"
+    ? [windowRows(searchWindows[1], "older"), { type: "end", complete: true }]
+    : [{ type: "plan", windows: searchWindows, cursor: "first", complete: false }, windowRows(searchWindows[0], "newer", "second"), { type: "end", cursor: "second", complete: false }]);
+  const searchRequests = () => vi.mocked(streamWindowedQuery).mock.calls.map(([, , request]) => request).filter((request) => !request.count);
+
+  // The windowed search panel as Explorer wires it.
+  function mountPanel({ pinia, nav }: Mounted) {
+    const host = document.createElement("div");
+    const panel = createApp({ render: () => h(WindowedSearchPanel, { onStop: () => nav.cancel(), onPage: nav.page }) }).use(pinia).use(i18n);
+    panel.mount(host);
+    const find = (label: string) => [...host.querySelectorAll("button")].find((button) => button.textContent?.trim() === label);
+    return {
+      buttons: () => [...host.querySelectorAll("button")].map((button) => button.textContent?.trim()),
+      text: () => host.textContent ?? "",
+      click: async (label: string) => (await vi.waitFor(() => {
+        const button = find(label);
+        if (!button) throw new Error(`no ${label} button`);
+        return button;
+      })).click(),
+      unmount: () => panel.unmount(),
+    };
+  }
+
+  it("records, filters the sidebar with and replays a windowed Run stopped after it showed rows", async () => {
+    const { router, store, nav, rows, pinia } = await mountExplorer(windowedLink, () => streamWindows(() => shownPage));
+    await settle();
+    const fieldValues = vi.spyOn(sourcesApi, "getFieldValues").mockImplementation(
+      (_teamId, _sourceId, fieldName, fieldType) => ok({ field_name: fieldName, field_type: fieldType, is_low_cardinality: false, values: [], total_distinct: 0 }),
+    );
+    const sidebar = createApp({
+      render: () => h(FieldSideBar, { fields: [{ name: "level", type: "Int64" }], expanded: true, teamId: team.id, sourceId: windowedSource.id, source: windowedSource }),
+    }).use(pinia).use(i18n);
+    sidebar.mount(document.createElement("div"));
+    try {
+      await vi.waitFor(() => expect(fieldValues).toHaveBeenCalled());
+      fieldValues.mockClear();
+      streamWindows(() => [{ type: "plan", windows: searchWindows, cursor: "first", complete: false }, windowRows(searchWindows[0], "error", "second")]);
+      store.setLogchefqlCode('level="error"');
+      const running = nav.run();
+      await vi.waitFor(() => expect(rows().map((row) => row._msg)).toEqual(["error"]));
+      await nav.cancel();
+      await running;
+      await settle();
+
+      expect(router.currentRoute.value.query.q).toBe('level="error"');
+      await vi.waitFor(() => expect(fieldValues).toHaveBeenCalled());
+      expect(fieldValues.mock.lastCall?.slice(8, 10)).toEqual(["logchefql", 'level="error"']);
+
+      streamWindows(() => shownPage);
+      store.setLogchefqlCode('level="draft" and');
+      nav.setWindow({ kind: "relative", spec: "1h" });
+      await settle();
+      expect(vi.mocked(streamWindowedQuery).mock.lastCall?.[2]).toMatchObject({ query_text: 'level="error"' });
+      expect(router.currentRoute.value.query).toMatchObject({ q: 'level="error"', t: "1h" });
+    } finally {
+      sidebar.unmount();
+    }
+  });
+
+  it.each(["stopped", "failed"])("keeps the shown histogram and coverage after a windowed Run %s before rows", async (outcome) => {
+    const counted = { ...windowedSource, connection: { base_url: "http://logs.test", optimizer: { enabled: true, histogram_enabled: true } } };
+    const explorer = await mountExplorer(windowedLink, () => {
+      vi.mocked(sourcesApi.getTeamSource).mockImplementation((_teamId: number, sourceId: number) => ok(sourceId === counted.id ? counted : sourceById(sourceId)) as never);
+      streamWindows((request) => request.query_text === windowedLink.q ? shownPage : [
+        { type: "plan", windows: searchWindows, cursor: "first", complete: false },
+        { type: "window", window: searchWindows[0], status: "running", cursor: "first", complete: false },
+        ...(outcome === "failed" ? [{ type: "end" as const, message: "search failed", complete: false }] : []),
+      ]);
+    });
+    const { store, nav, rows, banner } = explorer;
+    await settle();
+    const histogram = () => useExploreRuns().shown?.search?.histogram ?? [];
+    await vi.waitFor(() => expect(histogram()).toHaveLength(1));
+    const panel = mountPanel(explorer);
+    try {
+      store.setLogchefqlCode('level="error"');
+      nav.run();
+      if (outcome === "stopped") {
+        await vi.waitFor(() => expect(useExploreRuns().current?.search?.coverage).toHaveLength(2));
+        expect(histogram()).toHaveLength(1);
+        expect(panel.text()).toContain("Searched 1 of 1");
+        nav.cancel();
+      }
+      await settle();
+      await flush();
+      expect(rows().map((row) => row._msg)).toEqual(["info"]);
+      expect(histogram()).toHaveLength(1);
+      expect(panel.text()).toContain("Searched 1 of 1");
+      expect(panel.buttons()).toEqual([]);
+      expect(banner()).toBe(outcome === "failed" ? "search failed" : null);
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it("replaces the windowed histogram when the new Run first shows rows", async () => {
+    const counted = { ...windowedSource, connection: { base_url: "http://logs.test", optimizer: { enabled: true, histogram_enabled: true } } };
+    const explorer = await mountExplorer(windowedLink, () => {
+      vi.mocked(sourcesApi.getTeamSource).mockImplementation((_teamId, sourceId) => ok(sourceId === counted.id ? counted : sourceById(sourceId)));
+      streamWindows(() => shownPage);
+    });
+    const { store, nav, rows } = explorer;
+    await settle();
+    const histogram = () => useExploreRuns().shown?.search?.histogram ?? [];
+    await vi.waitFor(() => expect(histogram()).toHaveLength(1));
+    const firstPage = deferred();
+    const ended = deferred();
+    vi.mocked(streamWindowedQuery).mockImplementation(async (_teamId, _sourceId, _request, _signal, onEvent) => {
+      onEvent({ type: "plan", windows: searchWindows, cursor: "first", complete: false });
+      await firstPage.done;
+      onEvent({ ...windowRows(searchWindows[0], "error"), logs: [{ _time: searchWindows[0].start, _msg: "error" }, { _time: searchWindows[0].start, _msg: "error" }] });
+      await ended.done;
+      onEvent({ type: "end", complete: true });
+    });
+    store.setLogchefqlCode('level="error"');
+    nav.run();
+    await flush();
+    expect(histogram()).toHaveLength(1);
+    firstPage.release();
+    await vi.waitFor(() => expect(rows()).toHaveLength(2));
+    expect(histogram()).toEqual([]);
+    ended.release();
+    await settle();
+    expect(histogram().map((bucket) => bucket.log_count)).toEqual([2]);
+  });
+
+  it("keeps Cancel on the query a pick starts after aborting the running one", async () => {
+    const { store, query, nav, isRunning } = await mountExplorer(evidenceA);
+    await settle();
+    query.mockImplementationOnce((_team, _source, _request, options) => untilAborted(options?.signal));
+    query.mockImplementationOnce((_team, _source, _request, options) => untilAborted(options?.signal));
+    store.setLogchefqlCode('slow="yes"');
+    void nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
+
+    await nav.selectSource(otherSource.id);
+    await vi.waitFor(() => expect(query.mock.lastCall?.[1]).toBe(otherSource.id));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(isRunning()).toBe(true);
+
+    const picked = query.mock.lastCall?.[3]?.signal;
+    await nav.cancel();
+    expect(picked?.aborted).toBe(true);
+    await settle();
+    expect(isRunning()).toBe(false);
+  });
+  it("opens a saved query link that a Run's first rows arrive during", async () => {
+    const { router, store, query, nav } = await mountExplorer(evidenceA);
+    await settle();
+    const ran = deferred();
+    query.mockImplementationOnce(async () => { await ran.done; return ok(noLogs) as never; });
+    store.setLogchefqlCode('slow="yes"');
+    nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
+    const resolved = deferred();
+    vi.spyOn(savedQueriesApi, "resolve").mockImplementation(async () => {
+      await resolved.done;
+      return ok({ ...savedOnOtherSource, source_id: source.id, query_content: savedContent('saved="yes"') }) as never;
+    });
+    await router.push({ path: "/logs/explore", query: { team: "1", source: "3", id: "42" } });
+    ran.release();
+    await flush();
+    resolved.release();
+    await vi.waitFor(() => expect(store.logchefqlCode).toBe('saved="yes"'));
+    await settle();
+    expect(router.currentRoute.value.query).toEqual({ team: "1", source: "3", id: "42" });
+  });
+
+  it("opens a source picked while a Run was running", async () => {
+    const { router, store, nav, query } = await mountExplorer(evidenceA);
+    await settle();
+    const ran = deferred();
+    const details = deferred();
+    query.mockImplementationOnce(async () => { await ran.done; return ok(noLogs) as never; });
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId, sourceId) => {
+      if (sourceId === otherSource.id) await details.done;
+      return ok(sourceById(sourceId)) as never;
+    });
+    store.setLogchefqlCode('slow="yes"');
+    nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
+    await nav.selectSource(otherSource.id);
+    ran.release();
+    await flush();
+    details.release();
+    await vi.waitFor(() => expect(store.sourceId).toBe(otherSource.id));
+    await settle();
+    expect(router.currentRoute.value.query.source).toBe(String(otherSource.id));
+  });
+
+  it("stays on the page the user left while a Run was running", async () => {
+    const { router, store, query, nav } = await mountExplorer(evidenceA);
+    await settle();
+    const ran = deferred();
+    query.mockImplementationOnce(async () => { await ran.done; return ok(noLogs) as never; });
+    store.setLogchefqlCode('slow="yes"');
+    nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
+    await router.push({ path: "/dashboards" });
+    ran.release();
+    await flush();
+    await flush();
+    expect(router.currentRoute.value.path).toBe("/dashboards");
+  });
+
+  it.each(["while the user is away", "after the user returns"])("records a Run whose rows arrive %s on another logs page", async (arrival) => {
+    const { router, store, query, nav, rows } = await mountExplorer(evidenceA);
+    await settle();
+    const ran = deferred();
+    query.mockImplementationOnce(async () => { await ran.done; return ok({ ...noLogs, logs: [{ msg: "slow" }] }) as never; });
+    store.setLogchefqlCode('slow="yes"');
+    nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
+    await router.push({ path: "/logs/library" });
+    if (arrival === "while the user is away") {
+      ran.release();
+      await flush();
+    }
+    router.back();
+    await vi.waitFor(() => expect(router.currentRoute.value.path).toBe("/logs/explore"));
+    ran.release();
+    await settle();
+    await flush();
+    expect(rows().map((row) => row.msg)).toEqual(["slow"]);
+    expect(router.currentRoute.value.query.q).toBe('slow="yes"');
+    expect(query).toHaveBeenCalledTimes(2);
+  });
+
+  const windowedRunStarts = () => streamWindows((request) => request.window_index === 0 || request.skip_window === 0 ? []
+    : [{ type: "plan", windows: searchWindows, cursor: "first", complete: false }, { type: "window", window: searchWindows[0], status: "running", cursor: "first", complete: false }]);
+
+  it("keeps the shown rows and URL when the panel's Stop ends a windowed Run before rows", async () => {
+    const explorer = await mountExplorer(windowedLink, () => streamWindows(() => shownPage));
+    const { router, store, nav, rows } = explorer;
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      windowedRunStarts();
+      store.setLogchefqlCode('level="error"');
+      nav.run();
+      await panel.click("Stop");
+      await settle();
+      expect(rows().map((row) => row._msg)).toEqual(["info"]);
+      expect(router.currentRoute.value.query.q).toBe(windowedLink.q);
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it("sends nothing for a Skip that Stop cancels while the search before it ends", async () => {
+    const explorer = await mountExplorer(windowedLink, () => streamWindows(() => shownPage));
+    const { router, store, nav, rows } = explorer;
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      streamWindows((request) => request.skip_window === 0
+        ? [windowRows(searchWindows[1], "after-stop"), { type: "end", complete: true }]
+        : [{ type: "plan", windows: searchWindows, cursor: "first", complete: false }, { type: "window", window: searchWindows[0], status: "running", cursor: "first", complete: false }]);
+      store.setLogchefqlCode('level="error"');
+      nav.run();
+      await panel.click("Skip to next window");
+      nav.cancel();
+      await settle();
+      await flush();
+      expect(searchRequests().filter((request) => request.skip_window !== undefined)).toEqual([]);
+      expect({ rows: rows().map((row) => row._msg), query: router.currentRoute.value.query.q }).toEqual({ rows: ["info"], query: windowedLink.q });
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it("runs a Retry after Stop until it settles, so Stop cancels it", async () => {
+    const explorer = await mountExplorer(windowedLink, () => streamWindows(() => shownPage));
+    const { router, store, nav, rows, isRunning } = explorer;
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      streamWindows((request) => request.window_index === 1 ? [] : [
+        { type: "plan", windows: searchWindows, cursor: "first", complete: false },
+        windowRows(searchWindows[0], "error", "second"),
+        { type: "window", window: searchWindows[1], status: "running", cursor: "second", complete: false },
+      ]);
+      store.setLogchefqlCode('level="error"');
+      nav.run();
+      await vi.waitFor(() => expect(rows().map((row) => row._msg)).toEqual(["error"]));
+      nav.cancel();
+      await settle();
+
+      await panel.click("Retry window");
+      await vi.waitFor(() => expect(vi.mocked(streamWindowedQuery).mock.lastCall?.[2]).toMatchObject({ window_index: 1 }));
+      expect(isRunning()).toBe(true);
+      nav.cancel();
+      expect(vi.mocked(streamWindowedQuery).mock.lastCall?.[3]?.aborted).toBe(true);
+      await settle();
+
+      streamWindows(() => [windowRows(searchWindows[1], "older"), { type: "end", complete: true }]);
+      await panel.click("Retry window");
+      await vi.waitFor(() => expect(rows().map((row) => row._msg)).toEqual(["error", "older"]));
+      await settle();
+      expect(router.currentRoute.value.query.q).toBe('level="error"');
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it("shows nothing of a windowed Run until a Skip finds its rows", async () => {
+    const explorer = await mountExplorer(windowedLink, () => streamWindows(() => shownPage));
+    const { router, store, nav, rows, isRunning } = explorer;
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      windowedRunStarts();
+      store.setLogchefqlCode('level="error"');
+      nav.run();
+      await panel.click("Skip to next window");
+      await vi.waitFor(() => expect(vi.mocked(streamWindowedQuery).mock.lastCall?.[2]).toMatchObject({ skip_window: 0 }));
+      await flush();
+      expect(rows().map((row) => row._msg)).toEqual(["info"]);
+      expect(router.currentRoute.value.query.q).toBe(windowedLink.q);
+      expect(isRunning()).toBe(true);
+      nav.cancel();
+      await settle();
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it.each(["fails", "is stopped"])("pages the shown windowed results after a Run that %s validating", async (outcome) => {
+    const explorer = await mountExplorer(windowedLink, pagedSearch);
+    const { store, nav, rows } = explorer;
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      const validated = deferred();
+      vi.mocked(logchefqlApi.validate).mockImplementation(async () => {
+        await validated.done;
+        return ok({ valid: false, error: { message: "bad" } }) as never;
+      });
+      store.setLogchefqlCode("level=");
+      nav.run();
+      if (outcome === "is stopped") nav.cancel();
+      validated.release();
+      await settle();
+
+      await panel.click("Load older");
+      await vi.waitFor(() => expect(rows().map((row) => row._msg)).toEqual(["newer", "older"]));
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it.each([["a Run validates", 'level="error"'], ["a navigation loads", 'level="saved"']])("refuses Load older while %s, which then runs", async (pending, ran) => {
+    const explorer = await mountExplorer(windowedLink, pagedSearch);
+    const { router, store, nav } = explorer;
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      const released = deferred();
+      if (pending === "a Run validates") {
+        vi.mocked(logchefqlApi.validate).mockImplementation(async () => {
+          await released.done;
+          return ok({ valid: true }) as never;
+        });
+        store.setLogchefqlCode(ran);
+        nav.run();
+      } else {
+        vi.spyOn(savedQueriesApi, "resolve").mockImplementation(async () => {
+          await released.done;
+          return ok({ ...savedOnOtherSource, source_id: windowedSource.id, query_content: savedContent(ran) }) as never;
+        });
+        await router.push({ path: "/logs/explore", query: { team: "1", source: windowedLink.source, id: "42" } });
+      }
+      await panel.click("Load older");
+      released.release();
+      await vi.waitFor(() => expect(searchRequests().at(-1)?.query_text).toBe(ran));
+      await settle();
+      expect(searchRequests().filter((request) => request.cursor)).toEqual([]);
+    } finally {
+      panel.unmount();
+    }
+  });
+
+  it("regenerates unchanged default SQL that a Run asks for again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const { nav, store } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) }, () => localStorage.clear());
+      await settle();
+      expect(store.nativeQuery).toBe(native.mock.lastCall?.[1].query_text);
+
+      vi.setSystemTime(idleStart + idle);
+      nav.run();
+      await settle();
+      expectSqlWindow(native.mock.lastCall?.[1], 15 * 60_000, idleStart + idle);
+      vi.setSystemTime(idleStart + 2 * idle);
+      nav.setWindow({ kind: "relative", spec: "1h" });
+      await settle();
+      expectSqlWindow(native.mock.lastCall?.[1], 3_600_000, idleStart + 2 * idle);
+
+      const edited = `${store.nativeQuery}\n-- mine`;
+      store.setNativeQuery(edited);
+      nav.run();
+      await settle();
+      expect(native.mock.lastCall?.[1].query_text).toBe(edited);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["echo", "edit and undo"])("runs generated SQL after an editor %s", async (change) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const { store, nav } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) }, () => localStorage.clear());
+      await settle();
+      const generated = store.nativeQuery;
+      if (change === "edit and undo") store.setNativeQuery(`${generated} `);
+      store.setNativeQuery(generated);
+      vi.setSystemTime(idleStart + idle);
+      nav.run();
+      await settle();
+      if (change === "echo") expectSqlWindow(native.mock.lastCall?.[1], 15 * 60_000, idleStart + idle);
+      else expect(native.mock.lastCall?.[1].query_text).toBe(generated);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([["Save", "id", "77"], ["Share", "share", "tok2"]])("runs the default SQL a %s captured as literal SQL", async (action, parameter, value) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const explorer = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) }, () => localStorage.clear());
+      const { router, store, nav, saved } = explorer;
+      await settle();
+      const generated = store.nativeQuery;
+      stubShareAndSave();
+      if (action === "Share") await share(explorer);
+      else await nav.recordAfter(() => saved.handleSaveQuery({
+        ...saveForm, source_id: sqlOnlySource.id, query_language: "clickhouse-sql", editor_mode: "native",
+        query_content: JSON.stringify({ version: 1, sourceId: sqlOnlySource.id, limit: store.limit, content: generated }),
+      }), store.markSavedQuery);
+
+      vi.setSystemTime(idleStart + idle);
+      nav.run();
+      await settle();
+      expect(native.mock.lastCall?.[1].query_text).toBe(generated);
+      expect(store.nativeQuery).toBe(generated);
+      expect(router.currentRoute.value.query[parameter]).toBe(value);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a Share's token off a query edited while the Share was in flight", async () => {
+    const explorer = await mountExplorer(evidenceA);
+    const { router, store, nav, query } = explorer;
+    await settle();
+    stubShareAndSave();
+    const shared = deferred();
+    vi.mocked(exploreApi.createQueryShare).mockImplementation(async () => {
+      await shared.done;
+      return ok(shareForm) as never;
+    });
+    const sharing = share(explorer);
+    await vi.waitFor(() => expect(exploreApi.createQueryShare).toHaveBeenCalled());
+    store.setLogchefqlCode('edited="yes"');
+    shared.release();
+    await sharing;
+    expect(router.currentRoute.value.query.q).toBe(evidenceA.q);
+
+    nav.run();
+    await settle();
+    expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'edited="yes"' });
+    expect(router.currentRoute.value.query).toMatchObject({ q: 'edited="yes"' });
+    expect(router.currentRoute.value.query.share).toBeUndefined();
+  });
+
+  it("sends the shown run's variables with a group-by histogram", async () => {
+    const { store, nav } = await mountExplorer(evidenceA);
+    await settle();
+    const variables = useVariableStore();
+    const env = (value: string) => [{ name: "env", type: "text" as const, label: "env", inputType: "input" as const, value }];
+    variables.setAllVariable(env("prod"));
+    store.setLogchefqlCode('env="{{env}}"');
+    nav.run();
+    await settle();
+    variables.setAllVariable(env("staging"));
+
+    useExploreRuns().setGroupByField("level");
+    await flush();
+    expect(vi.mocked(exploreApi.getHistogramData).mock.lastCall?.[1]).toMatchObject({ group_by: "level", variables: [{ name: "env", value: "prod" }] });
+  });
+
+  it.each(["failed", "stopped"])("keeps the shown histogram after a %s Run", async (outcome) => {
+    const { store, query, nav } = await mountExplorer(evidenceA, () => {
+      vi.mocked(exploreApi.getHistogramData).mockReturnValue(ok({ data: [{ bucket: "2026-10-19T04:00:00Z", log_count: 3 }], granularity: "1m" }) as never);
+    });
+    await settle();
+    const histogram = useExploreHistogramStore();
+    await vi.waitFor(() => expect(histogram.histogramData).toHaveLength(1));
+    query.mockImplementationOnce((_team, _source, _request, options) =>
+      outcome === "failed" ? Promise.reject(new Error("Query failed")) : untilAborted(options?.signal));
+    store.setLogchefqlCode('other="yes"');
+    nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'other="yes"' }));
+    if (outcome === "stopped") nav.cancel();
+    await settle();
+    expect(histogram.histogramData).toHaveLength(1);
+  });
+
+  it("clears sidebar values when a same-source link shows nothing", async () => {
+    const { router, query, pinia } = await mountExplorer(evidenceA);
+    await settle();
+    vi.spyOn(sourcesApi, "getFieldValues").mockImplementation((_teamId, _sourceId, fieldName, fieldType) =>
+      ok({ field_name: fieldName, field_type: fieldType, is_low_cardinality: false, values: [{ value: "old-location-value", count: 1 }], total_distinct: 1 }));
+    const host = document.createElement("div");
+    const sidebar = createApp({
+      render: () => h(FieldSideBar, { fields: [{ name: "level", type: "Int64" }], expanded: true, teamId: team.id, sourceId: source.id, source }),
+    }).use(pinia).use(i18n);
+    sidebar.mount(host);
+    try {
+      await vi.waitFor(() => expect(host.textContent).toContain("old-location-value"));
+      query.mockRejectedValueOnce(new Error("link query failed"));
+      await router.push({ path: "/logs/explore", query: evidenceB });
+      await settle();
+      expect(host.textContent).not.toContain("old-location-value");
+    } finally {
+      sidebar.unmount();
+    }
+  });
+
+  it("loads each sidebar field's values once when a source opens", async () => {
+    const { nav, pinia } = await mountExplorer(evidenceA);
+    await settle();
+    const fieldValues = vi.spyOn(sourcesApi, "getFieldValues").mockImplementation((_teamId, _sourceId, fieldName, fieldType) =>
+      ok({ field_name: fieldName, field_type: fieldType, is_low_cardinality: false, values: [], total_distinct: 0 }));
+    const context = useContextStore();
+    const sidebar = createApp({
+      render: () => h(FieldSideBar, { fields: [{ name: "level", type: "Int64" }], expanded: true, teamId: team.id, sourceId: context.sourceId ?? undefined, source: useSourcesStore().currentSourceDetails }),
+    }).use(pinia).use(i18n);
+    sidebar.mount(document.createElement("div"));
+    try {
+      await vi.waitFor(() => expect(fieldValues).toHaveBeenCalled());
+      await flush();
+      fieldValues.mockClear();
+      await nav.selectSource(otherSource.id);
+      await vi.waitFor(() => expect(context.sourceId).toBe(otherSource.id));
+      await settle();
+      await flush();
+      expect(fieldValues).toHaveBeenCalledTimes(1);
+      expect(fieldValues.mock.lastCall?.[1]).toBe(otherSource.id);
+    } finally {
+      sidebar.unmount();
+    }
+  });
+
+  it("records an away-finished Run when Back cancels a pending link", async () => {
+    const { router, store, query, nav, rows } = await mountExplorer(evidenceA);
+    await settle();
+    const ran = deferred();
+    query.mockImplementationOnce(async () => { await ran.done; return ok({ ...noLogs, logs: [{ msg: "slow" }] }); });
+    store.setLogchefqlCode('slow="yes"');
+    nav.run();
+    await vi.waitFor(() => expect(query.mock.lastCall?.[2]).toMatchObject({ query: 'slow="yes"' }));
+    const resolved = deferred();
+    vi.spyOn(savedQueriesApi, "resolve").mockImplementation(async () => {
+      await resolved.done;
+      return ok({ ...savedOnOtherSource, query_language: 'logchefql', editor_mode: 'builder', source_id: source.id, query_content: savedContent('saved="yes"') } satisfies ResolvedSavedQuery);
+    });
+    await router.push({ path: "/logs/explore", query: { team: "1", source: "3", id: "42" } });
+    expect(nav.status.value).toBe("navigating");
+    await router.push({ path: "/logs/library" });
+    ran.release();
+    await settle();
+    expect(rows().map((row) => row.msg)).toEqual(["slow"]);
+    router.back();
+    await vi.waitFor(() => expect(nav.status.value).toBe("navigating"));
+    router.back();
+    await vi.waitFor(() => expect(nav.status.value).toBe("ready"));
+    await flush();
+    resolved.release();
+    await flush();
+    expect(rows().map((row) => row.msg)).toEqual(["slow"]);
+    expect(query).toHaveBeenCalledTimes(2);
+    expect(router.currentRoute.value.query.q).toBe('slow="yes"');
+  });
+
+  it("regenerates default SQL after a source switch away and back", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const { nav } = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) });
+      await settle();
+      await nav.selectSource(otherSource.id);
+      await settle();
+      vi.setSystemTime(idleStart + idle);
+      await nav.selectSource(sqlOnlySource.id);
+      await settle();
+      expectSqlWindow(native.mock.lastCall?.[1], 15 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["stopped", "failed"])("preserves shown counts and coverage after a newer Run %s before rows", async (outcome) => {
+    const counts = deferred();
+    const counted = { ...windowedSource, connection: { base_url: "http://logs.test", optimizer: { enabled: true, histogram_enabled: true } } };
+    const explorer = await mountExplorer(windowedLink, () => {
+      vi.mocked(sourcesApi.getTeamSource).mockImplementation((_teamId, sourceId) => ok(sourceId === counted.id ? counted : sourceById(sourceId)));
+      vi.mocked(streamWindowedQuery).mockImplementation(async (_team, _source, request, signal, onEvent) => {
+        await Promise.resolve();
+        if (request.count) {
+          if (request.query_text !== windowedLink.q) return untilAborted(signal);
+          await counts.done;
+          for (const window of searchWindows) onEvent({ type: "count", window, status: "complete", buckets: [{ bucket: window.start, log_count: 7 }], complete: false });
+          onEvent({ type: "end", complete: true });
+          return;
+        }
+        onEvent({ type: "plan", windows: searchWindows, cursor: "first", complete: false });
+        if (request.query_text === windowedLink.q) {
+          onEvent(windowRows(searchWindows[0], "info", "second"));
+          onEvent({ type: "end", cursor: "second", complete: false });
+        } else {
+          onEvent({ type: "window", window: searchWindows[0], status: "running", cursor: "first", complete: false });
+          if (outcome === "failed") onEvent({ type: "end", message: "search failed", complete: false });
+          else await untilAborted(signal);
+        }
+      });
+    });
+    const panel = mountPanel(explorer);
+    try {
+      await settle();
+      await vi.waitFor(() => expect(vi.mocked(streamWindowedQuery).mock.calls.some(([, , request]) => request.count)).toBe(true));
+      const countSignal = vi.mocked(streamWindowedQuery).mock.calls.find(([, , request]) => request.count)?.[3];
+      explorer.store.setLogchefqlCode('level="error"');
+      explorer.nav.run();
+      await vi.waitFor(() => expect(searchRequests()).toHaveLength(2));
+      if (outcome === "stopped") explorer.nav.cancel();
+      await settle();
+      expect(explorer.rows().map(row => row._msg)).toEqual(["info"]);
+      expect(panel.text()).toContain("Searched 1 of 2");
+      expect(countSignal?.aborted).toBe(false);
+      counts.release();
+      await vi.waitFor(() => expect(panel.text()).toContain("14"));
+      expect(panel.text()).toContain("of 14 rows");
+      const failedCounts = vi.mocked(streamWindowedQuery).mock.calls.filter(([, , request]) => request.count && request.query_text !== windowedLink.q);
+      expect(failedCounts).toEqual([]);
+    } finally {
+      counts.release();
+      panel.unmount();
+    }
+  });
+
+  it.each([
+    ["older", "validation"], ["retry", "validation"], ["skip", "validation"],
+    ["older", "stopped"], ["retry", "stopped"], ["skip", "stopped"],
+    ["older", "failed"], ["retry", "failed"], ["skip", "failed"],
+  ])("pages the shown run with %s after a newer Run %s", async (action, outcome) => {
+    const explorer = await mountExplorer(windowedLink, () => streamWindows(request => {
+      if (request.cursor || request.window_index !== undefined) return [windowRows(searchWindows[1], "older"), { type: "end", complete: true }];
+      const first = windowRows(searchWindows[0], "info", "second");
+
+      return [
+        { type: "plan", windows: searchWindows, cursor: "first", complete: false },
+        { type: "window", window: searchWindows[0], status: "running", cursor: "first", complete: false }, first,
+        ...(action === "retry" ? [{ type: "window" as const, window: searchWindows[0], status: "partial" as const, cursor: "first", complete: false }] : []),
+        ...(action === "skip" ? [{ type: "window" as const, window: searchWindows[1], status: "failed" as const, cursor: "second", complete: false }] : []),
+        { type: "end", cursor: "second", complete: false },
+      ];
+    }));
+    await settle();
+    if (outcome === "validation") vi.mocked(logchefqlApi.validate).mockReturnValueOnce(ok({ valid: false, error: { code: "syntax", message: "invalid", position: { line: 1, column: 1 } } }));
+    else vi.mocked(streamWindowedQuery).mockImplementationOnce(async (_team, _source, _request, signal, onEvent) => {
+      onEvent({ type: "plan", windows: searchWindows, cursor: "first", complete: false });
+      onEvent({ type: "window", window: searchWindows[0], status: "running", cursor: "first", complete: false });
+      if (outcome === "failed") onEvent({ type: "end", message: "search failed", complete: false });
+      else await untilAborted(signal);
+    });
+    explorer.store.setLogchefqlCode('level="error"');
+    explorer.nav.run();
+    if (outcome === "stopped") {
+      await vi.waitFor(() => expect(searchRequests()).toHaveLength(2));
+      explorer.nav.cancel();
+    }
+    await settle();
+    const panel = mountPanel(explorer);
+    try {
+      if (action === "retry") await panel.click("Retry window");
+      else await panel.click(action === "older" ? "Load older" : "Skip to next window");
+      await vi.waitFor(() => expect(explorer.rows().map(row => row._msg)).toEqual(["info", "older"]));
+      await settle();
+      expect(searchRequests().at(-1)?.query_text).toBe(windowedLink.q);
+      expect(explorer.router.currentRoute.value.query.q).toBe(windowedLink.q);
+    } finally { panel.unmount(); }
+  });
+
+  it.each(["Save", "Share"])("restores the literal default SQL that a %s captured", async (action) => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      vi.setSystemTime(idleStart);
+      const native = vi.spyOn(exploreApi, "getLogs").mockReturnValue(ok(noLogs));
+      const explorer = await mountExplorer({ team: "1", source: String(sqlOnlySource.id) });
+      await settle();
+      const generated = explorer.store.nativeQuery;
+      stubShareAndSave();
+      if (action === "Share") await share(explorer);
+      else await explorer.nav.recordAfter(() => explorer.saved.handleSaveQuery({
+        ...saveForm, source_id: sqlOnlySource.id, query_language: "clickhouse-sql", editor_mode: "native",
+        query_content: JSON.stringify({ version: 1, sourceId: sqlOnlySource.id, limit: explorer.store.limit, content: generated }),
+      }), explorer.store.markSavedQuery);
+      await explorer.nav.selectSource(otherSource.id);
+      await settle();
+      vi.setSystemTime(idleStart + idle);
+      await explorer.nav.selectSource(sqlOnlySource.id);
+      await settle();
+      expect(native.mock.lastCall?.[1].query_text).toBe(generated);
+      expect(explorer.store.showsDefaultSql).toBe(false);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it("disposes both sessions when Explorer unmounts during a replacement Run", async () => {
+    const counted = { ...windowedSource, connection: { base_url: "http://logs.test", optimizer: { enabled: true, histogram_enabled: true } } };
+    const explorer = await mountExplorer(windowedLink, () => {
+      vi.mocked(sourcesApi.getTeamSource).mockImplementation((_teamId, sourceId) => ok(sourceId === counted.id ? counted : sourceById(sourceId)));
+      vi.mocked(streamWindowedQuery).mockImplementation(async (_team, _source, request, signal, onEvent) => {
+        await Promise.resolve();
+        if (request.count || request.query_text !== windowedLink.q) return untilAborted(signal);
+        onEvent({ type: "plan", windows: searchWindows, cursor: "first", complete: false });
+        onEvent(windowRows(searchWindows[0], "info", "second"));
+        onEvent({ type: "end", cursor: "second", complete: false });
+      });
+    });
+    await settle();
+    const counts = vi.mocked(streamWindowedQuery).mock.calls.find(([, , request]) => request.count)?.[3];
+    expect(counts?.aborted).toBe(false);
+    explorer.store.setLogchefqlCode('level="error"');
+    explorer.nav.run();
+    await vi.waitFor(() => expect(searchRequests()).toHaveLength(2));
+    await explorer.router.push('/dashboards');
+    expect(counts?.aborted).toBe(true);
+    expect(vi.mocked(streamWindowedQuery).mock.lastCall?.[3].aborted).toBe(true);
   });
 });

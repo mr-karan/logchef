@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "停止实时日志流",
   "ui.run": "运行",
   "ui.executeQueryCtrlEnter": "执行查询 (Ctrl+Enter)",
-  "ui.cancelling": "正在取消…",
   "ui.cancelRunningQueryEscape": "取消正在运行的查询 (Escape)",
   "ui.showSyntaxHelp": "显示语法帮助",
   "ui.syntax": "语法",

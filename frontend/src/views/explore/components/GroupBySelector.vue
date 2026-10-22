@@ -2,7 +2,8 @@
 import { useI18n } from "vue-i18n";
 
 import { computed } from 'vue'
-import { useExploreStore } from '@/stores/explore'
+import { useExploreHistogramStore } from '@/stores/exploreHistogram'
+import { useExploreRuns } from '@/stores/exploreRuns'
 import { useSourcesStore } from '@/stores/sources'
 import { SearchableSelect } from '@/components/ui/searchable-select'
 
@@ -13,17 +14,18 @@ interface Props {
 }
 
 const props = defineProps<Props>()
-const exploreStore = useExploreStore()
+const histogram = useExploreHistogramStore()
+const runs = useExploreRuns()
 const sourcesStore = useSourcesStore()
 
 // Group by field with computed default - no default grouping
 const groupByField = computed({
   get() {
     // Return the stored value or use no grouping as default
-    return exploreStore.groupByField || '__none__';
+    return histogram.groupByField || '__none__';
   },
   set(value) {
-    exploreStore.setGroupByField(value);
+    runs.setGroupByField(value);
   }
 });
 

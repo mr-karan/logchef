@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/composables/useToast";
 import { TOAST_DURATION } from "@/lib/constants";
 import { useExploreStore } from "@/stores/explore";
+import { useExploreRuns } from "@/stores/exploreRuns";
 import { useTeamsStore } from "@/stores/teams";
 import { useSourcesStore } from "@/stores/sources";
 import { useSavedQueriesStore } from "@/stores/savedQueries";
@@ -28,7 +29,6 @@ import { useSavedQueries } from "@/composables/useSavedQueries";
 import { useExplorerNavigator } from "@/composables/useExplorerNavigator";
 import { useQuery } from "@/composables/useQuery";
 import { supportsQueryLanguage, hasSourceCapability, getNativeQueryLanguageForSource } from "@/lib/queryMetadata";
-import { useVariables } from "@/composables/useVariables";
 
 import { useContextStore } from "@/stores/context";
 import { exploreApi } from "@/api/explore";
@@ -50,7 +50,6 @@ import EmptyResultsState from "./components/EmptyResultsState.vue";
 import ExploreTopBar from "./components/ExploreTopBar.vue";
 import ResultsToolbar from "./components/ResultsToolbar.vue";
 import WindowedSearchPanel from "./components/WindowedSearchPanel.vue";
-import { useExploreWindowedStore } from '@/stores/exploreWindowed';
 import ExploreJsonResults from "./components/ExploreJsonResults.vue";
 import LiveTailPanel from "./components/LiveTailPanel.vue";
 import AskChefDrawer from "@/components/ask-chef/AskChefDrawer.vue";
@@ -61,22 +60,23 @@ const { t } = useI18n();
 // Router and stores
 const router = useRouter();
 const exploreStore = useExploreStore();
+const runs = useExploreRuns();
 const teamsStore = useTeamsStore();
 const sourcesStore = useSourcesStore();
 const savedQueriesStore = useSavedQueriesStore();
 const preferencesStore = usePreferencesStore();
 const { preferences } = storeToRefs(preferencesStore);
 const { toast } = useToast();
-const { getVariablesForApi } = useVariables();
 
 const {
   logchefQuery,
   sqlQuery,
   activeMode,
-  isExecutingQuery,
-  canExecuteQuery,
   changeMode,
 } = useQuery();
+const isExecutingQuery = computed(() => runs.isRunning);
+const canExecuteQuery = computed(() => exploreStore.canExecuteQuery);
+const rows = computed(() => runs.results?.rows ?? []);
 
 const nav = useExplorerNavigator();
 const isInitializing = computed(() => nav.status.value === 'loading' || nav.status.value === 'error');
@@ -151,7 +151,6 @@ const queryEditorRef = ref<ComponentPublicInstance<{
 const isLoadingQuery = ref(false);
 const editQueryData = ref<SavedQuery | null>(null);
 const topBarRef = ref<InstanceType<typeof ExploreTopBar> | null>(null);
-const windowedStore = useExploreWindowedStore();
 const sortKeysInfoOpen = ref(false); // State for sort keys info expandable section
 const isHistogramVisible = ref(true);
 
@@ -168,10 +167,8 @@ const showLoadingState = computed(
   () => isInitializing.value && !initializationError.value
 );
 
-// A location is opening, or its first query has yet to start.
-const isInitialQueryPending = computed(() => {
-  return nav.status.value === 'navigating' || (canExecuteQuery.value && !exploreStore.hasExecutedQuery && !isExecutingQuery.value);
-});
+// A location is opening. It starts its run as soon as it opens.
+const isInitialQueryPending = computed(() => nav.status.value === 'navigating');
 
 const showNoTeamsState = computed(
   () =>
@@ -229,11 +226,9 @@ const currentQueryContentJson = computed(() => {
 });
 
 const parsedQuery = computed(() => {
-  const executed = exploreStore.lastExecutedState;
-  if (executed?.mode !== 'logchefql' || !executed.logchefqlQuery?.trim() || !executed.compilation) {
-    return EMPTY_PARSED_QUERY;
-  }
-  return { success: true, meta: executed.compilation };
+  const compilation = runs.results?.compilation;
+  if (!runs.shown?.query.text.trim() || !compilation) return EMPTY_PARSED_QUERY;
+  return { success: true, meta: compilation };
 });
 
 // Use structured data for query fields
@@ -424,10 +419,10 @@ async function handleUpdateQuery(queryId: string, formData: SaveQueryFormData, d
 }
 
 const onHistogramTimeRangeZoom = (range: { start: Date; end: Date }) => {
-  const current = exploreStore.resolved;
+  const current = runs.shown?.resolved;
   const start = epochMs(range.start);
   const end = epochMs(range.end);
-  if (Math.abs(current.start - start) < 1000 && Math.abs(current.end - end) < 1000) return;
+  if (current && Math.abs(current.start - start) < 1000 && Math.abs(current.end - end) < 1000) return;
   nav.setWindow({ kind: 'absolute', start, end });
 };
 
@@ -487,9 +482,9 @@ const waitForExportCompletion = async (exportId: string, timeoutSeconds: number,
 const handleExport = async () => {
   if (!currentTeamId.value || !currentSourceId.value) return;
 
-  const sql = exploreStore.lastExecutedState?.sqlQuery ||
-    (exploreStore.activeMode === "native" ? exploreStore.sqlForExecution : "");
-  if (!sql?.trim()) {
+  const shown = runs.shown;
+  const sql = shown?.results?.sql;
+  if (!shown || !sql?.trim()) {
     toast({
       get title() { return t('ui.cannotDownload'); },
       get description() { return t('ui.runTheQueryBeforeDownloadingResults'); },
@@ -510,7 +505,7 @@ const handleExport = async () => {
       query_text: sql,
       format: "csv",
       query_timeout: queryTimeout,
-      variables: getVariablesForApi(),
+      variables: shown.variables,
     }, currentTeamId.value);
     const job = response.data;
     if (!job?.id) {
@@ -601,7 +596,7 @@ const handleCopyCliCommand = async () => {
           ? exploreStore.logchefqlCode
           : exploreStore.nativeQuery,
       window: exploreStore.window,
-      resolved: exploreStore.resolved,
+      resolved: exploreStore.resolveNow(),
       limit: exploreStore.limit,
       timeout: exploreStore.queryTimeout,
     });
@@ -624,14 +619,16 @@ const handleCopyCliCommand = async () => {
 
 const handleShare = async () => {
   try {
-    const share = await nav.recordAfter(() => exploreStore.createQueryShare(), (created) => exploreStore.setActiveShareToken(created.token));
+    const share = await nav.recordAfter(() => exploreStore.createQueryShare(), exploreStore.markShare);
     if (!share?.share_url) return;
 
     await copyTextWithFallback(share.share_url);
 
+    // An unedited saved query keeps its id in the URL.
+    const recorded = router.currentRoute.value.query.share === share.token;
     toast({
       get title() { return t('ui.shareLinkCopied'); },
-      get description() { return t('ui.uRLUpdatedToTheShareLinkAndCopiedToClipboard'); },
+      get description() { return recorded ? t('ui.uRLUpdatedToTheShareLinkAndCopiedToClipboard') : undefined; },
       duration: TOAST_DURATION.SUCCESS,
     });
   } catch (error: any) {
@@ -709,7 +706,7 @@ const toggleHistogramVisibility = () => {
 
 // Auto-hide histogram when it's not eligible (e.g., in SQL mode)
 watch(
-  () => exploreStore.isHistogramEligible,
+  () => runs.isHistogramEligible,
   (isEligible) => {
     if (!isEligible && isHistogramVisible.value) {
       isHistogramVisible.value = false;
@@ -1062,7 +1059,6 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                     :isExecuting="isExecutingQuery"
                     :canExecute="canExecuteQuery"
                     :showRunButton="true"
-                    :isCancelling="exploreStore.isCancellingQuery"
                     :queryTimeout="exploreStore.queryTimeout"
                     @change="(event) => event.mode === 'logchefql'
                       ? updateLogchefqlValue(event.query, event.isUserInput)
@@ -1160,12 +1156,12 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
               exploreStore.hasWindow
             ">
               <!-- Unified Results Toolbar -->
-              <WindowedSearchPanel />
+              <WindowedSearchPanel @stop="nav.cancel()" @page="nav.page" />
               <ResultsToolbar
                 :isHistogramVisible="isHistogramVisible"
                 :availableFields="availableFields"
                 :displayMode="displayMode"
-                :logsCount="exploreStore.logs?.length || 0"
+                :logsCount="rows.length"
                 :isLoading="isExecutingQuery || isInitialQueryPending"
                 :isExporting="isExporting"
                 :canExport="supportsExports"
@@ -1206,22 +1202,22 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 />
 
                 <!-- Results Table -->
-                <template v-else-if="exploreStore.logs?.length > 0 || isExecutingQuery || isInitialQueryPending">
+                <template v-else-if="rows.length > 0 || isExecutingQuery || isInitialQueryPending">
                   <ExploreJsonResults
                     v-if="displayMode === 'json'"
-                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId}-${displayMode}`"
-                    :data="exploreStore.logs"
-                    :is-loading="(isExecutingQuery || isInitialQueryPending) && !(windowedStore.active && exploreStore.logs.length > 0)"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${runs.shown?.id}-${displayMode}`"
+                    :data="rows"
+                    :is-loading="runs.showsLoading || isInitialQueryPending"
                   />
 
                   <component
-                    v-else-if="exploreStore.columns?.length > 0"
+                    v-else-if="runs.results?.columns.length"
                     :is="displayMode === 'table' ? DataTable : CompactLogList"
-                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${exploreStore.queryId ?? 'noquery'}-${displayMode}`"
-                    :columns="exploreStore.columns as any"
-                    :data="exploreStore.logs"
-                    :stats="exploreStore.queryStats"
-                    :is-loading="(isExecutingQuery || isInitialQueryPending) && !(windowedStore.active && exploreStore.logs.length > 0)"
+                    :key="`${exploreStore.sourceId}-${exploreStore.activeMode}-${runs.shown?.id}-${displayMode}`"
+                    :columns="runs.results.columns as any"
+                    :data="rows"
+                    :stats="runs.results.stats"
+                    :is-loading="runs.showsLoading || isInitialQueryPending"
                     :source-id="String(exploreStore.sourceId)"
                     :team-id="teamsStore.currentTeamId"
                     :source="sourceDetails"
@@ -1245,7 +1241,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
                 </template>
 
                 <!-- Empty Results State Component -->
-                <EmptyResultsState v-else :has-executed-query="exploreStore.hasExecutedQuery"
+                <EmptyResultsState v-else :has-executed-query="runs.shown !== null"
                   :can-execute-query="canExecuteQuery" @run-default-query="nav.run"
                   @open-date-picker="openDatePicker" />
               </div>
