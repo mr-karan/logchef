@@ -48,7 +48,7 @@ describe('cold template dialect hydration', () => {
     else if (path === 'share') store.hydrateFromQueryShare({
       token: 'template', source_id: 2, team_id: 1, share_url: '/s/template',
       created_at: '', expires_at: '', created_by: 1,
-      payload: { version: 1, mode: 'native', query, limit: 100 },
+      payload: { version: 1, mode: 'sql', query, limit: 100 },
     })
     else {
       localStorage.setItem('logchef.explore.draft.1.2', JSON.stringify({ version: 2, mode: 'native', nativeQuery: query }))

@@ -1528,7 +1528,7 @@ export const useExploreStore = defineStore("explore", () => {
     const stored = window ? encodeStoredRange(window) : null;
     return {
       version: 2,
-      mode: activeMode,
+      mode: activeMode === "native" ? "sql" : "logchefql",
       query: activeMode === "native" ? nativeQuery : logchefqlCode,
       limit,
       timezone: resolved.value.zone,
@@ -1544,7 +1544,7 @@ export const useExploreStore = defineStore("explore", () => {
     }
 
     const payload = buildQuerySharePayload();
-    if (payload.mode === "native" && !payload.query.trim()) {
+    if (payload.mode === "sql" && !payload.query.trim()) {
       throw new Error("Query is required to create a share link");
     }
 
