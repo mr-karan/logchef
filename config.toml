@@ -179,6 +179,11 @@ max_concurrent_per_user = 3
 max_concurrent_global = 30
 
 [export]
+# Optional replica identity for immediate recovery of interrupted exports.
+# Keep this stable across restarts and unique to each concurrent replica.
+# Stop the previous process before starting its replacement with the same ID.
+# An empty ID uses only the age-based recovery fallback.
+instance_id = ""
 # Download jobs use this higher cap and keep completed artifacts for a limited time.
 max_rows = 1000000
 default_timeout_seconds = 120

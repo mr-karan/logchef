@@ -365,6 +365,8 @@ max_concurrent_per_user = 3
 max_concurrent_global = 30
 
 [export]
+# Stable identity unique to this replica. Empty keeps age-based cleanup only.
+instance_id = ""
 # Download jobs use this separate, higher cap and keep completed artifacts briefly.
 max_rows = 1000000
 default_timeout_seconds = 120

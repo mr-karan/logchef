@@ -383,6 +383,8 @@ WHERE expires_at < ?;
 -- Persist an async export job
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -391,26 +393,23 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+) VALUES (
+    sqlc.arg(id),
+    sqlc.arg(owner_instance_id),
+    sqlc.arg(owner_process_id),
+    sqlc.arg(source_id),
+    sqlc.arg(created_by),
+    sqlc.arg(status),
+    sqlc.arg(format),
+    sqlc.arg(request_json),
+    CAST(sqlc.arg(expires_at) AS TEXT),
+    CAST(sqlc.arg(created_at) AS TEXT),
+    CAST(sqlc.arg(updated_at) AS TEXT)
+);
 
 -- name: GetExportJob :one
 -- Retrieve an export job by ID
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = ?;
 
@@ -429,15 +428,15 @@ RETURNING id;
 -- Mark an export job as complete and return its ID
 UPDATE export_jobs
 SET
-    status = ?,
-    file_name = ?,
-    file_path = ?,
+    status = sqlc.arg(status),
+    file_name = sqlc.arg(file_name),
+    file_path = sqlc.arg(file_path),
     error_message = NULL,
-    rows_exported = ?,
-    bytes_written = ?,
-    completed_at = ?,
-    updated_at = ?
-WHERE id = ?
+    rows_exported = sqlc.arg(rows_exported),
+    bytes_written = sqlc.arg(bytes_written),
+    completed_at = CAST(sqlc.arg(completed_at) AS TEXT),
+    updated_at = CAST(sqlc.arg(updated_at) AS TEXT)
+WHERE id = sqlc.arg(id)
   AND status IN ('pending', 'running')
 RETURNING id;
 
@@ -445,26 +444,26 @@ RETURNING id;
 -- Mark an export job as failed and return its ID
 UPDATE export_jobs
 SET
-    status = ?,
+    status = sqlc.arg(status),
     file_name = NULL,
     file_path = NULL,
-    error_message = ?,
+    error_message = sqlc.arg(error_message),
     completed_at = NULL,
-    updated_at = ?
-WHERE id = ?
+    updated_at = CAST(sqlc.arg(updated_at) AS TEXT)
+WHERE id = sqlc.arg(id)
 RETURNING id;
 
 -- name: ListExpiredExportJobPaths :many
 -- List artifact paths for expired export jobs
 SELECT file_path
 FROM export_jobs
-WHERE expires_at < ?
+WHERE expires_at < CAST(sqlc.arg(before) AS TEXT)
   AND file_path IS NOT NULL;
 
 -- name: DeleteExpiredExportJobs :exec
 -- Delete expired export jobs
 DELETE FROM export_jobs
-WHERE expires_at < ?;
+WHERE expires_at < CAST(sqlc.arg(before) AS TEXT);
 
 -- Additional queries for user-source and team-source access
 
@@ -1276,18 +1275,21 @@ WHERE NOT EXISTS (
       AND live.expires_at > sqlc.arg(now)
 );
 
+-- name: ListInterruptedExportJobs :many
+SELECT id, file_path, updated_at
+FROM export_jobs
+WHERE status IN ('pending', 'running')
+  AND (updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(sqlc.arg(max_age_seconds) AS INTEGER) || ' seconds')
+    OR (CAST(sqlc.arg(instance_id) AS TEXT) <> '' AND owner_instance_id = sqlc.arg(instance_id) AND owner_process_id <> sqlc.arg(process_id)))
+ORDER BY id
+LIMIT 100;
+
 -- name: ReapInterruptedExportJobs :many
--- Legacy workers stored UTC timestamps with a Go zone suffix.
 UPDATE export_jobs
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id IN (
-    SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(sqlc.arg(max_age_seconds) AS INTEGER) / 86400.0
-    ORDER BY id
-    LIMIT 100
-)
-  AND status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(sqlc.arg(max_age_seconds) AS INTEGER) / 86400.0
-RETURNING *;
+WHERE id IN (SELECT value FROM json_each(CAST(sqlc.arg(ids_json) AS TEXT)))
+  AND status IN ('pending', 'running')
+RETURNING id;
 
 -- name: MarkAlertResolved :exec
 UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;

@@ -31,6 +31,7 @@ import (
 	"github.com/gofiber/fiber/v3/middleware/compress"
 	fiberrecover "github.com/gofiber/fiber/v3/middleware/recover"
 	"github.com/gofiber/fiber/v3/middleware/static"
+	"github.com/google/uuid"
 
 	// Import generated docs (will be created after running swag init)
 	_ "github.com/mr-karan/logchef/docs"
@@ -83,6 +84,7 @@ type Server struct {
 	shutdownOnce    sync.Once
 	shutdownErr     error
 	backgroundDone  chan struct{}
+	exportOwner     models.ExportJobOwner
 	historyQueue    chan *models.QueryHistory
 	historyDropped  atomic.Uint64
 	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
@@ -196,6 +198,7 @@ func New(opts ServerOptions) *Server {
 			MaxEntries:         opts.Config.DashboardCache.MaxEntries,
 			MaxConcurrentFills: opts.Config.DashboardCache.MaxConcurrentFills,
 		}),
+		exportOwner:     models.ExportJobOwner{InstanceID: opts.Config.Export.InstanceID, ProcessID: uuid.NewString()},
 		baseCtx:         baseCtx,
 		backgroundDone:  make(chan struct{}),
 		historyQueue:    make(chan *models.QueryHistory, 128),
@@ -212,7 +215,7 @@ func New(opts ServerOptions) *Server {
 	s.indexHTML = indexHTML
 	s.askChef = s.newAskChef(opts.AskChefChat)
 
-	s.reapInterruptedExportJobs()
+	s.reapInterruptedExportJobs(s.exportOwner)
 	s.setupRoutes()
 	s.startQueryHistoryWorker()
 	s.startTokenLastUsedWorker()

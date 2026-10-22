@@ -118,6 +118,8 @@ type QueryConfig struct {
 
 // ExportConfig contains settings for streaming result exports.
 type ExportConfig struct {
+	// InstanceID must be unique per live replica and stable across restarts.
+	InstanceID            string        `koanf:"instance_id"`
 	MaxRows               int           `koanf:"max_rows"`
 	DefaultTimeoutSeconds int           `koanf:"default_timeout_seconds"`
 	MaxTimeoutSeconds     int           `koanf:"max_timeout_seconds"`

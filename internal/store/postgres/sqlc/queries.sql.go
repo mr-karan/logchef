@@ -607,6 +607,8 @@ const createExportJob = `-- name: CreateExportJob :exec
 
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -615,19 +617,21 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 `
 
 type CreateExportJobParams struct {
-	ID          string             `json:"id"`
-	SourceID    int64              `json:"source_id"`
-	CreatedBy   int64              `json:"created_by"`
-	Status      string             `json:"status"`
-	Format      string             `json:"format"`
-	RequestJson string             `json:"request_json"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID              string             `json:"id"`
+	OwnerInstanceID string             `json:"owner_instance_id"`
+	OwnerProcessID  string             `json:"owner_process_id"`
+	SourceID        int64              `json:"source_id"`
+	CreatedBy       int64              `json:"created_by"`
+	Status          string             `json:"status"`
+	Format          string             `json:"format"`
+	RequestJson     string             `json:"request_json"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Export Jobs
@@ -635,6 +639,8 @@ type CreateExportJobParams struct {
 func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams) error {
 	_, err := q.db.Exec(ctx, createExportJob,
 		arg.ID,
+		arg.OwnerInstanceID,
+		arg.OwnerProcessID,
 		arg.SourceID,
 		arg.CreatedBy,
 		arg.Status,
@@ -1375,22 +1381,7 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 }
 
 const getExportJob = `-- name: GetExportJob :one
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = $1
 `
@@ -1415,6 +1406,8 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerInstanceID,
+		&i.OwnerProcessID,
 	)
 	return i, err
 }
@@ -3854,44 +3847,43 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) 
 }
 
 const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
-UPDATE export_jobs
+UPDATE export_jobs AS e
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
-WHERE id IN (
-    SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < now() - $1::bigint * interval '1 second'
-    ORDER BY id
+FROM (
+    SELECT j.id, j.updated_at FROM export_jobs j
+    WHERE j.status IN ('pending', 'running')
+      AND (j.updated_at < now() - $1::bigint * interval '1 second'
+        OR ($2::text <> '' AND j.owner_instance_id = $2 AND j.owner_process_id <> $3))
+    ORDER BY j.id
     LIMIT 100
-)
-  AND status IN ('pending', 'running') AND export_jobs.updated_at < now() - $1::bigint * interval '1 second'
-RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at
+    FOR UPDATE
+) AS interrupted
+WHERE e.id = interrupted.id
+RETURNING e.id, e.file_path, interrupted.updated_at AS previous_updated_at
 `
 
-func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds int64) ([]ExportJob, error) {
-	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, maxAgeSeconds)
+type ReapInterruptedExportJobsParams struct {
+	MaxAgeSeconds int64  `json:"max_age_seconds"`
+	InstanceID    string `json:"instance_id"`
+	ProcessID     string `json:"process_id"`
+}
+
+type ReapInterruptedExportJobsRow struct {
+	ID                string             `json:"id"`
+	FilePath          pgtype.Text        `json:"file_path"`
+	PreviousUpdatedAt pgtype.Timestamptz `json:"previous_updated_at"`
+}
+
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error) {
+	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ExportJob{}
+	items := []ReapInterruptedExportJobsRow{}
 	for rows.Next() {
-		var i ExportJob
-		if err := rows.Scan(
-			&i.ID,
-			&i.SourceID,
-			&i.CreatedBy,
-			&i.Status,
-			&i.Format,
-			&i.RequestJson,
-			&i.FileName,
-			&i.FilePath,
-			&i.ErrorMessage,
-			&i.RowsExported,
-			&i.BytesWritten,
-			&i.ExpiresAt,
-			&i.CompletedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
+		var i ReapInterruptedExportJobsRow
+		if err := rows.Scan(&i.ID, &i.FilePath, &i.PreviousUpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

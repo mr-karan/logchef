@@ -202,6 +202,7 @@ proxy_header = "X-Real-IP"
 ` + goldenOIDCKeys + `scopes = ["openid"]
 
 [export]
+instance_id = "replica-a"
 formats = ["csv"]
 
 [ai]
@@ -259,6 +260,7 @@ Max_Preview_Limit = 0
 func TestLoad_GoldenEnvOnly(t *testing.T) {
 	clearLogchefEnv(t)
 	for k, v := range map[string]string{
+		"LOGCHEF_EXPORT__INSTANCE_ID":                "replica-env",
 		"LOGCHEF_AUTH__ADMIN_EMAILS":                 "admin@example.com",
 		"LOGCHEF_AUTH__API_TOKEN_SECRET":             "0123456789abcdef0123456789abcdef",
 		"LOGCHEF_AUTH__SESSION_DURATION":             "0s",
