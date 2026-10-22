@@ -41,7 +41,7 @@ import AddUser from './AddUser.vue'
 
 const usersStore = useUsersStore()
 const { t } = useI18n()
-const { isLoading, error: _userError } = storeToRefs(usersStore)
+const { isLoading } = storeToRefs(usersStore)
 const showDeleteDialog = ref(false)
 const userToDelete = ref<User | null>(null)
 const showEditDialog = ref(false)

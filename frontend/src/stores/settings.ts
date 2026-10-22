@@ -2,6 +2,7 @@ import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
 import { settingsApi, type SettingsByCategory, type UpdateSettingRequest } from "@/api/settings";
 import { computed } from "vue";
+import { i18n } from "@/i18n";
 
 interface SettingsState {
   settingsByCategory: SettingsByCategory[];
@@ -32,78 +33,60 @@ export const useSettingsStore = defineStore("settings", () => {
 
   // Load all settings grouped by category
   async function loadSettings(forceReload = false) {
-    return await state.withLoading('loadSettings', async () => {
-      // Skip loading if we already have settings and not forcing reload
-      if (!forceReload && state.data.value.settingsByCategory && state.data.value.settingsByCategory.length > 0) {
-        return { success: true, data: state.data.value.settingsByCategory };
-      }
+    // Skip loading if we already have settings and not forcing reload
+    if (!forceReload && state.data.value.settingsByCategory && state.data.value.settingsByCategory.length > 0) {
+      return { success: true, data: state.data.value.settingsByCategory };
+    }
 
-      return await state.callApi({
-        apiCall: () => settingsApi.listSettings(),
-        operationKey: 'loadSettings',
-        onSuccess: (response) => {
-          state.data.value.settingsByCategory = (response as SettingsByCategory[]) || [];
-        },
-        showToast: false,
-      });
+    return await state.callApi({
+      apiCall: () => settingsApi.listSettings(),
+      operationKey: 'loadSettings',
+      onSuccess: (response) => {
+        state.data.value.settingsByCategory = (response as SettingsByCategory[]) || [];
+      },
+      showToast: false,
     });
   }
 
   // Update or create a setting
   async function updateSetting(key: string, data: UpdateSettingRequest) {
-    return await state.withLoading(`updateSetting-${key}`, async () => {
-      const result = await state.callApi({
-        apiCall: () => settingsApi.updateSetting(key, data),
-        successMessage: "Setting updated successfully",
-        operationKey: `updateSetting-${key}`,
-      });
-
-      if (result && result.success) {
-        // Reload settings to ensure frontend state is in sync
+    return await state.callApi({
+      apiCall: () => settingsApi.updateSetting(key, data),
+      successMessage: i18n.global.t("admin.settingUpdated"),
+      operationKey: `updateSetting-${key}`,
+      onSuccess: async () => {
         await loadSettings(true);
-      }
-
-      return result;
+      },
     });
   }
 
   // Delete a setting
   async function deleteSetting(key: string) {
-    return await state.withLoading(`deleteSetting-${key}`, async () => {
-      const result = await state.callApi({
-        apiCall: () => settingsApi.deleteSetting(key),
-        successMessage: "Setting deleted successfully",
-        operationKey: `deleteSetting-${key}`,
-      });
-
-      if (result && result.success) {
-        // Reload settings to ensure frontend state is in sync
+    return await state.callApi({
+      apiCall: () => settingsApi.deleteSetting(key),
+      successMessage: i18n.global.t("admin.settingDeleted"),
+      operationKey: `deleteSetting-${key}`,
+      onSuccess: async () => {
         await loadSettings(true);
-      }
-
-      return result;
+      },
     });
   }
 
   // Send a test email to verify SMTP configuration
   async function testEmail(recipientEmail?: string) {
-    return await state.withLoading('testEmail', async () => {
-      return await state.callApi({
-        apiCall: () => settingsApi.testEmail({ recipient_email: recipientEmail }),
-        successMessage: "Test email sent successfully",
-        operationKey: 'testEmail',
-      });
+    return await state.callApi({
+      apiCall: () => settingsApi.testEmail({ recipient_email: recipientEmail }),
+      successMessage: i18n.global.t("admin.testEmailSent"),
+      operationKey: 'testEmail',
     });
   }
 
   // Send a test webhook to verify webhook configuration
   async function testWebhook(webhookUrl: string) {
-    return await state.withLoading('testWebhook', async () => {
-      return await state.callApi({
-        apiCall: () => settingsApi.testWebhook({ webhook_url: webhookUrl }),
-        successMessage: "Test webhook sent successfully",
-        operationKey: 'testWebhook',
-      });
+    return await state.callApi({
+      apiCall: () => settingsApi.testWebhook({ webhook_url: webhookUrl }),
+      successMessage: i18n.global.t("admin.testWebhookSent"),
+      operationKey: 'testWebhook',
     });
   }
 

@@ -1,12 +1,9 @@
-import { ref } from "vue";
 import type { APIResponse, APIErrorResponse } from "@/api/types";
 import { showErrorToast, isAbortError, hasShownErrorToast } from "@/api/error-handler";
+import { useToast } from "@/composables/useToast";
+import { TOAST_DURATION } from "@/lib/constants";
 
 export function useApiQuery<T>() {
-  const isLoading = ref(false);
-  const error = ref<APIErrorResponse | null>(null);
-  const data = ref<T | null>(null);
-
   const execute = async (
     apiCall: () => Promise<APIResponse<T>>,
     options?: {
@@ -18,23 +15,21 @@ export function useApiQuery<T>() {
       defaultData?: T;  // New option for fallback data
     }
   ) => {
-    isLoading.value = true;
-    error.value = null;
-    
     try {
       const response = await apiCall();
 
       if (response && response.status === "success") {
         // Standard API response format with status and data fields
         const resultData = response.data ?? options?.defaultData ?? null;
-        data.value = resultData;
 
         // Pass data to success handler
         await options?.onSuccess?.(resultData);
+        if (options?.successMessage && options.showToast !== false) {
+          useToast().toast({ title: options.successMessage, duration: TOAST_DURATION.SUCCESS });
+        }
         return { success: true, data: resultData };
       } else {
         // Handle API error response
-        error.value = response as APIErrorResponse;
         if (options?.showToast !== false) {
           showErrorToast(response, options?.errorMessage);
         }
@@ -51,16 +46,14 @@ export function useApiQuery<T>() {
       }
 
       // Handle unexpected errors
-      error.value = err as APIErrorResponse;
+      const error = err as APIErrorResponse;
       if (options?.showToast !== false && !hasShownErrorToast(err)) {
         showErrorToast(err, options?.errorMessage);
       }
-      options?.onError?.(error.value);
-      return { success: false, error: error.value };
-    } finally {
-      isLoading.value = false;
+      options?.onError?.(error);
+      return { success: false, error };
     }
   };
 
-  return { isLoading, error, data, execute };
+  return { execute };
 }

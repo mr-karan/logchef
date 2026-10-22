@@ -4,7 +4,6 @@ import type { Session, User } from "@/types";
 import { authApi, type SessionResponse } from "@/api/auth";
 import router from "@/router";
 import { useBaseStore } from "./base";
-import { useApiQuery } from "@/composables/useApiQuery";
 import { useMetaStore } from "./meta";
 import { useContextStore } from "./context";
 import type { APIErrorResponse } from "@/api/types";
@@ -23,9 +22,6 @@ export const useAuthStore = defineStore("auth", () => {
     isInitialized: false,
     isInitializing: false,
   });
-
-  // Use our API query composable for loading state only
-  const { isLoading: apiLoading } = useApiQuery<SessionResponse>();
 
   // Computed properties
   const user = computed(() => state.data.value.user);
@@ -52,7 +48,6 @@ export const useAuthStore = defineStore("auth", () => {
         const result = await state.callApi({
           apiCall: () => authApi.getSession(),
           showToast: false,
-          operationKey: 'initialize',
           onSuccess: (response: SessionResponse | null) => {
             if (response) {
               state.data.value.user = response.user;
@@ -111,14 +106,12 @@ export const useAuthStore = defineStore("auth", () => {
       const result = await state.callApi({
         apiCall: () => authApi.localLogin(email, password),
         showToast: false,
-        operationKey: 'localLogin',
       });
       if (result.success) {
         // Hydrate user/session state off the fresh cookie.
         const session = await state.callApi({
           apiCall: () => authApi.getSession(),
           showToast: false,
-          operationKey: 'localLogin',
           onSuccess: (response: SessionResponse | null) => {
             if (response) {
               state.data.value.user = response.user;
@@ -140,7 +133,6 @@ export const useAuthStore = defineStore("auth", () => {
         const result = await state.callApi({
           apiCall: () => authApi.logout(),
           showToast: false,
-          operationKey: 'logout'
         });
 
         clearState();
@@ -170,7 +162,7 @@ export const useAuthStore = defineStore("auth", () => {
     logout,
     clearState,
     // Loading state helpers
-    isLoading: computed(() => apiLoading.value || state.isLoading.value),
+    isLoading: state.isLoading,
     isLoadingOperation: state.isLoadingOperation,
   };
 });

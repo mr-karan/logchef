@@ -13,6 +13,7 @@ import type {
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
+import { i18n } from "@/i18n";
 
 type SourceActivityRequestResult = {
   success: boolean;
@@ -291,7 +292,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const result = await state.withLoading("createSource", async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.createSource(payload),
-        successMessage: "Source created successfully",
+        successMessage: i18n.global.t("sources.sourceCreated"),
         operationKey: "createSource"
       });
     });
@@ -308,7 +309,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const result = await state.withLoading(`deleteSource-${id}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.deleteSource(id),
-        successMessage: "Source deleted successfully",
+        successMessage: i18n.global.t("sources.sourceDeleted"),
         operationKey: `deleteSource-${id}`,
         onSuccess: () => {
           // Remove from local state
@@ -561,7 +562,7 @@ export const useSourcesStore = defineStore("sources", () => {
     return await state.withLoading(`updateSource-${id}`, async () => {
       return await state.callApi({
         apiCall: () => sourcesApi.updateSource(id, payload),
-        successMessage: "Source updated successfully",
+        successMessage: i18n.global.t("sources.sourceUpdated"),
         operationKey: `updateSource-${id}`,
         onSuccess: (data) => {
           // Ensure data is treated as a Source object

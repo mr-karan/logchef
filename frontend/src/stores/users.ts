@@ -3,6 +3,7 @@ import { useBaseStore } from "./base";
 import type { User } from "@/types";
 import { usersApi } from "@/api/users";
 import { computed } from "vue";
+import { i18n } from "@/i18n";
 
 interface UsersState {
   users: User[];
@@ -19,22 +20,19 @@ export const useUsersStore = defineStore("users", () => {
   // Use the centralized error handler from base store
 
   async function loadUsers(forceReload = false) {
-    return await state.withLoading('loadUsers', async () => {
-      // Skip loading if we already have users and not forcing reload
-      if (!forceReload && state.data.value.users && state.data.value.users.length > 0) {
-        return { success: true, data: state.data.value.users };
-      }
-      
-      return await state.callApi({
-        apiCall: () => usersApi.listUsers(),
-        operationKey: 'loadUsers',
-        onSuccess: (response) => {
-          // Store the users array from the response - without trying to access response.data
-          // because callApi already extracts the data property from the response
-          state.data.value.users = (response as User[]) || [];
-        },
-        showToast: false,
-      });
+    // Skip loading if we already have users and not forcing reload
+    if (!forceReload && state.data.value.users && state.data.value.users.length > 0) {
+      return { success: true, data: state.data.value.users };
+    }
+    return await state.callApi({
+      apiCall: () => usersApi.listUsers(),
+      operationKey: 'loadUsers',
+      onSuccess: (response) => {
+        // Store the users array from the response - without trying to access response.data
+        // because callApi already extracts the data property from the response
+        state.data.value.users = (response as User[]) || [];
+      },
+      showToast: false,
     });
   }
 
@@ -54,19 +52,13 @@ export const useUsersStore = defineStore("users", () => {
     full_name: string;
     role: "admin" | "member";
   }) {
-    return await state.withLoading('createUser', async () => {
-      const result = await state.callApi({
-        apiCall: () => usersApi.createUser(data),
-        successMessage: "User created successfully",
-        operationKey: 'createUser',
-      });
-      
-      if (result && result.success) {
-        // Reload all users from backend to ensure frontend state is in sync
+    return await state.callApi({
+      apiCall: () => usersApi.createUser(data),
+      successMessage: i18n.global.t("access.userCreated"),
+      operationKey: 'createUser',
+      onSuccess: async () => {
         await loadUsers(true);
-      }
-      
-      return result;
+      },
     });
   }
 
@@ -79,36 +71,24 @@ export const useUsersStore = defineStore("users", () => {
       status?: "active" | "inactive";
     }
   ) {
-    return await state.withLoading(`updateUser-${id}`, async () => {
-      const result = await state.callApi({
-        apiCall: () => usersApi.updateUser(id, data),
-        successMessage: "User updated successfully",
-        operationKey: `updateUser-${id}`,
-      });
-      
-      if (result && result.success) {
-        // Reload all users from backend to ensure frontend state is in sync
+    return await state.callApi({
+      apiCall: () => usersApi.updateUser(id, data),
+      successMessage: i18n.global.t("access.userUpdated"),
+      operationKey: `updateUser-${id}`,
+      onSuccess: async () => {
         await loadUsers(true);
-      }
-      
-      return result;
+      },
     });
   }
 
   async function deleteUser(id: string) {
-    return await state.withLoading(`deleteUser-${id}`, async () => {
-      const result = await state.callApi({
-        apiCall: () => usersApi.deleteUser(id),
-        successMessage: "User deleted successfully",
-        operationKey: `deleteUser-${id}`,
-      });
-      
-      if (result && result.success) {
-        // Reload all users from backend to ensure frontend state is in sync
+    return await state.callApi({
+      apiCall: () => usersApi.deleteUser(id),
+      successMessage: i18n.global.t("access.userDeleted"),
+      operationKey: `deleteUser-${id}`,
+      onSuccess: async () => {
         await loadUsers(true);
-      }
-      
-      return result;
+      },
     });
   }
 

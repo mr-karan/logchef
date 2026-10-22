@@ -38,6 +38,7 @@ import {
   resolveAppliedRange,
   resolveEffectiveCacheTtl,
 } from "@/utils/dashboardRuntime";
+import { i18n } from "@/i18n";
 
 // Number of panel fetches allowed in flight at once. A 24-panel dashboard would
 // otherwise fire 24 (or 48, counting the logchefql translate step) requests at
@@ -272,7 +273,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     return await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.create(req),
       operationKey: "createDashboard",
-      successMessage: "Dashboard created",
+      successMessage: i18n.global.t("dashboards.dashboardCreated"),
       onSuccess: (data) => {
         if (data) {
           state.data.value.dashboards = [data, ...state.data.value.dashboards];
@@ -285,7 +286,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     return await state.callApi<{ id: number }>({
       apiCall: () => dashboardsApi.remove(id),
       operationKey: `deleteDashboard-${id}`,
-      successMessage: "Dashboard deleted",
+      successMessage: i18n.global.t("dashboards.dashboardDeleted"),
       onSuccess: () => {
         state.data.value.dashboards = state.data.value.dashboards.filter((d) => d.id !== id);
         if (state.data.value.current?.id === id) {
@@ -806,7 +807,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     const result = await state.callApi<Dashboard>({
       apiCall: () => dashboardsApi.update(dashboard.id, body),
       operationKey: "saveDashboard",
-      successMessage: "Dashboard saved",
+      successMessage: i18n.global.t("dashboards.dashboardSaved"),
       onSuccess: (data) => {
         // Adopt the saved blob as the live dashboard and re-render.
         if (data) {
