@@ -1864,6 +1864,31 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 	return i, err
 }
 
+const getUserForUpdate = `-- name: GetUserForUpdate :one
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE id = $1 FOR NO KEY UPDATE
+`
+
+// Get a user by ID and lock the row until the transaction ends
+func (q *Queries) GetUserForUpdate(ctx context.Context, id int64) (User, error) {
+	row := q.db.QueryRow(ctx, getUserForUpdate, id)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.Email,
+		&i.FullName,
+		&i.Role,
+		&i.Status,
+		&i.LastLoginAt,
+		&i.LastActiveAt,
+		&i.Managed,
+		&i.AccountType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PasswordHash,
+	)
+	return i, err
+}
+
 const getUserPreferences = `-- name: GetUserPreferences :one
 
 SELECT user_id, preferences_json, created_at, updated_at FROM user_preferences WHERE user_id = $1
@@ -3655,6 +3680,16 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
+const lockAdminInvariant = `-- name: LockAdminInvariant :exec
+SELECT pg_advisory_xact_lock($1)
+`
+
+// Hold a transaction-scoped advisory lock
+func (q *Queries) LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error {
+	_, err := q.db.Exec(ctx, lockAdminInvariant, pgAdvisoryXactLock)
+	return err
+}
+
 const markAlertEvaluated = `-- name: MarkAlertEvaluated :exec
 UPDATE alerts
 SET last_state = 'resolved',
@@ -4539,6 +4574,21 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) error {
 		arg.UpdatedAt,
 		arg.ID,
 	)
+	return err
+}
+
+const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
+UPDATE users SET last_login_at = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateUserLastLoginParams struct {
+	ID          int64              `json:"id"`
+	LastLoginAt pgtype.Timestamptz `json:"last_login_at"`
+}
+
+// Record a login without rewriting the rest of the user row
+func (q *Queries) UpdateUserLastLogin(ctx context.Context, arg UpdateUserLastLoginParams) error {
+	_, err := q.db.Exec(ctx, updateUserLastLogin, arg.ID, arg.LastLoginAt)
 	return err
 }
 

@@ -224,3 +224,97 @@ func TestEmailNormalizedOnCreateAndLookup(t *testing.T) {
 		t.Fatalf("duplicate case-variant create: err = %v, want ErrConflict", err)
 	}
 }
+
+func TestDemoteAdmin(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		otherAdmin bool
+		deactivate bool
+		wantErr    error
+	}{
+		{"sole admin", false, false, ErrCannotDeleteLastAdmin},
+		{"one of two admins", true, false, nil},
+		{"sole admin demoted and deactivated", false, true, ErrCannotDeleteLastAdmin},
+		{"one of two admins demoted and deactivated", true, true, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newTestDB(t)
+			ctx := context.Background()
+			admin := newTestAdmin(t, db, "admin@example.com")
+			if tc.otherAdmin {
+				newTestAdmin(t, db, "other@example.com")
+			}
+			session := &models.Session{ID: "admin-session", UserID: admin.ID, ExpiresAt: time.Now().Add(time.Hour)}
+			if err := db.CreateSession(ctx, session); err != nil {
+				t.Fatal(err)
+			}
+			update := models.User{Role: models.UserRoleMember}
+			if tc.deactivate {
+				update.Status = models.UserStatusInactive
+			}
+			err := UpdateUser(ctx, db, discardLogger(), admin.ID, update)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("UpdateUser = %v, want %v", err, tc.wantErr)
+			}
+			got, err := db.GetUser(ctx, admin.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRole := models.UserRoleMember
+			if tc.wantErr != nil {
+				wantRole = models.UserRoleAdmin
+			}
+			if got.Role != wantRole {
+				t.Fatalf("role = %q, want %q", got.Role, wantRole)
+			}
+			if count, err := db.CountAdminUsers(ctx); err != nil || count != 1 {
+				t.Fatalf("active admins = %d, %v, want 1", count, err)
+			}
+			wantSessions := 1
+			if tc.wantErr == nil && tc.deactivate {
+				wantSessions = 0
+			}
+			if count, err := db.CountUserSessions(ctx, admin.ID); err != nil || count != wantSessions {
+				t.Fatalf("sessions = %d, %v, want %d", count, err, wantSessions)
+			}
+		})
+	}
+}
+
+func TestConcurrentAdminDemotionKeepsOneAdmin(t *testing.T) {
+	t.Parallel()
+	db := newTestDB(t)
+	ctx := context.Background()
+	admins := []*models.User{
+		newTestAdmin(t, db, "admin-a@example.com"),
+		newTestAdmin(t, db, "admin-b@example.com"),
+	}
+	var wg sync.WaitGroup
+	errs := make([]error, len(admins))
+	wg.Add(len(admins))
+	for i, admin := range admins {
+		go func() {
+			defer wg.Done()
+			errs[i] = UpdateUser(ctx, db, discardLogger(), admin.ID, models.User{Role: models.UserRoleMember})
+		}()
+	}
+	wg.Wait()
+	var success, rejected int
+	for _, err := range errs {
+		switch {
+		case err == nil:
+			success++
+		case errors.Is(err, ErrCannotDeleteLastAdmin):
+			rejected++
+		default:
+			t.Fatalf("unexpected error: %v", err)
+		}
+	}
+	if success != 1 || rejected != 1 {
+		t.Fatalf("success=%d rejected=%d, want 1/1", success, rejected)
+	}
+	if count, err := db.CountAdminUsers(ctx); err != nil || count != 1 {
+		t.Fatalf("active admins = %d, %v, want 1", count, err)
+	}
+}

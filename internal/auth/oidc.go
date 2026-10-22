@@ -331,11 +331,9 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 	}
 
 	// Update user's last login time (best effort).
-	now := time.Now()
-	updateData := models.User{LastLoginAt: &now}
-	if err := core.UpdateUser(ctx, db, log, user.ID, updateData); err != nil {
+	if err := db.UpdateUserLastLogin(ctx, user.ID, time.Now().UTC()); err != nil {
 		// Log failure but don't block login.
-		p.log.Error("failed to update user last login via core function", "error", err, "user_id", user.ID)
+		p.log.Error("failed to update user last login", "error", err, "user_id", user.ID)
 	}
 
 	// Create a new application session for the user.

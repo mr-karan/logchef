@@ -93,6 +93,12 @@ func (db *DB) GetUser(ctx context.Context, id models.UserID) (*models.User, erro
 	return mapUserRowToModel(userRow), nil
 }
 
+// GetUserForUpdate retrieves a user by ID. BEGIN IMMEDIATE already
+// serializes writers, so no row lock is needed.
+func (db *DB) GetUserForUpdate(ctx context.Context, id models.UserID) (*models.User, error) {
+	return db.GetUser(ctx, id)
+}
+
 // GetUserByEmail retrieves a single user by their email address.
 // Returns core.ErrUserNotFound if not found.
 func (db *DB) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
@@ -144,6 +150,17 @@ func (db *DB) UpdateUser(ctx context.Context, user *models.User) error {
 	return nil
 }
 
+// UpdateUserLastLogin records a user's last login time.
+func (db *DB) UpdateUserLastLogin(ctx context.Context, id models.UserID, at time.Time) error {
+	if err := db.writeQueries.UpdateUserLastLogin(ctx, sqlc.UpdateUserLastLoginParams{
+		LastLoginAt: sql.NullTime{Time: at, Valid: true},
+		ID:          int64(id),
+	}); err != nil {
+		return fmt.Errorf("failed to update user last login: %w", err)
+	}
+	return nil
+}
+
 // ListUsers retrieves all user records, ordered by creation date.
 func (db *DB) ListUsers(ctx context.Context) ([]*models.User, error) {
 
@@ -182,6 +199,11 @@ func (db *DB) ListServiceAccounts(ctx context.Context) ([]*models.User, error) {
 	}
 
 	return users, nil
+}
+
+// LockAdminInvariant is a no-op: BEGIN IMMEDIATE already serializes writers.
+func (db *DB) LockAdminInvariant(context.Context) error {
+	return nil
 }
 
 // CountAdminUsers counts active users with the admin role.

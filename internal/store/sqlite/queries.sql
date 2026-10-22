@@ -72,6 +72,10 @@ SET email = ?,
     updated_at = ?
 WHERE id = ?;
 
+-- name: UpdateUserLastLogin :exec
+-- Record a login without rewriting the rest of the user row
+UPDATE users SET last_login_at = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;
+
 -- name: ListUsers :many
 -- List all users
 SELECT * FROM users ORDER BY created_at ASC;

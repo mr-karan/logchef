@@ -52,6 +52,10 @@ RETURNING id;
 -- Get a user by ID
 SELECT * FROM users WHERE id = $1;
 
+-- name: GetUserForUpdate :one
+-- Get a user by ID and lock the row until the transaction ends
+SELECT * FROM users WHERE id = $1 FOR NO KEY UPDATE;
+
 -- name: GetUserByEmail :one
 -- Get a user by email
 SELECT * FROM users WHERE email = $1;
@@ -72,6 +76,10 @@ SET email = $1,
     updated_at = $7
 WHERE id = $8;
 
+-- name: UpdateUserLastLogin :exec
+-- Record a login without rewriting the rest of the user row
+UPDATE users SET last_login_at = $2, updated_at = now() WHERE id = $1;
+
 -- name: ListUsers :many
 -- List all users
 SELECT * FROM users ORDER BY created_at ASC;
@@ -83,6 +91,10 @@ SELECT * FROM users WHERE account_type = 'service' ORDER BY created_at ASC;
 -- name: CountAdminUsers :one
 -- Count active admin users
 SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2;
+
+-- name: LockAdminInvariant :exec
+-- Hold a transaction-scoped advisory lock
+SELECT pg_advisory_xact_lock($1);
 
 -- name: DeleteUser :exec
 -- Delete a user by ID
