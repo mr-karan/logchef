@@ -10,6 +10,7 @@ import (
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -56,7 +57,7 @@ func TestHistogramTimeRangeValidation(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tc.req.QueryText = "SELECT * FROM logs"
-			_, err := PrepareHistogram(tc.req)
+			_, err := prepareHistogram(tc.req, template.ClickHouseSQL)
 			if (err != nil) != tc.invalid {
 				t.Fatalf("validation error = %v, invalid = %v", err, tc.invalid)
 			}
@@ -74,12 +75,12 @@ func TestPrepareSQLQuery(t *testing.T) {
 	}
 	tooLong := 61
 
-	params, err := PrepareSQLQuery(cfg, models.APIQueryRequest{
+	params, err := prepareSQLQuery(cfg, models.APIQueryRequest{
 		QueryText: "SELECT * FROM logs WHERE level = {{level}}",
 		Variables: []models.TemplateVariable{{Name: "level", Type: "string", Value: "error"}},
 		StartTime: "2026-04-08T00:00:00Z",
 		EndTime:   "2026-04-08T01:00:00Z",
-	})
+	}, template.ClickHouseSQL)
 	if err != nil {
 		t.Fatalf("PrepareSQLQuery: %v", err)
 	}
@@ -99,11 +100,11 @@ func TestPrepareSQLQuery(t *testing.T) {
 		want string
 	}{
 		{"timeout over max", models.APIQueryRequest{QueryText: "SELECT 1", QueryTimeout: &tooLong}, "Query timeout cannot exceed 60 seconds for Run"},
-		{"variables missing", models.APIQueryRequest{QueryText: "SELECT {{a}}"}, "Query contains template variables (a) but no variables were provided. Please define variable values before executing."},
+		{"variables missing", models.APIQueryRequest{QueryText: "SELECT {{a}}"}, "Variable substitution failed: undefined variable: {{a}}"},
 		{"half a time range", models.APIQueryRequest{QueryText: "SELECT 1", StartTime: "2026-04-08T00:00:00Z"}, "start_time and end_time must both be provided"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := PrepareSQLQuery(cfg, tc.req)
+			_, err := prepareSQLQuery(cfg, tc.req, template.ClickHouseSQL)
 			reqErr, ok := errors.AsType[*QueryRequestError](err)
 			if !ok || reqErr.Message != tc.want {
 				t.Fatalf("error = %v, want QueryRequestError %q", err, tc.want)
@@ -173,18 +174,18 @@ func TestStreamFilterValidation(t *testing.T) {
 	cfg := config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 30, MaxTimeoutSeconds: 60}
 	malformed := []string{`[{"app":"api"}]`}
 
-	if _, err := PrepareSQLQuery(cfg, models.APIQueryRequest{QueryText: "*", ExtraStreamFilters: malformed}); !isQueryRequestError(err) {
+	if _, err := prepareSQLQuery(cfg, models.APIQueryRequest{QueryText: "*", ExtraStreamFilters: malformed}, template.ClickHouseSQL); !isQueryRequestError(err) {
 		t.Fatalf("PrepareSQLQuery malformed filter: %v, want QueryRequestError", err)
 	}
-	if _, err := PrepareHistogram(models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: malformed}); !isQueryRequestError(err) {
+	if _, err := prepareHistogram(models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: malformed}, template.ClickHouseSQL); !isQueryRequestError(err) {
 		t.Fatalf("PrepareHistogram malformed filter: %v, want QueryRequestError", err)
 	}
 	picker := []string{`{"app":["api"]}`, `{env="prod"}`}
-	params, err := PrepareSQLQuery(cfg, models.APIQueryRequest{QueryText: "*", ExtraStreamFilters: picker})
+	params, err := prepareSQLQuery(cfg, models.APIQueryRequest{QueryText: "*", ExtraStreamFilters: picker}, template.ClickHouseSQL)
 	if err != nil || len(params.ExtraStreamFilters) != 2 {
 		t.Fatalf("PrepareSQLQuery picker filters: %+v, %v", params.ExtraStreamFilters, err)
 	}
-	histogram, err := PrepareHistogram(models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: picker})
+	histogram, err := prepareHistogram(models.APIHistogramRequest{QueryText: "*", ExtraStreamFilters: picker}, template.ClickHouseSQL)
 	if err != nil || len(histogram.ExtraStreamFilters) != 2 {
 		t.Fatalf("PrepareHistogram picker filters: %+v, %v", histogram.ExtraStreamFilters, err)
 	}

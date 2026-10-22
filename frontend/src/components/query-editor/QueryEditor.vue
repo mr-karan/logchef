@@ -474,7 +474,7 @@ import { useExploreStore } from "@/stores/explore";
 import { useMetaStore } from "@/stores/meta";
 import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
-import { useVariables, extractVariablesWithOptional, extractVariableNames } from "@/composables/useVariables.ts";
+import { useVariables, extractVariablesWithOptional } from "@/composables/useVariables.ts";
 import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
 import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
@@ -693,11 +693,11 @@ const handleEditorChange = (value: string | undefined) => {
 const detectVariables = (value: string) => {
   if (typeof value !== 'string') return;
 
-  const isSqlMode = props.activeMode === 'clickhouse-sql';
-  const extractedVars = isSqlMode 
-    ? extractVariablesWithOptional(value)
-    : extractVariableNames(value).map(name => ({ name, isOptional: false }));
-  
+  const dialect = props.activeMode === 'logchefql'
+    ? 'logchefql'
+    : isVictoriaLogsSource.value ? 'logsql' : 'clickhouse-sql';
+  const extractedVars = extractVariablesWithOptional(value, dialect);
+
   const currentVariables = allVariables?.value ?? [];
   const extractedNames = extractedVars.map(v => v.name);
 

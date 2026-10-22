@@ -34,6 +34,8 @@ func TestSubstituteLogchefQLVariables(t *testing.T) {
 		{"empty", `p.tcode={{code}}`, []Variable{{Name: "code", Type: TypeText, Value: ""}}, "", true},
 		{"invalid number", `p.tcode={{code}}`, []Variable{{Name: "code", Type: TypeNumber, Value: "1 or x=1"}}, "", true},
 		{"array", `p.tcode={{code}}`, []Variable{{Name: "code", Type: TypeText, Value: []string{"a", "b"}}}, "", true},
+		{"optional expression", `level="ERROR" [[p.tcode={{code}}]]`, nil, `level="ERROR" `, false},
+		{"literal brackets", `msg="[[info]]"`, nil, `msg="[[info]]"`, false},
 		{"optional", `level="ERROR" [[and p.tcode={{code}}]]`, nil, `level="ERROR" `, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {

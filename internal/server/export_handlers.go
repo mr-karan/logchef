@@ -113,22 +113,18 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // reque
 			models.ValidationErrorType)
 	}
 
-	processedSQL := req.RawSQL
-	if len(req.Variables) > 0 {
-		vars := make([]template.Variable, len(req.Variables))
-		for i, v := range req.Variables {
-			vars[i] = template.Variable{
-				Name:  v.Name,
-				Type:  template.VariableType(v.Type),
-				Value: v.Value,
-			}
+	vars := make([]template.Variable, len(req.Variables))
+	for i, v := range req.Variables {
+		vars[i] = template.Variable{
+			Name:  v.Name,
+			Type:  template.VariableType(v.Type),
+			Value: v.Value,
 		}
-		substituted, err := template.SubstituteVariables(req.RawSQL, vars)
-		if err != nil {
-			return SendErrorWithType(c, fiber.StatusBadRequest,
-				fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
-		}
-		processedSQL = substituted
+	}
+	processedSQL, err := template.SubstituteVariables(req.RawSQL, vars)
+	if err != nil {
+		return SendErrorWithType(c, fiber.StatusBadRequest,
+			fmt.Sprintf("Variable substitution failed: %v", err), models.ValidationErrorType)
 	}
 
 	client, err := s.clickhouse.GetConnection(sourceID)

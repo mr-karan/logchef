@@ -10,6 +10,11 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+// LoadSource returns the stored source without contacting the log backend.
+func (s *Service) LoadSource(ctx context.Context, sourceID models.SourceID) (*models.Source, error) {
+	return s.loadSource(ctx, sourceID)
+}
+
 func (s *Service) GetSource(ctx context.Context, sourceID models.SourceID) (*models.Source, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {

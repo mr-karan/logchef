@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/ClickHouse/clickhouse-go/v2"
+
+	"github.com/mr-karan/logchef/internal/queryescape"
 )
 
 const (
@@ -73,7 +74,7 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 			database,
 			table
 		ORDER BY size DESC
-	`, database, table) // Note: ORDER BY might not be necessary if only one row is expected.
+	`, queryescape.ClickHouseString(database), queryescape.ClickHouseString(table))
 
 	queryCtx, cancel := c.statsQueryContext(ctx, tableStatsTimeoutSeconds)
 	defer cancel()
@@ -128,15 +129,6 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 	return &stats[0], nil
 }
 
-func quoteIdentifier(name string) string {
-	trimmed := strings.TrimSpace(name)
-	if strings.HasPrefix(trimmed, "`") && strings.HasSuffix(trimmed, "`") {
-		return trimmed
-	}
-	escaped := strings.ReplaceAll(trimmed, "`", "``")
-	return "`" + escaped + "`"
-}
-
 type ingestionActivityRow struct {
 	bucket time.Time
 	rows   uint64
@@ -148,8 +140,8 @@ func ingestionActivityQuery(database, table, timestampField string) (string, err
 	if timestampField == "" {
 		return "", fmt.Errorf("timestamp field is required for ingestion stats")
 	}
-	tsField := quoteIdentifier(timestampField)
-	qualifiedTable := fmt.Sprintf("%s.%s", quoteIdentifier(database), quoteIdentifier(table))
+	tsField := queryescape.ClickHouseIdentifier(timestampField)
+	qualifiedTable := fmt.Sprintf("%s.%s", queryescape.ClickHouseIdentifier(database), queryescape.ClickHouseIdentifier(table))
 	return fmt.Sprintf(`
 		WITH now64(3) AS anchor
 		SELECT toStartOfHour(%s) AS bucket,
