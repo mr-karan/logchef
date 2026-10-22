@@ -11,6 +11,25 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
+func teamToModel(row sqlc.Team) *models.Team {
+	return &models.Team{
+		ID:          models.TeamID(row.ID),
+		Name:        row.Name,
+		Description: row.Description.String,
+		Managed:     row.Managed == 1,
+		Timestamps:  models.Timestamps{CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt},
+	}
+}
+
+func teamMemberToModel(row sqlc.TeamMember) *models.TeamMember {
+	return &models.TeamMember{
+		TeamID:    models.TeamID(row.TeamID),
+		UserID:    models.UserID(row.UserID),
+		Role:      models.TeamRole(row.Role),
+		CreatedAt: row.CreatedAt,
+	}
+}
+
 // Team methods
 
 // CreateTeam inserts a new team record.
@@ -49,26 +68,15 @@ func (db *DB) CreateTeam(ctx context.Context, team *models.Team) error {
 }
 
 // GetTeam retrieves a single team by its ID.
-// Returns core.ErrTeamNotFound if not found.
+// Returns models.ErrNotFound if not found.
 func (db *DB) GetTeam(ctx context.Context, teamID models.TeamID) (*models.Team, error) {
 
 	teamRow, err := db.readQueries.GetTeam(ctx, int64(teamID))
 	if err != nil {
-		return nil, handleNotFoundError(err, fmt.Sprintf("getting team id %d", teamID))
+		return nil, fmt.Errorf("getting team id %d: %w", teamID, translateNotFound(err))
 	}
 
-	// Map sqlc result to domain model.
-	team := &models.Team{
-		ID:          models.TeamID(teamRow.ID),
-		Name:        teamRow.Name,
-		Description: teamRow.Description.String,
-		Timestamps: models.Timestamps{
-			CreatedAt: teamRow.CreatedAt,
-			UpdatedAt: teamRow.UpdatedAt,
-		},
-		Managed: teamRow.Managed == 1,
-	}
-	return team, nil
+	return teamToModel(teamRow), nil
 }
 
 // UpdateTeam updates an existing team record.
@@ -119,16 +127,16 @@ func (db *DB) ListTeams(ctx context.Context) ([]*models.Team, error) {
 	// Map sqlc result rows to domain model slice.
 	teams := make([]*models.Team, 0, len(teamRows))
 	for _, row := range teamRows {
-		teams = append(teams, &models.Team{
-			ID:          models.TeamID(row.ID),
+		team := teamToModel(sqlc.Team{
+			ID:          row.ID,
 			Name:        row.Name,
-			Description: row.Description.String,
-			MemberCount: int(row.MemberCount), // Include member count from query.
-			Timestamps: models.Timestamps{
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
-			},
+			Description: row.Description,
+			CreatedAt:   row.CreatedAt,
+			UpdatedAt:   row.UpdatedAt,
+			Managed:     row.Managed,
 		})
+		team.MemberCount = int(row.MemberCount)
+		teams = append(teams, team)
 	}
 
 	return teams, nil
@@ -144,13 +152,13 @@ func (db *DB) AddTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 	// Check team existence (optional, FK constraint might handle).
 	_, err := db.GetTeam(ctx, teamID)
 	if err != nil {
-		return fmt.Errorf("failed checking team existence: %w", err) // Could be ErrTeamNotFound
+		return fmt.Errorf("failed checking team existence: %w", err)
 	}
 
 	// Check user existence (optional, FK constraint might handle).
 	_, err = db.GetUser(ctx, userID)
 	if err != nil {
-		return fmt.Errorf("failed checking user existence: %w", err) // Could be ErrUserNotFound
+		return fmt.Errorf("failed checking user existence: %w", err)
 	}
 
 	params := sqlc.AddTeamMemberParams{
@@ -177,7 +185,6 @@ func (db *DB) GetTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 		UserID: int64(userID),
 	})
 	if err != nil {
-		// Map ErrNoRows to nil, nil for "not found".
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -185,14 +192,7 @@ func (db *DB) GetTeamMember(ctx context.Context, teamID models.TeamID, userID mo
 		return nil, fmt.Errorf("error getting team member: %w", err)
 	}
 
-	// Map sqlc result to domain model.
-	member := &models.TeamMember{
-		TeamID:    models.TeamID(memberRow.TeamID),
-		UserID:    models.UserID(memberRow.UserID),
-		Role:      models.TeamRole(memberRow.Role),
-		CreatedAt: memberRow.CreatedAt,
-	}
-	return member, nil
+	return teamMemberToModel(memberRow), nil
 }
 
 // UpdateTeamMemberRole updates the role of an existing team member.
@@ -252,15 +252,14 @@ func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.Team
 		if accountType == "" {
 			accountType = models.UserAccountTypeHuman
 		}
-		members = append(members, &models.TeamMember{
-			TeamID:      models.TeamID(row.TeamID),
-			UserID:      models.UserID(row.UserID),
-			Role:        models.TeamRole(row.Role),
-			Email:       row.Email,
-			FullName:    row.FullName,
-			AccountType: accountType,
-			CreatedAt:   row.CreatedAt,
+		member := teamMemberToModel(sqlc.TeamMember{
+			TeamID:    row.TeamID,
+			UserID:    row.UserID,
+			Role:      row.Role,
+			CreatedAt: row.CreatedAt,
 		})
+		member.Email, member.FullName, member.AccountType = row.Email, row.FullName, accountType
+		members = append(members, member)
 	}
 
 	return members, nil
@@ -278,16 +277,7 @@ func (db *DB) ListUserTeams(ctx context.Context, userID models.UserID) ([]*model
 	// Map results to domain model.
 	teams := make([]*models.Team, 0, len(teamRows))
 	for _, row := range teamRows {
-		teams = append(teams, &models.Team{
-			ID:          models.TeamID(row.ID),
-			Name:        row.Name,
-			Description: row.Description.String,
-			Timestamps: models.Timestamps{
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
-			},
-			// MemberCount not included in this query.
-		})
+		teams = append(teams, teamToModel(row))
 	}
 
 	return teams, nil
@@ -360,15 +350,7 @@ func (db *DB) ListSourceTeams(ctx context.Context, sourceID models.SourceID) ([]
 	// Map results.
 	teams := make([]*models.Team, 0, len(teamRows))
 	for _, row := range teamRows {
-		teams = append(teams, &models.Team{
-			ID:          models.TeamID(row.ID),
-			Name:        row.Name,
-			Description: row.Description.String,
-			Timestamps: models.Timestamps{
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
-			},
-		})
+		teams = append(teams, teamToModel(row))
 	}
 
 	return teams, nil
@@ -400,22 +382,10 @@ func (db *DB) GetTeamByName(ctx context.Context, name string) (*models.Team, err
 
 	teamRow, err := db.readQueries.GetTeamByName(ctx, name)
 	if err != nil {
-		// Use handleNotFoundError for consistent not-found mapping.
-		return nil, handleNotFoundError(err, fmt.Sprintf("getting team name %s", name))
+		return nil, fmt.Errorf("getting team name %s: %w", name, translateNotFound(err))
 	}
 
-	// Map result.
-	team := &models.Team{
-		ID:          models.TeamID(teamRow.ID),
-		Name:        teamRow.Name,
-		Description: teamRow.Description.String,
-		Timestamps: models.Timestamps{
-			CreatedAt: teamRow.CreatedAt,
-			UpdatedAt: teamRow.UpdatedAt,
-		},
-		Managed: teamRow.Managed == 1,
-	}
-	return team, nil
+	return teamToModel(teamRow), nil
 }
 
 // TeamHasSource checks if a specific team has been granted access to a specific source.

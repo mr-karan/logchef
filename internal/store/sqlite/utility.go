@@ -10,30 +10,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// Define standard error types. ErrNotFound and ErrUniqueConstraint are aliases
-// of the canonical backend-neutral sentinels in pkg/models, so an error from
-// this package satisfies errors.Is(err, models.ErrNotFound) / models.ErrConflict
-// and the Postgres backend (which returns the models sentinels directly) is
-// classified identically by the helpers below.
 var (
-	// ErrNotFound is returned when a resource is not found
-	ErrNotFound = models.ErrNotFound
-
-	// ErrUserNotFound is returned when a user is not found
-	ErrUserNotFound = fmt.Errorf("%w: user", ErrNotFound)
-
-	// ErrTeamNotFound is returned when a team is not found
-	ErrTeamNotFound = fmt.Errorf("%w: team", ErrNotFound)
-
-	// ErrSourceNotFound is returned when a source is not found
-	ErrSourceNotFound = fmt.Errorf("%w: source", ErrNotFound)
-
-	// ErrSessionNotFound is returned when a session is not found
-	ErrSessionNotFound = fmt.Errorf("%w: session", ErrNotFound)
-
-	// ErrQueryNotFound is returned when a query is not found
-	ErrQueryNotFound = fmt.Errorf("%w: query", ErrNotFound)
-
 	// ErrUniqueConstraint is returned when a unique constraint is violated
 	ErrUniqueConstraint = models.ErrConflict
 
@@ -47,9 +24,7 @@ var (
 	ErrSourceExists = fmt.Errorf("%w: source with this identity already exists", ErrUniqueConstraint)
 )
 
-// translateNotFound maps the driver's no-rows error to the backend-neutral
-// models.ErrNotFound sentinel (so callers see the same error as the Postgres
-// backend); any other error passes through unchanged.
+// translateNotFound gives callers a backend-neutral missing-resource error.
 func translateNotFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
 		return models.ErrNotFound
@@ -127,49 +102,11 @@ func isUniqueConstraintSQLiteError(err error, table, column string) bool {
 	return false
 }
 
-// wrapError wraps an error with additional context
-func wrapError(err error, format string, args ...any) error {
-	if err == nil {
-		return nil
-	}
-	return fmt.Errorf(format+": %w", append(args, err)...)
-}
-
-// handleNotFoundError checks if the error is sql.ErrNoRows and maps it
-// to appropriate application-level not found errors based on the provided resource type.
 func handleNotFoundError(err error, prefix string) error {
 	if err == nil {
 		return nil
 	}
-
-	if errors.Is(err, sql.ErrNoRows) {
-		// Map to specific resource error types
-		// Note: Order matters - check more specific patterns first (e.g., "query" before "team"
-		// since "team query" should match query, not team)
-		if strings.Contains(prefix, "user") {
-			if strings.Contains(prefix, "email") {
-				return wrapError(ErrUserNotFound, "getting user email %s", strings.TrimPrefix(prefix, "getting user email "))
-			}
-			return wrapError(ErrUserNotFound, prefix)
-		}
-		if strings.Contains(prefix, "query") {
-			return wrapError(ErrQueryNotFound, prefix)
-		}
-		if strings.Contains(prefix, "team") {
-			return wrapError(ErrTeamNotFound, prefix)
-		}
-		if strings.Contains(prefix, "source") {
-			return wrapError(ErrSourceNotFound, prefix)
-		}
-		if strings.Contains(prefix, "session") {
-			return wrapError(ErrSessionNotFound, prefix)
-		}
-		// Generic not found error
-		return wrapError(ErrNotFound, prefix)
-	}
-
-	// For other errors, just wrap them with the prefix
-	return wrapError(err, prefix)
+	return fmt.Errorf("%s: %w", prefix, translateNotFound(err))
 }
 
 // handleUniqueConstraintError maps SQLite unique constraint errors to specific domain errors
@@ -181,13 +118,13 @@ func handleUniqueConstraintError(err error, table, column, value string) error {
 	if isUniqueConstraintSQLiteError(err, table, column) {
 		switch {
 		case table == "users" && column == "email":
-			return wrapError(ErrUserExists, "email %s", value)
+			return fmt.Errorf("email %s: %w", value, ErrUserExists)
 		case table == "teams" && column == "name":
-			return wrapError(ErrTeamExists, "name %s", value)
+			return fmt.Errorf("name %s: %w", value, ErrTeamExists)
 		case table == "sources" && (column == "name" || column == "identity_key"):
-			return wrapError(ErrSourceExists, value)
+			return fmt.Errorf("%s: %w", value, ErrSourceExists)
 		default:
-			return wrapError(ErrUniqueConstraint, "%s.%s: %s", table, column, value)
+			return fmt.Errorf("%s.%s: %s: %w", table, column, value, ErrUniqueConstraint)
 		}
 	}
 

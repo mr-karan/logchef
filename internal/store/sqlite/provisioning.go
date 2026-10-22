@@ -3,7 +3,6 @@ package sqlite
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
 	"github.com/mr-karan/logchef/internal/store/sqlite/sqlc"
@@ -53,16 +52,7 @@ func (db *DB) ListManagedTeams(ctx context.Context) ([]*models.Team, error) {
 	}
 	teams := make([]*models.Team, 0, len(rows))
 	for _, row := range rows {
-		teams = append(teams, &models.Team{
-			ID:          models.TeamID(row.ID),
-			Name:        row.Name,
-			Description: row.Description.String,
-			Timestamps: models.Timestamps{
-				CreatedAt: row.CreatedAt,
-				UpdatedAt: row.UpdatedAt,
-			},
-			Managed: row.Managed == 1,
-		})
+		teams = append(teams, teamToModel(row))
 	}
 	return teams, nil
 }
@@ -72,11 +62,7 @@ func (db *DB) ListManagedTeams(ctx context.Context) ([]*models.Team, error) {
 func (db *DB) GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error) {
 	row, err := db.readQueries.GetSourceByNameForProvisioning(ctx, name)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, models.ErrNotFound
-		}
-		db.log.Error("failed to get source by name for provisioning", "error", err, "name", name)
-		return nil, fmt.Errorf("error getting source by name: %w", err)
+		return nil, fmt.Errorf("error getting source by name: %w", translateNotFound(err))
 	}
 	return mapSourceRowToModel(&row), nil
 }
