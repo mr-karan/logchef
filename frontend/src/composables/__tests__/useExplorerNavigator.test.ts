@@ -21,6 +21,8 @@ import { useVariableStore } from "@/stores/variables";
 import { epochMs, parseZoneId, sqlTimeCondition, type TimeWindow } from "@/utils/timeWindow";
 import { exploreWindowQuery } from "@/utils/alertExplore";
 import { contextRouterGuard } from "@/router/contextGuard";
+import { controlledApi } from "@/test/controlledApi";
+import { setForbiddenHandler } from "@/api/config";
 import { i18n } from "@/i18n";
 import FieldSideBar from "@/components/field-sidebar/FieldSideBar.vue";
 import WindowedSearchPanel from "@/views/explore/components/WindowedSearchPanel.vue";
@@ -296,17 +298,113 @@ describe("Explorer history navigation", () => {
 
   it.each(["url", "share", "saved"])("rejects a member's %s link outside team memberships without running elsewhere", async (entry) => {
     const location: Record<string, string> = entry === "share" ? { share: "tok" } : entry === "saved" ? { id: "42" } : { team: "14", source: "140", q: 'level="error"' };
-    const { router, query, nav } = await mountExplorer(location, () => {
+    const network = controlledApi(config => config.url === "/teams/14/sources");
+    const denied = vi.fn();
+    setForbiddenHandler(denied);
+    const opening = mountExplorer(location, () => {
+      vi.mocked(sourcesApi.listTeamSources).mockRestore();
       vi.spyOn(exploreApi, "getQueryShare").mockReturnValue(ok({ ...shareOnOtherSource, team_id: 14, source_id: 140 }) as never);
       vi.spyOn(savedQueriesApi, "resolve").mockReturnValue(ok({ ...savedOnOtherSource, resolved_team_id: 14, source_id: 140, query_content: savedContent('level="error"') }) as never);
     });
-    await settle();
+    try {
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      network.requests[0]?.respond(403, { status: "error", message: "Membership required", error_type: "AuthorizationError" });
+      const { router, query, nav } = await opening;
+      await settle();
 
+      expect(denied).toHaveBeenCalledOnce();
+      expect(nav.status.value).toBe("error");
+      expect(nav.error.value).toBe(i18n.global.t("explore.teamAccessDenied"));
+      expect(query).not.toHaveBeenCalled();
+      expect(router.currentRoute.value.query).toEqual(location);
+    } finally {
+      await opening;
+      network.restore();
+      setForbiddenHandler(() => {});
+    }
+  });
+
+  it("shows the teams load failure for an explicit team instead of denying access", async () => {
+    const { nav, query } = await mountExplorer({ team: "14", source: "140" }, () => {
+      vi.mocked(teamsApi.listUserTeams).mockRejectedValue({ status: "error", message: "Unavailable", error_type: "ServerError" });
+    });
     expect(nav.status.value).toBe("error");
-    expect(nav.error.value).toBeTruthy();
+    expect(nav.error.value).toBe(i18n.global.t("access.loadTeamsFailed"));
     expect(query).not.toHaveBeenCalled();
     expect(sourcesApi.listTeamSources).not.toHaveBeenCalled();
-    expect(router.currentRoute.value.query).toEqual(location);
+  });
+
+  it("opens a newly granted team even while the memberships list is stale", async () => {
+    const granted = { ...source, id: 140 };
+    const { nav, query } = await mountExplorer({ team: "14", source: "140" }, () => {
+      vi.mocked(sourcesApi.listTeamSources).mockImplementation(teamId => ok(teamId === 14 ? [granted] : sourcesOfTeam(teamId)));
+      vi.mocked(sourcesApi.getTeamSource).mockReturnValue(ok(granted));
+    });
+    await settle();
+    expect(nav.status.value).toBe("ready");
+    expect(query.mock.lastCall?.slice(0, 2)).toEqual([14, 140]);
+  });
+
+  it("does not request abandoned source details after a pending team pick is superseded", async () => {
+    const { nav, query } = await mountExplorer(evidenceA);
+    await settle();
+    const ready = deferred();
+    vi.mocked(sourcesApi.listTeamSources).mockImplementation(async teamId => {
+      if (teamId === otherTeam.id) await ready.done;
+      return ok(sourcesOfTeam(teamId));
+    });
+    const before = query.mock.calls.length;
+    await nav.selectTeam(otherTeam.id);
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.anything()));
+    await nav.selectTeam(team.id);
+    await flush();
+    ready.release();
+    await flush();
+    await flush();
+    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
+    expect(nav.status.value).toBe("ready");
+    expect(query).toHaveBeenCalledTimes(before);
+  });
+
+  it("retries invalidated metadata before requesting source details", async () => {
+    const { nav, query } = await mountExplorer(evidenceA);
+    await settle();
+    const ready = deferred();
+    vi.mocked(sourcesApi.listTeamSources)
+      .mockImplementationOnce(async () => { await ready.done; return ok([otherTeamSource]); })
+      .mockImplementation(teamId => ok(teamId === otherTeam.id ? [] : sourcesOfTeam(teamId)));
+    await nav.selectTeam(otherTeam.id);
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.anything()));
+    useSourcesStore().invalidateTeamSources();
+    ready.release();
+    await vi.waitFor(() => expect(nav.status.value).toBe("ready"));
+    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
+    expect(useContextStore().teamId).toBe(otherTeam.id);
+    expect(useContextStore().sourceId).toBeNull();
+    expect(query).toHaveBeenCalledTimes(1);
+  });
+
+  it("replaces a failed mid-session link with the shown URL without a run or history entry", async () => {
+    const { router, store, nav, query } = await mountExplorer(evidenceA);
+    await settle();
+    await nav.selectTeam(otherTeam.id);
+    await settle();
+    const shown = { ...router.currentRoute.value.query };
+    const before = query.mock.calls.length;
+    const replace = vi.spyOn(router, "replace");
+    vi.spyOn(savedQueriesApi, "resolve").mockRejectedValue({ status: "error", message: "Saved query not found", error_type: "NotFoundError" });
+    await router.push({ path: "/logs/explore", query: { team: "1", source: "3", id: "999999" } });
+    await flush();
+    await flush();
+
+    expect(nav.status.value).toBe("ready");
+    expect(router.currentRoute.value.query).toEqual(shown);
+    expect(replace).toHaveBeenCalledWith({ path: "/logs/explore", query: shown });
+    expect(store.sourceId).toBe(otherTeamSource.id);
+    expect(query).toHaveBeenCalledTimes(before);
+    router.back();
+    await vi.waitFor(() => expect(router.currentRoute.value.query).toEqual(shown));
+    expect(query).toHaveBeenCalledTimes(before);
   });
 
   it("opens another team's link after the current context changes during resolution", async () => {
@@ -1013,10 +1111,11 @@ describe("Explorer history navigation", () => {
     expect(nav.error.value).toBeNull();
     expect(store.sourceId).toBe(source.id);
     expect(store.logchefqlCode).toBe(evidenceA.q);
-    expect(router.currentRoute.value.query).toMatchObject({ source: String(otherSource.id), id: "42" });
+    expect(router.currentRoute.value.query).toMatchObject(evidenceA);
+    expect(router.currentRoute.value.query.id).toBeUndefined();
   });
 
-  it("keeps the shown query and the link when the linked team's sources fail to load", async () => {
+  it("keeps the shown query and restores its URL when the linked team's sources fail to load", async () => {
     const { router, store, query, nav } = await mountExplorer();
     await settle();
     await expectOneRun(query, () => router.push({ path: "/logs/explore", query: evidenceA }));
@@ -1026,7 +1125,7 @@ describe("Explorer history navigation", () => {
     const link = { team: String(otherTeam.id), source: String(otherTeamSource.id), q: 'a="b"', t: "1h" };
 
     await expectNoRun(query, () => router.push({ path: "/logs/explore", query: link }));
-    expect(router.currentRoute.value.query).toEqual(link);
+    expect(router.currentRoute.value.query).toMatchObject(evidenceA);
     expect(nav.status.value).toBe("ready");
     expect(store.sourceId).toBe(source.id);
     expect(store.logchefqlCode).toBe(evidenceA.q);

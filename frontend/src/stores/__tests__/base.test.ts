@@ -75,6 +75,27 @@ describe('useBaseStore', () => {
     expect(store.error.value).toBeNull()
   })
 
+  it.each([
+    new DOMException('Request canceled', 'AbortError'),
+    { status: 'error', message: 'Request canceled', error_type: 'CanceledError' },
+  ])('returns a canonical cancellation without callbacks, state errors or toasts', async cancellation => {
+    const store = useBaseStore({})
+    const onSuccess = vi.fn()
+    const onError = vi.fn()
+    const result = await store.callApi({
+      apiCall: () => Promise.reject(cancellation),
+      operationKey: 'load', onSuccess, onError,
+    })
+
+    expect(result).toEqual({ success: false, error: { status: 'error', message: 'Request canceled', error_type: 'CanceledError' } })
+    expect(store.error.value).toBeNull()
+    expect(store.isLoading.value).toBe(false)
+    expect(onSuccess).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+    expect(toast).not.toHaveBeenCalled()
+    expect(toast.error).not.toHaveBeenCalled()
+  })
+
   it('waits for an async onSuccess before resolving', async () => {
     const store = useBaseStore({})
     const followUp = deferred<void>()

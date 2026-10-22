@@ -101,6 +101,16 @@ describe("useTeamsStore", () => {
       expect(toast.error).toHaveBeenCalledTimes(1);
     });
 
+    it("returns a typed cancellation when a user team load is cleared", async () => {
+      const teams = useTeamsStore();
+      const load = teams.loadUserTeams();
+      await startedRequest(0);
+      teams.clearState();
+      expect(await load).toMatchObject({ success: false, error: { error_type: "CanceledError" } });
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
     it.each(['getTeam', 'listTeamMembers', 'listTeamSources'] as const)("aborts %s when the caller's signal aborts", async operation => {
       const teams = useTeamsStore();
       const caller = new AbortController();
@@ -109,7 +119,7 @@ describe("useTeamsStore", () => {
       caller.abort();
       request.respond(403, { status: "error", message: "forbidden", error_type: "Forbidden" });
 
-      expect((await load).success).toBe(false);
+      expect(await load).toMatchObject({ success: false, error: { error_type: 'CanceledError' } });
       expect(forbidden).not.toHaveBeenCalled();
       expect(toast.error).not.toHaveBeenCalled();
       expect(teams.error).toBeNull();
