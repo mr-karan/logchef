@@ -696,6 +696,13 @@ SET status = 'resolved',
 WHERE id = $2 AND status = 'triggered'
 RETURNING alert_id;
 
+-- name: ResolveAlertHistoryForAlert :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = now(),
+    message = sqlc.arg(message)
+WHERE alert_id = sqlc.arg(alert_id) AND status = 'triggered';
+
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
@@ -724,7 +731,7 @@ WHERE target.alert_id = $1
   AND target.id NOT IN (
     SELECT active.id
     FROM alert_history AS active
-    WHERE active.alert_id = target.alert_id AND active.status = 'triggered'
+    WHERE active.alert_id = $1 AND active.status = 'triggered'
     ORDER BY active.triggered_at DESC, active.id DESC
     LIMIT 1
   )

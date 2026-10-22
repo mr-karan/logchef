@@ -1,30 +1,18 @@
-package store_test
+package storetest
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
-	"github.com/mr-karan/logchef/internal/store/sqlite"
 )
 
-func TestSettingFallbackLogs(t *testing.T) {
-	s, err := sqlite.New(context.Background(), sqlite.Options{
-		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "settings.db")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
+func testSettingFallbackLogs(t *testing.T, s store.Store) {
 	var logs bytes.Buffer
 	previous := slog.Default()
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logs, nil)))

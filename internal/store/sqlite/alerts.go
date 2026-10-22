@@ -211,7 +211,7 @@ func (db *DB) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID, 
 	return alertHistoryFromSQLC(row)
 }
 
-// ResolveAlertHistory marks a history entry as resolved with an optional message.
+// ResolveAlertHistory resolves all firing history for the selected entry's alert.
 func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
 	if !db.inTx {
 		return db.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
@@ -225,6 +225,12 @@ func (db *DB) ResolveAlertHistory(ctx context.Context, historyID int64, message 
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if err := db.writeQueries.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: alertID}); err != nil {
+		return fmt.Errorf("failed to interrupt legacy alert deliveries: %w", err)
+	}
+	if err := db.writeQueries.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: nullString(message)}); err != nil {
+		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
 	}
 	if err := db.writeQueries.MarkAlertResolved(ctx, alertID); err != nil {
 		return fmt.Errorf("failed to mark alert resolved: %w", err)
@@ -281,6 +287,7 @@ func (db *DB) PruneAlertHistory(ctx context.Context, alertID models.AlertID, kee
 	if err := db.writeQueries.PruneAlertHistory(ctx, sqlc.PruneAlertHistoryParams{
 		AlertID:   int64(alertID),
 		AlertID_2: int64(alertID),
+		AlertID_3: int64(alertID),
 		Limit:     int64(keep),
 	}); err != nil {
 		return fmt.Errorf("failed to prune alert history: %w", err)

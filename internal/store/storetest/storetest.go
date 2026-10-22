@@ -28,6 +28,7 @@ func Run(t *testing.T, s store.Store) {
 	t.Run("TeamsMembersSources", func(t *testing.T) { testTeams(t, ctx, s) })
 	t.Run("Sessions", func(t *testing.T) { testSessions(t, ctx, s) })
 	t.Run("Settings", func(t *testing.T) { testSettings(t, ctx, s) })
+	t.Run("SettingFallbackLogs", func(t *testing.T) { testSettingFallbackLogs(t, s) })
 	t.Run("SettingsParsing", func(t *testing.T) { testSettingsParsing(t, ctx, s) })
 	t.Run("SettingsSensitivity", func(t *testing.T) { testSettingsSensitivity(t, ctx, s) })
 	t.Run("SavedQueriesCollections", func(t *testing.T) { testSavedQueriesCollections(t, ctx, s) })
