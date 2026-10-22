@@ -1,9 +1,12 @@
 package clickhouse
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/mr-karan/logchef/internal/queryescape"
 )
@@ -94,6 +97,14 @@ func TestQuotedIdentifiersMatchClickHouse(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildRawQuery: %v", err)
 			}
+			// Older servers reject some accepted shapes, such as a WITH alias in a
+			// table function argument; the built query must fail the same way.
+			if rawCode := exceptionCode(ctx, client, sql); rawCode != 0 {
+				if builtCode := exceptionCode(ctx, client, built); builtCode != rawCode {
+					t.Fatalf("raw query failed with code %d, built %q with code %d", rawCode, built, builtCode)
+				}
+				return
+			}
 			wantColumns, wantValues := query(t, sql)
 			gotColumns, gotValues := query(t, built)
 			if !reflect.DeepEqual(gotColumns, wantColumns) || !reflect.DeepEqual(gotValues, wantValues) {
@@ -132,4 +143,17 @@ func TestQuotedIdentifiersMatchClickHouse(t *testing.T) {
 			}
 		})
 	}
+}
+
+// exceptionCode runs sql and returns the ClickHouse error code, or 0 when it succeeds.
+func exceptionCode(ctx context.Context, client *Client, sql string) int32 {
+	rows, err := client.conn.Query(ctx, sql)
+	if err == nil {
+		rows.Close()
+		return 0
+	}
+	if exception, ok := errors.AsType[*clickhouse.Exception](err); ok {
+		return exception.Code
+	}
+	return -1
 }
