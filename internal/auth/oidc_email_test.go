@@ -71,6 +71,7 @@ func TestHandleCallbackRejectsPaddedEmail(t *testing.T) {
 		for _, position := range []string{"leading", "trailing"} {
 			for _, account := range []string{"new", "existing"} {
 				t.Run(whitespace.name+"/"+position+"/"+account, func(t *testing.T) {
+					t.Parallel()
 					email := "User@Example.com"
 					if position == "leading" {
 						email = whitespace.value + email
