@@ -680,13 +680,9 @@ WHERE status = 'triggered'
   AND (CAST(sqlc.arg(history_id) AS INTEGER) = 0 OR id = sqlc.arg(history_id))
   AND (CAST(sqlc.arg(alert_id) AS INTEGER) = 0 OR alert_id = sqlc.arg(alert_id));
 
--- name: ResolveAlertHistory :one
-UPDATE alert_history
-SET status = 'resolved',
-    resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    message = ?
-WHERE id = ? AND status = 'triggered'
-RETURNING alert_id;
+-- name: GetTriggeredAlertHistoryAlertID :one
+SELECT alert_id FROM alert_history
+WHERE id = ? AND status = 'triggered';
 
 -- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history

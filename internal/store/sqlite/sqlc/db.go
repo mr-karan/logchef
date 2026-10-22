@@ -231,6 +231,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.getTeamMemberStmt, err = db.PrepareContext(ctx, getTeamMember); err != nil {
 		return nil, fmt.Errorf("error preparing query GetTeamMember: %w", err)
 	}
+	if q.getTriggeredAlertHistoryAlertIDStmt, err = db.PrepareContext(ctx, getTriggeredAlertHistoryAlertID); err != nil {
+		return nil, fmt.Errorf("error preparing query GetTriggeredAlertHistoryAlertID: %w", err)
+	}
 	if q.getUserStmt, err = db.PrepareContext(ctx, getUser); err != nil {
 		return nil, fmt.Errorf("error preparing query GetUser: %w", err)
 	}
@@ -404,9 +407,6 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.removeTeamSourceStmt, err = db.PrepareContext(ctx, removeTeamSource); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveTeamSource: %w", err)
-	}
-	if q.resolveAlertHistoryStmt, err = db.PrepareContext(ctx, resolveAlertHistory); err != nil {
-		return nil, fmt.Errorf("error preparing query ResolveAlertHistory: %w", err)
 	}
 	if q.resolveAlertHistoryForAlertStmt, err = db.PrepareContext(ctx, resolveAlertHistoryForAlert); err != nil {
 		return nil, fmt.Errorf("error preparing query ResolveAlertHistoryForAlert: %w", err)
@@ -851,6 +851,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing getTeamMemberStmt: %w", cerr)
 		}
 	}
+	if q.getTriggeredAlertHistoryAlertIDStmt != nil {
+		if cerr := q.getTriggeredAlertHistoryAlertIDStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing getTriggeredAlertHistoryAlertIDStmt: %w", cerr)
+		}
+	}
 	if q.getUserStmt != nil {
 		if cerr := q.getUserStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing getUserStmt: %w", cerr)
@@ -1141,11 +1146,6 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing removeTeamSourceStmt: %w", cerr)
 		}
 	}
-	if q.resolveAlertHistoryStmt != nil {
-		if cerr := q.resolveAlertHistoryStmt.Close(); cerr != nil {
-			err = fmt.Errorf("error closing resolveAlertHistoryStmt: %w", cerr)
-		}
-	}
 	if q.resolveAlertHistoryForAlertStmt != nil {
 		if cerr := q.resolveAlertHistoryForAlertStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing resolveAlertHistoryForAlertStmt: %w", cerr)
@@ -1409,6 +1409,7 @@ type Queries struct {
 	getTeamStmt                           *sql.Stmt
 	getTeamByNameStmt                     *sql.Stmt
 	getTeamMemberStmt                     *sql.Stmt
+	getTriggeredAlertHistoryAlertIDStmt   *sql.Stmt
 	getUserStmt                           *sql.Stmt
 	getUserByEmailStmt                    *sql.Stmt
 	getUserPreferencesStmt                *sql.Stmt
@@ -1467,7 +1468,6 @@ type Queries struct {
 	removeCollectionTeamStmt              *sql.Stmt
 	removeTeamMemberStmt                  *sql.Stmt
 	removeTeamSourceStmt                  *sql.Stmt
-	resolveAlertHistoryStmt               *sql.Stmt
 	resolveAlertHistoryForAlertStmt       *sql.Stmt
 	revokeOAuthGrantStmt                  *sql.Stmt
 	revokeOAuthGrantByTokenStmt           *sql.Stmt
@@ -1574,6 +1574,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		getTeamStmt:                           q.getTeamStmt,
 		getTeamByNameStmt:                     q.getTeamByNameStmt,
 		getTeamMemberStmt:                     q.getTeamMemberStmt,
+		getTriggeredAlertHistoryAlertIDStmt:   q.getTriggeredAlertHistoryAlertIDStmt,
 		getUserStmt:                           q.getUserStmt,
 		getUserByEmailStmt:                    q.getUserByEmailStmt,
 		getUserPreferencesStmt:                q.getUserPreferencesStmt,
@@ -1632,7 +1633,6 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeCollectionTeamStmt:              q.removeCollectionTeamStmt,
 		removeTeamMemberStmt:                  q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                  q.removeTeamSourceStmt,
-		resolveAlertHistoryStmt:               q.resolveAlertHistoryStmt,
 		resolveAlertHistoryForAlertStmt:       q.resolveAlertHistoryForAlertStmt,
 		revokeOAuthGrantStmt:                  q.revokeOAuthGrantStmt,
 		revokeOAuthGrantByTokenStmt:           q.revokeOAuthGrantByTokenStmt,

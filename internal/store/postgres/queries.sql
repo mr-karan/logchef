@@ -675,13 +675,9 @@ WHERE status = 'triggered'
   AND (sqlc.arg(history_id)::bigint = 0 OR id = sqlc.arg(history_id))
   AND (sqlc.arg(alert_id)::bigint = 0 OR alert_id = sqlc.arg(alert_id));
 
--- name: ResolveAlertHistory :one
-UPDATE alert_history
-SET status = 'resolved',
-    resolved_at = now(),
-    message = $1
-WHERE id = $2 AND status = 'triggered'
-RETURNING alert_id;
+-- name: GetTriggeredAlertHistoryAlertID :one
+SELECT alert_id FROM alert_history
+WHERE id = $1 AND status = 'triggered';
 
 -- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
