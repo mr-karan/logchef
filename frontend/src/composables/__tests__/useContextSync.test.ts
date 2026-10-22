@@ -4,6 +4,7 @@ import { sourcesApi } from "@/api/sources";
 import { teamsApi } from "@/api/teams";
 import { useContextStore } from "@/stores/context";
 import { useSourcesStore } from "@/stores/sources";
+import { useTeamsStore } from "@/stores/teams";
 
 const mocks = vi.hoisted(() => ({
   route: { path: "/logs/alerts", query: {} as Record<string, string> },
@@ -71,6 +72,7 @@ describe("useContextSync route ownership", () => {
   });
 
   it("does not let a departed page's list restore its old source", async () => {
+    await useTeamsStore().loadUserTeams();
     let release: () => void = () => {};
     const ready = new Promise<void>(resolve => { release = resolve; });
     vi.mocked(sourcesApi.listTeamSources)
@@ -93,6 +95,7 @@ describe("useContextSync route ownership", () => {
   });
 
   it("never writes a removed source from an invalidated list to the URL", async () => {
+    await useTeamsStore().loadUserTeams();
     let release: () => void = () => {};
     const ready = new Promise<void>(resolve => { release = resolve; });
     vi.mocked(sourcesApi.listTeamSources)
@@ -112,6 +115,7 @@ describe("useContextSync route ownership", () => {
   });
 
   it("publishes only the latest page selection when callers join a pending list", async () => {
+    await useTeamsStore().loadUserTeams();
     let release: () => void = () => {};
     const ready = new Promise<void>(resolve => { release = resolve; });
     vi.mocked(sourcesApi.listTeamSources).mockImplementation(async () => {
