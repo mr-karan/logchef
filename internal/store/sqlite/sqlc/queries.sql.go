@@ -3803,6 +3803,7 @@ func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
 const pruneAlertHistory = `-- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = ?
+  AND target.status <> 'triggered'
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
@@ -4293,6 +4294,18 @@ func (q *Queries) TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesPa
 		return nil, err
 	}
 	return items, nil
+}
+
+const touchAlertEvaluated = `-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
+WHERE id = ?
+`
+
+func (q *Queries) TouchAlertEvaluated(ctx context.Context, id int64) error {
+	_, err := q.exec(ctx, q.touchAlertEvaluatedStmt, touchAlertEvaluated, id)
+	return err
 }
 
 const touchOAuthGrant = `-- name: TouchOAuthGrant :exec

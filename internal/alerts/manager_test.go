@@ -1,11 +1,20 @@
 package alerts
 
 import (
+	"bytes"
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -43,5 +52,332 @@ func TestEvaluateAlertWithTimeoutIsolatesHungEvaluation(t *testing.T) {
 
 	if hadDeadline := <-sawDeadline; !hadDeadline {
 		t.Fatal("evaluation context carried no deadline")
+	}
+}
+
+func newManagerTestAlert(t *testing.T) (*sqlite.DB, *models.Alert, *slog.Logger) {
+	t.Helper()
+	return newManagerTestAlertAtPath(t, filepath.Join(t.TempDir(), "alerts.db"))
+}
+
+func newManagerTestAlertAtPath(t *testing.T, path string) (*sqlite.DB, *models.Alert, *slog.Logger) {
+	t.Helper()
+	ctx := t.Context()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	db, err := sqlite.New(ctx, sqlite.Options{
+		Logger: logger,
+		Config: config.SQLiteConfig{Path: path},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	source := &models.Source{
+		Name: "logs.alerts", MetaTSField: "timestamp",
+		Connection: models.ConnectionInfo{Host: "localhost:9000", Database: "logs", TableName: "alerts"},
+	}
+	if err := source.SyncConnectionConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	alert := &models.Alert{
+		SourceID: source.ID, Name: "errors", Query: "SELECT count() FROM logs",
+		QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
+		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true,
+		ThresholdOperator: models.AlertThresholdGreaterThan, ThresholdValue: 10,
+		Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
+	}
+	if err := db.CreateAlert(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	return db, alert, logger
+}
+
+func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
+	db, alert, logger := newManagerTestAlert(t)
+	m := NewManager(Options{
+		DB: db, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100},
+		Datasources: datasource.NewService(db, logger),
+	})
+	ctx := t.Context()
+	if err := m.handleTriggered(ctx, alert, 12); err != nil {
+		t.Fatal(err)
+	}
+	before, err := db.GetAlert(ctx, alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.evaluateAlert(ctx, before); err == nil {
+		t.Fatal("evaluateAlert succeeded without a datasource provider")
+	}
+	after, err := db.GetAlert(ctx, alert.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.LastState != models.AlertStateFiring {
+		t.Errorf("state after evaluation error = %s, want firing", after.LastState)
+	}
+	if after.LastEvaluatedAt == nil || after.LastEvaluatedAt.Before(*before.LastEvaluatedAt) {
+		t.Errorf("evaluation timestamp = %v, want at least %v", after.LastEvaluatedAt, before.LastEvaluatedAt)
+	}
+	if after.LastTriggeredAt == nil || !after.LastTriggeredAt.Equal(*before.LastTriggeredAt) {
+		t.Errorf("trigger timestamp changed from %v to %v", before.LastTriggeredAt, after.LastTriggeredAt)
+	}
+	due, err := db.ListActiveAlertsDue(ctx)
+	if err != nil || len(due) != 0 {
+		t.Errorf("due after evaluation error = %d alerts, %v; want none", len(due), err)
+	}
+	history, err := db.ListAlertHistory(ctx, alert.ID, 10)
+	if err != nil || len(history) != 2 {
+		t.Fatalf("history = %d entries, %v; want trigger and error", len(history), err)
+	}
+	if history[0].Status != models.AlertStatusError {
+		t.Errorf("latest history status = %s, want error", history[0].Status)
+	}
+	if err := m.handleResolved(ctx, after, 0); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := db.GetAlert(ctx, alert.ID)
+	if err != nil || resolved.LastState != models.AlertStateResolved {
+		t.Fatalf("state after resolution = %+v, %v; want resolved", resolved, err)
+	}
+}
+
+type alertSenderFunc func(context.Context, AlertNotification) error
+
+func (f alertSenderFunc) Send(ctx context.Context, notification AlertNotification) error {
+	return f(ctx, notification)
+}
+
+func TestManagerDeliveryRetries(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		legacy       bool
+		succeedAt    int
+		wantAttempts int
+	}{
+		{name: "persistent failure", wantAttempts: 3},
+		{name: "legacy failure", legacy: true, wantAttempts: 3},
+		{name: "successful retry", succeedAt: 2, wantAttempts: 2},
+		{name: "successful first attempt", succeedAt: 1, wantAttempts: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db, alert, _ := newManagerTestAlert(t)
+			ctx := t.Context()
+			var logs bytes.Buffer
+			logger := slog.New(slog.NewJSONHandler(&logs, nil))
+			attempts := 0
+			var historyID int64
+			if tc.legacy {
+				entry, err := db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+				if err != nil {
+					t.Fatal(err)
+				}
+				historyID = entry.ID
+				attempts = 1
+			}
+			sender := alertSenderFunc(func(_ context.Context, notification AlertNotification) error {
+				if notification.Status != models.AlertStatusTriggered {
+					return nil
+				}
+				attempts++
+				if tc.succeedAt > 0 && attempts >= tc.succeedAt {
+					return nil
+				}
+				return errors.New("outbound delivery unavailable")
+			})
+			for range 8 {
+				m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+				if err := m.handleTriggered(ctx, alert, 12); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if attempts != tc.wantAttempts {
+				t.Errorf("delivery attempts = %d, want %d", attempts, tc.wantAttempts)
+			}
+			wantExhausted := 0
+			if tc.succeedAt == 0 {
+				wantExhausted = 1
+			}
+			if got := countLogs(t, &logs, "alert delivery retries exhausted"); got != wantExhausted {
+				t.Errorf("exhaustion log count = %d, want %d", got, wantExhausted)
+			}
+			history, err := db.ListAlertHistory(ctx, alert.ID, 10)
+			if err != nil || len(history) != 1 {
+				t.Fatalf("history = %d entries, %v; want one firing entry", len(history), err)
+			}
+			if historyID != 0 && history[0].ID != historyID {
+				t.Errorf("history ID changed from %d to %d", historyID, history[0].ID)
+			}
+			if got := history[0].Payload["delivery_attempts"]; got != float64(tc.wantAttempts) {
+				t.Errorf("persisted delivery_attempts = %v, want %d", got, tc.wantAttempts)
+			}
+			if got := history[0].Payload["delivery_failed"]; got != (tc.succeedAt == 0) {
+				t.Errorf("persisted delivery_failed = %v, want %t", got, tc.succeedAt == 0)
+			}
+			if err := NewManager(Options{DB: db, Logger: logger, Sender: sender}).handleResolved(ctx, alert, 0); err != nil {
+				t.Fatal(err)
+			}
+			if err := NewManager(Options{DB: db, Logger: logger, Sender: sender}).handleTriggered(ctx, alert, 12); err != nil {
+				t.Fatal(err)
+			}
+			if attempts != tc.wantAttempts+1 {
+				t.Errorf("new firing delivery attempts = %d, want %d", attempts, tc.wantAttempts+1)
+			}
+		})
+	}
+}
+
+func TestManagerStopTwice(t *testing.T) {
+	m := NewManager(Options{Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	m.Stop()
+	m.Stop()
+}
+
+type logRecord struct {
+	Level     string         `json:"level"`
+	Message   string         `json:"msg"`
+	AlertID   models.AlertID `json:"alert_id"`
+	HistoryID int64          `json:"history_id"`
+	Attempts  int            `json:"attempts"`
+}
+
+func decodeLogs(t *testing.T, logs *bytes.Buffer, msg string) []logRecord {
+	t.Helper()
+	var matched []logRecord
+	decoder := json.NewDecoder(bytes.NewReader(logs.Bytes()))
+	for {
+		var record logRecord
+		if err := decoder.Decode(&record); err != nil {
+			if errors.Is(err, io.EOF) {
+				return matched
+			}
+			t.Fatal(err)
+		}
+		if record.Message == msg {
+			matched = append(matched, record)
+		}
+	}
+}
+
+func countLogs(t *testing.T, logs *bytes.Buffer, msg string) int {
+	t.Helper()
+	return len(decodeLogs(t, logs, msg))
+}
+
+// failHistoryWrites installs a trigger that rejects the matching alert_history
+// writes and returns a function that removes it.
+func failHistoryWrites(t *testing.T, path, event string) (restore func()) {
+	t.Helper()
+	ctx := t.Context()
+	control, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = control.Close() })
+	if _, err := control.ExecContext(ctx, "CREATE TRIGGER fail_history_write "+event+" BEGIN SELECT RAISE(FAIL, 'history write unavailable'); END"); err != nil {
+		t.Fatal(err)
+	}
+	return func() {
+		t.Helper()
+		if _, err := control.ExecContext(ctx, "DROP TRIGGER fail_history_write"); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestManagerReservationWriteFailureSendsNothing(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		seed  bool
+		event string
+	}{
+		{name: "initial reservation", event: "BEFORE INSERT ON alert_history"},
+		{name: "retry reservation", seed: true, event: "BEFORE UPDATE OF payload_json ON alert_history"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "alerts.db")
+			db, alert, _ := newManagerTestAlertAtPath(t, path)
+			ctx := t.Context()
+			if tc.seed {
+				if _, err := db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{
+					"delivery_attempts": 1, "delivery_failed": true,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			restore := failHistoryWrites(t, path, tc.event)
+			sends := 0
+			sender := alertSenderFunc(func(context.Context, AlertNotification) error {
+				sends++
+				return errors.New("outbound delivery unavailable")
+			})
+			logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+			for range 8 {
+				m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+				if err := m.handleTriggered(ctx, alert, 12); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if sends != 0 {
+				t.Errorf("sends while the reservation write fails = %d, want 0", sends)
+			}
+
+			restore()
+			sender = alertSenderFunc(func(context.Context, AlertNotification) error {
+				sends++
+				return nil
+			})
+			m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+			if err := m.handleTriggered(ctx, alert, 12); err != nil {
+				t.Fatal(err)
+			}
+			if sends != 1 {
+				t.Errorf("sends after the reservation write recovers = %d, want 1", sends)
+			}
+		})
+	}
+}
+
+func TestManagerOutcomeWriteFailureStopsAtMaxAttempts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.db")
+	db, alert, _ := newManagerTestAlertAtPath(t, path)
+	ctx := t.Context()
+	failHistoryWrites(t, path, `BEFORE UPDATE OF payload_json ON alert_history
+		WHEN json_extract(NEW.payload_json, '$.delivery_attempts') = json_extract(OLD.payload_json, '$.delivery_attempts')`)
+	sends := 0
+	sender := alertSenderFunc(func(context.Context, AlertNotification) error {
+		sends++
+		entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+		if err != nil {
+			t.Errorf("history at send = %v, want persisted reservation", err)
+		} else if got := entry.Payload["delivery_attempts"]; got != float64(sends) {
+			t.Errorf("reserved attempts at send = %v, want %d", got, sends)
+		}
+		return errors.New("outbound delivery unavailable")
+	})
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	for range 8 {
+		m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+		if err := m.handleTriggered(ctx, alert, 12); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if sends != maxDeliveryAttempts {
+		t.Errorf("sends while the outcome write fails = %d, want %d", sends, maxDeliveryAttempts)
+	}
+	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+	if err != nil || entry.Payload["delivery_attempts"] != float64(maxDeliveryAttempts) {
+		t.Fatalf("persisted attempts = %+v, %v; want %d", entry, err, maxDeliveryAttempts)
+	}
+	exhausted := decodeLogs(t, &logs, "alert delivery retries exhausted")
+	if len(exhausted) != 1 {
+		t.Fatalf("exhaustion log count = %d, want 1", len(exhausted))
+	}
+	if got := exhausted[0]; got.Level != "ERROR" || got.AlertID != alert.ID || got.HistoryID != entry.ID || got.Attempts != maxDeliveryAttempts {
+		t.Errorf("exhaustion log = %+v, want error with alert %d, history %d, %d attempts", got, alert.ID, entry.ID, maxDeliveryAttempts)
 	}
 }

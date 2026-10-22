@@ -301,6 +301,7 @@ type Querier interface {
 	// Top users by total query count over rollup rows on/after `since`, joined to
 	// users for the email.
 	TopUsersByQueries(ctx context.Context, arg TopUsersByQueriesParams) ([]TopUsersByQueriesRow, error)
+	TouchAlertEvaluated(ctx context.Context, id int64) error
 	TouchOAuthGrant(ctx context.Context, arg TouchOAuthGrantParams) error
 	// Update a query share's last access time
 	TouchQueryShare(ctx context.Context, arg TouchQueryShareParams) error

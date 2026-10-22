@@ -638,6 +638,12 @@ SET last_state = 'resolved',
     updated_at = now()
 WHERE id = $1;
 
+-- name: TouchAlertEvaluated :exec
+UPDATE alerts
+SET last_evaluated_at = now(),
+    updated_at = now()
+WHERE id = $1;
+
 -- name: MarkAlertTriggered :exec
 UPDATE alerts
 SET last_state = 'firing',
@@ -700,6 +706,7 @@ LIMIT $2;
 -- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
+  AND target.status <> 'triggered'
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
