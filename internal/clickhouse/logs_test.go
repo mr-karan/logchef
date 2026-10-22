@@ -140,7 +140,7 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 
 func TestGetSurroundingLogsDateTime64Nanoseconds(t *testing.T) {
 	client, ctx := integrationClient(t)
-	conn := client.connection()
+	conn := client.conn
 	table := fmt.Sprintf("log_context_test_%d", time.Now().UnixNano())
 	if err := conn.Exec(ctx, fmt.Sprintf("CREATE TABLE %s (ts DateTime64(9, 'UTC'), msg String) ENGINE=MergeTree ORDER BY (ts, msg)", table)); err != nil {
 		t.Fatal(err)
@@ -454,50 +454,6 @@ func TestExtractGroupValueDereferencesPointerTypes(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Fatalf("value mismatch: got %q want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-// TestLogQueryParams tests query parameter validation
-func TestLogQueryParams(t *testing.T) {
-	tests := []struct {
-		name    string
-		params  LogQueryParams
-		wantErr bool
-	}{
-		{
-			name: "valid params with SQL",
-			params: LogQueryParams{
-				Limit:     100,
-				QueryText: "SELECT * FROM logs",
-			},
-			wantErr: false,
-		},
-		{
-			name: "zero limit is valid (uses default)",
-			params: LogQueryParams{
-				Limit:     0,
-				QueryText: "SELECT * FROM logs",
-			},
-			wantErr: false,
-		},
-		{
-			name: "with timeout",
-			params: LogQueryParams{
-				Limit:        100,
-				QueryText:    "SELECT * FROM logs",
-				QueryTimeout: new(30),
-			},
-			wantErr: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Structural validation - these params should be valid
-			if tt.params.QueryText == "" && !tt.wantErr {
-				t.Errorf("expected QueryText to be set for valid params")
 			}
 		})
 	}

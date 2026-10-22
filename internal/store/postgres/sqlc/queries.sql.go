@@ -2096,18 +2096,6 @@ func (q *Queries) IsTeamManaged(ctx context.Context, id int64) (bool, error) {
 	return managed, err
 }
 
-const isUserManaged = `-- name: IsUserManaged :one
-SELECT managed FROM users WHERE id = $1
-`
-
-// Check if a user is managed
-func (q *Queries) IsUserManaged(ctx context.Context, id int64) (bool, error) {
-	row := q.db.QueryRow(ctx, isUserManaged, id)
-	var managed bool
-	err := row.Scan(&managed)
-	return managed, err
-}
-
 const listAPITokensForUser = `-- name: ListAPITokensForUser :many
 SELECT id, user_id, name, token_hash, prefix, scopes, last_used_at, expires_at, created_at, updated_at FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC
 `
@@ -2820,44 +2808,6 @@ func (q *Queries) ListManagedTeams(ctx context.Context) ([]Team, error) {
 			&i.Managed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listManagedUsers = `-- name: ListManagedUsers :many
-SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE managed = true ORDER BY id
-`
-
-// Get all users managed by provisioning config
-func (q *Queries) ListManagedUsers(ctx context.Context) ([]User, error) {
-	rows, err := q.db.Query(ctx, listManagedUsers)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []User{}
-	for rows.Next() {
-		var i User
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.FullName,
-			&i.Role,
-			&i.Status,
-			&i.LastLoginAt,
-			&i.LastActiveAt,
-			&i.Managed,
-			&i.AccountType,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.PasswordHash,
 		); err != nil {
 			return nil, err
 		}

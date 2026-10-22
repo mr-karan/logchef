@@ -87,8 +87,8 @@ func TestReconcile_TeamsMembersLinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("member user should exist: %v", err)
 	}
-	if managed, err := db.IsUserManaged(ctx, user.ID); err != nil || !managed {
-		t.Fatalf("member user should be managed (managed=%v err=%v)", managed, err)
+	if !user.Managed {
+		t.Fatal("member user should be managed")
 	}
 	if user.AccountType != models.UserAccountTypeHuman {
 		t.Fatalf("member user account_type = %q, want %q", user.AccountType, models.UserAccountTypeHuman)
@@ -387,9 +387,6 @@ func TestReconcile_IgnoresAutoProvisionedUsers(t *testing.T) {
 	if err := db.CreateUser(ctx, autoUser); err != nil {
 		t.Fatalf("seed auto-provisioned user: %v", err)
 	}
-	if managed, err := db.IsUserManaged(ctx, autoUser.ID); err != nil || managed {
-		t.Fatalf("precondition: auto-provisioned user should start unmanaged (managed=%v err=%v)", managed, err)
-	}
 
 	cfg := &config.ProvisioningConfig{
 		ManageTeams: true,
@@ -409,8 +406,8 @@ func TestReconcile_IgnoresAutoProvisionedUsers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auto-provisioned user should still exist after reconcile: %v", err)
 	}
-	if managed, err := db.IsUserManaged(ctx, got.ID); err != nil || managed {
-		t.Fatalf("auto-provisioned user must remain unmanaged after reconcile (managed=%v err=%v)", managed, err)
+	if got.Managed {
+		t.Fatal("auto-provisioned user must remain unmanaged after reconcile")
 	}
 	if got.Email != autoUser.Email || got.FullName != autoUser.FullName {
 		t.Errorf("auto-provisioned user was modified by reconcile: got %+v", got)

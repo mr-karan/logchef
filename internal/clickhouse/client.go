@@ -241,12 +241,6 @@ func (c *Client) Close() error {
 	}
 }
 
-func (c *Client) connection() driver.Conn {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	return c.conn
-}
-
 func (c *Client) queryRows(ctx context.Context, query string, args ...any) (driver.Rows, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

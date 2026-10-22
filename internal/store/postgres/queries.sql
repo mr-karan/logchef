@@ -740,10 +740,6 @@ SELECT * FROM sources WHERE managed = true ORDER BY id;
 -- Get all teams managed by provisioning config
 SELECT * FROM teams WHERE managed = true ORDER BY id;
 
--- name: ListManagedUsers :many
--- Get all users managed by provisioning config
-SELECT * FROM users WHERE managed = true ORDER BY id;
-
 -- name: SetSourceManaged :exec
 -- Mark a source as managed/unmanaged and set secret_ref
 UPDATE sources SET managed = $1, secret_ref = $2, updated_at = now() WHERE id = $3;
@@ -763,10 +759,6 @@ SELECT managed FROM sources WHERE id = $1;
 -- name: IsTeamManaged :one
 -- Check if a team is managed
 SELECT managed FROM teams WHERE id = $1;
-
--- name: IsUserManaged :one
--- Check if a user is managed
-SELECT managed FROM users WHERE id = $1;
 
 -- name: GetSourceByNameForProvisioning :one
 -- Get source by name for provisioning lookup

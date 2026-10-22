@@ -15,12 +15,6 @@ const (
 	CollectionRoleMember CollectionRole = "member"
 )
 
-// CanCurateItems reports whether a collection role may add/remove items and edit
-// the queries curated in the collection (owners and editors; not plain members).
-func (r CollectionRole) CanCurateItems() bool {
-	return r == CollectionRoleOwner || r == CollectionRoleEditor
-}
-
 // Collection groups saved queries across teams. Each user has a single
 // auto-created personal collection (is_personal = true); other collections
 // are shared with explicit member invites and with whole teams.

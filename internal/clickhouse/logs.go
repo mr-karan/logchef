@@ -12,24 +12,6 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-// LogQueryParams defines parameters for querying logs.
-type LogQueryParams struct {
-	Limit            int
-	DefaultLimit     int
-	MaxLimit         int
-	MaxResponseBytes int
-	QueryText        string
-	// Query execution timeout in seconds. If not specified, uses default timeout.
-	QueryTimeout *int
-}
-
-// LogQueryResult represents the structured result of a log query.
-type LogQueryResult struct {
-	Data    []map[string]any    `json:"data"`
-	Stats   models.QueryStats   `json:"stats"`
-	Columns []models.ColumnInfo `json:"columns"`
-}
-
 // TimeWindow represents the desired granularity for time-based aggregations.
 type TimeWindow string
 

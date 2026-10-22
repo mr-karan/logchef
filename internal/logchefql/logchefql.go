@@ -312,29 +312,6 @@ func validateTableName(name string) *ParseError {
 	return nil
 }
 
-// BuildFullQuery builds a complete SQL query from LogchefQL with time range and other parameters.
-// This is used when executing the query against ClickHouse.
-func BuildFullQuery(params QueryBuildParams) (string, error) {
-	start, end, err := prepareTimeRange(params)
-	if err != nil {
-		return "", err
-	}
-
-	pq, parseErr := ParseLogchefQL(params.LogchefQL)
-	if parseErr != nil {
-		return "", convertParticipleError(parseErr)
-	}
-	translateResult := translateAST(ConvertToAST(pq), params.Schema)
-	if !translateResult.Valid {
-		if translateResult.Error != nil {
-			return "", translateResult.Error
-		}
-		return "", &ParseError{Code: ErrUnexpectedToken, Message: "invalid LogchefQL query"}
-	}
-
-	return buildFullQueryFromTranslation(params, start, end, translateResult)
-}
-
 // BuildFullQueryFromTranslation builds a complete SQL query from an already
 // translated query. Callers that need both preview metadata and executable SQL
 // can translate once and pass that result here.

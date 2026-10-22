@@ -50,7 +50,7 @@ func TestExtractFieldValuesPreservesEmptyEnumValue(t *testing.T) {
 func TestEnumFieldValuesClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
 	table := fmt.Sprintf("logchef_enum_values_test_%d", time.Now().UnixNano())
-	conn := client.connection()
+	conn := client.conn
 	if err := conn.Exec(ctx, "CREATE TABLE "+table+" (ts DateTime64(9), level Enum8('' = 0, 'INFO' = 1)) ENGINE=MergeTree ORDER BY ts"); err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func testFieldValuesMemoryJSONFilter(t *testing.T, columnType string) {
 	t.Helper()
 	client, ctx := integrationClient(t)
 	table := fmt.Sprintf("logchef_memory_field_values_test_%d", time.Now().UnixNano())
-	conn := client.connection()
+	conn := client.conn
 	if columnType == "JSON" {
 		version, err := conn.ServerVersion()
 		if err != nil {

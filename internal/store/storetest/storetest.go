@@ -830,14 +830,15 @@ func testUserPreferences(t *testing.T, ctx context.Context, s store.Store) {
 
 func testProvisioning(t *testing.T, ctx context.Context, s store.Store) {
 	u := mkUser(t, ctx, s, "managed@test.dev")
-	if managed, err := s.IsUserManaged(ctx, u.ID); err != nil || managed {
-		t.Errorf("IsUserManaged(new) = %v / %v, want false", managed, err)
+	if got, err := s.GetUser(ctx, u.ID); err != nil || got.Managed {
+		t.Errorf("GetUser(new).Managed = %v / %v, want false", got != nil && got.Managed, err)
 	}
 	if err := s.SetUserManaged(ctx, u.ID, true); err != nil {
 		t.Fatalf("SetUserManaged: %v", err)
 	}
-	if managed, err := s.IsUserManaged(ctx, u.ID); err != nil || !managed {
-		t.Errorf("IsUserManaged(after set) = %v / %v, want true", managed, err)
+	got, err := s.GetUser(ctx, u.ID)
+	if err != nil || !got.Managed {
+		t.Errorf("GetUser(after set).Managed = %v / %v, want true", got != nil && got.Managed, err)
 	}
 }
 

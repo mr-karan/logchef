@@ -225,8 +225,12 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 	if user.Status != models.UserStatusActive {
 		t.Errorf("status = %q, want active", user.Status)
 	}
-	if managed, err := db.IsUserManaged(ctx, user.ID); err != nil || managed {
-		t.Errorf("auto-provisioned user must be unmanaged (managed=%v err=%v)", managed, err)
+	stored, err := db.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatalf("GetUser: %v", err)
+	}
+	if stored.Managed {
+		t.Error("auto-provisioned user must be unmanaged")
 	}
 
 	member, err := db.GetTeamMember(ctx, team.ID, user.ID)

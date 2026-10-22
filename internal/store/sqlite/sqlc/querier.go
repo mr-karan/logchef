@@ -182,13 +182,8 @@ type Querier interface {
 	IsSourceManaged(ctx context.Context, id int64) (int64, error)
 	// Check if a team is managed
 	IsTeamManaged(ctx context.Context, id int64) (int64, error)
-	// Check if a user is managed
-	IsUserManaged(ctx context.Context, id int64) (int64, error)
 	// List all API tokens for a user
 	ListAPITokensForUser(ctx context.Context, userID int64) ([]ApiToken, error)
-	// Source IDs the user can reach via any team, used to mark runnable on browse
-	// lists without an N+1 access check per row.
-	ListAccessibleSourceIDsForUser(ctx context.Context, userID int64) ([]int64, error)
 	ListActiveAlertsDue(ctx context.Context) ([]Alert, error)
 	ListAlertHistory(ctx context.Context, arg ListAlertHistoryParams) ([]AlertHistory, error)
 	// List alerts for one source
@@ -220,8 +215,6 @@ type Querier interface {
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
 	ListManagedTeams(ctx context.Context) ([]Team, error)
-	// Get all users managed by provisioning config
-	ListManagedUsers(ctx context.Context) ([]User, error)
 	ListOAuthGrantsForUser(ctx context.Context, userID int64) ([]OauthGrant, error)
 	// Most recent query_history rows across all users, newest first, enriched with
 	// the executing user's email and the source's display name. LEFT JOIN on

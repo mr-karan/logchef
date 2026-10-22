@@ -125,7 +125,7 @@ type GeneratorConfig struct {
 	// ReasoningEffort is passed through to the provider for reasoning-capable
 	// models; empty leaves the model default. See CompletionRequest.
 	ReasoningEffort string
-	Timeout         time.Duration // Timeout applied to an individual GenerateSQL call.
+	Timeout         time.Duration // Timeout applied to an individual GenerateQuery call.
 }
 
 // Generator turns natural language into validated ClickHouse SQL. It is
@@ -139,7 +139,7 @@ type Generator struct {
 	maxTokens       int
 	temperature     float32
 	reasoningEffort string
-	callTimeout     time.Duration // Timeout for individual GenerateSQL calls
+	callTimeout     time.Duration // Timeout for individual GenerateQuery calls
 }
 
 // NewGenerator creates a Generator wrapping the given Provider. Defaults mirror
@@ -182,26 +182,6 @@ type GenerateQueryInput struct {
 	Schema               string
 	TableName            string
 	CurrentQuery         string // Optional current query for context
-}
-
-// GenerateSQL generates a ClickHouse SQL query from a natural language query and
-// schema. It is a thin wrapper over GenerateQuery pinned to the ClickHouse-SQL
-// target, preserving the exact prompt and validation behavior of the pre-P2
-// single-target client.
-func (g *Generator) GenerateSQL(
-	ctx context.Context,
-	naturalLanguageQuery string,
-	schema string,
-	tableName string,
-	currentQuery string, // Optional current query for context
-) (string, error) {
-	return g.GenerateQuery(ctx, GenerateQueryInput{
-		Target:               TargetClickHouseSQL,
-		NaturalLanguageQuery: naturalLanguageQuery,
-		Schema:               schema,
-		TableName:            tableName,
-		CurrentQuery:         currentQuery,
-	})
 }
 
 // GenerateQuery turns natural language into a validated query in the requested

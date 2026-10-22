@@ -162,7 +162,7 @@ func BenchmarkScanRowMap(b *testing.B) {
 
 func TestScanRowMapJSONClickHouse(t *testing.T) {
 	client, ctx := integrationClient(t)
-	conn := client.connection()
+	conn := client.conn
 	version, err := conn.ServerVersion()
 	if err != nil {
 		t.Fatal(err)
@@ -252,7 +252,7 @@ func TestQueryLosslessWideIntegersClickHouse(t *testing.T) {
 	}
 
 	t.Run("native JSON", func(t *testing.T) {
-		version, err := client.connection().ServerVersion()
+		version, err := client.conn.ServerVersion()
 		if err != nil {
 			t.Fatal(err)
 		}
