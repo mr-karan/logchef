@@ -2,7 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { toast } from "vue-sonner";
 import { controlledApi } from "@/test/controlledApi";
-import { setForbiddenHandler } from "@/api/config";
+import { setForbiddenHandler, setUnauthorizedHandler } from "@/api/config";
+import type { APIErrorResponse } from "@/api/types";
 import { authApi } from "@/api/auth";
 import { teamsApi, type TeamWithMemberCount, type UserTeamMembership } from "@/api/teams";
 import { useAuthStore } from "../auth";
@@ -110,6 +111,47 @@ describe("useTeamsStore", () => {
       expect(forbidden).not.toHaveBeenCalled();
       expect(toast.error).not.toHaveBeenCalled();
       expect(teams.error).toBeNull();
+    });
+
+    it.each([true, false])('keeps a healthy member load when a second caller signal is aborted (already aborted = %s)', async alreadyAborted => {
+      const teams = useTeamsStore();
+      const healthyLoad = teams.listTeamMembers(1);
+      const healthyRequest = await startedRequest(0);
+      const caller = new AbortController();
+      if (alreadyAborted) caller.abort();
+      const canceledLoad = teams.listTeamMembers(1, caller.signal);
+      if (!alreadyAborted) {
+        await startedRequest(1);
+        caller.abort();
+      }
+      const canceledResult = await canceledLoad;
+      healthyRequest.succeed([{ user_id: 7, role: 'member' }]);
+
+      expect((await healthyLoad).success).toBe(true);
+      expect(canceledResult).toMatchObject({ success: false, error: { error_type: 'CanceledError' } });
+      expect(teams.getTeamMembersByTeamId(1)).toEqual([{ user_id: 7, role: 'member' }]);
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it.each(['getTeam', 'listTeamMembers', 'listTeamSources', 'loadAdminTeams'] as const)('ignores a superseded %s 401 after the unauthorized handler finishes', async operation => {
+      const teams = useTeamsStore();
+      let releaseExpiration: ((value: APIErrorResponse) => void) | undefined;
+      const expiration = new Promise<APIErrorResponse>(resolve => { releaseExpiration = resolve; });
+      const unauthorized = vi.fn(() => expiration);
+      setUnauthorizedHandler(unauthorized);
+      const load = () => operation === 'loadAdminTeams' ? teams.loadAdminTeams(true) : teams[operation](1);
+      const oldLoad = load();
+      (await startedRequest(0)).respond(401, { status: 'error', message: 'Session expired', error_type: 'AuthenticationError' });
+      await vi.waitFor(() => expect(unauthorized).toHaveBeenCalledOnce());
+      const currentLoad = load();
+      (await startedRequest(1)).succeed(operation === 'getTeam' ? adminTeam(1) : []);
+      await currentLoad;
+      releaseExpiration?.({ status: 'error', message: 'Session expired', error_type: 'AuthenticationError' });
+      expect((await oldLoad).success).toBe(true);
+
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
     });
 
     it.each(['loadUserTeams', 'loadAdminTeams'] as const)("gives an older %s caller the newer list", async operation => {

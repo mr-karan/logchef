@@ -145,9 +145,9 @@ interface LiveRequest<R> {
 }
 
 /**
- * Keeps one live load per slot. A newer load aborts the older one, so the older
- * response never reaches the API interceptors or the store. The older caller gets
- * the newer result when both asked for the same request, and its own cancel otherwise.
+ * Loads without a caller signal supersede the previous load in their slot.
+ * Only these loads can replace an older caller's result for the same request.
+ * Caller-controlled loads leave earlier loads running so their cancellation stays local.
  */
 export function createLatestRequests<A extends unknown[], R>(options: {
   request: (...args: A) => string;
@@ -155,17 +155,20 @@ export function createLatestRequests<A extends unknown[], R>(options: {
   load: (signal: AbortSignal, ...args: A) => Promise<R>;
 }) {
   const live = new Map<string, LiveRequest<R>>();
+  const pending = new Set<LiveRequest<R>>();
 
   function run(args: A, callerSignal?: AbortSignal): Promise<R> {
+    if (callerSignal?.aborted) return options.load(callerSignal, ...args);
+
     const request = options.request(...args);
     const slot = options.slot?.(...args) ?? request;
     const current: LiveRequest<R> = { request, controller: new AbortController() };
     callerSignal?.addEventListener("abort", () => current.controller.abort(), { once: true });
-    if (callerSignal?.aborted) current.controller.abort();
 
     const previous = live.get(slot);
     live.set(slot, current);
-    previous?.controller.abort();
+    pending.add(current);
+    if (!callerSignal) previous?.controller.abort();
 
     const result = options.load(current.controller.signal, ...args)
       .then(
@@ -176,14 +179,16 @@ export function createLatestRequests<A extends unknown[], R>(options: {
         },
       )
       .finally(() => {
+        pending.delete(current);
         if (live.get(slot) === current) live.delete(slot);
       });
-    if (previous?.request === request) previous.replacement = result;
+    if (!callerSignal && previous?.request === request) previous.replacement = result;
     return result;
   }
 
   function cancelAll() {
-    for (const request of live.values()) request.controller.abort();
+    for (const request of pending) request.controller.abort();
+    pending.clear();
     live.clear();
   }
 
