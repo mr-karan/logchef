@@ -2,12 +2,101 @@ package datasource
 
 import (
 	"context"
+	"errors"
+	"io"
+	"log/slog"
+	"os"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/pkg/models"
 )
+
+func TestEvaluateAlertRejectsNonSelectQueries(t *testing.T) {
+	provider := &ClickHouseProvider{manager: &clickhouse.Manager{}}
+	result, err := provider.EvaluateAlert(context.Background(), &models.Source{ID: 1}, AlertQueryRequest{Query: "DROP TABLE x"})
+	var validationErr *ValidationError
+	if !errors.As(err, &validationErr) || validationErr.Field != "query" {
+		t.Fatalf("EvaluateAlert() = %v, %v; want query validation error before connection lookup", result, err)
+	}
+}
+
+func TestEvaluateAlertClickHouse(t *testing.T) {
+	addr := os.Getenv("LOGCHEF_TEST_CLICKHOUSE_ADDR")
+	if addr == "" {
+		t.Skip("set LOGCHEF_TEST_CLICKHOUSE_ADDR to run against ClickHouse")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	manager := clickhouse.NewManager(log)
+	defer manager.Close()
+	source := &models.Source{ID: 1, Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "numbers"}}
+	if err := manager.AddSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	provider := NewClickHouseProvider(manager, log)
+	for _, tc := range []struct {
+		query string
+		want  any
+	}{
+		{query: "SELECT count() AS value FROM numbers(1501)", want: uint64(1501)},
+		{query: "SELECT count() AS value FROM (SELECT number FROM numbers(1501) LIMIT 1201)", want: uint64(1201)},
+		// ClickHouse nests block comments and the parser does not, so the raw
+		// text would run the hidden SELECT 42 instead of the validated literal.
+		{query: "/* /* */ SELECT '*/ SELECT 42 AS value -- '", want: "*/ SELECT 42 AS value -- "},
+	} {
+		t.Run(tc.query, func(t *testing.T) {
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: tc.query})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(result.Logs) != 1 || len(result.Logs[0]) != 1 {
+				t.Fatalf("EvaluateAlert() rows = %v, want one row with one column", result.Logs)
+			}
+			for _, got := range result.Logs[0] {
+				if got != tc.want {
+					t.Fatalf("EvaluateAlert() value = %#v, want %#v", got, tc.want)
+				}
+			}
+		})
+	}
+
+	result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(1000000)"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Logs) != alertMaxRows || !result.Stats.Truncated {
+		t.Fatalf("EvaluateAlert() buffered %d rows (truncated=%v), want %d truncated", len(result.Logs), result.Stats.Truncated, alertMaxRows)
+	}
+
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT number AS value FROM numbers(10) WHERE number > 100"})
+	if err != nil || len(result.Logs) != 0 || result.Stats.Truncated {
+		t.Fatalf("EvaluateAlert(empty) = %v, %v; want zero rows without error", result, err)
+	}
+
+	result, err = provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: "SELECT count() AS value, repeat('xx', 600000) AS detail FROM numbers(1501)"})
+	if err == nil {
+		t.Fatalf("EvaluateAlert(first row over byte limit) = %v, want error instead of an empty result", result.Logs)
+	}
+
+	// The parser keeps these as identifiers while ClickHouse reads an escaped
+	// backtick or a heredoc string, which would run the hidden 42 AS value.
+	for _, query := range []string{
+		"SELECT 'n' AS `\\`, '`, 42 AS value -- '",
+		`SELECT 'n' AS "\", '", 42 AS value -- '`,
+		"SELECT $$ AS a, '$$, 42 AS value -- '",
+	} {
+		t.Run(query, func(t *testing.T) {
+			result, err := provider.EvaluateAlert(ctx, source, AlertQueryRequest{Query: query})
+			if _, ok := errors.AsType[*ValidationError](err); !ok {
+				t.Fatalf("EvaluateAlert() = %v, %v; want query validation error", result, err)
+			}
+		})
+	}
+}
 
 func TestHasLeadingTimestampSortKey(t *testing.T) {
 	tests := []struct {

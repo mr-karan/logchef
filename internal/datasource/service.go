@@ -206,6 +206,15 @@ func (s *Service) ValidateAlertSupport(ctx context.Context, sourceID models.Sour
 	return nil
 }
 
+// ValidateAlertQuery rejects alert SQL that EvaluateAlert would refuse to run.
+func ValidateAlertQuery(language models.QueryLanguage, query string) error {
+	if models.NormalizeQueryLanguage(language) != models.QueryLanguageClickHouseSQL {
+		return nil
+	}
+	_, err := formatAlertQuery(query)
+	return err
+}
+
 func (s *Service) QueryLogs(ctx context.Context, sourceID models.SourceID, req QueryRequest) (*models.QueryResult, error) {
 	source, provider, err := s.sourceAndProvider(ctx, sourceID)
 	if err != nil {

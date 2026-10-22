@@ -128,7 +128,7 @@ func validateWebhookURLs(urls []string) error {
 	return nil
 }
 
-func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert) error {
+func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID models.SourceID, alert *models.Alert, checkQuery bool) error {
 	if alert == nil {
 		return fmt.Errorf("alert payload is required")
 	}
@@ -179,6 +179,9 @@ func validateAlertModel(ctx context.Context, ds *datasource.Service, sourceID mo
 	if _, ok := validSeverities[alert.Severity]; !ok {
 		return fmt.Errorf("invalid severity %q", alert.Severity)
 	}
+	if checkQuery {
+		return datasource.ValidateAlertQuery(alert.QueryLanguage, alert.Query)
+	}
 	return nil
 }
 
@@ -217,7 +220,7 @@ func CreateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		IsActive:          req.IsActive,
 		CreatedBy:         &owner,
 	}
-	if err := validateAlertModel(ctx, ds, sourceID, alert); err != nil {
+	if err := validateAlertModel(ctx, ds, sourceID, alert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -257,9 +260,14 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 		return nil, fmt.Errorf("failed to load alert: %w", err)
 	}
 
+	previous := *existing
 	if err := applyAlertUpdates(existing, req); err != nil {
 		return nil, err
 	}
+	// An unchanged query skips the SQL check so owners can still pause, rename
+	// or delete an alert whose stored query the parser rejects. Evaluation
+	// still refuses to run it.
+	queryChanged := existing.Query != previous.Query || existing.QueryLanguage != previous.QueryLanguage || existing.EditorMode != previous.EditorMode
 	if req.RecipientUserIDs != nil {
 		if err := validateRecipientUserIDs(ctx, db, existing.RecipientUserIDs); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
@@ -270,7 +278,7 @@ func UpdateAlert(ctx context.Context, db store.StoreOps, ds *datasource.Service,
 			return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 		}
 	}
-	if err := validateAlertModel(ctx, ds, existing.SourceID, existing); err != nil {
+	if err := validateAlertModel(ctx, ds, existing.SourceID, existing, queryChanged); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -490,7 +498,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		FrequencySeconds:  60,
 		Severity:          models.AlertSeverityWarning,
 	}
-	if err := validateAlertModel(ctx, ds, sourceID, tempAlert); err != nil {
+	if err := validateAlertModel(ctx, ds, sourceID, tempAlert, true); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidAlertConfiguration, err)
 	}
 
@@ -574,7 +582,12 @@ func generateQueryWarnings(query string, executionTime time.Duration, result *mo
 	}
 
 	// Warn if result set is unexpectedly large
-	if len(result.Logs) > 1 {
+	switch {
+	case result.Stats.Truncated && result.Stats.TruncatedReason == "byte_limit":
+		warnings = append(warnings, fmt.Sprintf("Results were cut off by the response size limit after %d rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).", len(result.Logs)))
+	case result.Stats.Truncated:
+		warnings = append(warnings, fmt.Sprintf("Results were capped at %d buffered rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).", len(result.Logs)))
+	case len(result.Logs) > 1:
 		warnings = append(warnings, fmt.Sprintf("Query returned %d rows. Alert queries should typically return a single numeric value (e.g., count, sum, avg).", len(result.Logs)))
 	}
 

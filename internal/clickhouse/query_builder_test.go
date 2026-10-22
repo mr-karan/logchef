@@ -284,3 +284,44 @@ func TestQueryBuilderPreservesSQLLiteralsAndIdentifiers(t *testing.T) {
 		})
 	}
 }
+
+func TestFormatSelectQuery(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  string
+	}{
+		{query: "SELECT count() AS value FROM logs -- trailing", want: "SELECT count() AS value FROM logs"},
+		{query: "/* /* */ SELECT '*/ SELECT 42 AS value -- '", want: "SELECT '*/ SELECT 42 AS value -- '"},
+		{
+			query: "SELECT count(*) as value\nFROM logs\nWHERE severity = 'ERROR'\n  AND `timestamp` >= now() - toIntervalSecond(300)",
+			want:  "SELECT count(*) AS value FROM logs WHERE severity = 'ERROR' AND `timestamp` >= now() - toIntervalSecond(300)",
+		},
+		{query: `SELECT "service.name", sum(t.bytes$total) AS value FROM db.logs AS t WHERE msg = 'a\\b'`, want: `SELECT "service.name", sum(t.bytes$total) AS value FROM db.logs AS t WHERE msg = 'a\\b'`},
+	} {
+		got, err := FormatSelectQuery(tc.query)
+		if err != nil || got != tc.want {
+			t.Errorf("FormatSelectQuery(%q) = %q, %v; want %q", tc.query, got, err, tc.want)
+		}
+	}
+
+	for _, query := range []string{
+		"",
+		"DROP TABLE x",
+		"INSERT INTO x SELECT 1",
+		"/* c */ DROP TABLE x",
+		"SYSTEM SHUTDOWN",
+		"OPTIMIZE TABLE x",
+		"KILL QUERY WHERE 1",
+		"SELECT 1; DROP TABLE x",
+		// ClickHouse reads an escaped backtick or a heredoc string here, so the
+		// formatted text would run the hidden 42 AS value.
+		"SELECT 'n' AS `\\`, '`, 42 AS value -- '",
+		`SELECT 'n' AS "\", '", 42 AS value -- '`,
+		"SELECT $$ AS a, '$$, 42 AS value -- '",
+		"SELECT count() FROM logs WHERE `a\\b` = 1",
+	} {
+		if got, err := FormatSelectQuery(query); err == nil {
+			t.Errorf("FormatSelectQuery(%q) = %q, want error", query, got)
+		}
+	}
+}
