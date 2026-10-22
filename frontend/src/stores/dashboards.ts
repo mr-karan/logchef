@@ -2,7 +2,6 @@ import { defineStore } from "pinia";
 import { computed } from "vue";
 import { useBaseStore } from "@/stores/base";
 import { useMetaStore } from "@/stores/meta";
-import type { DashboardCachePolicy } from "@/api/meta";
 import {
   dashboardsApi,
   dashboardPanelApi,
@@ -16,7 +15,6 @@ import {
   type PanelQueryLanguage,
   type CacheDirective,
 } from "@/api/dashboards";
-import { isSuccessResponse, type APIResponse } from "@/api/types";
 import { HistogramService, type HistogramData } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
 import {
@@ -29,19 +27,22 @@ import {
   type TimeWindow,
 } from "@/utils/timeWindow";
 import { usePreferencesStore } from "@/stores/preferences";
-import { isCanceledError } from "@/api/error-handler";
+import { unwrap } from "@/api/types";
+import { stableStringify } from "@/utils/stableStringify";
+import { isAbortError } from "@/api/error-handler";
 import { runWithConcurrency } from "@/utils/promisePool";
+import {
+  classifyPanelError,
+  clampTableLimit,
+  execSignature,
+  resolveAppliedRange,
+  resolveEffectiveCacheTtl,
+} from "@/utils/dashboardRuntime";
 
 // Number of panel fetches allowed in flight at once. A 24-panel dashboard would
 // otherwise fire 24 (or 48, counting the logchefql translate step) requests at
 // once; this keeps the backend from being stampeded on load/refresh.
 export const PANEL_FETCH_CONCURRENCY = 4;
-
-// Table panel row cap. The builder's limit option maxes at 1000; a hand-edited
-// or legacy blob could carry anything (a saved limit:100000 would try to render
-// 100k rows), so the runtime clamps into [1, TABLE_LIMIT_MAX] regardless.
-const DEFAULT_TABLE_LIMIT = 100;
-const TABLE_LIMIT_MAX = 1000;
 
 // A burst of time-picker emissions (partial date entry, quick-range flips) each
 // mutate the range; coalesce them into a single panel refresh instead of firing
@@ -125,99 +126,6 @@ function newPanelId(): string {
 /** Deep clone a JSON-serializable panel blob (breaks all reactive references). */
 function cloneBlob(blob: DashboardPanels): DashboardPanels {
   return JSON.parse(JSON.stringify(blob));
-}
-
-// Stable, key-order-independent serialization used for the dirty comparison. The
-// reflow step re-emits object keys in a different order than the loaded blob, so
-// a plain JSON.stringify would report a semantically-identical draft as dirty.
-function stableStringify(value: unknown): string {
-  if (Array.isArray(value)) {
-    return `[${value.map(stableStringify).join(",")}]`;
-  }
-  if (value && typeof value === "object") {
-    const keys = Object.keys(value as Record<string, unknown>).sort();
-    return `{${keys
-      .map((k) => `${JSON.stringify(k)}:${stableStringify((value as Record<string, unknown>)[k])}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function isAbort(err: unknown): boolean {
-  return (
-    isCanceledError(err) ||
-    (err instanceof Error && err.name === "AbortError") ||
-    (typeof err === "object" && err !== null && (err as { error_type?: string }).error_type === "CanceledError")
-  );
-}
-
-// Resolve a dashboard's EFFECTIVE result-cache TTL (seconds), combining the blob
-// value with the server's advertised policy. Client and server apply the SAME
-// clamp with the SAME max, so the snap bucket, the directive TTL, and the
-// server-side cache TTL all coincide.
-//
-// FAILS CLOSED to 0 (no caching) whenever the policy is missing/disabled/
-// malformed — this is deliberate. Guessing enabled/600 on a stale or old server
-// would change the query-window semantics (snapping) and risk serving stale
-// data against a cache the server may not even keep.
-export function resolveEffectiveCacheTtl(
-  blobTtl: number | null | undefined,
-  policy: DashboardCachePolicy | null | undefined
-): number {
-  // Old/malformed server, or cache disabled → fail closed (no caching).
-  if (!policy || policy.enabled !== true) return 0;
-  if (!Number.isSafeInteger(policy.default_ttl_seconds) || policy.default_ttl_seconds < 1) return 0;
-  if (!Number.isSafeInteger(policy.max_ttl_seconds) || policy.max_ttl_seconds < 1) return 0;
-
-  if (blobTtl === 0) return 0; // explicit per-dashboard "off"
-  const requested =
-    blobTtl === undefined || blobTtl === null
-      ? policy.default_ttl_seconds // dashboard didn't set one → server default
-      : blobTtl;
-  if (!Number.isSafeInteger(requested) || requested < 1) return 0; // fail closed on garbage
-  return Math.min(requested, policy.max_ttl_seconds); // clamp to server max (same clamp the server applies)
-}
-
-// Compute the range actually executed for a refresh, given an injected `nowMs`.
-// Pure + fake-clock testable. `baseStart`/`baseEnd` are the unsnapped range for
-// this now (from the existing time parsing); `durationMs` is only meaningful for
-// "rolling".
-//
-// - absolute → passthrough (never snapped; its key is naturally stable).
-// - calendar (today/yesterday) → passthrough, PRESERVING calendar boundaries —
-//   never subtract a rolling duration (which would move the day off its edge).
-// - rolling + effTtl>0 → snap the end to the current TTL bucket so successive
-//   refreshes within a bucket produce a byte-identical (cacheable) query.
-// - rolling + effTtl===0 → no snap; a fresh moving window anchored on nowMs.
-export function resolveAppliedRange(input: {
-  kind: "rolling" | "calendar" | "absolute";
-  baseStart: number;
-  baseEnd: number;
-  durationMs: number;
-  effTtlSeconds: number;
-  nowMs: number;
-}): { start: number; end: number } {
-  const { kind, baseStart, baseEnd, durationMs, effTtlSeconds, nowMs } = input;
-  if (kind === "absolute" || kind === "calendar") {
-    return { start: baseStart, end: baseEnd };
-  }
-  // rolling
-  if (effTtlSeconds > 0) {
-    const ttlMs = effTtlSeconds * 1000;
-    const bucketEnd = Math.floor(nowMs / ttlMs) * ttlMs;
-    return { start: bucketEnd - durationMs, end: bucketEnd };
-  }
-  return { start: nowMs - durationMs, end: nowMs };
-}
-
-function classifyPanelError(err: unknown): { locked: boolean; message: string } {
-  const asObj = (typeof err === "object" && err !== null ? err : {}) as {
-    error_type?: string;
-    message?: string;
-  };
-  const locked = asObj.error_type === "AuthorizationError";
-  const message = asObj.message || (err instanceof Error ? err.message : "Failed to load panel");
-  return { locked, message };
 }
 
 export const useDashboardsStore = defineStore("dashboards", () => {
@@ -410,14 +318,6 @@ export const useDashboardsStore = defineStore("dashboards", () => {
 
   // ---- Panel execution ----------------------------------------------------
 
-  function unwrap<T>(resp: APIResponse<T>): T {
-    if (isSuccessResponse(resp)) {
-      return resp.data as T;
-    }
-    // Non-2xx responses reject before this; a 200 with status:"error" lands here.
-    throw resp;
-  }
-
   // Resolve a panel's query to the native query text the histogram endpoint wants
   // (SQL for ClickHouse sources, LogsQL for VictoriaLogs), plus the language of
   // that native text. ClickHouse-SQL and native LogsQL panels already carry the
@@ -454,14 +354,6 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     // for VictoriaLogs); default to clickhouse-sql for older server builds.
     const language = (translated.generated_query_language as PanelQueryLanguage) || "clickhouse-sql";
     return { query, language };
-  }
-
-  // Clamp a table panel's row cap into [1, TABLE_LIMIT_MAX]; absent/invalid
-  // falls back to the default. Guards against a legacy/hand-edited blob asking
-  // to render tens of thousands of DOM rows.
-  function clampTableLimit(value: number | undefined): number {
-    if (!value || !Number.isFinite(value) || value <= 0) return DEFAULT_TABLE_LIMIT;
-    return Math.min(Math.max(Math.floor(value), 1), TABLE_LIMIT_MAX);
   }
 
   async function fetchPanelData(
@@ -503,10 +395,10 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       if (panel.type === "stat") {
         return { status: "success", stat: { value: sumHistogramCounts(buckets) } };
       }
-      if (panel.type === "breakdown") {
+      if (panel.type === "breakdown" && groupBy) {
         return {
           status: buckets.length ? "success" : "empty",
-          breakdown: { buckets, groupBy: groupBy!, notice: data?.notice ?? null },
+          breakdown: { buckets, groupBy, notice: data?.notice ?? null },
         };
       }
       return {
@@ -589,7 +481,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       if (signal.aborted) return;
       setPanelState(panel.id, { ...result, range });
     } catch (err) {
-      if (signal.aborted || isAbort(err)) return;
+      if (signal.aborted || isAbortError(err)) return;
       const { locked, message } = classifyPanelError(err);
       setPanelState(panel.id, { status: locked ? "locked" : "error", error: message });
     }
@@ -686,18 +578,22 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     editBaseUpdatedAt = dashboard.updated_at ?? null;
   }
 
-  function cancelEdit() {
-    // The live dashboard (current.panels) was never mutated, so simply dropping
-    // the draft reverts to the last-loaded state.
-    previewAbort?.abort();
-    previewAbort = null;
-    abortSinglePanels();
+  // Leaves edit mode and drops the draft and its identity/concurrency baselines.
+  function resetEdit() {
     state.data.value.isEditing = false;
     state.data.value.editDraft = null;
     state.data.value.editSnapshotJson = null;
     state.data.value.previewState = null;
     editDashboardId = null;
     editBaseUpdatedAt = null;
+  }
+
+  function cancelEdit() {
+    // The live dashboard (current.panels) was never mutated, so simply dropping
+    // the draft reverts to the last-loaded state.
+    abortPreview();
+    abortSinglePanels();
+    resetEdit();
   }
 
   function setDraft(next: DashboardPanels) {
@@ -783,20 +679,6 @@ export const useDashboardsStore = defineStore("dashboards", () => {
         executeSinglePanel(merged);
       }
     }
-  }
-
-  // Signature of the fields that determine a panel's fetched result. Two panels
-  // with the same signature render identically, so panelState is reusable.
-  function execSignature(p: DashboardPanel): string {
-    return JSON.stringify([
-      p.type,
-      p.query,
-      p.query_language,
-      p.team_id,
-      p.source_id,
-      p.options?.limit ?? null,
-      p.options?.group_by ?? null,
-    ]);
   }
 
   // Create-on-canvas: push a bare panel shell into the draft immediately (so the
@@ -939,12 +821,7 @@ export const useDashboardsStore = defineStore("dashboards", () => {
             panels: cloneBlob(draft),
           };
         }
-        state.data.value.isEditing = false;
-        state.data.value.editDraft = null;
-        state.data.value.editSnapshotJson = null;
-        state.data.value.previewState = null;
-        editDashboardId = null;
-        editBaseUpdatedAt = null;
+        resetEdit();
       },
     });
     if (result.success) {
@@ -979,15 +856,14 @@ export const useDashboardsStore = defineStore("dashboards", () => {
       if (signal.aborted) return;
       state.data.value.previewState = result;
     } catch (err) {
-      if (signal.aborted || isAbort(err)) return;
+      if (signal.aborted || isAbortError(err)) return;
       const { locked, message } = classifyPanelError(err);
       state.data.value.previewState = { status: locked ? "locked" : "error", error: message };
     }
   }
 
   function clearPreview() {
-    previewAbort?.abort();
-    previewAbort = null;
+    abortPreview();
     state.data.value.previewState = null;
   }
 
@@ -1010,17 +886,11 @@ export const useDashboardsStore = defineStore("dashboards", () => {
     abortSinglePanels();
     refreshAbort?.abort();
     refreshAbort = null;
-    previewAbort?.abort();
-    previewAbort = null;
+    abortPreview();
     state.data.value.current = null;
     state.data.value.panelStates = {};
     state.data.value.appliedRange = null;
-    state.data.value.isEditing = false;
-    state.data.value.editDraft = null;
-    state.data.value.editSnapshotJson = null;
-    state.data.value.previewState = null;
-    editDashboardId = null;
-    editBaseUpdatedAt = null;
+    resetEdit();
   }
 
   return {

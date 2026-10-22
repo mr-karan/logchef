@@ -1,6 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { resolveEffectiveCacheTtl, resolveAppliedRange } from "../dashboards";
+import {
+  classifyPanelError,
+  clampTableLimit,
+  execSignature,
+  resolveAppliedRange,
+  resolveEffectiveCacheTtl,
+} from "../dashboardRuntime";
 import type { DashboardCachePolicy } from "@/api/meta";
+import type { DashboardPanel } from "@/api/dashboards";
 
 // A well-formed server policy: caching on, 10m default, 1h max.
 const POLICY: DashboardCachePolicy = {
@@ -180,5 +187,75 @@ describe("resolveAppliedRange", () => {
       });
       expect(r).toEqual({ start: baseStart, end: baseEnd });
     });
+  });
+});
+
+describe("classifyPanelError", () => {
+  it("marks an AuthorizationError as locked", () => {
+    expect(classifyPanelError({ error_type: "AuthorizationError", message: "no access" })).toEqual({
+      locked: true,
+      message: "no access",
+    });
+  });
+
+  it("uses the message of a plain error", () => {
+    expect(classifyPanelError(new Error("boom"))).toEqual({ locked: false, message: "boom" });
+  });
+
+  it("keeps an authorization error locked when its message is empty", () => {
+    expect(classifyPanelError({ error_type: "AuthorizationError", message: "" })).toEqual({
+      locked: true,
+      message: "Failed to load panel",
+    });
+  });
+
+  it.each([undefined, null, "str", 42, {}])("falls back for %j", (err) => {
+    expect(classifyPanelError(err)).toEqual({ locked: false, message: "Failed to load panel" });
+  });
+});
+
+describe("clampTableLimit", () => {
+  it.each<[string, number | undefined, number]>([
+    ["undefined → default", undefined, 100],
+    ["0 → default", 0, 100],
+    ["negative → default", -5, 100],
+    ["NaN → default", NaN, 100],
+    ["Infinity → default", Infinity, 100],
+    ["fraction below 1 clamps up to 1", 0.5, 1],
+    ["1.9 floors to 1", 1.9, 1],
+    ["in range passes through", 250, 250],
+    ["max passes through", 1000, 1000],
+    ["above max clamps", 100000, 1000],
+  ])("%s", (_name, value, expected) => {
+    expect(clampTableLimit(value)).toBe(expected);
+  });
+});
+
+describe("execSignature", () => {
+  const base: DashboardPanel = {
+    id: "p1",
+    title: "A",
+    type: "table",
+    team_id: 1,
+    source_id: 2,
+    query: "level:error",
+    query_language: "logchefql",
+    options: { limit: 50 },
+  };
+
+  it("ignores fields that do not affect the fetched result", () => {
+    expect(execSignature({ ...base, id: "p2", title: "B" })).toBe(execSignature(base));
+  });
+
+  it.each<[string, Partial<DashboardPanel>]>([
+    ["type", { type: "stat" }],
+    ["query", { query: "level:warn" }],
+    ["query language", { query_language: "clickhouse-sql" }],
+    ["team", { team_id: 9 }],
+    ["source", { source_id: 9 }],
+    ["limit", { options: { limit: 10 } }],
+    ["group by", { options: { limit: 50, group_by: "host" } }],
+  ])("changes when %s changes", (_name, patch) => {
+    expect(execSignature({ ...base, ...patch })).not.toBe(execSignature(base));
   });
 });

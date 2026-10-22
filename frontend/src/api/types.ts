@@ -48,6 +48,14 @@ export function isSuccessResponse<T>(
   return response.status === "success";
 }
 
+export function unwrap<T>(resp: APIResponse<T>): T {
+  if (isSuccessResponse(resp)) {
+    return resp.data as T;
+  }
+  // Non-2xx responses reject before this; a 200 with status:"error" lands here.
+  throw resp;
+}
+
 // Import from our new error handler utility
 import { formatErrorMessage } from "@/api/error-handler";
 
