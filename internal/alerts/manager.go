@@ -141,10 +141,7 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 	}
 	alerts, err := m.db.ListActiveAlertsDue(ctx)
 	if err != nil {
-		if errors.Is(err, context.Canceled) {
-			return
-		}
-		m.log.Error("failed to fetch alerts for evaluation", "error", err)
+		m.log.Log(ctx, evaluationLogLevel(ctx, err), "failed to fetch alerts for evaluation", "error", err)
 		return
 	}
 	if len(alerts) == 0 {
@@ -155,8 +152,8 @@ func (m *Manager) evaluateCycle(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
-		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil && !errors.Is(err, context.Canceled) {
-			m.log.Error("alert evaluation failed", "alert_id", alert.ID, "error", err)
+		if err := m.evaluateAlertWithTimeout(ctx, alert); err != nil {
+			m.log.Log(ctx, evaluationLogLevel(ctx, err), "alert evaluation failed", "alert_id", alert.ID, "error", err)
 		}
 	}
 }
@@ -235,7 +232,10 @@ func evaluationLogLevel(ctx context.Context, err error) slog.Level {
 }
 
 func (m *Manager) recordEvaluationError(ctx context.Context, alert *models.Alert, evalErr error) {
-	if alert == nil || evalErr == nil || errors.Is(evalErr, context.Canceled) {
+	if alert == nil || evalErr == nil {
+		return
+	}
+	if errors.Is(ctx.Err(), context.Canceled) && errors.Is(evalErr, context.Canceled) {
 		return
 	}
 	// Evaluation deadlines must not prevent recording genuine failures.

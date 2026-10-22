@@ -431,12 +431,14 @@ func TestCanceledEvaluationDoesNotRecordFailure(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
 	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{HistoryLimit: 100}})
+	ctx, cancel := context.WithCancel(t.Context())
 	manager.evalFn = func(ctx context.Context, current *models.Alert) error {
+		cancel()
 		err := fmt.Errorf("query failed: %w", context.Canceled)
 		manager.recordEvaluationError(ctx, current, err)
 		return err
 	}
-	manager.evaluateCycle(t.Context())
+	manager.evaluateCycle(ctx)
 	history, err := db.ListAlertHistory(t.Context(), alert.ID, 10)
 	if err != nil || len(history) != 0 {
 		t.Fatalf("cancellation created failure history = %v, %v", history, err)
