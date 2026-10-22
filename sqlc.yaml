@@ -35,6 +35,7 @@ sql:
       - "internal/store/sqlite/migrations/000032_add_query_stats_daily.up.sql"
       - "internal/store/sqlite/migrations/000033_oauth.up.sql"
       - "internal/store/sqlite/migrations/000034_add_collection_teams.up.sql"
+      - "internal/store/sqlite/migrations/000035_revoke_non_utc_sessions.up.sql"
     gen:
       go:
         package: "sqlc"
