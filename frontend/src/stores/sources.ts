@@ -93,7 +93,10 @@ export const useSourcesStore = defineStore("sources", () => {
 
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
+  const teamSourceRequests = new Map<number, symbol>();
   const sourceActivityRequests = new Map<number, Promise<SourceActivityRequestResult>>();
+
+  watch(() => contextStore.teamId, () => teamSourceRequests.clear(), { flush: "sync" });
 
   // Hydration state
   const isHydrated = ref(false);
@@ -152,11 +155,14 @@ export const useSourcesStore = defineStore("sources", () => {
         return;
       }
 
+      state.data.value.isLoadingTeamSources = true;
+      const pending = loadTeamSources(newTeamId);
+      const request = teamSourceRequests.get(newTeamId);
+      const isCurrent = () => contextStore.teamId === newTeamId && teamSourceRequests.get(newTeamId) === request;
       try {
-        state.data.value.isLoadingTeamSources = true;
-        await loadTeamSources(newTeamId);
+        await pending;
 
-        if (contextStore.teamId !== newTeamId) {
+        if (!isCurrent()) {
           return;
         }
 
@@ -173,11 +179,14 @@ export const useSourcesStore = defineStore("sources", () => {
           }
         }
       } catch (error) {
+        if (!isCurrent()) return;
         const errorMessage = error instanceof Error ? error.message : 'Failed to load sources';
         state.data.value.teamSourcesError = errorMessage;
         console.error(`SourcesStore: Error loading sources for team ${newTeamId}:`, error);
       } finally {
-        state.data.value.isLoadingTeamSources = false;
+        if (isCurrent()) {
+          state.data.value.isLoadingTeamSources = false;
+        }
       }
     },
     { immediate: true }
@@ -275,17 +284,30 @@ export const useSourcesStore = defineStore("sources", () => {
   }
 
   async function loadTeamSources(teamId: number, _version?: number) {
-    return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
-      return await state.callApi({
-        apiCall: () => sourcesApi.listTeamSources(teamId),
-        operationKey: `loadTeamSources-${teamId}`,
-        onSuccess: async (data) => {
-          state.data.value.teamSources = data ?? [];
-        },
-        defaultData: [],
-        showToast: false,
+    const request = Symbol();
+    teamSourceRequests.set(teamId, request);
+    const isCurrent = () => contextStore.teamId === teamId && teamSourceRequests.get(teamId) === request;
+    try {
+      return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
+        return await state.callApi({
+          apiCall: async () => {
+            try {
+              return await sourcesApi.listTeamSources(teamId);
+            } finally {
+              if (!isCurrent()) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
+            }
+          },
+          operationKey: `loadTeamSources-${teamId}`,
+          onSuccess: (data) => {
+            if (isCurrent()) state.data.value.teamSources = data ?? [];
+          },
+          defaultData: [],
+          showToast: false,
+        });
       });
-    });
+    } finally {
+      if (isCurrent()) state.data.value.isLoadingTeamSources = false;
+    }
   }
 
   async function createSource(payload: CreateSourcePayload) {

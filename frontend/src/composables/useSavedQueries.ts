@@ -1,4 +1,4 @@
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useExploreStore } from '@/stores/explore'
 import { useSavedQueriesStore } from '@/stores/savedQueries'
@@ -38,6 +38,19 @@ export function useSavedQueries(
   const openingQueryId = ref<number | null>(null)
   const searchQuery = ref('')
   const saveAsNewQuery = ref(false)
+  const sourceQueryRequests = new Map<number, symbol>()
+  let activeSourceId: number | null = null
+
+  watch(
+    [() => contextStore.teamId, () => contextStore.sourceId],
+    () => {
+      sourceQueryRequests.clear()
+      activeSourceId = null
+      queriesRef.value = []
+      isLoading.value = false
+    },
+    { flush: 'sync' },
+  )
 
   const isEditingExistingQuery = computed(() => !!route.query.id);
 
@@ -424,6 +437,10 @@ export function useSavedQueries(
   // loadSourceQueries fetches saved queries for a single source. teamId is no
   // longer needed — visibility is gated by source access via any team membership.
   async function loadSourceQueries(sourceId: number) {
+    const request = Symbol()
+    sourceQueryRequests.set(sourceId, request)
+    activeSourceId = sourceId
+    const isCurrent = () => activeSourceId === sourceId && sourceQueryRequests.get(sourceId) === request
     try {
       isLoading.value = true
       searchQuery.value = ''
@@ -434,6 +451,7 @@ export function useSavedQueries(
       }
 
       const result = await savedQueriesStore.list(sourceId)
+      if (!isCurrent()) return { success: false }
 
       if (result.success) {
         queriesRef.value = result.data ?? []
@@ -451,6 +469,7 @@ export function useSavedQueries(
       }
       return { success: false, error: result.error }
     } catch (error) {
+      if (!isCurrent()) return { success: false }
       queriesRef.value = []
       toast({
         title: 'Error',
@@ -460,7 +479,10 @@ export function useSavedQueries(
       })
       return { success: false, error }
     } finally {
-      isLoading.value = false
+      if (isCurrent()) {
+        sourceQueryRequests.delete(sourceId)
+        isLoading.value = false
+      }
     }
   }
 

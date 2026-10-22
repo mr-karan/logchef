@@ -29,13 +29,18 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   });
 
   const contextStore = useContextStore();
+  const listRequests = new Map<string, symbol>();
+  let activeListKey: string | null = null;
 
   watch(
     [() => contextStore.teamId, () => contextStore.sourceId],
     () => {
+      listRequests.clear();
+      activeListKey = null;
       state.data.value.queries = [];
       state.data.value.selectedQuery = null;
-    }
+    },
+    { flush: "sync" },
   );
 
   const queries = computed(() => state.data.value.queries);
@@ -62,11 +67,21 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   // list fetches saved queries the user can see. Optional sourceId narrows to one source.
   async function list(sourceId?: number) {
     const key = sourceId ? `listSavedQueries-${sourceId}` : 'listSavedQueries';
+    const request = Symbol();
+    listRequests.set(key, request);
+    activeListKey = key;
+    const isCurrent = () => activeListKey === key && listRequests.get(key) === request;
     return await state.callApi<SavedQuery[]>({
-      apiCall: () => savedQueriesApi.list(sourceId),
+      apiCall: async () => {
+        try {
+          return await savedQueriesApi.list(sourceId);
+        } finally {
+          if (!isCurrent()) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
+        }
+      },
       operationKey: key,
       onSuccess: (responseData) => {
-        state.data.value.queries = responseData ?? [];
+        if (isCurrent()) state.data.value.queries = responseData ?? [];
       },
       defaultData: [],
       showToast: false,
