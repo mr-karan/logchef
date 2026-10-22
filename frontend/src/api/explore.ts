@@ -156,7 +156,7 @@ export interface ExportJobResponse {
 
 export interface QuerySharePayload {
   version: number;
-  mode: "logchefql" | "native";
+  mode: "logchefql" | "sql";
   query: string;
   limit: number;
   time_range?: {

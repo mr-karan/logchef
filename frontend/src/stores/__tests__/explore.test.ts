@@ -195,6 +195,22 @@ describe("explore store", () => {
       expect(store.activeShareToken).toBeNull();
     });
 
+    it("shares a native query in the server's sql mode", async () => {
+      const contextStore = useContextStore();
+      contextStore.selectTeam(1);
+      contextStore.selectSource(10);
+      mocks.teamsState.currentTeamId = 1;
+      mocks.sourcesState.currentSourceDetails = CH_SOURCE;
+      mocks.exploreCreateQueryShare.mockResolvedValue({ data: { token: "share-token" } });
+
+      const store = useExploreStore();
+      store.setActiveMode("native");
+      store.setNativeQuery("SELECT 1");
+      await store.createQueryShare();
+
+      expect(mocks.exploreCreateQueryShare.mock.lastCall?.[1]).toMatchObject({ mode: "sql", query: "SELECT 1" });
+    });
+
     it("leaves the share selection untouched on a no-op mode switch", () => {
       mocks.sourcesState.currentSourceDetails = CH_SOURCE;
       const store = useExploreStore();
@@ -976,7 +992,7 @@ describe("explore template dialect on load", () => {
         store.hydrateFromQueryShare({
           token: "template", source_id: 2, team_id: 1, share_url: "/s/template",
           created_at: "", expires_at: "", created_by: 1,
-          payload: { version: 1, mode, query, limit: 100, time_range: { relative: "15m" } },
+          payload: { version: 1, mode: mode === "native" ? "sql" : mode, query, limit: 100, time_range: { relative: "15m" } },
         });
       }
       expect(useVariableStore().allVariables).toMatchObject([{ name: "level", isOptional: true }]);
