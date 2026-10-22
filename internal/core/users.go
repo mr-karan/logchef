@@ -41,6 +41,9 @@ var (
 
 // validateUserCreation validates parameters for creating a new user.
 func validateUserCreation(email, fullName string, role models.UserRole) error {
+	if len(email) > models.MaxEmailLength {
+		return &ValidationError{Field: "email", Message: "email must be at most 254 bytes"}
+	}
 	if email == "" {
 		return &ValidationError{Field: "email", Message: "email is required"}
 	}
@@ -65,6 +68,9 @@ func validateUserCreation(email, fullName string, role models.UserRole) error {
 // validateUserUpdate validates parameters for updating a user.
 // It checks only the fields provided in updateData.
 func validateUserUpdate(updateData models.User) error {
+	if len(updateData.Email) > models.MaxEmailLength {
+		return &ValidationError{Field: "email", Message: "email must be at most 254 bytes"}
+	}
 	// Full Name validation (if provided)
 	if updateData.FullName != "" {
 		if len(updateData.FullName) < 2 || len(updateData.FullName) > 100 {
