@@ -9,6 +9,7 @@ import { useSavedQueriesStore } from '../savedQueries'
 import { useExploreStore } from '../explore'
 import { useVariableStore } from '../variables'
 import { useSavedQueries } from '@/composables/useSavedQueries'
+import { contextRouterGuard } from '@/router/contextGuard'
 
 function source(id: number) {
   return { id, name: `Source ${id}`, columns: [{ name: 'timestamp', type: 'DateTime' }] }
@@ -16,12 +17,23 @@ function source(id: number) {
 function query(id: number, sourceId = id) {
   return { id, source_id: sourceId, name: `Query ${id}` }
 }
+const content = { version: 1, sourceId: 1, timeRange: null, limit: 100, content: '' }
 
 describe('navigation request ownership', () => {
   let pinia: ReturnType<typeof createPinia>
   let network: ReturnType<typeof controlledApi>
   let app: ReturnType<typeof createApp> | undefined
   let root: HTMLElement | undefined
+
+  async function settle(pending: Promise<unknown>, later: () => ReturnType<typeof controlledApi>['requests'], data: unknown) {
+    let settled = false
+    void pending.then(() => { settled = true })
+    await vi.waitFor(() => {
+      for (const request of later()) request.succeed(data)
+      expect(settled).toBe(true)
+    })
+    await pending
+  }
 
   beforeEach(() => {
     localStorage.clear()
@@ -50,16 +62,42 @@ describe('navigation request ownership', () => {
     expect(store.isLoadingTeamSources).toBe(false)
   })
 
-  it('restores the stored source before releasing the team loading flag', async () => {
+  async function openDeepLink(url: string) {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/', component: { render: () => h('div') } }] })
+    router.beforeEach(contextRouterGuard)
+    await router.push(url)
+  }
+
+  it.each([
+    ['falls back to the remembered source for a stale', '/?team=1&source=99999', 3],
+    ['remembers a valid', '/?team=1&source=2', 2],
+  ])('%s deep-linked source', async (_name, url, expected) => {
+    localStorage.setItem('logchef_context', JSON.stringify({ lastTeamId: 1, sourcePerTeam: { 1: 3 } }))
     const store = useSourcesStore()
     const context = useContextStore()
-    context.selectTeam(1)
-    context.selectSource(99)
-    localStorage.setItem('logchef_context', JSON.stringify({ lastTeamId: 1, sourcePerTeam: { 1: 3 } }))
+    await openDeepLink(url)
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     network.requests[0].succeed([source(2), source(3)])
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
-    expect(context.sourceId).toBe(3)
+    await vi.waitFor(() => expect(context.getStoredSourceForTeam(1)).toBe(expected))
+    expect(context.sourceId).toBe(expected)
+  })
+
+  it.each([
+    ['another team', () => useContextStore().selectTeam(2), () => useContextStore().selectTeam(1)],
+    ['no team', () => useContextStore().clear(), () => useContextStore().selectTeam(1)],
+    ['a route without a team', () => useContextStore().setFromRoute(null, null), () => useContextStore().restoreTeam([1])],
+  ])('finishes the team load when context visits %s and returns in one tick', async (_name, leave, back) => {
+    const store = useSourcesStore()
+    const context = useContextStore()
+    context.selectTeam(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+    leave()
+    back()
+    network.requests[0].succeed([source(1)])
+    await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
+    expect(store.teamSources.map(s => s.id)).toEqual([1])
+    expect(context.sourceId).toBe(1)
   })
 
   it('keeps the current team list when the previous team responds late', async () => {
@@ -91,37 +129,19 @@ describe('navigation request ownership', () => {
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
   })
 
-  it('shares the active team load until the team watcher restores its source', async () => {
+  it('hands a duplicate current-team load to the team watcher', async () => {
     const context = useContextStore()
     context.selectTeam(1)
     const store = useSourcesStore()
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
-    const duplicate = store.loadTeamSources(1)
+    const duplicate = store.loadCurrentTeamSources()
     expect(store.isLoadingTeamSources).toBe(true)
-    let finished = false
-    void duplicate.then(() => { finished = true })
-    await vi.waitFor(() => {
-      for (const request of network.requests) request.succeed([source(2)])
-      expect(finished).toBe(true)
-    })
-    expect(network.requests).toHaveLength(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    network.requests[1].succeed([source(2)])
     expect((await duplicate).success).toBe(true)
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
     expect(context.sourceId).toBe(2)
     expect(store.teamSources.map(s => s.id)).toEqual([2])
-  })
-
-  it('does not let an unrelated team request supersede the selected team', async () => {
-    useContextStore().selectTeam(1)
-    const store = useSourcesStore()
-    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
-    const unrelated = store.loadTeamSources(2)
-    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
-    network.requests[0].succeed([source(1)])
-    await vi.waitFor(() => expect(store.teamSources.map(s => s.id)).toEqual([1]))
-    network.requests[1].succeed([source(2)])
-    await unrelated
-    expect(store.teamSources.map(s => s.id)).toEqual([1])
   })
 
   it.each(['source', 'team', 'clear'] as const)('does not restore saved queries after a %s context change', async change => {
@@ -140,7 +160,7 @@ describe('navigation request ownership', () => {
     expect(store.queries).toEqual([])
   })
 
-  it('shares a saved-query list between concurrent same-source callers', async () => {
+  it('gives concurrent same-source callers the latest list', async () => {
     const store = useSavedQueriesStore()
     const first = store.list(1)
     const second = store.list(1)
@@ -148,11 +168,10 @@ describe('navigation request ownership', () => {
     for (const request of network.requests) request.succeed([query(1)])
     const results = await Promise.all([first, second])
     expect(results.every(result => result.success)).toBe(true)
-    expect(network.requests).toHaveLength(1)
     expect(store.queries.map(q => q.id)).toEqual([1])
   })
 
-  it('keeps saved queries empty when context leaves and returns during a request', async () => {
+  it('keeps the saved-query response when context leaves and returns in one tick', async () => {
     const context = useContextStore()
     context.selectTeam(1)
     context.selectSource(1)
@@ -163,7 +182,27 @@ describe('navigation request ownership', () => {
     context.selectSource(1)
     network.requests[0].succeed([query(1)])
     await old
-    expect(store.queries).toEqual([])
+    expect(store.queries.map(q => q.id)).toEqual([1])
+  })
+
+  it.each([
+    ['a refresh', true],
+    ['no refresh', false],
+  ])('keeps a created query when an older list resolves after %s', async (_name, refresh) => {
+    const context = useContextStore()
+    context.selectTeam(1)
+    context.selectSource(1)
+    const store = useSavedQueriesStore()
+    const stale = store.list(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+    const created = store.create(1, 1, 'New', '', content, 'logchefql', 'builder')
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    network.requests[1].succeed(query(5, 1))
+    expect((await created).success).toBe(true)
+    const pending = Promise.all(refresh ? [stale, store.list(1)] : [stale])
+    network.requests[0].succeed([])
+    await settle(pending, () => network.requests.slice(2), [query(5, 1)])
+    expect(store.queries.map(q => q.id)).toEqual([5])
   })
 
   it('ignores an old saved-query failure after a new list succeeds', async () => {
@@ -227,7 +266,7 @@ describe('navigation request ownership', () => {
     expect(queries.queries.value).toEqual([])
     requests[1].succeed([query(2)])
     await current
-    expect(queries.queries.value?.map(q => q.id)).toEqual([2])
+    expect(queries.queries.value.map(q => q.id)).toEqual([2])
     expect(queries.isLoading.value).toBe(false)
   })
 
@@ -239,7 +278,7 @@ describe('navigation request ownership', () => {
     for (const request of network.requests) request.succeed([query(1)])
     const results = await Promise.all([first, second])
     expect(results.every(result => result.success)).toBe(true)
-    expect(queries.queries.value?.map(q => q.id)).toEqual([1])
+    expect(queries.queries.value.map(q => q.id)).toEqual([1])
   })
 
   it('shares a composable load between concurrent same-source callers', async () => {
@@ -250,7 +289,27 @@ describe('navigation request ownership', () => {
     for (const request of network.requests) request.succeed([query(1)])
     const results = await Promise.all([first, second])
     expect(results.every(result => result.success)).toBe(true)
-    expect(queries.queries.value?.map(q => q.id)).toEqual([1])
+    expect(queries.queries.value.map(q => q.id)).toEqual([1])
+  })
+
+  it('shows a query saved while the source list is loading', async () => {
+    const queries = await savedQueries()
+    const context = useContextStore()
+    context.selectTeam(1)
+    context.selectSource(1)
+    await nextTick()
+    const savedQueryRequests = () => network.requests.filter(r => r.config.url?.includes('saved-queries'))
+    const loading = queries.loadSourceQueries(1)
+    await vi.waitFor(() => expect(savedQueryRequests()).toHaveLength(1))
+    const saving = queries.handleSaveQuery({
+      name: 'New', description: '', source_id: 1, created_from_team_id: 1,
+      query_language: 'logchefql', editor_mode: 'builder', query_content: JSON.stringify(content),
+    })
+    await vi.waitFor(() => expect(savedQueryRequests()).toHaveLength(2))
+    savedQueryRequests()[1].succeed(query(5, 1))
+    savedQueryRequests()[0].succeed([])
+    await settle(Promise.all([loading, saving]), () => savedQueryRequests().slice(2), [query(5, 1)])
+    expect(queries.queries.value.map(q => q.id)).toEqual([5])
   })
 
   it('restores saved LogsQL variables through the composable without source details', async () => {

@@ -983,3 +983,24 @@ describe("explore template dialect on load", () => {
     });
   }
 });
+
+describe("explore template dialect after a mode switch", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActivePinia(createPinia());
+    mocks.sourcesState.currentSourceDetails = CH_SOURCE;
+    mocks.teamsState.currentTeamId = 1;
+    useContextStore().selectTeam(1);
+    useContextStore().selectSource(1);
+  });
+
+  it("scans native SQL with the source dialect after a LogchefQL saved query", () => {
+    const store = useExploreStore();
+    store.hydrateFromResolvedQuery({
+      id: 1, name: "Template", query_language: "logchefql",
+      query_content: JSON.stringify({ content: "level={{a}}" }),
+    });
+    store.setActiveMode("native");
+    expect(store.templateDialect).toBe("clickhouse-sql");
+  });
+});
