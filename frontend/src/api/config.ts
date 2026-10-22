@@ -4,6 +4,8 @@ import router from "@/router";
 import { showErrorToast } from "@/api/error-handler";
 import { basePath } from "@/utils/basePath";
 
+let handlingSessionExpiration = false;
+
 export const apiBaseURL = `${basePath}api/v1`;
 
 // Create base axios instance with common configuration
@@ -57,43 +59,33 @@ api.interceptors.response.use(
 
     // Handle session expiration
     if (error.response?.status === 401) {
-      // Clear auth state using the store
-      const authStore = useAuthStore();
-      await authStore.clearState();
-
-      // Current route (without the base path), including query and hash, to
-      // return to after login.
-      const currentPath = router.options.history.location;
-
-      // Check if we're already on the login page (including /auth/login pattern)
       const isOnLoginPage = window.location.pathname.includes("/auth/login") ||
                           window.location.pathname.includes("/login") ||
                           router.currentRoute.value.name === "Login";
-
-      // Check if this is the initial session check or a later API call
       const isInitialSessionCheck = error.config?.url === "/me" &&
                                   !sessionStorage.getItem("hadPreviousSession");
-
-      // Only show the toast if:
-      // 1. We're not on the login page already
-      // 2. This isn't the first session check when the app loads
-      const showSessionToast = !isOnLoginPage && !isInitialSessionCheck;
       const sessionError = {
         status: "error",
         message: "Your session has expired. Please log in again.",
         error_type: "AuthenticationError",
-        _toastShown: showSessionToast,
+        _toastShown: isOnLoginPage || handlingSessionExpiration || !isInitialSessionCheck,
       };
-      if (showSessionToast) {
-        showErrorToast(sessionError);
-      }
 
-      // Redirect to login with the current path as redirect parameter
-      router.push({
-        name: "Login",
-        query: { redirect: currentPath },
-        replace: true // Replace current history entry to avoid navigation issues after login
-      });
+      if (!handlingSessionExpiration && !isOnLoginPage) {
+        handlingSessionExpiration = true;
+        const currentPath = router.options.history.location;
+        try {
+          useAuthStore().clearState();
+          if (!isInitialSessionCheck) showErrorToast(sessionError);
+          await router.push({
+            name: "Login",
+            query: { redirect: currentPath },
+            replace: true,
+          }).catch(() => undefined);
+        } finally {
+          handlingSessionExpiration = false;
+        }
+      }
       return Promise.reject(sessionError);
     }
 

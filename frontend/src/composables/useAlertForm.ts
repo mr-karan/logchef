@@ -1,4 +1,4 @@
-import { computed, reactive, ref, watch } from "vue";
+import { computed, onScopeDispose, reactive, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { useAlertsStore } from "@/stores/alerts";
 import { useSourcesStore } from "@/stores/sources";
@@ -6,6 +6,7 @@ import { useTeamsStore } from "@/stores/teams";
 import { alertsApi } from "@/api/alerts";
 import { asClickHouseConnection } from "@/api/sources";
 import { logchefqlApi } from "@/api/logchefql";
+import { getErrorMessage } from "@/api/types";
 import type { Alert, CreateAlertRequest, UpdateAlertRequest, TestAlertQueryResponse } from "@/api/alerts";
 import {
   getNativeQueryLanguageForSource,
@@ -211,8 +212,11 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     }
   }, { immediate: true });
 
+  let translationSequence = 0;
+
   // Translate LogChefQL condition to SQL using backend API
   async function translateCondition() {
+    const requestId = ++translationSequence;
     if (!supportsConditionEditor.value) {
       conditionError.value = null;
       generatedQuery.value = "";
@@ -234,6 +238,7 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
     isTranslating.value = true;
     try {
       const response = await logchefqlApi.translate(teamId, props.sourceId, { query: form.condition_json });
+      if (requestId !== translationSequence) return;
 
       if (response.data && response.data.valid) {
         conditionError.value = null;
@@ -269,27 +274,44 @@ export function useAlertForm(props: UseAlertFormProps, emit: UseAlertFormEmit) {
         conditionError.value = 'status' in response && response.status === 'error' ? response.message : t("alerts.translationFailed");
         generatedQuery.value = "";
       }
-    } catch (error: any) {
-      conditionError.value = error.message || t("alerts.translationFailed");
+    } catch (error: unknown) {
+      if (requestId !== translationSequence) return;
+      conditionError.value = getErrorMessage(error) || t("alerts.translationFailed");
       generatedQuery.value = "";
     } finally {
-      isTranslating.value = false;
+      if (requestId === translationSequence) isTranslating.value = false;
     }
   }
 
-  // Watch for changes that should trigger translation with debounce
   let translateDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function invalidateTranslation() {
+    translationSequence++;
+    if (translateDebounceTimer !== null) clearTimeout(translateDebounceTimer);
+    translateDebounceTimer = null;
+    isTranslating.value = false;
+    generatedQuery.value = "";
+    conditionError.value = null;
+  }
+
   watch(
-    () => [form.condition_json, form.aggregate_function, form.aggregate_field, form.lookback_seconds],
+    () => [props.open, props.teamId, props.sourceId, form.editor_mode,
+      form.condition_json, form.aggregate_function, form.aggregate_field, form.lookback_seconds,
+      currentTableName.value, timestampField.value, nativeQueryLanguage.value, supportsConditionEditor.value],
     () => {
-      if (translateDebounceTimer) clearTimeout(translateDebounceTimer);
+      invalidateTranslation();
+      if (form.editor_mode !== "condition") return;
+      form.query = "";
+      if (!props.open) return;
       translateDebounceTimer = setTimeout(() => {
-        if (form.editor_mode === "condition") {
-          translateCondition();
-        }
+        translateDebounceTimer = null;
+        translateCondition();
       }, 300);
-    }
+    },
+    { flush: "sync" }
   );
+
+  onScopeDispose(invalidateTranslation);
 
   // Sync generated query to query field when using condition mode
   watch(generatedQuery, (query) => {
@@ -506,6 +528,7 @@ WHERE \`${tsField}\` >= ${lookback}`,
   }
 
   function resetForm(alert: Alert | null) {
+    invalidateTranslation();
     testQueryResult.value = null;
     testQueryError.value = null;
     conditionError.value = null;

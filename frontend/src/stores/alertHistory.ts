@@ -38,11 +38,14 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
   const entries = computed(() => state.data.value.entries);
   const currentAlertId = computed(() => state.data.value.currentAlertId);
 
+  let historyRequestId = 0;
+
   function setCurrentContext(alertId: number | null) {
-    state.data.value.currentAlertId = alertId;
-    if (!alertId) {
+    if (alertId !== state.data.value.currentAlertId || alertId === null) {
+      historyRequestId++;
       state.data.value.entries = [];
     }
+    state.data.value.currentAlertId = alertId;
   }
 
   function setLimit(limit: number) {
@@ -58,11 +61,22 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
   async function loadHistory(alertId: number, _teamId?: number | null, _sourceId?: number | null, limit?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     setCurrentContext(alertId);
+    const requestId = ++historyRequestId;
     const effectiveLimit = limit ?? state.data.value.limit;
     return await state.callApi<AlertHistoryEntry[]>({
-      apiCall: () => alertsApi.history(alertId, effectiveLimit),
+      apiCall: async () => {
+        try {
+          const response = await alertsApi.history(alertId, effectiveLimit);
+          if (requestId !== historyRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
+          return response;
+        } catch (error) {
+          if (requestId !== historyRequestId) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
+          throw error;
+        }
+      },
       operationKey: `loadHistory-${alertId}`,
       onSuccess: (response) => {
+        if (requestId !== historyRequestId) return;
         state.data.value.entries = response ?? [];
       },
       defaultData: [],
@@ -72,11 +86,13 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
 
   async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
+    const requestId = historyRequestId;
     return await state.callApi<{ message: string }>({
       apiCall: () => alertsApi.resolve(alertId, payload),
       operationKey: `resolveAlert-${alertId}`,
       successMessage: i18n.global.t("alerts.alertResolved"),
       onSuccess: () => {
+        if (requestId !== historyRequestId || alertId !== currentAlertId.value) return;
         // Optimistically mark the latest triggered entry as resolved.
         const idx = state.data.value.entries.findIndex((entry) => entry.status === "triggered");
         if (idx !== -1) {

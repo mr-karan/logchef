@@ -9,7 +9,7 @@ import type { LiveTailStatus } from "@/stores/explore";
 const { t } = useI18n();
 
 const props = defineProps<{
-  rows: Record<string, any>[];
+  rows: Record<string, unknown>[];
   status: LiveTailStatus;
   notice: string | null;
   droppedCount: number;
@@ -23,6 +23,17 @@ const emit = defineEmits<{
   (e: "resume"): void;
   (e: "stop"): void;
 }>();
+
+const rowIds = new WeakMap<Record<string, unknown>, number>();
+let nextRowId = 0;
+
+function rowId(row: Record<string, unknown>): number {
+  const existing = rowIds.get(row);
+  if (existing !== undefined) return existing;
+  const id = nextRowId++;
+  rowIds.set(row, id);
+  return id;
+}
 
 const scrollRef = ref<HTMLElement | null>(null);
 // Auto-scroll is "pinned" to the top; if the user scrolls down we pause it and
@@ -83,7 +94,7 @@ const statusLabel = computed(() => {
   }
 });
 
-function fieldPairs(row: Record<string, any>): Array<{ key: string; value: string }> {
+function fieldPairs(row: Record<string, unknown>): Array<{ key: string; value: string }> {
   return Object.keys(row)
     .filter((k) => k !== props.timestampField)
     .map((k) => ({ key: k, value: formatValue(row[k]) }));
@@ -95,7 +106,7 @@ function formatValue(value: unknown): string {
   return String(value);
 }
 
-function timestampOf(row: Record<string, any>): string {
+function timestampOf(row: Record<string, unknown>): string {
   if (!props.timestampField) return "";
   return formatValue(row[props.timestampField]);
 }
@@ -158,8 +169,8 @@ function timestampOf(row: Record<string, any>): string {
 
       <div ref="scrollRef" class="h-full overflow-y-auto font-mono text-xs" @scroll="onScroll">
         <div
-          v-for="(row, idx) in rows"
-          :key="idx"
+          v-for="row in rows"
+          :key="rowId(row)"
           class="flex gap-2 border-b border-border/40 px-4 py-1 hover:bg-muted/40"
         >
           <span v-if="timestampField" class="whitespace-nowrap text-muted-foreground">

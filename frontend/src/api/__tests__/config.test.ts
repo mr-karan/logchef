@@ -5,6 +5,7 @@ import { api } from '../config'
 import { apiClient } from '../apiUtils'
 import { useBaseStore } from '@/stores/base'
 import { hasShownErrorToast } from '@/api/error-handler'
+import router from '@/router'
 
 vi.mock('vue-sonner', () => ({
   toast: Object.assign(vi.fn(), { error: vi.fn(), success: vi.fn() }),
@@ -12,7 +13,7 @@ vi.mock('vue-sonner', () => ({
 
 vi.mock('@/router', () => ({
   default: {
-    push: vi.fn(),
+    push: vi.fn().mockResolvedValue(undefined),
     currentRoute: { value: { name: 'Home' } },
     options: { history: { location: '/logs/explore' } },
   },
@@ -84,5 +85,49 @@ describe('api error toasts', () => {
     expect(rejection).toMatchObject({ status: 'error', error_type: 'AuthenticationError' })
     expect(hasShownErrorToast(rejection)).toBe(false)
     expect(toast.error).not.toHaveBeenCalled()
+  })
+})
+
+describe('session expiration ownership', () => {
+  const originalAdapter = api.defaults.adapter
+  afterEach(() => { api.defaults.adapter = originalAdapter })
+
+  it('shows one toast and starts one login navigation for parallel 401 responses', async () => {
+    let finishNavigation: (() => void) | undefined
+    const navigation = new Promise<void>(resolve => { finishNavigation = resolve })
+    vi.mocked(router.push).mockImplementationOnce(() => navigation)
+    vi.clearAllMocks()
+    sessionStorage.setItem('hadPreviousSession', 'true')
+    api.defaults.adapter = respondWith(401, { status: 'error', message: 'unauthorized' })
+    const requests = Array.from({ length: 3 }, () => api.get('/teams').catch((error: unknown) => error))
+    await vi.waitFor(() => expect(router.push).toHaveBeenCalled())
+    try {
+      expect(router.push).toHaveBeenCalledTimes(1)
+      expect(toast.error).toHaveBeenCalledTimes(1)
+    } finally { finishNavigation?.() }
+    const rejections = await Promise.all(requests)
+    expect(rejections.every(hasShownErrorToast)).toBe(true)
+    expect(router.push).toHaveBeenCalledTimes(1)
+  })
+
+  it('allows another expiration after the previous login navigation completes', async () => {
+    vi.clearAllMocks()
+    api.defaults.adapter = respondWith(401, { status: 'error', message: 'unauthorized' })
+    await api.get('/teams').catch(() => {})
+    await api.get('/teams').catch(() => {})
+    expect(router.push).toHaveBeenCalledTimes(2)
+    expect(toast.error).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not toast or navigate again for a late 401 on the login page', async () => {
+    router.currentRoute.value.name = 'Login'
+    vi.clearAllMocks()
+    api.defaults.adapter = respondWith(401, { status: 'error', message: 'unauthorized' })
+    try {
+      const rejection = await api.get('/teams').catch((error: unknown) => error)
+      expect(hasShownErrorToast(rejection)).toBe(true)
+      expect(router.push).not.toHaveBeenCalled()
+      expect(toast.error).not.toHaveBeenCalled()
+    } finally { router.currentRoute.value.name = 'Home' }
   })
 })
