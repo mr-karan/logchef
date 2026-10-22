@@ -1,3 +1,4 @@
+import { quoteClickHouseIdentifier } from "@/utils/clickhouse";
 import { defineStore } from "pinia";
 import { computed, markRaw, ref, watch } from "vue";
 import { exploreApi, buildTailUrl, subscribeToTail } from "@/api/explore";
@@ -472,7 +473,7 @@ export const useExploreStore = defineStore("explore", () => {
     const tsField = sourceDetails._meta_ts_field || 'timestamp';
     const timeCondition = sqlTimeCondition(tsField, resolved.value);
 
-    const formattedTsField = tsField.includes('`') ? tsField : `\`${tsField}\``;
+    const formattedTsField = quoteClickHouseIdentifier(tsField);
     const whereClause = logchefqlCode?.trim() 
       ? `WHERE ${timeCondition}\n  -- LogchefQL: ${logchefqlCode}`
       : `WHERE ${timeCondition}`;

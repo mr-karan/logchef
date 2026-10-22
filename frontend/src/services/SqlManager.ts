@@ -1,3 +1,4 @@
+import { quoteClickHouseIdentifier } from "@/utils/clickhouse";
 import { sqlTimeCondition, type ResolvedWindow } from '@/utils/timeWindow';
 
 /**
@@ -26,7 +27,7 @@ export class SqlManager {
     const sql = `SELECT *
 FROM ${tableName}
 WHERE ${timeCondition}
-ORDER BY \`${tsField}\` DESC
+ORDER BY ${quoteClickHouseIdentifier(tsField)} DESC
 LIMIT ${limit}`;
 
     return {
