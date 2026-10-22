@@ -13,6 +13,7 @@ import (
 )
 
 type queryErrorLogKey struct{}
+type queryCancellationKey struct{}
 
 var queryErrorLoggedKey queryErrorLogKey
 
@@ -63,6 +64,9 @@ func classifyQueryError(err error, failure, operation string) queryErrorResponse
 
 func (s *Server) sendQueryError(c fiber.Ctx, sourceID models.SourceID, err error, failure, operation string) error {
 	response := classifyQueryError(err, failure, operation)
+	if errors.Is(err, context.Canceled) {
+		c.Locals(queryCancellationKey{}, true)
+	}
 	if response.status >= fiber.StatusInternalServerError {
 		s.log.Error("query failed", "error", err, "source_id", sourceID, "route", redactedRequestPath(c))
 		c.Locals(queryErrorLoggedKey, true)

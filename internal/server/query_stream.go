@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -285,13 +286,19 @@ func (s *Server) streamPreviewQuery(
 		defer producer.Close()
 		output := bufio.NewWriter(producer)
 		writer := newQueryStreamWriter(output, cfg, queryID)
+		start := time.Now()
 		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, params, writer)
 		if err != nil {
+			if errors.Is(err, context.Canceled) {
+				s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage,
+					time.Since(start).Milliseconds(), int64(writer.rows))
+			} else if writer.begun {
+				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", logMode)
+			}
 			if !writer.begun {
 				_ = producer.CloseWithError(err)
 				return
 			}
-			s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", logMode)
 			_ = writer.WriteError(err)
 			return
 		}
@@ -325,8 +332,8 @@ func (s *Server) streamPreviewQuery(
 	c.Set("X-LogChef-Query-ID", queryID)
 	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
 		defer func() {
-			_ = reader.Close()
 			cancel()
+			_ = reader.CloseWithError(context.Canceled)
 			<-done
 		}()
 		if err := w.WriteByte(first[0]); err != nil {
