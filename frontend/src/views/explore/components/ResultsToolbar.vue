@@ -4,10 +4,9 @@ import { useI18n } from "vue-i18n";
 import { computed } from 'vue'
 import { Button } from '@/components/ui/button'
 import { ChevronUp, ChevronDown, Rows4, Terminal, TerminalSquare, Download, Braces, Share2 } from 'lucide-vue-next'
-import { useExploreStore } from '@/stores/explore'
+import { useExploreRuns } from '@/stores/exploreRuns'
 import GroupBySelector from './GroupBySelector.vue'
 import StreamPicker from './StreamPicker.vue'
-import { useExploreWindowedStore } from '@/stores/exploreWindowed'
 import {
   Tooltip,
   TooltipContent,
@@ -45,12 +44,11 @@ const emit = defineEmits<{
   (e: 'copy-cli'): void
 }>()
 
-const exploreStore = useExploreStore()
-const windowedStore = useExploreWindowedStore()
+const runs = useExploreRuns()
 
-const queryStats = computed(() => exploreStore.queryStats)
-const isHistogramEligible = computed(() => exploreStore.isHistogramEligible)
-const queryWarnings = computed(() => exploreStore.queryWarnings)
+const queryStats = computed(() => runs.results?.stats)
+const isHistogramEligible = computed(() => runs.isHistogramEligible)
+const queryWarnings = computed(() => runs.results?.warnings ?? [])
 
 const formattedQueryTime = computed(() => {
   const executionTimeMs = queryStats.value?.execution_time_ms
@@ -112,7 +110,7 @@ const warningText = computed(() => {
 
     <!-- Center: Group By -->
     <div v-if="isHistogramEligible" class="flex items-center">
-      <GroupBySelector v-if="!windowedStore.active" :available-fields="availableFields" />
+      <GroupBySelector v-if="!runs.windowed" :available-fields="availableFields" />
     </div>
     <div v-else />
 

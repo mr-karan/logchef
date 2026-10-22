@@ -1,4 +1,4 @@
-import { ref, watch } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { exploreApi } from '@/api/explore'
 import type { Source } from '@/api/sources'
@@ -8,7 +8,9 @@ import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { EXPLORE_PATH, parseExploreLocation, sameExploreLocation, type ExploreLocation } from '@/lib/exploreLocation'
 import { pickSource, pickTeam, useContextStore } from '@/stores/context'
-import { useExploreStore, type ExecutionQuery, type OpenedLocation } from '@/stores/explore'
+import { useExploreStore, type OpenedLocation, type RunQuery, type RunRequest } from '@/stores/explore'
+import { useExploreRuns, type Execution } from '@/stores/exploreRuns'
+import type { Paging } from '@/stores/exploreWindowed'
 import { useSourcesStore } from '@/stores/sources'
 import { useTeamsStore } from '@/stores/teams'
 import type { TimeWindow } from '@/utils/timeWindow'
@@ -25,13 +27,15 @@ function noTeamsMessage(error: APIErrorResponse | null): string {
 
 /**
  * The one owner of Explorer navigation. It opens every Explorer URL, runs at
- * most one query per navigation and is the only writer of the Explorer URL.
- * Other code changes what Explorer shows by navigating to it.
+ * most one query per navigation, is the only caller of the runs store and the
+ * only writer of the Explorer URL. Other code changes what Explorer shows by
+ * navigating to it.
  */
 export function useExplorerNavigator() {
   const route = useRoute()
   const router = useRouter()
   const explore = useExploreStore()
+  const runs = useExploreRuns()
   const context = useContextStore()
   const sources = useSourcesStore()
   const teams = useTeamsStore()
@@ -40,17 +44,22 @@ export function useExplorerNavigator() {
   const status = ref<ExplorerStatus>('loading')
   const error = ref<string | null>(null)
 
-  // Every route change and every commit takes the next id, which supersedes
-  // a navigation still loading: it never applies state, runs or writes the URL.
+  // Every route change, window, limit and New query takes the next id, which supersedes
+  // a navigation still loading or a Share or Save in flight.
   let navId = 0
-  let inFlightQuery: ExecutionQuery | null = null
-  let openedQuery: ExecutionQuery | null = null
   // The URL Explorer last recorded. Null until a location opens.
   let shown: Record<string, string> | null = null
   // A window or limit chosen while a navigation loads applies to it.
   let chosen: { window?: TimeWindow; limit?: number } = {}
+  // A Run that showed results while Explorer could not record them.
+  let unrecorded: Execution | null = null
 
   watch(() => route.fullPath, () => openRoute(), { immediate: true })
+  // Nothing loading or running may record once Explorer is gone.
+  onScopeDispose(() => {
+    navId++
+    runs.enter(null)
+  })
 
   // Back to it, the echo of our own write, or a return while other pages left the context alone.
   function isShown() {
@@ -58,26 +67,30 @@ export function useExplorerNavigator() {
     return shown !== null && sameExploreLocation(route.query, shown) && current.team === shown.team && current.source === shown.source
   }
 
-  function supersede() {
-    inFlightQuery = null
-    explore.isValidatingQuery = false
-    return ++navId
+  function isHere() {
+    return route.path === EXPLORE_PATH && status.value === 'ready' && isShown()
   }
 
-  // Only a Run still validating is superseded, so Stop leaves a pending navigation, Share or Save alone.
+  /** Stops the running query or a Run still validating. A pending navigation, Share or Save goes on. */
   function cancel() {
-    inFlightQuery = null
-    if (explore.isValidatingQuery) supersede()
-    return explore.cancelQuery()
+    runs.stop()
   }
 
   /** Opens the route's location unless Explorer already shows it. */
   async function openRoute(reopen = false) {
-    if (route.path === EXPLORE_PATH && !reopen && isShown() && status.value !== 'navigating') return
-    const id = supersede()
+    if (!reopen && isHere()) {
+      recordDeferred()
+      return
+    }
+    const id = ++navId
     chosen = {}
-    if (route.path !== EXPLORE_PATH || (!reopen && isShown())) {
+    if (route.path !== EXPLORE_PATH) {
       if (status.value === 'navigating') status.value = 'ready'
+      return
+    }
+    if (!reopen && isShown()) {
+      status.value = 'ready'
+      recordDeferred()
       return
     }
     status.value = shown ? 'navigating' : 'loading'
@@ -91,7 +104,8 @@ export function useExplorerNavigator() {
         const shouldRun = explore.open(location)
         applyChoice()
         status.value = 'ready'
-        openedQuery = commit(shouldRun)
+        runs.enter(shouldRun ? editorAsk() : null)
+        replay()
         return
       }
       throw new Error('Sources changed while opening this link. Try again.')
@@ -107,6 +121,12 @@ export function useExplorerNavigator() {
         status.value = 'error'
       }
     }
+  }
+
+  function recordDeferred() {
+    const ran = unrecorded
+    unrecorded = null
+    if (ran && ran === runs.shown) void record('replace', explore.queryParameters(ran))
   }
 
   /** Loads everything the location needs and resolves its team and source. */
@@ -140,28 +160,25 @@ export function useExplorerNavigator() {
     return { teamId: team, sourceId: source, content, list, details, generation }
   }
 
-  // The only caller of executeQuery: a disconnected source runs nothing.
-  async function execute(query: ExecutionQuery) {
-    if (!sources.currentSourceDetails?.is_connected) return false
-    const execution = { ...query }
-    inFlightQuery = execution
-    try {
-      return (await explore.executeQuery(execution)).success
-    } finally {
-      if (inFlightQuery === execution) inFlightQuery = null
-    }
+  // Runs what last ran here, or the opened query, and records it. The URL
+  // write comes last, so its echo equals what was recorded and opens nothing.
+  function replay() {
+    const execution = runs.replay()
+    showDefaultSql(execution)
+    void record('replace', explore.queryParameters(execution ?? explore.editorRun))
   }
 
-  // Runs the shown query and records it. The URL write comes last, so its
-  // echo equals what was recorded and opens nothing.
-  function commit(shouldRun: boolean, query = explore.editorQuery) {
-    if (shouldRun) query = explore.resolveExecutionQuery(query)
-    if (shouldRun) execute(query).catch((err) => console.error('error running query', err))
-    void record('replace', explore.queryParameters(query))
-    return query
+  function editorAsk(): RunQuery {
+    const query = explore.editorQuery
+    return query.mode === 'native' && explore.showsDefaultSql ? { mode: 'native', text: '' } : query
   }
 
-  function record(history: 'push' | 'replace' = 'replace', query = explore.urlQueryParameters) {
+  function showDefaultSql(execution: Execution | null) {
+    const asked = editorAsk()
+    if (execution && execution.query !== execution.asked && asked.mode === 'native' && !asked.text.trim()) explore.showDefaultSql(execution.query.text)
+  }
+
+  function record(history: 'push' | 'replace', query: Record<string, string>) {
     shown = query
     if (!sameExploreLocation(route.query, query)) return router[history]({ path: EXPLORE_PATH, query })
   }
@@ -197,13 +214,9 @@ export function useExplorerNavigator() {
   }
 
   function commitChoice() {
-    const last = explore.lastExecutedState
-    const query = inFlightQuery ?? (last
-      ? { mode: last.mode, text: last.mode === 'logchefql' ? last.logchefqlQuery ?? '' : last.sqlQuery }
-      : openedQuery ?? explore.editorQuery)
-    supersede()
+    navId++
     applyChoice()
-    commit(true, query)
+    replay()
   }
 
   function applyChoice() {
@@ -215,40 +228,45 @@ export function useExplorerNavigator() {
   /** Resets the editor to the defaults and runs them. */
   function newQuery() {
     if (status.value !== 'ready') return
-    supersede()
+    navId++
     explore.resetQueryToDefaults()
-    openedQuery = commit(true)
+    runs.enter(explore.editorQuery)
+    replay()
   }
 
   /**
    * Runs a Share or Save of the shown location, ignored while a navigation
    * loads. Unless a navigation started meanwhile, marks the location with
-   * the result and records it.
+   * the result and records what the editor held when it began.
    */
-  async function recordAfter<T>(request: () => Promise<T | null>, mark: (result: T) => void): Promise<T | null> {
+  async function recordAfter<T>(request: () => Promise<T | null>, mark: (result: NoInfer<T>) => void): Promise<T | null> {
     if (status.value !== 'ready') return null
     const id = navId
+    const captured: RunRequest = explore.editorRun
     const result = await request()
     if (result === null || id !== navId) return null
     mark(result)
-    await record()
+    await record('replace', explore.queryParameters(captured))
     return result
   }
 
-  /** Runs the editor's query and pushes a history entry with what ran when it succeeds. */
-  async function run() {
-    if (status.value !== 'ready' || explore.isExecutingQuery) return
-    const id = supersede()
-    explore.isValidatingQuery = true
-    try {
-      if (!(await explore.validateQuery(() => id === navId)) || id !== navId) return
-    } finally {
-      if (id === navId) explore.isValidatingQuery = false
+  /**
+   * Runs the editor's query and pushes a history entry with what ran once it
+   * shows results. Shown while the user is away, it records on their return.
+   */
+  function run() {
+    if (status.value !== 'ready' || runs.isRunning) return
+    const onShown = (ran: Execution) => {
+      if (isHere()) void record('push', explore.queryParameters(ran))
+      else unrecorded = ran
     }
-    const query = explore.resolveExecutionQuery()
-    const ran = explore.queryParameters(query)
-    if ((await execute(query)) && id === navId) void record('push', ran)
+    showDefaultSql(runs.run(editorAsk(), { validate: true, onShown }))
   }
 
-  return { status, error, selectTeam, selectSource, openSavedQuery, setWindow, setLimit, newQuery, run, cancel, recordAfter, retry: () => openRoute() }
+  /** Pages the windowed search on screen, unless a navigation loads or a Run validates. */
+  function page(action: Paging) {
+    if (status.value === 'ready' && runs.current?.status !== 'validating') void runs.page(action)
+  }
+
+  return { status, error, selectTeam, selectSource, openSavedQuery, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
 }

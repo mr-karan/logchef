@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "停止即時日誌串流",
   "ui.run": "執行",
   "ui.executeQueryCtrlEnter": "執行查詢 (Ctrl+Enter)",
-  "ui.cancelling": "正在取消…",
   "ui.cancelRunningQueryEscape": "取消執行中的查詢 (Escape)",
   "ui.showSyntaxHelp": "顯示語法說明",
   "ui.syntax": "語法",

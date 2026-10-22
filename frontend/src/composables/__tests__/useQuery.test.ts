@@ -8,10 +8,10 @@ const mocks = vi.hoisted(() => ({
     logchefqlCode: 'lvl="WARN"',
     nativeQuery: "",
     resolved: null as unknown as ResolvedWindow,
+    resolveNow(): ResolvedWindow {
+      return this.resolved;
+    },
     limit: 100,
-    lastExecutedState: null,
-    isQueryStateDirty: false,
-    canExecuteQuery: true,
     setLogchefqlCode: vi.fn(),
     setNativeQuery: vi.fn(),
     setActiveMode: vi.fn(),

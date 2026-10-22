@@ -3,12 +3,14 @@ import { useI18n } from "vue-i18n";
 
 import { computed } from 'vue'
 import { useExploreStore } from '@/stores/explore'
+import { useExploreRuns } from '@/stores/exploreRuns'
 
 const { t } = useI18n();
 
 const exploreStore = useExploreStore()
+const runs = useExploreRuns()
 
-const displayError = computed(() => exploreStore.error?.message)
+const displayError = computed(() => runs.error ?? exploreStore.error?.message)
 </script>
 
 <template>

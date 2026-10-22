@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "실시간 로그 중지",
   "ui.run": "실행",
   "ui.executeQueryCtrlEnter": "쿼리 실행 (Ctrl+Enter)",
-  "ui.cancelling": "취소 중…",
   "ui.cancelRunningQueryEscape": "실행 중인 쿼리 취소 (Escape)",
   "ui.showSyntaxHelp": "구문 도움말 표시",
   "ui.syntax": "구문",

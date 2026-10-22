@@ -12,7 +12,8 @@
         </button>
 
         <!-- Tabs for Mode Switching -->
-        <Tabs :model-value="props.activeMode"
+        <!-- Manual activation: a click also focuses the tab, which automatic activation counts as a second switch. -->
+        <Tabs :model-value="props.activeMode" activation-mode="manual"
           @update:model-value="(value: string | number) => $emit('update:activeMode', asEditorMode(value), false)"
           class="w-auto">
           <TabsList :class="['grid w-fit', supportsLogchefQL ? 'grid-cols-2' : 'grid-cols-1']">
@@ -206,18 +207,11 @@
                 variant="destructive" 
                 size="sm" 
                 class="h-7 gap-1.5 px-3 shadow-sm"
-                :disabled="props.isCancelling"
                 @click="$emit('cancel-query')"
               >
-                <template v-if="props.isCancelling">
-                  <RefreshCw class="h-3.5 w-3.5 animate-spin" />
-                  <span class='font-medium'>{{ t('ui.cancelling') }}</span>
-                </template>
-                <template v-else>
-                  <Square class="h-3.5 w-3.5" />
-                  <span class='font-medium'>{{ t('ui.cancel') }}</span>
-                  <kbd class="ml-1 text-[10px] bg-red-700/50 px-1 py-0.5 rounded hidden sm:inline">Esc</kbd>
-                </template>
+                <Square class="h-3.5 w-3.5" />
+                <span class='font-medium'>{{ t('ui.cancel') }}</span>
+                <kbd class="ml-1 text-[10px] bg-red-700/50 px-1 py-0.5 rounded hidden sm:inline">Esc</kbd>
               </Button>
             </TooltipTrigger>
             <TooltipContent side="bottom">
@@ -418,7 +412,6 @@ import {
   Wand2,
   Play,
   Clock3,
-  RefreshCw,
   Square,
   Radio,
 } from "lucide-vue-next";
@@ -489,7 +482,6 @@ interface QueryEditorProps {
   isExecuting?: boolean
   canExecute?: boolean
   showRunButton?: boolean
-  isCancelling?: boolean
   queryTimeout?: number
 }
 
@@ -505,7 +497,6 @@ const props = withDefaults(defineProps<QueryEditorProps>(), {
   isExecuting: false,
   canExecute: true,
   showRunButton: true,
-  isCancelling: false,
   queryTimeout: 30,
 });
 
@@ -767,7 +758,7 @@ const focusEditor = (revealLastPosition = false) => {
 };
 
 const handleEscapeKey = (e: KeyboardEvent) => {
-  if (e.key === 'Escape' && props.isExecuting && !props.isCancelling) {
+  if (e.key === 'Escape' && props.isExecuting) {
     e.preventDefault();
     emit('cancel-query');
   }

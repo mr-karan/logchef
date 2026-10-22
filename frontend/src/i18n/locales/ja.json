@@ -303,7 +303,6 @@
   "ui.stopLiveTail": "ライブテールを停止",
   "ui.run": "実行",
   "ui.executeQueryCtrlEnter": "クエリを実行 (Ctrl+Enter)",
-  "ui.cancelling": "キャンセル中…",
   "ui.cancelRunningQueryEscape": "実行中のクエリをキャンセル (Escape)",
   "ui.showSyntaxHelp": "構文ヘルプを表示",
   "ui.syntax": "構文",
