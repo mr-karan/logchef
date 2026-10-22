@@ -13,6 +13,7 @@ import type {
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
 import { i18n } from "@/i18n";
+import { isAbortError } from "@/api/error-handler";
 
 type SourceActivityRequestResult = {
   success: boolean;
@@ -98,14 +99,11 @@ export const useSourcesStore = defineStore("sources", () => {
   // Bumped whenever the context changes and on invalidation. A request from
   // an older generation neither writes the cache nor is joined.
   let generation = 0;
-  let generationController = new AbortController();
 
   function invalidateRequests() {
     generation++;
-    generationController.abort();
-    generationController = new AbortController();
   }
-  const teamSourcesRequests = new Map<string, Promise<Source[]>>();
+  const teamSourcesRequests = new Map<string, { teamId: number; controller: AbortController; promise: Promise<Source[]> }>();
   const sourceDetailsRequests = new Map<string, Promise<Source>>();
 
   // Hydration state
@@ -145,11 +143,13 @@ export const useSourcesStore = defineStore("sources", () => {
   async function loadContext(refresh = false) {
     const { teamId } = contextStore;
     if (!teamId) return;
+    const requestedIn = generation;
     const list = await loadTeamSources(teamId, refresh);
-    if (contextStore.teamId !== teamId) return;
+    if (requestedIn !== generation || contextStore.teamId !== teamId) return;
     const sourceId = pickSource(teamId, list, contextStore.sourceId);
     if (sourceId !== contextStore.sourceId) {
       if (sourceId) contextStore.selectSource(sourceId);
+      else contextStore.clearSource();
       return;
     }
     if (sourceId) {
@@ -160,7 +160,14 @@ export const useSourcesStore = defineStore("sources", () => {
 
   // Synchronous, so a request made right after a context change, before the
   // watcher below runs, already belongs to the new generation.
-  watch(() => [contextStore.teamId, contextStore.sourceId], invalidateRequests, { flush: "sync" });
+  watch(() => [contextStore.teamId, contextStore.sourceId], ([teamId], [leftTeamId]) => {
+    invalidateRequests();
+    if (teamId !== leftTeamId) {
+      for (const request of teamSourcesRequests.values()) {
+        if (request.teamId === leftTeamId) request.controller.abort();
+      }
+    }
+  }, { flush: "sync" });
 
   // A left team or source drops its cache, so a return fetches it again.
   watch(
@@ -174,7 +181,9 @@ export const useSourcesStore = defineStore("sources", () => {
       } else if (leftTeamId && leftSourceId && leftSourceId !== sourceId) {
         delete cache.sourceDetails[leftTeamId]?.[leftSourceId];
       }
-      loadContext().catch((error) => console.error("error loading the context's sources", error));
+      loadContext().catch((error) => {
+        if (!isAbortError(error)) console.error("error loading the context's sources", error);
+      });
     },
     { immediate: true }
   );
@@ -216,25 +225,26 @@ export const useSourcesStore = defineStore("sources", () => {
     const current = teamId === contextStore.teamId;
     const key = `${generation}-${teamId}`;
     const pending = teamSourcesRequests.get(key);
-    if (pending) return pending;
+    if (pending) return pending.promise;
     const cached = current && !refresh ? state.data.value.sourcesByTeam[teamId] : undefined;
     if (cached) return Promise.resolve(cached);
 
     const requestedIn = generation;
+    const controller = new AbortController();
     const request = state
       .callApi<Source[]>({
-        apiCall: () => sourcesApi.listTeamSources(teamId, { signal: generationController.signal }),
+        apiCall: () => sourcesApi.listTeamSources(teamId, { signal: controller.signal }),
         operationKey: `loadTeamSources-${teamId}`,
         showToast: false,
       })
       .then((result) => {
-        if (!result.success) throw result.error;
+        if (!result.success) throw result.error ?? { status: "error", error_type: "CanceledError", message: "Request canceled" } satisfies APIErrorResponse;
         const list = result.data ?? [];
         if (current && requestedIn === generation) state.data.value.sourcesByTeam[teamId] = list;
         return list;
       })
       .finally(() => teamSourcesRequests.delete(key));
-    teamSourcesRequests.set(key, request);
+    teamSourcesRequests.set(key, { teamId, controller, promise: request });
     return request;
   }
 
@@ -426,7 +436,9 @@ export const useSourcesStore = defineStore("sources", () => {
   /** Refetches the context's sources and details after a source or team change, keeping the old ones until then. */
   function invalidateTeamSources() {
     invalidateRequests();
-    loadContext(true).catch((error) => console.error("error reloading the context's sources", error));
+    loadContext(true).catch((error) => {
+      if (!isAbortError(error)) console.error("error reloading the context's sources", error);
+    });
   }
 
   function invalidateSourceCache(sourceId: number) {

@@ -27,11 +27,12 @@ export function useContextSync(options: { basePath?: string } = {}) {
     if (teamId !== contextStore.teamId) contextStore.selectTeam(teamId);
     const sources = await sourcesStore.loadTeamSources(teamId).catch((error) => {
       console.error('error loading team sources', error);
-      return [];
+      return null;
     });
-    if (contextStore.teamId !== teamId) return;
+    if (!sources || contextStore.teamId !== teamId) return;
     const sourceId = pickSource(teamId, sources, requestedSourceId);
-    if (sourceId && sourceId !== contextStore.sourceId) contextStore.selectSource(sourceId);
+    if (sourceId === null) contextStore.clearSource();
+    else if (sourceId !== contextStore.sourceId) contextStore.selectSource(sourceId);
     await syncUrl();
   }
 

@@ -133,7 +133,7 @@ describe("sources store", () => {
     await useTeamsStore().removeTeamSource(1, 7);
 
     await vi.waitFor(() => expect(sources.teamSources).toEqual([]));
-    expect(context.sourceId).toBeNull();
+    await vi.waitFor(() => expect(context.sourceId).toBeNull());
     expect(sources.currentSourceDetails).toBeNull();
     expect(sources.hasValidCurrentSource).toBe(false);
     context.selectSource(7);

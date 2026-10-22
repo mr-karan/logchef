@@ -390,6 +390,7 @@ describe("Explorer history navigation", () => {
     if (pick === "team") await nav.selectTeam(otherTeam.id);
     else await nav.selectSource(otherSource.id);
     await vi.waitFor(() => expect(nav.status.value).toBe("navigating"));
+    expect(nav.pending.value).toMatchObject(pick === "team" ? { teamId: otherTeam.id, sourceId: null } : { teamId: team.id, sourceId: otherSource.id });
     if (pick === "team") await nav.selectTeam(team.id);
     else await nav.selectSource(source.id);
     await flush();
@@ -398,6 +399,7 @@ describe("Explorer history navigation", () => {
     ready.release();
     await flush();
     await settle();
+    expect(nav.pending.value).toBeNull();
     expect(useContextStore().teamId).toBe(team.id);
     expect(store.sourceId).toBe(source.id);
     expect(query).toHaveBeenCalledTimes(before);

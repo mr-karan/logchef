@@ -4,10 +4,13 @@ import { exploreApi } from '@/api/explore'
 import type { Source } from '@/api/sources'
 import { savedQueriesApi, type SavedQuery, type SavedQueryContent } from '@/api/savedQueries'
 import { getErrorMessage, type APIErrorResponse } from '@/api/types'
+import { isAbortError } from '@/api/error-handler'
+import { i18n } from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { EXPLORE_PATH, parseExploreLocation, sameExploreLocation, type ExploreLocation } from '@/lib/exploreLocation'
 import { pickSource, pickTeam, useContextStore } from '@/stores/context'
+import { useAuthStore } from '@/stores/auth'
 import { useExploreStore, type OpenedLocation, type RunQuery, type RunRequest } from '@/stores/explore'
 import { useExploreRuns, type Execution } from '@/stores/exploreRuns'
 import type { Paging } from '@/stores/exploreWindowed'
@@ -19,10 +22,10 @@ import type { TimeWindow } from '@/utils/timeWindow'
 export type ExplorerStatus = 'loading' | 'error' | 'navigating' | 'ready'
 
 function noTeamsMessage(error: APIErrorResponse | null): string {
-  if (!error) return "You don't have access to any teams yet. Contact your administrator."
-  if (error.error_type === 'ServerError') return 'Unable to load teams. The server may be experiencing issues.'
-  if (error.error_type === 'AuthenticationError') return 'Please log in to access teams.'
-  return error.message || 'Failed to load teams.'
+  if (!error) return i18n.global.t('explore.noTeams')
+  if (error.error_type === 'ServerError') return i18n.global.t('access.loadTeamsFailed')
+  if (error.error_type === 'AuthenticationError') return i18n.global.t('explore.loginForTeams')
+  return error.message || i18n.global.t('access.loadTeamsFailed')
 }
 
 /**
@@ -39,10 +42,12 @@ export function useExplorerNavigator() {
   const context = useContextStore()
   const sources = useSourcesStore()
   const teams = useTeamsStore()
+  const auth = useAuthStore()
   const { toast } = useToast()
 
   const status = ref<ExplorerStatus>('loading')
   const error = ref<string | null>(null)
+  const pending = ref<Pick<ExploreLocation, 'teamId' | 'sourceId'> | null>(null)
 
   // Every route change, window, limit and New query takes the next id, which supersedes
   // a navigation still loading or a Share or Save in flight.
@@ -84,6 +89,7 @@ export function useExplorerNavigator() {
     }
     const id = ++navId
     chosen = {}
+    pending.value = null
     if (route.path !== EXPLORE_PATH) {
       if (status.value === 'navigating') status.value = 'ready'
       return
@@ -97,29 +103,37 @@ export function useExplorerNavigator() {
     error.value = null
     try {
       const target = parseExploreLocation(route.query)
+      pending.value = target
       for (let attempt = 0; attempt < 3; attempt++) {
-        const { list, details, generation, ...location } = await resolve(target, attempt > 0)
-        if (id !== navId) return
-        if (!sources.holdResolved(location.teamId, list, details, generation)) continue
-        const shouldRun = explore.open(location)
-        applyChoice()
-        status.value = 'ready'
-        runs.enter(shouldRun ? editorAsk() : null)
-        replay()
-        return
+        try {
+          const { list, details, generation, ...location } = await resolve(target, attempt > 0)
+          if (id !== navId) return
+          if (!sources.holdResolved(location.teamId, list, details, generation)) continue
+          const shouldRun = explore.open(location)
+          applyChoice()
+          status.value = 'ready'
+          runs.enter(shouldRun ? editorAsk() : null)
+          replay()
+          return
+        } catch (err) {
+          if (id !== navId) return
+          if (!isAbortError(err)) throw err
+        }
       }
-      throw new Error('Sources changed while opening this link. Try again.')
+      throw new Error(i18n.global.t('explore.sourcesChanged'))
     } catch (err) {
       if (id !== navId) return
       console.error('error opening explorer location', err)
       chosen = {}
       if (shown) {
         status.value = 'ready'
-        toast({ title: 'Unable to open this link', description: getErrorMessage(err), variant: 'destructive', duration: TOAST_DURATION.ERROR })
+        toast({ title: i18n.global.t('explore.linkOpenFailed'), description: getErrorMessage(err), variant: 'destructive', duration: TOAST_DURATION.ERROR })
       } else {
         error.value = getErrorMessage(err)
         status.value = 'error'
       }
+    } finally {
+      if (id === navId) pending.value = null
     }
   }
 
@@ -136,13 +150,13 @@ export function useExplorerNavigator() {
     let content: OpenedLocation['content']
     if (target.kind === 'share') {
       const share = (await exploreApi.getQueryShare(target.token)).data
-      if (!share) throw new Error('Share link not found.')
+      if (!share) throw new Error(i18n.global.t('explore.shareNotFound'))
       teamId = share.team_id
       sourceId = share.source_id
       content = { kind: 'share', share }
     } else if (target.kind === 'saved') {
       const saved = (await savedQueriesApi.resolve(target.queryId, teamId)).data
-      if (!saved) throw new Error('Saved query not found.')
+      if (!saved) throw new Error(i18n.global.t('pages.savedQueryNotFound'))
       teamId = saved.resolved_team_id
       sourceId = saved.source_id
       const queryContent: SavedQueryContent = JSON.parse(saved.query_content)
@@ -151,7 +165,10 @@ export function useExplorerNavigator() {
       content = target
     }
 
-    const team = pickTeam(teams.teams.map((t) => t.id), teamId)
+    if (teamId !== null && auth.user?.role !== 'admin' && !teams.teams.some(team => team.id === teamId)) {
+      throw new Error(i18n.global.t('explore.teamAccessDenied'))
+    }
+    const team = teamId ?? pickTeam(teams.teams.map((t) => t.id), null)
     if (team === null) throw new Error(noTeamsMessage(teams.error))
     const generation = sources.getMetadataGeneration()
     const list = await sources.loadTeamSources(team, refresh)
@@ -186,12 +203,13 @@ export function useExplorerNavigator() {
   /** Pushes a history entry for the team and runs its stored or first connected source's draft. */
   async function selectTeam(teamId: number) {
     if (teamId !== context.teamId) await router.push({ path: EXPLORE_PATH, query: { team: teamId } })
+    else if (status.value === 'navigating' && shown) await router.push({ path: EXPLORE_PATH, query: shown })
   }
 
   /** Pushes a history entry for the source and runs its draft. */
   async function selectSource(sourceId: number) {
-    if (sourceId === context.sourceId) return
-    await router.push({ path: EXPLORE_PATH, query: { team: context.teamId ?? undefined, source: sourceId } })
+    if (sourceId !== context.sourceId) await router.push({ path: EXPLORE_PATH, query: { team: context.teamId ?? undefined, source: sourceId } })
+    else if (status.value === 'navigating' && shown) await router.push({ path: EXPLORE_PATH, query: shown })
   }
 
   /** Pushes a history entry for the saved query and runs it. Reopens it when already shown. */
@@ -268,5 +286,5 @@ export function useExplorerNavigator() {
     if (status.value === 'ready' && runs.current?.status !== 'validating') void runs.page(action)
   }
 
-  return { status, error, selectTeam, selectSource, openSavedQuery, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
+  return { status, error, pending, selectTeam, selectSource, openSavedQuery, setWindow, setLimit, newQuery, run, cancel, page, recordAfter, retry: () => openRoute() }
 }
