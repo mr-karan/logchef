@@ -40,7 +40,7 @@ func TestCallbackUserFailureIncludesEmail(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg := &config.AuthConfig{AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}}}
-			_, _, err = p.HandleCallback(t.Context(), db, log, cfg, "code", "nonce")
+			_, _, err = p.HandleCallback(t.Context(), db, log, cfg, "code", "nonce", "test-pkce-verifier")
 			if err == nil || !strings.HasPrefix(err.Error(), "failed to "+failure+" user for email="+email+":") {
 				t.Fatalf("%s failure lost email context: %v", failure, err)
 			}

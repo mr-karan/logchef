@@ -38,7 +38,7 @@ func TestHandleCallbackNonce(t *testing.T) {
 				SessionDuration: time.Hour, MaxConcurrentSessions: 5,
 				AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}},
 			}
-			user, session, err := provider.HandleCallback(t.Context(), db, log, cfg, "code", tc.expected)
+			user, session, err := provider.HandleCallback(t.Context(), db, log, cfg, "code", tc.expected, "test-pkce-verifier")
 			if tc.valid {
 				if err != nil || user == nil || session == nil {
 					t.Fatalf("matching nonce did not create a session: %v", err)

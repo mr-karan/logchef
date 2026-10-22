@@ -86,6 +86,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
 	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
 	req.AddCookie(&http.Cookie{Name: nonceCookieName, Value: "test-browser-secret"})
+	req.AddCookie(&http.Cookie{Name: verifierCookieName, Value: "test-pkce-verifier"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
