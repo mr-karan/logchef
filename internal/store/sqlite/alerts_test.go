@@ -2,10 +2,10 @@ package sqlite
 
 import (
 	"context"
-	"os"
 	"strings"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/store/storetest"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -196,15 +196,7 @@ func TestListActiveAlertsDue_AfterMark(t *testing.T) {
 
 func TestPruneAlertHistoryPlan(t *testing.T) {
 	db := newTxTestDB(t)
-	source, err := os.ReadFile("queries.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, query, found := strings.Cut(string(source), "-- name: PruneAlertHistory :exec\n")
-	if !found {
-		t.Fatal("prune query not found")
-	}
-	query, _, _ = strings.Cut(query, ";")
+	query := storetest.GeneratedQuery(t, "sqlc/queries.sql.go", "pruneAlertHistory")
 	args := make([]any, strings.Count(query, "?"))
 	for i := range args {
 		args[i] = 1
