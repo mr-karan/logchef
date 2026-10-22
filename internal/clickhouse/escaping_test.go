@@ -11,7 +11,7 @@ func TestStatsIdentifiersRoundTripClickHouse(t *testing.T) {
 	for _, name := range []string{"a`b", `a\b`, `a\` + "`b", "`x`", "`x` + 1 AS `injected`", " spaced "} {
 		t.Run(name, func(t *testing.T) {
 			query := "SELECT 'safe' AS " + queryescape.ClickHouseIdentifier(name)
-			rows, err := client.connection().Query(ctx, query)
+			rows, err := client.conn.Query(ctx, query)
 			if err != nil {
 				t.Fatal(err)
 			}
