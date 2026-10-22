@@ -469,6 +469,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { logchefqlApi } from "@/api/logchefql";
+import { formatErrorMessage } from "@/api/error-handler";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
 import { useMetaStore } from "@/stores/meta";
@@ -830,7 +831,7 @@ const submitQuery = async () => {
     });
   } catch (e: unknown) {
     console.error("Error validating or submitting query:", e);
-    validationError.value = (e && typeof e === "object" && "message" in e && typeof e.message === "string" ? e.message : "") || "Error preparing query";
+    validationError.value = formatErrorMessage(e, "Error preparing query");
   }
 };
 
