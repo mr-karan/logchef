@@ -118,6 +118,33 @@ describe("sources store", () => {
     await expect(sources.loadSourceDetails(9, 1)).rejects.toMatchObject({ message: failure.message });
   });
 
+  it("clears the selected source and its cached details when the last source is removed", async () => {
+    const list = vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([{ id: 7, is_connected: true }]) as never);
+    vi.mocked(sourcesApi.getTeamSource).mockReturnValue(ok({ id: 7, is_connected: true }) as never);
+    vi.spyOn(teamsApi, "removeTeamSource").mockReturnValue(ok(null) as never);
+    vi.spyOn(teamsApi, "listTeamSources").mockReturnValue(ok([]) as never);
+    const sources = useSourcesStore();
+    const context = useContextStore();
+    context.selectTeam(1);
+    await vi.waitFor(() => expect(sources.hasValidCurrentSource).toBe(true));
+    expect(context.sourceId).toBe(7);
+
+    list.mockReturnValue(ok([]) as never);
+    await useTeamsStore().removeTeamSource(1, 7);
+
+    await vi.waitFor(() => expect(sources.teamSources).toEqual([]));
+    expect(context.sourceId).toBeNull();
+    expect(sources.currentSourceDetails).toBeNull();
+    expect(sources.hasValidCurrentSource).toBe(false);
+    context.selectSource(7);
+    expect(sources.currentSourceDetails).toBeNull();
+  });
+
+  it("rejects cancellation with a typed error instead of undefined", async () => {
+    vi.spyOn(sourcesApi, "listTeamSources").mockRejectedValue({ status: "error", error_type: "CanceledError", message: "Request canceled" });
+    await expect(useSourcesStore().loadTeamSources(9)).rejects.toMatchObject({ error_type: "CanceledError" });
+  });
+
   it("serves the current team's sources and its connected source's details without a request", async () => {
     const list = vi.spyOn(sourcesApi, "listTeamSources").mockReturnValue(ok([{ id: 3, is_connected: true }]) as never);
     const details = vi.mocked(sourcesApi.getTeamSource).mockReturnValue(ok({ id: 3, is_connected: true }) as never);
