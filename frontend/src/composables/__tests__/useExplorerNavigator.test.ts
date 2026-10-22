@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp, defineComponent, h, KeepAlive, type VNode } from "vue";
-import { createPinia, setActivePinia } from "pinia";
+import { createPinia, disposePinia, setActivePinia } from "pinia";
 import { createMemoryHistory, createRouter, RouterView } from "vue-router";
 import { teamsApi, type UserTeamMembership } from "@/api/teams";
 import { authApi } from "@/api/auth";
@@ -128,7 +128,7 @@ describe("Explorer history navigation", () => {
   });
 
   // `stub` replaces API stubs before Explorer reads its first location.
-  async function mountExplorer(location: Record<string, string> = { team: "1", source: "3" }, stub?: () => void, role: "admin" | "member" = "member") {
+  async function mountExplorer(location: Record<string, string> | string = { team: "1", source: "3" }, stub?: () => void, role: "admin" | "member" = "member") {
     const toastError = vi.spyOn(toast, "error").mockReturnValue(0);
     vi.spyOn(teamsApi, "getTeam").mockImplementation(id => ok({ ...team, id, created_by: "1" }));
     vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team, otherTeam]) as never);
@@ -179,10 +179,10 @@ describe("Explorer history navigation", () => {
     const forbidden = vi.fn(() => { void router.push({ name: "Forbidden" }); });
     setForbiddenHandler(forbidden);
     router.beforeEach(contextRouterGuard);
-    await router.push({ path: "/logs/explore", query: location });
+    await router.push(typeof location === 'string' ? location : { path: "/logs/explore", query: location });
     const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router);
     app.mount(document.createElement("div"));
-    unmount = () => app.unmount();
+    unmount = () => { app.unmount(); disposePinia(pinia); };
     const opened = nav;
     const shownEditor = editor;
     if (!opened || !saved || !shownEditor) throw new Error("explorer did not mount");
@@ -396,11 +396,21 @@ describe("Explorer history navigation", () => {
 
     expect(nav.status.value).toBe('ready');
     expect(store.sourceId).toBe(source.id);
-    expect(router.currentRoute.value.query.source).toBe(String(source.id));
+    expect(router.currentRoute.value.query).toEqual({ team: String(team.id), source: String(source.id) });
     expect(query).not.toHaveBeenCalled();
     expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t('explore.linkOpenFailed'), expect.objectContaining({
       description: i18n.global.t('explore.sourceUnavailableFallback', { sourceId: requestedSourceId, sourceName: source.name }),
     }));
+
+    const recorded = router.currentRoute.value.fullPath;
+    unmount?.();
+    unmount = undefined;
+    const reloaded = await mountExplorer(recorded);
+    await settle();
+
+    expect(reloaded.query.mock.calls.every(([, sourceId, request]) =>
+      sourceId !== source.id || (request.query !== 'private="yes"' && request.query !== shareOnOtherSource.payload.query),
+    )).toBe(true);
   });
 
   it("does not repeat an error toast already shown by the interceptor", async () => {
