@@ -64,11 +64,9 @@ CLI (in `cli/`): `just build-cli`, `just check-cli` (fmt + clippy + tests).
 **Metadata DB schema change** (applies to both stores):
 1. Add a numbered migration pair: `internal/store/<store>/migrations/NNNNNN_name.up.sql`
    + `.down.sql` (next sequence number, both stores versioned independently).
-2. **Add the new up-migration to the `schema:` list in `sqlc.yaml`** — easy to forget,
-   and sqlc will silently type-check against the old schema without it.
-3. Update `internal/store/<store>/queries.sql`, then `just sqlc-generate`.
-4. Update models in `pkg/models/`.
-5. Both `sqlite` and `postgres` stores implement the same store interface — a schema
+2. Update `internal/store/<store>/queries.sql`, then `just sqlc-generate`.
+3. Update models in `pkg/models/`.
+4. Both `sqlite` and `postgres` stores implement the same store interface — a schema
    or query change usually needs to be mirrored in both. Conformance tests live in
    `internal/store/storetest/` and run against each backend.
 
