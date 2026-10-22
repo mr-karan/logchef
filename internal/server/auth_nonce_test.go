@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -34,7 +35,7 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"matching", "mismatched claim", "missing claim", "missing state cookie", "swapped state cookie", "swapped login code"} {
+	for _, mode := range []string{"matching", "mismatched claim", "missing claim", "missing state cookie", "swapped state cookie", "swapped login code", "replayed callback URL"} {
 		t.Run(mode, func(t *testing.T) {
 			var nonce string
 			var exchanges atomic.Int32
@@ -124,7 +125,22 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 			}
 			logs.Reset()
 			req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+url.QueryEscape(state), http.NoBody)
-			req.AddCookie(stateCookie)
+			if mode == "replayed callback URL" {
+				jar, err := cookiejar.New(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				callbackURL, err := url.Parse("http://logchef.example" + req.URL.String())
+				if err != nil {
+					t.Fatal(err)
+				}
+				jar.SetCookies(callbackURL, []*http.Cookie{{Name: stateCookieName, Value: state}})
+				for _, cookie := range jar.Cookies(callbackURL) {
+					req.AddCookie(cookie)
+				}
+			} else {
+				req.AddCookie(stateCookie)
+			}
 			resp, err = app.Test(req, fiber.TestConfig{Timeout: 10 * time.Second, FailOnTimeout: true})
 			if err != nil {
 				t.Fatal(err)
