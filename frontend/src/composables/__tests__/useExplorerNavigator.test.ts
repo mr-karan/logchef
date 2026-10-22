@@ -1344,8 +1344,9 @@ describe("Explorer history navigation", () => {
     await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     await router.push({ path: "/logs/explore", query: { team: "1", source: String(otherSource.id) } });
     teamLoaded.release();
-    await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id));
+    await flush();
     await settle();
+    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
     expect(store.sourceId).toBe(otherSource.id);
 
     vi.mocked(sourcesApi.getTeamSource).mockImplementation(

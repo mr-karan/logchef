@@ -155,9 +155,7 @@ export const useTeamsStore = defineStore("teams", () => {
         return { success: false, error: { status: 'error', message: "Failed to load admin teams", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
         return state.handleError(
-          signal.aborted
-            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
-            : error as Error,
+          error as Error,
           'loadAdminTeams',
         );
       }
@@ -226,9 +224,7 @@ export const useTeamsStore = defineStore("teams", () => {
         return { success: false, error: { status: 'error', message: 'Team not found', error_type: 'NotFound' } as APIErrorResponse };
       } catch (error) {
         return state.handleError(
-          signal.aborted
-            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
-            : error as Error,
+          error as Error,
           `getTeam-${teamId}`,
         );
       }
@@ -292,9 +288,7 @@ export const useTeamsStore = defineStore("teams", () => {
         return { success: false, error: { status: 'error', message: "Failed to load team members", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
         return state.handleError(
-          signal.aborted
-            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
-            : error as Error,
+          error as Error,
           `listTeamMembers-${teamId}`,
         );
       }
@@ -401,9 +395,7 @@ export const useTeamsStore = defineStore("teams", () => {
         return { success: false, error: { status: 'error', message: "Failed to load team sources", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
         return state.handleError(
-          signal.aborted
-            ? { status: 'error', message: 'Request canceled', error_type: 'CanceledError' }
-            : error as Error,
+          error as Error,
           `listTeamSources-${teamId}`,
         );
       }

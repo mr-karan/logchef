@@ -73,7 +73,7 @@ export function isCanceledError(error: unknown): boolean {
 
 /** Checks if an error came from an aborted or canceled request (fetch AbortError or our CanceledError). */
 export function isAbortError(error: unknown): boolean {
-  return isCanceledError(error) || (error instanceof Error && error.name === "AbortError");
+  return isCanceledError(error) || (error !== null && typeof error === "object" && "name" in error && error.name === "AbortError");
 }
 
 /** Returns true when an interceptor already surfaced this error to the user. */

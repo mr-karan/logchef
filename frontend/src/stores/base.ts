@@ -3,7 +3,7 @@ import type { ComputedRef, Ref } from "vue";
 import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
-import { hasShownErrorToast, isCanceledError, showErrorToast } from "@/api/error-handler";
+import { hasShownErrorToast, isAbortError, showErrorToast } from "@/api/error-handler";
 
 export interface BaseState<T> {
   data: Ref<T>;
@@ -44,7 +44,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
 
   function handleError(err: Error | APIErrorResponse, operation: string): { success: false; error: APIErrorResponse } {
     // Handle canceled requests silently - don't show error or store in state
-    if (isCanceledError(err)) {
+    if (isAbortError(err)) {
       const canceledError: APIErrorResponse = {
         status: 'error',
         message: 'Request canceled',
@@ -103,6 +103,9 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
           }
         });
         
+        if (result.aborted) {
+          return handleError(new DOMException("Request canceled", "AbortError"), options.operationKey || 'api');
+        }
         if (result.success) {
           return { success: true, data: result.data };
         } else {

@@ -6,7 +6,7 @@ import { createSessionExpirationHandler, expireSession } from '../session'
 import { useAuthStore } from '@/stores/auth'
 import { apiClient } from '../apiUtils'
 import { useBaseStore } from '@/stores/base'
-import { hasShownErrorToast } from '@/api/error-handler'
+import { hasShownErrorToast, isAbortError } from '@/api/error-handler'
 import router from '@/router'
 
 vi.mock('vue-sonner', () => ({
@@ -79,6 +79,24 @@ describe('api error toasts', () => {
       _toastShown: true,
     })
     expect(toast.error).toHaveBeenCalledTimes(1)
+  })
+
+  it('preserves cancellation while awaiting the session expiration handler', async () => {
+    const controller = new AbortController()
+    let release: (value: import('../types').APIErrorResponse) => void = () => {}
+    const expiration = new Promise<import('../types').APIErrorResponse>(resolve => { release = resolve })
+    const unauthorized = vi.fn(() => expiration)
+    setUnauthorizedHandler(unauthorized)
+    api.defaults.adapter = respondWith(401, { status: 'error', message: 'Expired', error_type: 'AuthenticationError' })
+    const load = apiClient.get('/teams', { signal: controller.signal }).catch((error: unknown) => error)
+    try {
+      await vi.waitFor(() => expect(unauthorized).toHaveBeenCalledOnce())
+      controller.abort()
+      release({ status: 'error', message: 'Expired', error_type: 'AuthenticationError' })
+      expect(isAbortError(await load)).toBe(true)
+    } finally {
+      setUnauthorizedHandler(createSessionExpirationHandler({ clearState: useAuthStore().clearState, router }))
+    }
   })
 
   it('rejects without a shown toast on the initial session check', async () => {

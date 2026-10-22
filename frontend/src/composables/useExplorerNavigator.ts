@@ -10,7 +10,6 @@ import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
 import { EXPLORE_PATH, parseExploreLocation, sameExploreLocation, type ExploreLocation } from '@/lib/exploreLocation'
 import { pickSource, pickTeam, useContextStore } from '@/stores/context'
-import { useAuthStore } from '@/stores/auth'
 import { useExploreStore, type OpenedLocation, type RunQuery, type RunRequest } from '@/stores/explore'
 import { useExploreRuns, type Execution } from '@/stores/exploreRuns'
 import type { Paging } from '@/stores/exploreWindowed'
@@ -42,7 +41,6 @@ export function useExplorerNavigator() {
   const context = useContextStore()
   const sources = useSourcesStore()
   const teams = useTeamsStore()
-  const auth = useAuthStore()
   const { toast } = useToast()
 
   const status = ref<ExplorerStatus>('loading')
@@ -106,8 +104,10 @@ export function useExplorerNavigator() {
       pending.value = target
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
-          const { list, details, generation, ...location } = await resolve(target, attempt > 0)
+          const resolved = await resolve(target, id, attempt > 0)
           if (id !== navId) return
+          if (!resolved) continue
+          const { list, details, generation, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
           const shouldRun = explore.open(location)
           applyChoice()
@@ -125,11 +125,14 @@ export function useExplorerNavigator() {
       if (id !== navId) return
       console.error('error opening explorer location', err)
       chosen = {}
+      const message = err && typeof err === 'object' && 'error_type' in err && err.error_type === 'AuthorizationError'
+        ? i18n.global.t('explore.teamAccessDenied') : getErrorMessage(err)
       if (shown) {
         status.value = 'ready'
-        toast({ title: i18n.global.t('explore.linkOpenFailed'), description: getErrorMessage(err), variant: 'destructive', duration: TOAST_DURATION.ERROR })
+        await record('replace', shown)
+        toast({ title: i18n.global.t('explore.linkOpenFailed'), description: message, variant: 'destructive', duration: TOAST_DURATION.ERROR })
       } else {
-        error.value = getErrorMessage(err)
+        error.value = message
         status.value = 'error'
       }
     } finally {
@@ -144,8 +147,15 @@ export function useExplorerNavigator() {
   }
 
   /** Loads everything the location needs and resolves its team and source. */
-  async function resolve({ teamId, sourceId, target }: ExploreLocation, refresh = false): Promise<OpenedLocation & { list: Source[]; details: Source | null; generation: number }> {
-    if (teams.teams.length === 0) await teams.loadTeams(false, false)
+  async function resolve({ teamId, sourceId, target }: ExploreLocation, id: number, refresh = false): Promise<(OpenedLocation & { list: Source[]; details: Source | null; generation: number }) | null> {
+    if (teams.teams.length === 0) {
+      const loaded = await teams.loadTeams(false, false)
+      if (id !== navId) return null
+      if (!loaded.success) {
+        if (isAbortError(loaded.error)) throw loaded.error
+        throw new Error(noTeamsMessage(teams.error))
+      }
+    }
 
     let content: OpenedLocation['content']
     if (target.kind === 'share') {
@@ -165,13 +175,12 @@ export function useExplorerNavigator() {
       content = target
     }
 
-    if (teamId !== null && auth.user?.role !== 'admin' && !teams.teams.some(team => team.id === teamId)) {
-      throw new Error(i18n.global.t('explore.teamAccessDenied'))
-    }
+    if (id !== navId) return null
     const team = teamId ?? pickTeam(teams.teams.map((t) => t.id), null)
     if (team === null) throw new Error(noTeamsMessage(teams.error))
     const generation = sources.getMetadataGeneration()
     const list = await sources.loadTeamSources(team, refresh)
+    if (id !== navId || generation !== sources.getMetadataGeneration()) return null
     const source = pickSource(team, list, sourceId)
     const details = source === null ? null : await sources.loadSourceDetails(team, source, refresh || (team === context.teamId && source === context.sourceId && sources.currentSourceDetails?.is_connected === false))
     return { teamId: team, sourceId: source, content, list, details, generation }
