@@ -405,6 +405,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.resolveAlertHistoryStmt, err = db.PrepareContext(ctx, resolveAlertHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query ResolveAlertHistory: %w", err)
 	}
+	if q.resolveAlertHistoryForAlertStmt, err = db.PrepareContext(ctx, resolveAlertHistoryForAlert); err != nil {
+		return nil, fmt.Errorf("error preparing query ResolveAlertHistoryForAlert: %w", err)
+	}
 	if q.revokeOAuthGrantStmt, err = db.PrepareContext(ctx, revokeOAuthGrant); err != nil {
 		return nil, fmt.Errorf("error preparing query RevokeOAuthGrant: %w", err)
 	}
@@ -1135,6 +1138,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing resolveAlertHistoryStmt: %w", cerr)
 		}
 	}
+	if q.resolveAlertHistoryForAlertStmt != nil {
+		if cerr := q.resolveAlertHistoryForAlertStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing resolveAlertHistoryForAlertStmt: %w", cerr)
+		}
+	}
 	if q.revokeOAuthGrantStmt != nil {
 		if cerr := q.revokeOAuthGrantStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing revokeOAuthGrantStmt: %w", cerr)
@@ -1451,6 +1459,7 @@ type Queries struct {
 	removeTeamMemberStmt                  *sql.Stmt
 	removeTeamSourceStmt                  *sql.Stmt
 	resolveAlertHistoryStmt               *sql.Stmt
+	resolveAlertHistoryForAlertStmt       *sql.Stmt
 	revokeOAuthGrantStmt                  *sql.Stmt
 	revokeOAuthGrantByTokenStmt           *sql.Stmt
 	revokeOAuthGrantForUserStmt           *sql.Stmt
@@ -1614,6 +1623,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		removeTeamMemberStmt:                  q.removeTeamMemberStmt,
 		removeTeamSourceStmt:                  q.removeTeamSourceStmt,
 		resolveAlertHistoryStmt:               q.resolveAlertHistoryStmt,
+		resolveAlertHistoryForAlertStmt:       q.resolveAlertHistoryForAlertStmt,
 		revokeOAuthGrantStmt:                  q.revokeOAuthGrantStmt,
 		revokeOAuthGrantByTokenStmt:           q.revokeOAuthGrantByTokenStmt,
 		revokeOAuthGrantForUserStmt:           q.revokeOAuthGrantForUserStmt,

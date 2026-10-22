@@ -278,6 +278,7 @@ type Querier interface {
 	// Remove a data source from a team
 	RemoveTeamSource(ctx context.Context, arg RemoveTeamSourceParams) error
 	ResolveAlertHistory(ctx context.Context, arg ResolveAlertHistoryParams) (int64, error)
+	ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error
 	RevokeOAuthGrant(ctx context.Context, arg RevokeOAuthGrantParams) (int64, error)
 	// Revoke the grant that owns an access-token ID hash or refresh-token hash,
 	// only when the grant belongs to the given client.

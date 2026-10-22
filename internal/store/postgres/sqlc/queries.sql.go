@@ -3757,7 +3757,13 @@ func (q *Queries) MarkAlertTriggered(ctx context.Context, id int64) error {
 const pruneAlertHistory = `-- name: PruneAlertHistory :exec
 DELETE FROM alert_history AS target
 WHERE target.alert_id = $1
-  AND target.status <> 'triggered'
+  AND target.id NOT IN (
+    SELECT active.id
+    FROM alert_history AS active
+    WHERE active.alert_id = $1 AND active.status = 'triggered'
+    ORDER BY active.triggered_at DESC, active.id DESC
+    LIMIT 1
+  )
   AND target.id NOT IN (
     SELECT keep.id
     FROM alert_history AS keep
@@ -3991,6 +3997,24 @@ func (q *Queries) ResolveAlertHistory(ctx context.Context, arg ResolveAlertHisto
 	var alert_id int64
 	err := row.Scan(&alert_id)
 	return alert_id, err
+}
+
+const resolveAlertHistoryForAlert = `-- name: ResolveAlertHistoryForAlert :exec
+UPDATE alert_history
+SET status = 'resolved',
+    resolved_at = now(),
+    message = $1
+WHERE alert_id = $2 AND status = 'triggered'
+`
+
+type ResolveAlertHistoryForAlertParams struct {
+	Message pgtype.Text `json:"message"`
+	AlertID int64       `json:"alert_id"`
+}
+
+func (q *Queries) ResolveAlertHistoryForAlert(ctx context.Context, arg ResolveAlertHistoryForAlertParams) error {
+	_, err := q.db.Exec(ctx, resolveAlertHistoryForAlert, arg.Message, arg.AlertID)
+	return err
 }
 
 const revokeOAuthGrant = `-- name: RevokeOAuthGrant :execrows

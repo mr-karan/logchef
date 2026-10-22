@@ -439,7 +439,7 @@ func ListAlertHistory(ctx context.Context, db store.StoreOps, alertID models.Ale
 	return history, nil
 }
 
-// ResolveAlert manually resolves the most recent triggered history entry.
+// ResolveAlert manually resolves every unresolved firing entry of the alert.
 func ResolveAlert(ctx context.Context, db store.StoreOps, log *slog.Logger, alertID models.AlertID, message string) error {
 	entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alertID)
 	if err != nil {
