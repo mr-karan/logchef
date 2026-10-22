@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Local admin emails now use the same validation as `admin_emails`; domains without a dot, such as `admin@localhost`, fail at startup.
+- Startup now fails when a config file passed with `--config` is missing,
+  unreadable or malformed, and when the default `config.toml` is unreadable or
+  malformed. Before, the server ignored the problem and ran on defaults.
+- Config file keys are normalized to lowercase before environment overrides
+  are applied. A key such as `[Server] Port` takes effect, and environment
+  overrides preserve other values in that section. File keys or sections that
+  differ only in case are rejected.
 
 ## [2.4.0] - 2026-10-13
 
