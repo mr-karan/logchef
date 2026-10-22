@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { Source } from "./sources";
 
 export interface Team {
@@ -60,7 +60,7 @@ export interface TeamWithMemberCount extends Team {
 export const teamsApi = {
   listUserTeams: (options?: { signal?: AbortSignal }) => apiClient.get<UserTeamMembership[]>("/me/teams", options),
   listAllTeams: (options?: { signal?: AbortSignal }) => apiClient.get<TeamWithMemberCount[]>("/admin/teams", options),
-  getTeam: (id: number, options?: { signal?: AbortSignal }) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`, options),
+  getTeam: (id: number, options?: RequestOptions) => apiClient.get<Team & { member_count?: number }>(`/teams/${id}`, options),
   createTeam: (data: CreateTeamRequest) => apiClient.post<Team>("/admin/teams", data),
   updateTeam: (id: number, data: UpdateTeamRequest) =>
     apiClient.put<Team>(`/teams/${id}`, data),

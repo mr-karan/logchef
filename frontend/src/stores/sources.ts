@@ -13,6 +13,7 @@ import type {
 import type { APIErrorResponse } from "@/api/types";
 import { useBaseStore } from "./base";
 import { i18n } from "@/i18n";
+import type { RequestOptions } from "@/api/apiUtils";
 import { isAbortError } from "@/api/error-handler";
 
 type SourceActivityRequestResult = {
@@ -221,9 +222,9 @@ export const useSourcesStore = defineStore("sources", () => {
    * request in flight. Only the current team's are cached. Rejects when the
    * request fails.
    */
-  function loadTeamSources(teamId: number, refresh = false): Promise<Source[]> {
+  function loadTeamSources(teamId: number, refresh = false, options?: RequestOptions): Promise<Source[]> {
     const current = teamId === contextStore.teamId;
-    const key = `${generation}-${teamId}`;
+    const key = `${generation}-${teamId}-${!!options?.suppressForbiddenRedirect}`;
     const pending = teamSourcesRequests.get(key);
     if (pending) return pending.promise;
     const cached = current && !refresh ? state.data.value.sourcesByTeam[teamId] : undefined;
@@ -233,7 +234,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const controller = new AbortController();
     const request = state
       .callApi<Source[]>({
-        apiCall: () => sourcesApi.listTeamSources(teamId, { signal: controller.signal }),
+        apiCall: () => sourcesApi.listTeamSources(teamId, { ...options, signal: controller.signal }),
         operationKey: `loadTeamSources-${teamId}`,
         showToast: false,
       })
@@ -380,9 +381,9 @@ export const useSourcesStore = defineStore("sources", () => {
    * a request in flight. Only the current source's are
    * cached. Rejects when the request fails.
    */
-  function loadSourceDetails(teamId: number, sourceId: number, refresh = false): Promise<Source> {
+  function loadSourceDetails(teamId: number, sourceId: number, refresh = false, options?: RequestOptions): Promise<Source> {
     const current = teamId === contextStore.teamId && sourceId === contextStore.sourceId;
-    const key = `${generation}-${detailsKey(teamId, sourceId)}`;
+    const key = `${generation}-${detailsKey(teamId, sourceId)}-${!!options?.suppressForbiddenRedirect}`;
     const pending = sourceDetailsRequests.get(key);
     if (pending) return pending;
     const cached = current && !refresh ? state.data.value.sourceDetails[teamId]?.[sourceId] : undefined;
@@ -391,7 +392,7 @@ export const useSourcesStore = defineStore("sources", () => {
     const requestedIn = generation;
     const request = state
       .callApi<Source>({
-        apiCall: () => sourcesApi.getTeamSource(teamId, sourceId),
+        apiCall: () => options ? sourcesApi.getTeamSource(teamId, sourceId, options) : sourcesApi.getTeamSource(teamId, sourceId),
         operationKey: `loadSourceDetails-${detailsKey(teamId, sourceId)}`,
         showToast: false,
       })

@@ -432,7 +432,7 @@ describe("Explorer history navigation", () => {
     ready.release();
     await flush();
     await flush();
-    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
+    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id, expect.anything());
     expect(nav.status.value).toBe("ready");
     expect(query).toHaveBeenCalledTimes(before);
   });
@@ -449,7 +449,7 @@ describe("Explorer history navigation", () => {
     useSourcesStore().invalidateTeamSources();
     ready.release();
     await vi.waitFor(() => expect(nav.status.value).toBe("ready"));
-    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
+    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id, expect.anything());
     expect(useContextStore().teamId).toBe(otherTeam.id);
     expect(useContextStore().sourceId).toBeNull();
     expect(query).toHaveBeenCalledTimes(1);
@@ -625,7 +625,7 @@ describe("Explorer history navigation", () => {
 
     await raceAndOutwait(query, async () => {
       await router.push({ path: "/logs/explore", query: evidenceOther });
-      await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id));
+      await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id, expect.anything()));
       router.back();
       await vi.waitFor(() => expect(router.currentRoute.value.query.source).toBe(String(source.id)));
       releaseOther();
@@ -691,7 +691,7 @@ describe("Explorer history navigation", () => {
 
     await raceAndOutwait(query, async () => {
       await router.push({ path: "/logs/explore", query: evidenceOther });
-      await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id));
+      await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(team.id, otherSource.id, expect.anything()));
       await router.push({ path: "/logs/explore", query: evidenceB });
       releaseOther();
       await vi.waitFor(() => expect(store.sourceId).toBe(source.id));
@@ -1336,7 +1336,7 @@ describe("Explorer history navigation", () => {
       return ok(sourceById(id)) as never;
     });
     await router.push({ path: "/logs/explore", query: { team: "1", source: "4" } });
-    await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(1, 4));
+    await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(1, 4, expect.anything()));
     vi.mocked(sourcesApi.listTeamSources).mockReturnValue(ok([source, sqlOnlySource]) as never);
     removal.release();
     await removing;
@@ -1376,7 +1376,7 @@ describe("Explorer history navigation", () => {
     await settle();
     expect({ lists: vi.mocked(sourcesApi.listTeamSources).mock.calls.length, details: vi.mocked(sourcesApi.getTeamSource).mock.calls.length }).toEqual({ lists: 1, details: 1 });
     expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.objectContaining({ signal: expect.any(AbortSignal) }));
-    expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
+    expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id, expect.anything());
     expect(query).toHaveBeenCalledTimes(1);
   });
 
@@ -1417,7 +1417,7 @@ describe("Explorer history navigation", () => {
     teamLoaded.release();
     await flush();
     await settle();
-    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
+    expect(sourcesApi.getTeamSource).not.toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id, expect.anything());
     expect(store.sourceId).toBe(otherSource.id);
 
     vi.mocked(sourcesApi.getTeamSource).mockImplementation(

@@ -8,7 +8,7 @@ async function apiRequest<T>(
   method: "get" | "post" | "put" | "patch" | "delete",
   url: string,
   data?: unknown,
-  options?: { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean }
+  options?: RequestOptions
 ): Promise<APIResponse<T>> {
   const config = {
     ...(options?.timeout ? { timeout: options.timeout * 1000 } : {}), // Convert seconds to milliseconds
@@ -16,7 +16,8 @@ async function apiRequest<T>(
     // Custom flag read back off `error.config` by the response interceptor to
     // suppress the global error toast (e.g. per-panel 403s on a dashboard, where
     // an inline locked/error state is shown instead of a toast storm).
-    ...(options?.suppressErrorToast ? { suppressErrorToast: true } : {})
+    ...(options?.suppressErrorToast ? { suppressErrorToast: true } : {}),
+    ...(options?.suppressForbiddenRedirect ? { suppressForbiddenRedirect: true } : {})
   };
   
   let response;
@@ -32,7 +33,7 @@ async function apiRequest<T>(
 /**
  * Shorthand methods for common API operations
  */
-type RequestOptions = { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean };
+export type RequestOptions = { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean; suppressForbiddenRedirect?: boolean };
 
 export const apiClient = {
   get: <T>(url: string, options?: RequestOptions) => apiRequest<T>("get", url, undefined, options),

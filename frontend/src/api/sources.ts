@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { TeamSummary } from "./teams";
 import type { ColumnInfo } from "./explore";
 import type { QueryLanguage } from "@/lib/queryMetadata";
@@ -223,10 +223,10 @@ export const sourcesApi = {
   // Source management
   listAllSourcesForAdmin: () =>
     apiClient.get<Source[]>("/admin/sources"),
-  listTeamSources: (teamId: number, options?: { signal?: AbortSignal }) =>
+  listTeamSources: (teamId: number, options?: RequestOptions) =>
     apiClient.get<Source[]>(`/teams/${teamId}/sources`, options),
-  getTeamSource: (teamId: number, sourceId: number) =>
-    apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`),
+  getTeamSource: (teamId: number, sourceId: number, options?: RequestOptions) =>
+    apiClient.get<Source>(`/teams/${teamId}/sources/${sourceId}`, options),
   createSource: (payload: CreateSourcePayload) =>
     apiClient.post<Source>("/admin/sources", payload),
   updateSource: (id: number, payload: UpdateSourcePayload) =>
