@@ -8,6 +8,7 @@ import { useMetaStore } from "@/stores/meta";
 import { basePath } from "@/utils/basePath";
 import { error } from "@/utils/debug";
 import { contextRouterGuard } from "./contextGuard";
+import { usePendingNavigation } from "./navigation";
 import ComponentLoadError from "@/views/error/ComponentLoadError.vue";
 
 const lazy = (name: string, loader: () => Promise<unknown>) => () =>
@@ -290,6 +291,8 @@ const router = createRouter({
     return savedPosition ?? { top: 0 };
   },
 });
+
+usePendingNavigation(router);
 
 router.beforeEach(async (to) => {
   // OAuth pages exist only when the server runs Logchef OAuth. Meta may not

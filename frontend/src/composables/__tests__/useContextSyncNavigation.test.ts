@@ -5,6 +5,7 @@ import { createMemoryHistory, createRouter, RouterView } from 'vue-router';
 import { sourcesApi, type Source } from '@/api/sources';
 import { teamsApi, type UserTeamMembership } from '@/api/teams';
 import { contextRouterGuard } from '@/router/contextGuard';
+import { usePendingNavigation } from '@/router/navigation';
 import { useContextStore } from '@/stores/context';
 import { useSourcesStore } from '@/stores/sources';
 import { useContextSync } from '../useContextSync';
@@ -54,6 +55,7 @@ describe('Alerts context navigation', () => {
       { path: 'alerts/new', component: page() },
       { path: 'library', component: library ?? { render: () => null } },
     ] }] });
+    usePendingNavigation(router);
     router.beforeEach(contextRouterGuard);
     await router.push({ path: '/logs/alerts', query: { team: '3', source: '7' } });
     const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router);

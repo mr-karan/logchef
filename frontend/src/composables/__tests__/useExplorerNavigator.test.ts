@@ -141,10 +141,12 @@ describe("Explorer history navigation", () => {
     vi.spyOn(exploreApi, "getHistogramData").mockReturnValue(ok({ data: [], granularity: "1m" }) as never);
 
     // A conflicting draft for the same team and source.
-    localStorage.setItem(
-      "logchef.explore.draft.1.3",
-      JSON.stringify({ version: 1, mode: "logchefql", nativeQuery: "", logchefqlCode: 'draft="yes"', limit: 100, relativeTime: "7d", absoluteStart: null, absoluteEnd: null, timezone: null, variables: [] }),
-    );
+    if (localStorage.getItem("logchef.explore.draft.1.3") === null) {
+      localStorage.setItem(
+        "logchef.explore.draft.1.3",
+        JSON.stringify({ version: 1, mode: "logchefql", nativeQuery: "", logchefqlCode: 'draft="yes"', limit: 100, relativeTime: "7d", absoluteStart: null, absoluteEnd: null, timezone: null, variables: [] }),
+      );
+    }
 
     stub?.();
 

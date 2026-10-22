@@ -124,12 +124,13 @@ export function useExplorerNavigator() {
           if (!resolved) continue
           const { list, details, generation, sourceNotice, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
-          const shouldRun = explore.open(location)
+          const shouldRun = explore.open(sourceNotice ? { ...location, content: { kind: 'draft' } } : location)
           applyChoice()
           status.value = 'ready'
           runs.enter(shouldRun && !sourceNotice ? editorAsk() : null)
           if (sourceNotice) toast({ title: i18n.global.t('explore.linkOpenFailed'), description: sourceNotice, variant: 'destructive', duration: TOAST_DURATION.ERROR })
-          replay()
+          if (sourceNotice) void record('replace', { team: String(location.teamId), ...(location.sourceId === null ? {} : { source: String(location.sourceId) }) })
+          else replay()
           return
         } catch (err) {
           if (id !== navId) return
