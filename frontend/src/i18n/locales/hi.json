@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "आपको इस टीम तक पहुँच नहीं है।",
   "explore.teamNotFound": "टीम नहीं मिली।",
   "explore.sourceAccessDenied": "आपको इस स्रोत तक पहुँच नहीं है।",
+  "explore.sourceUnavailableFallback": "स्रोत {sourceId} उपलब्ध नहीं है। इसके बजाय {sourceName} खोला गया। लिंक की क्वेरी नहीं चलाई गई।",
   "pages.savedQueryNotFound": "सहेजी गई क्वेरी नहीं मिली।",
   "explore.disconnectedSource": "चुना गया स्रोत “{name}” जुड़ा नहीं है। कॉन्फ़िगरेशन जाँचें या दूसरा स्रोत चुनें।",
   "explore.noMatches": "“{search}” से मेल खाने वाला कोई लॉग नहीं",

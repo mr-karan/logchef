@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import { apiBaseURL } from "./config";
 import { streamSSE } from "./eventStream";
 import type { TemplateVariable } from "./logchefql";
@@ -317,11 +317,11 @@ export const exploreApi = {
     );
   },
 
-  getQueryShare: (token: string) => {
+  getQueryShare: (token: string, options?: RequestOptions) => {
     if (!token) {
       throw new Error("Share token is required");
     }
-    return apiClient.get<QueryShareResponse>(`/query-shares/${encodeURIComponent(token)}`);
+    return apiClient.get<QueryShareResponse>(`/query-shares/${encodeURIComponent(token)}`, options);
   },
 
   // Fetch the caller's recent query history (newest-first). limit is clamped

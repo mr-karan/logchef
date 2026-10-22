@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "이 팀에 접근할 권한이 없습니다.",
   "explore.teamNotFound": "팀을 찾을 수 없습니다.",
   "explore.sourceAccessDenied": "이 소스에 접근할 권한이 없습니다.",
+  "explore.sourceUnavailableFallback": "소스 {sourceId}을(를) 사용할 수 없습니다. 대신 {sourceName}을(를) 열었습니다. 링크의 쿼리는 실행하지 않았습니다.",
   "pages.savedQueryNotFound": "저장된 쿼리를 찾을 수 없습니다.",
   "explore.disconnectedSource": "“{name}” 소스가 연결되지 않았습니다. 구성을 확인하거나 다른 소스를 선택하세요.",
   "explore.noMatches": "“{search}”와 일치하는 로그가 없습니다",

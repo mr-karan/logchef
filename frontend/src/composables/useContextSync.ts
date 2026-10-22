@@ -1,5 +1,4 @@
 import { useRoute, useRouter } from 'vue-router';
-import { watch } from 'vue';
 import { pickTeam, useContextStore } from '@/stores/context';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
@@ -13,6 +12,7 @@ export function useContextSync(options: { basePath?: string } = {}) {
   const sourcesStore = useSourcesStore();
   // LogsLayout caches views, so a cached page must never rewrite another route.
   const syncPath = options.basePath ?? route.path;
+  let requestId = 0;
 
   async function syncUrl() {
     if (route.path !== syncPath) return;
@@ -24,28 +24,33 @@ export function useContextSync(options: { basePath?: string } = {}) {
     }
   }
 
-  watch(() => [contextStore.teamId, contextStore.sourceId], () => { void syncUrl(); });
-
-  /** Keeps the router's context and records it after its source list loads. */
-  async function initialize() {
-    if (teamsStore.teams.length === 0) await teamsStore.loadTeams(false, false);
-    const teamId = contextStore.teamId ?? pickTeam(teamsStore.teams.map((team) => team.id), null);
-    if (!teamId) return;
+  async function select(teamId: number, sourceId: number | null, id = ++requestId) {
     contextStore.selectTeam(teamId);
+    if (sourceId !== null) contextStore.selectSource(sourceId);
+    const generation = sourcesStore.getMetadataGeneration();
     try {
-      await sourcesStore.loadTeamSources(teamId);
-      await syncUrl();
+      await sourcesStore.loadContext();
+      if (id === requestId && generation === sourcesStore.getMetadataGeneration() && contextStore.teamId === teamId) await syncUrl();
     } catch (error) {
       console.error('error loading team sources', error);
     }
   }
 
+  /** Keeps the router's context and records it after its source list loads. */
+  async function initialize() {
+    const id = ++requestId;
+    if (teamsStore.teams.length === 0) await teamsStore.loadTeams(false, false);
+    if (id !== requestId) return;
+    const teamId = contextStore.teamId ?? pickTeam(teamsStore.teams.map((team) => team.id), null);
+    if (teamId) await select(teamId, contextStore.sourceId, id);
+  }
+
   function handleTeamChange(teamId: number) {
-    contextStore.selectTeam(teamId);
+    return select(teamId, null);
   }
 
   function handleSourceChange(sourceId: number) {
-    contextStore.selectSource(sourceId);
+    if (contextStore.teamId) return select(contextStore.teamId, sourceId);
   }
 
   return { initialize, handleTeamChange, handleSourceChange };

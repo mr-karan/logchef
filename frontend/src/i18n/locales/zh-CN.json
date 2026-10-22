@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "你无权访问此团队。",
   "explore.teamNotFound": "未找到团队。",
   "explore.sourceAccessDenied": "你无权访问此数据源。",
+  "explore.sourceUnavailableFallback": "数据源 {sourceId} 不可用。已改为打开 {sourceName}。未运行链接中的查询。",
   "explore.disconnectedSource": "所选数据源“{name}”未连接。请检查配置或选择其他数据源。",
   "explore.noMatches": "没有匹配“{search}”的日志",
   "dashboards.noMatches": "没有匹配“{search}”的仪表盘",
