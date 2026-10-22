@@ -104,6 +104,8 @@ const isLoadingTeamSources = computed(() => sourcesStore.isLoadingTeamSources);
 // Computed properties for the clean approach
 const currentTeamId = computed(() => contextStore.teamId);
 const currentSourceId = computed(() => contextStore.sourceId);
+const selection = computed(() => nav.pending.value ?? { teamId: currentTeamId.value, sourceId: currentSourceId.value });
+const selectableSources = computed(() => selection.value.teamId === contextStore.teamId ? availableSources.value : []);
 const availableTeams = computed(() => teamsStore.teams || []);
 const selectedTeamName = computed(() => teamsStore.currentTeam?.name || 'Select team');
 const selectedSourceName = computed(() => {
@@ -944,10 +946,10 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <!-- Header bar for team selection -->
         <div class="border-b py-2 px-4 flex items-center h-12">
           <TeamSourceSelector 
-            :current-team-id="currentTeamId"
-            :current-source-id="currentSourceId"
+            :current-team-id="selection.teamId"
+            :current-source-id="selection.sourceId"
             :available-teams="availableTeams"
-            :available-sources="availableSources"
+            :available-sources="selectableSources"
             @update:team="nav.selectTeam"
             @update:source="nav.selectSource"
           />
@@ -966,10 +968,10 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <!-- Filter Bar with Team/Source Selection -->
         <div class="border-b bg-background py-2 px-4 flex items-center h-12 shadow-sm">
           <TeamSourceSelector 
-            :current-team-id="currentTeamId"
-            :current-source-id="currentSourceId"
+            :current-team-id="selection.teamId"
+            :current-source-id="selection.sourceId"
             :available-teams="availableTeams"
-            :available-sources="availableSources"
+            :available-sources="selectableSources"
             @update:team="nav.selectTeam"
             @update:source="nav.selectSource"
           />
@@ -1011,10 +1013,10 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <!-- Streamlined Top Bar -->
         <ExploreTopBar
           ref="topBarRef"
-          :current-team-id="currentTeamId"
-          :current-source-id="currentSourceId"
+          :current-team-id="selection.teamId"
+          :current-source-id="selection.sourceId"
           :available-teams="availableTeams"
-          :available-sources="availableSources"
+          :available-sources="selectableSources"
           :selected-source="sourceDetails"
           @update:team="nav.selectTeam"
           @update:source="nav.selectSource"

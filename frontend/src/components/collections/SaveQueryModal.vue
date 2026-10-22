@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { useI18n } from "vue-i18n";
+import { getErrorMessage } from '@/api/types';
+import { isAbortError } from '@/api/error-handler';
 
 import { ref, computed, onMounted, watch } from 'vue';
 import { SaveIcon, Pencil } from 'lucide-vue-next';
@@ -216,7 +218,11 @@ onMounted(async () => {
   }
 
   if (promises.length > 0) {
-    await Promise.all(promises);
+    const results = await Promise.allSettled(promises);
+    const failure = results.find(result => result.status === 'rejected' && !isAbortError(result.reason));
+    if (failure?.status === 'rejected') {
+      toast({ title: t('ui.error'), description: getErrorMessage(failure.reason), variant: 'destructive', duration: TOAST_DURATION.ERROR });
+    }
   }
 
   // Default the collection picker to the user's personal collection.
