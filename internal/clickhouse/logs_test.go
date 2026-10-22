@@ -665,3 +665,10 @@ func normalizeWhitespace(s string) string {
 	}
 	return string(result)
 }
+
+func TestHistogramRejectsUnparseableQueryAsValidation(t *testing.T) {
+	_, err := (&Client{}).GetHistogramData(t.Context(), "logs.app", "ts", HistogramParams{Query: "SELEC * FROM logs.app", Window: TimeWindow1m})
+	if !IsValidationError(err) {
+		t.Fatalf("err = %v, want a ValidationError the API maps to 400", err)
+	}
+}

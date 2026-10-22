@@ -72,7 +72,7 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		// directly, avoiding the per-request []any conversion.
 		var level slog.Level
 		switch {
-		case status >= 500:
+		case status >= 500 && c.Locals(queryErrorLoggedKey) != true:
 			level = slog.LevelError
 		case status >= 400:
 			level = slog.LevelWarn

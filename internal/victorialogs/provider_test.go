@@ -3,6 +3,7 @@ package victorialogs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -625,7 +626,9 @@ func newPermissiveVLServer(t *testing.T) *httptest.Server {
 }
 
 // Finding #16: custom headers must never override the provider-computed
+
 // auth/tenant headers. Reject the collision at validation time.
+
 func TestValidateConnectionRejectsReservedCustomHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -651,7 +654,9 @@ func TestValidateConnectionRejectsReservedCustomHeaders(t *testing.T) {
 }
 
 // Finding #16: even if a reserved header somehow reaches applyHeaders, the
+
 // computed auth/tenant values must win on the wire.
+
 func TestApplyHeadersSkipsReservedCustomHeaders(t *testing.T) {
 	t.Parallel()
 
@@ -694,7 +699,9 @@ func TestApplyHeadersSkipsReservedCustomHeaders(t *testing.T) {
 }
 
 // Finding #15: switching auth mode must only carry over the credential the NEW
+
 // mode uses, so a stale token/password cannot be resurrected via a later switch.
+
 func TestUpdateSourceCarriesOnlyActiveModeCredential(t *testing.T) {
 	t.Parallel()
 
@@ -753,7 +760,9 @@ func TestUpdateSourceCarriesOnlyActiveModeCredential(t *testing.T) {
 }
 
 // Regression guard for Finding #15: within the same mode, a blank redacted
+
 // credential still means "keep the existing one".
+
 func TestUpdateSourceKeepsActiveModeCredentialOnBlank(t *testing.T) {
 	t.Parallel()
 
@@ -787,6 +796,7 @@ func TestUpdateSourceKeepsActiveModeCredentialOnBlank(t *testing.T) {
 }
 
 // Finding #17: validation must probe the real query path, not just field_names.
+
 func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
 	t.Parallel()
 
@@ -825,7 +835,9 @@ func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
 }
 
 // Finding #18: lifecycle operations for the same source ID must be serialised so
+
 // concurrent init/remove/status-check calls cannot deadlock or interleave unsafely.
+
 func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 	t.Parallel()
 
@@ -882,6 +894,56 @@ func TestProviderSourceMetadata(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if !reflect.DeepEqual(tt.got, tt.want) {
 				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRejectedQueryDiagnostics(t *testing.T) {
+	for _, tc := range []struct{ name, contentType, body, message string }{
+		{"plain", "text/plain; charset=utf-8", "remoteAddr: 127.0.0.1:1234; requestURI: /select/logsql/query?token=private; cannot parse\n\t query pipe", "cannot parse query pipe"},
+		{"html", "text/html", "<html>internal gateway details</html>", "Invalid query or query parameters"},
+		{"json", "application/json", `{"internal":"details"}`, "Invalid query or query parameters"},
+		{"bounded", "text/plain", strings.Repeat("界", 300), strings.Repeat("界", 240) + "..."},
+		{"split rune", "text/plain", "unknown stats func \"countt\"; " + strings.Repeat("界", 1400), "unknown stats func \"countt\"; " + strings.Repeat("界", 240-len(`unknown stats func "countt"; `)) + "..."},
+		{"malformed prefix", "text/plain", "remoteAddr: 127.0.0.1:1234", "Invalid query or query parameters"},
+		{"control characters", "text/plain", "invalid\x00query", "Invalid query or query parameters"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", tc.contentType)
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = io.WriteString(w, tc.body)
+			}))
+			defer upstream.Close()
+			conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: upstream.URL})
+			if err != nil {
+				t.Fatal(err)
+			}
+			source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
+			p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+			_, err = p.QueryLogs(t.Context(), source, datasource.QueryRequest{RawQuery: "* | invalid"})
+			validation, ok := errors.AsType[*datasource.ValidationError](err)
+			if !ok || validation.Message != tc.message || validation.Err == nil || !strings.Contains(validation.Err.Error(), tc.body[:min(len(tc.body), 4096)]) {
+				t.Fatalf("error=%#v, want safe message %q and original cause", err, tc.message)
+			}
+		})
+	}
+}
+
+func TestHistogramRejectsInvalidWindow(t *testing.T) {
+	p := NewProvider(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	conn, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: "http://127.0.0.1:1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: conn}
+	for _, window := range []string{"1d12h", "1y", "2x", "0s", "-1m", "NaNd", "Infw", "1e99d"} {
+		t.Run(window, func(t *testing.T) {
+			_, err := p.Histogram(t.Context(), source, datasource.HistogramRequest{Window: window})
+			validation, ok := errors.AsType[*datasource.ValidationError](err)
+			if !ok || validation.Field != "window" || !strings.Contains(validation.Message, "positive duration") {
+				t.Fatalf("error=%v, want local window validation", err)
 			}
 		})
 	}

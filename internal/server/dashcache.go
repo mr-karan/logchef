@@ -129,27 +129,13 @@ func (e *dashboardStreamError) Unwrap() error { return e.err }
 
 // writeDashboardStreamError preserves the streaming response, including any
 // partial rows, without executing the failed query again.
-func writeDashboardStreamError(c fiber.Ctx, err error) error {
-	if admissionErr, ok := errors.AsType[*QueryAdmissionError](err); ok {
-		return SendErrorWithType(c, fiber.StatusTooManyRequests, admissionErr.Message, models.ValidationErrorType)
-	}
+func (s *Server) writeDashboardStreamError(c fiber.Ctx, sourceID models.SourceID, err error, failure, operation string) error {
 	if streamErr, ok := errors.AsType[*dashboardStreamError](err); ok {
 		c.Set("X-LogChef-Query-ID", streamErr.queryID)
 		c.Set(fiber.HeaderContentType, "application/json; charset=utf-8")
 		return c.Status(fiber.StatusOK).Send(streamErr.body)
 	}
-	// No complete envelope is available when the cache times out before the
-	// fill starts or encoding the execution error exceeds the buffer budget.
-	// Nothing has been committed to the response here, so a real status is
-	// still possible: status-driven consumers must not read a failure as
-	// success.
-	if errors.Is(err, context.Canceled) {
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-	}
-	return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.DatabaseErrorType)
+	return s.sendQueryError(c, sourceID, err, failure, operation)
 }
 
 // fillClickHouseStream returns a cache fill that buffers a ClickHouse query
@@ -163,7 +149,7 @@ func (s *Server) fillClickHouseStream(userID models.UserID, teamID models.TeamID
 		bw := bufio.NewWriter(cb)
 		writer := newQueryStreamWriter(bw, cfg, queryID)
 		if _, err := s.datasources.QueryLogsStream(ctx, sourceID, params, writer); err != nil {
-			if errors.Is(err, errCacheBudgetExceeded) {
+			if !writer.begun || errors.Is(err, errCacheBudgetExceeded) {
 				return nil, err
 			}
 			if writeErr := writer.WriteError(err); writeErr != nil {

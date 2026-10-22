@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"slices"
@@ -341,14 +342,18 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 		return nil, err
 	}
 
+	window := defaultWindow(req.Window)
+	duration, err := parseHistogramWindow(window)
+	if err != nil || duration <= 0 {
+		return nil, &datasource.ValidationError{Field: "window", Message: "invalid histogram window: use a positive duration such as 1h30m, or a single day or week value such as 1d"}
+	}
 	query := strings.TrimSpace(req.Query)
 	if query == "" {
 		query = "*"
 	}
-
 	form := url.Values{}
 	form.Set("query", query)
-	form.Set("step", defaultWindow(req.Window))
+	form.Set("step", window)
 	form.Set("ignore_pipes", "1")
 	if req.StartTime != nil {
 		form.Set("start", formatAPITime(*req.StartTime))
@@ -383,7 +388,7 @@ func (p *Provider) Histogram(ctx context.Context, source *models.Source, req dat
 	if err != nil {
 		return nil, err
 	}
-	return buildHistogramResult(result, groupBy, defaultWindow(req.Window))
+	return buildHistogramResult(result, groupBy, window)
 }
 
 func buildHistogramResult(result *hitsResponse, groupBy, window string) (*datasource.HistogramResult, error) {
@@ -1056,6 +1061,15 @@ func (p *Provider) doFormRequest(ctx context.Context, conn models.VictoriaLogsCo
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		defer resp.Body.Close()
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		// VictoriaLogs answers 400 when it cannot parse the query or its
+		// arguments; that reason is the caller's to fix.
+		if resp.StatusCode == http.StatusBadRequest {
+			message := sanitizeVictoriaLogsValidationBody(body, resp.Header.Get("Content-Type"), form.Get("query"))
+			if message == "" {
+				message = "Invalid query or query parameters"
+			}
+			return nil, &datasource.ValidationError{Field: "query", Message: message, Err: fmt.Errorf("victorialogs rejected request: %s", body)}
+		}
 		return nil, fmt.Errorf("victorialogs request failed with status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
 	}
 	return resp, nil
@@ -1147,6 +1161,21 @@ func emptyFallback(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func parseHistogramWindow(window string) (time.Duration, error) {
+	if strings.HasSuffix(window, "d") || strings.HasSuffix(window, "w") {
+		days := 1.0
+		if strings.HasSuffix(window, "w") {
+			days = 7
+		}
+		count, err := strconv.ParseFloat(window[:len(window)-1], 64)
+		if err != nil || math.IsNaN(count) || math.IsInf(count, 0) || count <= 0 || count >= float64(math.MaxInt64)/float64(24*time.Hour)/days {
+			return 0, fmt.Errorf("invalid duration")
+		}
+		return time.Duration(count * days * float64(24*time.Hour)), nil
+	}
+	return time.ParseDuration(window)
 }
 
 func defaultWindow(window string) string {

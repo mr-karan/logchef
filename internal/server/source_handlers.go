@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
@@ -45,16 +44,16 @@ func (s *Server) handleCreateSource(c fiber.Ctx) error {
 
 	createdSource, err := core.CreateSourceFromRequest(c.Context(), s.datasources, &req)
 	if err != nil {
-		// Handle specific validation or creation errors from core.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+			s.log.Warn("source validation failed", "error", err, "field", validationErr.Field)
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
 		}
 		if errors.Is(err, core.ErrSourceAlreadyExists) {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
 
 		s.log.Error("failed to create source", "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, fmt.Sprintf("Error creating source: %v", err), models.DatabaseErrorType)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error creating source", models.DatabaseErrorType)
 	}
 
 	if actor, ok := c.Locals("user").(*models.User); ok {
@@ -89,7 +88,7 @@ func (s *Server) handleDeleteSource(c fiber.Ctx) error {
 			return SendError(c, fiber.StatusNotFound, "Source not found")
 		}
 		s.log.Error("failed to delete source", "error", err, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Error deleting source: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error deleting source", models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{"message": "Source deleted successfully"})
@@ -122,10 +121,11 @@ func (s *Server) handleUpdateSource(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusConflict, err.Error(), models.ConflictErrorType)
 		}
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+			s.log.Warn("source validation failed", "error", err, "field", validationErr.Field)
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
 		}
 		s.log.Error("failed to update source", "error", err, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Error updating source: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error updating source", models.DatabaseErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, updatedSource.ToResponse())
@@ -144,11 +144,11 @@ func (s *Server) handleValidateSourceConnection(c fiber.Ctx) error {
 	if err != nil {
 		// Handle specific validation errors.
 		if validationErr, ok := errors.AsType[*core.ValidationError](err); ok {
-			s.log.Warn("connection validation failed", "error", validationErr.Message, "field", validationErr.Field)
-			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Error(), models.ValidationErrorType)
+			s.log.Warn("connection validation failed", "error", err, "field", validationErr.Field)
+			return SendErrorWithType(c, fiber.StatusBadRequest, validationErr.Message, models.ValidationErrorType)
 		}
 		s.log.Error("connection validation error", "error", err, "source_type", req.SourceType)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating connection: "+err.Error(), models.ExternalServiceErrorType)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating connection", models.ExternalServiceErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)
@@ -184,7 +184,7 @@ func (s *Server) handleGetSourceStats(c fiber.Ctx) error {
 			return SendErrorWithType(c, fiber.StatusBadRequest, "Source inspection is not supported for this source type yet", models.ValidationErrorType)
 		}
 		s.log.Error("failed to get source inspection", "error", err, "source_id", sourceID)
-		return SendError(c, fiber.StatusInternalServerError, "Error getting source inspection: "+err.Error())
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error getting source inspection", models.ExternalServiceErrorType)
 	}
 
 	return SendSuccess(c, fiber.StatusOK, inspection)

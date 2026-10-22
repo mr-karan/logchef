@@ -5,9 +5,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"reflect"
 	"testing"
 
+	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -16,7 +18,7 @@ func drainWriter(t *testing.T, run func(w *queryStreamWriter)) map[string]any {
 	t.Helper()
 	var buf bytes.Buffer
 	bw := bufio.NewWriter(&buf)
-	w := newQueryStreamWriter(bw, queryStreamConfig{logsKey: "data"}, "qid-1")
+	w := newQueryStreamWriter(bw, queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation}, "qid-1")
 	run(w)
 	if err := bw.Flush(); err != nil {
 		t.Fatalf("flush: %v", err)
@@ -186,7 +188,7 @@ func TestQueryStreamWriter_ErrorBeforeBegin(t *testing.T) {
 	if got["status"] != "error" {
 		t.Fatalf("status = %v, want error", got["status"])
 	}
-	if got["message"] != "boom: syntax error" {
+	if got["message"] != logsQueryFailure {
 		t.Fatalf("message = %v", got["message"])
 	}
 	if got["error_type"] != string(models.DatabaseErrorType) {
@@ -224,7 +226,84 @@ func TestQueryStreamWriter_ErrorMidStreamStaysValidJSON(t *testing.T) {
 	if !ok || len(logs) != 1 {
 		t.Fatalf("expected 1 partial row, got %v", data["data"])
 	}
-	if data["error"] != "stream interrupted" {
+	if data["error"] != logsQueryFailure {
 		t.Fatalf("expected error field, got %v", data["error"])
+	}
+}
+
+func TestQueryStreamDiagnostics(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		message   string
+		errorType models.ErrorType
+	}{
+		{"validation", &datasource.ValidationError{Field: "query", Message: "Cannot parse query", Err: errors.New(internalDetail)}, "Cannot parse query", models.ValidationErrorType},
+		{"driver", errors.New(internalDetail), logsQueryFailure, models.DatabaseErrorType},
+	} {
+		for _, begun := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/begun=%t", tc.name, begun), func(t *testing.T) {
+				body := drainWriter(t, func(w *queryStreamWriter) {
+					if begun {
+						if err := w.Begin(nil); err != nil {
+							t.Fatal(err)
+						}
+					}
+					if err := w.WriteError(tc.err); err != nil {
+						t.Fatal(err)
+					}
+				})
+				if begun {
+					data := body["data"].(map[string]any)
+					if data["error"] != tc.message {
+						t.Fatalf("error=%v, want %q", data["error"], tc.message)
+					}
+				} else if body["message"] != tc.message || body["error_type"] != string(tc.errorType) {
+					t.Fatalf("body=%v", body)
+				}
+			})
+		}
+	}
+}
+
+func TestLogchefQLStreamFailureMessages(t *testing.T) {
+	for _, begun := range []bool{false, true} {
+		for _, tc := range []struct {
+			name    string
+			err     error
+			message string
+		}{
+			{"driver", errors.New("private driver error"), logchefQLQueryFailure},
+			{"unsupported", datasource.ErrOperationNotSupported, "LogchefQL querying is not supported for this source type yet"},
+		} {
+			t.Run(fmt.Sprintf("%s/begun=%t", tc.name, begun), func(t *testing.T) {
+				var buf bytes.Buffer
+				w := newQueryStreamWriter(bufio.NewWriter(&buf), queryStreamConfig{logsKey: "logs", includeGenerated: true, failure: logchefQLQueryFailure, operation: logchefQLQueryOperation}, "query-id")
+				if begun {
+					if err := w.Begin(nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if err := w.WriteError(tc.err); err != nil {
+					t.Fatal(err)
+				}
+				var body struct {
+					Message string `json:"message"`
+					Data    struct {
+						Error string `json:"error"`
+					} `json:"data"`
+				}
+				if err := json.Unmarshal(buf.Bytes(), &body); err != nil {
+					t.Fatal(err)
+				}
+				got := body.Message
+				if begun {
+					got = body.Data.Error
+				}
+				if got != tc.message {
+					t.Fatalf("message=%q, want %q", got, tc.message)
+				}
+			})
+		}
 	}
 }

@@ -342,7 +342,7 @@ func (p *ClickHouseProvider) buildQuery(source *models.Source, req QueryRequest)
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), req.MaxLimit)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(req.RawQuery, req.Limit, req.DefaultLimit, req.MaxLimit)
 	if err != nil {
-		return nil, "", clickhouse.QueryOptions{}, fmt.Errorf("invalid query syntax: %w", err)
+		return nil, "", clickhouse.QueryOptions{}, &clickhouse.ValidationError{Message: err.Error()}
 	}
 
 	opts := clickhouse.QueryOptions{
@@ -410,14 +410,14 @@ func (p *ClickHouseProvider) Histogram(ctx context.Context, source *models.Sourc
 		req.QueryTimeout = &defaultTimeout
 	}
 
-	client, err := p.manager.GetConnection(source.ID)
-	if err != nil {
-		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
-	}
-
 	window, err := parseTimeWindow(req.Window)
 	if err != nil {
 		return nil, err
+	}
+
+	client, err := p.manager.GetConnection(source.ID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting database connection for source %d: %w", source.ID, err)
 	}
 
 	result, err := client.GetHistogramData(ctx, source.GetFullTableName(), source.MetaTSField, clickhouse.HistogramParams{
@@ -746,7 +746,7 @@ func parseTimeWindow(window string) (clickhouse.TimeWindow, error) {
 	if tw, ok := windowMap[window]; ok {
 		return tw, nil
 	}
-	return "", fmt.Errorf("invalid histogram window: %s", window)
+	return "", &ValidationError{Field: "window", Message: fmt.Sprintf("invalid histogram window: %s", window)}
 }
 
 func extractTTLFromTableInfo(ctx context.Context, client *clickhouse.Client, tableInfo *clickhouse.TableInfo) string {

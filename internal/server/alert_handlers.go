@@ -10,7 +10,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
-	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v3"
@@ -217,7 +216,7 @@ func (s *Server) handleResolveAlert(c fiber.Ctx) error {
 
 	if s.alertsManager != nil {
 		if err := s.alertsManager.ManualResolve(c.Context(), alert.ID, strings.TrimSpace(req.Message)); err != nil {
-			if strings.Contains(err.Error(), "no active alert") {
+			if models.IsNotFound(err) {
 				return SendErrorWithType(c, fiber.StatusNotFound, "Alert is not active", models.NotFoundErrorType)
 			}
 			s.log.Error("failed to manually resolve alert", "alert_id", alert.ID, "error", err)
@@ -296,21 +295,10 @@ func (s *Server) handleTestAlertQuery(c fiber.Ctx) error {
 		if errors.Is(err, access.ErrInsufficientScope) {
 			return sendInsufficientScope(c, p.User)
 		}
-		if ctx.Err() == context.Canceled {
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request cancelled", models.ExternalServiceErrorType)
-		}
-		if ctx.Err() == context.DeadlineExceeded {
-			s.log.Warn("test alert query timed out", "source_id", req.SourceID, "timeout", TestAlertTimeout)
-			return SendErrorWithType(c, fiber.StatusRequestTimeout, "Request timed out", models.ExternalServiceErrorType)
-		}
-		if errors.Is(err, datasource.ErrOperationNotSupported) {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Alert evaluation is not supported for this source type yet", models.ValidationErrorType)
-		}
 		if errors.Is(err, core.ErrInvalidAlertConfiguration) {
 			return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 		}
-		s.log.Error("failed to test alert query", "source_id", req.SourceID, "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
+		return s.sendQueryError(c, req.SourceID, err, "Failed to test alert query", "Alert evaluation")
 	}
 
 	return SendSuccess(c, fiber.StatusOK, result)

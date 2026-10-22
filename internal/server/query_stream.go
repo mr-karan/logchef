@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
@@ -20,6 +21,8 @@ import (
 // ("data" for /logs/query, "logs" for /logchefql/query). The generated* fields
 // are emitted only for the LogchefQL endpoint (includeGenerated).
 type queryStreamConfig struct {
+	failure           string
+	operation         string
 	logsKey           string
 	includeGenerated  bool
 	generatedSQL      string
@@ -87,7 +90,7 @@ func (w *queryStreamWriter) Begin(columns []models.ColumnInfo) error {
 		return err
 	}
 	w.begun = true
-	return nil
+	return w.out.Flush()
 }
 
 func (w *queryStreamWriter) WriteRow(row map[string]any) error {
@@ -130,10 +133,11 @@ func (w *queryStreamWriter) WriteError(streamErr error) error {
 	}
 	if !w.begun {
 		w.closed = true
+		response := classifyQueryError(streamErr, w.cfg.failure, w.cfg.operation)
 		payload := map[string]any{
 			"status":     "error",
-			"message":    streamErr.Error(),
-			"error_type": string(models.DatabaseErrorType),
+			"message":    response.message,
+			"error_type": string(response.errorType),
 		}
 		enc, err := json.Marshal(payload)
 		if err != nil {
@@ -199,7 +203,7 @@ func (w *queryStreamWriter) closeEnvelope(stats models.QueryStats, streamErr err
 	}
 
 	if streamErr != nil {
-		if err := w.writeStringField("error", streamErr.Error()); err != nil {
+		if err := w.writeStringField("error", classifyQueryError(streamErr, w.cfg.failure, w.cfg.operation).message); err != nil {
 			return err
 		}
 	}
@@ -272,20 +276,23 @@ func (s *Server) streamPreviewQuery(
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
 	}
 
-	c.Status(fiber.StatusOK)
-	c.Set("Content-Type", "application/json; charset=utf-8")
-	c.Set("X-LogChef-Query-ID", queryID)
-
-	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
+	reader, producer := io.Pipe()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
 		defer cancel()
 		defer queryTracker.RemoveQuery(queryID)
-
-		writer := newQueryStreamWriter(w, cfg, queryID)
+		defer producer.Close()
+		output := bufio.NewWriter(producer)
+		writer := newQueryStreamWriter(output, cfg, queryID)
 		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, params, writer)
 		if err != nil {
+			if !writer.begun {
+				_ = producer.CloseWithError(err)
+				return
+			}
 			s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", logMode)
 			_ = writer.WriteError(err)
-			_ = w.Flush()
 			return
 		}
 
@@ -303,8 +310,43 @@ func (s *Server) streamPreviewQuery(
 		)
 		s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage,
 			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
-		_ = w.Flush()
-	})
+	}()
 
+	// The first byte proves execution reached Begin before HTTP headers are committed.
+	var first [1]byte
+	if _, err := io.ReadFull(reader, first[:]); err != nil {
+		_ = reader.Close()
+		cancel()
+		<-done
+		return s.sendQueryError(c, sourceID, err, cfg.failure, cfg.operation)
+	}
+	c.Status(fiber.StatusOK)
+	c.Set("Content-Type", "application/json; charset=utf-8")
+	c.Set("X-LogChef-Query-ID", queryID)
+	c.RequestCtx().SetBodyStreamWriter(func(w *bufio.Writer) {
+		defer func() {
+			_ = reader.Close()
+			cancel()
+			<-done
+		}()
+		if err := w.WriteByte(first[0]); err != nil {
+			return
+		}
+		buffer := make([]byte, 32*1024)
+		for {
+			n, readErr := reader.Read(buffer)
+			if n > 0 {
+				if _, err := w.Write(buffer[:n]); err != nil {
+					return
+				}
+				if err := w.Flush(); err != nil {
+					return
+				}
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	})
 	return nil
 }

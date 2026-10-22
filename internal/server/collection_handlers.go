@@ -63,7 +63,7 @@ func (s *Server) handleCreateCollection(c fiber.Ctx) error {
 			return sendErr
 		}
 		s.log.Error("failed to create collection", "error", err, "user_id", user.ID)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create collection", models.GeneralErrorType)
 	}
 	return SendSuccess(c, fiber.StatusCreated, collection)
 }
@@ -105,7 +105,7 @@ func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 			return sendErr
 		}
 		s.log.Error("failed to update collection", "error", err, "collection_id", id)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, err.Error(), models.GeneralErrorType)
+		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to update collection", models.GeneralErrorType)
 	}
 	return SendSuccess(c, fiber.StatusOK, updated)
 }

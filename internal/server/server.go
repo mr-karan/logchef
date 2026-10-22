@@ -139,14 +139,16 @@ func New(opts ServerOptions) *Server {
 		ProxyHeader:        opts.Config.Server.ProxyHeader,
 		EnableIPValidation: true,
 		ErrorHandler: func(c fiber.Ctx, err error) error {
-			code := fiber.StatusInternalServerError
+			// Server errors can contain driver details or recovered panic text.
+			code, message := fiber.StatusInternalServerError, "Internal server error"
 			if e, ok := errors.AsType[*fiber.Error](err); ok {
-				code = e.Code // Use Fiber's error code if available.
+				code = e.Code
+				if code < fiber.StatusInternalServerError {
+					message = e.Message
+				}
 			}
-			// Log the internal error details.
 			log.Error("request error", "route", redactedRequestPath(c), "method", c.Method(), "error", err.Error())
-			// Return a standardized JSON error response to the client.
-			return SendError(c, code, err.Error()) // Assumes SendError is defined elsewhere.
+			return SendError(c, code, message)
 		},
 	})
 

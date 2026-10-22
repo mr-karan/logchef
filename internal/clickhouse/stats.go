@@ -169,7 +169,7 @@ func accumulateIngestionActivity(rows []ingestionActivityRow) *IngestionStats {
 }
 
 func activityError(queryCtx context.Context, operation string, err error) error {
-	if errors.Is(queryCtx.Err(), context.DeadlineExceeded) || isTimeoutError(err) {
+	if errors.Is(queryCtx.Err(), context.DeadlineExceeded) || IsTimeoutError(err) {
 		return fmt.Errorf("%s: %w", operation, context.DeadlineExceeded)
 	}
 	return fmt.Errorf("%s: %w", operation, err)

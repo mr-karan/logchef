@@ -74,9 +74,12 @@ func testOAuthConfig() *config.Config {
 	}
 }
 
-func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServer *oauth.Server) *Server {
+func newServerForTest(t *testing.T, cfg *config.Config, db *sqlite.DB, oauthServer *oauth.Server, logs ...*slog.Logger) *Server {
 	t.Helper()
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	if len(logs) > 0 {
+		log = logs[0]
+	}
 	datasources := datasource.NewService(db, log)
 	datasources.Register(datasource.NewClickHouseProvider(clickhouse.NewManager(log), log))
 	datasources.Register(victorialogs.NewProvider(log))
