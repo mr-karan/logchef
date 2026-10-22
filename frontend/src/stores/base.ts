@@ -4,7 +4,7 @@ import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
 import { useToast } from "@/composables/useToast";
-import { formatErrorTypeToTitle, isCanceledError } from "@/api/error-handler";
+import { formatErrorTypeToTitle, hasShownErrorToast, isCanceledError } from "@/api/error-handler";
 
 export interface BaseState<T> {
   data: Ref<T>;
@@ -69,12 +69,14 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
 
     error.value = apiError;
 
-    const { toast } = useToast();
-    toast({
-      title: formatErrorTypeToTitle(errorType),
-      description: errorMessage,
-      variant: 'destructive',
-    });
+    if (!hasShownErrorToast(err)) {
+      const { toast } = useToast();
+      toast({
+        title: formatErrorTypeToTitle(errorType),
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    }
 
     return { success: false as const, error: apiError };
   }
