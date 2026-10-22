@@ -112,7 +112,7 @@ func TestErrorResponses(t *testing.T) {
 		Query: "* | stats count() c", LookbackSeconds: 300, ThresholdOperator: models.AlertThresholdGreaterThan,
 		FrequencySeconds: 60, Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
 	}
-	if err := s.sqlite.CreateAlert(context.Background(), quietAlert); err != nil {
+	if err := s.store.CreateAlert(context.Background(), quietAlert); err != nil {
 		t.Fatal(err)
 	}
 	sourcePath := fmt.Sprintf("%s/sources/%d", teamPath, sourceID)
@@ -249,12 +249,12 @@ func TestErrorResponses(t *testing.T) {
 
 func configureErrorResponseClickHouse(t *testing.T, env errorResponseEnv, addr string) {
 	t.Helper()
-	source, err := env.s.sqlite.GetSource(t.Context(), env.chSource)
+	source, err := env.s.store.GetSource(t.Context(), env.chSource)
 	if err != nil {
 		t.Fatal(err)
 	}
 	source.Connection = models.ConnectionInfo{Host: addr, Username: "default", Database: "system", TableName: "numbers"}
-	if err := env.s.sqlite.UpdateSource(t.Context(), source); err != nil {
+	if err := env.s.store.UpdateSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	manager := clickhouse.NewManager(env.s.log)
@@ -377,7 +377,7 @@ func TestVictoriaLogsQueryFailureResponse(t *testing.T) {
 		t.Skip("set LOGCHEF_TEST_VICTORIALOGS_URL for read-only VictoriaLogs checks")
 	}
 	env := newErrorResponseServer(t, vlUpstream)
-	source, err := env.s.sqlite.GetSource(t.Context(), env.vlSource)
+	source, err := env.s.store.GetSource(t.Context(), env.vlSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +385,7 @@ func TestVictoriaLogsQueryFailureResponse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := env.s.sqlite.UpdateSource(t.Context(), source); err != nil {
+	if err := env.s.store.UpdateSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logs/query", env.team, env.vlSource)

@@ -157,7 +157,7 @@ func sessionCookie(t *testing.T, db store.Store, user *models.User) *http.Cookie
 
 func apiToken(t *testing.T, s *Server, user *models.User, scopes ...models.TokenScope) string {
 	t.Helper()
-	created, err := core.CreateAPIToken(context.Background(), s.sqlite, s.log, &s.config.Auth, user.ID, "authz", nil, scopes)
+	created, err := core.CreateAPIToken(context.Background(), s.store, s.log, &s.config.Auth, user.ID, "authz", nil, scopes)
 	if err != nil {
 		t.Fatalf("CreateAPIToken: %v", err)
 	}
@@ -201,7 +201,7 @@ func httpAuthzEntrypoint(s *Server) authzEntrypoint {
 	return func(t *testing.T, user *models.User, team models.TeamID, source models.SourceID) authzVerdict {
 		t.Helper()
 		path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/logchefql/validate", team, source)
-		resp := doAuthzRequest(t, s, http.MethodPost, path, `{"query":"level=\"error\""}`, withSession(sessionCookie(t, s.sqlite, user)))
+		resp := doAuthzRequest(t, s, http.MethodPost, path, `{"query":"level=\"error\""}`, withSession(sessionCookie(t, s.store, user)))
 		switch resp.status {
 		case fiber.StatusOK:
 			return verdictGranted
@@ -215,12 +215,12 @@ func httpAuthzEntrypoint(s *Server) authzEntrypoint {
 
 func TestAuthzTeamSourceHTTP(t *testing.T) {
 	s := newAuthzTestServer(t)
-	runTeamSourceAuthzCases(t, newAuthzWorld(t, s.sqlite), httpAuthzEntrypoint(s))
+	runTeamSourceAuthzCases(t, newAuthzWorld(t, s.store), httpAuthzEntrypoint(s))
 }
 
 func TestAuthzMembershipRemovalHTTP(t *testing.T) {
 	s := newAuthzTestServer(t)
-	runMembershipRemovalCase(t, newAuthzWorld(t, s.sqlite), httpAuthzEntrypoint(s))
+	runMembershipRemovalCase(t, newAuthzWorld(t, s.store), httpAuthzEntrypoint(s))
 }
 
 // logReadRoutes are the team-source routes that require logs:read.
@@ -246,7 +246,7 @@ var logReadRoutes = []struct{ method, path string }{
 // scope check is the same Principal.Require, covered in core/access.
 func TestAuthzTokenWithoutLogsReadDeniedOnEveryLogRoute(t *testing.T) {
 	s := newAuthzTestServer(t)
-	w := newAuthzWorld(t, s.sqlite)
+	w := newAuthzWorld(t, s.store)
 	token := apiToken(t, s, w.member, models.TokenScopeSourcesRead)
 	base := fmt.Sprintf("/api/v1/teams/%d/sources/%d", w.team, w.source)
 
@@ -271,7 +271,7 @@ func TestAuthzTokenWithoutLogsReadDeniedOnEveryLogRoute(t *testing.T) {
 // membership, then the source link, then scope.
 func TestAuthzHTTPErrorPrecedence(t *testing.T) {
 	s := newAuthzTestServer(t)
-	w := newAuthzWorld(t, s.sqlite)
+	w := newAuthzWorld(t, s.store)
 	validate := func(team models.TeamID) string {
 		return fmt.Sprintf("/api/v1/teams/%d/sources/%d/logchefql/validate", team, w.source)
 	}
@@ -285,7 +285,7 @@ func TestAuthzHTTPErrorPrecedence(t *testing.T) {
 		status  int
 		message string
 	}{
-		{"session member", validate(w.team), withSession(sessionCookie(t, s.sqlite, w.member)), fiber.StatusOK, ""},
+		{"session member", validate(w.team), withSession(sessionCookie(t, s.store, w.member)), fiber.StatusOK, ""},
 		{"non-member without scope", validate(w.team), outsiderNoLogs, fiber.StatusForbidden, "Team membership required"},
 		{"unlinked team without scope", validate(w.bareTeam), noLogs, fiber.StatusForbidden, "Team does not have access to this source"},
 		{"linked team without scope", validate(w.team), noLogs, fiber.StatusForbidden, "API token does not have the required scope"},

@@ -94,7 +94,7 @@ func TestQueryDoesNotWaitForSourceStatus(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	source, err := env.s.sqlite.GetSource(ctx, env.vlSource)
+	source, err := env.s.store.GetSource(ctx, env.vlSource)
 	if err != nil {
 		t.Fatal(err)
 	}

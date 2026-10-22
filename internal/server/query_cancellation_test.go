@@ -27,7 +27,7 @@ func TestClickHousePreviewClientDisconnect(t *testing.T) {
 			log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 			env := newErrorResponseServer(t, vlUpstream, log)
 			configureErrorResponseClickHouse(t, env, addr)
-			user, err := env.s.sqlite.GetUserByEmail(t.Context(), "admin@example.com")
+			user, err := env.s.store.GetUserByEmail(t.Context(), "admin@example.com")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -106,7 +106,7 @@ func TestClickHousePreviewClientDisconnect(t *testing.T) {
 			if err := env.s.Shutdown(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			history, err := env.s.sqlite.ListQueryHistory(t.Context(), user.ID, 10)
+			history, err := env.s.store.ListQueryHistory(t.Context(), user.ID, 10)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -144,7 +144,7 @@ func TestClickHousePreviewContextCancellation(t *testing.T) {
 			log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 			env := newErrorResponseServer(t, vlUpstream, log)
 			configureErrorResponseClickHouse(t, env, addr)
-			user, err := env.s.sqlite.GetUserByEmail(t.Context(), "admin@example.com")
+			user, err := env.s.store.GetUserByEmail(t.Context(), "admin@example.com")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -187,7 +187,7 @@ func TestClickHousePreviewContextCancellation(t *testing.T) {
 			if err := env.s.Shutdown(context.Background()); err != nil {
 				t.Fatal(err)
 			}
-			history, err := env.s.sqlite.ListQueryHistory(t.Context(), user.ID, 10)
+			history, err := env.s.store.ListQueryHistory(t.Context(), user.ID, 10)
 			if err != nil {
 				t.Fatal(err)
 			}

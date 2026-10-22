@@ -23,19 +23,19 @@ import (
 func TestHistogramAdmissionLifecycle(t *testing.T) {
 	s := newDashboardTestServer(t)
 	s.config = &config.Config{}
-	s.datasources = datasource.NewService(s.sqlite, s.log)
+	s.datasources = datasource.NewService(s.store, s.log)
 	s.config.Query.MaxConcurrentPerUser = 1
 	s.config.DashboardCache.MaxConcurrentFills = 1
 	source := &models.Source{Name: "histogram-admission", Connection: models.ConnectionInfo{
 		Host: "ch:9000", Username: "default", Database: "default", TableName: "histogram_admission",
 	}}
-	if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+	if err := s.store.CreateSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
-	_, src := authorizeTestSource(t, s.sqlite, source.ID)
+	_, src := authorizeTestSource(t, s.store, source.ID)
 	// The source disappears after authorization, so execution reaches the
 	// datasource lookup and fails there.
-	if err := s.sqlite.DeleteSource(t.Context(), source.ID); err != nil {
+	if err := s.store.DeleteSource(t.Context(), source.ID); err != nil {
 		t.Fatal(err)
 	}
 	userID, sourceID, teamID := src.UserID(), src.SourceID(), src.TeamID()

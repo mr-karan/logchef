@@ -62,7 +62,7 @@ type ServerOptions struct {
 type Server struct {
 	app           *fiber.App
 	config        *config.Config
-	sqlite        store.Store
+	store         store.Store
 	clickhouse    *clickhouse.Manager
 	datasources   *datasource.Service
 	webhookSender *alerts.DynamicWebhookSender
@@ -180,7 +180,7 @@ func New(opts ServerOptions) *Server {
 	s := &Server{
 		app:           app,
 		config:        opts.Config,
-		sqlite:        opts.SQLite,
+		store:         opts.SQLite,
 		clickhouse:    opts.ClickHouse,
 		datasources:   opts.Datasources,
 		alertsManager: opts.AlertsManager,

@@ -29,12 +29,12 @@ func TestQueryPreparationErrorStatus(t *testing.T) {
 			t.Run(operation+"/"+failure.name, func(t *testing.T) {
 				s := newDashboardTestServer(t)
 				s.config = &config.Config{Query: config.QueryConfig{DefaultTimeoutSeconds: 10}}
-				s.datasources = datasource.NewService(s.sqlite, s.log)
+				s.datasources = datasource.NewService(s.store, s.log)
 				source := &models.Source{Name: "preparation", SourceType: models.SourceTypeClickHouse}
-				if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+				if err := s.store.CreateSource(t.Context(), source); err != nil {
 					t.Fatal(err)
 				}
-				user, src := authorizeTestSource(t, s.sqlite, source.ID)
+				user, src := authorizeTestSource(t, s.store, source.ID)
 				handler := s.handleQueryLogs
 				if operation == "histogram" {
 					handler = s.handleGetHistogram
@@ -43,11 +43,11 @@ func TestQueryPreparationErrorStatus(t *testing.T) {
 				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, func(c fiber.Ctx) error {
 					switch failure.name {
 					case "missing source":
-						if err := s.sqlite.DeleteSource(t.Context(), source.ID); err != nil {
+						if err := s.store.DeleteSource(t.Context(), source.ID); err != nil {
 							t.Fatal(err)
 						}
 					case "closed store":
-						if err := s.sqlite.Close(); err != nil {
+						if err := s.store.Close(); err != nil {
 							t.Fatal(err)
 						}
 					case "cancelled":

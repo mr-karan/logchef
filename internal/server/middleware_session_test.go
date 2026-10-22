@@ -36,7 +36,7 @@ func newSessionTestServer(t *testing.T, db *sqlite.DB) *fiber.App {
 	t.Helper()
 	s := &Server{
 		log:    slog.New(slog.NewTextHandler(io.Discard, nil)),
-		sqlite: db,
+		store:  db,
 		config: &config.Config{},
 	}
 	app := fiber.New()

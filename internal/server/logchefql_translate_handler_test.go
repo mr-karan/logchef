@@ -97,7 +97,7 @@ func newTranslateTestApp(timeRangeErr error) *fiber.App {
 	svc := datasource.NewService(db, slog.Default())
 	svc.Register(&fakeClickHouseCompiler{timeRangeErr: timeRangeErr})
 
-	s := &Server{datasources: svc, sqlite: db, log: slog.Default()}
+	s := &Server{datasources: svc, store: db, log: slog.Default()}
 
 	app := fiber.New()
 	admin := &models.User{ID: 1, Role: models.UserRoleAdmin}

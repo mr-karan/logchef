@@ -76,7 +76,7 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 				t.Fatal(err)
 			}
 			db := newServerTestDB(t)
-			s := &Server{log: log, sqlite: db, oidcProvider: provider, config: &config.Config{Auth: config.AuthConfig{
+			s := &Server{log: log, store: db, oidcProvider: provider, config: &config.Config{Auth: config.AuthConfig{
 				SessionDuration: time.Hour, MaxConcurrentSessions: 5,
 				AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}},
 			}}}
