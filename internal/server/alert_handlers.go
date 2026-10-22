@@ -59,7 +59,7 @@ func (s *Server) loadAlertWithVisibility(c fiber.Ctx) (*models.Alert, *models.Us
 
 	alert, err := core.GetAlertForPrincipal(c.Context(), s.sqlite, s.log, principalFromLocals(c), alertID)
 	if err != nil {
-		if errors.Is(err, core.ErrAlertNotFound) || models.IsNotFound(err) {
+		if errors.Is(err, core.ErrAlertNotFound) {
 			s.sendLoadFailure(c, fiber.StatusNotFound, "Alert not found", models.NotFoundErrorType)
 			return nil, nil, false
 		}
