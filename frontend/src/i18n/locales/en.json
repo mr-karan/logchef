@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "You don't have access to this team.",
   "explore.teamNotFound": "Team not found.",
   "explore.sourceAccessDenied": "You don't have access to this source.",
+  "explore.sourceUnavailableFallback": "Source {sourceId} is unavailable. Opened {sourceName} instead. The linked query was not run.",
   "explore.disconnectedSource": "The selected source \"{name}\" is not connected. Check its configuration or select a different source.",
   "explore.noMatches": "No logs matching \"{search}\"",
   "dashboards.noMatches": "No dashboards match \"{search}\"",

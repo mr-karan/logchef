@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "Vous n'avez pas accès à cette équipe.",
   "explore.teamNotFound": "Équipe introuvable.",
   "explore.sourceAccessDenied": "Vous n'avez pas accès à cette source.",
+  "explore.sourceUnavailableFallback": "La source {sourceId} est indisponible. La source {sourceName} a été ouverte à la place. La requête du lien n'a pas été exécutée.",
   "pages.savedQueryNotFound": "Requête enregistrée introuvable.",
   "explore.disconnectedSource": "La source « {name} » n’est pas connectée. Vérifiez sa configuration ou sélectionnez-en une autre.",
   "explore.noMatches": "Aucun log ne correspond à « {search} »",

@@ -122,12 +122,13 @@ export function useExplorerNavigator() {
           const resolved = await resolve(target, id, attempt > 0)
           if (id !== navId) return
           if (!resolved) continue
-          const { list, details, generation, ...location } = resolved
+          const { list, details, generation, sourceNotice, ...location } = resolved
           if (!sources.holdResolved(location.teamId, list, details, generation)) continue
           const shouldRun = explore.open(location)
           applyChoice()
           status.value = 'ready'
-          runs.enter(shouldRun ? editorAsk() : null)
+          runs.enter(shouldRun && !sourceNotice ? editorAsk() : null)
+          if (sourceNotice) toast({ title: i18n.global.t('explore.linkOpenFailed'), description: sourceNotice, variant: 'destructive', duration: TOAST_DURATION.ERROR })
           replay()
           return
         } catch (err) {
@@ -161,7 +162,7 @@ export function useExplorerNavigator() {
   }
 
   /** Loads everything the location needs and resolves its team and source. */
-  async function resolve({ teamId, sourceId, target }: ExploreLocation, id: number, refresh = false): Promise<(OpenedLocation & { list: Source[]; details: Source | null; generation: number }) | null> {
+  async function resolve({ teamId, sourceId, target }: ExploreLocation, id: number, refresh = false): Promise<(OpenedLocation & { list: Source[]; details: Source | null; generation: number; sourceNotice: string | null }) | null> {
     if (teams.teams.length === 0) {
       const loaded = await teams.loadTeams(false, false)
       if (id !== navId) return null
@@ -173,13 +174,13 @@ export function useExplorerNavigator() {
 
     let content: OpenedLocation['content']
     if (target.kind === 'share') {
-      const share = (await exploreApi.getQueryShare(target.token)).data
+      const share = (await exploreApi.getQueryShare(target.token, navigationRequest).catch(error => { throw navigationError(error, 'source') })).data
       if (!share) throw new Error(i18n.global.t('explore.shareNotFound'))
       teamId = share.team_id
       sourceId = share.source_id
       content = { kind: 'share', share }
     } else if (target.kind === 'saved') {
-      const saved = (await savedQueriesApi.resolve(target.queryId, teamId)).data
+      const saved = (await savedQueriesApi.resolve(target.queryId, teamId, navigationRequest).catch(error => { throw navigationError(error, 'source') })).data
       if (!saved) throw new Error(i18n.global.t('pages.savedQueryNotFound'))
       teamId = saved.resolved_team_id
       sourceId = saved.source_id
@@ -202,7 +203,10 @@ export function useExplorerNavigator() {
     if (id !== navId || generation !== sources.getMetadataGeneration()) return null
     const source = pickSource(team, list, sourceId)
     const details = source === null ? null : await sources.loadSourceDetails(team, source, refresh || (team === context.teamId && source === context.sourceId && sources.currentSourceDetails?.is_connected === false), navigationRequest).catch(error => { throw navigationError(error, 'source') })
-    return { teamId: team, sourceId: source, content, list, details, generation }
+    const sourceNotice = sourceId !== null && sourceId !== source && details
+      ? i18n.global.t('explore.sourceUnavailableFallback', { sourceId, sourceName: details.name })
+      : null
+    return { teamId: team, sourceId: source, content, list, details, generation, sourceNotice }
   }
 
   // Runs what last ran here, or the opened query, and records it. The URL

@@ -1366,7 +1366,7 @@ describe("Explorer history navigation", () => {
   });
 
   it("keeps a removed team source out of a navigation that was resolving it", async () => {
-    const { router, store, query } = await mountExplorer();
+    const { router, store, query, nav, toastError } = await mountExplorer();
     await settle();
     const sources = useSourcesStore();
     router.addRoute({ path: "/manage", component: defineComponent({ render: () => null }) });
@@ -1390,8 +1390,10 @@ describe("Explorer history navigation", () => {
     await vi.waitFor(() => expect(sources.teamSources.some(s => s.id === 4)).toBe(false));
     const queriesBefore = query.mock.calls.length;
     oldDetails.release();
-    await vi.waitFor(() => expect(query.mock.calls.length).toBeGreaterThan(queriesBefore));
+    await vi.waitFor(() => expect(nav.status.value).toBe("ready"));
     await settle();
+    expect(query).toHaveBeenCalledTimes(queriesBefore);
+    expect(toastError).toHaveBeenCalledTimes(1);
     expect({
       path: router.currentRoute.value.path,
       selected: store.sourceId,

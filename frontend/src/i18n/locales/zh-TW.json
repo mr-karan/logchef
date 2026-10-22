@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "你無權存取此團隊。",
   "explore.teamNotFound": "找不到團隊。",
   "explore.sourceAccessDenied": "你無權存取此資料來源。",
+  "explore.sourceUnavailableFallback": "資料來源 {sourceId} 無法使用。已改為開啟 {sourceName}。未執行連結中的查詢。",
   "pages.savedQueryNotFound": "找不到已儲存的查詢。",
   "explore.disconnectedSource": "所選資料來源「{name}」未連線。請檢查設定或選擇其他資料來源。",
   "explore.noMatches": "沒有符合「{search}」的日誌",

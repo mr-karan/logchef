@@ -44,7 +44,7 @@ describe("translation catalogs", () => {
   });
   it.each(locales.filter(locale => locale.code !== "en"))("translates Explorer link errors in $code", ({ code }) => {
     const messages = catalog(code);
-    for (const key of ["explore.linkOpenFailed", "explore.sourcesChanged", "explore.shareNotFound", "explore.teamAccessDenied", "explore.sourceAccessDenied", "explore.teamNotFound", "pages.savedQueryNotFound"]) {
+    for (const key of ["explore.linkOpenFailed", "explore.sourcesChanged", "explore.shareNotFound", "explore.teamAccessDenied", "explore.sourceAccessDenied", "explore.sourceUnavailableFallback", "explore.teamNotFound", "pages.savedQueryNotFound"]) {
       expect(messages[key], `${code}:${key}`).toBeDefined();
       expect(messages[key], `${code}:${key}`).not.toBe(english[key]);
     }

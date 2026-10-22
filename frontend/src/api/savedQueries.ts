@@ -1,4 +1,4 @@
-import { apiClient } from "./apiUtils";
+import { apiClient, type RequestOptions } from "./apiUtils";
 import type { VariableState } from "@/stores/variables";
 import type { TeamSummary } from "./teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
@@ -98,9 +98,9 @@ export const savedQueriesApi = {
   delete: (queryId: number | string) =>
     apiClient.delete<{ message: string }>(`/saved-queries/${queryId}`),
 
-  resolve: (queryId: number | string, preferredTeamId?: number | string | null) => {
+  resolve: (queryId: number | string, preferredTeamId?: number | string | null, options?: RequestOptions) => {
     const suffix = preferredTeamId ? `?team_id=${encodeURIComponent(String(preferredTeamId))}` : "";
-    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`);
+    return apiClient.get<ResolvedSavedQuery>(`/saved-queries/${queryId}/resolve${suffix}`, options);
   },
 
   getUserTeams: () => apiClient.get<TeamSummary[]>("/me/teams"),

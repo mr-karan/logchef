@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "No tienes acceso a este equipo.",
   "explore.teamNotFound": "Equipo no encontrado.",
   "explore.sourceAccessDenied": "No tienes acceso a esta fuente.",
+  "explore.sourceUnavailableFallback": "La fuente {sourceId} no está disponible. Se abrió {sourceName} en su lugar. La consulta del enlace no se ejecutó.",
   "pages.savedQueryNotFound": "No se encontró la consulta guardada.",
   "explore.disconnectedSource": "La fuente «{name}» no está conectada. Revisa su configuración o selecciona otra.",
   "explore.noMatches": "No hay logs que coincidan con «{search}»",

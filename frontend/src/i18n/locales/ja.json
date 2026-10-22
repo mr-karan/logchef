@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "このチームにアクセスする権限がありません。",
   "explore.teamNotFound": "チームが見つかりません。",
   "explore.sourceAccessDenied": "このソースにアクセスする権限がありません。",
+  "explore.sourceUnavailableFallback": "ソース {sourceId} は利用できません。代わりに {sourceName} を開きました。リンクのクエリは実行されませんでした。",
   "pages.savedQueryNotFound": "保存済みクエリが見つかりません。",
   "explore.disconnectedSource": "ソース「{name}」が接続されていません。設定を確認するか、別のソースを選択してください。",
   "explore.noMatches": "「{search}」に一致するログはありません",

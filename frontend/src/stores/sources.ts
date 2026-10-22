@@ -97,12 +97,13 @@ export const useSourcesStore = defineStore("sources", () => {
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
   const sourceActivityRequests = new Map<number, Promise<SourceActivityRequestResult>>();
-  // Bumped whenever the context changes and on invalidation. A request from
-  // an older generation neither writes the cache nor is joined.
+  // Source selection keeps the team's pending list valid.
   let generation = 0;
+  let detailsGeneration = 0;
 
   function invalidateRequests() {
     generation++;
+    detailsGeneration++;
   }
   const teamSourcesRequests = new Map<string, { teamId: number; controller: AbortController; promise: Promise<Source[]> }>();
   const sourceDetailsRequests = new Map<string, Promise<Source>>();
@@ -162,8 +163,9 @@ export const useSourcesStore = defineStore("sources", () => {
   // Synchronous, so a request made right after a context change, before the
   // watcher below runs, already belongs to the new generation.
   watch(() => [contextStore.teamId, contextStore.sourceId], ([teamId], [leftTeamId]) => {
-    invalidateRequests();
+    detailsGeneration++;
     if (teamId !== leftTeamId) {
+      generation++;
       for (const request of teamSourcesRequests.values()) {
         if (request.teamId === leftTeamId) request.controller.abort();
       }
@@ -383,13 +385,13 @@ export const useSourcesStore = defineStore("sources", () => {
    */
   function loadSourceDetails(teamId: number, sourceId: number, refresh = false, options?: RequestOptions): Promise<Source> {
     const current = teamId === contextStore.teamId && sourceId === contextStore.sourceId;
-    const key = `${generation}-${detailsKey(teamId, sourceId)}-${!!options?.suppressForbiddenRedirect}`;
+    const key = `${detailsGeneration}-${detailsKey(teamId, sourceId)}-${!!options?.suppressForbiddenRedirect}`;
     const pending = sourceDetailsRequests.get(key);
     if (pending) return pending;
     const cached = current && !refresh ? state.data.value.sourceDetails[teamId]?.[sourceId] : undefined;
     if (cached) return Promise.resolve(cached);
 
-    const requestedIn = generation;
+    const requestedIn = detailsGeneration;
     const request = state
       .callApi<Source>({
         apiCall: () => options ? sourcesApi.getTeamSource(teamId, sourceId, options) : sourcesApi.getTeamSource(teamId, sourceId),
@@ -398,7 +400,7 @@ export const useSourcesStore = defineStore("sources", () => {
       })
       .then((result) => {
         if (!result.success || !result.data) throw result.error ?? new Error("Source not found.");
-        if (current && requestedIn === generation) (state.data.value.sourceDetails[teamId] ??= {})[sourceId] = result.data;
+        if (current && requestedIn === detailsGeneration) (state.data.value.sourceDetails[teamId] ??= {})[sourceId] = result.data;
         return result.data;
       })
       .finally(() => sourceDetailsRequests.delete(key));
@@ -527,6 +529,7 @@ export const useSourcesStore = defineStore("sources", () => {
 
     // Actions
     loadSources,
+    loadContext,
     loadTeamSources,
     createSource,
     updateSource,

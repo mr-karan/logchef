@@ -478,6 +478,7 @@
   "explore.teamAccessDenied": "Non hai accesso a questo team.",
   "explore.teamNotFound": "Team non trovato.",
   "explore.sourceAccessDenied": "Non hai accesso a questa sorgente.",
+  "explore.sourceUnavailableFallback": "La sorgente {sourceId} non è disponibile. È stata aperta {sourceName} al suo posto. La query del link non è stata eseguita.",
   "pages.savedQueryNotFound": "Query salvata non trovata.",
   "explore.disconnectedSource": "La sorgente «{name}» non è connessa. Verifica la configurazione o scegline un’altra.",
   "explore.noMatches": "Nessun log corrisponde a «{search}»",
