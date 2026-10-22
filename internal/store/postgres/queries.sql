@@ -176,9 +176,10 @@ ORDER BY t.created_at DESC;
 -- Team Members
 
 -- name: AddTeamMember :exec
--- Add a member to a team
+-- Add a member to a team; adding an existing member is a no-op and keeps their role.
 INSERT INTO team_members (team_id, user_id, role)
-VALUES ($1, $2, $3);
+VALUES ($1, $2, $3)
+ON CONFLICT (team_id, user_id) DO NOTHING;
 
 -- name: GetTeamMember :one
 -- Get a team member
@@ -214,9 +215,10 @@ ORDER BY t.name;
 -- Team Sources
 
 -- name: AddTeamSource :exec
--- Add a data source to a team
+-- Add a data source to a team; linking an already linked source is a no-op.
 INSERT INTO team_sources (team_id, source_id)
-VALUES ($1, $2);
+VALUES ($1, $2)
+ON CONFLICT (team_id, source_id) DO NOTHING;
 
 -- name: RemoveTeamSource :exec
 -- Remove a data source from a team

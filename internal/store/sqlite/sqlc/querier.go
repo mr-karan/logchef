@@ -18,10 +18,10 @@ type Querier interface {
 	// Share a collection with a team; idempotent on (collection_id, team_id).
 	AddCollectionTeam(ctx context.Context, arg AddCollectionTeamParams) error
 	// Team Members
-	// Add a member to a team
+	// Add a member to a team; adding an existing member is a no-op and keeps their role.
 	AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error
 	// Team Sources
-	// Add a data source to a team
+	// Add a data source to a team; linking an already linked source is a no-op.
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
 	// Record the first decision on a pending, unexpired request. Zero rows means

@@ -82,6 +82,7 @@ const addTeamMember = `-- name: AddTeamMember :exec
 
 INSERT INTO team_members (team_id, user_id, role)
 VALUES (?, ?, ?)
+ON CONFLICT (team_id, user_id) DO NOTHING
 `
 
 type AddTeamMemberParams struct {
@@ -91,7 +92,7 @@ type AddTeamMemberParams struct {
 }
 
 // Team Members
-// Add a member to a team
+// Add a member to a team; adding an existing member is a no-op and keeps their role.
 func (q *Queries) AddTeamMember(ctx context.Context, arg AddTeamMemberParams) error {
 	_, err := q.exec(ctx, q.addTeamMemberStmt, addTeamMember, arg.TeamID, arg.UserID, arg.Role)
 	return err
@@ -101,6 +102,7 @@ const addTeamSource = `-- name: AddTeamSource :exec
 
 INSERT INTO team_sources (team_id, source_id)
 VALUES (?, ?)
+ON CONFLICT (team_id, source_id) DO NOTHING
 `
 
 type AddTeamSourceParams struct {
@@ -109,7 +111,7 @@ type AddTeamSourceParams struct {
 }
 
 // Team Sources
-// Add a data source to a team
+// Add a data source to a team; linking an already linked source is a no-op.
 func (q *Queries) AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error {
 	_, err := q.exec(ctx, q.addTeamSourceStmt, addTeamSource, arg.TeamID, arg.SourceID)
 	return err

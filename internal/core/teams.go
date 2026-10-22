@@ -360,39 +360,32 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 }
 
 // AddTeamSource associates a source with a team.
-func AddTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
-	// Validate team exists
-	if _, err := GetTeam(ctx, db, teamID); err != nil {
-		return err // Propagate ErrTeamNotFound or other DB errors
-	}
-
-	// Validate source exists
-	if _, err := db.GetSource(ctx, sourceID); err != nil { // Check DB directly for now
-		if (errors.Is(err, sql.ErrNoRows) || errors.Is(err, models.ErrNotFound)) || errors.Is(err, models.ErrNotFound) {
-			return ErrSourceNotFound // Use error from source.go
+func AddTeamSource(ctx context.Context, db store.Store, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
+	return db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
 		}
-		return fmt.Errorf("error getting source: %w", err)
-	}
+		if _, err := GetTeam(ctx, tx, teamID); err != nil {
+			return err
+		}
+		if _, err := tx.GetSource(ctx, sourceID); err != nil {
+			if models.IsNotFound(err) {
+				return ErrSourceNotFound
+			}
+			return fmt.Errorf("error getting source: %w", err)
+		}
 
-	// Add source to team (DB handles potential duplicates gracefully or via error)
-	log.Info("adding source to team", "team_id", teamID, "source_id", sourceID)
-	if err := db.AddTeamSource(ctx, teamID, sourceID); err != nil {
-		log.Error("failed to add team source in db", "error", err, "team_id", teamID, "source_id", sourceID)
-		return fmt.Errorf("error adding team source: %w", err)
-	}
-
-	return nil
+		log.Info("adding source to team", "team_id", teamID, "source_id", sourceID)
+		if err := tx.AddTeamSource(ctx, teamID, sourceID); err != nil {
+			log.Error("failed to add team source in db", "error", err, "team_id", teamID, "source_id", sourceID)
+			return fmt.Errorf("error adding team source: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemoveTeamSource removes the association between a source and a team.
 func RemoveTeamSource(ctx context.Context, db store.StoreOps, log *slog.Logger, teamID models.TeamID, sourceID models.SourceID) error {
-	// Optional: Validate team and source exist first
-	// _, err := GetTeam(ctx, db, teamID)
-	// if err != nil { return err }
-	// _, err = db.GetSource(ctx, sourceID) // Check DB directly
-	// if err != nil { ... handle ErrSourceNotFound ... }
-
-	// Remove source from team
 	log.Info("removing source from team", "team_id", teamID, "source_id", sourceID)
 	if err := db.RemoveTeamSource(ctx, teamID, sourceID); err != nil {
 		log.Error("failed to remove team source from db", "error", err, "team_id", teamID, "source_id", sourceID)

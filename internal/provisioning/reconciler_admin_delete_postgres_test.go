@@ -2,6 +2,7 @@ package provisioning
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -200,5 +201,88 @@ func TestReconcilePostgresConcurrentCollectionDelete(t *testing.T) {
 		if _, err := db.GetTeam(ctx, team.ID); !models.IsNotFound(err) {
 			t.Fatalf("team remains after prune: %v", err)
 		}
+	}
+}
+
+type afterSourceDeletion struct {
+	store.StoreOps
+	after func() error
+}
+
+func (s afterSourceDeletion) DeleteSource(ctx context.Context, source models.SourceID) error {
+	if err := s.StoreOps.DeleteSource(ctx, source); err != nil {
+		return err
+	}
+	return s.after()
+}
+
+func TestReconcilePostgresConcurrentAdminTeamSourceWrite(t *testing.T) {
+	for _, operation := range []string{"add", "remove", "remove_missing"} {
+		t.Run(operation, func(t *testing.T) {
+			db, dsn, observer := newProvisioningPostgres(t)
+			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			source, err := sourceFromConfig(config.ProvisionSource{Name: "logs", SourceType: models.SourceTypeVictoriaLogs, Connection: map[string]any{"base_url": "http://127.0.0.1:1"}}, 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := db.CreateSource(ctx, source); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.SetSourceManaged(ctx, source.ID, true, ""); err != nil {
+				t.Fatal(err)
+			}
+			cfg := &config.ProvisioningConfig{ManageTeams: true, Prune: true, Teams: []config.ProvisionTeam{{Name: "team"}}}
+			if operation == "remove" {
+				cfg.Teams[0].Sources = []string{"logs"}
+			}
+			if err := Reconcile(ctx, cfg, db, nil, quietLogger(), nil); err != nil {
+				t.Fatal(err)
+			}
+			team, err := db.GetTeamByName(ctx, "team")
+			if err != nil {
+				t.Fatal(err)
+			}
+			result := make(chan error, 1)
+			progress := make(chan struct{})
+			started := false
+			wrapped := observedStore{Store: db, observe: func(tx store.StoreOps) store.StoreOps {
+				return afterSourceDeletion{StoreOps: tx, after: func() error {
+					started = true
+					go func() {
+						if operation == "add" {
+							result <- core.AddTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+						} else {
+							result <- core.RemoveTeamSource(ctx, db, quietLogger(), team.ID, source.ID)
+						}
+						close(progress)
+					}()
+					return waitForProvisioningContention(ctx, observer, applicationName(dsn), progress)
+				}}
+			}}
+			cfg.ManageSources = true
+			cfg.Teams = nil
+			reconcileErr := Reconcile(ctx, cfg, wrapped, nil, quietLogger(), nil)
+			if !started {
+				t.Fatalf("no source pruned: %v", reconcileErr)
+			}
+			writeErr := <-result
+			if reconcileErr != nil {
+				t.Fatalf("reconcile = %v; concurrent %s = %v", reconcileErr, operation, writeErr)
+			}
+			if operation == "add" {
+				if !errors.Is(writeErr, core.ErrTeamNotFound) {
+					t.Fatalf("concurrent add = %v, want team not found after prune", writeErr)
+				}
+			} else if writeErr != nil {
+				t.Fatalf("concurrent %s = %v", operation, writeErr)
+			}
+			if _, err := db.GetTeam(ctx, team.ID); !models.IsNotFound(err) {
+				t.Fatalf("team remains after prune: %v", err)
+			}
+			if _, err := db.GetSource(ctx, source.ID); !models.IsNotFound(err) {
+				t.Fatalf("source remains after prune: %v", err)
+			}
+		})
 	}
 }
