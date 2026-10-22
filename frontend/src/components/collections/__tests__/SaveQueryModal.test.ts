@@ -134,7 +134,6 @@ vi.mock("@/stores/explore", () => ({
 }));
 vi.mock("@/stores/variables", () => ({ useVariableStore: () => ({ allVariables: [] }) }));
 vi.mock("pinia", () => ({ storeToRefs: () => ({ allVariables: ref([]) }) }));
-vi.mock("vue-router", () => ({ useRoute: () => ({ query: {} }) }));
 vi.mock("@/composables/useToast", () => ({ useToast: () => ({ toast: vi.fn() }) }));
 
 import SaveQueryModal from "../SaveQueryModal.vue";

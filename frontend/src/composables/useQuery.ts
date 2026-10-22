@@ -1,15 +1,22 @@
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
 import { useExploreStore } from '@/stores/explore';
 import { useSourcesStore } from '@/stores/sources';
 import { useTeamsStore } from '@/stores/teams';
-import { getErrorMessage } from '@/api/types';
+import { generateDefaultSql } from '@/services/SqlManager';
 import { logchefqlApi } from '@/api/logchefql';
 import { useVariables } from "@/composables/useVariables";
-import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
 import { toRfc3339 } from '@/utils/timeWindow';
 
 // Define the valid editor modes
 type EditorMode = 'logchefql' | 'native';
+
+// Interface for tracking why a query is dirty (used in computed)
+interface DirtyStateReason {
+  timeRangeChanged: boolean;
+  limitChanged: boolean;
+  queryChanged: boolean;
+  modeChanged: boolean;
+}
 
 /**
  * Refactored query management composable that delegates most logic to the explore store
@@ -19,9 +26,7 @@ export function useQuery() {
   const exploreStore = useExploreStore();
   const sourcesStore = useSourcesStore();
   const teamsStore = useTeamsStore();
-  const { convertVariables, getVariablesForApi } = useVariables();
-  // Local state that isn't persisted in the store
-  const queryError = ref<string>('');
+  const { getVariablesForApi } = useVariables();
 
   // Computed query content
   const logchefQuery = computed({
@@ -40,46 +45,58 @@ export function useQuery() {
     set: (value: EditorMode) => exploreStore.setActiveMode(value)
   });
 
+  // Current query based on active mode
+  const currentQuery = computed(() =>
+      activeMode.value === 'logchefql' ? logchefQuery.value : sqlQuery.value
+  );
+
   // Source and execution state - delegate to store with enhanced loading checks
   const canExecuteQuery = computed(() => {
     // Use the store's enhanced canExecuteQuery which includes loading state checks
     return exploreStore.canExecuteQuery;
   });
 
-  const isExecutingQuery = computed(() =>
-      exploreStore.isLoadingOperation('executeQuery')
-  );
+  const isExecutingQuery = computed(() => exploreStore.isExecutingQuery);
 
-  // Validate LogchefQL query via backend API
-  const validateLogchefQL = async (query: string): Promise<{ valid: boolean; error?: string }> => {
-    try {
-      const currentTeamId = teamsStore.currentTeamId;
-      const sourceId = exploreStore.sourceId;
-      
-      if (!currentTeamId || !sourceId) {
-        return { valid: true }; // Fail open if no context
-      }
+  // Check if query state is dirty using store's computed property
+  const isDirty = computed(() => exploreStore.isQueryStateDirty);
 
-      const response = await logchefqlApi.validate(currentTeamId, sourceId, query);
-      if (response.data) {
-        return {
-          valid: response.data.valid,
-          error: response.data.error?.message
-        };
+  // Get dirtyReason from the store's computed property
+  const dirtyReason = computed((): DirtyStateReason => {
+    const dirtyState: DirtyStateReason = {
+      timeRangeChanged: false,
+      limitChanged: false,
+      queryChanged: false,
+      modeChanged: false
+    };
+
+    // Only populate if we can get the info from the store
+    if (exploreStore.lastExecutedState) {
+      // Time range changed
+      dirtyState.timeRangeChanged = JSON.stringify(exploreStore.window) !== exploreStore.lastExecutedState.window;
+
+      // Limit changed
+      dirtyState.limitChanged = exploreStore.limit !== exploreStore.lastExecutedState.limit;
+
+      // Mode changed
+      dirtyState.modeChanged = exploreStore.lastExecutedState.mode !== exploreStore.activeMode;
+
+      // Query content changed
+      if (exploreStore.activeMode === 'logchefql') {
+        dirtyState.queryChanged = exploreStore.logchefqlCode !== exploreStore.lastExecutedState.logchefqlQuery;
+      } else {
+        dirtyState.queryChanged = exploreStore.sqlForExecution !== exploreStore.lastExecutedState.sqlQuery;
       }
-      return { valid: true }; // Fail open on API error
-    } catch (error) {
-      console.warn("LogchefQL validation API error:", error);
-      return { valid: true }; // Fail open
     }
-  };
+
+    return dirtyState;
+  });
 
   // Change query mode - uses backend as single source of truth for SQL generation
   // When isModeSwitchOnly is true, skip LogchefQL→SQL translation (e.g. AI insert,
   // loading a saved SQL query) so existing nativeQuery content is preserved.
   const changeMode = async (newMode: EditorMode, isModeSwitchOnly: boolean = false) => {
-    // Clear any validation errors when changing modes
-    queryError.value = '';
+    exploreStore.clearError();
 
     // If switching to SQL mode and caller hasn't already set nativeQuery
     if (newMode === 'native' && activeMode.value === 'logchefql' && !isModeSwitchOnly) {
@@ -109,7 +126,7 @@ export function useQuery() {
             });
 
             if (response.data && !response.data.valid) {
-              queryError.value = response.data.error?.message || "Invalid LogchefQL syntax";
+              exploreStore.setQueryError(response.data.error?.message || "Invalid LogchefQL syntax");
               return; // Don't switch modes if validation fails
             }
 
@@ -117,12 +134,12 @@ export function useQuery() {
             if (generatedQuery) {
               exploreStore.setNativeQuery(generatedQuery);
             } else {
-              queryError.value = "Could not generate SQL from your query. Please refine and try again.";
+              exploreStore.setQueryError("Could not generate SQL from your query. Please refine and try again.");
               return;
             }
           } catch (error: any) {
             console.error("useQuery: Failed to get full SQL from backend:", error);
-            queryError.value = error?.message || "Failed to translate query to SQL. Please try again.";
+            exploreStore.setQueryError(error?.message || "Failed to translate query to SQL. Please try again.");
             return;
           }
         }
@@ -133,109 +150,27 @@ export function useQuery() {
     exploreStore.setActiveMode(newMode);
   };
 
-  // Handle time range update
-  // NOTE: In SQL mode, we do NOT modify the user's raw SQL
-  // The time picker in SQL mode is informational only - users have full control over their query
-  const handleTimeRangeUpdate = () => {
-    // In SQL mode, user has full control - don't modify their query
-    if (exploreStore.activeMode === 'native') {
-      return;
-    }
-
-    // In LogchefQL mode, the time range is passed to the backend separately
-    // No need to modify the LogchefQL query itself
-  };
-
-  const prepareQueryForExecution = async () => {
+  // Generate default SQL - now uses SqlManager
+  const generateDefaultSQL = () => {
     try {
       const sourceDetails = sourcesStore.currentSourceDetails;
       if (!sourceDetails) {
         throw new Error('No source selected');
       }
 
-      const mode = activeMode.value;
+      const params = {
+        tableName: sourcesStore.getCurrentSourceTableName || '',
+        tsField: sourceDetails._meta_ts_field || 'timestamp',
+        window: exploreStore.resolved,
+        limit: exploreStore.limit,
+      };
 
-      let query = mode === 'logchefql' ? logchefQuery.value : sqlQuery.value;
-
-      // Validate query before execution
-      if (mode === 'logchefql' && query.trim()) {
-        // For LogchefQL validation, use placeholder values
-        const queryForValidation = prepareLogchefQLTemplate(query);
-        const validation = await validateLogchefQL(queryForValidation);
-        if (!validation.valid) {
-          queryError.value = validation.error || 'Invalid LogchefQL syntax';
-          return {
-            success: false,
-            sql: '',
-            error: validation.error || 'Invalid LogchefQL syntax'
-          };
-        }
-      }
-
-      if (mode === 'native') {
-        // For SQL mode, apply variable substitution ONLY - DO NOT modify the query
-        // User has full control over their raw SQL including time ranges
-        const queryWithVariables = convertVariables(query);
-        
-        return {
-          success: true,
-          sql: queryWithVariables,
-          warnings: [],
-          error: undefined
-        };
-      } else {
-        // LogchefQL execution is source-aware and happens in the explore store.
-        // Validation above is the only client-side preflight needed here; trying
-        // to generate ClickHouse SQL would reject VictoriaLogs sources because
-        // they intentionally have no database/table coordinates.
-        queryError.value = '';
-        return {
-          success: true,
-          sql: '',
-          warnings: [],
-          error: undefined
-        };
-      }
+      return { success: true, sql: generateDefaultSql(params) };
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-      queryError.value = errorMessage;
       return {
         success: false,
         sql: '',
-        error: errorMessage
-      };
-    }
-  };
-
-  // Execute query - now delegates to store
-  const executeQuery = async () => {
-    // Clear any previous errors from both local state and store
-    queryError.value = '';
-    exploreStore.clearError();
-
-    try {
-      // Make sure query is valid before execution
-      const result = await prepareQueryForExecution();
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to prepare query for execution');
-      }
-
-      // Execute via store action
-      const execResult = await exploreStore.executeQuery();
-
-      if (!execResult.success) {
-        queryError.value = execResult.error?.message || 'Query execution failed';
-      }
-
-      return execResult;
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : getErrorMessage(error);
-      queryError.value = errorMessage;
-      console.error('Query execution error:', errorMessage);
-      return {
-        success: false,
-        error: { message: errorMessage },
-        data: null
+        error: error instanceof Error ? error.message : 'Failed to generate SQL'
       };
     }
   };
@@ -246,17 +181,16 @@ export function useQuery() {
     logchefQuery,
     sqlQuery,
     activeMode,
+    currentQuery,
 
     // State
-    queryError,
+    isDirty,
+    dirtyReason,
     isExecutingQuery,
     canExecuteQuery,
 
     // Actions
     changeMode,
-    validateLogchefQL,
-    handleTimeRangeUpdate,
-    prepareQueryForExecution,
-    executeQuery
+    generateDefaultSQL,
   };
 }

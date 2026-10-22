@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "쿼리 로드 오류",
   "ui.explorerError": "탐색기 오류",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "탐색기를 초기화하지 못했습니다. 페이지를 새로고침하세요.",
-  "ui.loadingContextData": "컨텍스트 데이터 로드 중…",
-  "ui.loadingSourceDetails": "소스 세부 정보 로드 중…",
   "ui.pausedDuringLiveTail": "실시간 로그 중 일시 중지됨",
   "ui.timeRangeIsControlledInYourSQLQuery": "시간 범위는 SQL 쿼리에서 지정합니다",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "제한은 SQL 쿼리의 LIMIT 절로 지정합니다",

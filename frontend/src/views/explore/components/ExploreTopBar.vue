@@ -44,6 +44,7 @@ import { getNativeQueryLanguageForSource, getSourceTypeLabel } from '@/lib/query
 import TeamSourceSelector from './TeamSourceSelector.vue'
 import type { Source } from '@/api/sources'
 import type { TeamWithMemberCount, UserTeamMembership } from '@/api/teams'
+import type { TimeWindow } from '@/utils/timeWindow'
 
 const { t } = useI18n();
 
@@ -68,6 +69,8 @@ const props = defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:team', teamId: number): void
   (e: 'update:source', sourceId: number): void
+  (e: 'update:window', window: TimeWindow): void
+  (e: 'update:limit', limit: number): void
 }>()
 
 const { limitOptions } = useLimitOptions()
@@ -112,10 +115,6 @@ const selectedTimeout = computed({
 
 function handleZonePreferenceChange(timezone: 'utc' | 'local') {
   void preferencesStore.updatePreferences({ timezone })
-}
-
-function handleLimitChange(limit: number) {
-  exploreStore.setLimit(limit)
 }
 
 function copyUrlToClipboard() {
@@ -231,7 +230,7 @@ defineExpose({
         :model-value="exploreStore.window"
         :resolved="exploreStore.resolved"
         :zone-preference="preferencesStore.preferences.timezone"
-        @update:model-value="exploreStore.setWindow"
+        @update:model-value="emit('update:window', $event)"
         @update:zone-preference="handleZonePreferenceChange"
       />
 
@@ -262,7 +261,7 @@ defineExpose({
           <DropdownMenuItem 
             v-for="limit in limitOptions" 
             :key="limit"
-            @click="handleLimitChange(limit)" 
+            @click="emit('update:limit', limit)"
             :class="{ 'bg-muted': currentLimit === limit }"
           >
             {{ limit.toLocaleString() }} {{ t('ui.rows') }}

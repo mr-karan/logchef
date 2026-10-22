@@ -6,15 +6,9 @@ import { useExploreStore } from '@/stores/explore'
 
 const { t } = useI18n();
 
-interface Props {
-  queryError?: string
-}
-
-const props = defineProps<Props>()
 const exploreStore = useExploreStore()
 
-// Combined error display from props and store
-const displayError = computed(() => props.queryError || exploreStore.error?.message)
+const displayError = computed(() => exploreStore.error?.message)
 </script>
 
 <template>

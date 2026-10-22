@@ -52,28 +52,25 @@ const { getVariablesForApi } = useVariables()
 
 // Get the current datasource-native query for filtering field values.
 const getCurrentFilterQuery = (): string => {
-  if (exploreStore.activeMode === 'logchefql') {
-    const query = exploreStore.logchefqlCode || ''
-    return query
-  }
+  const executed = exploreStore.lastExecutedState
+  if (executed?.mode === 'logchefql') return executed.logchefqlQuery || ''
 
   if (!supportsQueryLanguage(props.source, 'logchefql')) {
-    const query = exploreStore.nativeQuery || ''
-    return query
+    return executed?.sqlQuery || ''
   }
 
   return ''
 }
 
 const getCurrentFilterVariables = () => {
-  if (exploreStore.activeMode !== 'logchefql') {
+  if (exploreStore.lastExecutedState?.mode !== 'logchefql') {
     return []
   }
   return getVariablesForApi()
 }
 
 const getCurrentFilterQueryLanguage = (): QueryLanguage | undefined => {
-  if (exploreStore.activeMode === 'logchefql') {
+  if (exploreStore.lastExecutedState?.mode === 'logchefql') {
     return 'logchefql'
   }
 

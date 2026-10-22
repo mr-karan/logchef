@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "Fehler beim Laden der Abfrage",
   "ui.explorerError": "Explorer-Fehler",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "Explorer konnte nicht initialisiert werden. Seite neu laden.",
-  "ui.loadingContextData": "Kontextdaten werden geladen…",
-  "ui.loadingSourceDetails": "Quelldetails werden geladen…",
   "ui.pausedDuringLiveTail": "Während Live-Logs pausiert",
   "ui.timeRangeIsControlledInYourSQLQuery": "Der Zeitraum wird in der SQL-Abfrage festgelegt",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "Das Limit wird durch die LIMIT-Klausel der SQL-Abfrage festgelegt",

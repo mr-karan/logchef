@@ -291,7 +291,7 @@ const router = createRouter({
   },
 });
 
-router.beforeEach(async (to, from) => {
+router.beforeEach(async (to) => {
   // OAuth pages exist only when the server runs Logchef OAuth. Meta may not
   // be loaded yet on a cold visit, so load it before deciding.
   if (to.matched.some((record) => record.meta.requiresOAuth)) {
@@ -351,7 +351,7 @@ router.beforeEach(async (to, from) => {
   }
 
   if (isAuthenticated && !isPublic) {
-    await contextRouterGuard(to, from);
+    await contextRouterGuard(to);
   }
 });
 

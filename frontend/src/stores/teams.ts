@@ -16,6 +16,7 @@ import { isSuccessResponse } from "@/api/types";
 import { useAuthStore } from "./auth";
 import { useContextStore } from "./context";
 import { i18n } from "@/i18n";
+import { useSourcesStore } from "./sources";
 
 interface TeamsState {
   userTeams: UserTeamMembership[];
@@ -419,6 +420,7 @@ export const useTeamsStore = defineStore("teams", () => {
      successMessage: i18n.global.t("access.teamSourceAdded"),
      operationKey: `addTeamSource-${teamId}-${sourceId}`,
      onSuccess: async () => {
+       useSourcesStore().invalidateTeamSources();
        // Always refresh the list after successfully adding a source
        // to ensure we have the complete source object with connection details.
        await listTeamSources(teamId);
@@ -432,6 +434,7 @@ export const useTeamsStore = defineStore("teams", () => {
       successMessage: i18n.global.t("access.teamSourceRemoved"),
       operationKey: `removeTeamSource-${teamId}-${sourceId}`,
       onSuccess: async () => {
+        useSourcesStore().invalidateTeamSources();
         // Update the cache if we have it
         if (state.data.value.teamSourcesMap[teamId]) {
           state.data.value.teamSourcesMap[teamId] = state.data.value.teamSourcesMap[teamId].filter(

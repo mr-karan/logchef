@@ -339,7 +339,7 @@
           :visible="isEditorVisible"
           class="h-full w-full"
           @change="handleSqlEditorChange"
-          @submit="submitQuery"
+          @submit="$emit('execute')"
           @ready="handleSqlEditorReady"
           @focus-change="editorFocused = $event"
         />
@@ -367,24 +367,6 @@
       <div class="truncate text-xs text-muted-foreground">
         {{ editorContent }}
       </div>
-    </div>
-
-    <!-- Error Message Display -->
-    <div v-if="validationError"
-      class="mt-2 p-2 text-sm text-destructive bg-destructive/10 rounded flex items-center gap-2">
-      <AlertCircle class="h-4 w-4 flex-shrink-0" />
-      <span>
-        <span class='font-medium'>{{ t('ui.validationError') }} </span>
-        {{ validationError }}
-        <span v-if="validationError?.includes('Missing boolean operator')" class="block mt-1 text-xs">
-          <i18n-t keypath="explore.conditionHint" tag="span" scope="global">
-            <template #and><code class="bg-muted px-1 rounded">and</code></template>
-            <template #or><code class="bg-muted px-1 rounded">or</code></template>
-          </i18n-t>
-          {{ t('ui.example') }}
-          <code class="bg-muted px-1 rounded">field1="value" and field2="value"</code>
-        </span>
-      </span>
     </div>
   </div>
 
@@ -428,7 +410,6 @@ import {
   HelpCircle,
   PanelRightOpen,
   PanelRightClose,
-  AlertCircle,
   FilePlus2,
   Search,
   Code2,
@@ -453,7 +434,6 @@ import AiSqlDialog from "./AiSqlDialog.vue";
 import VariableConfigSheet from "./VariableConfigSheet.vue";
 import VariablesPanel from "./VariablesPanel.vue";
 import type { SavedQuery } from "@/api/savedQueries";
-import { useRoute, useRouter } from "vue-router";
 import { Button } from "@/components/ui/button";
 import {
   Tooltip,
@@ -468,15 +448,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { logchefqlApi } from "@/api/logchefql";
-import { formatErrorMessage } from "@/api/error-handler";
 import { storeToRefs } from 'pinia';
 import { useExploreStore } from "@/stores/explore";
 import { useMetaStore } from "@/stores/meta";
-import { useTeamsStore } from "@/stores/teams";
 import { useVariableStore } from '@/stores/variables';
-import { useVariables, extractVariablesWithOptional } from "@/composables/useVariables.ts";
-import { prepareLogchefQLTemplate } from '@/utils/logchefql/template';
+import { extractVariablesWithOptional } from "@/composables/useVariables.ts";
 import SqlMonacoSkeleton from "./SqlMonacoSkeleton.vue";
 import { getNativeQueryLanguageForSource, hasSourceCapability, supportsQueryLanguage } from "@/lib/queryMetadata";
 import type { AcceptableValue } from "reka-ui";
@@ -535,7 +511,6 @@ const props = withDefaults(defineProps<QueryEditorProps>(), {
 
 const emit = defineEmits<{
   (e: "change", value: EditorChangeEvent): void;
-  (e: "submit", value: EditorChangeEvent): void;
   (e: "update:activeMode", value: EditorMode, isModeSwitchOnly?: boolean): void;
   (e: "toggle-fields"): void;
   // SavedQueries events
@@ -545,6 +520,7 @@ const emit = defineEmits<{
   (e: "generateAiSql", payload: any): void;
   // Run button
   (e: "execute"): void;
+  (e: "new-query"): void;
   // Cancel button
   (e: "cancel-query"): void;
   (e: "update:query-timeout", value: number): void;
@@ -555,12 +531,9 @@ const isDark = computed(() => themeStore.isDark);
 const exploreStore = useExploreStore();
 const metaStore = useMetaStore();
 const variableStore = useVariableStore();
-const teamsStore = useTeamsStore();
-const { convertVariables } = useVariables();
 
 const editorContent = ref(props.value || "");
 const editorFocused = ref(false);
-const validationError = ref<string | null>(null);
 const isEditorVisible = ref(true);
 const pendingSqlFocus = ref<boolean | null>(null);
 const isSqlEditorLoading = ref(false);
@@ -681,8 +654,6 @@ const handleEditorChange = (value: string | undefined) => {
     exploreStore.setNativeQuery(currentQuery);
   }
 
-  validationError.value = null;
-
   detectVariables(currentQuery); // detect dynamic variables and make variable list in dom
 
   emit("change", {
@@ -748,8 +719,6 @@ watch(
 watch(
   () => props.activeMode,
   (newMode, oldMode) => {
-    validationError.value = null;
-
     // Re-sync editor content from the new mode's value. Without this the
     // shared editorContent ref can retain stale content from the previous
     // mode when both mode-specific values happen to be equal (e.g. both
@@ -782,57 +751,6 @@ watch(
     }
   }
 );
-
-const submitQuery = async () => {
-  const currentContent = editorContent.value;
-  validationError.value = null;
-
-  let queryForValidation = currentContent;
-  if (props.activeMode === "logchefql") {
-    queryForValidation = prepareLogchefQLTemplate(currentContent);
-  } else {
-    queryForValidation = convertVariables(currentContent);
-  }
-
-  try {
-    let isValid = true;
-
-      if (queryForValidation.trim()) {
-        if (props.activeMode === "logchefql") {
-          try {
-            const currentTeamId = teamsStore.currentTeamId;
-            if (currentTeamId && props.sourceId) {
-              const response = await logchefqlApi.validate(currentTeamId, props.sourceId, queryForValidation);
-              if (response.data) {
-                isValid = response.data.valid;
-                if (!isValid) validationError.value = response.data.error?.message || "Invalid LogchefQL syntax.";
-              }
-            }
-          } catch (validationErr) {
-            console.warn("LogchefQL validation API error:", validationErr);
-            isValid = true;
-          }
-        }
-      }
-
-      if (!isValid) return;
-
-    if (props.activeMode === "logchefql") {
-      if (exploreStore.logchefqlCode !== currentContent) exploreStore.setLogchefqlCode(currentContent);
-    } else {
-      if (exploreStore.nativeQuery !== currentContent) exploreStore.setNativeQuery(currentContent);
-    }
-
-    emit("submit", {
-      query: currentContent,
-      mode: props.activeMode,
-      isUserInput: true,
-    });
-  } catch (e: unknown) {
-    console.error("Error validating or submitting query:", e);
-    validationError.value = formatErrorMessage(e, "Error preparing query");
-  }
-};
 
 const focusEditor = (revealLastPosition = false) => {
   pendingSqlFocus.value = revealLastPosition;
@@ -918,7 +836,6 @@ const toggleSqlEditorVisibility = () => {
 };
 
 defineExpose({
-  submitQuery,
   focus: focusEditor,
   code: computed(() => editorContent.value),
   toggleSqlEditorVisibility,
@@ -931,35 +848,11 @@ const asEditorMode = (value: string | number): EditorMode => {
   return "logchefql";
 };
 
-const route = useRoute();
-const router = useRouter();
-
-const isEditingExistingQuery = computed(() => !!route.query.id);
+const isEditingExistingQuery = computed(() => !!exploreStore.selectedQueryId);
 
 const handleNewQueryClick = () => {
-  const currentQuery = { ...route.query };
-  delete currentQuery.id;
-
-  exploreStore.resetQueryToDefaults();
-  exploreStore.setSelectedQueryId(null);
-  exploreStore.setActiveSavedQueryName(null);
-
-  nextTick(() => {
-    const finalQuery = { ...currentQuery };
-    delete finalQuery.id;
-
-    router
-      .replace({ query: finalQuery })
-      .then(() => {
-        setTimeout(() => {
-          focusEditor(true);
-        }, 50);
-      })
-      .catch((err) => {
-        console.error("Error updating URL:", err);
-        focusEditor(true);
-      });
-  });
+  emit("new-query");
+  nextTick(() => focusEditor(true));
 };
 
 const handleAiDialogSubmit = (payload: { naturalLanguageQuery: string; currentQuery: string }) => {

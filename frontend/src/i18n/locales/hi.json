@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "क्वेरी लोड करने में त्रुटि",
   "ui.explorerError": "एक्सप्लोरर त्रुटि",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "एक्सप्लोरर शुरू नहीं हुआ। पेज रीफ़्रेश करें।",
-  "ui.loadingContextData": "संदर्भ डेटा लोड हो रहा है…",
-  "ui.loadingSourceDetails": "स्रोत विवरण लोड हो रहा है…",
   "ui.pausedDuringLiveTail": "लाइव लॉग के दौरान रुका हुआ",
   "ui.timeRangeIsControlledInYourSQLQuery": "समय सीमा आपकी SQL क्वेरी से तय होती है",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "सीमा आपकी SQL क्वेरी के LIMIT खंड से तय होती है",

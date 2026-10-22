@@ -1,16 +1,14 @@
 import type { RouteLocationNormalized } from 'vue-router'
+import { EXPLORE_PATH } from '@/lib/exploreLocation'
 import { useAuthStore } from '@/stores/auth'
 import { useContextStore } from '@/stores/context'
 import { useTeamsStore } from '@/stores/teams'
 
-const EXPLORE_PATH = '/logs/explore'
-
 type GuardLocation = Pick<RouteLocationNormalized, 'path' | 'params' | 'query'>
 
-export async function contextRouterGuard(to: GuardLocation, from?: GuardLocation) {
-  // Explorer applies its own team and source after it reads the rest of the
-  // link. Selecting them here first would let the old query overwrite it.
-  if (from?.path === EXPLORE_PATH && to.path === EXPLORE_PATH) return
+export async function contextRouterGuard(to: GuardLocation) {
+  // Explorer resolves its own team and source with the rest of its link.
+  if (to.path === EXPLORE_PATH) return
 
   const authStore = useAuthStore()
   const contextStore = useContextStore()

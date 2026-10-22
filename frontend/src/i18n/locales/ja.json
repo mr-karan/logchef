@@ -509,8 +509,6 @@
   "ui.errorLoadingQuery": "クエリの読み込みエラー",
   "ui.explorerError": "エクスプローラーのエラー",
   "ui.errorInitializingTheExplorerPleaseTryRefreshingThePage": "エクスプローラーの初期化に失敗しました。ページを再読み込みしてください。",
-  "ui.loadingContextData": "コンテキストを読み込み中…",
-  "ui.loadingSourceDetails": "ソースの詳細を読み込み中…",
   "ui.pausedDuringLiveTail": "ライブテール中は一時停止",
   "ui.timeRangeIsControlledInYourSQLQuery": "期間は SQL クエリで指定します",
   "ui.limitIsControlledByLIMITClauseInYourSQLQuery": "上限は SQL クエリの LIMIT 句で指定します",
