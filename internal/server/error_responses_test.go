@@ -471,7 +471,7 @@ func TestQueryTransportTimeoutResponses(t *testing.T) {
 	}
 	var netErr net.Error
 	if !errors.As(dialErr, &netErr) || !netErr.Timeout() {
-		t.Fatalf("want real dial timeout, got %v", dialErr)
+		t.Fatalf("want dial to fail on its deadline, got %v", dialErr)
 	}
 	client := &http.Client{Timeout: 100 * time.Millisecond, Transport: &http.Transport{}}
 	t.Cleanup(client.CloseIdleConnections)
