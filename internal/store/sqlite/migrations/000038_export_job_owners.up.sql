@@ -47,3 +47,9 @@ SET
             substr(updated_at, instr(updated_at, ' -') + 4, 2)
         ELSE updated_at
     END), updated_at);
+
+DELETE FROM export_jobs
+WHERE strftime('%Y-%m-%dT%H:%M:%fZ', expires_at) IS NULL
+   OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at) IS NULL
+   OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at) IS NULL
+   OR (completed_at IS NOT NULL AND strftime('%Y-%m-%dT%H:%M:%fZ', completed_at) IS NULL);

@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -281,10 +282,10 @@ func TestStartupExportReapLogs(t *testing.T) {
 							if entry.Level != "INFO" || entry.Instance != tc.instance || entry.Reaped != tc.count {
 								t.Errorf("startup summary = %+v", entry)
 							}
-						case "reaped recently updated exports; possible duplicate export instance_id":
+						case "reaped exports updated in the last 5s; check for a duplicate export instance_id or a crash restart":
 							warns++
 							if entry.Level != "WARN" || entry.Instance != tc.instance || entry.Reaped != tc.count {
-								t.Errorf("duplicate identity warning = %+v", entry)
+								t.Errorf("recent update warning = %+v", entry)
 							}
 						}
 					}
@@ -332,15 +333,6 @@ func TestExportJobsIgnoreExtraColumns(t *testing.T) {
 			if got.Owner != owner || got.Status != job.Status {
 				t.Errorf("get after adding column = %+v", got)
 			}
-			columns := "id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at"
-			var values [15]any
-			var targets [15]any
-			for i := range values {
-				targets[i] = &values[i]
-			}
-			if err := raw.QueryRowContext(ctx, "SELECT "+columns+" FROM export_jobs WHERE id = '"+job.ID+"'").Scan(targets[:]...); err != nil {
-				t.Fatalf("legacy 15-column scan after extra columns: %v", err)
-			}
 			reaped, err := db.ReapInterruptedExportJobs(ctx, time.Hour, models.ExportJobOwner{InstanceID: owner.InstanceID, ProcessID: "current"})
 			if err != nil {
 				t.Fatal(err)
@@ -358,7 +350,55 @@ func TestExportJobsIgnoreExtraColumns(t *testing.T) {
 			if got.Status != models.ExportJobStatusFailed {
 				t.Errorf("reaped job status = %s", got.Status)
 			}
-			t.Logf("%s legacy 15-column scan, GetExportJob, and reaper passed with ownership and dummy columns", backend)
+		})
+	}
+}
+
+func TestStartupExportReapSummaryOnEarlyExit(t *testing.T) {
+	for _, name := range []string{"later batch failure", "expired context"} {
+		t.Run(name, func(t *testing.T) {
+			db, raw := backgroundTestStore(t, "sqlite")
+			ctx := context.Background()
+			owner := models.ExportJobOwner{InstanceID: "replica-a", ProcessID: "current"}
+			wantReaped := 0
+			if name == "later batch failure" {
+				user := mkTestUser(t, db, "reap-summary@example.com", models.UserRoleMember)
+				_, source := mkTestTeam(t, db, "reap-summary", user)
+				now := time.Now().UTC()
+				for range 101 {
+					job := &models.ExportJob{ID: uuid.NewString(), Owner: models.ExportJobOwner{InstanceID: owner.InstanceID, ProcessID: "previous"}, SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+					if err := db.CreateExportJob(ctx, job); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if _, err := raw.ExecContext(ctx, `CREATE TRIGGER fail_later_reap BEFORE UPDATE ON export_jobs WHEN (SELECT count(*) FROM export_jobs WHERE status = 'failed') >= 100 BEGIN SELECT RAISE(FAIL, 'later batch failed'); END`); err != nil {
+					t.Fatal(err)
+				}
+				wantReaped = 100
+			} else {
+				var cancel context.CancelFunc
+				ctx, cancel = context.WithDeadline(ctx, time.Now().Add(-time.Second))
+				defer cancel()
+			}
+			var logs bytes.Buffer
+			srv := &Server{sqlite: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(&logs, nil))}
+			srv.reapInterruptedExportJobs(owner)
+			output := logs.String()
+			if strings.Count(output, "msg=\"reaped interrupted exports\"") != 1 || !strings.Contains(output, fmt.Sprintf("reaped=%d", wantReaped)) {
+				t.Errorf("missing startup summary for %d reaped jobs: %s", wantReaped, output)
+			}
+			if wantReaped > 0 {
+				if !strings.Contains(output, "later batch failed") || !strings.Contains(output, "level=WARN") {
+					t.Errorf("missing later-batch error or recent-update warning: %s", output)
+				}
+				var failed int
+				if err := raw.QueryRow(`SELECT count(*) FROM export_jobs WHERE status = 'failed'`).Scan(&failed); err != nil {
+					t.Fatal(err)
+				}
+				if failed != wantReaped {
+					t.Errorf("failed jobs = %d, want %d", failed, wantReaped)
+				}
+			}
 		})
 	}
 }

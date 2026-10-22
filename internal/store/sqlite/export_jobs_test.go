@@ -126,9 +126,15 @@ func TestExportJobTimestampUpgrade(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, value := range []string{"", "garbage"} {
-		if _, err := db.Exec(`INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at, completed_at, created_at, updated_at) VALUES (?, 1, 1, 'running', 'csv', '{}', ?, ?, ?, ?)`, "invalid-"+value, value, value, value, value); err != nil {
-			t.Fatal(err)
+	for _, column := range []string{"expires_at", "completed_at", "created_at", "updated_at"} {
+		for _, value := range []string{"", "garbage"} {
+			id := "invalid-" + column + "-" + value
+			if _, err := db.Exec(`INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at, completed_at, created_at, updated_at) VALUES (?, 1, 1, 'running', 'csv', '{}', ?, ?, ?, ?)`, id, formats[0], formats[0], formats[0], formats[0]); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec("UPDATE export_jobs SET "+column+" = ? WHERE id = ?", value, id); err != nil {
+				t.Fatal(err)
+			}
 		}
 	}
 	mustExec(t, db, `INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at, created_at, updated_at) VALUES ('nullable', 1, 1, 'running', 'csv', '{}', '2026-01-02 03:04:05', '2026-01-02 03:04:05', '2026-01-02 03:04:05')`)
@@ -149,16 +155,12 @@ func TestExportJobTimestampUpgrade(t *testing.T) {
 			t.Errorf("legacy owner = %q/%q", instance, process)
 		}
 	}
-	for _, value := range []string{"", "garbage"} {
-		var expires, completed, created, updated string
-		if err := db.QueryRow(`SELECT CAST(expires_at AS TEXT), CAST(completed_at AS TEXT), CAST(created_at AS TEXT), CAST(updated_at AS TEXT) FROM export_jobs WHERE id = ?`, "invalid-"+value).Scan(&expires, &completed, &created, &updated); err != nil {
-			t.Fatal(err)
-		}
-		for _, got := range []string{expires, completed, created, updated} {
-			if got != value {
-				t.Errorf("invalid timestamp %q changed to %q", value, got)
-			}
-		}
+	var invalidCount int
+	if err := db.QueryRow(`SELECT count(*) FROM export_jobs WHERE id LIKE 'invalid-%'`).Scan(&invalidCount); err != nil {
+		t.Fatal(err)
+	}
+	if invalidCount != 0 {
+		t.Errorf("invalid timestamp rows retained = %d, want 0", invalidCount)
 	}
 	var completed sql.NullString
 	if err := db.QueryRow(`SELECT completed_at FROM export_jobs WHERE id = 'nullable'`).Scan(&completed); err != nil {

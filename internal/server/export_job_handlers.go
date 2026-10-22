@@ -498,6 +498,14 @@ func (s *Server) reapInterruptedExportJobs(owner models.ExportJobOwner) {
 	}
 	maxAge := time.Duration(maxTimeout)*time.Second + exportQueryGrace + exportReapSlack
 	reaped, recentlyUpdated := 0, 0
+	defer func() {
+		if owner.InstanceID != "" {
+			s.log.Info("reaped interrupted exports", "instance_id", owner.InstanceID, "reaped", reaped)
+			if recentlyUpdated > 0 {
+				s.log.Warn("reaped exports updated in the last 5s; check for a duplicate export instance_id or a crash restart", "instance_id", owner.InstanceID, "reaped", recentlyUpdated)
+			}
+		}
+	}()
 	recentCutoff := time.Now().UTC().Add(-5 * time.Second)
 	for ctx.Err() == nil {
 		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge, owner)
@@ -506,12 +514,6 @@ func (s *Server) reapInterruptedExportJobs(owner models.ExportJobOwner) {
 			return
 		}
 		if len(jobs) == 0 {
-			if owner.InstanceID != "" {
-				s.log.Info("reaped interrupted exports", "instance_id", owner.InstanceID, "reaped", reaped)
-				if recentlyUpdated > 0 {
-					s.log.Warn("reaped recently updated exports; possible duplicate export instance_id", "instance_id", owner.InstanceID, "reaped", recentlyUpdated)
-				}
-			}
 			return
 		}
 		reaped += len(jobs)
