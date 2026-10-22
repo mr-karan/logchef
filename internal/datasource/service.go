@@ -32,6 +32,7 @@ type Provider interface {
 	EvaluateAlert(context.Context, *models.Source, AlertQueryRequest) (*models.QueryResult, error)
 	InitializeSource(context.Context, *models.Source) error
 	RemoveSource(models.SourceID) error
+	CachedSourceConnectionStatus(models.SourceID) bool
 	CheckSourceConnectionStatus(context.Context, *models.Source) bool
 }
 
@@ -501,6 +502,15 @@ func (s *Service) RemoveSource(source *models.Source) error {
 		return err
 	}
 	return provider.RemoveSource(source.ID)
+}
+
+// CachedSourceConnectionStatus returns the last health result without backend I/O.
+func (s *Service) CachedSourceConnectionStatus(source *models.Source) bool {
+	provider, err := s.ProviderForSource(source)
+	if err != nil {
+		return false
+	}
+	return provider.CachedSourceConnectionStatus(source.ID)
 }
 
 func (s *Service) CheckSourceConnectionStatus(ctx context.Context, source *models.Source) bool {

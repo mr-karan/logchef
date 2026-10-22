@@ -3,6 +3,7 @@ package victorialogs
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -70,8 +71,14 @@ type Provider struct {
 	// serialisation two concurrent operations for the SAME source can interleave
 	// and leave stale state (e.g. a connection cached for a source that a
 	// concurrent remove already deleted).
-	opLocks      keyedMutex
-	windowLimits map[models.SourceID]*windowLimiter
+	opLocks       keyedMutex
+	windowLimits  map[models.SourceID]*windowLimiter
+	health        map[models.SourceID]bool
+	healthCtx     context.Context //nolint:containedctx // The provider owns cancellation of checks that outlive requests.
+	cancelHealth  context.CancelFunc
+	healthWG      sync.WaitGroup
+	healthStarted bool
+	closed        bool
 }
 
 // keyedMutex hands out one mutex per key, so callers can serialise operations
@@ -123,10 +130,14 @@ func NewProvider(log *slog.Logger) *Provider {
 	}).DialContext
 	transport.ResponseHeaderTimeout = responseHeaderTimeout
 
+	healthCtx, cancelHealth := context.WithCancel(context.Background())
 	return &Provider{
-		client:  &http.Client{Transport: transport},
-		log:     log.With("component", "victorialogs_provider"),
-		sources: make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
+		client:       &http.Client{Transport: transport},
+		log:          log.With("component", "victorialogs_provider"),
+		sources:      make(map[models.SourceID]models.VictoriaLogsConnectionInfo),
+		health:       make(map[models.SourceID]bool),
+		healthCtx:    healthCtx,
+		cancelHealth: cancelHealth,
 	}
 }
 
@@ -296,10 +307,16 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 	}
 
 	p.mu.Lock()
+	if p.closed {
+		p.mu.Unlock()
+		return fmt.Errorf("victorialogs provider is closed")
+	}
 	p.sources[source.ID] = conn
+	p.health[source.ID] = false
 	p.mu.Unlock()
-
-	return p.checkHealth(ctx, source.ID, conn)
+	err = p.checkHealth(ctx, source.ID, conn)
+	p.recordHealth(source.ID, err == nil)
+	return err
 }
 
 func (p *Provider) RemoveSource(sourceID models.SourceID) error {
@@ -309,6 +326,7 @@ func (p *Provider) RemoveSource(sourceID models.SourceID) error {
 	defer p.mu.Unlock()
 
 	delete(p.sources, sourceID)
+	delete(p.health, sourceID)
 	p.evictIdleWindowLimiter(sourceID)
 	return nil
 }
@@ -329,7 +347,9 @@ func (p *Provider) CheckSourceConnectionStatus(ctx context.Context, source *mode
 		return false
 	}
 
-	return p.checkHealth(ctx, source.ID, conn) == nil
+	connected := p.checkHealth(ctx, source.ID, conn) == nil
+	p.recordHealth(source.ID, connected)
+	return connected
 }
 
 func (p *Provider) connectionFromConfig(raw json.RawMessage) (models.VictoriaLogsConnectionInfo, error) {
@@ -345,6 +365,10 @@ func (p *Provider) connectionFromConfig(raw json.RawMessage) (models.VictoriaLog
 
 func (p *Provider) connectionForSource(source *models.Source) (models.VictoriaLogsConnectionInfo, error) {
 	p.mu.RLock()
+	if p.closed {
+		p.mu.RUnlock()
+		return models.VictoriaLogsConnectionInfo{}, fmt.Errorf("victorialogs provider is closed")
+	}
 	conn, ok := p.sources[source.ID]
 	p.mu.RUnlock()
 	if ok {
@@ -357,8 +381,11 @@ func (p *Provider) connectionForSource(source *models.Source) (models.VictoriaLo
 	}
 
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.closed {
+		return models.VictoriaLogsConnectionInfo{}, fmt.Errorf("victorialogs provider is closed")
+	}
 	p.sources[source.ID] = conn
-	p.mu.Unlock()
 	return conn, nil
 }
 
@@ -384,7 +411,9 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 
 	resp, err := p.client.Do(req)
 	if err != nil {
-		p.log.Warn("victorialogs health check failed", "source_id", sourceID, "error", err)
+		if !errors.Is(err, context.Canceled) {
+			p.log.Warn("victorialogs health check failed", "source_id", sourceID, "error", err)
+		}
 		return fmt.Errorf("victorialogs health check failed: %w", err)
 	}
 	defer resp.Body.Close()

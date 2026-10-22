@@ -312,7 +312,7 @@ func RemoveTeamMember(ctx context.Context, db store.StoreOps, log *slog.Logger, 
 // --- Team Source Functions ---
 
 // ListTeamSources returns basic information for all sources associated with a specific team,
-// including provider-derived feature metadata and current connection status.
+// including provider-derived feature metadata and cached connection status.
 func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Service, log *slog.Logger, teamID models.TeamID) ([]*models.Source, error) {
 	// First, validate the team exists
 	_, err := GetTeam(ctx, db, teamID) // Use existing GetTeam function
@@ -337,7 +337,7 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 		return nil, fmt.Errorf("error listing team sources from db: %w", err)
 	}
 
-	if err := populateSourceStatuses(ctx, ds, sources); err != nil {
+	if err := populateSourceStatuses(ds, sources); err != nil {
 		return nil, err
 	}
 	for _, source := range sources {

@@ -85,6 +85,8 @@ func (f *fakeProvider) InitializeSource(context.Context, *models.Source) error {
 
 func (f *fakeProvider) RemoveSource(models.SourceID) error { return nil }
 
+func (f *fakeProvider) CachedSourceConnectionStatus(models.SourceID) bool { return true }
+
 func (f *fakeProvider) CheckSourceConnectionStatus(context.Context, *models.Source) bool { return true }
 
 // newFakeDatasourceService returns a *datasource.Service backed by db with a

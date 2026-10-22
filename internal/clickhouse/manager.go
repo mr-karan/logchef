@@ -28,64 +28,72 @@ const (
 // Manager handles pooling and management of multiple ClickHouse client connections,
 // one per data source. It also manages query hooks and background health checks.
 type Manager struct {
-	clients    map[models.SourceID]*Client
-	clientsMux sync.RWMutex // Protects the clients map.
-	logger     *slog.Logger
-	health     map[models.SourceID]healthState
-	healthMux  sync.RWMutex   // Protects the health map.
-	hooks      []QueryHook    // Hooks applied to all managed clients; fixed at construction.
-	stopHealth chan struct{}  // Channel to signal health check goroutine to stop.
-	healthWG   sync.WaitGroup // WaitGroup to wait for health check goroutine to exit.
-	stopOnce   sync.Once      // Makes StopBackgroundHealthChecks idempotent.
+	clients       map[models.SourceID]*Client
+	clientsMux    sync.RWMutex
+	logger        *slog.Logger
+	health        map[models.SourceID]healthState
+	healthMux     sync.RWMutex    // Protects the health map.
+	hooks         []QueryHook     // Hooks applied to all managed clients; fixed at construction.
+	healthCtx     context.Context //nolint:containedctx // The manager owns cancellation of checks that outlive requests.
+	cancelHealth  context.CancelFunc
+	healthWG      sync.WaitGroup
+	healthStarted bool
+	healthStopped bool
 }
 
 // NewManager creates a ClickHouse connection manager whose clients all run hooks.
 func NewManager(log *slog.Logger, hooks ...QueryHook) *Manager {
+	healthCtx, cancelHealth := context.WithCancel(context.Background())
 	return &Manager{
-		clients:    make(map[models.SourceID]*Client),
-		logger:     log.With("component", "clickhouse_manager"),
-		health:     make(map[models.SourceID]healthState),
-		hooks:      hooks,
-		stopHealth: make(chan struct{}),
+		clients:      make(map[models.SourceID]*Client),
+		logger:       log.With("component", "clickhouse_manager"),
+		health:       make(map[models.SourceID]healthState),
+		hooks:        hooks,
+		healthCtx:    healthCtx,
+		cancelHealth: cancelHealth,
 	}
 }
 
 // StartBackgroundHealthChecks launches a goroutine to periodically check
 // the health of all managed connections.
 func (m *Manager) StartBackgroundHealthChecks(interval time.Duration) {
+	m.clientsMux.Lock()
+	defer m.clientsMux.Unlock()
+	if m.healthStarted || m.healthStopped {
+		return
+	}
+	m.healthStarted = true
 	if interval <= 0 {
 		interval = DefaultHealthCheckInterval
 	}
-	m.logger.Debug("starting background health checks", "interval", interval)
-
-	ticker := time.NewTicker(interval)
-
-	// Add to wait group before starting the goroutine
-	m.healthWG.Add(1)
-
-	go func() {
+	m.healthWG.Go(func() {
+		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		defer m.healthWG.Done()
 		m.checkAllSourcesHealth()
-
 		for {
 			select {
 			case <-ticker.C:
 				m.checkAllSourcesHealth()
-			case <-m.stopHealth:
-				m.logger.Debug("stopping background health checks")
+			case <-m.healthCtx.Done():
 				return
 			}
 		}
-	}()
+	})
 }
 
-// StopBackgroundHealthChecks signals the health check goroutine to stop.
+// StopBackgroundHealthChecks cancels periodic and initial health checks.
 func (m *Manager) StopBackgroundHealthChecks() {
-	m.stopOnce.Do(func() {
-		m.logger.Debug("signaling health check stop")
-		close(m.stopHealth)
-	})
+	m.clientsMux.Lock()
+	defer m.clientsMux.Unlock()
+	m.healthStopped = true
+	m.cancelHealth()
+}
+
+// CachedSourceConnectionStatus reports false until a managed client passes a health check.
+func (m *Manager) CachedSourceConnectionStatus(sourceID models.SourceID) bool {
+	m.healthMux.RLock()
+	defer m.healthMux.RUnlock()
+	return m.health[sourceID] == healthHealthy
 }
 
 // checkAllSourcesHealth iterates through managed clients and updates their health status.
@@ -98,12 +106,25 @@ func (m *Manager) checkAllSourcesHealth() {
 	}
 	m.clientsMux.RUnlock()
 
+	jobs := make(chan models.SourceID)
 	var wg sync.WaitGroup
-	for _, id := range idsToCheck {
+	for range min(32, len(idsToCheck)) {
 		wg.Go(func() {
-			m.checkSource(context.Background(), id)
+			for id := range jobs {
+				m.checkSource(m.healthCtx, id)
+			}
 		})
 	}
+	for _, id := range idsToCheck {
+		select {
+		case jobs <- id:
+		case <-m.healthCtx.Done():
+			close(jobs)
+			wg.Wait()
+			return
+		}
+	}
+	close(jobs)
 	wg.Wait()
 }
 
@@ -111,7 +132,7 @@ func (m *Manager) checkAllSourcesHealth() {
 func (m *Manager) updateHealthStatus(sourceID models.SourceID, client *Client, err error) {
 	m.clientsMux.RLock()
 	defer m.clientsMux.RUnlock()
-	if m.clients[sourceID] != client {
+	if m.clients[sourceID] != client || m.healthStopped {
 		return
 	}
 
@@ -149,7 +170,7 @@ func (m *Manager) checkSource(ctx context.Context, sourceID models.SourceID) {
 
 	pingCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 	defer cancel()
-	m.updateHealthStatus(sourceID, client, client.Ping(pingCtx, "", ""))
+	m.updateHealthStatus(sourceID, client, client.Ping(pingCtx, client.source.Connection.Database, client.source.Connection.TableName))
 }
 
 // AddSource creates a managed client and schedules its first health check.
@@ -158,6 +179,10 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 	defer m.clientsMux.Unlock()
 	m.healthMux.Lock() // Lock health map for writing.
 	defer m.healthMux.Unlock()
+
+	if m.healthStopped {
+		return fmt.Errorf("clickhouse manager is closed")
+	}
 
 	m.logger.Debug("adding source",
 		"source_id", source.ID,
@@ -196,7 +221,7 @@ func (m *Manager) AddSource(ctx context.Context, source *models.Source) error {
 	m.health[source.ID] = healthPending
 
 	// Trigger an immediate check for the newly added source in the background
-	go m.checkSource(context.Background(), source.ID) //nolint:contextcheck,gosec // G118: detached background source check, must outlive request
+	m.healthWG.Go(func() { m.checkSource(m.healthCtx, source.ID) })
 
 	return nil
 }

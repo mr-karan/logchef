@@ -522,14 +522,6 @@ func (s *Source) GetFullTableName() string {
 // SourceHealthTimeout bounds a provider health check, including connection setup.
 const SourceHealthTimeout = 5 * time.Second
 
-// SourceHealth represents the health status of a source.
-type SourceHealth struct {
-	SourceID    SourceID     `json:"source_id"`
-	Status      HealthStatus `json:"status"`
-	Error       string       `json:"error,omitempty"`
-	LastChecked time.Time    `json:"last_checked"`
-}
-
 // CreateSourceRequest represents a request to create a new data source.
 type CreateSourceRequest struct {
 	Name              string          `json:"name"`
