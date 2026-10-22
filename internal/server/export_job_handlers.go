@@ -147,9 +147,9 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 }
 
 func (s *Server) handleGetExportJob(c fiber.Ctx) error {
-	job, err := s.authorizeExportJob(c)
-	if job == nil {
-		return err
+	job, ok := s.authorizeExportJob(c)
+	if !ok {
+		return nil
 	}
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
@@ -159,9 +159,9 @@ func (s *Server) handleGetExportJob(c fiber.Ctx) error {
 }
 
 func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
-	job, err := s.authorizeExportJob(c)
-	if job == nil {
-		return err
+	job, ok := s.authorizeExportJob(c)
+	if !ok {
+		return nil
 	}
 	if time.Now().UTC().After(job.ExpiresAt) {
 		return SendErrorWithType(c, fiber.StatusGone, "Export has expired", models.NotFoundErrorType)
@@ -201,42 +201,49 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	return c.SendFile(job.FilePath, fiber.SendFile{ByteRange: true})
 }
 
-// authorizeExportJob returns the job the caller may read. When it returns a
-// nil job it has already sent the error response; the caller returns err.
-func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, error) {
+// authorizeExportJob writes the error response and returns false on failure; the caller must then return nil.
+func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
 	teamID, err := core.ParseTeamID(c.Params("teamID"))
 	if err != nil {
-		return nil, SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+		return nil, false
 	}
 	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
 	if err != nil {
-		return nil, SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+		return nil, false
 	}
 	exportID := strings.TrimSpace(c.Params("exportID"))
 	if exportID == "" {
-		return nil, SendErrorWithType(c, fiber.StatusBadRequest, "Export ID is required", models.ValidationErrorType)
+		s.sendLoadFailure(c, fiber.StatusBadRequest, "Export ID is required", models.ValidationErrorType)
+		return nil, false
 	}
 	user := c.Locals("user").(*models.User)
 	if user == nil {
-		return nil, SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		s.sendLoadFailure(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return nil, false
 	}
 
 	job, err := s.sqlite.GetExportJob(c.Context(), exportID)
 	if err != nil {
 		if models.IsNotFound(err) {
-			return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
+			s.sendLoadFailure(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
+			return nil, false
 		}
 		s.log.Error("failed to get export job", "error", err, "job_id", exportID)
-		return nil, SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get export job", models.GeneralErrorType)
+		s.sendLoadFailure(c, fiber.StatusInternalServerError, "Failed to get export job", models.GeneralErrorType)
+		return nil, false
 	}
 	if job.SourceID != sourceID {
-		return nil, SendErrorWithType(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
+		s.sendLoadFailure(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
+		return nil, false
 	}
 	_ = teamID // teamID in the URL is an auth gate via middleware; no need to compare on the row
 	if !hasGlobalAdminBypass(c) && job.CreatedBy != user.ID {
-		return nil, SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this export", models.AuthorizationErrorType)
+		s.sendLoadFailure(c, fiber.StatusForbidden, "You do not have access to this export", models.AuthorizationErrorType)
+		return nil, false
 	}
-	return job, nil
+	return job, true
 }
 
 // runExportJob runs the export pipeline. The caller must have already
