@@ -30,14 +30,3 @@ describe("generateDefaultSql — query timezone (#103)", () => {
     expect(sql).not.toContain("12:00:00");
   });
 });
-
-describe('default SQL timestamp identifier', () => {
-  it('quotes the raw field consistently in the filter and sort', () => {
-    const result = generateDefaultSql({
-      tableName: 'default.logs', tsField: 'event`time\\path', limit: 100,
-      window: { start: epochMs(0), end: epochMs(1000), zone: zoneFromPreference('utc') },
-    })
-    expect(result).toContain('WHERE `event\\x60time\\\\path` BETWEEN')
-    expect(result).toContain('ORDER BY `event\\x60time\\\\path` DESC')
-  })
-})

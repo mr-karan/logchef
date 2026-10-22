@@ -9,7 +9,7 @@ import type { VariableState } from '@/stores/variables'
 import { useTeamPermissions } from '@/composables/useTeamPermissions'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
-import { getErrorMessage } from '@/api/types'
+import { getErrorMessage, type APIErrorResponse } from '@/api/types'
 import type { SaveQueryFormData } from '@/views/explore/types'
 import { savedQueriesApi, type SavedQuery } from '@/api/savedQueries'
 import { decodeStoredRange, encodeWindowForUrl } from '@/utils/timeWindowCodec'
@@ -38,14 +38,17 @@ export function useSavedQueries(
   const openingQueryId = ref<number | null>(null)
   const searchQuery = ref('')
   const saveAsNewQuery = ref(false)
-  const sourceQueryRequests = new Map<number, symbol>()
-  let activeSourceId: number | null = null
+  let sourceQueryVersion = 0
+  let inFlightSourceQueries: {
+    sourceId: number;
+    promise: Promise<{ success: boolean; data?: SavedQuery[] | null; error?: APIErrorResponse | string | null }>;
+  } | null = null
 
   watch(
     [() => contextStore.teamId, () => contextStore.sourceId],
     () => {
-      sourceQueryRequests.clear()
-      activeSourceId = null
+      sourceQueryVersion++
+      inFlightSourceQueries = null
       queriesRef.value = []
       isLoading.value = false
     },
@@ -262,7 +265,7 @@ export function useSavedQueries(
       const metadata = resolveSavedQueryMetadata({
         query_language: queryData.query_language,
         editor_mode: queryData.editor_mode,
-        source_type: _currentSource?.value?.source_type,
+        source_type: _currentSource?.value?.source_type ?? (queryData.query_language === "logsql" ? "victorialogs" : "clickhouse"),
         query_languages: _currentSource?.value?.query_languages,
         saved_query_editor_modes: _currentSource?.value?.saved_query_editor_modes,
       })
@@ -290,7 +293,7 @@ export function useSavedQueries(
       if (isLogchefQL) {
         exploreStore.setLogchefqlCode(queryToLoad)
       } else {
-        exploreStore.setNativeQuery(queryToLoad)
+        exploreStore.setNativeQuery(queryToLoad, metadata.queryLanguage)
       }
 
       if (content.limit) exploreStore.setLimit(content.limit)
@@ -436,29 +439,23 @@ export function useSavedQueries(
 
   // loadSourceQueries fetches saved queries for a single source. teamId is no
   // longer needed — visibility is gated by source access via any team membership.
-  async function loadSourceQueries(sourceId: number) {
-    const request = Symbol()
-    sourceQueryRequests.set(sourceId, request)
-    activeSourceId = sourceId
-    const isCurrent = () => activeSourceId === sourceId && sourceQueryRequests.get(sourceId) === request
-    try {
-      isLoading.value = true
-      searchQuery.value = ''
-
+  function loadSourceQueries(sourceId: number) {
+    if (inFlightSourceQueries?.sourceId === sourceId) return inFlightSourceQueries.promise
+    const version = ++sourceQueryVersion
+    isLoading.value = true
+    searchQuery.value = ''
+    const promise = (async () => {
       if (!sourceId) {
         queriesRef.value = []
+        isLoading.value = false
         return { success: false, error: 'No source ID provided' }
       }
 
       const result = await savedQueriesStore.list(sourceId)
-      if (!isCurrent()) return { success: false }
+      if (version !== sourceQueryVersion) return { success: false }
 
-      if (result.success) {
-        queriesRef.value = result.data ?? []
-        return { success: true, data: result.data }
-      }
-
-      queriesRef.value = []
+      isLoading.value = false
+      queriesRef.value = result.success ? result.data ?? [] : []
       if (result.error) {
         toast({
           title: 'Error',
@@ -467,23 +464,12 @@ export function useSavedQueries(
           duration: TOAST_DURATION.ERROR,
         })
       }
-      return { success: false, error: result.error }
-    } catch (error) {
-      if (!isCurrent()) return { success: false }
-      queriesRef.value = []
-      toast({
-        title: 'Error',
-        description: getErrorMessage(error),
-        variant: 'destructive',
-        duration: TOAST_DURATION.ERROR,
-      })
-      return { success: false, error }
-    } finally {
-      if (isCurrent()) {
-        sourceQueryRequests.delete(sourceId)
-        isLoading.value = false
-      }
-    }
+      return result
+    })().finally(() => {
+      if (inFlightSourceQueries?.promise === promise) inFlightSourceQueries = null
+    })
+    inFlightSourceQueries = { sourceId, promise }
+    return promise
   }
 
   function createNewQuery(sourceId?: number) {

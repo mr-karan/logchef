@@ -1,7 +1,7 @@
-import { quoteClickHouseIdentifier } from "./clickhouse";
 // The Explorer's time model. A window is plain data (a relative spec or two
 // UTC instants). Wall clock exists only at the edges (picker text, SQL text,
 // labels), and every wall-clock function takes its zone explicitly.
+import { quoteClickHouseIdentifier } from "./clickhouse";
 import {
   CalendarDateTime,
   fromAbsolute,

@@ -5,8 +5,10 @@ import {
   type SavedQuery,
   type SavedQueryContent,
 } from "@/api/savedQueries";
+import type { APIErrorResponse } from "@/api/types";
 import type { TeamSummary } from "@/api/teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
+import { useApiQuery } from "@/composables/useApiQuery";
 import { useBaseStore } from "./base";
 import { useContextStore } from "./context";
 import { i18n } from "@/i18n";
@@ -29,14 +31,17 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   });
 
   const contextStore = useContextStore();
-  const listRequests = new Map<string, symbol>();
-  let activeListKey: string | null = null;
+  let listVersion = 0;
+  let inFlightList: {
+    sourceId: number | undefined;
+    promise: Promise<{ success: boolean; data?: SavedQuery[] | null; error?: APIErrorResponse | null }>;
+  } | null = null;
 
   watch(
     [() => contextStore.teamId, () => contextStore.sourceId],
     () => {
-      listRequests.clear();
-      activeListKey = null;
+      listVersion++;
+      inFlightList = null;
       state.data.value.queries = [];
       state.data.value.selectedQuery = null;
     },
@@ -65,27 +70,23 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   }
 
   // list fetches saved queries the user can see. Optional sourceId narrows to one source.
-  async function list(sourceId?: number) {
+  function list(sourceId?: number) {
+    if (inFlightList && inFlightList.sourceId === sourceId) return inFlightList.promise;
+    const version = ++listVersion;
     const key = sourceId ? `listSavedQueries-${sourceId}` : 'listSavedQueries';
-    const request = Symbol();
-    listRequests.set(key, request);
-    activeListKey = key;
-    const isCurrent = () => activeListKey === key && listRequests.get(key) === request;
-    return await state.callApi<SavedQuery[]>({
-      apiCall: async () => {
-        try {
-          return await savedQueriesApi.list(sourceId);
-        } finally {
-          if (!isCurrent()) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
-        }
-      },
-      operationKey: key,
-      onSuccess: (responseData) => {
-        if (isCurrent()) state.data.value.queries = responseData ?? [];
-      },
-      defaultData: [],
-      showToast: false,
+    const { execute } = useApiQuery<SavedQuery[]>();
+    const promise = state.withLoading(key, async () => {
+      state.error.value = null;
+      const result = await execute(() => savedQueriesApi.list(sourceId), { defaultData: [], showToast: false });
+      if (version !== listVersion) return { success: false, data: null, error: null };
+      if (result.success) state.data.value.queries = result.data ?? [];
+      else state.error.value = result.error ?? null;
+      return result;
+    }).finally(() => {
+      if (inFlightList?.promise === promise) inFlightList = null;
     });
+    inFlightList = { sourceId, promise };
+    return promise;
   }
 
   const allQueries = computed(() => state.data.value.allQueries);

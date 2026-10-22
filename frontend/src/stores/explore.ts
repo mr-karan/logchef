@@ -24,7 +24,7 @@ import { useBaseStore } from "./base";
 import { useExploreHistogramStore } from "./exploreHistogram";
 import { useExploreAIStore } from "./exploreAI";
 import { usePreferencesStore } from "@/stores/preferences";
-import { SqlManager } from '@/services/SqlManager';
+import { generateDefaultSql } from '@/services/SqlManager';
 import { useVariables } from "@/composables/useVariables";
 import { useVariableStore, type VariableState } from "@/stores/variables";
 import { epochMs, resolveWindow, sameWindow, sqlTimeCondition, toRfc3339, type EpochMs, type ResolvedWindow, type TimeWindow } from '@/utils/timeWindow';
@@ -33,6 +33,7 @@ import { asClickHouseConnection, getVictoriaLogsOptimizer } from '@/api/sources'
 import { useExploreWindowedStore } from './exploreWindowed';
 import { WindowedHTTPError } from '@/api/windowed';
 import {
+  type QueryLanguage,
   getExploreModeForQueryLanguage,
   getNativeQueryLanguageForSource,
   hasSourceCapability,
@@ -315,9 +316,21 @@ export const useExploreStore = defineStore("explore", () => {
     source = getCurrentSource(),
   ): "logchefql" | "native" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "native" : mode);
   const isNativeHistogramSource = (source = getCurrentSource()) => getNativeQueryLanguageForSource(source) === "logsql";
-  const templateDialect = computed(() => state.data.value.activeMode === "logchefql"
-    ? "logchefql"
-    : getNativeQueryLanguageForSource(getCurrentSource()));
+  const restoredQueryLanguage = ref<QueryLanguage | null>(null);
+  const templateDialect = computed(() => {
+    if (state.data.value.activeMode === "logchefql") return "logchefql";
+    if (restoredQueryLanguage.value) return restoredQueryLanguage.value;
+    const source = getCurrentSource();
+    return source ? getNativeQueryLanguageForSource(source) : null;
+  });
+
+  watch(() => contextStore.sourceId, () => { restoredQueryLanguage.value = null; }, { flush: "sync" });
+  watch(templateDialect, (dialect) => {
+    if (!dialect) return;
+    const query = state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode;
+    useVariables().ensureVariablesFromSql(query, dialect);
+    if (state.data.value.activeShareToken) state.data.value.activeShareSnapshot = buildCurrentShareSnapshot();
+  });
 
   // Live tail: the current source must advertise the capability, and the tail
   // endpoint only accepts LogchefQL (either backend) or native logsql
@@ -408,7 +421,7 @@ export const useExploreStore = defineStore("explore", () => {
         variableStore.setAllVariable(draft.variables);
       } else {
         const { ensureVariablesFromSql } = useVariables();
-        ensureVariablesFromSql(state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode, templateDialect.value);
+        if (templateDialect.value) ensureVariablesFromSql(state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode, templateDialect.value);
       }
       return true;
     } catch (error) {
@@ -678,7 +691,8 @@ export const useExploreStore = defineStore("explore", () => {
     persistDraft();
   }
 
-  function setNativeQuery(sql: string) {
+  function setNativeQuery(sql: string, queryLanguage?: QueryLanguage) {
+    if (queryLanguage) restoredQueryLanguage.value = queryLanguage;
     state.data.value.nativeQuery = sql;
     clearSavedQueryIfDirty();
     clearShareSelectionIfDirty();
@@ -735,6 +749,7 @@ export const useExploreStore = defineStore("explore", () => {
     params: Record<string, string | undefined>,
     options?: { updateLastExecutedState?: boolean }
   ): { needsResolve: boolean; queryId?: string; needsShareResolve?: boolean; shareToken?: string; shouldExecute: boolean } {
+    restoredQueryLanguage.value = null;
     if (params.source) {
       const parsedSourceId = parseInt(params.source, 10);
       if (!isNaN(parsedSourceId)) {
@@ -806,7 +821,7 @@ export const useExploreStore = defineStore("explore", () => {
     const sqlToCheck = state.data.value.activeMode === 'native'
       ? state.data.value.nativeQuery
       : state.data.value.logchefqlCode;
-    if (sqlToCheck) {
+    if (sqlToCheck && templateDialect.value) {
       ensureVariablesFromSql(sqlToCheck, templateDialect.value);
     }
 
@@ -832,7 +847,7 @@ export const useExploreStore = defineStore("explore", () => {
       const metadata = resolveSavedQueryMetadata({
         query_language: data.query_language,
         editor_mode: data.editor_mode,
-        source_type: sourcesStore.currentSourceDetails?.source_type ?? "clickhouse",
+        source_type: sourcesStore.currentSourceDetails?.source_type ?? (data.query_language === "logsql" ? "victorialogs" : "clickhouse"),
         query_languages: sourcesStore.currentSourceDetails?.query_languages ?? [],
         saved_query_editor_modes: sourcesStore.currentSourceDetails?.saved_query_editor_modes ?? [],
       });
@@ -844,6 +859,7 @@ export const useExploreStore = defineStore("explore", () => {
       // hidden editor. See #105.
       const resolvedMode = normalizeModeForSource(getExploreModeForQueryLanguage(metadata.queryLanguage));
 
+      restoredQueryLanguage.value = metadata.queryLanguage;
       state.data.value.activeMode = resolvedMode;
       state.data.value.activeSavedQueryName = data.name;
       state.data.value.selectedQueryId = data.id.toString();
@@ -881,7 +897,7 @@ export const useExploreStore = defineStore("explore", () => {
         variableStore.setAllVariable(normalizedVariables);
       } else {
         const { ensureVariablesFromSql } = useVariables();
-        ensureVariablesFromSql(queryContent, templateDialect.value);
+        ensureVariablesFromSql(queryContent, metadata.queryLanguage);
       }
 
       _updateLastExecutedState();
@@ -895,6 +911,7 @@ export const useExploreStore = defineStore("explore", () => {
 
   function hydrateFromQueryShare(data: QueryShareResponse): { shouldExecute: boolean } {
     try {
+      restoredQueryLanguage.value = null;
       const payload = data.payload;
 
       state.data.value.activeShareToken = data.token;
@@ -924,7 +941,7 @@ export const useExploreStore = defineStore("explore", () => {
           variableStore.setAllVariable(payload.variables as VariableState[]);
         } else {
           const { ensureVariablesFromSql } = useVariables();
-          ensureVariablesFromSql(payload.query || "", templateDialect.value);
+          if (templateDialect.value) ensureVariablesFromSql(payload.query || "", templateDialect.value);
         }
       } finally {
         suppressSharedVariableTracking = false;
@@ -969,14 +986,14 @@ export const useExploreStore = defineStore("explore", () => {
       }
 
       const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
-      const result = SqlManager.generateDefaultSql({
+      const sql = generateDefaultSql({
         tableName,
         tsField: timestampField,
         window: resolved.value,
         limit: state.data.value.limit,
       });
 
-      state.data.value.nativeQuery = result.success ? result.sql : '';
+      state.data.value.nativeQuery = sql;
     }
 
     histogramStore.clearHistogramData();
@@ -999,14 +1016,14 @@ export const useExploreStore = defineStore("explore", () => {
 
         const timestampField = sourceDetails?._meta_ts_field || 'timestamp';
 
-        const result = SqlManager.generateDefaultSql({
+        const sql = generateDefaultSql({
           tableName,
           tsField: timestampField,
           window: resolved.value,
           limit: state.data.value.limit,
         });
 
-        state.data.value.nativeQuery = result.success ? result.sql : '';
+        state.data.value.nativeQuery = sql;
       }
     }
 
@@ -1220,25 +1237,15 @@ export const useExploreStore = defineStore("explore", () => {
             tableName = `${chConn.database}.${chConn.table_name}`;
           }
 
-          const result = SqlManager.generateDefaultSql({
+          sql = generateDefaultSql({
             tableName,
             tsField,
             window: run,
             limit: state.data.value.limit,
           });
 
-          if (!result.success) {
-            return state.handleError({
-              status: "error",
-              message: "Failed to generate default SQL",
-              error_type: "ValidationError"
-            }, operationKey);
-          }
-
-          sql = result.sql;
-
           if (state.data.value.activeMode === 'native') {
-            state.data.value.nativeQuery = result.sql;
+            state.data.value.nativeQuery = sql;
           }
         }
       }
@@ -1730,6 +1737,7 @@ export const useExploreStore = defineStore("explore", () => {
     nativeQuery: computed(() => state.data.value.nativeQuery),
     logchefqlCode: computed(() => state.data.value.logchefqlCode),
     activeMode: computed(() => state.data.value.activeMode),
+    templateDialect,
     error: state.error,
     queryId: computed(() => state.data.value.queryId),
     lastExecutedState: computed(() => state.data.value.lastExecutedState),

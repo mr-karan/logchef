@@ -14,9 +14,3 @@ WHERE ${sqlTimeCondition(tsField, window)}
 ORDER BY ${quoteClickHouseIdentifier(tsField)} DESC
 LIMIT ${limit}`;
 }
-
-export const SqlManager = {
-  generateDefaultSql(params: Parameters<typeof generateDefaultSql>[0]) {
-    return { success: true, sql: generateDefaultSql(params), warnings: [] };
-  },
-};

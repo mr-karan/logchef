@@ -695,9 +695,8 @@ const handleEditorChange = (value: string | undefined) => {
 const detectVariables = (value: string) => {
   if (typeof value !== 'string') return;
 
-  const dialect = props.activeMode === 'logchefql'
-    ? 'logchefql'
-    : isVictoriaLogsSource.value ? 'logsql' : 'clickhouse-sql';
+  const dialect = exploreStore.templateDialect;
+  if (!dialect) return;
   const extractedVars = extractVariablesWithOptional(value, dialect);
 
   const currentVariables = allVariables?.value ?? [];
@@ -739,8 +738,8 @@ watch(
 
 // Watch for editor content changes to detect variables immediately
 watch(
-  () => editorContent.value,
-  (newValue) => {
+  () => [editorContent.value, exploreStore.templateDialect] as const,
+  ([newValue]) => {
     detectVariables(newValue ?? "");
   },
   { immediate: true }

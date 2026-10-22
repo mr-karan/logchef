@@ -12,6 +12,7 @@ import type {
   ValidateConnectionRequestInfo,
 } from "@/api/sources";
 import type { APIErrorResponse } from "@/api/types";
+import { useApiQuery } from "@/composables/useApiQuery";
 import { useBaseStore } from "./base";
 import { i18n } from "@/i18n";
 
@@ -93,10 +94,14 @@ export const useSourcesStore = defineStore("sources", () => {
 
   // Track validated connections
   const validatedConnections = reactive(new Set<string>());
-  const teamSourceRequests = new Map<number, symbol>();
+  const teamSourceRequests = new Map<number, Promise<{ success: boolean; data?: Source[] | null; error?: APIErrorResponse | null }>>();
+  let teamContextVersion = 0;
   const sourceActivityRequests = new Map<number, Promise<SourceActivityRequestResult>>();
 
-  watch(() => contextStore.teamId, () => teamSourceRequests.clear(), { flush: "sync" });
+  watch(() => contextStore.teamId, () => {
+    teamContextVersion++;
+    teamSourceRequests.clear();
+  }, { flush: "sync" });
 
   // Hydration state
   const isHydrated = ref(false);
@@ -152,13 +157,14 @@ export const useSourcesStore = defineStore("sources", () => {
       state.data.value.currentSourceDetails = null;
 
       if (!newTeamId) {
+        state.data.value.isLoadingTeamSources = false;
         return;
       }
 
       state.data.value.isLoadingTeamSources = true;
       const pending = loadTeamSources(newTeamId);
-      const request = teamSourceRequests.get(newTeamId);
-      const isCurrent = () => contextStore.teamId === newTeamId && teamSourceRequests.get(newTeamId) === request;
+      const version = teamContextVersion;
+      const isCurrent = () => version === teamContextVersion;
       try {
         await pending;
 
@@ -283,31 +289,23 @@ export const useSourcesStore = defineStore("sources", () => {
     return isHydrated.value;
   }
 
-  async function loadTeamSources(teamId: number, _version?: number) {
-    const request = Symbol();
-    teamSourceRequests.set(teamId, request);
-    const isCurrent = () => contextStore.teamId === teamId && teamSourceRequests.get(teamId) === request;
-    try {
-      return await state.withLoading(`loadTeamSources-${teamId}`, async () => {
-        return await state.callApi({
-          apiCall: async () => {
-            try {
-              return await sourcesApi.listTeamSources(teamId);
-            } finally {
-              if (!isCurrent()) throw { status: "error", message: "Request superseded", error_type: "CanceledError" };
-            }
-          },
-          operationKey: `loadTeamSources-${teamId}`,
-          onSuccess: (data) => {
-            if (isCurrent()) state.data.value.teamSources = data ?? [];
-          },
-          defaultData: [],
-          showToast: false,
-        });
-      });
-    } finally {
-      if (isCurrent()) state.data.value.isLoadingTeamSources = false;
-    }
+  function loadTeamSources(teamId: number, _version?: number) {
+    const pending = teamSourceRequests.get(teamId);
+    if (pending) return pending;
+    const version = teamContextVersion;
+    const { execute } = useApiQuery<Source[]>();
+    const promise = state.withLoading(`loadTeamSources-${teamId}`, async () => {
+      state.error.value = null;
+      const result = await execute(() => sourcesApi.listTeamSources(teamId), { defaultData: [], showToast: false });
+      if (contextStore.teamId !== teamId || version !== teamContextVersion) return { success: false, data: null, error: null };
+      if (result.success) state.data.value.teamSources = result.data ?? [];
+      else state.error.value = result.error ?? null;
+      return result;
+    }).finally(() => {
+      if (teamSourceRequests.get(teamId) === promise) teamSourceRequests.delete(teamId);
+    });
+    teamSourceRequests.set(teamId, promise);
+    return promise;
   }
 
   async function createSource(payload: CreateSourcePayload) {
@@ -592,10 +590,9 @@ export const useSourcesStore = defineStore("sources", () => {
           // Update in local state
           const index = sources.value.findIndex(s => s.id === id);
           if (index >= 0) {
-            const updatedSource = { ...sources.value[index], ...updatedSourceData };
             state.data.value.sources = [
               ...sources.value.slice(0, index),
-              updatedSource,
+              updatedSourceData,
               ...sources.value.slice(index + 1)
             ];
           }
@@ -603,19 +600,15 @@ export const useSourcesStore = defineStore("sources", () => {
           // Also update in team sources if present
           const teamIndex = teamSources.value.findIndex(s => s.id === id);
           if (teamIndex >= 0) {
-            const updatedTeamSource = { ...teamSources.value[teamIndex], ...updatedSourceData };
             state.data.value.teamSources = [
               ...teamSources.value.slice(0, teamIndex),
-              updatedTeamSource,
+              updatedSourceData,
               ...teamSources.value.slice(teamIndex + 1)
             ];
           }
 
           if (state.data.value.currentSourceDetails?.id === id) {
-            state.data.value.currentSourceDetails = {
-              ...state.data.value.currentSourceDetails,
-              ...updatedSourceData,
-            };
+            state.data.value.currentSourceDetails = updatedSourceData;
           }
           delete state.data.value.sourceInspections[id.toString()];
           delete state.data.value.sourceActivities[id.toString()];

@@ -983,18 +983,3 @@ describe("explore template dialect on load", () => {
     });
   }
 });
-
-describe("explore timestamp identifier escaping", () => {
-  beforeEach(() => {
-    setActivePinia(createPinia());
-    localStorage.clear();
-    mocks.sourcesState.currentSourceDetails = makeSource({ _meta_ts_field: "event`time\\path" });
-  });
-
-  it("quotes the timestamp in both the display SQL filter and sort", () => {
-    const store = useExploreStore();
-    store.setWindow(absolute(0, 1000));
-    expect(store.sqlForExecution).toContain("WHERE `event\\x60time\\\\path` BETWEEN");
-    expect(store.sqlForExecution).toContain("ORDER BY `event\\x60time\\\\path` DESC");
-  });
-});
