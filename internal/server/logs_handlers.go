@@ -13,6 +13,7 @@ import (
 
 	dashcache "github.com/mr-karan/logchef/internal/cache"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -177,7 +178,7 @@ const logsQueryFailure = "Failed to query logs"
 
 // handleQueryLogs handles requests to query logs for a specific source.
 // Access is controlled by the requireTeamHasSource middleware.
-func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
+func (s *Server) handleQueryLogs(c fiber.Ctx) error {
 	src, ok := s.authorizedSource(c)
 	if !ok {
 		return nil
@@ -201,10 +202,6 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	}
 	processedQuery := params.RawQuery
 
-	// ClickHouse-backed sources stream the response body row-by-row so server
-	// memory stays bounded regardless of result size (the OOM this endpoint used
-	// to hit came from buffering the full result set into a []map before
-	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
 	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
@@ -244,62 +241,92 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		})
 	}
 
-	if source.IsClickHouse() {
-		cfg := queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation}
+	return s.executePreviewQuery(c, user, previewQuery{
+		src:             src,
+		source:          source,
+		params:          params,
+		cfg:             queryStreamConfig{logsKey: "data", failure: logsQueryFailure, operation: logsQueryOperation},
+		mode:            "sql",
+		trackedQuery:    req.QueryText,
+		requestedLimit:  req.Limit,
+		historyQuery:    req.QueryText,
+		historyLanguage: models.QueryLanguageClickHouseSQL,
+		cacheable:       cacheable,
+		cacheKey:        cacheKey,
+		cacheTTL:        effTTL,
+	})
+}
+
+// previewQuery is a prepared /logs/query or /logchefql/query request. The two
+// handlers differ only in preparation; executePreviewQuery runs both.
+type previewQuery struct {
+	src    access.AuthorizedSource
+	source *models.Source
+	params datasource.QueryRequest
+	cfg    queryStreamConfig
+	// columnsSource orders buffered columns by the source schema. The SQL
+	// endpoint passes nil and keeps the result order.
+	columnsSource   *models.Source
+	mode            string
+	trackedQuery    string
+	requestedLimit  int
+	historyQuery    string
+	historyLanguage models.QueryLanguage
+	cacheable       bool
+	cacheKey        [32]byte
+	cacheTTL        time.Duration
+}
+
+// executePreviewQuery serves q from the dashboard cache when it is cacheable,
+// streams it from ClickHouse, and otherwise runs it buffered.
+func (s *Server) executePreviewQuery(c fiber.Ctx, user *models.User, q previewQuery) error {
+	sourceID, teamID := q.src.SourceID(), q.src.TeamID()
+	fillTimeout := time.Duration(*q.params.QueryTimeout) * time.Second
+
+	// ClickHouse-backed sources stream the response body row-by-row so server
+	// memory stays bounded regardless of result size. Other source types
+	// (VictoriaLogs) keep the buffered path.
+	if q.source.IsClickHouse() {
 		// OOM guardrail: only the dashboard-directive path buffers (bounded by
 		// max_entry_bytes); on overflow the fill errors and we fall through to the
 		// unbuffered streaming path below, which is left byte-for-byte unchanged.
-		if cacheable {
-			fillTimeout := time.Duration(*params.QueryTimeout) * time.Second
-			if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, params, cfg)); handled {
+		if q.cacheable {
+			if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, s.fillClickHouseStream(user.ID, teamID, sourceID, q.params, q.cfg)); handled {
 				return err
 			} else if err != nil {
-				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", "sql")
-				return s.writeDashboardStreamError(c, sourceID, err, logsQueryFailure, logsQueryOperation)
+				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "mode", q.mode)
+				return s.writeDashboardStreamError(c, sourceID, err, q.cfg.failure, q.cfg.operation)
 			}
 		}
-		return s.streamPreviewQuery(c, sourceID, teamID, user, params,
-			cfg, req.QueryText, "sql", req.Limit,
-			req.QueryText, models.QueryLanguageClickHouseSQL)
+		return s.streamPreviewQuery(c, user, q)
 	}
 
 	// Non-streaming providers (VictoriaLogs) already buffer; serve dashboard
 	// panels from the cache when eligible.
-	if cacheable {
-		fillTimeout := time.Duration(*params.QueryTimeout) * time.Second
-		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
-			result, err := core.QueryLogs(ctx, s.datasources, src, params)
+	if q.cacheable {
+		fill := s.dashboardQueryFill(user.ID, teamID, sourceID, q.params.RawQuery, func(ctx context.Context, queryID string) ([]byte, error) {
+			result, err := core.QueryLogs(ctx, s.datasources, q.src, q.params)
 			if err != nil {
 				return nil, err
 			}
-			resp := map[string]any{
-				"query_id": queryID,
-				"data":     result.Logs,
-				"stats":    result.Stats,
-				"columns":  core.ResultColumns(nil, result),
-				"warnings": result.Warnings,
-			}
-			return json.Marshal(NewSuccessResponse(resp))
+			return json.Marshal(NewSuccessResponse(q.bufferedResponse(result, queryID)))
 		})
-		if handled, err := s.tryServeDashboardCache(c, cacheKey, effTTL, fillTimeout, fill); handled {
+		if handled, err := s.tryServeDashboardCache(c, q.cacheKey, q.cacheTTL, fillTimeout, fill); handled {
 			return err
 		} else if err != nil {
-			return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
+			return s.sendQueryError(c, sourceID, err, q.cfg.failure, q.cfg.operation)
 		}
 	}
 
-	// Buffered fallback for non-streaming providers.
-	// Create a cancellable context for this query
 	queryCtx, cancel := context.WithCancel(c.Context())
-	defer cancel() // Ensure cleanup
+	defer cancel()
 
-	// Add query to tracker atomically with admission control.
 	queryID, err := queryTracker.StartQuery(
 		QueryClassPreview,
 		user.ID,
 		sourceID,
 		teamID,
-		req.QueryText,
+		q.trackedQuery,
 		cancel,
 		s.config.Query.MaxConcurrentPerUser,
 		s.config.Query.MaxConcurrentGlobal,
@@ -310,47 +337,48 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track query", models.GeneralErrorType)
 	}
-	defer queryTracker.RemoveQuery(queryID) // Ensure cleanup
+	defer queryTracker.RemoveQuery(queryID)
 
-	// Execute query via core function with cancellable context.
-	result, err := core.QueryLogs(queryCtx, s.datasources, src, params)
+	result, err := core.QueryLogs(queryCtx, s.datasources, q.src, q.params)
 	if err != nil {
-		return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
+		return s.sendQueryError(c, sourceID, err, q.cfg.failure, q.cfg.operation)
 	}
 
-	// Log successful query execution
-	if result != nil {
-		s.log.Info("query.execute",
-			"user", user.Email,
-			"team_id", teamID,
-			"source_id", sourceID,
-			"mode", "sql",
-			"query_id", queryID,
-			"rows", len(result.Logs),
-			"duration_ms", result.Stats.ExecutionTimeMs,
-			"limit_requested", req.Limit,
-			"limit_applied", result.Stats.LimitApplied,
-			"truncated", result.Stats.Truncated,
-		)
-		s.recordQueryHistory(user, teamID, sourceID, req.QueryText, models.QueryLanguageClickHouseSQL,
-			int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
-	}
+	s.log.Info("query.execute",
+		"user", user.Email,
+		"team_id", teamID,
+		"source_id", sourceID,
+		"mode", q.mode,
+		"query_id", queryID,
+		"rows", len(result.Logs),
+		"duration_ms", result.Stats.ExecutionTimeMs,
+		"limit_requested", q.requestedLimit,
+		"limit_applied", result.Stats.LimitApplied,
+		"truncated", result.Stats.Truncated,
+	)
+	s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
+		int64(result.Stats.ExecutionTimeMs), int64(len(result.Logs)))
 
-	// Add query ID to the response for frontend tracking
-	if result != nil {
-		columns := core.ResultColumns(nil, result)
-		// Create a map to include the query ID with the result
-		responseWithQueryID := map[string]any{
-			"query_id": queryID,
-			"data":     result.Logs,
-			"stats":    result.Stats,
-			"columns":  columns,
-			"warnings": result.Warnings,
-		}
-		return SendSuccess(c, fiber.StatusOK, responseWithQueryID)
-	}
+	return SendSuccess(c, fiber.StatusOK, q.bufferedResponse(result, queryID))
+}
 
-	return SendSuccess(c, fiber.StatusOK, result)
+// bufferedResponse has the same keys as the streamed response for q.
+func (q previewQuery) bufferedResponse(result *models.QueryResult, queryID string) map[string]any {
+	resp := map[string]any{
+		"query_id":    queryID,
+		q.cfg.logsKey: result.Logs,
+		"stats":       result.Stats,
+		"columns":     core.ResultColumns(q.columnsSource, result),
+		"warnings":    result.Warnings,
+	}
+	if q.cfg.includeGenerated {
+		resp["generated_sql"] = q.cfg.generatedSQL // Deprecated legacy field kept for compatibility.
+		resp["generated_query"] = q.cfg.generatedQuery
+		resp["generated_query_language"] = q.cfg.generatedLanguage
+		resp["conditions"] = q.cfg.conditions
+		resp["fields_used"] = q.cfg.fieldsUsed
+	}
+	return resp
 }
 
 // handleCancelQuery cancels a running query for a specific source
