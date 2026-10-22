@@ -11,19 +11,15 @@ import (
 
 	"github.com/gofiber/fiber/v3"
 
-	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
-	}
+	sourceID, teamID := src.SourceID(), src.TeamID()
 	user := currentUser(c)
 	if user == nil {
 		return sendMissingUser(c)

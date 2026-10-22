@@ -32,14 +32,11 @@ const tailHeartbeatInterval = 15 * time.Second
 //
 // GET /api/v1/teams/:teamID/sources/:sourceID/logs/tail?query=&query_language=
 func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request handler, inherently branchy
-	sourceID, err := core.ParseSourceID(c.Params("sourceID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
+	src, ok := s.authorizedSource(c)
+	if !ok {
+		return nil
 	}
-	teamID, err := core.ParseTeamID(c.Params("teamID"))
-	if err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
-	}
+	sourceID, teamID := src.SourceID(), src.TeamID()
 	user := currentUser(c)
 	if user == nil {
 		return sendMissingUser(c)
