@@ -457,8 +457,15 @@ func TestClickHouseResourceFailureResponses(t *testing.T) {
 }
 
 func TestQueryTransportTimeoutResponses(t *testing.T) {
-	dialer := net.Dialer{Timeout: 20 * time.Millisecond}
-	conn, dialErr := dialer.DialContext(t.Context(), "tcp", "192.0.2.1:80")
+	stop := make(chan struct{})
+	backend := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		<-stop
+	}))
+	t.Cleanup(backend.Close)
+	t.Cleanup(func() { close(stop) })
+
+	dialer := net.Dialer{Deadline: time.Now().Add(-time.Second)}
+	conn, dialErr := dialer.DialContext(t.Context(), "tcp", backend.Listener.Addr().String())
 	if conn != nil {
 		_ = conn.Close()
 	}
@@ -466,22 +473,22 @@ func TestQueryTransportTimeoutResponses(t *testing.T) {
 	if !errors.As(dialErr, &netErr) || !netErr.Timeout() {
 		t.Fatalf("want real dial timeout, got %v", dialErr)
 	}
-	client := &http.Client{Timeout: time.Millisecond, Transport: &http.Transport{DialContext: dialer.DialContext}}
+	client := &http.Client{Timeout: 100 * time.Millisecond, Transport: &http.Transport{}}
 	t.Cleanup(client.CloseIdleConnections)
-	resp, httpErr := client.Get("http://192.0.2.1:80")
+	resp, httpErr := client.Get(backend.URL)
 	if resp != nil {
 		_ = resp.Body.Close()
 	}
 	if !errors.As(httpErr, &netErr) || !netErr.Timeout() {
 		t.Fatalf("want HTTP client timeout, got %v", httpErr)
 	}
-	queryCtx, cancel := context.WithTimeout(t.Context(), time.Millisecond)
+	queryCtx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
-	queryRequest, err := http.NewRequestWithContext(queryCtx, http.MethodGet, "http://192.0.2.1:80", http.NoBody)
+	queryRequest, err := http.NewRequestWithContext(queryCtx, http.MethodGet, backend.URL, http.NoBody)
 	if err != nil {
 		t.Fatal(err)
 	}
-	queryClient := &http.Client{Transport: &http.Transport{DialContext: dialer.DialContext}}
+	queryClient := &http.Client{Transport: &http.Transport{}}
 	t.Cleanup(queryClient.CloseIdleConnections)
 	queryResponse, queryErr := queryClient.Do(queryRequest)
 	if queryResponse != nil {
@@ -494,13 +501,14 @@ func TestQueryTransportTimeoutResponses(t *testing.T) {
 		name              string
 		err               error
 		status, errorLogs int
+		message           string
 	}{
-		{"dial", dialErr, 500, 1},
-		{"http client connecting", httpErr, 500, 1},
-		{"query deadline", fmt.Errorf("query: %w", context.DeadlineExceeded), 408, 0},
-		{"http query deadline", queryErr, 408, 0},
-		{"ClickHouse execution deadline", &ch.Exception{Code: 159}, 408, 0},
-		{"ClickHouse socket timeout", &ch.Exception{Code: 209}, 408, 0},
+		{"dial", dialErr, 500, 1, logsQueryFailure},
+		{"http client waiting for response", httpErr, 500, 1, logsQueryFailure},
+		{"query deadline", fmt.Errorf("query: %w", context.DeadlineExceeded), 408, 0, "Request timed out"},
+		{"http query deadline", queryErr, 408, 0, "Request timed out"},
+		{"ClickHouse execution deadline", &ch.Exception{Code: 159}, 408, 0, "Request timed out"},
+		{"ClickHouse socket timeout", &ch.Exception{Code: 209}, 408, 0, "Request timed out"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
@@ -515,6 +523,15 @@ func TestQueryTransportTimeoutResponses(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer response.Body.Close()
+			var body struct {
+				Message string `json:"message"`
+			}
+			if err := json.NewDecoder(response.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			if body.Message != tc.message {
+				t.Errorf("message=%q, want %q", body.Message, tc.message)
+			}
 			count := strings.Count(logs.String(), "level=ERROR")
 			t.Logf("status=%d error_logs=%d cause=%v", response.StatusCode, count, tc.err)
 			if response.StatusCode != tc.status || count != tc.errorLogs {
