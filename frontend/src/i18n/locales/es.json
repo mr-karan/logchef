@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "¿Descartar cambios?",
   "dashboards.discardChangesConfirmation": "¿Descartar los cambios sin guardar en este panel?",
   "dashboards.discardChanges": "Descartar cambios",
-  "dashboards.unsavedLeaveConfirmation": "Tienes cambios sin guardar en este panel. ¿Salir de todos modos?"
+  "dashboards.unsavedLeaveConfirmation": "Tienes cambios sin guardar en este panel. ¿Salir de todos modos?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Entrega interrumpida",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

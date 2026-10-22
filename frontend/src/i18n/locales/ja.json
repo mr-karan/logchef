@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "変更を破棄しますか？",
   "dashboards.discardChangesConfirmation": "このダッシュボードの未保存の変更を破棄しますか？",
   "dashboards.discardChanges": "変更を破棄",
-  "dashboards.unsavedLeaveConfirmation": "このダッシュボードには未保存の変更があります。このまま移動しますか？"
+  "dashboards.unsavedLeaveConfirmation": "このダッシュボードには未保存の変更があります。このまま移動しますか？",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "配信が中断されました",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

@@ -178,6 +178,7 @@ type Querier interface {
 	// Query history ---------------------------------------------------------------
 	// Record one executed query and return its id.
 	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
+	InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (int64, error)
 	// Check if a team is managed
@@ -251,6 +252,7 @@ type Querier interface {
 	ListUsers(ctx context.Context) ([]User, error)
 	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
+	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares

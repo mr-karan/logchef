@@ -1448,5 +1448,9 @@
   "dashboards.discardChangesTitle": "Discard changes?",
   "dashboards.discardChangesConfirmation": "Discard unsaved changes to this dashboard?",
   "dashboards.discardChanges": "Discard changes",
-  "dashboards.unsavedLeaveConfirmation": "You have unsaved changes to this dashboard. Leave anyway?"
+  "dashboards.unsavedLeaveConfirmation": "You have unsaved changes to this dashboard. Leave anyway?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Delivery interrupted",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

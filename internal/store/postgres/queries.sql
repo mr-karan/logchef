@@ -676,18 +676,30 @@ INSERT INTO alert_history (
 VALUES ($1, $2, $3, $4, $5)
 RETURNING *;
 
+-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = ((payload_json::jsonb - 'delivery_deadline_at') || jsonb_build_object(
+    'delivery_in_progress', false,
+    'delivery_failed', true,
+    'delivery_error', 'delivery interrupted',
+    'delivery_retries_exhausted', COALESCE((payload_json::jsonb ->> 'delivery_attempts')::integer, 1) >= 3))::text
+WHERE status = 'triggered'
+  AND payload_json::jsonb ->> 'delivery_in_progress' = 'true'
+  AND (sqlc.arg(history_id)::bigint = 0 OR id = sqlc.arg(history_id))
+  AND (sqlc.arg(alert_id)::bigint = 0 OR alert_id = sqlc.arg(alert_id));
+
 -- name: ResolveAlertHistory :one
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = now(),
     message = $1
-WHERE id = $2
-RETURNING id;
+WHERE id = $2 AND status = 'triggered'
+RETURNING alert_id;
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = $1
-WHERE id = $2
+WHERE id = $2 AND status = 'triggered'
 RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one
@@ -1267,3 +1279,6 @@ WHERE id IN (
 )
   AND status IN ('pending', 'running') AND export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
 RETURNING *;
+
+-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = CURRENT_TIMESTAMP WHERE id = $1;

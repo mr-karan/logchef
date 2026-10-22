@@ -465,7 +465,7 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	}
 
 	// Send test email
-	if err := sender.Send(c.Context(), notification); err != nil {
+	if err := sender.Send(c.Context(), notification).Err(); err != nil {
 		s.log.Error("failed to send test email", "error", err, "recipient", recipientEmail, "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test email: %v", err))
 	}
@@ -525,7 +525,7 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	}
 
 	// Send test webhook
-	if err := s.webhookSender.Send(c.Context(), notification); err != nil {
+	if err := s.webhookSender.Send(c.Context(), notification).Err(); err != nil {
 		s.log.Error("failed to send test webhook", "error", err, "host", parsedURL.Hostname(), "user", user.Email)
 		return SendError(c, fiber.StatusBadGateway, fmt.Sprintf("Failed to send test webhook: %v", err))
 	}

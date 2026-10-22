@@ -39,7 +39,7 @@ func NewDynamicWebhookSender(settings store.SettingGetter, opts WebhookSenderOpt
 	}
 }
 
-func (d *DynamicWebhookSender) Send(ctx context.Context, notification AlertNotification) error {
+func (d *DynamicWebhookSender) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
 	opts := WebhookSenderOptions{
 		Timeout:       store.GetDurationSetting(ctx, d.settings, "alerts.request_timeout", d.defaultTimeout),
 		SkipTLSVerify: store.GetBoolSetting(ctx, d.settings, "alerts.tls_insecure_skip_verify", d.defaultSkipTLSVerify),

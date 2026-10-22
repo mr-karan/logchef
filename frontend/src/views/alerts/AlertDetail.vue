@@ -20,6 +20,7 @@ import { epochMs, formatInZone } from "@/utils/timeWindow";
 import { useTeamsStore } from "@/stores/teams";
 import { useToast } from "@/composables/useToast";
 import { alertHistoryExploreQuery } from "@/utils/alertExplore";
+import AlertDeliveryStatus from "@/components/alerts/AlertDeliveryStatus.vue";
 import AlertForm from "@/components/alerts/AlertForm.vue";
 import { EmptyState, LoadingState } from "@/components/layout";
 import type { Alert, AlertHistoryEntry, UpdateAlertRequest } from "@/api/alerts";
@@ -347,6 +348,8 @@ onMounted(async () => {
                       </Button>
                     </div>
                   </div>
+
+                  <AlertDeliveryStatus :entry="entry" />
 
                   <!-- Resolution Info -->
                   <div v-if="entry.resolved_at" class="text-xs text-muted-foreground">

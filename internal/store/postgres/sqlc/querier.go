@@ -181,6 +181,7 @@ type Querier interface {
 	// Query history ---------------------------------------------------------------
 	// Record one executed query and return its id.
 	InsertQueryHistory(ctx context.Context, arg InsertQueryHistoryParams) (int64, error)
+	InterruptAlertDeliveries(ctx context.Context, arg InterruptAlertDeliveriesParams) error
 	// Check if a source is managed
 	IsSourceManaged(ctx context.Context, id int64) (bool, error)
 	// Check if a team is managed
@@ -255,6 +256,7 @@ type Querier interface {
 	// Hold a transaction-scoped advisory lock
 	LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error
 	MarkAlertEvaluated(ctx context.Context, id int64) error
+	MarkAlertResolved(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error
 	// Delete expired query shares

@@ -59,7 +59,7 @@ func RunShareLogRedaction(t *testing.T, open LoggerOpener) {
 	}
 
 	out := logs.String()
-	if !strings.Contains(out, "failed to get query share") {
+	if !strings.Contains(out, "failed to touch query share") {
 		t.Fatalf("no error log captured, test would pass vacuously:\n%s", out)
 	}
 	if strings.Contains(out, token) {

@@ -4,6 +4,23 @@ import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/a
 import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
 
+const legacyDeliveryAttemptLimit = 3;
+
+export interface AlertDeliveryFailure {
+  message: string;
+  retriesExhausted: boolean;
+}
+
+export function alertDeliveryFailure(entry: AlertHistoryEntry): AlertDeliveryFailure | null {
+  const payload = entry.payload;
+  const message = typeof payload?.delivery_error === "string" ? payload.delivery_error : "";
+  if (payload?.delivery_failed !== true) return null;
+  const retriesExhausted = typeof payload?.delivery_retries_exhausted === "boolean"
+    ? payload.delivery_retries_exhausted
+    : typeof payload?.delivery_attempts === "number" && payload.delivery_attempts >= legacyDeliveryAttemptLimit;
+  return { message, retriesExhausted };
+}
+
 interface AlertHistoryState {
   entries: AlertHistoryEntry[];
   currentAlertId: number | null;

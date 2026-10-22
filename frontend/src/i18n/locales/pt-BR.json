@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "Descartar alterações?",
   "dashboards.discardChangesConfirmation": "Descartar as alterações não salvas neste painel?",
   "dashboards.discardChanges": "Descartar alterações",
-  "dashboards.unsavedLeaveConfirmation": "Este painel tem alterações não salvas. Sair mesmo assim?"
+  "dashboards.unsavedLeaveConfirmation": "Este painel tem alterações não salvas. Sair mesmo assim?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Entrega interrompida",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

@@ -669,18 +669,30 @@ INSERT INTO alert_history (
 VALUES (?, ?, ?, ?, ?)
 RETURNING *;
 
+-- name: InterruptAlertDeliveries :exec
+UPDATE alert_history
+SET payload_json = json_set(json_remove(payload_json, '$.delivery_deadline_at'),
+    '$.delivery_in_progress', json('false'),
+    '$.delivery_failed', json('true'),
+    '$.delivery_error', 'delivery interrupted',
+    '$.delivery_retries_exhausted', json(CASE WHEN COALESCE(json_extract(payload_json, '$.delivery_attempts'), 1) >= 3 THEN 'true' ELSE 'false' END))
+WHERE status = 'triggered'
+  AND json_extract(payload_json, '$.delivery_in_progress') = 1
+  AND (CAST(sqlc.arg(history_id) AS INTEGER) = 0 OR id = sqlc.arg(history_id))
+  AND (CAST(sqlc.arg(alert_id) AS INTEGER) = 0 OR alert_id = sqlc.arg(alert_id));
+
 -- name: ResolveAlertHistory :one
 UPDATE alert_history
 SET status = 'resolved',
     resolved_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
     message = ?
-WHERE id = ?
-RETURNING id;
+WHERE id = ? AND status = 'triggered'
+RETURNING alert_id;
 
 -- name: UpdateAlertHistoryPayload :one
 UPDATE alert_history
 SET payload_json = ?
-WHERE id = ?
+WHERE id = ? AND status = 'triggered'
 RETURNING id;
 
 -- name: GetLatestUnresolvedAlertHistory :one
@@ -1263,3 +1275,6 @@ WHERE id IN (
 )
   AND status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(sqlc.arg(max_age_seconds) AS INTEGER) / 86400.0
 RETURNING *;
+
+-- name: MarkAlertResolved :exec
+UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;

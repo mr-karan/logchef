@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "Abandonner les modifications ?",
   "dashboards.discardChangesConfirmation": "Abandonner les modifications non enregistrées de ce tableau de bord ?",
   "dashboards.discardChanges": "Abandonner les modifications",
-  "dashboards.unsavedLeaveConfirmation": "Ce tableau de bord contient des modifications non enregistrées. Quitter quand même ?"
+  "dashboards.unsavedLeaveConfirmation": "Ce tableau de bord contient des modifications non enregistrées. Quitter quand même ?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Envoi interrompu",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

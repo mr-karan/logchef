@@ -35,9 +35,12 @@ type AlertNotification struct {
 	MissingRecipientUserIDs []models.UserID
 	RecipientResolutionErr  string
 	WebhookURLs             []string
+	deliveryTargets         map[DeliveryTargetID]struct{}
+	attemptedTargets        map[DeliveryTargetID]struct{}
+	recipientTargets        map[string]DeliveryTargetID
 }
 
 // AlertSender abstracts the delivery mechanism for alert notifications.
 type AlertSender interface {
-	Send(ctx context.Context, notification AlertNotification) error
+	Send(ctx context.Context, notification AlertNotification) DeliveryResults
 }

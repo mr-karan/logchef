@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "बदलाव छोड़ें?",
   "dashboards.discardChangesConfirmation": "इस डैशबोर्ड के बिना सहेजे बदलाव छोड़ें?",
   "dashboards.discardChanges": "बदलाव छोड़ें",
-  "dashboards.unsavedLeaveConfirmation": "इस डैशबोर्ड में बिना सहेजे बदलाव हैं। फिर भी बाहर जाएँ?"
+  "dashboards.unsavedLeaveConfirmation": "इस डैशबोर्ड में बिना सहेजे बदलाव हैं। फिर भी बाहर जाएँ?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "डिलीवरी बाधित हुई",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

@@ -16,13 +16,16 @@ import (
 
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/internal/store/sqlite"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
 // TestEvaluateAlertWithTimeoutIsolatesHungEvaluation proves the per-alert
 // deadline bounds a single evaluation, so a wedged source (one whose evaluation
+
 // never returns on its own) cannot freeze the sequential evaluation loop.
+
 func TestEvaluateAlertWithTimeoutIsolatesHungEvaluation(t *testing.T) {
 	t.Parallel()
 
@@ -74,27 +77,7 @@ func newManagerTestAlertAtPath(t *testing.T, path string) (*sqlite.DB, *models.A
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	source := &models.Source{
-		Name: "logs.alerts", MetaTSField: "timestamp",
-		Connection: models.ConnectionInfo{Host: "localhost:9000", Database: "logs", TableName: "alerts"},
-	}
-	if err := source.SyncConnectionConfig(); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.CreateSource(ctx, source); err != nil {
-		t.Fatal(err)
-	}
-	alert := &models.Alert{
-		SourceID: source.ID, Name: "errors", Query: "SELECT count() FROM logs",
-		QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
-		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true,
-		ThresholdOperator: models.AlertThresholdGreaterThan, ThresholdValue: 10,
-		Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
-	}
-	if err := db.CreateAlert(ctx, alert); err != nil {
-		t.Fatal(err)
-	}
-	return db, alert, logger
+	return db, createManagerTestAlert(t, db), logger
 }
 
 func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
@@ -149,8 +132,8 @@ func TestManagerEvaluationErrorPreservesFiringState(t *testing.T) {
 
 type alertSenderFunc func(context.Context, AlertNotification) error
 
-func (f alertSenderFunc) Send(ctx context.Context, notification AlertNotification) error {
-	return f(ctx, notification)
+func (f alertSenderFunc) Send(ctx context.Context, notification AlertNotification) DeliveryResults {
+	return DeliveryResults{{Target: deliveryTargetID("test", "target"), Err: f(ctx, notification)}}
 }
 
 func TestManagerDeliveryRetries(t *testing.T) {
@@ -270,7 +253,9 @@ func countLogs(t *testing.T, logs *bytes.Buffer, msg string) int {
 }
 
 // failHistoryWrites installs a trigger that rejects the matching alert_history
+
 // writes and returns a function that removes it.
+
 func failHistoryWrites(t *testing.T, path, event string) (restore func()) {
 	t.Helper()
 	ctx := t.Context()
@@ -498,4 +483,119 @@ func TestStopCancelsActiveEvaluation(t *testing.T) {
 	if !strings.Contains(logs.String(), "level=DEBUG msg=\"alert evaluation failed\"") {
 		t.Errorf("shutdown cancellation missing debug log: %s", logs.String())
 	}
+}
+
+func createManagerTestAlert(t *testing.T, db store.Store) *models.Alert {
+	t.Helper()
+	ctx := t.Context()
+	source := &models.Source{
+		Name: "logs.alerts", MetaTSField: "timestamp",
+		Connection: models.ConnectionInfo{Host: "localhost:9000", Database: "logs", TableName: "alerts"},
+	}
+	if err := source.SyncConnectionConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateSource(ctx, source); err != nil {
+		t.Fatal(err)
+	}
+	alert := &models.Alert{
+		SourceID: source.ID, Name: "errors", Query: "SELECT count() FROM logs",
+		QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative,
+		LookbackSeconds: 300, FrequencySeconds: 60, IsActive: true,
+		ThresholdOperator: models.AlertThresholdGreaterThan, ThresholdValue: 10,
+		Severity: models.AlertSeverityWarning, LastState: models.AlertStateResolved,
+	}
+	if err := db.CreateAlert(ctx, alert); err != nil {
+		t.Fatal(err)
+	}
+	return alert
+}
+
+func TestManagerEvaluatesAfterStartupSweepFailure(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "alerts.db")
+	db, alert, logger := newManagerTestAlertAtPath(t, path)
+	if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_in_progress": true}); err != nil {
+		t.Fatal(err)
+	}
+	failHistoryWrites(t, path, "BEFORE UPDATE OF payload_json ON alert_history")
+	manager := NewManager(Options{DB: db, Logger: logger, Config: config.AlertsConfig{Enabled: true, EvaluationInterval: time.Hour}})
+	evaluated := make(chan struct{}, 1)
+	manager.evalFn = func(context.Context, *models.Alert) error { evaluated <- struct{}{}; return nil }
+	manager.Start(t.Context())
+	defer manager.Stop()
+	select {
+	case <-evaluated:
+	case <-time.After(time.Second):
+		t.Fatal("startup sweep failure prevented alert evaluation")
+	}
+}
+
+func TestManagerReservesDeliveryDeadline(t *testing.T) {
+	db, alert, logger := newManagerTestAlert(t)
+	for attempt := 1; attempt <= 2; attempt++ {
+		started := time.Now().UTC()
+		sender := alertSenderFunc(func(ctx context.Context, _ AlertNotification) error {
+			entry, err := db.GetLatestUnresolvedAlertHistory(ctx, alert.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw, ok := entry.Payload["delivery_deadline_at"].(string)
+			if !ok {
+				t.Errorf("reservation deadline = %v, want RFC 3339 UTC time", entry.Payload["delivery_deadline_at"])
+				return errors.New("retry")
+			}
+			deadline, err := time.Parse(time.RFC3339Nano, raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			bound := alertEvaluationTimeout + smtpDialTimeout + deliveryBookkeepingTimeout
+			if deadline.Before(started.Add(bound)) || deadline.After(time.Now().UTC().Add(bound)) || !strings.HasSuffix(raw, "Z") {
+				t.Errorf("reservation deadline = %s, want current attempt plus %s in UTC", raw, bound)
+			}
+			return errors.New("retry")
+		})
+		manager := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+		if err := manager.handleTriggered(t.Context(), alert, 12); err != nil {
+			t.Fatal(err)
+		}
+		entry, err := db.GetLatestUnresolvedAlertHistory(t.Context(), alert.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, exists := entry.Payload["delivery_deadline_at"]; exists {
+			t.Error("finished attempt retained its delivery deadline")
+		}
+	}
+}
+
+type blockedRecoveryStore struct {
+	store.Store
+	started chan struct{}
+}
+
+func (s *blockedRecoveryStore) RecoverAlertDeliveries(ctx context.Context) error {
+	close(s.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestManagerStopCancelsStartupSweep(t *testing.T) {
+	db, _, logger := newManagerTestAlert(t)
+	blocked := &blockedRecoveryStore{Store: db, started: make(chan struct{})}
+	manager := NewManager(Options{DB: blocked, Logger: logger, Config: config.AlertsConfig{Enabled: true}})
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	started := make(chan struct{})
+	go func() { manager.Start(ctx); close(started) }()
+	<-blocked.started
+	stopped := make(chan struct{})
+	go func() { manager.Stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		cancel()
+		<-stopped
+		t.Error("Stop could not cancel the startup sweep")
+	}
+	<-started
 }

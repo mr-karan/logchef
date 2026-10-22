@@ -27,6 +27,10 @@ const alertEvaluationTimeout = (models.DefaultQueryTimeoutSeconds + 30) * time.S
 
 const maxDeliveryAttempts = 3
 
+const deliveryBookkeepingTimeout = 2 * time.Second
+
+const deliveryAttemptTimeout = alertEvaluationTimeout + smtpDialTimeout + deliveryBookkeepingTimeout
+
 // Options encapsulates the dependencies required to run the alerting manager.
 type Options struct {
 	Config      config.AlertsConfig
@@ -77,11 +81,12 @@ func NewManager(opts Options) *Manager {
 // Start launches the evaluation loop. It is a no-op when alerting is disabled.
 func (m *Manager) Start(ctx context.Context) {
 	m.lifecycleMu.Lock()
-	defer m.lifecycleMu.Unlock()
 	if m.stopped || m.cancel != nil {
+		m.lifecycleMu.Unlock()
 		return
 	}
 	if !m.cfg.Enabled {
+		m.lifecycleMu.Unlock()
 		m.log.Debug("alerting disabled")
 		return
 	}
@@ -91,9 +96,21 @@ func (m *Manager) Start(ctx context.Context) {
 		interval = time.Minute
 	}
 	ctx, m.cancel = context.WithCancel(ctx)
+	m.wg.Add(1)
+	m.lifecycleMu.Unlock()
+
+	// One manager owns delivery reservations, as required by docs/src/content/docs/operations/database-backends.md.
+	recoveryCtx, cancel := context.WithTimeout(ctx, alertEvaluationTimeout)
+	err := m.db.RecoverAlertDeliveries(recoveryCtx)
+	cancel()
+	if err != nil && !errors.Is(err, context.Canceled) {
+		m.log.Error("failed to recover interrupted alert deliveries", "error", err)
+	}
+
 	m.log.Debug("starting alert manager", "interval", interval)
 
-	m.wg.Go(func() {
+	go func() {
+		defer m.wg.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -109,7 +126,7 @@ func (m *Manager) Start(ctx context.Context) {
 				return
 			}
 		}
-	})
+	}()
 }
 
 // Stop signals the manager to stop evaluating alerts.
@@ -275,26 +292,9 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	}
 	alreadyActive := err == nil && prevHistory != nil
 
-	deliveryAttempts := 0
-	shouldRetryDelivery := false
-	if alreadyActive {
-		// Legacy history entries have already had at least one delivery attempt.
-		deliveryAttempts = 1
-		if attempts, ok := prevHistory.Payload["delivery_attempts"].(float64); ok {
-			deliveryAttempts = int(attempts)
-		}
-		if deliveryFailed, ok := prevHistory.Payload["delivery_failed"].(bool); ok && deliveryFailed {
-			shouldRetryDelivery = deliveryAttempts < maxDeliveryAttempts
-		}
-	}
-
-	if markErr := m.db.MarkAlertTriggered(ctx, alert.ID); markErr != nil {
-		m.log.Log(ctx, evaluationLogLevel(ctx, markErr), "failed to mark alert triggered", "alert_id", alert.ID, "error", markErr)
-	}
-
+	deliveryAttempts, shouldRetryDelivery := deliveryRetryState(prevHistory)
 	if alreadyActive && !shouldRetryDelivery {
-		m.log.Debug("suppressing duplicate alert notification", "alert_id", alert.ID, "delivery_attempts", deliveryAttempts)
-		return nil
+		return m.suppressDuplicateDelivery(ctx, alert.ID, prevHistory, deliveryAttempts)
 	}
 
 	m.log.Info("alert triggered",
@@ -310,34 +310,55 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	valueCopy := value
 	message := fmt.Sprintf("alert %s triggered with value %.4f", alert.Name, value)
 
-	deliveryAttempts++
-	historyPayload := map[string]any{
-		"labels":            copyStringMap(labels),
-		"annotations":       copyStringMap(annotations),
-		"status":            string(models.AlertStatusTriggered),
-		"delivery_failed":   true,
-		"delivery_attempts": deliveryAttempts,
+	notificationHistory := prevHistory
+	if notificationHistory == nil {
+		notificationHistory = &models.AlertHistoryEntry{TriggeredAt: time.Now().UTC(), Message: message}
 	}
-
-	history := prevHistory
+	notification := m.buildNotification(ctx, alert, notificationHistory, labels, annotations, models.AlertStatusTriggered, value)
 	if shouldRetryDelivery {
-		if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, historyPayload); err != nil {
-			m.log.Error("failed to reserve alert delivery attempt", "alert_id", alert.ID, "history_id", history.ID, "error", err)
-			return nil
+		notification.deliveryTargets = pendingDeliveryTargets(prevHistory.Payload)
+		notification.attemptedTargets = storedDeliveryTargets(prevHistory.Payload, "delivery_attempted")
+	}
+	selectedTargets := notification.targetIDs()
+	attemptedIDs := notification.attemptedTargetIDs()
+	deliveryAttempts++
+	historyPayload := make(map[string]any)
+	if prevHistory != nil {
+		maps.Copy(historyPayload, prevHistory.Payload)
+	}
+	maps.Copy(historyPayload, map[string]any{
+		"labels":                     copyStringMap(labels),
+		"annotations":                copyStringMap(annotations),
+		"status":                     string(models.AlertStatusTriggered),
+		"delivery_failed":            false,
+		"delivery_in_progress":       true,
+		"delivery_deadline_at":       time.Now().UTC().Add(deliveryAttemptTimeout).Format(time.RFC3339Nano),
+		"delivery_attempted":         attemptedIDs,
+		"delivery_attempts":          deliveryAttempts,
+		"delivery_pending":           selectedTargets,
+		"delivery_retries_exhausted": deliveryAttempts >= maxDeliveryAttempts,
+	})
+
+	history, err := m.reserveTriggeredHistory(ctx, alert.ID, prevHistory, valueCopy, message, historyPayload)
+	if err != nil {
+		if !models.IsNotFound(err) {
+			m.log.Error("failed to reserve alert delivery attempt", "alert_id", alert.ID, "error", err)
 		}
-	} else {
-		var err error
-		history, err = m.db.InsertAlertHistory(ctx, alert.ID, models.AlertStatusTriggered, &valueCopy, message, historyPayload)
-		if err != nil {
-			m.log.Error("failed to insert alert history", "alert_id", alert.ID, "error", err)
-			return nil
-		}
-		if err := m.db.PruneAlertHistory(ctx, alert.ID, m.cfg.HistoryLimit); err != nil {
-			m.log.Warn("failed to prune alert history", "alert_id", alert.ID, "error", err)
-		}
+		return nil
 	}
 
-	deliveryErr := m.sendNotification(ctx, alert, history, labels, annotations, models.AlertStatusTriggered, value)
+	notification.TriggeredAt = history.TriggeredAt
+	results := m.sender.Send(ctx, notification)
+	deliveryErr := results.Err()
+	// Removing every pending target leaves delivery failed until a current target succeeds.
+	if shouldRetryDelivery && len(selectedTargets) == 0 && len(results) == 0 {
+		deliveryErr = errors.New("no pending notification targets remain")
+	}
+	historyPayload["delivery_in_progress"] = false
+	delete(historyPayload, "delivery_deadline_at")
+	historyPayload["delivery_pending"] = results.failedTargets()
+	historyPayload["delivery_retries_exhausted"] = deliveryErr != nil && deliveryAttempts >= maxDeliveryAttempts
+	delete(historyPayload, "delivery_error")
 	historyPayload["delivery_failed"] = deliveryErr != nil
 	if deliveryErr != nil {
 		historyPayload["delivery_error"] = deliveryErr.Error()
@@ -348,13 +369,60 @@ func (m *Manager) handleTriggered(ctx context.Context, alert *models.Alert, valu
 	} else {
 		m.log.Debug("alert notifications sent", "alert_id", alert.ID, "alert_name", alert.Name)
 	}
-	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	bookkeepingCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryBookkeepingTimeout)
 	defer cancel()
 	if err := m.db.UpdateAlertHistoryPayload(bookkeepingCtx, history.ID, historyPayload); err != nil {
-		m.log.Error("failed to update alert history payload after delivery", "alert_id", alert.ID, "history_id", history.ID, "error", err)
+		if models.IsNotFound(err) {
+			m.log.Debug("alert history resolved during delivery", "alert_id", alert.ID, "history_id", history.ID)
+		} else {
+			m.log.Error("failed to update alert history payload after delivery", "alert_id", alert.ID, "history_id", history.ID, "error", err)
+		}
 	}
 
 	return nil
+}
+
+func (m *Manager) suppressDuplicateDelivery(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, attempts int) error {
+	if attempts >= maxDeliveryAttempts && history.Payload["delivery_in_progress"] == true {
+		history.Payload["delivery_in_progress"] = false
+		delete(history.Payload, "delivery_deadline_at")
+		history.Payload["delivery_failed"] = true
+		history.Payload["delivery_retries_exhausted"] = true
+		history.Payload["delivery_error"] = "delivery interrupted"
+		if err := m.db.UpdateAlertHistoryPayload(ctx, history.ID, history.Payload); err != nil && !models.IsNotFound(err) {
+			m.log.Error("failed to record interrupted alert delivery", "alert_id", alertID, "history_id", history.ID, "error", err)
+		}
+	}
+	if err := m.db.TouchAlertEvaluated(ctx, alertID); err != nil {
+		return err
+	}
+	m.log.Debug("suppressing duplicate alert notification", "alert_id", alertID, "delivery_attempts", attempts)
+	return nil
+}
+
+func (m *Manager) reserveTriggeredHistory(ctx context.Context, alertID models.AlertID, history *models.AlertHistoryEntry, value float64, message string, payload map[string]any) (*models.AlertHistoryEntry, error) {
+	newHistory := history == nil
+	err := m.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if newHistory {
+			var err error
+			history, err = tx.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, &value, message, payload)
+			if err != nil {
+				return err
+			}
+		} else if err := tx.UpdateAlertHistoryPayload(ctx, history.ID, payload); err != nil {
+			return err
+		}
+		return tx.MarkAlertTriggered(ctx, alertID)
+	})
+	if err != nil {
+		return nil, err
+	}
+	if newHistory {
+		if err := m.db.PruneAlertHistory(ctx, alertID, m.cfg.HistoryLimit); err != nil {
+			m.log.Warn("failed to prune alert history", "alert_id", alertID, "error", err)
+		}
+	}
+	return history, nil
 }
 
 func (m *Manager) handleResolved(ctx context.Context, alert *models.Alert, value float64) error {
@@ -453,11 +521,11 @@ func (m *Manager) sendNotification(ctx context.Context, alert *models.Alert, his
 	}
 
 	notification := m.buildNotification(ctx, alert, history, labels, annotations, status, value)
-	return boundedDeliveryError(m.sender.Send(ctx, notification))
+	return m.sender.Send(ctx, notification).Err()
 }
 
 func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, history *models.AlertHistoryEntry, labels, annotations map[string]string, status models.AlertStatus, value float64) AlertNotification {
-	recipientEmails, missingRecipients := m.resolveRecipientEmails(ctx, alert)
+	recipientEmails, missingRecipients, recipientTargets := m.resolveRecipientEmails(ctx, alert)
 	sourceName := labels["source"]
 
 	return AlertNotification{
@@ -483,19 +551,21 @@ func (m *Manager) buildNotification(ctx context.Context, alert *models.Alert, hi
 		Message:                 history.Message,
 		RecipientUserIDs:        append([]models.UserID(nil), alert.RecipientUserIDs...),
 		RecipientEmails:         recipientEmails,
+		recipientTargets:        recipientTargets,
 		MissingRecipientUserIDs: missingRecipients,
 		WebhookURLs:             append([]string(nil), alert.WebhookURLs...),
 	}
 }
 
-func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID) {
+func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Alert) (recipientEmails []string, missingRecipients []models.UserID, targets map[string]DeliveryTargetID) {
 	if alert == nil || len(alert.RecipientUserIDs) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Recipients are users (not team-scoped). Resolve each by id directly.
 	seen := make(map[string]struct{}, len(alert.RecipientUserIDs))
 	emails := make([]string, 0, len(alert.RecipientUserIDs))
+	targets = make(map[string]DeliveryTargetID)
 	missing := make([]models.UserID, 0)
 	for _, userID := range alert.RecipientUserIDs {
 		user, err := m.db.GetUser(ctx, userID)
@@ -513,9 +583,10 @@ func (m *Manager) resolveRecipientEmails(ctx context.Context, alert *models.Aler
 		}
 		seen[email] = struct{}{}
 		emails = append(emails, email)
+		targets[email] = emailUserTarget(userID)
 	}
 
-	return emails, missing
+	return emails, missing, targets
 }
 
 func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string {
@@ -537,7 +608,7 @@ func (m *Manager) generatorURL(ctx context.Context, alert *models.Alert) string 
 
 type noopSender struct{}
 
-func (noopSender) Send(_ context.Context, _ AlertNotification) error {
+func (noopSender) Send(_ context.Context, _ AlertNotification) DeliveryResults {
 	return nil
 }
 

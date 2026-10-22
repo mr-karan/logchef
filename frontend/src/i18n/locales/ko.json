@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "변경 사항을 삭제할까요?",
   "dashboards.discardChangesConfirmation": "이 대시보드의 저장하지 않은 변경 사항을 삭제할까요?",
   "dashboards.discardChanges": "변경 사항 삭제",
-  "dashboards.unsavedLeaveConfirmation": "이 대시보드에 저장하지 않은 변경 사항이 있습니다. 그래도 나갈까요?"
+  "dashboards.unsavedLeaveConfirmation": "이 대시보드에 저장하지 않은 변경 사항이 있습니다. 그래도 나갈까요?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "전송 중단",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

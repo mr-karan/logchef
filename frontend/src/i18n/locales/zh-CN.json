@@ -1448,5 +1448,9 @@
   "dashboards.discardChangesTitle": "放弃更改？",
   "dashboards.discardChangesConfirmation": "放弃此仪表板尚未保存的更改？",
   "dashboards.discardChanges": "放弃更改",
-  "dashboards.unsavedLeaveConfirmation": "此仪表板有尚未保存的更改。仍要离开？"
+  "dashboards.unsavedLeaveConfirmation": "此仪表板有尚未保存的更改。仍要离开？",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "投递中断",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

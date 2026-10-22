@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "Änderungen verwerfen?",
   "dashboards.discardChangesConfirmation": "Nicht gespeicherte Änderungen an diesem Dashboard verwerfen?",
   "dashboards.discardChanges": "Änderungen verwerfen",
-  "dashboards.unsavedLeaveConfirmation": "Dieses Dashboard enthält nicht gespeicherte Änderungen. Trotzdem verlassen?"
+  "dashboards.unsavedLeaveConfirmation": "Dieses Dashboard enthält nicht gespeicherte Änderungen. Trotzdem verlassen?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Zustellung unterbrochen",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

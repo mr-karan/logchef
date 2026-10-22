@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "Scartare le modifiche?",
   "dashboards.discardChangesConfirmation": "Scartare le modifiche non salvate a questa dashboard?",
   "dashboards.discardChanges": "Scarta modifiche",
-  "dashboards.unsavedLeaveConfirmation": "Questa dashboard contiene modifiche non salvate. Uscire comunque?"
+  "dashboards.unsavedLeaveConfirmation": "Questa dashboard contiene modifiche non salvate. Uscire comunque?",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "Invio interrotto",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

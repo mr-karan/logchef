@@ -733,5 +733,9 @@
   "dashboards.discardChangesTitle": "放棄變更？",
   "dashboards.discardChangesConfirmation": "放棄此儀表板尚未儲存的變更？",
   "dashboards.discardChanges": "放棄變更",
-  "dashboards.unsavedLeaveConfirmation": "此儀表板有尚未儲存的變更。仍要離開？"
+  "dashboards.unsavedLeaveConfirmation": "此儀表板有尚未儲存的變更。仍要離開？",
+  "alerts.delivering": "Delivering",
+  "alerts.deliveryInterrupted": "傳送中斷",
+  "alerts.deliveryFailed": "Delivery failed",
+  "alerts.deliveryRetriesExhausted": "Delivery retries exhausted"
 }

@@ -258,6 +258,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.insertQueryHistoryStmt, err = db.PrepareContext(ctx, insertQueryHistory); err != nil {
 		return nil, fmt.Errorf("error preparing query InsertQueryHistory: %w", err)
 	}
+	if q.interruptAlertDeliveriesStmt, err = db.PrepareContext(ctx, interruptAlertDeliveries); err != nil {
+		return nil, fmt.Errorf("error preparing query InterruptAlertDeliveries: %w", err)
+	}
 	if q.isSourceManagedStmt, err = db.PrepareContext(ctx, isSourceManaged); err != nil {
 		return nil, fmt.Errorf("error preparing query IsSourceManaged: %w", err)
 	}
@@ -362,6 +365,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	}
 	if q.markAlertEvaluatedStmt, err = db.PrepareContext(ctx, markAlertEvaluated); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertEvaluated: %w", err)
+	}
+	if q.markAlertResolvedStmt, err = db.PrepareContext(ctx, markAlertResolved); err != nil {
+		return nil, fmt.Errorf("error preparing query MarkAlertResolved: %w", err)
 	}
 	if q.markAlertTriggeredStmt, err = db.PrepareContext(ctx, markAlertTriggered); err != nil {
 		return nil, fmt.Errorf("error preparing query MarkAlertTriggered: %w", err)
@@ -884,6 +890,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing insertQueryHistoryStmt: %w", cerr)
 		}
 	}
+	if q.interruptAlertDeliveriesStmt != nil {
+		if cerr := q.interruptAlertDeliveriesStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing interruptAlertDeliveriesStmt: %w", cerr)
+		}
+	}
 	if q.isSourceManagedStmt != nil {
 		if cerr := q.isSourceManagedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing isSourceManagedStmt: %w", cerr)
@@ -1057,6 +1068,11 @@ func (q *Queries) Close() error {
 	if q.markAlertEvaluatedStmt != nil {
 		if cerr := q.markAlertEvaluatedStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing markAlertEvaluatedStmt: %w", cerr)
+		}
+	}
+	if q.markAlertResolvedStmt != nil {
+		if cerr := q.markAlertResolvedStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing markAlertResolvedStmt: %w", cerr)
 		}
 	}
 	if q.markAlertTriggeredStmt != nil {
@@ -1386,6 +1402,7 @@ type Queries struct {
 	insertOAuthAccessTokenStmt            *sql.Stmt
 	insertOAuthRefreshTokenStmt           *sql.Stmt
 	insertQueryHistoryStmt                *sql.Stmt
+	interruptAlertDeliveriesStmt          *sql.Stmt
 	isSourceManagedStmt                   *sql.Stmt
 	isTeamManagedStmt                     *sql.Stmt
 	listAPITokensForUserStmt              *sql.Stmt
@@ -1421,6 +1438,7 @@ type Queries struct {
 	listUsersStmt                         *sql.Stmt
 	listUsersForProvisioningStmt          *sql.Stmt
 	markAlertEvaluatedStmt                *sql.Stmt
+	markAlertResolvedStmt                 *sql.Stmt
 	markAlertTriggeredStmt                *sql.Stmt
 	pruneAlertHistoryStmt                 *sql.Stmt
 	pruneExpiredQuerySharesStmt           *sql.Stmt
@@ -1547,6 +1565,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		insertOAuthAccessTokenStmt:            q.insertOAuthAccessTokenStmt,
 		insertOAuthRefreshTokenStmt:           q.insertOAuthRefreshTokenStmt,
 		insertQueryHistoryStmt:                q.insertQueryHistoryStmt,
+		interruptAlertDeliveriesStmt:          q.interruptAlertDeliveriesStmt,
 		isSourceManagedStmt:                   q.isSourceManagedStmt,
 		isTeamManagedStmt:                     q.isTeamManagedStmt,
 		listAPITokensForUserStmt:              q.listAPITokensForUserStmt,
@@ -1582,6 +1601,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		listUsersStmt:                         q.listUsersStmt,
 		listUsersForProvisioningStmt:          q.listUsersForProvisioningStmt,
 		markAlertEvaluatedStmt:                q.markAlertEvaluatedStmt,
+		markAlertResolvedStmt:                 q.markAlertResolvedStmt,
 		markAlertTriggeredStmt:                q.markAlertTriggeredStmt,
 		pruneAlertHistoryStmt:                 q.pruneAlertHistoryStmt,
 		pruneExpiredQuerySharesStmt:           q.pruneExpiredQuerySharesStmt,

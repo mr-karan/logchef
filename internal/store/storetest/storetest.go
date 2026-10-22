@@ -912,6 +912,8 @@ func testAlerts(t *testing.T, ctx context.Context, s store.Store) {
 		t.Fatalf("ListAlertHistory: %v / %d", err, len(hist))
 	}
 	testAlertHistoryEntry(t, ctx, s, hist[0])
+	t.Run("ManualResolveUpdatesState", func(t *testing.T) { testManualResolveState(t, ctx, s, a.ID) })
+
 	t.Run("PruneAlertHistoryPreservesFiring", func(t *testing.T) { testAlertHistoryPruning(t, ctx, s, src.ID) })
 
 	if err := s.DeleteAlert(ctx, a.ID); err != nil {
@@ -1130,5 +1132,37 @@ func testAlertHistoryPruning(t *testing.T, ctx context.Context, s store.Store, s
 	}
 	if _, err := s.GetAlertHistoryEntry(ctx, alertID, entry.ID); !models.IsNotFound(err) {
 		t.Errorf("resolved history after pruning error = %v, want not found", err)
+	}
+}
+
+func testManualResolveState(t *testing.T, ctx context.Context, s store.Store, alertID models.AlertID) {
+	t.Helper()
+	if err := s.MarkAlertTriggered(ctx, alertID); err != nil {
+		t.Fatal(err)
+	}
+	entry, err := s.InsertAlertHistory(ctx, alertID, models.AlertStatusTriggered, nil, "fired", map[string]any{"delivery_failed": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "resolved manually"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.GetAlert(ctx, alertID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.LastState != models.AlertStateResolved {
+		t.Errorf("last_state = %s, want resolved", after.LastState)
+	}
+	if err := s.ResolveAlertHistory(ctx, entry.ID, "second resolution"); !models.IsNotFound(err) {
+		t.Errorf("second resolution = %v, want not found", err)
+	}
+	if err := s.UpdateAlertHistoryPayload(ctx, entry.ID, map[string]any{"delivery_failed": false}); !models.IsNotFound(err) {
+		t.Errorf("resolved history payload update = %v, want not found", err)
+	}
+
+	history, err := s.ListAlertHistory(ctx, alertID, 1)
+	if err != nil || len(history) != 1 || history[0].Status != models.AlertStatusResolved || history[0].Payload["delivery_failed"] != true {
+		t.Fatalf("resolved history = %+v, %v", history, err)
 	}
 }
