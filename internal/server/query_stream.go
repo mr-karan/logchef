@@ -11,7 +11,6 @@ import (
 	"github.com/gofiber/fiber/v3"
 	"github.com/google/uuid"
 
-	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/logchefql"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -244,19 +243,8 @@ func (w *queryStreamWriter) writeJSONField(key string, value any) error {
 // proper status code before any body is committed; failures during execution
 // are handled by the writer (see WriteError). The caller must have already
 // resolved the source as ClickHouse-backed.
-func (s *Server) streamPreviewQuery(
-	c fiber.Ctx,
-	sourceID models.SourceID,
-	teamID models.TeamID,
-	user *models.User,
-	params datasource.QueryRequest,
-	cfg queryStreamConfig,
-	trackerQueryText string,
-	logMode string,
-	requestedLimit int,
-	historyQueryText string,
-	historyLanguage models.QueryLanguage,
-) error {
+func (s *Server) streamPreviewQuery(c fiber.Ctx, user *models.User, q previewQuery) error {
+	sourceID, teamID, cfg := q.src.SourceID(), q.src.TeamID(), q.cfg
 	queryID := uuid.New().String()
 	streamCtx, cancel := context.WithCancel(c.Context())
 	if err := queryTracker.StartQueryWithID(
@@ -265,7 +253,7 @@ func (s *Server) streamPreviewQuery(
 		user.ID,
 		sourceID,
 		teamID,
-		trackerQueryText,
+		q.trackedQuery,
 		cancel,
 		s.config.Query.MaxConcurrentPerUser,
 		s.config.Query.MaxConcurrentGlobal,
@@ -287,13 +275,13 @@ func (s *Server) streamPreviewQuery(
 		output := bufio.NewWriter(producer)
 		writer := newQueryStreamWriter(output, cfg, queryID)
 		start := time.Now()
-		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, params, writer)
+		stats, err := s.datasources.QueryLogsStream(streamCtx, sourceID, q.params, writer)
 		if err != nil {
 			if errors.Is(err, context.Canceled) {
-				s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage,
+				s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
 					time.Since(start).Milliseconds(), int64(writer.rows))
 			} else if writer.begun {
-				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", logMode)
+				s.log.Error("failed to stream query", "error", err, "source_id", sourceID, "query_id", queryID, "mode", q.mode)
 			}
 			if !writer.begun {
 				_ = producer.CloseWithError(err)
@@ -307,15 +295,15 @@ func (s *Server) streamPreviewQuery(
 			"user", user.Email,
 			"team_id", teamID,
 			"source_id", sourceID,
-			"mode", logMode,
+			"mode", q.mode,
 			"query_id", queryID,
 			"rows", stats.RowsReturned,
 			"duration_ms", stats.ExecutionTimeMs,
-			"limit_requested", requestedLimit,
+			"limit_requested", q.requestedLimit,
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
-		s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage,
+		s.recordQueryHistory(user, teamID, sourceID, q.historyQuery, q.historyLanguage,
 			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
 	}()
 
