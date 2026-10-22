@@ -237,7 +237,14 @@ Max_Preview_Limit = 0
 		name string
 		path func(t *testing.T) string
 	}{
-		{"repo_config", func(t *testing.T) string { return filepath.Join("..", "..", "config.toml") }},
+		{"dev_config", func(t *testing.T) string { return filepath.Join("..", "..", "dev", "config.toml") }},
+		{"shipped_config", func(t *testing.T) string {
+			// The shipped sample leaves the admin, token secret and login method to the operator.
+			t.Setenv("LOGCHEF_AUTH__ADMIN_EMAILS", "admin@example.com")
+			t.Setenv("LOGCHEF_AUTH__API_TOKEN_SECRET", "0123456789abcdef0123456789abcdef")
+			t.Setenv("LOGCHEF_AUTH__LOCAL__ENABLED", "true")
+			return filepath.Join("..", "..", "config.toml")
+		}},
 		{"required_only", func(t *testing.T) string { return writeConfig(t, "") }},
 		{"explicit_zeros", func(t *testing.T) string { return writeRawConfig(t, zeros) }},
 		{"negatives_and_empties", func(t *testing.T) string { return writeRawConfig(t, negatives) }},
