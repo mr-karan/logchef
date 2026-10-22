@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/mr-karan/logchef/pkg/models"
+
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -66,5 +68,5 @@ func (l *LoginRateLimiter) Allow(ip, email string) bool {
 	}
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	return l.ips.Allow(ip) && l.emails.Allow(strings.ToLower(strings.TrimSpace(email)))
+	return l.ips.Allow(ip) && l.emails.Allow(models.NormalizeEmail(email))
 }
