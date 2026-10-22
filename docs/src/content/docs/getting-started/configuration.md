@@ -411,6 +411,8 @@ unauthenticated auth/token endpoints, and per-user on the query endpoints.
 The limiter adds the current count to the previous window count weighted by the
 fraction of the current minute remaining. Colliding keys share a budget, so
 collisions can cause extra rejections.
+A burst at a minute boundary can admit up to twice the limit within 60 seconds,
+while the sustained rate stays at the limit.
 **Off by default**. Enable it deliberately (see the proxy note below).
 
 ```toml

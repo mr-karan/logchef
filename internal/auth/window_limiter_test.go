@@ -79,7 +79,7 @@ func TestWindowLimiterLoneKeyResetsWithinBound(t *testing.T) {
 	}
 }
 
-func TestWindowLimiterCollisionsOnlyRestrictAdmissions(t *testing.T) {
+func TestWindowLimiterCollisionsPreserveAdmissionBounds(t *testing.T) {
 	l := NewGlobalWindowLimiter(time.Minute, 5)
 	type counts struct {
 		epoch             int64

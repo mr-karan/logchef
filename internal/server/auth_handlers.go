@@ -23,6 +23,7 @@ import (
 const (
 	// Cookie names used for authentication state and session.
 	stateCookieName   = "auth_state"
+	nonceCookieName   = "auth_nonce"
 	sessionCookieName = "session_id"
 	// stateCookieTTL defines how long the OIDC state cookie is valid.
 	stateCookieTTL = 5 * time.Minute
@@ -53,8 +54,8 @@ func generateState() (string, error) {
 	return combined, nil
 }
 
-func stateNonce(state string) string {
-	digest := sha256.Sum256([]byte(state))
+func nonceFromSecret(secret string) string {
+	digest := sha256.Sum256([]byte(secret))
 	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
@@ -190,10 +191,28 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("state generation failed: %w", err))
 	}
 
+	var nonceBytes [32]byte
+	if _, err := rand.Read(nonceBytes[:]); err != nil {
+		s.log.Error("failed to generate OIDC nonce secret", "error", err)
+		return s.redirectToFrontend(c, "", fmt.Errorf("nonce generation failed: %w", err))
+	}
+	nonceSecret := base64.RawURLEncoding.EncodeToString(nonceBytes[:])
+	expires := time.Now().Add(stateCookieTTL)
+
 	c.Cookie(&fiber.Cookie{
 		Name:     stateCookieName,
 		Value:    state,
-		Expires:  time.Now().Add(stateCookieTTL),
+		Expires:  expires,
+		HTTPOnly: true,
+		Secure:   s.config.Server.IsSecureCookie(),
+		SameSite: fiber.CookieSameSiteLaxMode,
+		Path:     s.config.Server.CookiePath(),
+	})
+
+	c.Cookie(&fiber.Cookie{
+		Name:     nonceCookieName,
+		Value:    nonceSecret,
+		Expires:  expires,
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
 		SameSite: fiber.CookieSameSiteLaxMode,
@@ -215,7 +234,7 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		})
 	}
 
-	authURL := s.oidcProvider.GetAuthURL(state, stateNonce(state))
+	authURL := s.oidcProvider.GetAuthURL(state, nonceFromSecret(nonceSecret))
 	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(authURL)
 }
 
@@ -248,10 +267,16 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("state validation failed: %w", err))
 	}
 
-	// State is validated, clear the cookie immediately.
-	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
+	for _, name := range []string{stateCookieName, nonceCookieName} {
+		c.Cookie(&fiber.Cookie{Name: name, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
+	}
 
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, stateNonce(storedState))
+	nonceSecret := c.Cookies(nonceCookieName)
+	if nonceSecret == "" {
+		return s.redirectToFrontend(c, "", auth.ErrOIDCInvalidNonce)
+	}
+
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret))
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}

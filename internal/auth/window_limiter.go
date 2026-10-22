@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// Colliding keys share one budget until restart and reject when their combined estimate reaches the limit.
+// Colliding keys share a budget capped at the limit per epoch and twice the limit per rolling window.
 const limiterBucketCount = 1 << 16
 
 // WindowLimiter counts requests in bounded, keyed hash buckets.

@@ -64,7 +64,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 		case "/jwks":
 			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, Algorithm: "RS256", Use: "sig"}}})
 		case "/token":
-			raw, err := jwt.Signed(signer).Claims(jwt.Claims{Issuer: idp.URL, Audience: jwt.Audience{"test-client"}, Expiry: jwt.NewNumericDate(time.Now().Add(time.Hour))}).Claims(auth.OIDCClaims{Email: user.Email, EmailVerified: new(true)}).Claims(map[string]any{"nonce": stateNonce(state)}).Serialize()
+			raw, err := jwt.Signed(signer).Claims(jwt.Claims{Issuer: idp.URL, Audience: jwt.Audience{"test-client"}, Expiry: jwt.NewNumericDate(time.Now().Add(time.Hour))}).Claims(auth.OIDCClaims{Email: user.Email, EmailVerified: new(true)}).Claims(map[string]any{"nonce": nonceFromSecret("test-browser-secret")}).Serialize()
 			if err != nil {
 				t.Error(err)
 				w.WriteHeader(http.StatusInternalServerError)
@@ -85,6 +85,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 	app.Get("/callback", s.handleCallback)
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
 	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
+	req.AddCookie(&http.Cookie{Name: nonceCookieName, Value: "test-browser-secret"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)

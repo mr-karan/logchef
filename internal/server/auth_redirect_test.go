@@ -231,6 +231,7 @@ func TestCallbackTokenFailureLogsOnce(t *testing.T) {
 	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
 	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
+	req.AddCookie(&http.Cookie{Name: nonceCookieName, Value: "test-browser-secret"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
