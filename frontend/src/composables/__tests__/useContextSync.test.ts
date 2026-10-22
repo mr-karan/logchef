@@ -26,6 +26,7 @@ describe("useContextSync route ownership", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     mocks.replace.mockReset();
+    mocks.replace.mockImplementation(({ query }) => { mocks.route.query = query; });
     mocks.route.path = "/logs/alerts";
     mocks.route.query = {};
     localStorage.clear();
@@ -133,6 +134,51 @@ describe("useContextSync route ownership", () => {
     expect(useContextStore().sourceId).toBe(8);
     expect(mocks.replace).toHaveBeenCalledTimes(1);
     expect(mocks.replace).toHaveBeenCalledWith({ path: "/logs/alerts", query: { team: "3", source: "8" } });
+  });
+
+  it("writes the new team and its picked source to the Alerts URL", async () => {
+    const sync = useContextSync();
+    await sync.initialize();
+    mocks.replace.mockClear();
+    vi.mocked(sourcesApi.listTeamSources).mockReturnValue(ok([{ id: 9 }]) as never);
+    vi.mocked(sourcesApi.getTeamSource).mockReturnValue(ok({ id: 9 }) as never);
+
+    await sync.handleTeamChange(4);
+    await vi.waitFor(() => expect(useSourcesStore().currentSourceDetails?.id).toBe(9));
+
+    expect(mocks.route.query).toEqual({ team: "4", source: "9" });
+  });
+
+  it("keeps a user pick during a refresh that removes the previous source", async () => {
+    const sync = useContextSync();
+    await sync.initialize();
+    const sources = useSourcesStore();
+    let release: () => void = () => {};
+    const ready = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(sourcesApi.listTeamSources).mockImplementation(async () => {
+      await ready;
+      return ok([{ id: 9 }, { id: 8 }]) as never;
+    });
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation((_team, id) => ok({ id }) as never);
+    sources.invalidateTeamSources();
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledTimes(2));
+    const picking = sync.handleSourceChange(8);
+    release();
+    await picking;
+    await vi.waitFor(() => expect(sources.currentSourceDetails).not.toBeNull());
+
+    expect(useContextStore().sourceId).toBe(8);
+    expect(sources.currentSourceDetails?.id).toBe(8);
+    expect(mocks.route.query).toEqual({ team: "3", source: "8" });
+  });
+
+  it("writes the URL when initialization picks the first source", async () => {
+    await useTeamsStore().loadUserTeams();
+    useContextStore().clearSource();
+    await useContextSync().initialize();
+    await vi.waitFor(() => expect(useSourcesStore().currentSourceDetails?.id).toBe(7));
+
+    expect(mocks.route.query).toEqual({ team: "3", source: "7" });
   });
 
   it("keeps the selected source when a list load fails", async () => {

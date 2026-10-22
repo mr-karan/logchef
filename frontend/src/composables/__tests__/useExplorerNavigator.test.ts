@@ -23,7 +23,8 @@ import { exploreWindowQuery } from "@/utils/alertExplore";
 import { contextRouterGuard } from "@/router/contextGuard";
 import { controlledApi } from "@/test/controlledApi";
 import { setForbiddenHandler } from "@/api/config";
-import { i18n } from "@/i18n";
+import { i18n, setLocale } from "@/i18n";
+import { toast } from "vue-sonner";
 import FieldSideBar from "@/components/field-sidebar/FieldSideBar.vue";
 import WindowedSearchPanel from "@/views/explore/components/WindowedSearchPanel.vue";
 
@@ -128,6 +129,8 @@ describe("Explorer history navigation", () => {
 
   // `stub` replaces API stubs before Explorer reads its first location.
   async function mountExplorer(location: Record<string, string> = { team: "1", source: "3" }, stub?: () => void, role: "admin" | "member" = "member") {
+    const toastError = vi.spyOn(toast, "error").mockReturnValue(0);
+    vi.spyOn(teamsApi, "getTeam").mockImplementation(id => ok({ ...team, id, created_by: "1" }));
     vi.spyOn(teamsApi, "listUserTeams").mockReturnValue(ok([team, otherTeam]) as never);
     vi.spyOn(sourcesApi, "listTeamSources").mockImplementation((teamId: number) => ok(sourcesOfTeam(teamId)) as never);
     vi.spyOn(sourcesApi, "getTeamSource").mockImplementation(
@@ -171,8 +174,10 @@ describe("Explorer history navigation", () => {
     const Logs = defineComponent({
       render: () => h(RouterView, null, { default: ({ Component }: { Component?: VNode }) => h(KeepAlive, null, { default: () => Component }) }),
     });
-    const routes = [{ path: "/logs", component: Logs, children: [{ path: "explore", component: Explorer }, { path: "library", component: { render: () => null } }] }];
+    const routes = [{ path: "/forbidden", name: "Forbidden", component: { render: () => null } }, { path: "/logs", component: Logs, children: [{ path: "explore", component: Explorer }, { path: "library", component: { render: () => null } }] }];
     const router = createRouter({ history: createMemoryHistory(), routes });
+    const forbidden = vi.fn(() => { void router.push({ name: "Forbidden" }); });
+    setForbiddenHandler(forbidden);
     router.beforeEach(contextRouterGuard);
     await router.push({ path: "/logs/explore", query: location });
     const app = createApp({ render: () => h(RouterView) }).use(pinia).use(router);
@@ -181,14 +186,14 @@ describe("Explorer history navigation", () => {
     const opened = nav;
     const shownEditor = editor;
     if (!opened || !saved || !shownEditor) throw new Error("explorer did not mount");
-    await vi.waitFor(() => expect(opened.status.value).not.toBe("loading"));
+    await vi.waitFor(() => expect(opened.status.value !== "loading" || router.currentRoute.value.name === "Forbidden").toBe(true));
     // What Explorer's query error banner shows.
     const banner = () => runs.error ?? store.error?.message ?? null;
     // Whether the editor shows Cancel and Esc stops the query.
     const isRunning = () => runs.isRunning;
     // The rows the results table shows.
     const rows = () => runs.results?.rows ?? [];
-    return { router, store, query, nav: opened, saved, editor: shownEditor, banner, isRunning, rows, pinia };
+    return { router, store, query, forbidden, toastError, nav: opened, saved, editor: shownEditor, banner, isRunning, rows, pinia };
   }
 
   // Lets late responses and validations land.
@@ -299,8 +304,6 @@ describe("Explorer history navigation", () => {
   it.each(["url", "share", "saved"])("rejects a member's %s link outside team memberships without running elsewhere", async (entry) => {
     const location: Record<string, string> = entry === "share" ? { share: "tok" } : entry === "saved" ? { id: "42" } : { team: "14", source: "140", q: 'level="error"' };
     const network = controlledApi(config => config.url === "/teams/14/sources");
-    const denied = vi.fn();
-    setForbiddenHandler(denied);
     const opening = mountExplorer(location, () => {
       vi.mocked(sourcesApi.listTeamSources).mockRestore();
       vi.spyOn(exploreApi, "getQueryShare").mockReturnValue(ok({ ...shareOnOtherSource, team_id: 14, source_id: 140 }) as never);
@@ -309,10 +312,12 @@ describe("Explorer history navigation", () => {
     try {
       await vi.waitFor(() => expect(network.requests).toHaveLength(1));
       network.requests[0]?.respond(403, { status: "error", message: "Membership required", error_type: "AuthorizationError" });
-      const { router, query, nav } = await opening;
+      const { router, query, nav, forbidden, toastError } = await opening;
       await settle();
 
-      expect(denied).toHaveBeenCalledOnce();
+      expect(forbidden).not.toHaveBeenCalled();
+      expect(router.currentRoute.value.path).toBe("/logs/explore");
+      expect(toastError).not.toHaveBeenCalled();
       expect(nav.status.value).toBe("error");
       expect(nav.error.value).toBe(i18n.global.t("explore.teamAccessDenied"));
       expect(query).not.toHaveBeenCalled();
@@ -322,6 +327,72 @@ describe("Explorer history navigation", () => {
       network.restore();
       setForbiddenHandler(() => {});
     }
+  });
+
+  it.each(["team", "source"])("keeps the shown view and shows one localized toast when a %s pick is denied", async resource => {
+    const { nav, router, store, query, forbidden, toastError } = await mountExplorer(evidenceA);
+    await settle();
+    const shown = { ...router.currentRoute.value.query };
+    const network = controlledApi(config => config.url === (resource === "team" ? "/teams/2/sources" : "/teams/1/sources/4"));
+    if (resource === "team") vi.mocked(sourcesApi.listTeamSources).mockRestore();
+    else vi.mocked(sourcesApi.getTeamSource).mockRestore();
+    await setLocale("fr");
+    try {
+      if (resource === "team") await nav.selectTeam(2);
+      else await nav.selectSource(4);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      network.requests[0]?.respond(403, { status: "error", message: "Denied", error_type: "AuthorizationError" });
+      await flush();
+      await flush();
+
+      expect(forbidden).not.toHaveBeenCalled();
+      expect(router.currentRoute.value.path).toBe("/logs/explore");
+      expect(router.currentRoute.value.query).toEqual(shown);
+      expect(store.sourceId).toBe(source.id);
+      expect(query).toHaveBeenCalledTimes(1);
+      expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t("explore.linkOpenFailed"), expect.objectContaining({
+        description: i18n.global.t(resource === "team" ? "explore.teamAccessDenied" : "explore.sourceAccessDenied"),
+      }));
+    } finally { network.restore(); }
+  });
+
+  it("does not repeat an error toast already shown by the interceptor", async () => {
+    const { nav, toastError } = await mountExplorer();
+    await settle();
+    vi.mocked(sourcesApi.getTeamSource).mockRejectedValue({ status: "error", message: "Already shown", error_type: "SecurityError", _toastShown: true });
+    await nav.selectSource(4);
+    await flush();
+    await flush();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])("rejects a nonexistent admin team while preserving the shown view, already open=%s", async alreadyOpen => {
+    const network = controlledApi(config => config.url === "/teams/999");
+    try {
+      const opening = mountExplorer(alreadyOpen ? evidenceA : { team: "999" }, () => {
+        vi.mocked(teamsApi.getTeam).mockRestore();
+        vi.mocked(sourcesApi.listTeamSources).mockImplementation(id => ok(id === 999 ? [] : sourcesOfTeam(id)));
+      }, "admin");
+      if (alreadyOpen) {
+        const { router } = await opening;
+        await settle();
+        await router.push({ path: "/logs/explore", query: { team: "999" } });
+      }
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      network.requests[0]?.respond(404, { status: "error", message: "Unknown team", error_type: "NotFoundError" });
+      const { nav, router, store, query, toastError } = await opening;
+      await flush();
+      await flush();
+      expect(nav.status.value).toBe(alreadyOpen ? "ready" : "error");
+      if (alreadyOpen) {
+        expect(router.currentRoute.value.query).toMatchObject({ team: "1", source: "3", q: evidenceA.q });
+        expect(store.sourceId).toBe(source.id);
+        expect(toastError).toHaveBeenCalledExactlyOnceWith(i18n.global.t("explore.linkOpenFailed"), expect.objectContaining({ description: i18n.global.t("explore.teamNotFound") }));
+      } else {
+        expect(nav.error.value).toBe(i18n.global.t("explore.teamNotFound"));
+        expect(query).not.toHaveBeenCalled();
+      }
+    } finally { network.restore(); }
   });
 
   it("shows the teams load failure for an explicit team instead of denying access", async () => {
