@@ -32,6 +32,11 @@ export const useTeamsStore = defineStore("teams", () => {
     teamMembersMap: {},
   });
 
+  const readRequests = { userTeams: 0, adminTeams: 0, team: 0, members: 0, sources: 0 };
+  const supersededError: APIErrorResponse = {
+    status: "error", message: "Request superseded", error_type: "CanceledError",
+  };
+
   const authStore = useAuthStore();
   const contextStore = useContextStore();
 
@@ -82,6 +87,11 @@ export const useTeamsStore = defineStore("teams", () => {
   });
 
   function clearState() {
+    readRequests.userTeams++;
+    readRequests.adminTeams++;
+    readRequests.team++;
+    readRequests.members++;
+    readRequests.sources++;
     state.data.value.teamMembersMap = {};
     state.data.value.teamSourcesMap = {};
   }
@@ -111,10 +121,21 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function loadUserTeams() {
+    const requestId = ++readRequests.userTeams;
     return await state.callApi({
-      apiCall: teamsApi.listUserTeams,
+      apiCall: async () => {
+        try {
+          const response = await teamsApi.listUserTeams();
+          if (requestId !== readRequests.userTeams) throw supersededError;
+          return response;
+        } catch (error) {
+          if (requestId !== readRequests.userTeams) throw supersededError;
+          throw error;
+        }
+      },
       operationKey: "loadUserTeams",
       onSuccess: async (response) => {
+        if (requestId !== readRequests.userTeams) return;
         // Simple, focused approach: Always work with the data array from the standard API response
         if (Array.isArray(response)) {
           state.data.value.userTeams = response;
@@ -128,6 +149,7 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function loadAdminTeams(forceReload = false) {
+    const requestId = ++readRequests.adminTeams;
     return await state.withLoading('loadAdminTeams', async () => {
       try {
         if (!forceReload && state.data.value.adminTeams.length > 0) {
@@ -135,6 +157,7 @@ export const useTeamsStore = defineStore("teams", () => {
         }
 
         const response = await teamsApi.listAllTeams();
+        if (requestId !== readRequests.adminTeams) return state.handleError(supersededError, "loadAdminTeams");
 
         if (isSuccessResponse(response) && response.data) {
           state.data.value.adminTeams = response.data as TeamWithMemberCount[];
@@ -143,7 +166,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: "Failed to load admin teams", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, 'loadAdminTeams');
+        return state.handleError(requestId !== readRequests.adminTeams ? supersededError : error as Error, 'loadAdminTeams');
       }
     });
   }
@@ -190,9 +213,11 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function getTeam(teamId: number) {
+    const requestId = ++readRequests.team;
     return await state.withLoading(`getTeam-${teamId}`, async () => {
       try {
         const response = await teamsApi.getTeam(teamId);
+        if (requestId !== readRequests.team) return state.handleError(supersededError, "getTeam");
 
         if (isSuccessResponse(response) && response.data) {
           const teamData = { ...response.data, member_count: response.data.member_count || 0 };
@@ -205,7 +230,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: 'Team not found', error_type: 'NotFound' } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, `getTeam-${teamId}`);
+        return state.handleError(requestId !== readRequests.team ? supersededError : error as Error, `getTeam-${teamId}`);
       }
     });
   }
@@ -248,9 +273,11 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function listTeamMembers(teamId: number) {
+    const requestId = ++readRequests.members;
     return await state.withLoading(`listTeamMembers-${teamId}`, async () => {
       try {
         const response = await teamsApi.listTeamMembers(teamId);
+        if (requestId !== readRequests.members) return state.handleError(supersededError, "listTeamMembers");
 
         if (isSuccessResponse(response)) {
           const membersData = response.data;
@@ -262,7 +289,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: "Failed to load team members", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, `listTeamMembers-${teamId}`);
+        return state.handleError(requestId !== readRequests.members ? supersededError : error as Error, `listTeamMembers-${teamId}`);
       }
     });
   }
@@ -348,9 +375,11 @@ export const useTeamsStore = defineStore("teams", () => {
   }
 
   async function listTeamSources(teamId: number) {
+    const requestId = ++readRequests.sources;
     return await state.withLoading(`listTeamSources-${teamId}`, async () => {
       try {
         const response = await teamsApi.listTeamSources(teamId);
+        if (requestId !== readRequests.sources) return state.handleError(supersededError, "listTeamSources");
 
         if (isSuccessResponse(response)) {
           const sourcesData = response.data;
@@ -362,7 +391,7 @@ export const useTeamsStore = defineStore("teams", () => {
 
         return { success: false, error: { status: 'error', message: "Failed to load team sources", error_type: "LoadError" } as APIErrorResponse };
       } catch (error) {
-        return state.handleError(error as Error, `listTeamSources-${teamId}`);
+        return state.handleError(requestId !== readRequests.sources ? supersededError : error as Error, `listTeamSources-${teamId}`);
       }
     });
   }

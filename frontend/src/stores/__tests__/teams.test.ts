@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
+import { toast } from "vue-sonner";
+import { controlledApi } from "@/test/controlledApi";
 import { authApi } from "@/api/auth";
 import { teamsApi, type TeamWithMemberCount, type UserTeamMembership } from "@/api/teams";
 import { useAuthStore } from "../auth";
@@ -35,6 +37,105 @@ describe("useTeamsStore", () => {
   });
 
   afterEach(() => vi.restoreAllMocks());
+
+  describe("superseded reads", () => {
+    let network: ReturnType<typeof controlledApi>;
+
+    beforeEach(() => {
+      vi.mocked(toast.error).mockClear();
+      network = controlledApi();
+    });
+    afterEach(() => network.restore());
+
+    it.each(['getTeam', 'listTeamMembers', 'listTeamSources'] as const)("drops an old %s failure after another team loads", async operation => {
+      const teams = useTeamsStore();
+      const oldLoad = teams[operation](1);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      const currentLoad = teams[operation](2);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+      network.requests[1].succeed(operation === 'getTeam' ? adminTeam(2) : []);
+      await currentLoad;
+      network.requests[0].fail('Old team load failed');
+      const result = await oldLoad;
+
+      expect(result.success).toBe(false);
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it.each(['loadUserTeams', 'loadAdminTeams'] as const)("drops an old %s failure after a newer list loads", async operation => {
+      const teams = useTeamsStore();
+      const oldLoad = teams[operation]();
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      const currentLoad = teams[operation]();
+      await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+      network.requests[1].succeed([membership(2)]);
+      await currentLoad;
+      network.requests[0].fail('Old list load failed');
+      const result = await oldLoad;
+
+      expect(result.success).toBe(false);
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
+      expect(teams.teams.map(team => team.id)).toEqual([2]);
+    });
+
+    it('preserves the current error when an older request fails', async () => {
+      const teams = useTeamsStore();
+      const oldLoad = teams.getTeam(1);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      const currentLoad = teams.getTeam(2);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+      network.requests[1].fail('Current team load failed');
+      await currentLoad;
+      const currentError = teams.error;
+      network.requests[0].fail('Old team load failed');
+      await oldLoad;
+
+      expect(teams.error).toBe(currentError);
+      expect(toast.error).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the newest data when requests for the same team finish out of order', async () => {
+      const teams = useTeamsStore();
+      const oldLoad = teams.getTeam(1);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      const currentLoad = teams.getTeam(1);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(2));
+      network.requests[1].succeed({ ...adminTeam(1), name: 'Fresh team name' });
+      await currentLoad;
+      network.requests[0].succeed({ ...adminTeam(1), name: 'Stale team name' });
+      await oldLoad;
+
+      expect(teams.getTeamById(1)?.name).toBe('Fresh team name');
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it('drops a request failure after the team state is cleared', async () => {
+      const teams = useTeamsStore();
+      const load = teams.listTeamMembers(1);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      teams.clearState();
+      network.requests[0].fail('Cleared team load failed');
+      const result = await load;
+
+      expect(result.success).toBe(false);
+      expect(teams.error).toBeNull();
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it.each(['getTeam', 'listTeamMembers', 'listTeamSources'] as const)("keeps current %s failures visible", async operation => {
+      const teams = useTeamsStore();
+      const load = teams[operation](1);
+      await vi.waitFor(() => expect(network.requests).toHaveLength(1));
+      network.requests[0].fail('Current team load failed');
+      await load;
+
+      expect(teams.error?.message).toBe('Current team load failed');
+      expect(toast.error).toHaveBeenCalledTimes(1);
+    });
+  });
 
   describe("deleting the selected team", () => {
     it("selects the next team the user belongs to", async () => {
