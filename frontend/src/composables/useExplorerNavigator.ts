@@ -3,8 +3,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { exploreApi } from '@/api/explore'
 import type { Source } from '@/api/sources'
 import { savedQueriesApi, type SavedQuery, type SavedQueryContent } from '@/api/savedQueries'
-import { getErrorMessage, type APIErrorResponse } from '@/api/types'
-import { isAbortError } from '@/api/error-handler'
+import { teamsApi } from '@/api/teams'
+import { getErrorMessage, unwrap, type APIErrorResponse } from '@/api/types'
+import { hasShownErrorToast, isAbortError } from '@/api/error-handler'
 import { i18n } from '@/i18n'
 import { useToast } from '@/composables/useToast'
 import { TOAST_DURATION } from '@/lib/constants'
@@ -25,6 +26,20 @@ function noTeamsMessage(error: APIErrorResponse | null): string {
   if (error.error_type === 'ServerError') return i18n.global.t('access.loadTeamsFailed')
   if (error.error_type === 'AuthenticationError') return i18n.global.t('explore.loginForTeams')
   return error.message || i18n.global.t('access.loadTeamsFailed')
+}
+
+const navigationRequest = { suppressErrorToast: true, suppressForbiddenRedirect: true }
+
+function navigationError(error: unknown, resource: 'team' | 'source'): unknown {
+  if (error && typeof error === 'object' && 'error_type' in error) {
+    if (error.error_type === 'AuthorizationError') {
+      return { ...error, message: i18n.global.t(resource === 'team' ? 'explore.teamAccessDenied' : 'explore.sourceAccessDenied') }
+    }
+    if (resource === 'team' && error.error_type === 'NotFoundError') {
+      return { ...error, message: i18n.global.t('explore.teamNotFound') }
+    }
+  }
+  return error
 }
 
 /**
@@ -125,12 +140,11 @@ export function useExplorerNavigator() {
       if (id !== navId) return
       console.error('error opening explorer location', err)
       chosen = {}
-      const message = err && typeof err === 'object' && 'error_type' in err && err.error_type === 'AuthorizationError'
-        ? i18n.global.t('explore.teamAccessDenied') : getErrorMessage(err)
+      const message = getErrorMessage(err)
       if (shown) {
         status.value = 'ready'
         await record('replace', shown)
-        toast({ title: i18n.global.t('explore.linkOpenFailed'), description: message, variant: 'destructive', duration: TOAST_DURATION.ERROR })
+        if (!hasShownErrorToast(err)) toast({ title: i18n.global.t('explore.linkOpenFailed'), description: message, variant: 'destructive', duration: TOAST_DURATION.ERROR })
       } else {
         error.value = message
         status.value = 'error'
@@ -179,10 +193,15 @@ export function useExplorerNavigator() {
     const team = teamId ?? pickTeam(teams.teams.map((t) => t.id), null)
     if (team === null) throw new Error(noTeamsMessage(teams.error))
     const generation = sources.getMetadataGeneration()
-    const list = await sources.loadTeamSources(team, refresh)
+    const list = await sources.loadTeamSources(team, refresh, navigationRequest).catch(error => { throw navigationError(error, 'team') })
+    if (id !== navId || generation !== sources.getMetadataGeneration()) return null
+    if (!teams.getTeamById(team)) {
+      const confirmed = await teamsApi.getTeam(team, navigationRequest).catch(error => { throw navigationError(error, 'team') })
+      if (!unwrap(confirmed)) throw new Error(i18n.global.t('explore.teamNotFound'))
+    }
     if (id !== navId || generation !== sources.getMetadataGeneration()) return null
     const source = pickSource(team, list, sourceId)
-    const details = source === null ? null : await sources.loadSourceDetails(team, source, refresh || (team === context.teamId && source === context.sourceId && sources.currentSourceDetails?.is_connected === false))
+    const details = source === null ? null : await sources.loadSourceDetails(team, source, refresh || (team === context.teamId && source === context.sourceId && sources.currentSourceDetails?.is_connected === false), navigationRequest).catch(error => { throw navigationError(error, 'source') })
     return { teamId: team, sourceId: source, content, list, details, generation }
   }
 

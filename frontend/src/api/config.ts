@@ -1,5 +1,6 @@
 import axios from "axios";
 import { showErrorToast } from "@/api/error-handler";
+import type { RequestOptions } from "./apiUtils";
 import type { APIErrorResponse } from "@/api/types";
 import { basePath } from "@/utils/basePath";
 
@@ -118,7 +119,8 @@ api.interceptors.response.use(
 
       // Callers can opt out of the toast (e.g. dashboard panels render an inline
       // locked state per panel and must not spawn one toast per forbidden source).
-      const showToast = !(error.config as { suppressErrorToast?: boolean } | undefined)?.suppressErrorToast;
+      const options: RequestOptions | undefined = error.config;
+      const showToast = !options?.suppressErrorToast;
       // Create a custom error object with the specific message and error type
       const forbiddenError = {
         status: "error",
@@ -137,7 +139,7 @@ api.interceptors.response.use(
       // independently by the router navigation guard (meta.requiresAdmin etc).
       const method = (error.config?.method || "get").toLowerCase();
       const isMutation = ["post", "put", "patch", "delete"].includes(method);
-      if (!isMutation) {
+      if (!isMutation && !options?.suppressForbiddenRedirect) {
         forbiddenHandler?.();
       }
       return Promise.reject(forbiddenError);

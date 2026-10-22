@@ -1,5 +1,6 @@
 import { useRoute, useRouter } from 'vue-router';
-import { pickSource, pickTeam, useContextStore } from '@/stores/context';
+import { watch } from 'vue';
+import { pickTeam, useContextStore } from '@/stores/context';
 import { useTeamsStore } from '@/stores/teams';
 import { useSourcesStore } from '@/stores/sources';
 
@@ -23,38 +24,28 @@ export function useContextSync(options: { basePath?: string } = {}) {
     }
   }
 
-  let selectionId = 0;
+  watch(() => [contextStore.teamId, contextStore.sourceId], () => { void syncUrl(); });
 
-  async function select(teamId: number, requestedSourceId: number | null) {
-    const id = ++selectionId;
-    if (teamId !== contextStore.teamId) contextStore.selectTeam(teamId);
-    const generation = sourcesStore.getMetadataGeneration();
-    const sources = await sourcesStore.loadTeamSources(teamId).catch((error) => {
-      console.error('error loading team sources', error);
-      return null;
-    });
-    if (!sources || id !== selectionId || generation !== sourcesStore.getMetadataGeneration() || contextStore.teamId !== teamId) return;
-    const sourceId = pickSource(teamId, sources, requestedSourceId);
-    if (sourceId === null) contextStore.clearSource();
-    else if (sourceId !== contextStore.sourceId) contextStore.selectSource(sourceId);
-    await syncUrl();
-  }
-
-  /** Keeps the team the router guard chose, picks a source and writes both to the URL. */
+  /** Keeps the router's context and records it after its source list loads. */
   async function initialize() {
-    const id = ++selectionId;
     if (teamsStore.teams.length === 0) await teamsStore.loadTeams(false, false);
-    if (id !== selectionId) return;
     const teamId = contextStore.teamId ?? pickTeam(teamsStore.teams.map((team) => team.id), null);
-    if (teamId) await select(teamId, contextStore.sourceId);
+    if (!teamId) return;
+    contextStore.selectTeam(teamId);
+    try {
+      await sourcesStore.loadTeamSources(teamId);
+      await syncUrl();
+    } catch (error) {
+      console.error('error loading team sources', error);
+    }
   }
 
-  async function handleTeamChange(teamId: number) {
-    if (teamId !== contextStore.teamId) await select(teamId, null);
+  function handleTeamChange(teamId: number) {
+    contextStore.selectTeam(teamId);
   }
 
-  async function handleSourceChange(sourceId: number) {
-    if (contextStore.teamId && sourceId !== contextStore.sourceId) await select(contextStore.teamId, sourceId);
+  function handleSourceChange(sourceId: number) {
+    contextStore.selectSource(sourceId);
   }
 
   return { initialize, handleTeamChange, handleSourceChange };

@@ -107,7 +107,6 @@ const currentSourceId = computed(() => contextStore.sourceId);
 const selection = computed(() => nav.pending.value ?? { teamId: currentTeamId.value, sourceId: currentSourceId.value });
 const selectableSources = computed(() => selection.value.teamId === contextStore.teamId ? availableSources.value : []);
 const availableTeams = computed(() => teamsStore.teams || []);
-const selectedTeamName = computed(() => teamsStore.currentTeam?.name || 'Select team');
 const selectedSourceName = computed(() => {
   if (!currentSourceId.value) return t('ui.selectSource');
   const source = availableSources.value.find(s => s.id === currentSourceId.value);
@@ -958,7 +957,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <div class="flex flex-col items-center justify-center flex-1 gap-4 text-center">
           <h2 class='text-2xl font-semibold'>{{ t('ui.noLogSourcesFound') }}</h2>
           <p class="text-muted-foreground max-w-md">
-            {{ t('explore.noTeamSources', { name: selectedTeamName }) }}
+            {{ t('explore.noTeamSources') }}
           </p>
         </div>
       </div>

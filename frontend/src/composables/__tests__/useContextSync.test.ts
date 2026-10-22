@@ -150,6 +150,7 @@ describe("useContextSync route ownership", () => {
   });
 
   it("keeps a user pick during a refresh that removes the previous source", async () => {
+    vi.mocked(sourcesApi.listTeamSources).mockReturnValue(ok([{ id: 7 }, { id: 8 }]) as never);
     const sync = useContextSync();
     await sync.initialize();
     const sources = useSourcesStore();
