@@ -24,9 +24,9 @@ func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	var req models.CreateQueryShareRequest
@@ -105,9 +105,9 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 	if token == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Share token is required", models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	tokenPrefix := models.RedactShareToken(token)
@@ -163,9 +163,9 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 	if token == "" {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Share token is required", models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	share, err := s.sqlite.GetQueryShare(c.Context(), token)

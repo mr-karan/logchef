@@ -212,8 +212,8 @@ func (s *Server) handleDeleteUser(c fiber.Ctx) error {
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleListCurrentUserTeams(c fiber.Ctx) error {
 	// User should be in context from auth middleware
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -241,8 +241,8 @@ func (s *Server) handleListCurrentUserTeams(c fiber.Ctx) error {
 // URL: GET /api/v1/me/query-history
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleListQueryHistory(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -278,8 +278,8 @@ func (s *Server) handleListQueryHistory(c fiber.Ctx) error {
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleListAPITokens(c fiber.Ctx) error {
 	// User should be in context from auth middleware
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -298,8 +298,8 @@ func (s *Server) handleListAPITokens(c fiber.Ctx) error {
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleCreateAPIToken(c fiber.Ctx) error {
 	// User should be in context from auth middleware
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -348,8 +348,8 @@ func authorizeAPITokenCreation(c fiber.Ctx, req models.CreateAPITokenRequest) er
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleDeleteAPIToken(c fiber.Ctx) error {
 	// User should be in context from auth middleware
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -568,8 +568,8 @@ type UserPreferencesResponse struct {
 // URL: GET /api/v1/me/preferences
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleGetUserPreferences(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -590,8 +590,8 @@ func (s *Server) handleGetUserPreferences(c fiber.Ctx) error {
 // URL: PUT /api/v1/me/preferences
 // Requires: User authentication (requireAuth middleware)
 func (s *Server) handleUpdateUserPreferences(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}

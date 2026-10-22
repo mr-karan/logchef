@@ -51,9 +51,9 @@ func (s *Server) handleAskChefTurn(c fiber.Ctx) error {
 	if s.askChef == nil {
 		return SendErrorWithType(c, fiber.StatusNotFound, "Ask Chef is not enabled", models.NotFoundErrorType)
 	}
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+	user := currentUser(c)
+	if user == nil {
+		return sendMissingUser(c)
 	}
 	// A cross-origin JSON POST needs a CORS preflight, so a form on another
 	// site cannot start a turn with the user's cookie.

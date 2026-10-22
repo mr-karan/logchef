@@ -24,7 +24,7 @@ func setDashboardCanEdit(dashboard *models.Dashboard, user *models.User) {
 // creator, global admin, or a member of a team referenced by the panels),
 // newest-updated first, each annotated with the caller's edit permission.
 func (s *Server) handleListDashboards(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	dashboards, err := core.ListDashboards(c.Context(), s.sqlite, s.log, user)
 	if err != nil {
@@ -39,7 +39,7 @@ func (s *Server) handleListDashboards(c fiber.Ctx) error {
 
 // handleCreateDashboard creates a dashboard owned by the caller.
 func (s *Server) handleCreateDashboard(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	var req models.CreateDashboardRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -68,7 +68,7 @@ func (s *Server) handleCreateDashboard(c fiber.Ctx) error {
 // they cannot reach is redacted (query text blanked, locked flagged) before the
 // response is sent — the creator and global admins see everything.
 func (s *Server) handleGetDashboard(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	id, err := parseDashboardID(c)
 	if err != nil {
@@ -110,7 +110,7 @@ func (s *Server) handleGetDashboard(c fiber.Ctx) error {
 // client sends the updated_at it loaded, a stale write is rejected with 409
 // (A3).
 func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	id, err := parseDashboardID(c)
 	if err != nil {
@@ -144,7 +144,7 @@ func (s *Server) handleUpdateDashboard(c fiber.Ctx) error {
 
 // handleDeleteDashboard removes a dashboard (creator + global admin only).
 func (s *Server) handleDeleteDashboard(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	id, err := parseDashboardID(c)
 	if err != nil {

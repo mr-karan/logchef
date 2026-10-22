@@ -53,7 +53,7 @@ func requestLogger(log *slog.Logger) fiber.Handler {
 		}
 
 		// User context
-		if user, ok := c.Locals("user").(*models.User); ok && user != nil {
+		if user := currentUser(c); user != nil {
 			attrs = append(attrs, slog.String("user", user.Email))
 		}
 

@@ -45,8 +45,8 @@ func parseAlertID(c fiber.Ctx) (models.AlertID, error) {
 // access via any team. On failure it writes the error response and returns
 // false; the caller must then return nil.
 func (s *Server) loadAlertWithVisibility(c fiber.Ctx) (*models.Alert, *models.User, bool) {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.sendLoadFailure(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 		return nil, nil, false
 	}
@@ -78,7 +78,7 @@ func (s *Server) loadAlertWithVisibility(c fiber.Ctx) (*models.Alert, *models.Us
 
 // handleListAlerts lists alerts the caller can see. Optional ?source_id filter.
 func (s *Server) handleListAlerts(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	if sourceParam := c.Query("source_id"); sourceParam != "" {
 		sourceID, err := core.ParseSourceID(sourceParam)
@@ -108,7 +108,7 @@ func (s *Server) handleListAlerts(c fiber.Ctx) error {
 // handleCreateAlert creates a new alert against the source in the request body.
 // The caller must have source access; the resulting alert is owned by the caller.
 func (s *Server) handleCreateAlert(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	var req models.CreateAlertRequest
 	if err := c.Bind().Body(&req); err != nil {

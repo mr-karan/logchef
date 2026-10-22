@@ -56,7 +56,7 @@ func (s *Server) handleCreateSource(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error creating source", models.DatabaseErrorType)
 	}
 
-	if actor, ok := c.Locals("user").(*models.User); ok {
+	if actor := currentUser(c); actor != nil {
 		attrs := []any{
 			"actor", actor.Email,
 			"source_name", createdSource.Name,

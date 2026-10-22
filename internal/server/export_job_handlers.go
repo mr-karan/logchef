@@ -32,9 +32,9 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid source ID format", models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	// Gate exports behind the source capability before persisting a job or
@@ -221,7 +221,7 @@ func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
 		s.sendLoadFailure(c, fiber.StatusBadRequest, "Export ID is required", models.ValidationErrorType)
 		return nil, false
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
 		s.sendLoadFailure(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
 		return nil, false

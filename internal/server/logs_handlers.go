@@ -190,9 +190,9 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	}
 
 	// Get user information for query tracking
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	params, err := core.PrepareSourceSQLQuery(c.Context(), s.datasources, s.config.Query, src, req)
@@ -362,9 +362,9 @@ func (s *Server) handleCancelQuery(c fiber.Ctx) error {
 	}
 
 	// Get user information
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	// Try to cancel the query

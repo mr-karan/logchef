@@ -339,7 +339,7 @@ func (s *Server) handleLogout(c fiber.Ctx) error {
 // It relies on the requireAuth middleware to populate user details in the context.
 // Supports both session-based and API token authentication.
 func (s *Server) handleGetCurrentUser(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
 		s.log.Error("user missing from context in handleGetCurrentUser")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication data unavailable", models.AuthenticationErrorType)

@@ -197,9 +197,9 @@ func (s *Server) handleLogchefQLQuery(c fiber.Ctx) error {
 	executableQueryLanguage := compiled.Language
 
 	// Get user information for query tracking
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	// Dashboard panel requests may opt into the per-dashboard result cache. The

@@ -51,9 +51,9 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error { //nolint:gocyclo // reque
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	// Gate exports behind the source capability before doing any work or

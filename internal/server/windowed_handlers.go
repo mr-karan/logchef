@@ -84,7 +84,7 @@ func (s *Server) handleWindowedQuery(c fiber.Ctx) error {
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, windowedQueryFailure, "Windowed search")
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	class := QueryClassPreview
 	if req.Count {
 		class = QueryClassHistogram

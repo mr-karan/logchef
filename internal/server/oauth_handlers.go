@@ -39,7 +39,7 @@ func (s *Server) handleGetOAuthRequest(c fiber.Ctx) error {
 		s.log.Error("failed to load OAuth authorization request", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to load authorization request")
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	return SendSuccess(c, fiber.StatusOK, fiber.Map{
 		"id":             req.ID,
 		"client":         req.Client,
@@ -65,7 +65,7 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 	if err := json.Unmarshal(c.Body(), &body); err != nil || body.Approve == nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, `Body must be {"approve": true} or {"approve": false}`, models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	redirectURL, err := s.oauth.Decide(c.Context(), models.OAuthAuthRequestID(c.Params("requestID")), user, *body.Approve)
 	switch {
 	case errors.Is(err, oauth.ErrRequestNotFound):
@@ -82,7 +82,7 @@ func (s *Server) handleOAuthDecision(c fiber.Ctx) error {
 
 // handleListConnectedApps lists the session user's active OAuth grants.
 func (s *Server) handleListConnectedApps(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	apps, err := s.oauth.ConnectedApps(c.Context(), user.ID)
 	if err != nil {
 		s.log.Error("failed to list connected apps", "error", err, "user_id", user.ID)
@@ -97,7 +97,7 @@ func (s *Server) handleRevokeConnectedApp(c fiber.Ctx) error {
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	err = s.oauth.RevokeConnectedApp(c.Context(), user.ID, models.OAuthGrantID(id))
 	if errors.Is(err, oauth.ErrGrantNotFound) {
 		return SendErrorWithType(c, fiber.StatusNotFound, err.Error(), models.NotFoundErrorType)
