@@ -1813,6 +1813,7 @@ func (q *Queries) GetTeamMember(ctx context.Context, arg GetTeamMemberParams) (T
 const getTriggeredAlertHistoryAlertID = `-- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
 WHERE id = $1 AND status = 'triggered'
+FOR UPDATE
 `
 
 func (q *Queries) GetTriggeredAlertHistoryAlertID(ctx context.Context, id int64) (int64, error) {
