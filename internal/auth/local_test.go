@@ -27,6 +27,8 @@ func TestHashAndVerifyLocalPassword(t *testing.T) {
 
 func TestLoginRateLimiter(t *testing.T) {
 	l := NewLoginRateLimiter(time.Minute, 10, 5)
+	l.ips = separateLimiterKeys(t, l.ips, []string{"1.2.3.4", "9.9.9.9"})
+	l.emails = separateLimiterKeys(t, l.emails, []string{"a@example.com", "b@example.com", "c@example.com", "d@example.com", "e@example.com"})
 	for i := range 5 {
 		if !l.Allow("1.2.3.4", "a@example.com") {
 			t.Fatalf("attempt %d should be allowed", i+1)
@@ -48,28 +50,6 @@ func TestLoginRateLimiter(t *testing.T) {
 	}
 	if !l.Allow("9.9.9.9", "e@example.com") {
 		t.Error("fresh IP should be allowed")
-	}
-}
-
-func TestLoginRateLimiterCapacityAdmitsNewIdentities(t *testing.T) {
-	l := NewLoginRateLimiter(time.Hour, 2, 2)
-	for i := range MaxLimiterKeys {
-		key := strconv.Itoa(i)
-		if !l.Allow(key, key+"@example.com") {
-			t.Fatalf("key %d rejected before capacity", i)
-		}
-	}
-	if !l.Allow("overflow", "overflow@example.com") {
-		t.Fatal("new identity rejected at capacity")
-	}
-	if len(l.ips.keys) != MaxLimiterKeys || len(l.emails.keys) != MaxLimiterKeys {
-		t.Fatal("limiter exceeded its memory bound")
-	}
-	if !l.Allow("1", "1@example.com") {
-		t.Fatal("tracked identity lost its remaining budget")
-	}
-	if l.Allow("1", "1@example.com") {
-		t.Fatal("tracked identity limit was evicted")
 	}
 }
 
@@ -124,9 +104,6 @@ func TestLoginRateLimiterRotatingIPFloodPreservesEmailWindow(t *testing.T) {
 				}
 				for j := range 10 {
 					l.Allow(ip, fmt.Sprintf("flood-%d-%d@example.com", i, j))
-					if len(l.ips.keys) > MaxLimiterKeys || len(l.emails.keys) > MaxLimiterKeys {
-						t.Fatal("flood exceeded limiter memory bound")
-					}
 				}
 			}
 			if l.Allow("192.0.2.2", "victim@example.com") {
@@ -138,6 +115,12 @@ func TestLoginRateLimiterRotatingIPFloodPreservesEmailWindow(t *testing.T) {
 
 func TestLoginRateLimiterIPv6PrefixBudget(t *testing.T) {
 	l := NewLoginRateLimiter(time.Hour, 10, 5)
+	l.ips = separateLimiterKeys(t, l.ips, []string{"2001:db8:1:2::/64", "2001:db8:1:3::/64", "192.0.2.1", "192.0.2.2"})
+	emails := []string{"fresh@example.com"}
+	for i := range 10 {
+		emails = append(emails, fmt.Sprintf("user-%d@example.com", i))
+	}
+	l.emails = separateLimiterKeys(t, l.emails, emails)
 	for i := range 10 {
 		if !l.Allow(fmt.Sprintf("2001:db8:1:2::%x", i+1), fmt.Sprintf("user-%d@example.com", i)) {
 			t.Fatalf("prefix attempt %d rejected before budget", i+1)
@@ -153,44 +136,18 @@ func TestLoginRateLimiterIPv6PrefixBudget(t *testing.T) {
 	}
 }
 
-func TestWindowLimiterCapacityPreservesExhaustedWindows(t *testing.T) {
-	l := NewWindowLimiter(time.Hour, 2)
-	for range 2 {
-		if !l.Allow("victim") {
-			t.Fatal("victim budget exhausted early")
+func separateLimiterKeys(t *testing.T, l *WindowLimiter, keys []string) *WindowLimiter {
+	t.Helper()
+	for range 64 {
+		seen := make(map[*limiterWindow]bool, len(keys))
+		for _, key := range keys {
+			seen[l.bucket(key)] = true
 		}
-	}
-	for i := range MaxLimiterKeys * 2 {
-		if !l.Allow(strconv.Itoa(i)) {
-			t.Fatalf("new key %d rejected", i)
+		if len(seen) == len(keys) {
+			return l
 		}
-		if len(l.keys) > MaxLimiterKeys || l.expiry.Len() > MaxLimiterKeys || l.evictable.Len() > MaxLimiterKeys {
-			t.Fatal("limiter exceeded memory bound")
-		}
+		l = NewWindowLimiter(l.window, l.limit)
 	}
-	if l.Allow("victim") {
-		t.Fatal("capacity eviction reset exhausted window")
-	}
-}
-
-func TestWindowLimiterAllBlockedAdmitsNewKeys(t *testing.T) {
-	l := NewWindowLimiter(time.Hour, 1)
-	for i := range MaxLimiterKeys * 2 {
-		key := strconv.Itoa(i)
-		if !l.Allow(key) {
-			t.Fatalf("new key %d rejected", i)
-		}
-		if l.Allow(key) {
-			t.Fatalf("key %d bypassed its budget", i)
-		}
-		if len(l.keys) > MaxLimiterKeys || l.expiry.Len() > MaxLimiterKeys || l.evictable.Len() > MaxLimiterKeys {
-			t.Fatal("limiter exceeded memory bound")
-		}
-	}
-	if !l.Allow("0") {
-		t.Fatal("oldest blocked window was not evicted")
-	}
-	if l.Allow(strconv.Itoa(MaxLimiterKeys*2 - 1)) {
-		t.Fatal("newest blocked window was evicted")
-	}
+	t.Fatal("could not place independent keys in distinct buckets")
+	return nil
 }

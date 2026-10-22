@@ -15,7 +15,7 @@ func TestCallbackUserFailureIncludesEmail(t *testing.T) {
 		t.Run(failure, func(t *testing.T) {
 			fake := newFakeOIDCServer(t)
 			const email = "user@example.com"
-			fake.registerCode("code", OIDCClaims{Email: email, Name: "Test User", EmailVerified: new(true)})
+			fake.registerCode("code", OIDCClaims{Email: email, Name: "Test User", EmailVerified: new(true)}, "nonce")
 			log := discardLoggerAP()
 			p, err := NewOIDCProvider(t.Context(), testOIDCConfig(fake), log)
 			if err != nil {
@@ -40,7 +40,7 @@ func TestCallbackUserFailureIncludesEmail(t *testing.T) {
 				t.Fatal(err)
 			}
 			cfg := &config.AuthConfig{AutoProvision: config.AutoProvisionConfig{Enabled: true, AllowedDomains: []string{"example.com"}}}
-			_, _, err = p.HandleCallback(t.Context(), db, log, cfg, "code", "state")
+			_, _, err = p.HandleCallback(t.Context(), db, log, cfg, "code", "nonce")
 			if err == nil || !strings.HasPrefix(err.Error(), "failed to "+failure+" user for email="+email+":") {
 				t.Fatalf("%s failure lost email context: %v", failure, err)
 			}

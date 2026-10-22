@@ -26,7 +26,7 @@ func authRateLimitMiddleware(perIPPerMinute, globalPerMinute int) fiber.Handler 
 
 	var global *auth.WindowLimiter
 	if globalPerMinute > 0 {
-		global = auth.NewWindowLimiter(time.Minute, globalPerMinute)
+		global = auth.NewGlobalWindowLimiter(time.Minute, globalPerMinute)
 	}
 
 	return func(c fiber.Ctx) error {

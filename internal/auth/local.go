@@ -35,7 +35,7 @@ func VerifyLocalPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }
 
-// LoginRateLimiter is a fixed-window in-memory limiter for the local login
+// LoginRateLimiter is a sliding-window in-memory limiter for the local login
 // endpoint, keyed independently by client IP and by (lowercased) email so a
 // single address can't brute-force many accounts and a distributed attempt
 // can't hammer one account.

@@ -25,7 +25,7 @@ func TestCallbackBoundsUnresponsiveIDP(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			fake := newFakeOIDCServer(t)
-			raw, err := fake.signIDToken(OIDCClaims{Email: "user@example.com", EmailVerified: new(true)})
+			raw, err := fake.signIDToken(OIDCClaims{Email: "user@example.com", EmailVerified: new(true)}, "nonce")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,7 +76,7 @@ func TestCallbackBoundsUnresponsiveIDP(t *testing.T) {
 			}
 			result := make(chan error, 1)
 			go func() {
-				_, _, err := p.HandleCallback(ctx, nil, log, &config.AuthConfig{}, "code", "state")
+				_, _, err := p.HandleCallback(ctx, nil, log, &config.AuthConfig{}, "code", "nonce")
 				result <- err
 			}()
 			select {
