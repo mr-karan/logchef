@@ -114,13 +114,6 @@ type CreateUserRequest struct {
 	Role     UserRole `json:"role"`
 }
 
-// UpdateUserRequest represents a request to update a user
-type UpdateUserRequest struct {
-	FullName string     `json:"full_name,omitempty"`
-	Role     UserRole   `json:"role,omitempty"`
-	Status   UserStatus `json:"status,omitempty"`
-}
-
 // Session represents a user session
 type Session struct {
 	ID        SessionID `db:"id" json:"id"`

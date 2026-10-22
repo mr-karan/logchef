@@ -1,7 +1,7 @@
 import { defineStore } from "pinia";
 import { useBaseStore } from "./base";
 import type { User } from "@/types";
-import { usersApi } from "@/api/users";
+import { usersApi, type UpdateUserRequest } from "@/api/users";
 import { computed } from "vue";
 import { i18n } from "@/i18n";
 
@@ -64,12 +64,7 @@ export const useUsersStore = defineStore("users", () => {
 
   async function updateUser(
     id: string,
-    data: {
-      full_name?: string;
-      email?: string;
-      role?: "admin" | "member";
-      status?: "active" | "inactive";
-    }
+    data: UpdateUserRequest
   ) {
     return await state.callApi({
       apiCall: () => usersApi.updateUser(id, data),

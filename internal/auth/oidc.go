@@ -52,6 +52,16 @@ func CheckEmailVerified(claims OIDCClaims, skipCheck bool) error {
 	return ErrOIDCEmailNotVerified
 }
 
+func checkOIDCClaims(claims OIDCClaims, skipEmailVerifiedCheck bool) error {
+	if err := CheckEmailVerified(claims, skipEmailVerifiedCheck); err != nil {
+		return err
+	}
+	if claims.Email != strings.TrimSpace(claims.Email) {
+		return fmt.Errorf("%w: email claim contains surrounding whitespace", ErrUnauthorizedUser)
+	}
+	return nil
+}
+
 func checkOIDCNonce(expected, claim string) error {
 	if expected == "" || subtle.ConstantTimeCompare([]byte(claim), []byte(expected)) != 1 {
 		return ErrOIDCInvalidNonce
@@ -314,8 +324,7 @@ func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *
 		return nil, nil, fmt.Errorf("%w: failed to parse ID token claims: %w", ErrOIDCInvalidToken, err)
 	}
 
-	// Verify email_verified claim.
-	if err := CheckEmailVerified(claims, p.oidcCfg.SkipEmailVerifiedCheck); err != nil {
+	if err := checkOIDCClaims(claims, p.oidcCfg.SkipEmailVerifiedCheck); err != nil {
 		return nil, nil, fmt.Errorf("%w: email=%s", err, claims.Email)
 	}
 

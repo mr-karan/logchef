@@ -9,7 +9,6 @@ export interface CreateUserRequest {
 
 export interface UpdateUserRequest {
   full_name?: string;
-  email?: string;
   role?: "admin" | "member";
   status?: "active" | "inactive";
 }
