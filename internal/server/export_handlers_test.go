@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -323,5 +325,58 @@ func TestExportRequestValidation(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestExportSourceLoadFailureLogs(t *testing.T) {
+	for _, endpoint := range []struct{ name, want string }{
+		{"stream", "failed to get source for export"},
+		{"job", "failed to get source for export job"},
+	} {
+		t.Run(endpoint.name, func(t *testing.T) {
+			s := newDashboardTestServer(t)
+			s.datasources = datasource.NewService(s.store, s.log)
+			s.datasources.Register(&exportCapabilityProvider{exports: true})
+			source := &models.Source{Name: "export-source-error", SourceType: models.SourceTypeClickHouse}
+			if err := s.store.CreateSource(t.Context(), source); err != nil {
+				t.Fatal(err)
+			}
+			user, src := authorizeTestSource(t, s.store, source.ID)
+			var logs bytes.Buffer
+			s.log = slog.New(slog.NewJSONHandler(&logs, nil))
+			handler := s.handleExportLogs
+			if endpoint.name == "job" {
+				handler = s.handleCreateExportJob
+			}
+			app := fiber.New()
+			withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, func(c fiber.Ctx) error {
+				if err := s.store.(interface{ Close() error }).Close(); err != nil {
+					return err
+				}
+				return handler(c)
+			})
+			path := fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID)
+			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"raw_sql":"SELECT 1"}`))
+			req.Header.Set("Content-Type", "application/json")
+			resp, err := app.Test(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusInternalServerError {
+				t.Fatalf("status=%d, want 500", resp.StatusCode)
+			}
+			var entry struct {
+				Message  string          `json:"msg"`
+				SourceID models.SourceID `json:"source_id"`
+				Error    string          `json:"error"`
+			}
+			if err := json.Unmarshal(bytes.TrimSpace(logs.Bytes()), &entry); err != nil {
+				t.Fatal(err)
+			}
+			if entry.Message != endpoint.want || entry.SourceID != source.ID || entry.Error == "" {
+				t.Fatalf("log=%+v, want message %q, source %d, and an error", entry, endpoint.want, source.ID)
+			}
+		})
 	}
 }

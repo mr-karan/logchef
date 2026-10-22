@@ -33,7 +33,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return sendMissingUser(c)
 	}
 
-	exp, ok := s.prepareExport(c, sourceID, "csv")
+	exp, ok := s.prepareExport(c, sourceID, "csv", "failed to get source for export job")
 	if !ok {
 		return nil
 	}

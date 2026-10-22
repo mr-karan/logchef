@@ -42,7 +42,7 @@ func (s *Server) handleExportLogs(c fiber.Ctx) error {
 		return sendMissingUser(c)
 	}
 
-	exp, ok := s.prepareExport(c, sourceID, inferExportFormatFromAccept(c.Get("Accept")))
+	exp, ok := s.prepareExport(c, sourceID, inferExportFormatFromAccept(c.Get("Accept")), "failed to get source for export")
 	if !ok {
 		return nil
 	}
@@ -180,7 +180,7 @@ type exportRequest struct {
 // prepareExport loads the source and validates the export request body.
 // defaultFormat applies when the body names no format. On failure it writes
 // the error response and returns ok=false; the caller must then return nil.
-func (s *Server) prepareExport(c fiber.Ctx, sourceID models.SourceID, defaultFormat string) (exportRequest, bool) {
+func (s *Server) prepareExport(c fiber.Ctx, sourceID models.SourceID, defaultFormat, sourceLoadLogMessage string) (exportRequest, bool) {
 	// Gate exports behind the source capability before doing any work or
 	// touching the ClickHouse connection. Non-supporting sources (e.g.
 	// VictoriaLogs) get a clean 400 instead of an opaque connection error.
@@ -190,7 +190,7 @@ func (s *Server) prepareExport(c fiber.Ctx, sourceID models.SourceID, defaultFor
 			s.sendLoadFailure(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
 			return exportRequest{}, false
 		}
-		s.log.Error("failed to get source for export", "source_id", sourceID, "error", err)
+		s.log.Error(sourceLoadLogMessage, "source_id", sourceID, "error", err)
 		s.sendLoadFailure(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
 		return exportRequest{}, false
 	}
