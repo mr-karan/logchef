@@ -677,7 +677,8 @@ WHERE status = 'triggered'
 
 -- name: GetTriggeredAlertHistoryAlertID :one
 SELECT alert_id FROM alert_history
-WHERE id = $1 AND status = 'triggered';
+WHERE id = $1 AND status = 'triggered'
+FOR UPDATE;
 
 -- name: ResolveAlertHistoryForAlert :exec
 UPDATE alert_history
