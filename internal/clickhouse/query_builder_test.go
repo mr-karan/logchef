@@ -1,6 +1,7 @@
 package clickhouse
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -323,5 +324,57 @@ func TestFormatSelectQuery(t *testing.T) {
 		if got, err := FormatSelectQuery(query); err == nil {
 			t.Errorf("FormatSelectQuery(%q) = %q, want error", query, got)
 		}
+	}
+}
+
+// quotedIdentifierEscapes maps identifier bodies to the name ClickHouse reads.
+// An empty name marks a body ClickHouse lexes differently, so it must fail.
+var quotedIdentifierEscapes = []struct {
+	quote, body, name string
+}{
+	{"`", `a\\b`, `a\b`},
+	{"`", `a\x60b`, "a`b"},
+	{"`", `a\\\x60b`, "a\\`b"},
+	{"`", `a\\`, `a\`},
+	{"`", `\x60`, "`"},
+	{"`", `a\x60`, "a`"},
+	{"`", `a\\x60`, `a\x60`},
+	{"`", `a\x600`, "a`0"},
+	{"`", `\\\\`, `\\`},
+	{`"`, `a\x60b`, "a`b"},
+	{`"`, `a\\b`, `a\b`},
+	{`"`, "a`b", "a`b"},
+	{"`", `a\`, ""},
+	{"`", `a\\\`, ""},
+	{"`", `a\x6`, ""},
+	{"`", `a\x`, ""},
+	{"`", `a\x6gb`, ""},
+	{"`", `a\X60b`, ""},
+	{"`", `a\x41b`, ""},
+	{"`", `a\"b`, ""},
+	{"`", `a\'b`, ""},
+	{"`", `a\nb`, ""},
+	{"`", `a\0b`, ""},
+	{"`", `a\é`, ""},
+	{`"`, `a\`, ""},
+	{`"`, `a\x6`, ""},
+}
+
+func TestQuotedIdentifierEscapes(t *testing.T) {
+	qb := NewExtendedQueryBuilder("", 0)
+	for _, tc := range quotedIdentifierEscapes {
+		ident := tc.quote + tc.body + tc.quote
+		t.Run(ident, func(t *testing.T) {
+			got, err := qb.BuildRawQuery("SELECT 1 AS "+ident+", 2 AS marker", 0)
+			if tc.name == "" {
+				if !errors.Is(err, ErrInvalidQuery) {
+					t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
+				}
+				return
+			}
+			if err != nil || !strings.Contains(got, "1 AS "+ident+", 2 AS marker") {
+				t.Fatalf("BuildRawQuery = %q, %v; want %s kept verbatim", got, err, ident)
+			}
+		})
 	}
 }
