@@ -18,7 +18,6 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/core"
-	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/template"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -37,44 +36,11 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return sendMissingUser(c)
 	}
 
-	// Gate exports behind the source capability before persisting a job or
-	// spawning the async worker. Non-supporting sources (e.g. VictoriaLogs) get
-	// a clean 400 instead of an async job failure.
-	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
-	if err != nil {
-		if errors.Is(err, core.ErrSourceNotFound) {
-			return SendErrorWithType(c, fiber.StatusNotFound, "Source not found", models.NotFoundErrorType)
-		}
-		s.log.Error("failed to get source for export job", "source_id", sourceID, "error", err)
-		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get source", models.DatabaseErrorType)
+	exp, ok := s.prepareExport(c, sourceID, "csv")
+	if !ok {
+		return nil
 	}
-	if !source.HasCapability(string(datasource.CapabilityExports)) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Exports are not supported for this source type yet", models.ValidationErrorType)
-	}
-
-	var req models.CreateExportJobRequest
-	if err := c.Bind().Body(&req); err != nil {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid request body", models.ValidationErrorType)
-	}
-	req.RawSQL = exportQueryText(req.RawSQL, req.QueryText)
-	if strings.TrimSpace(req.RawSQL) == "" {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "raw_sql (or query_text) is required", models.ValidationErrorType)
-	}
-
-	formatInput := strings.TrimSpace(req.Format)
-	format := formatInput
-	if format == "" {
-		format = "csv"
-	} else {
-		normalized, ok := normalizeExplicitExportFormat(format)
-		if !ok {
-			return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
-		}
-		format = normalized
-	}
-	if !isExportFormatAllowed(format, s.config.Export.Formats) {
-		return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
-	}
+	req, format := exp.body, exp.format
 
 	timeout, err := s.exportJobTimeout(req.QueryTimeout)
 	if err != nil {
@@ -130,13 +96,8 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create export job", models.GeneralErrorType)
 	}
 
-	runReq := exportLogsRequest{
-		RawSQL:       req.RawSQL,
-		Format:       format,
-		Limit:        req.Limit,
-		QueryTimeout: req.QueryTimeout,
-		Variables:    req.Variables,
-	}
+	runReq := req
+	runReq.Format = format
 	if !s.startBackgroundTask(func() {
 		s.runExportJob(queryCtx, job.ID, cancel, teamID, sourceID, user.Email, runReq)
 	}) {
@@ -250,7 +211,7 @@ func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
 }
 
 // runExportJob releases its pre-admitted query slot when the pipeline exits.
-func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req exportLogsRequest) {
+func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req models.CreateExportJobRequest) {
 	defer cancel()
 	defer queryTracker.RemoveQuery(jobID)
 	var filePath string
