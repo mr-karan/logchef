@@ -35,6 +35,7 @@ import {
   type QueryStatsResponse,
 } from "@/api/admin";
 import { isSuccessResponse } from "@/api/types";
+import { formatErrorMessage } from "@/api/error-handler";
 import { formatHistoryTimeAgo, formatHistoryDuration } from "@/lib/queryHistory";
 import { useMetaStore } from "@/stores/meta";
 import { usePreferencesStore } from "@/stores/preferences";
@@ -84,8 +85,8 @@ async function loadActivity() {
     } else {
       error.value = response.message || t("admin.queryActivityLoadFailed");
     }
-  } catch (err: any) {
-    error.value = err?.message || t("admin.queryActivityLoadFailed");
+  } catch (err: unknown) {
+    error.value = formatErrorMessage(err, t("admin.queryActivityLoadFailed"));
   } finally {
     isLoading.value = false;
   }
@@ -101,8 +102,8 @@ async function loadStats() {
     } else {
       statsError.value = response.message || t("admin.usageStatsLoadFailed");
     }
-  } catch (err: any) {
-    statsError.value = err?.message || t("admin.usageStatsLoadFailed");
+  } catch (err: unknown) {
+    statsError.value = formatErrorMessage(err, t("admin.usageStatsLoadFailed"));
   } finally {
     statsLoading.value = false;
   }

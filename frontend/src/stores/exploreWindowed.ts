@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { epochMs, parseZoneId, zoneOffsetMs } from '@/utils/timeWindow';
 import { streamWindowedQuery, WindowedHTTPError, type LogRow, type SearchWindow, type WindowStatus, type WindowedRequest, type WindowedEvent } from '@/api/windowed';
 import type { HistogramDataPoint, QueryStats } from '@/api/explore';
-import { HistogramService } from '@/services/HistogramService';
+import { calculateOptimalGranularity } from '@/services/HistogramService';
 
 export interface WindowCoverage extends SearchWindow {
   search: WindowStatus;
@@ -258,7 +258,7 @@ export const useExploreWindowedStore = defineStore('exploreWindowed', () => {
     snapshot = input;
     active.value = true;
     histogramEnabled.value = input.histogram;
-    granularity.value = HistogramService.calculateOptimalGranularity(input.request.start_time ?? '', input.request.end_time ?? '');
+    granularity.value = calculateOptimalGranularity(input.request.start_time ?? '', input.request.end_time ?? '');
     await search({ signal });
   }
   function loadOlder() { if (!isSearching.value && cursor.value) return search({ cursor: cursor.value }); }

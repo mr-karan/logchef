@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -228,6 +229,61 @@ func TestDeliveryRecovery(t *testing.T) {
 				}
 				t.Cleanup(func() { _ = db.Close() })
 				return db, createManagerTestAlert(t, db), logger
+			}
+
+			for _, manual := range []bool{false, true} {
+				for _, repeatRecovery := range []bool{false, true} {
+					t.Run(fmt.Sprintf("legacy duplicates manual=%v repeat recovery=%v", manual, repeatRecovery), func(t *testing.T) {
+						db, alert, logger := open(t)
+						for i := range 3 {
+							if _, err := db.InsertAlertHistory(t.Context(), alert.ID, models.AlertStatusTriggered, nil, "legacy firing", map[string]any{"delivery_in_progress": i == 0, "delivery_failed": false}); err != nil {
+								t.Fatal(err)
+							}
+						}
+						var triggered, resolved int
+						sender := alertSenderFunc(func(_ context.Context, notification AlertNotification) error {
+							if notification.Status == models.AlertStatusResolved {
+								resolved++
+							} else {
+								triggered++
+							}
+							return nil
+						})
+						m := NewManager(Options{DB: db, Logger: logger, Sender: sender, Config: config.AlertsConfig{HistoryLimit: 100}})
+						if manual {
+							if err := m.ManualResolve(t.Context(), alert.ID, "manual resolution"); err != nil {
+								t.Fatal(err)
+							}
+						} else if err := m.handleResolved(t.Context(), alert, 0); err != nil {
+							t.Fatal(err)
+						}
+						history, err := db.ListAlertHistory(t.Context(), alert.ID, 100)
+						if err != nil {
+							t.Fatal(err)
+						}
+						for _, entry := range history {
+							if entry.Status != models.AlertStatusResolved || entry.ResolvedAt == nil || entry.Payload["delivery_in_progress"] != false {
+								t.Errorf("legacy entry %d remains active: status=%s payload=%v", entry.ID, entry.Status, entry.Payload)
+							}
+						}
+						if repeatRecovery {
+							for range 3 {
+								if err := m.handleResolved(t.Context(), alert, 0); err != nil {
+									t.Fatal(err)
+								}
+							}
+						}
+						if resolved != 1 {
+							t.Errorf("resolved notifications = %d, want 1", resolved)
+						}
+						if err := m.handleTriggered(t.Context(), alert, 12); err != nil {
+							t.Fatal(err)
+						}
+						if triggered != 1 {
+							t.Errorf("new firing notifications = %d, want 1", triggered)
+						}
+					})
+				}
 			}
 			for _, action := range []string{"resolve", "startup inactive", "deactivate"} {
 				t.Run("interrupted "+action, func(t *testing.T) {

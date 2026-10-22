@@ -4,10 +4,10 @@ import type { APIResponse } from "./types";
 /**
  * Generic API request function to reduce repetitive code
  */
-export async function apiRequest<T>(
+async function apiRequest<T>(
   method: "get" | "post" | "put" | "patch" | "delete",
   url: string,
-  data?: any,
+  data?: unknown,
   options?: { timeout?: number; signal?: AbortSignal; suppressErrorToast?: boolean }
 ): Promise<APIResponse<T>> {
   const config = {
@@ -36,8 +36,8 @@ type RequestOptions = { timeout?: number; signal?: AbortSignal; suppressErrorToa
 
 export const apiClient = {
   get: <T>(url: string, options?: RequestOptions) => apiRequest<T>("get", url, undefined, options),
-  post: <T>(url: string, data?: any, options?: RequestOptions) => apiRequest<T>("post", url, data, options),
-  put: <T>(url: string, data?: any, options?: RequestOptions) => apiRequest<T>("put", url, data, options),
-  patch: <T>(url: string, data?: any, options?: RequestOptions) => apiRequest<T>("patch", url, data, options),
+  post: <T>(url: string, data?: unknown, options?: RequestOptions) => apiRequest<T>("post", url, data, options),
+  put: <T>(url: string, data?: unknown, options?: RequestOptions) => apiRequest<T>("put", url, data, options),
+  patch: <T>(url: string, data?: unknown, options?: RequestOptions) => apiRequest<T>("patch", url, data, options),
   delete: <T>(url: string, options?: RequestOptions) => apiRequest<T>("delete", url, undefined, options)
 };

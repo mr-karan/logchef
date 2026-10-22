@@ -196,7 +196,7 @@ func (s *Store) GetAlertHistoryEntry(ctx context.Context, alertID models.AlertID
 	return alertHistoryFromSQLC(row)
 }
 
-// ResolveAlertHistory marks a history entry resolved with an optional message.
+// ResolveAlertHistory resolves all firing history for the selected entry's alert.
 func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, message string) error {
 	if s.pool != nil {
 		return s.WithTx(ctx, func(tx store.StoreOps) error { return tx.ResolveAlertHistory(ctx, historyID, message) })
@@ -210,6 +210,12 @@ func (s *Store) ResolveAlertHistory(ctx context.Context, historyID int64, messag
 			return models.ErrNotFound
 		}
 		return fmt.Errorf("failed to resolve alert history: %w", err)
+	}
+	if err := s.q.InterruptAlertDeliveries(ctx, sqlc.InterruptAlertDeliveriesParams{AlertID: alertID}); err != nil {
+		return fmt.Errorf("failed to interrupt legacy alert deliveries: %w", err)
+	}
+	if err := s.q.ResolveAlertHistoryForAlert(ctx, sqlc.ResolveAlertHistoryForAlertParams{AlertID: alertID, Message: text(message)}); err != nil {
+		return fmt.Errorf("failed to resolve legacy alert history: %w", err)
 	}
 	if err := s.q.MarkAlertResolved(ctx, alertID); err != nil {
 		return fmt.Errorf("failed to mark alert resolved: %w", err)
@@ -256,7 +262,7 @@ func (s *Store) ListAlertHistory(ctx context.Context, alertID models.AlertID, li
 	return history, nil
 }
 
-// PruneAlertHistory keeps the most recent N entries and all unresolved firings.
+// PruneAlertHistory keeps the most recent N entries and the newest unresolved firing.
 func (s *Store) PruneAlertHistory(ctx context.Context, alertID models.AlertID, keep int) error {
 	if keep <= 0 {
 		return nil

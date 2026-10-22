@@ -157,6 +157,97 @@ func TestStartupReapsInterruptedExports(t *testing.T) {
 	}
 }
 
+func TestStartupReapsOnlyPreviousInstanceProcess(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, _ := backgroundTestStore(t, backend)
+			log := slog.New(slog.NewTextHandler(io.Discard, nil))
+			newReplica := func(instance string) *Server {
+				cfg := testOAuthConfig()
+				cfg.Export.InstanceID = instance
+				srv := New(ServerOptions{Config: cfg, SQLite: db, Logger: log, FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+				t.Cleanup(func() { _ = srv.Shutdown(context.Background()) })
+				return srv
+			}
+			ctx := context.Background()
+			previous := newReplica("replica-a")
+			other := newReplica("replica-b")
+			user := mkTestUser(t, db, uuid.NewString()+"@example.com", models.UserRoleMember)
+			_, source := mkTestTeam(t, db, uuid.NewString(), user)
+			createJob := func(owner models.ExportJobOwner, status models.ExportJobStatus) (*models.ExportJob, string) {
+				now := time.Now().UTC()
+				job := &models.ExportJob{ID: uuid.NewString(), Owner: owner, SourceID: source.ID, CreatedBy: user.ID, Status: status, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+				if err := db.CreateExportJob(ctx, job); err != nil {
+					t.Fatal(err)
+				}
+				partial, err := os.CreateTemp("", "logchef-export-"+job.ID+"-*.csv")
+				if err != nil {
+					t.Fatal(err)
+				}
+				_ = partial.Close()
+				t.Cleanup(func() { _ = os.Remove(partial.Name()) })
+				return job, partial.Name()
+			}
+			pending, pendingPath := createJob(previous.exportOwner, models.ExportJobStatusPending)
+			running, runningPath := createJob(previous.exportOwner, models.ExportJobStatusRunning)
+			live, livePath := createJob(other.exportOwner, models.ExportJobStatusRunning)
+			if err := previous.Shutdown(ctx); err != nil {
+				t.Fatal(err)
+			}
+			restarted := newReplica("replica-a")
+			if restarted.exportOwner.ProcessID == previous.exportOwner.ProcessID || restarted.exportOwner.ProcessID == "" {
+				t.Fatal("restart reused the process owner ID")
+			}
+			for _, job := range []*models.ExportJob{pending, running} {
+				got, err := db.GetExportJob(ctx, job.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Status != models.ExportJobStatusFailed || got.ErrorMessage != "interrupted by restart" {
+					t.Errorf("own %s job = %s, %q", job.Status, got.Status, got.ErrorMessage)
+				}
+			}
+			for _, path := range []string{pendingPath, runningPath} {
+				if _, err := os.Stat(path); !os.IsNotExist(err) {
+					t.Errorf("own partial artifact remains: %v", err)
+				}
+			}
+			current, currentPath := createJob(restarted.exportOwner, models.ExportJobStatusRunning)
+			restarted.cleanupExpiredBackgroundState()
+			for _, job := range []*models.ExportJob{live, current} {
+				got, err := db.GetExportJob(ctx, job.ID)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got.Status != models.ExportJobStatusRunning {
+					t.Errorf("live job = %s, want running", got.Status)
+				}
+			}
+			for _, path := range []string{livePath, currentPath} {
+				if _, err := os.Stat(path); err != nil {
+					t.Errorf("live partial artifact removed: %v", err)
+				}
+			}
+			if err := restarted.Shutdown(ctx); err != nil {
+				t.Fatal(err)
+			}
+			unconfigured := newReplica("")
+			unowned, _ := createJob(unconfigured.exportOwner, models.ExportJobStatusRunning)
+			if err := unconfigured.Shutdown(ctx); err != nil {
+				t.Fatal(err)
+			}
+			newReplica("")
+			got, err := db.GetExportJob(ctx, unowned.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != models.ExportJobStatusRunning {
+				t.Errorf("unconfigured replica reaped a fresh job: %s", got.Status)
+			}
+		})
+	}
+}
+
 func TestServerShutdownBoundsBackgroundWait(t *testing.T) {
 	srv := newServerForTest(t, testOAuthConfig(), newServerTestDB(t), nil)
 	done := make(chan struct{})

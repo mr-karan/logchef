@@ -53,7 +53,7 @@ async function loadAlertForDuplication() {
   }
   // Find the alert in the store or fetch alerts first
   if (!alertsStore.alerts.length) {
-    await alertsStore.fetchAlerts(currentTeamId.value, currentSourceId.value);
+    await alertsStore.fetchAlerts(currentSourceId.value);
   }
   const found = alertsStore.alerts.find((a) => a.id === duplicateAlertId.value);
   if (found) {
@@ -83,7 +83,7 @@ async function handleCreate(payload: Omit<CreateAlertRequest, "source_id">) {
   if (!currentSourceId.value) {
     return;
   }
-  const result = await alertsStore.createAlert(undefined, currentSourceId.value, payload);
+  const result = await alertsStore.createAlert(currentSourceId.value, payload);
   if (result.success && result.data) {
     // Remove the duplicate query param when navigating away
     const { duplicate, ...restQuery } = route.query;

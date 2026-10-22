@@ -85,7 +85,7 @@ let setupComplete = false;
 let setupPromise: Promise<void> | null = null;
 
 // Initialize Monaco only once
-export function initMonacoSetup() {
+function initMonacoSetup() {
   // Skip if already initialized
   if (setupComplete) {
     return;

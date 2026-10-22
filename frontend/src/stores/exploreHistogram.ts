@@ -1,14 +1,14 @@
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { exploreApi } from "@/api/explore";
+import { exploreApi, type HistogramDataPoint } from "@/api/explore";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
-import { HistogramService, type HistogramData } from '@/services/HistogramService';
+import { calculateOptimalGranularity } from '@/services/HistogramService';
 import { useVariables } from "@/composables/useVariables";
 import { toRfc3339, type ResolvedWindow } from "@/utils/timeWindow";
 
 interface HistogramState {
-  data: HistogramData[];
+  data: HistogramDataPoint[];
   isLoading: boolean;
   error: string | null;
   notice: string | null;
@@ -57,7 +57,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
     state.value.groupByField = field;
   }
 
-  function setWindowedHistogram(data: HistogramData[], granularity: string, isLoading: boolean) {
+  function setWindowedHistogram(data: HistogramDataPoint[], granularity: string, isLoading: boolean) {
     state.value.data = data;
     state.value.granularity = granularity;
     state.value.isLoading = isLoading && data.length === 0;
@@ -111,7 +111,7 @@ export const useExploreHistogramStore = defineStore("exploreHistogram", () => {
 
       const startISO = toRfc3339(window.start);
       const endISO = toRfc3339(window.end);
-      const windowGranularity = granularity || HistogramService.calculateOptimalGranularity(startISO, endISO);
+      const windowGranularity = granularity || calculateOptimalGranularity(startISO, endISO);
 
       // Get variables for backend substitution
       const { getVariablesForApi } = useVariables();

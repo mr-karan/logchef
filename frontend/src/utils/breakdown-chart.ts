@@ -1,8 +1,8 @@
-import type { HistogramData } from "@/services/HistogramService";
+import type { HistogramDataPoint } from "@/api/explore";
 import { getColorForGroupValue } from "@/utils/histogram-chart";
 
 export const BREAKDOWN_OTHER_COLOR = "#6E7074";
-export const MAX_DONUT_SLICES = 11;
+const MAX_DONUT_SLICES = 11;
 
 export interface BreakdownCategory {
   /** Original grouped value. `isOther` is the structural discriminator. */
@@ -15,7 +15,7 @@ export interface BreakdownCategory {
   isNull: boolean;
 }
 
-export interface BreakdownChartModel {
+interface BreakdownChartModel {
   categories: BreakdownCategory[];
   total: number;
 }
@@ -41,7 +41,7 @@ function withPercentages(categories: Omit<BreakdownCategory, "percentage">[], to
 }
 
 /** Collapse grouped histogram buckets over time while retaining synthetic Other structurally. */
-export function buildBreakdownChartModel(buckets: HistogramData[] | null | undefined): BreakdownChartModel {
+export function buildBreakdownChartModel(buckets: HistogramDataPoint[] | null | undefined): BreakdownChartModel {
   const grouped = new Map<string, { value: string; isOther: boolean; isNull: boolean; count: number }>();
   for (const bucket of buckets ?? []) {
     const count = Number(bucket?.log_count);
@@ -75,7 +75,7 @@ export function buildBreakdownChartModel(buckets: HistogramData[] | null | undef
  * the largest real categories remain and all remaining real categories merge
  * into the structural synthetic Other (including any backend-provided remainder).
  */
-export function buildDonutBreakdownChartModel(buckets: HistogramData[] | null | undefined): BreakdownChartModel {
+export function buildDonutBreakdownChartModel(buckets: HistogramDataPoint[] | null | undefined): BreakdownChartModel {
   const model = buildBreakdownChartModel(buckets);
   if (model.categories.length <= MAX_DONUT_SLICES) return model;
 

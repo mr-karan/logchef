@@ -23,7 +23,7 @@ describe("useAlertsStore", () => {
       data: { id: 3, source_id: 7, name: "High error rate", last_state: "resolved" },
     });
     const alerts = useAlertsStore();
-    await alerts.refreshAlert(undefined, undefined, 3);
+    await alerts.refreshAlert(3);
 
     const context = useContextStore();
     context.selectTeam(2);

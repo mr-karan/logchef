@@ -100,6 +100,7 @@ import { History, Clock, Rows3 } from "lucide-vue-next";
 import { EmptyState, LoadingState } from "@/components/layout";
 import { exploreApi, type QueryHistoryRecord } from "@/api/explore";
 import { isSuccessResponse } from "@/api/types";
+import { formatErrorMessage } from "@/api/error-handler";
 import { getQueryLanguageLabel } from "@/lib/queryMetadata";
 import {
   buildHistoryRerunQuery,
@@ -135,8 +136,8 @@ async function loadHistory() {
     } else {
       error.value = response.message || "Failed to load query history.";
     }
-  } catch (err: any) {
-    error.value = err?.message || "Failed to load query history.";
+  } catch (err: unknown) {
+    error.value = formatErrorMessage(err, "Failed to load query history.");
   } finally {
     isLoading.value = false;
   }

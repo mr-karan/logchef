@@ -65,6 +65,8 @@ func New(opts Options) (*App, error) {
 		Version:   opts.Version,
 	}
 
+	slog.SetDefault(app.Logger)
+
 	return app, nil
 }
 

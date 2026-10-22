@@ -1,6 +1,7 @@
 import { apiClient } from "./apiUtils";
 import { apiBaseURL } from "./config";
 import { streamSSE } from "./eventStream";
+import type { TemplateVariable } from "./logchefql";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
 // tens of seconds, and the shared axios client otherwise aborts after 10s.
@@ -48,13 +49,6 @@ export interface ColumnInfo {
   type: string;
 }
 
-// Template variable for SQL substitution
-export interface TemplateVariable {
-  name: string;
-  type: 'text' | 'number' | 'date' | 'string';
-  value: string | number | string[];
-}
-
 // Simplified query parameters - intended for API communication
 export interface QueryParams {
   extra_stream_filters?: string[];
@@ -86,8 +80,8 @@ export interface QueryWarning {
 }
 
 export interface QuerySuccessResponse {
-  logs?: Record<string, any>[] | null; // For backward compatibility
-  data?: Record<string, any>[] | null; // New structure
+  logs?: Record<string, unknown>[] | null; // For backward compatibility
+  data?: Record<string, unknown>[] | null; // New structure
   stats: QueryStats;
   params?: QueryParams & {
     source_id: number;
@@ -134,9 +128,9 @@ export interface LogContextRequest {
 
 export interface LogContextResponse {
   target_timestamp: number;
-  before_logs: Record<string, any>[];
-  target_logs: Record<string, any>[];
-  after_logs: Record<string, any>[];
+  before_logs: Record<string, unknown>[];
+  target_logs: Record<string, unknown>[];
+  after_logs: Record<string, unknown>[];
   stats: QueryStats;
 }
 

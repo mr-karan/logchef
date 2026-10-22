@@ -3,6 +3,7 @@ import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
+import { alertsDisabledResult } from "@/lib/alerts";
 import { i18n } from "@/i18n";
 
 const legacyDeliveryAttemptLimit = 3;
@@ -52,13 +53,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     state.data.value.limit = limit > 0 ? limit : state.data.value.limit;
   }
 
-  // Belt-and-braces: match the guard in useAlertsStore so that a stale
-  // bookmarked URL bypassing the router guard cannot fire alert HTTP.
-  function alertsDisabledResult() {
-    return { success: false as const, data: null };
-  }
-
-  async function loadHistory(alertId: number, _teamId?: number | null, _sourceId?: number | null, limit?: number) {
+  async function loadHistory(alertId: number, limit?: number) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     setCurrentContext(alertId);
     const requestId = ++historyRequestId;
@@ -84,7 +79,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     });
   }
 
-  async function resolveAlert(_teamId: number | undefined, _sourceId: number | undefined, alertId: number, payload: ResolveAlertRequest) {
+  async function resolveAlert(alertId: number, payload: ResolveAlertRequest) {
     if (!useMetaStore().alertsEnabled) return alertsDisabledResult();
     const requestId = historyRequestId;
     return await state.callApi<{ message: string }>({

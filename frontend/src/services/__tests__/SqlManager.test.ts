@@ -3,7 +3,7 @@
 process.env.TZ = "Asia/Kolkata"; // UTC+05:30, no DST
 
 import { describe, it, expect } from "vitest";
-import { SqlManager } from "@/services/SqlManager";
+import { generateDefaultSql } from "@/services/SqlManager";
 import { epochMs, zoneFromPreference, type ResolvedWindow } from "@/utils/timeWindow";
 
 const range: ResolvedWindow = {
@@ -12,16 +12,15 @@ const range: ResolvedWindow = {
   zone: zoneFromPreference("utc"),
 };
 
-describe("SqlManager.generateDefaultSql — query timezone (#103)", () => {
+describe("generateDefaultSql — query timezone (#103)", () => {
   it("emits wall-clock strings paired with the window's (non-browser) zone", () => {
-    const { success, sql } = SqlManager.generateDefaultSql({
+    const sql = generateDefaultSql({
       tableName: "logs.app",
       tsField: "timestamp",
       window: range,
       limit: 100,
     });
 
-    expect(success).toBe(true);
     expect(sql).toContain(
       "`timestamp` BETWEEN toDateTime('2026-07-14 04:30:00', 'UTC') " +
         "AND toDateTime('2026-07-14 06:30:00', 'UTC')"
@@ -34,11 +33,11 @@ describe("SqlManager.generateDefaultSql — query timezone (#103)", () => {
 
 describe('default SQL timestamp identifier', () => {
   it('quotes the raw field consistently in the filter and sort', () => {
-    const result = SqlManager.generateDefaultSql({
+    const result = generateDefaultSql({
       tableName: 'default.logs', tsField: 'event`time\\path', limit: 100,
       window: { start: epochMs(0), end: epochMs(1000), zone: zoneFromPreference('utc') },
     })
-    expect(result.sql).toContain('WHERE `event\\x60time\\\\path` BETWEEN')
-    expect(result.sql).toContain('ORDER BY `event\\x60time\\\\path` DESC')
+    expect(result).toContain('WHERE `event\\x60time\\\\path` BETWEEN')
+    expect(result).toContain('ORDER BY `event\\x60time\\\\path` DESC')
   })
 })

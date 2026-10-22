@@ -15,20 +15,13 @@ const ERROR_TITLES: Record<string, string> = {
 };
 
 /**
- * Formats an error message from various error types
+ * Formats an error message from an Error, an API error response, or any object with a message
  */
-export function formatErrorMessage(error: unknown): string {
-  // API error response object
-  if (error && typeof error === "object" && "status" in error) {
-    const response = error as APIErrorResponse;
-    if (response.status === "error") return response.message;
+export function formatErrorMessage(error: unknown, fallback = "An unexpected error occurred"): string {
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message || fallback;
   }
-
-  // Standard Error object
-  if (error instanceof Error) return error.message;
-
-  // Unknown error type
-  return "An unexpected error occurred";
+  return fallback;
 }
 
 /**
