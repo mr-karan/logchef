@@ -199,39 +199,14 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 	nonceSecret := base64.RawURLEncoding.EncodeToString(nonceBytes[:])
 	expires := time.Now().Add(stateCookieTTL)
 
-	c.Cookie(&fiber.Cookie{
-		Name:     stateCookieName,
-		Value:    state,
-		Expires:  expires,
-		HTTPOnly: true,
-		Secure:   s.config.Server.IsSecureCookie(),
-		SameSite: fiber.CookieSameSiteLaxMode,
-		Path:     s.config.Server.CookiePath(),
-	})
-
-	c.Cookie(&fiber.Cookie{
-		Name:     nonceCookieName,
-		Value:    nonceSecret,
-		Expires:  expires,
-		HTTPOnly: true,
-		Secure:   s.config.Server.IsSecureCookie(),
-		SameSite: fiber.CookieSameSiteLaxMode,
-		Path:     s.config.Server.CookiePath(),
-	})
+	s.setCookie(c, stateCookieName, state, expires)
+	s.setCookie(c, nonceCookieName, nonceSecret, expires)
 
 	// Persist the requested redirect path through the OIDC round-trip. Only
 	// safe local paths are stored; anything protocol-relative or scheme-bearing
 	// is dropped so the callback falls back to the default landing page.
 	if redirectPath := c.Query("redirect", ""); isSafeLocalPath(redirectPath) {
-		c.Cookie(&fiber.Cookie{
-			Name:     "logchef_redirect",
-			Value:    redirectPath,
-			Expires:  time.Now().Add(stateCookieTTL),
-			HTTPOnly: true,
-			Secure:   s.config.Server.IsSecureCookie(),
-			SameSite: fiber.CookieSameSiteLaxMode,
-			Path:     s.config.Server.CookiePath(),
-		})
+		s.setCookie(c, "logchef_redirect", redirectPath, time.Now().Add(stateCookieTTL))
 	}
 
 	authURL := s.oidcProvider.GetAuthURL(state, nonceFromSecret(nonceSecret))
@@ -267,9 +242,8 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("state validation failed: %w", err))
 	}
 
-	for _, name := range []string{stateCookieName, nonceCookieName} {
-		c.Cookie(&fiber.Cookie{Name: name, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
-	}
+	s.clearCookie(c, stateCookieName)
+	s.clearCookie(c, nonceCookieName)
 
 	nonceSecret := c.Cookies(nonceCookieName)
 	if nonceSecret == "" {
@@ -295,15 +269,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	}
 
 	// Set the application session cookie.
-	c.Cookie(&fiber.Cookie{
-		Name:     sessionCookieName,
-		Value:    string(session.ID),
-		Expires:  session.ExpiresAt,
-		HTTPOnly: true,
-		Secure:   s.config.Server.IsSecureCookie(),
-		SameSite: fiber.CookieSameSiteLaxMode,
-		Path:     s.config.Server.CookiePath(),
-	})
+	s.setCookie(c, sessionCookieName, string(session.ID), session.ExpiresAt)
 
 	// Redirect back to the frontend, restoring the path requested before login.
 	// Re-validate the cookie value (defense in depth): a tampered or unsafe
@@ -313,7 +279,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		redirectPath = defaultPostLoginPath
 	}
 	// Clear the redirect cookie
-	c.Cookie(&fiber.Cookie{Name: "logchef_redirect", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
+	s.clearCookie(c, "logchef_redirect")
 	return s.redirectToFrontend(c, redirectPath, nil)
 }
 
@@ -330,7 +296,7 @@ func (s *Server) handleLogout(c fiber.Ctx) error {
 	}
 
 	// Clear the session cookie in the browser.
-	c.Cookie(&fiber.Cookie{Name: sessionCookieName, Value: "", Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
+	s.clearCookie(c, sessionCookieName)
 
 	return SendSuccess(c, fiber.StatusOK, nil) // Send simple success response.
 }
@@ -440,15 +406,25 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", user.ID)
 	}
 
+	s.setCookie(c, sessionCookieName, string(session.ID), session.ExpiresAt)
+
+	return SendSuccess(c, fiber.StatusOK, fiber.Map{"user": user})
+}
+
+// setCookie writes an HttpOnly, SameSite=Lax cookie under the UI base path.
+func (s *Server) setCookie(c fiber.Ctx, name, value string, expires time.Time) {
 	c.Cookie(&fiber.Cookie{
-		Name:     sessionCookieName,
-		Value:    string(session.ID),
-		Expires:  session.ExpiresAt,
+		Name:     name,
+		Value:    value,
+		Expires:  expires,
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
 		SameSite: fiber.CookieSameSiteLaxMode,
 		Path:     s.config.Server.CookiePath(),
 	})
+}
 
-	return SendSuccess(c, fiber.StatusOK, fiber.Map{"user": user})
+// clearCookie expires a cookie that setCookie wrote.
+func (s *Server) clearCookie(c fiber.Ctx, name string) {
+	s.setCookie(c, name, "", time.Now().Add(-1*time.Hour))
 }
