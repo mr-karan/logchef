@@ -198,7 +198,7 @@ func TestHungQueryDoesNotStallHealthOrQueriesClickHouse(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close() })
 	const id models.SourceID = 1
 	client := addTestSource(t, m, id, proxy.addr)
-	waitForHealth(t, m, id, 5*time.Second, healthUnhealthy)
+	waitForHealth(t, m, id, HealthCheckTimeout+2*time.Second, healthUnhealthy)
 
 	hungCtx, cancelHung := context.WithTimeout(context.Background(), 30*time.Second)
 	hungDone := make(chan struct{})
@@ -301,7 +301,7 @@ func TestOldHealthCannotOverwriteReplacementClickHouse(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close() })
 	const id models.SourceID = 1
 	addTestSource(t, m, id, proxy.addr)
-	waitForHealth(t, m, id, 2*time.Second, healthUnhealthy)
+	waitForHealth(t, m, id, HealthCheckTimeout+2*time.Second, healthUnhealthy)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -366,7 +366,7 @@ func TestHealthRecoveryLogsAtInfoClickHouse(t *testing.T) {
 	t.Cleanup(func() { _ = m.Close() })
 	const id models.SourceID = 2
 	addTestSource(t, m, id, proxy.addr)
-	waitForHealth(t, m, id, 2*time.Second, healthUnhealthy)
+	waitForHealth(t, m, id, HealthCheckTimeout+2*time.Second, healthUnhealthy)
 	proxy.silent.Store(false)
 	m.checkSource(context.Background(), id)
 	waitForHealth(t, m, id, 2*time.Second, healthHealthy)

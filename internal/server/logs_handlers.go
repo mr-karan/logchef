@@ -205,7 +205,7 @@ func (s *Server) handleQueryLogs(c fiber.Ctx) error { //nolint:gocyclo // reques
 	// memory stays bounded regardless of result size (the OOM this endpoint used
 	// to hit came from buffering the full result set into a []map before
 	// marshaling). Other source types (VictoriaLogs) keep the buffered path.
-	source, err := core.GetSource(c.Context(), s.datasources, sourceID)
+	source, err := core.LoadSource(c.Context(), s.datasources, sourceID)
 	if err != nil {
 		return s.sendQueryError(c, src.SourceID(), err, logsQueryFailure, logsQueryOperation)
 	}

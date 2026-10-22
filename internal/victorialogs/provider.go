@@ -20,7 +20,7 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
-const defaultHealthTimeout = 5 * time.Second
+const defaultHealthTimeout = models.SourceHealthTimeout
 const defaultValidationTimeout = 8 * time.Second
 
 const (
@@ -80,25 +80,34 @@ type Provider struct {
 // key space here is the set of source IDs, which is small and bounded.
 type keyedMutex struct {
 	mu    sync.Mutex
-	locks map[models.SourceID]*sync.Mutex
+	locks map[models.SourceID]chan struct{}
 }
 
-// lock acquires the mutex for id and returns its unlock function, so callers can
-// write `defer p.opLocks.lock(id)()`.
 func (k *keyedMutex) lock(id models.SourceID) func() {
+	unlock, _ := k.lockContext(context.Background(), id)
+	return unlock
+}
+
+func (k *keyedMutex) lockContext(ctx context.Context, id models.SourceID) (func(), error) {
 	k.mu.Lock()
 	if k.locks == nil {
-		k.locks = make(map[models.SourceID]*sync.Mutex)
+		k.locks = make(map[models.SourceID]chan struct{})
 	}
-	m, ok := k.locks[id]
+	lock, ok := k.locks[id]
 	if !ok {
-		m = &sync.Mutex{}
-		k.locks[id] = m
+		lock = make(chan struct{}, 1)
+		k.locks[id] = lock
 	}
 	k.mu.Unlock()
-
-	m.Lock()
-	return m.Unlock
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	select {
+	case lock <- struct{}{}:
+		return func() { <-lock }, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }
 
 func NewProvider(log *slog.Logger) *Provider {
@@ -275,7 +284,11 @@ func (p *Provider) InitializeSource(ctx context.Context, source *models.Source) 
 		return fmt.Errorf("source is required")
 	}
 
-	defer p.opLocks.lock(source.ID)()
+	unlock, err := p.opLocks.lockContext(ctx, source.ID)
+	if err != nil {
+		return err
+	}
+	defer unlock()
 
 	conn, err := source.VictoriaLogsConnection()
 	if err != nil {
@@ -305,7 +318,11 @@ func (p *Provider) CheckSourceConnectionStatus(ctx context.Context, source *mode
 		return false
 	}
 
-	defer p.opLocks.lock(source.ID)()
+	unlock, err := p.opLocks.lockContext(ctx, source.ID)
+	if err != nil {
+		return false
+	}
+	defer unlock()
 
 	conn, err := p.connectionForSource(source)
 	if err != nil {
@@ -350,12 +367,8 @@ func (p *Provider) checkHealth(ctx context.Context, sourceID models.SourceID, co
 		return fmt.Errorf("victorialogs base_url is required")
 	}
 
-	healthCtx := ctx
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		healthCtx, cancel = context.WithTimeout(ctx, defaultHealthTimeout)
-		defer cancel()
-	}
+	healthCtx, cancel := context.WithTimeout(ctx, defaultHealthTimeout)
+	defer cancel()
 
 	healthURL, err := url.JoinPath(conn.BaseURL, "/health")
 	if err != nil {

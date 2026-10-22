@@ -14,6 +14,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -348,7 +349,7 @@ func TestDeadClickHouseQueryResponse(t *testing.T) {
 	if err := listener.Close(); err != nil {
 		t.Fatal(err)
 	}
-	var logs bytes.Buffer
+	var logs syncLogBuffer
 	env := newErrorResponseServer(t, vlUpstream, slog.New(slog.NewTextHandler(&logs, nil)))
 	configureErrorResponseClickHouse(t, env, addr)
 	logs.Reset()
@@ -521,4 +522,28 @@ func TestQueryTransportTimeoutResponses(t *testing.T) {
 			}
 		})
 	}
+}
+
+// syncLogBuffer is safe for the background health check to write while a test reads it.
+type syncLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func (b *syncLogBuffer) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf.Reset()
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -26,13 +27,18 @@ func ListSources(ctx context.Context, db store.Store, ds *datasource.Service) ([
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
 
-	var wg sync.WaitGroup
-	for i := range sources {
-		source := sources[i]
+	if err := populateSourceStatuses(ctx, ds, sources); err != nil {
+		return nil, err
+	}
+
+	return sources, nil
+}
+
+func populateSourceStatuses(ctx context.Context, ds *datasource.Service, sources []*models.Source) error {
+	for _, source := range sources {
 		if source == nil {
 			continue
 		}
-
 		source.IsConnected = false
 		source.Columns = nil
 		source.Schema = ""
@@ -40,18 +46,54 @@ func ListSources(ctx context.Context, db store.Store, ds *datasource.Service) ([
 		source.EngineParams = nil
 		source.SortKeys = nil
 		if err := ds.ApplySourceMetadata(source); err != nil {
-			return nil, fmt.Errorf("error annotating source features: %w", err)
+			return fmt.Errorf("error annotating source features: %w", err)
 		}
-
-		wg.Add(1)
-		go func(s *models.Source) {
-			defer wg.Done()
-			s.IsConnected = ds.CheckSourceConnectionStatus(ctx, s)
-		}(source)
 	}
-	wg.Wait()
 
-	return sources, nil
+	ctx, cancel := context.WithTimeout(ctx, models.SourceHealthTimeout+500*time.Millisecond)
+	defer cancel()
+	// Checks unfinished at the listing deadline remain disconnected.
+	jobs := make(chan *models.Source)
+	var workers sync.WaitGroup
+	for range min(32, len(sources)) {
+		workers.Go(func() {
+			for source := range jobs {
+				if ctx.Err() != nil {
+					continue
+				}
+				source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
+			}
+		})
+	}
+	for _, source := range sources {
+		if source != nil {
+			select {
+			case jobs <- source:
+			case <-ctx.Done():
+				close(jobs)
+				workers.Wait()
+				return nil
+			}
+		}
+	}
+	close(jobs)
+	workers.Wait()
+	return nil
+}
+
+// LoadSource returns stored source metadata with provider capabilities and no backend requests.
+func LoadSource(ctx context.Context, ds *datasource.Service, id models.SourceID) (*models.Source, error) {
+	source, err := ds.LoadSource(ctx, id)
+	if err != nil {
+		if errors.Is(err, models.ErrNotFound) {
+			return nil, ErrSourceNotFound
+		}
+		return nil, fmt.Errorf("error getting source: %w", err)
+	}
+	if err := ds.ApplySourceMetadata(source); err != nil {
+		return nil, fmt.Errorf("error annotating source features: %w", err)
+	}
+	return source, nil
 }
 
 // GetSource retrieves a source by ID including connection status and provider-populated details.

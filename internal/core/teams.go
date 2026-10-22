@@ -337,18 +337,11 @@ func ListTeamSources(ctx context.Context, db store.StoreOps, ds *datasource.Serv
 		return nil, fmt.Errorf("error listing team sources from db: %w", err)
 	}
 
-	// Iterate and populate connection status from the manager's cache
+	if err := populateSourceStatuses(ctx, ds, sources); err != nil {
+		return nil, err
+	}
 	for _, source := range sources {
-		if source == nil { // Safety check
-			continue
-		}
-		if err := ds.ApplySourceMetadata(source); err != nil {
-			return nil, fmt.Errorf("error annotating source features: %w", err)
-		}
-		source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
-
-		// Optionally log if status is unhealthy for debugging
-		if !source.IsConnected {
+		if source != nil && !source.IsConnected {
 			log.Debug("source reported unhealthy during team source listing",
 				"source_id", source.ID,
 				"team_id", teamID,

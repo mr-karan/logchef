@@ -14,6 +14,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -946,5 +947,37 @@ func TestHistogramRejectsInvalidWindow(t *testing.T) {
 				t.Fatalf("error=%v, want local window validation", err)
 			}
 		})
+	}
+}
+
+func TestHealthLockWaitRespectsCallerContext(t *testing.T) {
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	provider := newTestProvider(server)
+	source := mustSource(t, models.VictoriaLogsConnectionInfo{BaseURL: server.URL})
+	done := make(chan struct{})
+	go func() { defer close(done); provider.CheckSourceConnectionStatus(context.Background(), source) }()
+	<-entered
+	defer func() { close(release); <-done }()
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	waiter := make(chan bool, 1)
+	go func() { waiter <- provider.CheckSourceConnectionStatus(ctx, source) }()
+	select {
+	case connected := <-waiter:
+		if connected {
+			t.Error("expired waiter reported connected")
+		}
+	case <-time.After(time.Second):
+		t.Error("health lock waiter ignored caller deadline")
 	}
 }

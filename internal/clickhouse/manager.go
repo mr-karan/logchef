@@ -13,7 +13,7 @@ import (
 
 // Default values
 const (
-	HealthCheckTimeout         = 1 * time.Second // Reduce to 1 second for faster health checks
+	HealthCheckTimeout         = models.SourceHealthTimeout
 	DefaultHealthCheckInterval = 30 * time.Second
 )
 
@@ -281,7 +281,7 @@ func (m *Manager) CreateTemporaryClient(ctx context.Context, source *models.Sour
 		return nil, fmt.Errorf("error creating temporary client: %w", err)
 	}
 
-	pingCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	pingCtx, cancel := context.WithTimeout(ctx, HealthCheckTimeout)
 	defer cancel()
 
 	if err := client.Ping(pingCtx, "", ""); err != nil {
