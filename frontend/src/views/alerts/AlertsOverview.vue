@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { normalizeDateString } from "@/utils/format";
 import { useI18n } from "vue-i18n";
 import { severityLabels, alertStateLabels } from "@/i18n/alertLabels";
 
@@ -46,6 +45,7 @@ import { useSourcesStore } from "@/stores/sources";
 import { useMetaStore } from "@/stores/meta";
 import { usePreferencesStore } from "@/stores/preferences";
 import { epochMs, formatInZone } from "@/utils/timeWindow";
+import { normalizeDateString } from "@/utils/format";
 import { useContextSync } from "@/composables/useContextSync";
 import { useTableSearchSort } from "@/composables/useTableSearchSort";
 import type { Alert } from "@/api/alerts";

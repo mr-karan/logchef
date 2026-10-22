@@ -11,6 +11,8 @@ export interface Team {
   member_count?: number;
 }
 
+export type TeamSummary = Pick<Team, "id" | "name"> & Partial<Pick<Team, "description">>;
+
 export interface UserTeamMembership {
   id: number;
   name: string;

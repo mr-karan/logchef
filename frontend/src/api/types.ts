@@ -1,5 +1,3 @@
-import type { VariableState } from "@/stores/variables";
-
 export interface APISuccessResponse<T> {
   status: "success";
   data: T | null;
@@ -14,24 +12,6 @@ export interface APIErrorResponse {
 }
 
 export type APIResponse<T = unknown> = APISuccessResponse<T> | APIErrorResponse;
-
-/**
- * Query content structure
- */
-export interface SavedQueryContent {
-  version: number;
-  sourceId: number;
-  timeRange: {
-    relative?: string;
-    absolute?: {
-      start: number;
-      end: number;
-    };
-  } | null;
-  limit: number;
-  content: string;
-  variables?: VariableState[];
-}
 
 export function isSuccessResponse<T>(
   response: APIResponse<T>

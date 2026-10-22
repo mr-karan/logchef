@@ -1,7 +1,6 @@
-import type { HistogramDataPoint } from "@/api/explore";
 import { defineStore } from "pinia";
 import { computed, ref } from "vue";
-import { exploreApi } from "@/api/explore";
+import { exploreApi, type HistogramDataPoint } from "@/api/explore";
 import { useTeamsStore } from "@/stores/teams";
 import { useContextStore } from "@/stores/context";
 import { calculateOptimalGranularity } from '@/services/HistogramService';

@@ -1,5 +1,6 @@
 import { apiClient } from "./apiUtils";
-import type { Team } from "./teams";
+import type { TeamSummary } from "./teams";
+import type { ColumnInfo } from "./explore";
 import type { QueryLanguage } from "@/lib/queryMetadata";
 import type { TemplateVariable } from "@/api/logchefql";
 
@@ -120,14 +121,9 @@ export interface Source {
   sort_keys?: string[];
 }
 
-export interface ColumnInfo {
-  name: string;
-  type: string;
-}
-
 export interface SourceWithTeamsResponse {
   source: Source;
-  teams: (Pick<Team, "id" | "name"> & Partial<Pick<Team, "description">>)[];
+  teams: TeamSummary[];
 }
 
 export interface SourceWithTeams extends Source {

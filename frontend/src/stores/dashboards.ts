@@ -1,4 +1,3 @@
-import type { HistogramDataPoint } from "@/api/explore";
 import { defineStore } from "pinia";
 import { computed } from "vue";
 import { useBaseStore } from "@/stores/base";
@@ -16,6 +15,7 @@ import {
   type PanelQueryLanguage,
   type CacheDirective,
 } from "@/api/dashboards";
+import type { HistogramDataPoint } from "@/api/explore";
 import { calculateOptimalGranularity } from "@/services/HistogramService";
 import { sumHistogramCounts, reflowPanels, validatePanelsBlob, MAX_DASHBOARD_PANELS } from "@/utils/dashboardPanels";
 import {

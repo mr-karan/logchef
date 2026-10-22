@@ -1,8 +1,7 @@
-import type { TemplateVariable } from './logchefql';
-
 import { apiClient } from "./apiUtils";
 import { apiBaseURL } from "./config";
 import { streamSSE } from "./eventStream";
+import type { TemplateVariable } from "./logchefql";
 
 // Mirrors the backend AIRequestTimeout (90s): reasoning-capable models can take
 // tens of seconds, and the shared axios client otherwise aborts after 10s.

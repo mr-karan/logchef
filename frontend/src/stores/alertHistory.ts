@@ -1,9 +1,9 @@
-import { alertsDisabledResult } from "@/lib/alerts";
 import { computed } from "vue";
 import { defineStore } from "pinia";
 import { alertsApi, type AlertHistoryEntry, type ResolveAlertRequest } from "@/api/alerts";
 import { useBaseStore } from "./base";
 import { useMetaStore } from "./meta";
+import { alertsDisabledResult } from "@/lib/alerts";
 import { i18n } from "@/i18n";
 
 const legacyDeliveryAttemptLimit = 3;

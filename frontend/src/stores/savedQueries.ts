@@ -3,9 +3,9 @@ import { computed, watch } from "vue";
 import {
   savedQueriesApi,
   type SavedQuery,
-  type Team,
   type SavedQueryContent,
 } from "@/api/savedQueries";
+import type { TeamSummary } from "@/api/teams";
 import type { QueryLanguage, SavedQueryEditorMode } from "@/lib/queryMetadata";
 import { useBaseStore } from "./base";
 import { useContextStore } from "./context";
@@ -17,7 +17,7 @@ interface SavedQueriesState {
   // `queries` so it doesn't clobber the explorer dropdown's per-source list.
   allQueries: SavedQuery[];
   selectedQuery: SavedQuery | null;
-  teams: Team[];
+  teams: TeamSummary[];
 }
 
 export const useSavedQueriesStore = defineStore("savedQueries", () => {
@@ -46,7 +46,7 @@ export const useSavedQueriesStore = defineStore("savedQueries", () => {
   const hasQueries = computed(() => (queries.value?.length || 0) > 0);
 
   async function fetchUserTeams() {
-    return await state.callApi<Team[]>({
+    return await state.callApi<TeamSummary[]>({
       apiCall: () => savedQueriesApi.getUserTeams(),
       operationKey: 'fetchUserTeams',
       onSuccess: (response) => {
