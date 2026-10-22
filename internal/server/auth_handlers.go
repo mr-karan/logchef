@@ -32,23 +32,21 @@ var (
 	errAccessDenied = errors.New("access denied by identity provider")
 )
 
-// generateState generates a cryptographically secure random string used for the OIDC state parameter.
-// It includes a nonce and timestamp to prevent replay attacks and ensure freshness.
+// generateState binds random state to a timestamp for cookie expiry checks.
 func generateState() (string, error) {
 	stateBytes := make([]byte, 32)
 	if _, err := rand.Read(stateBytes); err != nil {
 		return "", fmt.Errorf("failed to generate random state bytes: %w", err)
 	}
-	nonceBytes := make([]byte, 32)
-	if _, err := rand.Read(nonceBytes); err != nil {
-		return "", fmt.Errorf("failed to generate nonce bytes: %w", err)
+	entropyBytes := make([]byte, 32)
+	if _, err := rand.Read(entropyBytes); err != nil {
+		return "", fmt.Errorf("failed to generate state entropy: %w", err)
 	}
 
-	// Combine state, nonce, and timestamp for validation.
 	timestamp := time.Now().Unix()
 	combined := fmt.Sprintf("%s.%s.%d",
 		base64.RawURLEncoding.EncodeToString(stateBytes),
-		base64.RawURLEncoding.EncodeToString(nonceBytes),
+		base64.RawURLEncoding.EncodeToString(entropyBytes),
 		timestamp,
 	)
 	return combined, nil
@@ -141,7 +139,7 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 		switch {
 		case errors.Is(err, errAccessDenied):
 			errCode = "access_denied"
-		case errors.Is(err, errInvalidState):
+		case errors.Is(err, errInvalidState), errors.Is(err, auth.ErrOIDCInvalidNonce):
 			errCode = "session_expired"
 		case errors.Is(err, auth.ErrOIDCInvalidToken):
 			errCode = "invalid_token"
@@ -185,11 +183,11 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		s.log.Error("failed to generate OIDC state", "error", err)
 		return s.redirectToFrontend(c, "", fmt.Errorf("state generation failed: %w", err))
 	}
+	nonce := rand.Text()
 
-	// Store state in a short-lived, secure, HTTP-only cookie.
 	c.Cookie(&fiber.Cookie{
 		Name:     stateCookieName,
-		Value:    state,
+		Value:    state + ":" + nonce,
 		Expires:  time.Now().Add(stateCookieTTL),
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
@@ -212,7 +210,7 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		})
 	}
 
-	authURL := s.oidcProvider.GetAuthURL(state)
+	authURL := s.oidcProvider.GetAuthURL(state, nonce)
 	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(authURL)
 }
 
@@ -240,8 +238,10 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("authorization code missing"))
 	}
 
-	// Validate state against the value stored in the cookie.
-	storedState := c.Cookies(stateCookieName)
+	storedState, nonce, ok := strings.Cut(c.Cookies(stateCookieName), ":")
+	if !ok || nonce == "" {
+		return s.redirectToFrontend(c, "", errInvalidState)
+	}
 	if err := validateState(state, storedState); err != nil {
 		return s.redirectToFrontend(c, "", fmt.Errorf("state validation failed: %w", err))
 	}
@@ -249,8 +249,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	// State is validated, clear the cookie immediately.
 	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
 
-	// Process the OIDC callback using the provider and core functions.
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, state)
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, nonce)
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}

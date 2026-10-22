@@ -56,6 +56,7 @@ func TestRedirectToFrontendAuthErrors(t *testing.T) {
 	}{
 		{"IdP access denied", errAccessDenied, "access_denied"},
 		{"invalid state", errInvalidState, "session_expired"},
+		{"invalid nonce", auth.ErrOIDCInvalidNonce, "session_expired"},
 		{"unauthorized", auth.ErrUnauthorizedUser, "unauthorized"},
 		{"inactive", auth.ErrUserInactive, "user_inactive"},
 		{"invalid token", auth.ErrOIDCInvalidToken, "invalid_token"},
@@ -179,7 +180,7 @@ func TestHandleCallbackErrors(t *testing.T) {
 			app.Get("/api/v1/auth/callback", s.handleCallback)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?"+tc.query, http.NoBody)
 			if tc.cookie != "" {
-				req.AddCookie(&http.Cookie{Name: stateCookieName, Value: tc.cookie})
+				req.AddCookie(&http.Cookie{Name: stateCookieName, Value: tc.cookie + ":nonce"})
 			}
 			resp, err := app.Test(req)
 			if err != nil {
@@ -229,7 +230,7 @@ func TestCallbackTokenFailureLogsOnce(t *testing.T) {
 	app.Get("/callback", s.handleCallback)
 	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
-	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state + ":nonce"})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)

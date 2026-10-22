@@ -102,7 +102,7 @@ func TestCallbackIDPFailures(t *testing.T) {
 			})
 			state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 			req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
-			req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
+			req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state + ":nonce"})
 			resp, err := app.Test(req)
 			if err != nil {
 				t.Fatal(err)

@@ -17,7 +17,7 @@ func TestVerifyIDToken_IssuerAllowList(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	ctx := context.Background()
 
-	raw, err := fake.signIDToken(OIDCClaims{Email: "u@example.com", EmailVerified: new(true)})
+	raw, err := fake.signIDToken(OIDCClaims{Email: "u@example.com", EmailVerified: new(true)}, "nonce")
 	if err != nil {
 		t.Fatalf("signIDToken: %v", err)
 	}
