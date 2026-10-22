@@ -33,7 +33,7 @@ func newDashboardTestServer(t *testing.T) *Server {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	return &Server{sqlite: s, baseCtx: t.Context(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &Server{store: s, baseCtx: t.Context(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
 // withUser mounts a handler with the given user injected into c.Locals, standing
@@ -85,10 +85,10 @@ const validDashboardBody = `{"name":"Ops","description":"","panels":{"version":1
 
 func TestHandleCreateDashboardValidation(t *testing.T) {
 	s := newDashboardTestServer(t)
-	user := mkTestUser(t, s.sqlite, "creator@test.dev", models.UserRoleMember)
+	user := mkTestUser(t, s.store, "creator@test.dev", models.UserRoleMember)
 	// Seed team 1 + source 1 with the creator as a member so the valid body
 	// (which references team_id:1/source_id:1) passes the B2/B4 checks.
-	mkTestTeam(t, s.sqlite, "team", user)
+	mkTestTeam(t, s.store, "team", user)
 
 	app := fiber.New()
 	withUser(app, http.MethodPost, "/dashboards", user, s.handleCreateDashboard)
@@ -135,9 +135,9 @@ func tooManyPanelsBody() string {
 // with the admin dev token alone.
 func TestHandleUpdateDashboardAuthz(t *testing.T) {
 	s := newDashboardTestServer(t)
-	creator := mkTestUser(t, s.sqlite, "owner@test.dev", models.UserRoleMember)
-	stranger := mkTestUser(t, s.sqlite, "stranger@test.dev", models.UserRoleMember)
-	admin := mkTestUser(t, s.sqlite, "admin@test.dev", models.UserRoleAdmin)
+	creator := mkTestUser(t, s.store, "owner@test.dev", models.UserRoleMember)
+	stranger := mkTestUser(t, s.store, "stranger@test.dev", models.UserRoleMember)
+	admin := mkTestUser(t, s.store, "admin@test.dev", models.UserRoleAdmin)
 
 	// Seed a dashboard owned by creator.
 	dash := &models.Dashboard{
@@ -145,7 +145,7 @@ func TestHandleUpdateDashboardAuthz(t *testing.T) {
 		PanelsJSON: json.RawMessage(`{"version":1,"layout":[],"panels":[]}`),
 		CreatedBy:  &creator.ID,
 	}
-	if err := s.sqlite.CreateDashboard(context.Background(), dash); err != nil {
+	if err := s.store.CreateDashboard(context.Background(), dash); err != nil {
 		t.Fatalf("CreateDashboard: %v", err)
 	}
 
@@ -219,12 +219,12 @@ func panelBody(name string, teamID models.TeamID, sourceID models.SourceID) stri
 // 403 (not the panel blob).
 func TestHandleGetDashboardForbidden(t *testing.T) {
 	s := newDashboardTestServer(t)
-	creator := mkTestUser(t, s.sqlite, "owner@test.dev", models.UserRoleMember)
-	stranger := mkTestUser(t, s.sqlite, "stranger@test.dev", models.UserRoleMember)
-	team, src := mkTestTeam(t, s.sqlite, "team", creator)
+	creator := mkTestUser(t, s.store, "owner@test.dev", models.UserRoleMember)
+	stranger := mkTestUser(t, s.store, "stranger@test.dev", models.UserRoleMember)
+	team, src := mkTestTeam(t, s.store, "team", creator)
 
 	dash := &models.Dashboard{Name: "Ops", PanelsJSON: panelBlobJSON(team.ID, src.ID), CreatedBy: &creator.ID}
-	if err := s.sqlite.CreateDashboard(context.Background(), dash); err != nil {
+	if err := s.store.CreateDashboard(context.Background(), dash); err != nil {
 		t.Fatalf("CreateDashboard: %v", err)
 	}
 
@@ -263,12 +263,12 @@ func TestHandleGetDashboardForbidden(t *testing.T) {
 func TestHandleGetDashboardRedaction(t *testing.T) {
 	s := newDashboardTestServer(t)
 	ctx := context.Background()
-	creator := mkTestUser(t, s.sqlite, "owner@test.dev", models.UserRoleMember)
-	partial := mkTestUser(t, s.sqlite, "partial@test.dev", models.UserRoleMember)
+	creator := mkTestUser(t, s.store, "owner@test.dev", models.UserRoleMember)
+	partial := mkTestUser(t, s.store, "partial@test.dev", models.UserRoleMember)
 
 	// partial is a member of team-a only; team-b's source is out of reach.
-	teamA, srcA := mkTestTeam(t, s.sqlite, "team-a", creator, partial)
-	teamB, srcB := mkTestTeam(t, s.sqlite, "team-b", creator)
+	teamA, srcA := mkTestTeam(t, s.store, "team-a", creator, partial)
+	teamB, srcB := mkTestTeam(t, s.store, "team-b", creator)
 
 	blob := json.RawMessage(fmt.Sprintf(
 		`{"version":1,"layout":[{"id":"p1","x":0,"y":0,"w":6,"h":2},{"id":"p2","x":6,"y":0,"w":6,"h":2}],`+
@@ -279,7 +279,7 @@ func TestHandleGetDashboardRedaction(t *testing.T) {
 		int(teamA.ID), int(srcA.ID), int(teamB.ID), int(srcB.ID),
 	))
 	dash := &models.Dashboard{Name: "shared", PanelsJSON: append(json.RawMessage(nil), blob...), CreatedBy: &creator.ID}
-	if err := s.sqlite.CreateDashboard(ctx, dash); err != nil {
+	if err := s.store.CreateDashboard(ctx, dash); err != nil {
 		t.Fatalf("CreateDashboard: %v", err)
 	}
 
@@ -356,7 +356,7 @@ func TestHandleGetDashboardRedaction(t *testing.T) {
 	}
 
 	// The stored blob is untouched by the GET.
-	reloaded, err := s.sqlite.GetDashboard(ctx, dash.ID)
+	reloaded, err := s.store.GetDashboard(ctx, dash.ID)
 	if err != nil {
 		t.Fatalf("reload: %v", err)
 	}
@@ -369,11 +369,11 @@ func TestHandleGetDashboardRedaction(t *testing.T) {
 // yields 409.
 func TestHandleUpdateDashboardConflict(t *testing.T) {
 	s := newDashboardTestServer(t)
-	creator := mkTestUser(t, s.sqlite, "owner@test.dev", models.UserRoleMember)
-	team, src := mkTestTeam(t, s.sqlite, "team", creator)
+	creator := mkTestUser(t, s.store, "owner@test.dev", models.UserRoleMember)
+	team, src := mkTestTeam(t, s.store, "team", creator)
 
 	dash := &models.Dashboard{Name: "Ops", PanelsJSON: panelBlobJSON(team.ID, src.ID), CreatedBy: &creator.ID}
-	if err := s.sqlite.CreateDashboard(context.Background(), dash); err != nil {
+	if err := s.store.CreateDashboard(context.Background(), dash); err != nil {
 		t.Fatalf("CreateDashboard: %v", err)
 	}
 
@@ -423,7 +423,7 @@ func panelBlobJSON(teamID models.TeamID, sourceID models.SourceID) json.RawMessa
 // a mis-handled Send* nil return.
 func TestHandleGetDashboardNotFound(t *testing.T) {
 	s := newDashboardTestServer(t)
-	user := mkTestUser(t, s.sqlite, "viewer@test.dev", models.UserRoleMember)
+	user := mkTestUser(t, s.store, "viewer@test.dev", models.UserRoleMember)
 
 	app := fiber.New()
 	withUser(app, http.MethodGet, "/dashboards/:dashboardID", user, s.handleGetDashboard)

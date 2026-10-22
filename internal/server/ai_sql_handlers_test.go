@@ -16,7 +16,7 @@ func TestGenerateAISQLAuthorization(t *testing.T) {
 	s := newAuthzTestServer(t)
 	s.config.AI.Enabled = true
 	s.config.AI.Provider = "bedrock"
-	w := newAuthzWorld(t, s.sqlite)
+	w := newAuthzWorld(t, s.store)
 
 	for _, tc := range []struct {
 		name string
@@ -33,7 +33,7 @@ func TestGenerateAISQLAuthorization(t *testing.T) {
 			path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/generate-sql", tc.team, w.source)
 			req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 			req.Header.Set("Content-Type", "application/json")
-			req.AddCookie(sessionCookie(t, s.sqlite, tc.user))
+			req.AddCookie(sessionCookie(t, s.store, tc.user))
 			resp, err := s.app.Test(req)
 			if err != nil {
 				t.Fatalf("app.Test: %v", err)
@@ -54,12 +54,12 @@ func TestGenerateAISQLRejectsUnavailableSourceProvider(t *testing.T) {
 	s := newAuthzTestServer(t)
 	s.config.AI.Enabled = true
 	s.config.AI.Provider = "bedrock"
-	w := newAuthzWorld(t, s.sqlite)
+	w := newAuthzWorld(t, s.store)
 
 	path := fmt.Sprintf("/api/v1/teams/%d/sources/%d/generate-sql", w.team, w.source)
 	req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"natural_language_query":"show logs"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(sessionCookie(t, s.sqlite, w.member))
+	req.AddCookie(sessionCookie(t, s.store, w.member))
 	resp, err := s.app.Test(req)
 	if err != nil {
 		t.Fatalf("app.Test: %v", err)

@@ -55,11 +55,11 @@ func TestCreateTokenDelegationHTTP(t *testing.T) {
 			}
 			t.Run(fmt.Sprintf("service=%t/%s", serviceAccount, tc.name), func(t *testing.T) {
 				s := newAuthzTestServer(t)
-				user := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+				user := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
 				path := "/api/v1/me/tokens"
 				target := user
 				if serviceAccount {
-					account, err := core.CreateServiceAccount(context.Background(), s.sqlite, s.log, "Test bot")
+					account, err := core.CreateServiceAccount(context.Background(), s.store, s.log, "Test bot")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -68,15 +68,15 @@ func TestCreateTokenDelegationHTTP(t *testing.T) {
 				}
 				var auth func(*http.Request)
 				if tc.session {
-					auth = withSession(sessionCookie(t, s.sqlite, user))
+					auth = withSession(sessionCookie(t, s.store, user))
 				} else {
-					parent, err := core.CreateAPIToken(context.Background(), s.sqlite, s.log, &s.config.Auth, user.ID, "parent", tc.parentExpiry, tc.parentScopes)
+					parent, err := core.CreateAPIToken(context.Background(), s.store, s.log, &s.config.Auth, user.ID, "parent", tc.parentExpiry, tc.parentScopes)
 					if err != nil {
 						t.Fatal(err)
 					}
 					auth = withBearer(parent.Token)
 				}
-				before, err := core.ListAPITokensForUser(context.Background(), s.sqlite, target.ID)
+				before, err := core.ListAPITokensForUser(context.Background(), s.store, target.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -89,7 +89,7 @@ func TestCreateTokenDelegationHTTP(t *testing.T) {
 				if resp.status != tc.want {
 					t.Fatalf("status = %d (%q), want %d", resp.status, resp.message, tc.want)
 				}
-				after, err := core.ListAPITokensForUser(context.Background(), s.sqlite, target.ID)
+				after, err := core.ListAPITokensForUser(context.Background(), s.store, target.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -134,8 +134,8 @@ func TestUpdateLastAdminHTTP(t *testing.T) {
 	for _, body := range []string{`{"role":"member"}`, `{"status":"inactive"}`, `{"role":"member","status":"inactive"}`} {
 		t.Run(body, func(t *testing.T) {
 			s := newAuthzTestServer(t)
-			admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
-			resp := doAuthzRequest(t, s, http.MethodPut, fmt.Sprintf("/api/v1/admin/users/%d", admin.ID), body, withSession(sessionCookie(t, s.sqlite, admin)))
+			admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
+			resp := doAuthzRequest(t, s, http.MethodPut, fmt.Sprintf("/api/v1/admin/users/%d", admin.ID), body, withSession(sessionCookie(t, s.store, admin)))
 			if resp.status != fiber.StatusBadRequest {
 				t.Fatalf("status = %d (%q), want 400", resp.status, resp.message)
 			}
@@ -151,13 +151,13 @@ func TestCreateTokenRejectsOtherAuthMethods(t *testing.T) {
 		for _, method := range []string{"oauth", "unknown", "token"} {
 			t.Run(fmt.Sprintf("service=%t/%s", serviceAccount, method), func(t *testing.T) {
 				s := newAuthzTestServer(t)
-				user := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+				user := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
 				target := user
 				path := "/tokens"
 				handler := s.handleCreateAPIToken
 				if serviceAccount {
 					var err error
-					target, err = core.CreateServiceAccount(context.Background(), s.sqlite, s.log, "Test bot")
+					target, err = core.CreateServiceAccount(context.Background(), s.store, s.log, "Test bot")
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -185,7 +185,7 @@ func TestCreateTokenRejectsOtherAuthMethods(t *testing.T) {
 				if resp.StatusCode != fiber.StatusForbidden {
 					t.Fatalf("status = %d, want 403", resp.StatusCode)
 				}
-				tokens, err := core.ListAPITokensForUser(context.Background(), s.sqlite, target.ID)
+				tokens, err := core.ListAPITokensForUser(context.Background(), s.store, target.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -220,10 +220,10 @@ func TestUserAdminGrantHTTP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newAuthzTestServer(t)
-			admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+			admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
 			var auth func(*http.Request)
 			if tc.session {
-				auth = withSession(sessionCookie(t, s.sqlite, admin))
+				auth = withSession(sessionCookie(t, s.store, admin))
 			} else {
 				auth = withBearer(apiToken(t, s, admin, tc.scope))
 			}
@@ -233,7 +233,7 @@ func TestUserAdminGrantHTTP(t *testing.T) {
 				t.Fatal(err)
 			}
 			if tc.update {
-				member := mkTestUser(t, s.sqlite, "target@example.com", models.UserRoleMember)
+				member := mkTestUser(t, s.store, "target@example.com", models.UserRoleMember)
 				method = http.MethodPut
 				path = fmt.Sprintf("%s/%d", path, member.ID)
 			} else {
@@ -251,7 +251,7 @@ func TestUserAdminGrantHTTP(t *testing.T) {
 			if tc.want == fiber.StatusForbidden && (!strings.Contains(resp.message, "admin") || !strings.Contains(resp.message, "*")) {
 				t.Errorf("denial must explain the admin grant scope requirement, got %q", resp.message)
 			}
-			user, err := core.GetUserByEmail(context.Background(), s.sqlite, "target@example.com")
+			user, err := core.GetUserByEmail(context.Background(), s.store, "target@example.com")
 			if !tc.persisted {
 				if !errors.Is(err, core.ErrUserNotFound) {
 					t.Fatalf("denied creation persisted a user: user=%v err=%v", user, err)
@@ -273,13 +273,13 @@ func TestUserAdminGrantHTTP(t *testing.T) {
 
 func TestServiceAccountRoleHTTP(t *testing.T) {
 	s := newAuthzTestServer(t)
-	admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
 	auth := withBearer(apiToken(t, s, admin, models.TokenScopeUsersWrite))
 	resp := doAuthzRequest(t, s, http.MethodPost, "/api/v1/admin/service-accounts", `{"name":"Test bot","role":"admin"}`, auth)
 	if resp.status != fiber.StatusCreated {
 		t.Fatalf("status = %d (%q), want 201", resp.status, resp.message)
 	}
-	accounts, err := core.ListServiceAccounts(context.Background(), s.sqlite)
+	accounts, err := core.ListServiceAccounts(context.Background(), s.store)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,14 +311,14 @@ func TestUserAdminTransitionHTTP(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := newAuthzTestServer(t)
-			admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
-			target, err := core.CreateUser(context.Background(), s.sqlite, s.log, access.SystemPrincipal(), "target@example.com", "Target User", tc.beforeRole, tc.beforeStatus)
+			admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
+			target, err := core.CreateUser(context.Background(), s.store, s.log, access.SystemPrincipal(), "target@example.com", "Target User", tc.beforeRole, tc.beforeStatus)
 			if err != nil {
 				t.Fatal(err)
 			}
 			var auth func(*http.Request)
 			if tc.session {
-				auth = withSession(sessionCookie(t, s.sqlite, admin))
+				auth = withSession(sessionCookie(t, s.store, admin))
 			} else {
 				auth = withBearer(apiToken(t, s, admin, tc.scope))
 			}
@@ -326,7 +326,7 @@ func TestUserAdminTransitionHTTP(t *testing.T) {
 			if resp.status != tc.want {
 				t.Errorf("status = %d (%q), want %d", resp.status, resp.message, tc.want)
 			}
-			stored, err := core.GetUser(context.Background(), s.sqlite, target.ID)
+			stored, err := core.GetUser(context.Background(), s.store, target.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -345,7 +345,7 @@ func TestUserAdminTransitionHTTP(t *testing.T) {
 
 	t.Run("scoped deactivate last admin", func(t *testing.T) {
 		s := newAuthzTestServer(t)
-		admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
+		admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
 		resp := doAuthzRequest(t, s, http.MethodPut, fmt.Sprintf("/api/v1/admin/users/%d", admin.ID), `{"status":"inactive"}`, withBearer(apiToken(t, s, admin, models.TokenScopeUsersWrite)))
 		if resp.status != fiber.StatusBadRequest || resp.message != core.ErrCannotDeleteLastAdmin.Error() {
 			t.Fatalf("status = %d (%q), want last-admin rejection", resp.status, resp.message)
@@ -357,14 +357,14 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 	for _, update := range []bool{false, true} {
 		t.Run(fmt.Sprintf("update=%t", update), func(t *testing.T) {
 			s := newAuthzTestServer(t)
-			admin := mkTestUser(t, s.sqlite, "audit-admin@example.com", models.UserRoleAdmin)
+			admin := mkTestUser(t, s.store, "audit-admin@example.com", models.UserRoleAdmin)
 			token := apiToken(t, s, admin, models.TokenScopeUsersWrite)
 			method, path, endpoint := http.MethodPost, "/api/v1/admin/users", "/api/v1/admin/users"
 			body := `{"email":"audit-target@example.com","full_name":"Audit Target","role":"admin"}`
 			target := "audit-target@example.com"
 			targetKey, targetValue := "target_email", fmt.Sprintf("%q", target)
 			if update {
-				member := mkTestUser(t, s.sqlite, target, models.UserRoleMember)
+				member := mkTestUser(t, s.store, target, models.UserRoleMember)
 				method, path, endpoint = http.MethodPut, fmt.Sprintf("%s/%d", path, member.ID), "/api/v1/admin/users/:userID"
 				body = `{"role":"admin"}`
 				targetKey, targetValue = "target_user_id", fmt.Sprint(member.ID)
@@ -412,8 +412,8 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 
 func TestAdminAccountHandlersRejectMissingUsers(t *testing.T) {
 	s := newAuthzTestServer(t)
-	admin := mkTestUser(t, s.sqlite, "admin@example.com", models.UserRoleAdmin)
-	cookie := sessionCookie(t, s.sqlite, admin)
+	admin := mkTestUser(t, s.store, "admin@example.com", models.UserRoleAdmin)
+	cookie := sessionCookie(t, s.store, admin)
 
 	for _, tc := range []struct {
 		method string

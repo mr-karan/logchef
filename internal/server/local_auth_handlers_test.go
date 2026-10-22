@@ -66,7 +66,7 @@ func TestHandleLocalLoginEmailLength(t *testing.T) {
 		strings.Repeat("é", 122) + "@example.com",
 	} {
 		t.Run(email[:8], func(t *testing.T) {
-			s := &Server{localLoginLimiter: auth.NewLoginRateLimiter(time.Minute, 1, 1), sqlite: newServerTestDB(t), config: &config.Config{Auth: config.AuthConfig{Local: config.LocalAuthConfig{Enabled: true}}}}
+			s := &Server{localLoginLimiter: auth.NewLoginRateLimiter(time.Minute, 1, 1), store: newServerTestDB(t), config: &config.Config{Auth: config.AuthConfig{Local: config.LocalAuthConfig{Enabled: true}}}}
 			app := fiber.New()
 			app.Post("/login", s.handleLocalLogin)
 			request := func(email string, wantStatus int) []byte {
@@ -137,7 +137,7 @@ func TestSessionCookieAttributes(t *testing.T) {
 	for _, secure := range []bool{true, false} {
 		t.Run(fmt.Sprintf("secure=%v", secure), func(t *testing.T) {
 			db := newServerTestDB(t)
-			s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), sqlite: db, config: &config.Config{Auth: config.AuthConfig{
+			s := &Server{log: slog.New(slog.NewTextHandler(io.Discard, nil)), store: db, config: &config.Config{Auth: config.AuthConfig{
 				Local: config.LocalAuthConfig{Enabled: true}, SessionDuration: time.Hour, MaxConcurrentSessions: 5,
 			}}}
 			s.config.Server.FrontendURL = "https://logs.example.com/logchef/"

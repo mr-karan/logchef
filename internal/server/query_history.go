@@ -92,13 +92,13 @@ func (s *Server) writeQueryHistory(parent context.Context, entry *models.QueryHi
 	defer cancel()
 	// Demo logins are shared, so only aggregate counters are retained.
 	if s.config == nil || !s.config.Demo.ReadOnly {
-		if err := s.sqlite.RecordQueryHistory(ctx, entry); err != nil {
+		if err := s.store.RecordQueryHistory(ctx, entry); err != nil {
 			s.historyDropped.Add(1)
 			s.log.Warn("failed to record query history", "error", err, "user_id", entry.UserID, "source_id", entry.SourceID)
 		}
 	}
 	bucketDate := time.Now().UTC().Format("2006-01-02")
-	if err := s.sqlite.IncrementQueryStats(ctx, bucketDate, entry.UserID, entry.TeamID, entry.SourceID, entry.QueryLanguage, entry.DurationMs); err != nil {
+	if err := s.store.IncrementQueryStats(ctx, bucketDate, entry.UserID, entry.TeamID, entry.SourceID, entry.QueryLanguage, entry.DurationMs); err != nil {
 		s.log.Warn("failed to increment query stats", "error", err, "user_id", entry.UserID, "source_id", entry.SourceID)
 	}
 }

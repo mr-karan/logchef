@@ -86,7 +86,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to track export query", models.GeneralErrorType)
 	}
 
-	if err := s.sqlite.CreateExportJob(c.Context(), job); err != nil {
+	if err := s.store.CreateExportJob(c.Context(), job); err != nil {
 		queryTracker.RemoveQuery(job.ID)
 		cancel()
 		s.log.Error("failed to persist export job", "error", err, "job_id", job.ID)
@@ -151,13 +151,13 @@ func (s *Server) handleDownloadExportJob(c fiber.Ctx) error {
 	}
 
 	if strings.TrimSpace(job.FilePath) == "" {
-		_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
+		_ = s.store.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
 	if _, err := os.Stat(job.FilePath); err != nil {
 		s.log.Error("failed to stat export artifact", "error", err, "job_id", job.ID, "path", job.FilePath)
 		if errors.Is(err, os.ErrNotExist) {
-			_ = s.sqlite.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
+			_ = s.store.FailExportJob(c.Context(), job.ID, "export artifact is unavailable", time.Now().UTC())
 		}
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Export artifact is unavailable", models.GeneralErrorType)
 	}
@@ -182,7 +182,7 @@ func (s *Server) authorizeExportJob(c fiber.Ctx, src access.AuthorizedSource) (*
 		return nil, false
 	}
 
-	job, err := s.sqlite.GetExportJob(c.Context(), exportID)
+	job, err := s.store.GetExportJob(c.Context(), exportID)
 	if err != nil {
 		if models.IsNotFound(err) {
 			s.sendLoadFailure(c, fiber.StatusNotFound, "Export job not found", models.NotFoundErrorType)
@@ -212,7 +212,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	complete := false
 	defer func() { s.finishExportJob(queryCtx, jobID, tmpFile, filePath, complete, recover()) }()
 	runningCtx, runningCancel := context.WithTimeout(queryCtx, time.Second)
-	err := s.sqlite.UpdateExportJobRunning(runningCtx, jobID)
+	err := s.store.UpdateExportJobRunning(runningCtx, jobID)
 	runningCancel()
 	if err != nil {
 		s.failExportJob(queryCtx, jobID, "", "failed to mark export running")
@@ -233,7 +233,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 		return
 	}
 
-	source, err := s.sqlite.GetSource(queryCtx, sourceID)
+	source, err := s.store.GetSource(queryCtx, sourceID)
 	if err != nil {
 		s.failExportJob(queryCtx, jobID, "", "Source not found")
 		return
@@ -312,7 +312,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	completedAt := time.Now().UTC()
 	metadataCtx, metadataCancel := context.WithTimeout(queryCtx, time.Second)
 	defer metadataCancel()
-	if err := s.sqlite.CompleteExportJob(metadataCtx, jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
+	if err := s.store.CompleteExportJob(metadataCtx, jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
 		level := slog.LevelError
 		if errors.Is(queryCtx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
 			level = slog.LevelDebug
@@ -344,7 +344,7 @@ func (s *Server) failExportJob(ctx context.Context, jobID, filePath, message str
 			s.log.Warn("failed to remove partial export artifact", "error", err, "job_id", jobID, "path", filePath)
 		}
 	}
-	if err := s.sqlite.FailExportJob(ctx, jobID, message, time.Now().UTC()); err != nil {
+	if err := s.store.FailExportJob(ctx, jobID, message, time.Now().UTC()); err != nil {
 		s.log.Error("failed to mark export job failed", "error", err, "job_id", jobID)
 	}
 }
@@ -408,14 +408,14 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	defer cancel()
 
 	now := time.Now().UTC()
-	if err := s.sqlite.PruneExpiredQueryShares(ctx, now); err != nil {
+	if err := s.store.PruneExpiredQueryShares(ctx, now); err != nil {
 		s.log.Warn("failed to prune expired query shares", "error", err)
 	}
 
 	// Unlink files first, then delete rows. If the process dies between
 	// the two steps, the next cycle re-lists the same rows and ignores
 	// already-removed files (ErrNotExist), so no artifact is orphaned.
-	paths, err := s.sqlite.ListExpiredExportJobPaths(ctx, now)
+	paths, err := s.store.ListExpiredExportJobPaths(ctx, now)
 	if err != nil {
 		s.log.Warn("failed to list expired export jobs", "error", err)
 		return
@@ -425,15 +425,15 @@ func (s *Server) cleanupExpiredBackgroundState() {
 			s.log.Warn("failed to remove expired export artifact", "error", err, "path", path)
 		}
 	}
-	if err := s.sqlite.DeleteExpiredExportJobs(ctx, now); err != nil {
+	if err := s.store.DeleteExpiredExportJobs(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired export job rows", "error", err)
 	}
 
-	if err := s.sqlite.DeleteExpiredSessions(ctx, now); err != nil {
+	if err := s.store.DeleteExpiredSessions(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired sessions", "error", err)
 	}
 
-	if err := s.sqlite.DeleteExpiredOAuthRows(ctx, now); err != nil {
+	if err := s.store.DeleteExpiredOAuthRows(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired OAuth rows", "error", err)
 	}
 }
@@ -462,7 +462,7 @@ func (s *Server) reapInterruptedExportJobs(owner models.ExportJobOwner) {
 	}()
 	recentCutoff := time.Now().UTC().Add(-5 * time.Second)
 	for ctx.Err() == nil {
-		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge, owner)
+		jobs, err := s.store.ReapInterruptedExportJobs(ctx, maxAge, owner)
 		if err != nil {
 			s.log.Error("failed to reap interrupted exports", "error", err)
 			return

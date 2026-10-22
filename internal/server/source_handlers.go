@@ -18,7 +18,7 @@ import (
 // URL: GET /api/v1/admin/sources
 // Requires: Admin privileges
 func (s *Server) handleListSources(c fiber.Ctx) error {
-	sources, err := core.ListSources(c.Context(), s.sqlite, s.datasources)
+	sources, err := core.ListSources(c.Context(), s.store, s.datasources)
 	if err != nil {
 		s.log.Error("failed to list sources", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "Error listing sources")

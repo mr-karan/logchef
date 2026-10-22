@@ -164,17 +164,17 @@ func TestExportOptionalBlocksWithoutVariables(t *testing.T) {
 			}}
 			s.clickhouse = clickhouse.NewManager(s.log)
 			t.Cleanup(func() { _ = s.clickhouse.Close() })
-			s.datasources = datasource.NewService(s.sqlite, s.log)
+			s.datasources = datasource.NewService(s.store, s.log)
 			s.datasources.Register(datasource.NewClickHouseProvider(s.clickhouse, s.log))
 			source := &models.Source{Name: "export", SourceType: models.SourceTypeClickHouse,
 				Connection: models.ConnectionInfo{Host: addr, Database: "system", TableName: "one"}}
-			if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+			if err := s.store.CreateSource(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
 			if err := s.clickhouse.AddSource(t.Context(), source); err != nil {
 				t.Fatal(err)
 			}
-			user, src := authorizeTestSource(t, s.sqlite, source.ID)
+			user, src := authorizeTestSource(t, s.store, source.ID)
 			handler := s.handleExportLogs
 			if operation == "job" {
 				handler = s.handleCreateExportJob
@@ -210,7 +210,7 @@ func TestExportOptionalBlocksWithoutVariables(t *testing.T) {
 			}
 			deadline := time.Now().Add(10 * time.Second)
 			for time.Now().Before(deadline) {
-				job, err := s.sqlite.GetExportJob(t.Context(), result.Data.ID)
+				job, err := s.store.GetExportJob(t.Context(), result.Data.ID)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -291,13 +291,13 @@ func TestExportRequestValidation(t *testing.T) {
 				}
 				s.config.Export.DefaultTimeoutSeconds = 30
 				s.config.Export.MaxTimeoutSeconds = 60
-				s.datasources = datasource.NewService(s.sqlite, s.log)
+				s.datasources = datasource.NewService(s.store, s.log)
 				s.datasources.Register(&exportCapabilityProvider{exports: !tc.noExports})
 				source := &models.Source{Name: "export-validation", SourceType: models.SourceTypeClickHouse}
-				if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+				if err := s.store.CreateSource(t.Context(), source); err != nil {
 					t.Fatal(err)
 				}
-				user, src := authorizeTestSource(t, s.sqlite, source.ID)
+				user, src := authorizeTestSource(t, s.store, source.ID)
 				app := fiber.New()
 				handler, want := s.handleExportLogs, tc.wantStream
 				if endpoint == "job" {

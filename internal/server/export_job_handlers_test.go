@@ -12,8 +12,8 @@ import (
 
 func TestExportJobHandlersRejectMissingJobs(t *testing.T) {
 	s := newAuthzTestServer(t)
-	w := newAuthzWorld(t, s.sqlite)
-	cookie := sessionCookie(t, s.sqlite, w.member)
+	w := newAuthzWorld(t, s.store)
+	cookie := sessionCookie(t, s.store, w.member)
 
 	for _, suffix := range []string{"", "/download"} {
 		t.Run("missing export"+suffix, func(t *testing.T) {

@@ -85,7 +85,7 @@ func TestHandleTestWebhookHonorsAllowedHosts(t *testing.T) {
 			}
 			s := &Server{
 				webhookSender: alerts.NewDynamicWebhookSender(db, alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}),
-				sqlite:        db,
+				store:         db,
 				log:           logger,
 			}
 			app := fiber.New()
@@ -188,7 +188,7 @@ func TestHandleTestWebhookTransportErrors(t *testing.T) {
 			if err := db.UpsertSetting(t.Context(), "alerts.request_timeout", timeout, "string", "alerts", "", false); err != nil {
 				t.Fatal(err)
 			}
-			s := &Server{webhookSender: alerts.NewDynamicWebhookSender(db, alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}), sqlite: db, log: logger}
+			s := &Server{webhookSender: alerts.NewDynamicWebhookSender(db, alerts.WebhookSenderOptions{Logger: logger, AllowedHosts: allowlist}), store: db, log: logger}
 			app := fiber.New()
 			app.Post("/test-webhook", func(c fiber.Ctx) error {
 				c.Locals("user", &models.User{Role: models.UserRoleAdmin, Email: "admin@example.com"})
@@ -218,8 +218,8 @@ func TestHandleTestWebhookTransportErrors(t *testing.T) {
 
 func TestSettingsBaseURLsRequireAbsoluteHTTPURL(t *testing.T) {
 	s := newAuthzTestServer(t)
-	admin := mkTestUser(t, s.sqlite, "url-admin@example.com", models.UserRoleAdmin)
-	auth := withSession(sessionCookie(t, s.sqlite, admin))
+	admin := mkTestUser(t, s.store, "url-admin@example.com", models.UserRoleAdmin)
+	auth := withSession(sessionCookie(t, s.store, admin))
 	for _, key := range []string{"server.frontend_url", "alerts.frontend_url", "alerts.external_url", "ai.base_url"} {
 		t.Run(key, func(t *testing.T) {
 			category, _, _ := strings.Cut(key, ".")
@@ -238,7 +238,7 @@ func TestSettingsBaseURLsRequireAbsoluteHTTPURL(t *testing.T) {
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					const original = "https://original.example.com"
-					if err := s.sqlite.UpsertSetting(t.Context(), key, original, "string", category, "", false); err != nil {
+					if err := s.store.UpsertSetting(t.Context(), key, original, "string", category, "", false); err != nil {
 						t.Fatal(err)
 					}
 					body := fmt.Sprintf(`{"value":%q,"value_type":"string","category":%q}`, tc.value, category)
@@ -250,7 +250,7 @@ func TestSettingsBaseURLsRequireAbsoluteHTTPURL(t *testing.T) {
 					if tc.status == http.StatusOK {
 						want = tc.value
 					}
-					saved, err := s.sqlite.GetSetting(t.Context(), key)
+					saved, err := s.store.GetSetting(t.Context(), key)
 					if err != nil {
 						t.Fatal(err)
 					}

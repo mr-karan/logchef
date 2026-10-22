@@ -250,7 +250,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("%w: missing nonce cookie", auth.ErrOIDCInvalidNonce))
 	}
 
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret))
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret))
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}
@@ -264,7 +264,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 
 	// Auto-provision (and self-heal) the user's personal collection. Best-effort:
 	// a transient failure here must not block login.
-	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, loginUser); err != nil {
+	if _, err := core.EnsurePersonalCollection(c.Context(), s.store, s.log, loginUser); err != nil {
 		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", loginUser.ID)
 	}
 
@@ -289,7 +289,7 @@ func (s *Server) handleLogout(c fiber.Ctx) error {
 	sessionIDStr := c.Cookies(sessionCookieName)
 	if sessionIDStr != "" {
 		// Attempt to revoke the session in the database.
-		if err := core.RevokeSession(c.Context(), s.sqlite, s.log, models.SessionID(sessionIDStr)); err != nil {
+		if err := core.RevokeSession(c.Context(), s.store, s.log, models.SessionID(sessionIDStr)); err != nil {
 			// Log error but proceed with cookie deletion anyway.
 			s.log.Error("failed to revoke session during logout", "error", err, "session_id_prefix", sessionIDStr[:min(len(sessionIDStr), 8)])
 		}
@@ -380,7 +380,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many login attempts, try again shortly", models.ValidationErrorType)
 	}
 
-	user, err := s.sqlite.GetUserByEmail(c.Context(), req.Email)
+	user, err := s.store.GetUserByEmail(c.Context(), req.Email)
 	if err != nil || user == nil {
 		// Burn a bcrypt comparison so unknown emails aren't timing-distinguishable.
 		auth.VerifyLocalPassword("", req.Password)
@@ -394,7 +394,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		return invalid()
 	}
 
-	session, err := core.CreateSession(c.Context(), s.sqlite, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
+	session, err := core.CreateSession(c.Context(), s.store, s.log, user.ID, s.config.Auth.SessionDuration, s.config.Auth.MaxConcurrentSessions)
 	if err != nil {
 		s.log.Error("failed to create session for local login", "error", err, "user_id", user.ID)
 		return SendError(c, fiber.StatusInternalServerError, "Failed to create session")
@@ -402,7 +402,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 
 	s.log.Info("user.login", "email", user.Email, "user_id", user.ID, "method", "local")
 
-	if _, err := core.EnsurePersonalCollection(c.Context(), s.sqlite, s.log, user); err != nil {
+	if _, err := core.EnsurePersonalCollection(c.Context(), s.store, s.log, user); err != nil {
 		s.log.Warn("failed to ensure personal collection on login", "error", err, "user_id", user.ID)
 	}
 

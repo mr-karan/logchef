@@ -94,13 +94,13 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 				s.dashCache = cache.New(cache.Config{Enabled: true, MaxEntryBytes: 4096, MaxBytes: 8192})
 				t.Cleanup(s.dashCache.Close)
 				s.historyQueue = make(chan *models.QueryHistory, 4)
-				s.datasources = datasource.NewService(s.sqlite, s.log)
+				s.datasources = datasource.NewService(s.store, s.log)
 				s.datasources.Register(&succeedingQueryProvider{sourceType: sourceType})
 				source := &models.Source{Name: "preview-success", SourceType: sourceType}
 				if sourceType == models.SourceTypeVictoriaLogs {
 					source.ConnectionConfig = json.RawMessage(`{"url":"http://localhost:9428"}`)
 				}
-				if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+				if err := s.store.CreateSource(t.Context(), source); err != nil {
 					t.Fatal(err)
 				}
 				app := fiber.New()
@@ -108,7 +108,7 @@ func TestPreviewQueryEndpointSuccessResponses(t *testing.T) {
 				if endpoint.name == "logchefql" {
 					handler = s.handleLogchefQLQuery
 				}
-				user, src := authorizeTestSource(t, s.sqlite, source.ID)
+				user, src := authorizeTestSource(t, s.store, source.ID)
 				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, handler)
 				path := fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID)
 

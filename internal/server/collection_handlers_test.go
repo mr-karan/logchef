@@ -53,7 +53,7 @@ func newCollectionRouteEnv(t *testing.T) *collectionRouteEnv {
 // token issues a real API token for user with the given scopes.
 func (e *collectionRouteEnv) token(user *models.User, scopes ...models.TokenScope) string {
 	e.t.Helper()
-	resp, err := core.CreateAPIToken(context.Background(), e.s.sqlite, e.s.log, &e.cfg.Auth, user.ID, "test-"+user.Email, nil, scopes)
+	resp, err := core.CreateAPIToken(context.Background(), e.s.store, e.s.log, &e.cfg.Auth, user.ID, "test-"+user.Email, nil, scopes)
 	if err != nil {
 		e.t.Fatalf("CreateAPIToken(%s): %v", user.Email, err)
 	}
@@ -110,9 +110,9 @@ var collectionsRW = []models.TokenScope{models.TokenScopeCollectionsRead, models
 // token scopes.
 func TestCollectionTeamRoutesTokenScopes(t *testing.T) {
 	e := newCollectionRouteEnv(t)
-	owner := mkTestUser(t, e.s.sqlite, "scope-owner@test.dev", models.UserRoleMember)
-	team, _ := mkTestTeam(t, e.s.sqlite, "scope-team", owner)
-	coll, err := core.CreateCollection(context.Background(), e.s.sqlite, e.s.log, "Scoped", "", owner.ID)
+	owner := mkTestUser(t, e.s.store, "scope-owner@test.dev", models.UserRoleMember)
+	team, _ := mkTestTeam(t, e.s.store, "scope-team", owner)
+	coll, err := core.CreateCollection(context.Background(), e.s.store, e.s.log, "Scoped", "", owner.ID)
 	if err != nil {
 		t.Fatalf("CreateCollection: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestCollectionTeamRoutesTokenScopes(t *testing.T) {
 func TestCollectionTeamRoutesSharingFlow(t *testing.T) {
 	e := newCollectionRouteEnv(t)
 	ctx := context.Background()
-	db := e.s.sqlite
+	db := e.s.store
 
 	owner := mkTestUser(t, db, "flow-owner@test.dev", models.UserRoleMember)
 	member := mkTestUser(t, db, "flow-member@test.dev", models.UserRoleMember)

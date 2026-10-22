@@ -61,7 +61,7 @@ func TestReapContinuesAfterArtifactRemoveError(t *testing.T) {
 	user := mkTestUser(t, db, "reap-remove@example.com", models.UserRoleMember)
 	_, source := mkTestTeam(t, db, "reap-remove", user)
 	var logs bytes.Buffer
-	srv := &Server{sqlite: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(&logs, nil))}
+	srv := &Server{store: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(&logs, nil))}
 	ids := []string{uuid.NewString(), uuid.NewString()}
 	sort.Strings(ids)
 	var partials []string
@@ -112,7 +112,7 @@ func TestExportRunningUsesDatabaseClock(t *testing.T) {
 			if err := db.CreateExportJob(ctx, job); err != nil {
 				t.Fatal(err)
 			}
-			srv := &Server{sqlite: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+			srv := &Server{store: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 			srv.reapInterruptedExportJobs(models.ExportJobOwner{})
 			got, err := db.GetExportJob(ctx, job.ID)
 			if err != nil {
@@ -381,7 +381,7 @@ func TestStartupExportReapSummaryOnEarlyExit(t *testing.T) {
 				defer cancel()
 			}
 			var logs bytes.Buffer
-			srv := &Server{sqlite: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(&logs, nil))}
+			srv := &Server{store: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(&logs, nil))}
 			srv.reapInterruptedExportJobs(owner)
 			output := logs.String()
 			if strings.Count(output, "msg=\"reaped interrupted exports\"") != 1 || !strings.Contains(output, fmt.Sprintf("reaped=%d", wantReaped)) {

@@ -36,14 +36,14 @@ func TestRawQueryRejectsStreamFiltersBeforeStreaming(t *testing.T) {
 	s := newDashboardTestServer(t)
 	s.config = &config.Config{Query: config.QueryConfig{DefaultPreviewLimit: 100, MaxPreviewLimit: 1000, DefaultTimeoutSeconds: 10}}
 	provider := &failingDashboardQueryProvider{sourceType: models.SourceTypeClickHouse}
-	s.datasources = datasource.NewService(s.sqlite, s.log)
+	s.datasources = datasource.NewService(s.store, s.log)
 	s.datasources.Register(provider)
 	source := &models.Source{Name: "stream-filter-validation", SourceType: models.SourceTypeClickHouse}
-	if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+	if err := s.store.CreateSource(t.Context(), source); err != nil {
 		t.Fatal(err)
 	}
 	app := fiber.New()
-	user, src := authorizeTestSource(t, s.sqlite, source.ID)
+	user, src := authorizeTestSource(t, s.store, source.ID)
 	withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, s.handleQueryLogs)
 	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID), strings.NewReader(`{"query_text":"SELECT * FROM logs","extra_stream_filters":["{app=\"api\"}"]}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -121,13 +121,13 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					provider := &failingDashboardQueryProvider{
 						sourceType: sourceType, err: failure.err, partial: failure.partial, release: make(chan struct{}),
 					}
-					s.datasources = datasource.NewService(s.sqlite, s.log)
+					s.datasources = datasource.NewService(s.store, s.log)
 					s.datasources.Register(provider)
 					source := &models.Source{Name: "dashboard-cache-test", SourceType: sourceType}
 					if sourceType == models.SourceTypeVictoriaLogs {
 						source.ConnectionConfig = json.RawMessage(`{"url":"http://localhost:9428"}`)
 					}
-					if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+					if err := s.store.CreateSource(t.Context(), source); err != nil {
 						t.Fatal(err)
 					}
 					app := fiber.New()
@@ -135,7 +135,7 @@ func TestDashboardCacheQueryEndpointFailures(t *testing.T) {
 					if endpoint == "logchefql" {
 						handler = s.handleLogchefQLQuery
 					}
-					user, src := authorizeTestSource(t, s.sqlite, source.ID)
+					user, src := authorizeTestSource(t, s.store, source.ID)
 					withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/query", user, handler)
 					path := fmt.Sprintf("/teams/%d/sources/%d/query", src.TeamID(), source.ID)
 					body := `{"query_text":"SELECT * FROM logs","query":"level=\"error\"","start_time":"2026-09-01 00:00:00","end_time":"2026-09-01 01:00:00"`

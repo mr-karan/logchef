@@ -88,7 +88,7 @@ func (s *Server) handleCreateQueryShare(c fiber.Ctx) error {
 		ExpiresAt: now.Add(ttl),
 		CreatedAt: now,
 	}
-	if err := s.sqlite.CreateQueryShare(c.Context(), share); err != nil {
+	if err := s.store.CreateQueryShare(c.Context(), share); err != nil {
 		s.log.Error("failed to create query share", "error", err, "team_id", teamID, "source_id", sourceID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to create share link", models.GeneralErrorType)
 	}
@@ -107,7 +107,7 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 	}
 
 	tokenPrefix := models.RedactShareToken(token)
-	share, err := s.sqlite.GetQueryShare(c.Context(), token)
+	share, err := s.store.GetQueryShare(c.Context(), token)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
@@ -116,13 +116,13 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to get share link", models.GeneralErrorType)
 	}
 	if time.Now().UTC().After(share.ExpiresAt) {
-		_ = s.sqlite.DeleteQueryShare(c.Context(), token)
+		_ = s.store.DeleteQueryShare(c.Context(), token)
 		return SendErrorWithType(c, fiber.StatusGone, "Share link has expired", models.NotFoundErrorType)
 	}
 
 	// Admins do not get a free pass on share visibility — they must be a
 	// member of a team that has the source.
-	hasAccess, err := s.sqlite.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
+	hasAccess, err := s.store.UserHasSourceAccess(c.Context(), user.ID, share.SourceID)
 	if err != nil {
 		s.log.Error("failed to check query share access", "error", err, "token_prefix", tokenPrefix, "user_id", user.ID)
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Failed to check share access", models.GeneralErrorType)
@@ -131,14 +131,14 @@ func (s *Server) handleGetQueryShare(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusForbidden, "You do not have access to this shared query", models.AuthorizationErrorType)
 	}
 
-	if err := s.sqlite.TouchQueryShare(c.Context(), token, time.Now().UTC()); err != nil {
+	if err := s.store.TouchQueryShare(c.Context(), token, time.Now().UTC()); err != nil {
 		s.log.Warn("failed to touch query share", "error", err, "token_prefix", tokenPrefix)
 	}
 
 	// Resolve a team the recipient actually belongs to for this source, so
 	// the client can issue team-scoped API calls without hitting auth failures
 	// (the creator's stored team may differ from the recipient's team).
-	recipientTeam, err := s.sqlite.GetUserTeamForSource(c.Context(), user.ID, share.SourceID)
+	recipientTeam, err := s.store.GetUserTeamForSource(c.Context(), user.ID, share.SourceID)
 	if err != nil {
 		if models.IsNotFound(err) {
 			// The recipient belongs to no team with access to this source, so they
@@ -164,7 +164,7 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 		return sendMissingUser(c)
 	}
 
-	share, err := s.sqlite.GetQueryShare(c.Context(), token)
+	share, err := s.store.GetQueryShare(c.Context(), token)
 	if err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
@@ -174,7 +174,7 @@ func (s *Server) handleDeleteQueryShare(c fiber.Ctx) error {
 	if !hasGlobalAdminBypass(c) && share.CreatedBy != user.ID {
 		return SendErrorWithType(c, fiber.StatusForbidden, "Only the creator or an admin can delete this share link", models.AuthorizationErrorType)
 	}
-	if err := s.sqlite.DeleteQueryShare(c.Context(), token); err != nil {
+	if err := s.store.DeleteQueryShare(c.Context(), token); err != nil {
 		if models.IsNotFound(err) {
 			return SendErrorWithType(c, fiber.StatusNotFound, "Share link not found", models.NotFoundErrorType)
 		}

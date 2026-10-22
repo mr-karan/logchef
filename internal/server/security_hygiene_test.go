@@ -24,9 +24,9 @@ import (
 
 func TestSettingsSensitiveValuesByPrincipal(t *testing.T) {
 	s := newAuthzTestServer(t)
-	admin := mkTestUser(t, s.sqlite, "settings-admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, s.store, "settings-admin@example.com", models.UserRoleAdmin)
 	token := apiToken(t, s, admin, core.ReadOnlyTokenScopes()...)
-	cookie := sessionCookie(t, s.sqlite, admin)
+	cookie := sessionCookie(t, s.store, admin)
 	ctx := context.Background()
 	const secret = "test-smtp-secret-value"
 	for _, setting := range []struct {
@@ -38,7 +38,7 @@ func TestSettingsSensitiveValuesByPrincipal(t *testing.T) {
 		{"custom.secret", secret, true},
 		{"custom.empty_secret", "", true},
 	} {
-		if err := s.sqlite.UpsertSetting(ctx, setting.key, setting.value, "string", "alerts", "", setting.sensitive); err != nil {
+		if err := s.store.UpsertSetting(ctx, setting.key, setting.value, "string", "alerts", "", setting.sensitive); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -123,14 +123,14 @@ func TestSettingsSensitiveValuesByPrincipal(t *testing.T) {
 
 func TestSettingsRejectNonPositiveDurations(t *testing.T) {
 	e := newCollectionRouteEnv(t)
-	admin := mkTestUser(t, e.s.sqlite, "duration-admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, e.s.store, "duration-admin@example.com", models.UserRoleAdmin)
 	token := e.token(admin, models.TokenScopeSettingsWrite)
 	keys := []string{"auth.session_duration", "auth.default_token_expiry", "alerts.evaluation_interval", "alerts.default_lookback", "alerts.request_timeout"}
 	for _, key := range keys {
 		for _, valueType := range []string{"duration", "string"} {
 			for _, value := range []string{"-1h", "0s", "1h"} {
 				t.Run(key+"/"+valueType+"/"+value, func(t *testing.T) {
-					if err := e.s.sqlite.UpsertSetting(context.Background(), key, "2h", "duration", strings.Split(key, ".")[0], "", false); err != nil {
+					if err := e.s.store.UpsertSetting(context.Background(), key, "2h", "duration", strings.Split(key, ".")[0], "", false); err != nil {
 						t.Fatal(err)
 					}
 					body := fmt.Sprintf(`{"value":%q,"value_type":%q,"category":%q}`, value, valueType, strings.Split(key, ".")[0])
@@ -139,7 +139,7 @@ func TestSettingsRejectNonPositiveDurations(t *testing.T) {
 						want = http.StatusOK
 					}
 					e.expect(token, http.MethodPut, "/api/v1/admin/settings/"+key, body, want)
-					saved, err := e.s.sqlite.GetSetting(context.Background(), key)
+					saved, err := e.s.store.GetSetting(context.Background(), key)
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -163,7 +163,7 @@ func TestManagedGuardsFailClosed(t *testing.T) {
 				db := newServerTestDB(t)
 				owner := mkTestUser(t, db, "guard-owner@example.com", models.UserRoleMember)
 				team, source := mkTestTeam(t, db, "guard-team", owner)
-				s := &Server{sqlite: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+				s := &Server{store: db, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 				id := int(team.ID)
 				guard := s.requireTeamNotManaged
 				path := "/:teamID"
@@ -234,7 +234,7 @@ func TestCredentialErrorsDoNotLeakInHandlerLogs(t *testing.T) {
 				t.Fatal(err)
 			}
 			var logs bytes.Buffer
-			s := &Server{sqlite: db, log: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))}
+			s := &Server{store: db, log: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))}
 			app := fiber.New()
 			const credential = "12345678-secret-credential-suffix"
 			path := "/protected"
@@ -269,13 +269,13 @@ func TestCredentialErrorsDoNotLeakInHandlerLogs(t *testing.T) {
 
 func TestSettingsPreserveSensitivityOnUpdate(t *testing.T) {
 	e := newCollectionRouteEnv(t)
-	admin := mkTestUser(t, e.s.sqlite, "sensitive-admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, e.s.store, "sensitive-admin@example.com", models.UserRoleAdmin)
 	token := e.token(admin, models.TokenScopeSettingsRead)
-	cookie := sessionCookie(t, e.s.sqlite, admin)
+	cookie := sessionCookie(t, e.s.store, admin)
 	for _, key := range []string{"ai.api_key", "alerts.smtp_password", "custom.secret"} {
 		t.Run(key, func(t *testing.T) {
 			if key == "custom.secret" {
-				if err := e.s.sqlite.UpsertSetting(context.Background(), key, "old-secret", "string", "ai", "", true); err != nil {
+				if err := e.s.store.UpsertSetting(context.Background(), key, "old-secret", "string", "ai", "", true); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -295,7 +295,7 @@ func TestSettingsPreserveSensitivityOnUpdate(t *testing.T) {
 				if strings.Contains(string(body), "new-secret-value") || !strings.Contains(string(body), "********") {
 					t.Error("token can read updated secret")
 				}
-				settings, err := e.s.sqlite.ListSettings(context.Background())
+				settings, err := e.s.store.ListSettings(context.Background())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -312,12 +312,12 @@ func TestSettingsPreserveSensitivityOnUpdate(t *testing.T) {
 func TestTestEmailRequiresBrowserSession(t *testing.T) {
 	e := newCollectionRouteEnv(t)
 	e.cfg.Alerts.Enabled = true
-	admin := mkTestUser(t, e.s.sqlite, "email-admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, e.s.store, "email-admin@example.com", models.UserRoleAdmin)
 	token := e.token(admin, models.TokenScopeSettingsWrite)
 	e.expect(token, http.MethodPost, "/api/v1/admin/settings/test-email", `{}`, http.StatusUnauthorized)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/settings/test-email", strings.NewReader(`{}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.AddCookie(sessionCookie(t, e.s.sqlite, admin))
+	req.AddCookie(sessionCookie(t, e.s.store, admin))
 	resp, err := e.s.app.Test(req)
 	if err != nil {
 		t.Fatal(err)
@@ -338,7 +338,7 @@ func TestTestEmailRequiresBrowserSession(t *testing.T) {
 func TestMissingManagedResourcesReturnNotFound(t *testing.T) {
 	s := newAuthzTestServer(t)
 	e := &collectionRouteEnv{t: t, s: s, cfg: s.config}
-	admin := mkTestUser(t, e.s.sqlite, "missing-admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, e.s.store, "missing-admin@example.com", models.UserRoleAdmin)
 	token := e.token(admin, models.TokenScopeTeamsWrite, models.TokenScopeSourcesWrite)
 	for _, path := range []string{"/api/v1/admin/teams/999999", "/api/v1/admin/sources/999999"} {
 		e.expect(token, http.MethodDelete, path, "", http.StatusNotFound)
@@ -383,9 +383,9 @@ func TestLegacySettingsRemainSensitive(t *testing.T) {
 
 func TestSettingsSecretDestinationsRequireSession(t *testing.T) {
 	s := newAuthzTestServer(t)
-	admin := mkTestUser(t, s.sqlite, "destination-admin@example.com", models.UserRoleAdmin)
+	admin := mkTestUser(t, s.store, "destination-admin@example.com", models.UserRoleAdmin)
 	token := apiToken(t, s, admin, models.TokenScopeSettingsWrite)
-	cookie := sessionCookie(t, s.sqlite, admin)
+	cookie := sessionCookie(t, s.store, admin)
 	for _, setting := range []struct{ key, value, valueType string }{
 		{"alerts.smtp_host", "smtp.example.com", "string"},
 		{"alerts.smtp_port", "465", "number"},
@@ -402,7 +402,7 @@ func TestSettingsSecretDestinationsRequireSession(t *testing.T) {
 			if category == "custom" {
 				category = "ai"
 			}
-			if err := s.sqlite.UpsertSetting(ctx, setting.key, "original", setting.valueType, category, "", setting.key == "custom.secret"); err != nil {
+			if err := s.store.UpsertSetting(ctx, setting.key, "original", setting.valueType, category, "", setting.key == "custom.secret"); err != nil {
 				t.Fatal(err)
 			}
 			body := fmt.Sprintf(`{"value":%q,"value_type":%q,"category":%q}`, setting.value, setting.valueType, category)
@@ -427,7 +427,7 @@ func TestSettingsSecretDestinationsRequireSession(t *testing.T) {
 					if resp.StatusCode != want {
 						t.Errorf("%s %s status = %d, want %d", principal, method, resp.StatusCode, want)
 					}
-					saved, err := s.sqlite.GetSetting(ctx, setting.key)
+					saved, err := s.store.GetSetting(ctx, setting.key)
 					if principal == "token" && (err != nil || saved != "original") {
 						t.Error("token modified session-only setting")
 					}

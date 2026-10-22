@@ -48,7 +48,7 @@ type SettingsByCategoryResponse struct {
 // handleListSettings returns all system settings grouped by category.
 // GET /api/v1/admin/settings
 func (s *Server) handleListSettings(c fiber.Ctx) error {
-	settings, err := s.sqlite.ListSettings(c.Context())
+	settings, err := s.store.ListSettings(c.Context())
 	if err != nil {
 		s.log.Error("failed to list settings", "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
@@ -82,7 +82,7 @@ func (s *Server) handleListSettingsByCategory(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "category parameter is required")
 	}
 
-	settings, err := s.sqlite.ListSettingsByCategory(c.Context(), category)
+	settings, err := s.store.ListSettingsByCategory(c.Context(), category)
 	if err != nil {
 		s.log.Error("failed to list settings by category", "category", category, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve settings")
@@ -105,7 +105,7 @@ func (s *Server) handleGetSetting(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "key parameter is required")
 	}
 
-	settings, err := s.sqlite.ListSettings(c.Context())
+	settings, err := s.store.ListSettings(c.Context())
 	if err != nil {
 		s.log.Error("failed to get setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to retrieve setting")
@@ -161,7 +161,7 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	}
 
 	// Upsert the setting
-	if err := s.sqlite.UpsertSetting(c.Context(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
+	if err := s.store.UpsertSetting(c.Context(), key, req.Value, req.ValueType, req.Category, req.Description, req.IsSensitive); err != nil {
 		s.log.Error("failed to update setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to update setting")
 	}
@@ -189,7 +189,7 @@ func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 		return nil
 	}
 
-	if err := s.sqlite.DeleteSetting(c.Context(), key); err != nil {
+	if err := s.store.DeleteSetting(c.Context(), key); err != nil {
 		s.log.Error("failed to delete setting", "key", key, "error", err)
 		return SendError(c, fiber.StatusInternalServerError, "failed to delete setting")
 	}
@@ -203,7 +203,7 @@ func (s *Server) allowSettingWrite(c fiber.Ctx, key string, sensitive bool) bool
 		return true
 	}
 	if !sensitive && !models.IsSessionOnlySetting(key) {
-		settings, err := s.sqlite.ListSettings(c.Context())
+		settings, err := s.store.ListSettings(c.Context())
 		if err != nil {
 			s.log.Error("failed to authorize setting write", "key", key, "error", err)
 			s.sendLoadFailure(c, fiber.StatusInternalServerError, "failed to retrieve setting", models.GeneralErrorType)
@@ -395,15 +395,15 @@ type TestWebhookRequest struct {
 
 func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 	return alerts.EmailSenderOptions{
-		Host:          store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_host", ""),
-		Port:          store.GetIntSetting(ctx, s.sqlite, "alerts.smtp_port", 587),
-		Username:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_username", ""),
-		Password:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_password", ""),
-		From:          store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_from", ""),
-		ReplyTo:       store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_reply_to", ""),
-		Security:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_security", "starttls"),
-		Timeout:       store.GetDurationSetting(ctx, s.sqlite, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: store.GetBoolSetting(ctx, s.sqlite, "alerts.tls_insecure_skip_verify", false),
+		Host:          store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_host", ""),
+		Port:          store.GetIntSetting(ctx, s.store, "alerts.smtp_port", 587),
+		Username:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_username", ""),
+		Password:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_password", ""),
+		From:          store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_from", ""),
+		ReplyTo:       store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_reply_to", ""),
+		Security:      store.GetSettingWithDefault(ctx, s.store, "alerts.smtp_security", "starttls"),
+		Timeout:       store.GetDurationSetting(ctx, s.store, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(ctx, s.store, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	}
 }

@@ -26,7 +26,7 @@ func TestSourceListHandlersCachedHealth(t *testing.T) {
 		}
 		w.WriteHeader(http.StatusOK)
 	})
-	source, err := env.s.sqlite.GetSource(t.Context(), env.vlSource)
+	source, err := env.s.store.GetSource(t.Context(), env.vlSource)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestSingleSourceHandlerKeepsLiveHealth(t *testing.T) {
 		}
 		_, _ = io.WriteString(w, `{"values":[]}`)
 	})
-	source, err := env.s.sqlite.GetSource(t.Context(), env.vlSource)
+	source, err := env.s.store.GetSource(t.Context(), env.vlSource)
 	if err != nil {
 		t.Fatal(err)
 	}

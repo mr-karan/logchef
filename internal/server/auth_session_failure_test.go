@@ -80,7 +80,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s := &Server{log: log, config: &config.Config{Auth: config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}}, sqlite: db, oidcProvider: provider}
+	s := &Server{log: log, config: &config.Config{Auth: config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}}, store: db, oidcProvider: provider}
 	app := fiber.New()
 	app.Get("/callback", s.handleCallback)
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)

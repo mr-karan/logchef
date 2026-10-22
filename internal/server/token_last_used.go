@@ -51,7 +51,7 @@ func (s *Server) startTokenLastUsedWorker() {
 				return
 			case id := <-s.tokenQueue:
 				ctx, cancel := context.WithTimeout(s.baseCtx, time.Second)
-				err := s.sqlite.UpdateAPITokenLastUsed(ctx, id)
+				err := s.store.UpdateAPITokenLastUsed(ctx, id)
 				cancel()
 				if err != nil {
 					s.tokenDropped.Add(1)
