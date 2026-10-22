@@ -61,5 +61,7 @@ describe("TeamSettings leaving a team", () => {
     network.requests[0].respond(403, { status: "error", message: "forbidden", error_type: "Forbidden" });
 
     await vi.waitFor(() => expect(forbidden).toHaveBeenCalledTimes(1));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(toasts).toEqual(["error"]);
   });
 });
