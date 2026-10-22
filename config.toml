@@ -8,7 +8,8 @@
 # Use double underscores for nesting: LOGCHEF_SERVER__PORT=8125.
 #
 # This is the sample shipped in the release archives and the container image.
-# Set at least auth.admin_emails and auth.api_token_secret before you start.
+# Set auth.admin_emails and auth.api_token_secret, and enable a login method
+# ([auth.local] or [oidc]) before you start.
 # Contributors running the local dev stack use dev/config.toml instead.
 
 # -----------------------------------------------------------------------------

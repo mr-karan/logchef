@@ -59,9 +59,7 @@
     },
     "AutoProvision": {
       "Enabled": false,
-      "AllowedDomains": [
-        "example.com"
-      ],
+      "AllowedDomains": null,
       "DefaultTeamIDs": null
     },
     "OAuth": {
@@ -71,7 +69,7 @@
     }
   },
   "Logging": {
-    "Level": "info"
+    "Level": "debug"
   },
   "AI": {
     "Provider": "",
