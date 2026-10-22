@@ -135,7 +135,7 @@ func checkIdentifiers(rawSQL string, query *clickhouseparser.SelectQuery) error 
 		case ident.QuoteType == 0 && quoted:
 			// Paths such as a table function's named argument leave QuoteType
 			// unset, and the formatter then writes the name without quotes.
-			err = fmt.Errorf("quoted table function argument names are not supported: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
+			err = fmt.Errorf("quoted names before = in table function arguments are not supported: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
 		case ident.QuoteType == 0, ident.QuoteType == clickhouseparser.Unquoted:
 			if strings.HasPrefix(ident.Name, "$") {
 				err = fmt.Errorf("identifiers starting with $ are not supported: %q: %w", ident.Name, ErrInvalidQuery)
