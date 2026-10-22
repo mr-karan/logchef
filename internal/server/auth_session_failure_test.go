@@ -54,6 +54,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 	var idp *httptest.Server
 	idp = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -63,7 +64,7 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 		case "/jwks":
 			_ = json.NewEncoder(w).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{Key: &key.PublicKey, Algorithm: "RS256", Use: "sig"}}})
 		case "/token":
-			raw, err := jwt.Signed(signer).Claims(jwt.Claims{Issuer: idp.URL, Audience: jwt.Audience{"test-client"}, Expiry: jwt.NewNumericDate(time.Now().Add(time.Hour))}).Claims(auth.OIDCClaims{Email: user.Email, EmailVerified: new(true)}).Claims(map[string]any{"nonce": "nonce"}).Serialize()
+			raw, err := jwt.Signed(signer).Claims(jwt.Claims{Issuer: idp.URL, Audience: jwt.Audience{"test-client"}, Expiry: jwt.NewNumericDate(time.Now().Add(time.Hour))}).Claims(auth.OIDCClaims{Email: user.Email, EmailVerified: new(true)}).Claims(map[string]any{"nonce": stateNonce(state)}).Serialize()
 			if err != nil {
 				t.Error(err)
 				w.WriteHeader(http.StatusInternalServerError)
@@ -82,9 +83,8 @@ func TestCallbackSessionFailureLogsAtBoundary(t *testing.T) {
 	s := &Server{log: log, config: &config.Config{Auth: config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}}, sqlite: db, oidcProvider: provider}
 	app := fiber.New()
 	app.Get("/callback", s.handleCallback)
-	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
-	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state + ":nonce"})
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)

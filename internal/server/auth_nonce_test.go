@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -32,7 +34,7 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, mode := range []string{"matching", "mismatched claim", "missing claim", "missing cookie nonce", "swapped cookie nonce"} {
+	for _, mode := range []string{"matching", "mismatched claim", "missing claim", "missing state cookie", "swapped state cookie", "swapped login code"} {
 		t.Run(mode, func(t *testing.T) {
 			var nonce string
 			var exchanges atomic.Int32
@@ -92,7 +94,7 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 			state := authURL.Query().Get("state")
 			nonce = authURL.Query().Get("nonce")
 			if nonce == "" || state == "" || strings.Contains(state, nonce) {
-				t.Fatal("authorization request must carry independent state and nonce values")
+				t.Fatal("authorization request must carry distinct state and nonce values")
 			}
 			var stateCookie *http.Cookie
 			for _, cookie := range resp.Cookies() {
@@ -100,14 +102,25 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 					stateCookie = cookie
 				}
 			}
-			if stateCookie == nil || stateCookie.Value != state+":"+nonce || !stateCookie.HttpOnly || stateCookie.SameSite != http.SameSiteLaxMode {
-				t.Fatal("login did not store state and nonce together in the HTTP-only cookie")
+			digest := sha256.Sum256([]byte(state))
+			if nonce != base64.RawURLEncoding.EncodeToString(digest[:]) {
+				t.Fatal("nonce must derive from the login state")
+			}
+			if stateCookie == nil || stateCookie.Value != state || !stateCookie.HttpOnly || stateCookie.SameSite != http.SameSiteLaxMode {
+				t.Fatal("login did not preserve the state-only HTTP-only cookie")
 			}
 			switch mode {
-			case "missing cookie nonce":
-				stateCookie.Value = state
-			case "swapped cookie nonce":
-				stateCookie.Value = state + ":another-login"
+			case "missing state cookie":
+				stateCookie.Value = ""
+			case "swapped state cookie", "swapped login code":
+				otherState, err := generateState()
+				if err != nil {
+					t.Fatal(err)
+				}
+				stateCookie.Value = otherState
+				if mode == "swapped login code" {
+					state = otherState
+				}
 			}
 			logs.Reset()
 			req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+url.QueryEscape(state), http.NoBody)
@@ -144,8 +157,8 @@ func TestOIDCNonceRoundTrip(t *testing.T) {
 			if strings.Count(logs.String(), "\n") != 1 || !strings.Contains(logs.String(), "level=WARN") || !strings.Contains(logs.String(), "error_code=session_expired") {
 				t.Errorf("want one state-failure warning, got %s", logs.String())
 			}
-			if mode == "missing cookie nonce" && exchanges.Load() != 0 {
-				t.Error("missing cookie nonce reached the token endpoint")
+			if (mode == "missing state cookie" || mode == "swapped state cookie") && exchanges.Load() != 0 {
+				t.Error("invalid state cookie reached the token endpoint")
 			}
 		})
 	}

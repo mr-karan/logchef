@@ -2,6 +2,7 @@ package server
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
 	"errors"
@@ -50,6 +51,11 @@ func generateState() (string, error) {
 		timestamp,
 	)
 	return combined, nil
+}
+
+func stateNonce(state string) string {
+	digest := sha256.Sum256([]byte(state))
+	return base64.RawURLEncoding.EncodeToString(digest[:])
 }
 
 // validateState checks the OIDC callback state against the stored state cookie.
@@ -183,11 +189,10 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		s.log.Error("failed to generate OIDC state", "error", err)
 		return s.redirectToFrontend(c, "", fmt.Errorf("state generation failed: %w", err))
 	}
-	nonce := rand.Text()
 
 	c.Cookie(&fiber.Cookie{
 		Name:     stateCookieName,
-		Value:    state + ":" + nonce,
+		Value:    state,
 		Expires:  time.Now().Add(stateCookieTTL),
 		HTTPOnly: true,
 		Secure:   s.config.Server.IsSecureCookie(),
@@ -210,7 +215,7 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		})
 	}
 
-	authURL := s.oidcProvider.GetAuthURL(state, nonce)
+	authURL := s.oidcProvider.GetAuthURL(state, stateNonce(state))
 	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(authURL)
 }
 
@@ -238,10 +243,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("authorization code missing"))
 	}
 
-	storedState, nonce, ok := strings.Cut(c.Cookies(stateCookieName), ":")
-	if !ok || nonce == "" {
-		return s.redirectToFrontend(c, "", errInvalidState)
-	}
+	storedState := c.Cookies(stateCookieName)
 	if err := validateState(state, storedState); err != nil {
 		return s.redirectToFrontend(c, "", fmt.Errorf("state validation failed: %w", err))
 	}
@@ -249,7 +251,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 	// State is validated, clear the cookie immediately.
 	c.Cookie(&fiber.Cookie{Name: stateCookieName, Expires: time.Now().Add(-1 * time.Hour), HTTPOnly: true, Secure: s.config.Server.IsSecureCookie(), SameSite: fiber.CookieSameSiteLaxMode, Path: s.config.Server.CookiePath()})
 
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, nonce)
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, stateNonce(storedState))
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}
@@ -360,10 +362,6 @@ func (s *Server) handleGetCurrentUser(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, response)
 }
 
-// localLoginLimiter guards the local login endpoint against brute force:
-// 10 attempts/min per IPv4 address or IPv6 /64, 5 attempts/min per email.
-var localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 10, 5)
-
 // handleLocalLogin authenticates a user with email+password (local auth).
 // Failures are indistinguishable (unknown email, wrong password, inactive,
 // service account) and the endpoint 404s when local auth is disabled.
@@ -387,7 +385,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		return invalid()
 	}
 
-	if !localLoginLimiter.Allow(c.IP(), req.Email) {
+	if !s.localLoginLimiter.Allow(c.IP(), req.Email) {
 		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many login attempts, try again shortly", models.ValidationErrorType)
 	}
 

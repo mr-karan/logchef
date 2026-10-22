@@ -2,8 +2,10 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -62,10 +64,7 @@ func TestHandleLocalLoginEmailLength(t *testing.T) {
 		strings.Repeat("é", 122) + "@example.com",
 	} {
 		t.Run(email[:8], func(t *testing.T) {
-			previous := localLoginLimiter
-			localLoginLimiter = auth.NewLoginRateLimiter(time.Minute, 1, 1)
-			t.Cleanup(func() { localLoginLimiter = previous })
-			s := &Server{sqlite: newServerTestDB(t), config: &config.Config{Auth: config.AuthConfig{Local: config.LocalAuthConfig{Enabled: true}}}}
+			s := &Server{localLoginLimiter: auth.NewLoginRateLimiter(time.Minute, 1, 1), sqlite: newServerTestDB(t), config: &config.Config{Auth: config.AuthConfig{Local: config.LocalAuthConfig{Enabled: true}}}}
 			app := fiber.New()
 			app.Post("/login", s.handleLocalLogin)
 			request := func(email string, wantStatus int) []byte {
@@ -98,6 +97,36 @@ func TestHandleLocalLoginEmailLength(t *testing.T) {
 				t.Fatal("overlong emails must return the generic failure without consuming login budgets")
 			}
 			request(boundaryEmail, http.StatusTooManyRequests)
+		})
+	}
+}
+
+func TestLocalLoginLimiterServerScope(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			cfg := &config.Config{Auth: config.AuthConfig{Local: config.LocalAuthConfig{Enabled: enabled}}}
+			first := newServerForTest(t, cfg, newServerTestDB(t), nil)
+			if (first.localLoginLimiter != nil) != enabled {
+				t.Fatal("local limiter allocation does not match local auth setting")
+			}
+			if !enabled {
+				return
+			}
+			for range 5 {
+				if !first.localLoginLimiter.Allow("ip", "user@example.com") {
+					t.Fatal("first server budget exhausted early")
+				}
+			}
+			if first.localLoginLimiter.Allow("ip", "user@example.com") {
+				t.Fatal("first server did not exhaust email budget")
+			}
+			if err := first.Shutdown(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			second := newServerForTest(t, cfg, newServerTestDB(t), nil)
+			if !second.localLoginLimiter.Allow("ip", "user@example.com") {
+				t.Fatal("new server inherited a previous server's login budget")
+			}
 		})
 	}
 }

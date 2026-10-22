@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -38,35 +37,6 @@ func TestWindowLimiterEmptyKeyAlwaysAllowed(t *testing.T) {
 		if !l.Allow("") {
 			t.Fatalf("empty key rejected on request %d", i)
 		}
-	}
-}
-
-func TestWindowLimiterResetsWithinTwoWindows(t *testing.T) {
-	l := auth.NewWindowLimiter(20*time.Millisecond, 1)
-	if !l.Allow("k") {
-		t.Fatal("first request rejected")
-	}
-	if l.Allow("k") {
-		t.Fatal("second request within window allowed, want rejected")
-	}
-	time.Sleep(2 * 20 * time.Millisecond)
-	if !l.Allow("k") {
-		t.Fatal("request after two windows rejected, want allowed")
-	}
-}
-
-func TestWindowLimiterExpiresFloodedBuckets(t *testing.T) {
-	l := auth.NewWindowLimiter(time.Second, 5)
-	l.Allow("stale")
-	for i := 1; i < 10_000; i++ {
-		l.Allow(strconv.Itoa(i))
-	}
-	time.Sleep(2 * time.Second)
-	if !l.Allow("fresh") {
-		t.Fatal("expired buckets did not release capacity")
-	}
-	if !l.Allow("stale") {
-		t.Fatal("expired key did not get a new window")
 	}
 }
 

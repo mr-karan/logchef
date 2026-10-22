@@ -2,7 +2,6 @@ package auth
 
 import (
 	"fmt"
-	"hash/maphash"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -28,8 +27,8 @@ func TestHashAndVerifyLocalPassword(t *testing.T) {
 
 func TestLoginRateLimiter(t *testing.T) {
 	l := NewLoginRateLimiter(time.Minute, 10, 5)
-	separateLimiterKeys(t, l.ips, []string{"1.2.3.4", "9.9.9.9"})
-	separateLimiterKeys(t, l.emails, []string{"a@example.com", "b@example.com", "c@example.com", "d@example.com", "e@example.com"})
+	l.ips = separateLimiterKeys(t, l.ips, []string{"1.2.3.4", "9.9.9.9"})
+	l.emails = separateLimiterKeys(t, l.emails, []string{"a@example.com", "b@example.com", "c@example.com", "d@example.com", "e@example.com"})
 	for i := range 5 {
 		if !l.Allow("1.2.3.4", "a@example.com") {
 			t.Fatalf("attempt %d should be allowed", i+1)
@@ -116,12 +115,12 @@ func TestLoginRateLimiterRotatingIPFloodPreservesEmailWindow(t *testing.T) {
 
 func TestLoginRateLimiterIPv6PrefixBudget(t *testing.T) {
 	l := NewLoginRateLimiter(time.Hour, 10, 5)
-	separateLimiterKeys(t, l.ips, []string{"2001:db8:1:2::/64", "2001:db8:1:3::/64", "192.0.2.1", "192.0.2.2"})
+	l.ips = separateLimiterKeys(t, l.ips, []string{"2001:db8:1:2::/64", "2001:db8:1:3::/64", "192.0.2.1", "192.0.2.2"})
 	emails := []string{"fresh@example.com"}
 	for i := range 10 {
 		emails = append(emails, fmt.Sprintf("user-%d@example.com", i))
 	}
-	separateLimiterKeys(t, l.emails, emails)
+	l.emails = separateLimiterKeys(t, l.emails, emails)
 	for i := range 10 {
 		if !l.Allow(fmt.Sprintf("2001:db8:1:2::%x", i+1), fmt.Sprintf("user-%d@example.com", i)) {
 			t.Fatalf("prefix attempt %d rejected before budget", i+1)
@@ -137,18 +136,18 @@ func TestLoginRateLimiterIPv6PrefixBudget(t *testing.T) {
 	}
 }
 
-func separateLimiterKeys(t *testing.T, l *WindowLimiter, keys []string) {
+func separateLimiterKeys(t *testing.T, l *WindowLimiter, keys []string) *WindowLimiter {
 	t.Helper()
 	for range 64 {
-		seed := maphash.MakeSeed()
-		seen := make(map[uint64]bool, len(keys))
+		seen := make(map[*limiterWindow]bool, len(keys))
 		for _, key := range keys {
-			seen[maphash.String(seed, key)%limiterBucketCount] = true
+			seen[l.bucket(key)] = true
 		}
 		if len(seen) == len(keys) {
-			l.seed = seed
-			return
+			return l
 		}
+		l = NewWindowLimiter(l.window, l.limit)
 	}
 	t.Fatal("could not place independent keys in distinct buckets")
+	return nil
 }

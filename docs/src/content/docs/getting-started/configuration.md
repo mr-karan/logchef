@@ -406,9 +406,12 @@ max_rows_per_sec = 100
 
 ### Rate limiting
 
-Fixed-window request limits: per-IP (plus an optional global cap) on the
+Sliding-window request limits: per-IP (plus an optional global cap) on the
 unauthenticated auth/token endpoints, and per-user on the query endpoints.
-**Off by default** — enable it deliberately (see the proxy note below).
+The limiter adds the current count to the previous window count weighted by the
+fraction of the current minute remaining. Colliding keys share a budget, so
+collisions can cause extra rejections.
+**Off by default**. Enable it deliberately (see the proxy note below).
 
 ```toml
 [rate_limit]

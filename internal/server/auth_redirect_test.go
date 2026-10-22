@@ -180,7 +180,7 @@ func TestHandleCallbackErrors(t *testing.T) {
 			app.Get("/api/v1/auth/callback", s.handleCallback)
 			req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?"+tc.query, http.NoBody)
 			if tc.cookie != "" {
-				req.AddCookie(&http.Cookie{Name: stateCookieName, Value: tc.cookie + ":nonce"})
+				req.AddCookie(&http.Cookie{Name: stateCookieName, Value: tc.cookie})
 			}
 			resp, err := app.Test(req)
 			if err != nil {
@@ -230,7 +230,7 @@ func TestCallbackTokenFailureLogsOnce(t *testing.T) {
 	app.Get("/callback", s.handleCallback)
 	state := fmt.Sprintf("state.nonce.%d", time.Now().Unix())
 	req := httptest.NewRequest(http.MethodGet, "/callback?code=code&state="+state, http.NoBody)
-	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state + ":nonce"})
+	req.AddCookie(&http.Cookie{Name: stateCookieName, Value: state})
 	resp, err := app.Test(req)
 	if err != nil {
 		t.Fatal(err)
