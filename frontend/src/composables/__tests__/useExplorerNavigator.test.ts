@@ -324,6 +324,49 @@ describe("Explorer history navigation", () => {
     expectOpen(router, store, query, evidenceA);
   });
 
+  it("waits for the current team's sources when a left team's list returns first", async () => {
+    const { router, query, store, nav } = await mountExplorer();
+    await settle();
+    const thirdTeam = { ...team, id: 9 };
+    const currentSource = { ...source, id: 91 };
+    useTeamsStore().userTeams.push(thirdTeam);
+    const leftLoaded = deferred();
+    const currentLoaded = deferred();
+    vi.mocked(sourcesApi.listTeamSources).mockImplementation(async (teamId) => {
+      if (teamId === otherTeam.id) await leftLoaded.done;
+      if (teamId === thirdTeam.id) await currentLoaded.done;
+      return ok(teamId === thirdTeam.id ? [{ ...source, id: 90 }, currentSource] : sourcesOfTeam(teamId));
+    });
+    vi.mocked(sourcesApi.getTeamSource).mockImplementation(async (_teamId, sourceId) =>
+      ok(sourceId === currentSource.id ? currentSource : sourceById(sourceId)));
+    const before = query.mock.calls.length;
+    await nav.selectTeam(otherTeam.id);
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.anything()));
+    await router.push({ path: "/logs/explore", query: { team: String(thirdTeam.id), source: String(currentSource.id) } });
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(thirdTeam.id, expect.anything()));
+    leftLoaded.release();
+    await flush();
+    expect(nav.status.value).toBe("navigating");
+    expect(store.sourceId).toBe(source.id);
+    expect(query).toHaveBeenCalledTimes(before);
+    currentLoaded.release();
+    await vi.waitFor(() => expect(nav.status.value).toBe("ready"));
+    await settle();
+    expect(useContextStore().teamId).toBe(thirdTeam.id);
+    expect(store.sourceId).toBe(currentSource.id);
+    expect(useSourcesStore().teamSources.map(source => source.id)).toEqual([90, 91]);
+    expect(query).toHaveBeenCalledTimes(before + 1);
+  });
+
+  it("keeps a remembered source when Explorer opens a stale source link", async () => {
+    const { store } = await mountExplorer({ team: "1", source: "99999" }, () => {
+      localStorage.setItem("logchef_context", JSON.stringify({ lastTeamId: 1, sourcePerTeam: { 1: otherSource.id } }));
+    });
+    await settle();
+    expect(store.sourceId).toBe(otherSource.id);
+    expect(useContextStore().getStoredDefaults().sourceId).toBe(otherSource.id);
+  });
+
   it("opens the last of two quick links when the first source is still loading", async () => {
     const { router, store, query } = await mountExplorer();
     await settle();
@@ -804,7 +847,7 @@ describe("Explorer history navigation", () => {
 
     await expectOneRun(query, async () => {
       const picking = nav.selectTeam(otherTeam.id);
-      await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id));
+      await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.objectContaining({ signal: expect.any(AbortSignal) })));
       expect(nav.status.value).toBe("navigating");
       nav.setWindow({ kind: "relative", spec: "1h" });
       teamLoaded.release();
@@ -1021,7 +1064,7 @@ describe("Explorer history navigation", () => {
     const { query } = await mountExplorer({ team: String(otherTeam.id), source: String(otherTeamSource.id), q: 'first="yes"' }, () => localStorage.clear());
     await settle();
     expect({ lists: vi.mocked(sourcesApi.listTeamSources).mock.calls.length, details: vi.mocked(sourcesApi.getTeamSource).mock.calls.length }).toEqual({ lists: 1, details: 1 });
-    expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id);
+    expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.objectContaining({ signal: expect.any(AbortSignal) }));
     expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id);
     expect(query).toHaveBeenCalledTimes(1);
   });
@@ -1058,7 +1101,7 @@ describe("Explorer history navigation", () => {
       return ok(sourcesOfTeam(teamId)) as never;
     });
     void router.push({ path: "/logs/explore", query: { team: String(otherTeam.id) } });
-    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id));
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(otherTeam.id, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     await router.push({ path: "/logs/explore", query: { team: "1", source: String(otherSource.id) } });
     teamLoaded.release();
     await vi.waitFor(() => expect(sourcesApi.getTeamSource).toHaveBeenCalledWith(otherTeam.id, otherTeamSource.id));

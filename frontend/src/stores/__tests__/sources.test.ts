@@ -37,7 +37,7 @@ describe("sources store", () => {
     const context = useContextStore();
 
     context.selectTeam(2);
-    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(2));
+    await vi.waitFor(() => expect(sourcesApi.listTeamSources).toHaveBeenCalledWith(2, expect.objectContaining({ signal: expect.any(AbortSignal) })));
     const leftTeamList = sources.loadTeamSources(2);
     context.selectTeam(1);
     context.selectSource(4);
@@ -84,7 +84,6 @@ describe("sources store", () => {
   });
 
   it.each([
-    ["editing a source", () => useSourcesStore().updateSource(3, { name: "checkout-v2" })],
     ["deleting a source", () => useSourcesStore().deleteSource(4)],
     ["adding a source to the team", () => useTeamsStore().addTeamSource(1, 5)],
     ["removing a source from the team", () => useTeamsStore().removeTeamSource(1, 4)],

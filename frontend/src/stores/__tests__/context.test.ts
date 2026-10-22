@@ -76,7 +76,7 @@ describe('useContextStore', () => {
       const store = useContextStore()
       store.selectTeam(1)
       store.selectSource(10)
-      expect(store.getStoredSourceForTeam(1)).toBeNull()
+      expect(store.getStoredDefaults().sourceId).toBeNull()
     })
 
     it('remembers confirmed sources per team in localStorage', () => {

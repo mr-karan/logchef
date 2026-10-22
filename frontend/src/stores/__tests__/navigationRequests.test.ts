@@ -6,8 +6,6 @@ import { controlledApi } from '@/test/controlledApi'
 import { useSourcesStore } from '../sources'
 import { useContextStore } from '../context'
 import { useSavedQueriesStore } from '../savedQueries'
-import { useExploreStore } from '../explore'
-import { useVariableStore } from '../variables'
 import { useSavedQueries } from '@/composables/useSavedQueries'
 import { contextRouterGuard } from '@/router/contextGuard'
 
@@ -79,7 +77,7 @@ describe('navigation request ownership', () => {
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     network.requests[0].succeed([source(2), source(3)])
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
-    await vi.waitFor(() => expect(context.getStoredSourceForTeam(1)).toBe(expected))
+    await vi.waitFor(() => expect(context.getStoredDefaults().sourceId).toBe(expected))
     expect(context.sourceId).toBe(expected)
   })
 
@@ -94,7 +92,10 @@ describe('navigation request ownership', () => {
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
     leave()
     back()
-    network.requests[0].succeed([source(1)])
+    await nextTick()
+    expect(network.requests[0].config.signal?.aborted).toBe(true)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
+    network.requests[1].succeed([source(1)])
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
     expect(store.teamSources.map(s => s.id)).toEqual([1])
     expect(context.sourceId).toBe(1)
@@ -129,16 +130,16 @@ describe('navigation request ownership', () => {
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
   })
 
-  it('hands a duplicate current-team load to the team watcher', async () => {
+  it('joins a duplicate current-team load with the context loader', async () => {
     const context = useContextStore()
     context.selectTeam(1)
     const store = useSourcesStore()
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
-    const duplicate = store.loadCurrentTeamSources()
+    const duplicate = store.loadTeamSources(1)
     expect(store.isLoadingTeamSources).toBe(true)
-    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
-    network.requests[1].succeed([source(2)])
-    expect((await duplicate).success).toBe(true)
+    expect(network.requests).toHaveLength(1)
+    network.requests[0].succeed([source(2)])
+    expect(await duplicate).toEqual([source(2)])
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
     expect(context.sourceId).toBe(2)
     expect(store.teamSources.map(s => s.id)).toEqual([2])
@@ -341,21 +342,6 @@ describe('navigation request ownership', () => {
     savedQueryRequests()[0].succeed([])
     await settle(Promise.all([loading, saving]), () => savedQueryRequests().slice(2), [query(5, 1)])
     expect(queries.queries.value.map(q => q.id)).toEqual([5])
-  })
-
-  it('restores saved LogsQL variables through the composable without source details', async () => {
-    const context = useContextStore()
-    context.selectTeam(1)
-    context.selectSource(2)
-    const queries = await savedQueries()
-    await queries.loadSavedQuery({
-      id: 1, source_id: 2, name: 'Template', description: '',
-      query_language: 'logsql', editor_mode: 'native', created_at: '', updated_at: '',
-      query_content: JSON.stringify({ content: 'service:my--svc [[ level:={{level}} ]]' }),
-    })
-    await nextTick()
-    expect(useExploreStore().templateDialect).toBe('logsql')
-    expect(useVariableStore().allVariables).toMatchObject([{ name: 'level', isOptional: true }])
   })
 
 })

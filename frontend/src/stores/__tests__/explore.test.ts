@@ -878,23 +878,23 @@ describe("explore template dialect on load", () => {
     it.each(["url", "draft", "saved", "share"])(`detects ${language} variables from %s`, (path) => {
       const store = useExploreStore();
       if (path === "url") {
-        store.initializeFromUrl({ mode, ...(mode === "native" ? { sql: query } : { q: query }) });
+        openUrl({ team: "1", source: "2", mode, ...(mode === "native" ? { sql: query } : { q: query }) });
       } else if (path === "draft") {
         localStorage.setItem("logchef.explore.draft.1.2", JSON.stringify({
           version: 2, mode, nativeQuery: query, logchefqlCode: query,
         }));
-        store.initializeFromUrl({});
+        openUrl({ team: "1", source: "2" });
       } else if (path === "saved") {
-        store.hydrateFromResolvedQuery({
+        store.open({ teamId: 1, sourceId: 2, content: savedContent(savedQuery({
           id: 1, name: "Template", query_language: language,
           query_content: JSON.stringify({ content: query }),
-        });
+        })) });
       } else {
-        store.hydrateFromQueryShare({
+        store.open({ teamId: 1, sourceId: 2, content: { kind: "share", share: {
           token: "template", source_id: 2, team_id: 1, share_url: "/s/template",
           created_at: "", expires_at: "", created_by: 1,
           payload: { version: 1, mode: mode === "native" ? "sql" : mode, query, limit: 100, time_range: { relative: "15m" } },
-        });
+        } } });
       }
       expect(useVariableStore().allVariables).toMatchObject([{ name: "level", isOptional: true }]);
     });
@@ -913,10 +913,10 @@ describe("explore template dialect after a mode switch", () => {
 
   it("scans native SQL with the source dialect after a LogchefQL saved query", () => {
     const store = useExploreStore();
-    store.hydrateFromResolvedQuery({
+    store.open({ teamId: 1, sourceId: 1, content: savedContent(savedQuery({
       id: 1, name: "Template", query_language: "logchefql",
       query_content: JSON.stringify({ content: "level={{a}}" }),
-    });
+    })) });
     store.setActiveMode("native");
     expect(store.templateDialect).toBe("clickhouse-sql");
   });
