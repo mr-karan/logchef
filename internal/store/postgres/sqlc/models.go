@@ -105,21 +105,23 @@ type Dashboard struct {
 }
 
 type ExportJob struct {
-	ID           string             `json:"id"`
-	SourceID     int64              `json:"source_id"`
-	CreatedBy    int64              `json:"created_by"`
-	Status       string             `json:"status"`
-	Format       string             `json:"format"`
-	RequestJson  string             `json:"request_json"`
-	FileName     pgtype.Text        `json:"file_name"`
-	FilePath     pgtype.Text        `json:"file_path"`
-	ErrorMessage pgtype.Text        `json:"error_message"`
-	RowsExported int64              `json:"rows_exported"`
-	BytesWritten int64              `json:"bytes_written"`
-	ExpiresAt    pgtype.Timestamptz `json:"expires_at"`
-	CompletedAt  pgtype.Timestamptz `json:"completed_at"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	ID              string             `json:"id"`
+	SourceID        int64              `json:"source_id"`
+	CreatedBy       int64              `json:"created_by"`
+	Status          string             `json:"status"`
+	Format          string             `json:"format"`
+	RequestJson     string             `json:"request_json"`
+	FileName        pgtype.Text        `json:"file_name"`
+	FilePath        pgtype.Text        `json:"file_path"`
+	ErrorMessage    pgtype.Text        `json:"error_message"`
+	RowsExported    int64              `json:"rows_exported"`
+	BytesWritten    int64              `json:"bytes_written"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CompletedAt     pgtype.Timestamptz `json:"completed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	OwnerInstanceID string             `json:"owner_instance_id"`
+	OwnerProcessID  string             `json:"owner_process_id"`
 }
 
 type OauthAccessToken struct {

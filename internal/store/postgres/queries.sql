@@ -390,6 +390,8 @@ WHERE expires_at < $1;
 -- Persist an async export job
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -398,26 +400,11 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 -- name: GetExportJob :one
 -- Retrieve an export job by ID
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT *
 FROM export_jobs
 WHERE id = $1;
 
@@ -1273,11 +1260,15 @@ UPDATE export_jobs
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
 WHERE id IN (
     SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+    WHERE status IN ('pending', 'running')
+      AND (export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+        OR (sqlc.arg(instance_id)::text <> '' AND export_jobs.owner_instance_id = sqlc.arg(instance_id) AND export_jobs.owner_process_id <> sqlc.arg(process_id)))
     ORDER BY id
     LIMIT 100
 )
-  AND status IN ('pending', 'running') AND export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+  AND status IN ('pending', 'running')
+  AND (export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+    OR (sqlc.arg(instance_id)::text <> '' AND export_jobs.owner_instance_id = sqlc.arg(instance_id) AND export_jobs.owner_process_id <> sqlc.arg(process_id)))
 RETURNING *;
 
 -- name: MarkAlertResolved :exec

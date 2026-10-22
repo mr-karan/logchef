@@ -99,6 +99,7 @@
     "MaxConcurrentGlobal": 30
   },
   "Export": {
+    "InstanceID": "",
     "MaxRows": 1000000,
     "DefaultTimeoutSeconds": 600,
     "MaxTimeoutSeconds": 600,

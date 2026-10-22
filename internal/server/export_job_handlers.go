@@ -91,6 +91,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 	now := time.Now().UTC()
 	job := &models.ExportJob{
 		ID:             uuid.New().String(),
+		Owner:          s.exportOwner,
 		SourceID:       sourceID,
 		CreatedBy:      user.ID,
 		Status:         models.ExportJobStatusPending,
@@ -447,7 +448,7 @@ func (s *Server) startBackgroundCleanup() {
 }
 
 func (s *Server) cleanupExpiredBackgroundState() {
-	s.reapInterruptedExportJobs()
+	s.reapInterruptedExportJobs(models.ExportJobOwner{})
 	s.logBackgroundDrops()
 	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
@@ -488,7 +489,7 @@ const (
 	exportReapSlack  = 30 * time.Second
 )
 
-func (s *Server) reapInterruptedExportJobs() {
+func (s *Server) reapInterruptedExportJobs(owner models.ExportJobOwner) {
 	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
 	maxTimeout := models.MaxQueryTimeoutSeconds
@@ -497,7 +498,7 @@ func (s *Server) reapInterruptedExportJobs() {
 	}
 	maxAge := time.Duration(maxTimeout)*time.Second + exportQueryGrace + exportReapSlack
 	for ctx.Err() == nil {
-		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge)
+		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge, owner)
 		if err != nil {
 			s.log.Error("failed to reap interrupted exports", "error", err)
 			return

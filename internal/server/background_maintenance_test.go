@@ -85,7 +85,7 @@ func TestReapContinuesAfterArtifactRemoveError(t *testing.T) {
 		t.Cleanup(func() { _ = os.Remove(file.Name()) })
 		partials = append(partials, file.Name())
 	}
-	srv.reapInterruptedExportJobs()
+	srv.reapInterruptedExportJobs(models.ExportJobOwner{})
 	for _, path := range partials {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Errorf("partial artifact remains after another remove failed: %s (%v)", path, err)
@@ -109,7 +109,7 @@ func TestExportRunningUsesDatabaseClock(t *testing.T) {
 				t.Fatal(err)
 			}
 			srv := &Server{sqlite: db, baseCtx: ctx, config: testOAuthConfig(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
-			srv.reapInterruptedExportJobs()
+			srv.reapInterruptedExportJobs(models.ExportJobOwner{})
 			got, err := db.GetExportJob(ctx, job.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -127,7 +127,7 @@ func TestExportRunningUsesDatabaseClock(t *testing.T) {
 			if got.UpdatedAt.Before(now.Add(-2*time.Second)) || got.UpdatedAt.After(time.Now().Add(2*time.Second)) {
 				t.Errorf("running timestamp used application clock: %s", got.UpdatedAt)
 			}
-			srv.reapInterruptedExportJobs()
+			srv.reapInterruptedExportJobs(models.ExportJobOwner{})
 			got, err = db.GetExportJob(ctx, job.ID)
 			if err != nil {
 				t.Fatal(err)
@@ -142,7 +142,7 @@ func TestExportRunningUsesDatabaseClock(t *testing.T) {
 			if err := db.CreateExportJob(ctx, &stale); err != nil {
 				t.Fatal(err)
 			}
-			srv.reapInterruptedExportJobs()
+			srv.reapInterruptedExportJobs(models.ExportJobOwner{})
 			reaped, err := db.GetExportJob(ctx, stale.ID)
 			if err != nil {
 				t.Fatal(err)

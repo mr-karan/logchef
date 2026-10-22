@@ -194,7 +194,7 @@ type QueryHistoryStore interface {
 
 // ExportJobStore persists asynchronous CSV/export job records.
 type ExportJobStore interface {
-	ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration) ([]*models.ExportJob, error)
+	ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]*models.ExportJob, error)
 	CreateExportJob(ctx context.Context, job *models.ExportJob) error
 	GetExportJob(ctx context.Context, id string) (*models.ExportJob, error)
 	UpdateExportJobRunning(ctx context.Context, id string) error

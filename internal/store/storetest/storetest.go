@@ -20,6 +20,7 @@ import (
 func Run(t *testing.T, s store.Store) {
 	ctx := context.Background()
 
+	t.Run("ExportJobOwnership", func(t *testing.T) { testExportJobOwnership(t, ctx, s) })
 	t.Run("Users", func(t *testing.T) { testUsers(t, ctx, s) })
 	t.Run("UserPasswordHash", func(t *testing.T) { testUserPasswordHash(t, ctx, s) })
 	t.Run("CollectionMapping", func(t *testing.T) { testCollectionMapping(t, ctx, s) })

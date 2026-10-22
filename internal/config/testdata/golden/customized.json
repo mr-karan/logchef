@@ -101,6 +101,7 @@
     "MaxConcurrentGlobal": 30
   },
   "Export": {
+    "InstanceID": "replica-a",
     "MaxRows": 1000000,
     "DefaultTimeoutSeconds": 120,
     "MaxTimeoutSeconds": 600,

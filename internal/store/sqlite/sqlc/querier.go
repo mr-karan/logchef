@@ -89,7 +89,7 @@ type Querier interface {
 	// Delete a dashboard; RETURNING lets callers detect not-found.
 	DeleteDashboard(ctx context.Context, id int64) (int64, error)
 	// Delete expired export jobs
-	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
+	DeleteExpiredExportJobs(ctx context.Context, before string) error
 	DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt int64) error
 	DeleteExpiredOAuthAuthRequests(ctx context.Context, now int64) error
 	// Delete refresh rows only when no row of the same grant is still live. A
@@ -210,7 +210,7 @@ type Querier interface {
 	// a LEFT JOIN (NULL for dashboards whose author was deleted).
 	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
-	ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error)
+	ListExpiredExportJobPaths(ctx context.Context, before string) ([]sql.NullString, error)
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
@@ -262,8 +262,7 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
-	// Legacy workers stored UTC timestamps with a Go zone suffix.
-	ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds int64) ([]ExportJob, error)
+	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection

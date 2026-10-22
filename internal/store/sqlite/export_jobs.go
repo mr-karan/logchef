@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
@@ -12,15 +11,17 @@ import (
 
 func (db *DB) CreateExportJob(ctx context.Context, job *models.ExportJob) error {
 	err := db.writeQueries.CreateExportJob(ctx, sqlc.CreateExportJobParams{
-		ID:          job.ID,
-		SourceID:    int64(job.SourceID),
-		CreatedBy:   int64(job.CreatedBy),
-		Status:      string(job.Status),
-		Format:      job.Format,
-		RequestJson: string(job.RequestPayload),
-		ExpiresAt:   job.ExpiresAt,
-		CreatedAt:   job.CreatedAt,
-		UpdatedAt:   job.UpdatedAt,
+		ID:              job.ID,
+		OwnerInstanceID: job.Owner.InstanceID,
+		OwnerProcessID:  job.Owner.ProcessID,
+		SourceID:        int64(job.SourceID),
+		CreatedBy:       int64(job.CreatedBy),
+		Status:          string(job.Status),
+		Format:          job.Format,
+		RequestJson:     string(job.RequestPayload),
+		ExpiresAt:       formatExportJobTime(job.ExpiresAt),
+		CreatedAt:       formatExportJobTime(job.CreatedAt),
+		UpdatedAt:       formatExportJobTime(job.UpdatedAt),
 	})
 	if err != nil {
 		db.log.Error("failed to create export job", "error", err, "job_id", job.ID, "source_id", job.SourceID)
@@ -55,8 +56,8 @@ func (db *DB) CompleteExportJob(ctx context.Context, id, fileName, filePath stri
 		FilePath:     nullString(filePath),
 		RowsExported: int64(rowsExported),
 		BytesWritten: bytesWritten,
-		CompletedAt:  sql.NullTime{Time: completedAt, Valid: true},
-		UpdatedAt:    completedAt,
+		CompletedAt:  formatExportJobTime(completedAt),
+		UpdatedAt:    formatExportJobTime(completedAt),
 		ID:           id,
 	})
 	if err != nil {
@@ -69,7 +70,7 @@ func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, update
 	_, err := db.writeQueries.FailExportJob(ctx, sqlc.FailExportJobParams{
 		Status:       string(models.ExportJobStatusFailed),
 		ErrorMessage: nullString(errorMessage),
-		UpdatedAt:    updatedAt,
+		UpdatedAt:    formatExportJobTime(updatedAt),
 		ID:           id,
 	})
 	if err != nil {
@@ -82,7 +83,7 @@ func (db *DB) FailExportJob(ctx context.Context, id, errorMessage string, update
 // expires_at is before the given time, without deleting anything.
 // Callers should unlink the files first, then call DeleteExpiredExportJobs.
 func (db *DB) ListExpiredExportJobPaths(ctx context.Context, before time.Time) ([]string, error) {
-	rows, err := db.readQueries.ListExpiredExportJobPaths(ctx, before)
+	rows, err := db.readQueries.ListExpiredExportJobPaths(ctx, formatExportJobTime(before))
 	if err != nil {
 		db.log.Error("failed to list expired export job paths", "error", err)
 		return nil, fmt.Errorf("error listing expired export job paths: %w", err)
@@ -99,7 +100,7 @@ func (db *DB) ListExpiredExportJobPaths(ctx context.Context, before time.Time) (
 
 // DeleteExpiredExportJobs removes rows whose expires_at is before the given time.
 func (db *DB) DeleteExpiredExportJobs(ctx context.Context, before time.Time) error {
-	if err := db.writeQueries.DeleteExpiredExportJobs(ctx, before); err != nil {
+	if err := db.writeQueries.DeleteExpiredExportJobs(ctx, formatExportJobTime(before)); err != nil {
 		db.log.Error("failed to prune expired export jobs", "error", err)
 		return fmt.Errorf("error pruning expired export jobs: %w", err)
 	}
@@ -109,6 +110,7 @@ func (db *DB) DeleteExpiredExportJobs(ctx context.Context, before time.Time) err
 func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 	job := &models.ExportJob{
 		ID:             row.ID,
+		Owner:          models.ExportJobOwner{InstanceID: row.OwnerInstanceID, ProcessID: row.OwnerProcessID},
 		SourceID:       models.SourceID(row.SourceID),
 		CreatedBy:      models.UserID(row.CreatedBy),
 		Status:         models.ExportJobStatus(row.Status),
@@ -135,9 +137,13 @@ func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 	return job
 }
 
-// ReapInterruptedExportJobs fails and returns a bounded batch of stale exports.
-func (db *DB) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration) ([]*models.ExportJob, error) {
-	rows, err := db.writeQueries.ReapInterruptedExportJobs(ctx, int64(maxAge/time.Second))
+// ReapInterruptedExportJobs fails stale exports and prior processes of owner.
+func (db *DB) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]*models.ExportJob, error) {
+	rows, err := db.writeQueries.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{
+		MaxAgeSeconds: int64(maxAge / time.Second),
+		InstanceID:    owner.InstanceID,
+		ProcessID:     owner.ProcessID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
 	}
@@ -146,4 +152,8 @@ func (db *DB) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duratio
 		jobs = append(jobs, exportJobFromSQLC(rows[i]))
 	}
 	return jobs, nil
+}
+
+func formatExportJobTime(t time.Time) string {
+	return t.UTC().Format("2006-01-02T15:04:05.000Z")
 }

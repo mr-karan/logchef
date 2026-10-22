@@ -220,15 +220,15 @@ func (q *Queries) ClaimOAuthAuthRequestDecision(ctx context.Context, arg ClaimOA
 const completeExportJob = `-- name: CompleteExportJob :one
 UPDATE export_jobs
 SET
-    status = ?,
-    file_name = ?,
-    file_path = ?,
+    status = ?1,
+    file_name = ?2,
+    file_path = ?3,
     error_message = NULL,
-    rows_exported = ?,
-    bytes_written = ?,
-    completed_at = ?,
-    updated_at = ?
-WHERE id = ?
+    rows_exported = ?4,
+    bytes_written = ?5,
+    completed_at = CAST(?6 AS TEXT),
+    updated_at = CAST(?7 AS TEXT)
+WHERE id = ?8
   AND status IN ('pending', 'running')
 RETURNING id
 `
@@ -239,8 +239,8 @@ type CompleteExportJobParams struct {
 	FilePath     sql.NullString `json:"file_path"`
 	RowsExported int64          `json:"rows_exported"`
 	BytesWritten int64          `json:"bytes_written"`
-	CompletedAt  sql.NullTime   `json:"completed_at"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	CompletedAt  string         `json:"completed_at"`
+	UpdatedAt    string         `json:"updated_at"`
 	ID           string         `json:"id"`
 }
 
@@ -608,6 +608,8 @@ const createExportJob = `-- name: CreateExportJob :exec
 
 INSERT INTO export_jobs (
     id,
+    owner_instance_id,
+    owner_process_id,
     source_id,
     created_by,
     status,
@@ -616,19 +618,33 @@ INSERT INTO export_jobs (
     expires_at,
     created_at,
     updated_at
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (
+    ?1,
+    ?2,
+    ?3,
+    ?4,
+    ?5,
+    ?6,
+    ?7,
+    ?8,
+    CAST(?9 AS TEXT),
+    CAST(?10 AS TEXT),
+    CAST(?11 AS TEXT)
+)
 `
 
 type CreateExportJobParams struct {
-	ID          string    `json:"id"`
-	SourceID    int64     `json:"source_id"`
-	CreatedBy   int64     `json:"created_by"`
-	Status      string    `json:"status"`
-	Format      string    `json:"format"`
-	RequestJson string    `json:"request_json"`
-	ExpiresAt   time.Time `json:"expires_at"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string `json:"id"`
+	OwnerInstanceID string `json:"owner_instance_id"`
+	OwnerProcessID  string `json:"owner_process_id"`
+	SourceID        int64  `json:"source_id"`
+	CreatedBy       int64  `json:"created_by"`
+	Status          string `json:"status"`
+	Format          string `json:"format"`
+	RequestJson     string `json:"request_json"`
+	ExpiresAt       string `json:"expires_at"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // Export Jobs
@@ -636,6 +652,8 @@ type CreateExportJobParams struct {
 func (q *Queries) CreateExportJob(ctx context.Context, arg CreateExportJobParams) error {
 	_, err := q.exec(ctx, q.createExportJobStmt, createExportJob,
 		arg.ID,
+		arg.OwnerInstanceID,
+		arg.OwnerProcessID,
 		arg.SourceID,
 		arg.CreatedBy,
 		arg.Status,
@@ -972,12 +990,12 @@ func (q *Queries) DeleteDashboard(ctx context.Context, id int64) (int64, error) 
 
 const deleteExpiredExportJobs = `-- name: DeleteExpiredExportJobs :exec
 DELETE FROM export_jobs
-WHERE expires_at < ?
+WHERE expires_at < CAST(?1 AS TEXT)
 `
 
 // Delete expired export jobs
-func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error {
-	_, err := q.exec(ctx, q.deleteExpiredExportJobsStmt, deleteExpiredExportJobs, expiresAt)
+func (q *Queries) DeleteExpiredExportJobs(ctx context.Context, before string) error {
+	_, err := q.exec(ctx, q.deleteExpiredExportJobsStmt, deleteExpiredExportJobs, before)
 	return err
 }
 
@@ -1115,20 +1133,20 @@ func (q *Queries) DeleteUserSessions(ctx context.Context, userID int64) error {
 const failExportJob = `-- name: FailExportJob :one
 UPDATE export_jobs
 SET
-    status = ?,
+    status = ?1,
     file_name = NULL,
     file_path = NULL,
-    error_message = ?,
+    error_message = ?2,
     completed_at = NULL,
-    updated_at = ?
-WHERE id = ?
+    updated_at = CAST(?3 AS TEXT)
+WHERE id = ?4
 RETURNING id
 `
 
 type FailExportJobParams struct {
 	Status       string         `json:"status"`
 	ErrorMessage sql.NullString `json:"error_message"`
-	UpdatedAt    time.Time      `json:"updated_at"`
+	UpdatedAt    string         `json:"updated_at"`
 	ID           string         `json:"id"`
 }
 
@@ -1375,22 +1393,7 @@ func (q *Queries) GetDashboard(ctx context.Context, id int64) (GetDashboardRow, 
 }
 
 const getExportJob = `-- name: GetExportJob :one
-SELECT
-    id,
-    source_id,
-    created_by,
-    status,
-    format,
-    request_json,
-    file_name,
-    file_path,
-    error_message,
-    rows_exported,
-    bytes_written,
-    expires_at,
-    completed_at,
-    created_at,
-    updated_at
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = ?
 `
@@ -1415,6 +1418,8 @@ func (q *Queries) GetExportJob(ctx context.Context, id string) (ExportJob, error
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.OwnerInstanceID,
+		&i.OwnerProcessID,
 	)
 	return i, err
 }
@@ -2787,13 +2792,13 @@ func (q *Queries) ListDashboards(ctx context.Context) ([]ListDashboardsRow, erro
 const listExpiredExportJobPaths = `-- name: ListExpiredExportJobPaths :many
 SELECT file_path
 FROM export_jobs
-WHERE expires_at < ?
+WHERE expires_at < CAST(?1 AS TEXT)
   AND file_path IS NOT NULL
 `
 
 // List artifact paths for expired export jobs
-func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error) {
-	rows, err := q.query(ctx, q.listExpiredExportJobPathsStmt, listExpiredExportJobPaths, expiresAt)
+func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, before string) ([]sql.NullString, error) {
+	rows, err := q.query(ctx, q.listExpiredExportJobPathsStmt, listExpiredExportJobPaths, before)
 	if err != nil {
 		return nil, err
 	}
@@ -3934,17 +3939,26 @@ UPDATE export_jobs
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id IN (
     SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(?1 AS INTEGER) / 86400.0
+    WHERE status IN ('pending', 'running')
+      AND (export_jobs.updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(?1 AS INTEGER) || ' seconds')
+        OR (CAST(?2 AS TEXT) <> '' AND export_jobs.owner_instance_id = ?2 AND export_jobs.owner_process_id <> ?3))
     ORDER BY id
     LIMIT 100
 )
-  AND status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(?1 AS INTEGER) / 86400.0
-RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at
+  AND status IN ('pending', 'running')
+  AND (export_jobs.updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(?1 AS INTEGER) || ' seconds')
+    OR (CAST(?2 AS TEXT) <> '' AND export_jobs.owner_instance_id = ?2 AND export_jobs.owner_process_id <> ?3))
+RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 `
 
-// Legacy workers stored UTC timestamps with a Go zone suffix.
-func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds int64) ([]ExportJob, error) {
-	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, maxAgeSeconds)
+type ReapInterruptedExportJobsParams struct {
+	MaxAgeSeconds int64  `json:"max_age_seconds"`
+	InstanceID    string `json:"instance_id"`
+	ProcessID     string `json:"process_id"`
+}
+
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error) {
+	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
 	if err != nil {
 		return nil, err
 	}
@@ -3968,6 +3982,8 @@ func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, maxAgeSeconds i
 			&i.CompletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.OwnerInstanceID,
+			&i.OwnerProcessID,
 		); err != nil {
 			return nil, err
 		}
