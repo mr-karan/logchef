@@ -582,13 +582,11 @@ export const useSourcesStore = defineStore("sources", () => {
   // Update source
   async function updateSource(id: number, payload: UpdateSourcePayload) {
     return await state.withLoading(`updateSource-${id}`, async () => {
-      return await state.callApi({
+      return await state.callApi<Source>({
         apiCall: () => sourcesApi.updateSource(id, payload),
         successMessage: i18n.global.t("sources.sourceUpdated"),
         operationKey: `updateSource-${id}`,
-        onSuccess: (data) => {
-          // Ensure data is treated as a Source object
-          const updatedSourceData = data as Source | null;
+        onSuccess: (updatedSourceData) => {
           if (!updatedSourceData) return;
 
           // Update in local state
@@ -613,8 +611,15 @@ export const useSourcesStore = defineStore("sources", () => {
             ];
           }
 
-          // Invalidate cache for this source
-          invalidateSourceCache(id);
+          if (state.data.value.currentSourceDetails?.id === id) {
+            state.data.value.currentSourceDetails = {
+              ...state.data.value.currentSourceDetails,
+              ...updatedSourceData,
+            };
+          }
+          delete state.data.value.sourceInspections[id.toString()];
+          delete state.data.value.sourceActivities[id.toString()];
+          delete state.data.value.sourceActivityErrors[id.toString()];
         }
       });
     });
