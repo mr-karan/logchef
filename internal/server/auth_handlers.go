@@ -380,7 +380,7 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 	invalid := func() error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
 	}
-	if len(req.Email) > 254 {
+	if len(req.Email) > models.MaxEmailLength {
 		return invalid()
 	}
 

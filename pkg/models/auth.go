@@ -2,6 +2,9 @@ package models
 
 import "time"
 
+// MaxEmailLength is the maximum account email length in bytes.
+const MaxEmailLength = 254
+
 // UserStatus represents the possible user statuses
 type UserStatus string
 

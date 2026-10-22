@@ -213,6 +213,9 @@ func validateTeams(cfg *config.ProvisioningConfig) []string {
 				errs = append(errs, fmt.Sprintf("%s: email is required", memberPrefix))
 				continue
 			}
+			if len(email) > models.MaxEmailLength {
+				errs = append(errs, fmt.Sprintf("%s: email must be at most 254 bytes", memberPrefix))
+			}
 			if memberSeen[email] {
 				errs = append(errs, fmt.Sprintf("%s: duplicate email %q", memberPrefix, member.Email))
 			}
