@@ -210,7 +210,6 @@ type Querier interface {
 	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, expiresAt time.Time) ([]sql.NullString, error)
-	// Provisioning Queries
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
@@ -238,8 +237,6 @@ type Querier interface {
 	ListSourcesForUser(ctx context.Context, userID int64) ([]Source, error)
 	ListSystemSettings(ctx context.Context) ([]SystemSetting, error)
 	ListSystemSettingsByCategory(ctx context.Context, category string) ([]SystemSetting, error)
-	// List all members of a team
-	ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error)
 	// List all members of a team with user details
 	ListTeamMembersWithDetails(ctx context.Context, teamID int64) ([]ListTeamMembersWithDetailsRow, error)
 	// List all data sources in a team
@@ -252,6 +249,7 @@ type Querier interface {
 	ListUserTeams(ctx context.Context, userID int64) ([]Team, error)
 	// List all users
 	ListUsers(ctx context.Context) ([]User, error)
+	ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error)
 	MarkAlertEvaluated(ctx context.Context, id int64) error
 	MarkAlertTriggered(ctx context.Context, id int64) error
 	PruneAlertHistory(ctx context.Context, arg PruneAlertHistoryParams) error

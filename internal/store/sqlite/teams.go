@@ -243,29 +243,6 @@ func (db *DB) RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID
 	return nil
 }
 
-// ListTeamMembers retrieves basic membership info for all members of a team.
-func (db *DB) ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
-
-	memberRows, err := db.readQueries.ListTeamMembers(ctx, int64(teamID))
-	if err != nil {
-		db.log.Error("failed to list team members from db", "error", err, "team_id", teamID)
-		return nil, fmt.Errorf("error listing team members: %w", err)
-	}
-
-	// Map results.
-	members := make([]*models.TeamMember, 0, len(memberRows))
-	for _, row := range memberRows {
-		members = append(members, &models.TeamMember{
-			TeamID:    models.TeamID(row.TeamID),
-			UserID:    models.UserID(row.UserID),
-			Role:      models.TeamRole(row.Role),
-			CreatedAt: row.CreatedAt,
-		})
-	}
-
-	return members, nil
-}
-
 // ListTeamMembersWithDetails retrieves membership info including user email and full name.
 func (db *DB) ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error) {
 

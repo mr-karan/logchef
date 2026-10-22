@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -106,7 +107,12 @@ func (s *Service) DeleteSource(ctx context.Context, sourceID models.SourceID) er
 			"error", err)
 	}
 
-	if err := s.db.DeleteSource(ctx, source.ID); err != nil {
+	if err := s.db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		return tx.DeleteSource(ctx, source.ID)
+	}); err != nil {
 		return fmt.Errorf("delete source from database: %w", err)
 	}
 

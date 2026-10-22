@@ -26,18 +26,19 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 		return nil
 	}
 
-	// Validate config
+	ResolveConfig(cfg)
 	if err := ValidateConfig(cfg); err != nil {
 		return err
 	}
 
-	// Resolve secrets from environment
-	ResolveSecrets(cfg)
-
 	// Build admin email set for role precedence
 	adminSet := make(map[string]bool)
 	for _, email := range adminEmails {
-		adminSet[strings.ToLower(email)] = true
+		adminSet[strings.ToLower(strings.TrimSpace(email))] = true
+	}
+
+	if err := validateNewSources(ctx, cfg, db, ds, log); err != nil {
+		return err
 	}
 
 	// Sources created/updated in this run, for post-commit datasource setup.
@@ -46,16 +47,25 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	// All mutations run in a single transaction. On dry_run we return errDryRun
 	// to roll the whole thing back without surfacing an error.
 	err := db.WithTx(ctx, func(tx store.StoreOps) error {
+		// Share the deletion lock because pruning cascades beyond configured users.
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		usersByEmail, err := loadProvisioningUsers(ctx, tx, cfg)
+		if err != nil {
+			return err
+		}
+
 		// Phase 1: Sources
 		if cfg.ManageSources {
-			if err := reconcileSources(ctx, tx, cfg, ds, log, &sourcesToConnect); err != nil {
+			if err := reconcileSources(ctx, tx, cfg, log, &sourcesToConnect); err != nil {
 				return fmt.Errorf("source reconciliation failed: %w", err)
 			}
 		}
 
 		// Phase 2: Teams (depends on sources being reconciled)
 		if cfg.ManageTeams {
-			if err := reconcileTeams(ctx, tx, cfg, log, adminSet); err != nil {
+			if err := reconcileTeams(ctx, tx, cfg, log, adminSet, usersByEmail); err != nil {
 				return fmt.Errorf("team reconciliation failed: %w", err)
 			}
 		}
@@ -90,7 +100,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	return nil
 }
 
-func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, ds *datasource.Service, log *slog.Logger, toConnect *[]models.Source) error {
+func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger, toConnect *[]models.Source) error {
 	// Load existing managed sources.
 	existingManaged, err := tx.ListManagedSources(ctx)
 	if err != nil {
@@ -113,7 +123,7 @@ func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.Provis
 				return err
 			}
 		} else {
-			if err := createOrAdoptSource(ctx, tx, ds, log, cfgSrc, toConnect); err != nil {
+			if err := createOrAdoptSource(ctx, tx, log, cfgSrc, toConnect); err != nil {
 				return err
 			}
 		}
@@ -125,9 +135,7 @@ func reconcileSources(ctx context.Context, tx store.StoreOps, cfg *config.Provis
 // createOrAdoptSource handles a config source with no managed counterpart:
 // it adopts a same-named unmanaged source if one exists, otherwise creates a
 // new managed source.
-func createOrAdoptSource(ctx context.Context, tx store.StoreOps, ds *datasource.Service, log *slog.Logger, cfgSrc config.ProvisionSource, toConnect *[]models.Source) error {
-	// Check for an unmanaged source with the same name (adopt). Any lookup
-	// error is treated as "not found" -> create, matching the prior behavior.
+func createOrAdoptSource(ctx context.Context, tx store.StoreOps, log *slog.Logger, cfgSrc config.ProvisionSource, toConnect *[]models.Source) error {
 	if unmanaged, err := tx.GetSourceByNameForProvisioning(ctx, cfgSrc.Name); err == nil {
 		log.Info("adopting existing source as managed", "name", cfgSrc.Name, "id", unmanaged.ID)
 		adopted, err := sourceFromConfig(cfgSrc, unmanaged.ID)
@@ -142,16 +150,12 @@ func createOrAdoptSource(ctx context.Context, tx store.StoreOps, ds *datasource.
 		}
 		*toConnect = append(*toConnect, *adopted)
 		return nil
+	} else if !models.IsNotFound(err) {
+		return fmt.Errorf("failed to look up source %q: %w", cfgSrc.Name, err)
 	}
 
 	// Create a new source.
 	log.Info("creating managed source", "name", cfgSrc.Name)
-
-	// Validate datasource connectivity before creating (best-effort).
-	if err := validateSourceConnection(ctx, ds, cfgSrc, log); err != nil {
-		log.Warn("datasource validation failed for provisioned source, creating anyway",
-			"name", cfgSrc.Name, "error", err)
-	}
 
 	src, err := sourceFromConfig(cfgSrc, 0)
 	if err != nil {
@@ -210,7 +214,7 @@ func pruneManagedSources(ctx context.Context, tx store.StoreOps, cfg *config.Pro
 	return nil
 }
 
-func reconcileTeams(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger, adminSet map[string]bool) error {
+func reconcileTeams(ctx context.Context, tx store.StoreOps, cfg *config.ProvisioningConfig, log *slog.Logger, adminSet map[string]bool, usersByEmail map[string]*models.User) error {
 	// Load existing managed teams.
 	existingManaged, err := tx.ListManagedTeams(ctx)
 	if err != nil {
@@ -231,8 +235,6 @@ func reconcileTeams(ctx context.Context, tx store.StoreOps, cfg *config.Provisio
 
 		existing, isManaged := managedByName[cfgTeam.Name]
 		if !isManaged {
-			// Adopt an existing unmanaged team if present; any lookup error is
-			// treated as "not found" -> create, matching the prior behavior.
 			if unmanaged, err := tx.GetTeamByName(ctx, cfgTeam.Name); err == nil {
 				log.Info("adopting existing team as managed", "name", cfgTeam.Name, "id", unmanaged.ID)
 				teamID = unmanaged.ID
@@ -244,6 +246,8 @@ func reconcileTeams(ctx context.Context, tx store.StoreOps, cfg *config.Provisio
 						return fmt.Errorf("failed to update team %q: %w", cfgTeam.Name, err)
 					}
 				}
+			} else if !models.IsNotFound(err) {
+				return fmt.Errorf("failed to look up team %q: %w", cfgTeam.Name, err)
 			} else {
 				log.Info("creating managed team", "name", cfgTeam.Name)
 				team := &models.Team{Name: cfgTeam.Name, Description: cfgTeam.Description}
@@ -264,7 +268,7 @@ func reconcileTeams(ctx context.Context, tx store.StoreOps, cfg *config.Provisio
 			}
 		}
 
-		if err := reconcileTeamMembers(ctx, tx, teamID, cfgTeam, log, adminSet, cfg.Prune); err != nil {
+		if err := reconcileTeamMembers(ctx, tx, teamID, cfgTeam, log, adminSet, usersByEmail, cfg.Prune); err != nil {
 			return fmt.Errorf("failed to reconcile members for team %q: %w", cfgTeam.Name, err)
 		}
 
@@ -291,32 +295,27 @@ func reconcileTeams(ctx context.Context, tx store.StoreOps, cfg *config.Provisio
 	return nil
 }
 
-func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.TeamID, cfgTeam config.ProvisionTeam, log *slog.Logger, adminSet map[string]bool, prune bool) error {
+func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.TeamID, cfgTeam config.ProvisionTeam, log *slog.Logger, adminSet map[string]bool, usersByEmail map[string]*models.User, prune bool) error {
 	// Load current members, keyed by user email.
-	currentMembers, err := tx.ListTeamMembers(ctx, teamID)
+	currentMembers, err := tx.ListTeamMembersWithDetails(ctx, teamID)
 	if err != nil {
 		return fmt.Errorf("failed to list team members: %w", err)
 	}
 
 	currentByEmail := make(map[string]*models.TeamMember, len(currentMembers))
 	for _, m := range currentMembers {
-		user, err := tx.GetUser(ctx, m.UserID)
-		if err != nil {
-			continue
-		}
-		currentByEmail[user.Email] = m
+		currentByEmail[m.Email] = m
 	}
 
 	desiredEmails := make(map[string]bool)
 
 	for _, member := range cfgTeam.Members {
-		email := strings.ToLower(member.Email)
+		email := member.Email
 		desiredEmails[email] = true
-		role := models.TeamRole(strings.ToLower(member.Role))
+		role := models.TeamRole(member.Role)
 
-		user, err := tx.GetUserByEmail(ctx, email)
-		if err != nil {
-			// User doesn't exist (or lookup failed): create a managed stub.
+		user, exists := usersByEmail[email]
+		if !exists {
 			log.Info("creating managed user for team membership", "email", email, "team", cfgTeam.Name)
 
 			globalRole := models.UserRoleMember
@@ -328,6 +327,8 @@ func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.
 			if err != nil {
 				return err
 			}
+			newUser.Managed = true
+			usersByEmail[email] = newUser
 			if err := tx.AddTeamMember(ctx, teamID, newUser.ID, role); err != nil {
 				return fmt.Errorf("failed to add member %q to team: %w", email, err)
 			}
@@ -339,6 +340,7 @@ func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.
 			if err := tx.SetUserManaged(ctx, user.ID, true); err != nil {
 				return fmt.Errorf("failed to set user %q as managed: %w", email, err)
 			}
+			user.Managed = true
 		}
 
 		// Ensure membership with the correct role.
@@ -361,7 +363,7 @@ func reconcileTeamMembers(ctx context.Context, tx store.StoreOps, teamID models.
 	// Prune members not in config.
 	if prune {
 		for email, member := range currentByEmail {
-			if desiredEmails[strings.ToLower(email)] {
+			if desiredEmails[email] {
 				continue
 			}
 			log.Warn("removing member from managed team (not in config)", "email", email, "team", cfgTeam.Name)
@@ -391,7 +393,7 @@ func reconcileTeamSources(ctx context.Context, tx store.StoreOps, teamID models.
 	for _, srcName := range cfgTeam.Sources {
 		src, err := tx.GetSourceByNameForProvisioning(ctx, srcName)
 		if err != nil {
-			return fmt.Errorf("source %q referenced by team %q not found", srcName, cfgTeam.Name)
+			return fmt.Errorf("failed to look up source %q referenced by team %q: %w", srcName, cfgTeam.Name, err)
 		}
 
 		desiredSourceIDs[src.ID] = true
@@ -399,10 +401,7 @@ func reconcileTeamSources(ctx context.Context, tx store.StoreOps, teamID models.
 		if !currentSourceIDs[src.ID] {
 			log.Info("linking source to managed team", "source", srcName, "team", cfgTeam.Name)
 			if err := tx.AddTeamSource(ctx, teamID, src.ID); err != nil {
-				// Ignore duplicate link errors.
-				if !strings.Contains(err.Error(), "UNIQUE") {
-					return fmt.Errorf("failed to link source %q to team %q: %w", srcName, cfgTeam.Name, err)
-				}
+				return fmt.Errorf("failed to link source %q to team %q: %w", srcName, cfgTeam.Name, err)
 			}
 		}
 	}
@@ -424,6 +423,24 @@ func reconcileTeamSources(ctx context.Context, tx store.StoreOps, teamID models.
 }
 
 // Helper functions
+
+func validateNewSources(ctx context.Context, cfg *config.ProvisioningConfig, db store.StoreOps, ds *datasource.Service, log *slog.Logger) error {
+	if !cfg.ManageSources {
+		return nil
+	}
+	for i := range cfg.Sources {
+		src := &cfg.Sources[i]
+		if _, err := db.GetSourceByNameForProvisioning(ctx, src.Name); err != nil {
+			if !models.IsNotFound(err) {
+				return fmt.Errorf("failed to look up source %q: %w", src.Name, err)
+			}
+			if err := validateSourceConnection(ctx, ds, *src, log); err != nil {
+				log.Warn("datasource validation failed for provisioned source, creating anyway", "name", src.Name, "error", err)
+			}
+		}
+	}
+	return nil
+}
 
 func validateSourceConnection(ctx context.Context, ds *datasource.Service, src config.ProvisionSource, log *slog.Logger) error {
 	payload, err := src.ConnectionPayload()

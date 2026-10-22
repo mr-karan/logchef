@@ -102,3 +102,20 @@ func (s *Store) SetUserManaged(ctx context.Context, id models.UserID, managed bo
 	}
 	return nil
 }
+
+// ListUsersForProvisioning loads the users referenced by provisioning.
+func (s *Store) ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListUsersForProvisioning(ctx, emails)
+	if err != nil {
+		return nil, fmt.Errorf("error loading provisioning users: %w", err)
+	}
+	users := make([]*models.User, 0, len(rows))
+	for i := range rows {
+		row := rows[i]
+		users = append(users, userToModel(row))
+	}
+	return users, nil
+}

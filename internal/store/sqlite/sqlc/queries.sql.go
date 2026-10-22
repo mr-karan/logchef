@@ -8,6 +8,7 @@ package sqlc
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -2789,11 +2790,9 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt time.
 }
 
 const listManagedSources = `-- name: ListManagedSources :many
-
 SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
 `
 
-// Provisioning Queries
 // Get all sources managed by provisioning config
 func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 	rows, err := q.query(ctx, q.listManagedSourcesStmt, listManagedSources)
@@ -3434,42 +3433,6 @@ func (q *Queries) ListSystemSettingsByCategory(ctx context.Context, category str
 	return items, nil
 }
 
-const listTeamMembers = `-- name: ListTeamMembers :many
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = ?
-ORDER BY tm.created_at
-`
-
-// List all members of a team
-func (q *Queries) ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error) {
-	rows, err := q.query(ctx, q.listTeamMembersStmt, listTeamMembers, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamMember{}
-	for rows.Next() {
-		var i TeamMember
-		if err := rows.Scan(
-			&i.TeamID,
-			&i.UserID,
-			&i.Role,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Close(); err != nil {
-		return nil, err
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listTeamMembersWithDetails = `-- name: ListTeamMembersWithDetails :many
 SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
 FROM team_members tm
@@ -3724,6 +3687,56 @@ SELECT id, email, full_name, role, status, last_login_at, last_active_at, create
 // List all users
 func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	rows, err := q.query(ctx, q.listUsersStmt, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FullName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.LastActiveAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Managed,
+			&i.AccountType,
+			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUsersForProvisioning = `-- name: ListUsersForProvisioning :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, created_at, updated_at, managed, account_type, password_hash FROM users WHERE email IN (/*SLICE:emails*/?) ORDER BY id
+`
+
+func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error) {
+	query := listUsersForProvisioning
+	var queryParams []interface{}
+	if len(emails) > 0 {
+		for _, v := range emails {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:emails*/?", strings.Repeat(",?", len(emails))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:emails*/?", "NULL", 1)
+	}
+	rows, err := q.query(ctx, nil, query, queryParams...)
 	if err != nil {
 		return nil, err
 	}

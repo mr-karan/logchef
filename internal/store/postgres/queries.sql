@@ -92,7 +92,7 @@ SELECT * FROM users WHERE account_type = 'service' ORDER BY created_at ASC;
 -- Count active admin users
 SELECT COUNT(*) FROM users WHERE role = $1 AND status = $2;
 
--- name: LockAdminInvariant :exec
+-- name: LockMembershipWrites :exec
 -- Hold a transaction-scoped advisory lock
 SELECT pg_advisory_xact_lock($1);
 
@@ -194,13 +194,6 @@ WHERE team_id = $2 AND user_id = $3;
 -- Remove a member from a team
 DELETE FROM team_members
 WHERE team_id = $1 AND user_id = $2;
-
--- name: ListTeamMembers :many
--- List all members of a team
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = $1
-ORDER BY tm.created_at;
 
 -- name: ListTeamMembersWithDetails :many
 -- List all members of a team with user details
@@ -742,7 +735,8 @@ ON CONFLICT(key) DO UPDATE SET
 DELETE FROM system_settings
 WHERE key = $1;
 
--- Provisioning Queries
+-- name: ListUsersForProvisioning :many
+SELECT * FROM users WHERE email = ANY(sqlc.arg(emails)::text[]) ORDER BY id;
 
 -- name: ListManagedSources :many
 -- Get all sources managed by provisioning config

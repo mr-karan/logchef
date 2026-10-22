@@ -69,9 +69,8 @@ type UserStore interface {
 	ListUsers(ctx context.Context) ([]*models.User, error)
 	ListServiceAccounts(ctx context.Context) ([]*models.User, error)
 	CountAdminUsers(ctx context.Context) (int, error)
-	// LockAdminInvariant serializes, until the enclosing WithTx ends, every
-	// change that could remove the last active admin.
-	LockAdminInvariant(ctx context.Context) error
+	// LockMembershipWrites serializes provisioning, cascading deletes, and admin removals until WithTx ends.
+	LockMembershipWrites(ctx context.Context) error
 	// SetUserPasswordHash stores (or clears, with "") the bcrypt hash used by
 	// local email+password authentication.
 	SetUserPasswordHash(ctx context.Context, id models.UserID, hash string) error
@@ -222,6 +221,8 @@ type ProvisioningStore interface {
 
 	ListManagedSources(ctx context.Context) ([]*models.Source, error)
 	ListManagedTeams(ctx context.Context) ([]*models.Team, error)
+	// ListUsersForProvisioning loads the users referenced by provisioning.
+	ListUsersForProvisioning(ctx context.Context, emails []string) ([]*models.User, error)
 	// GetSourceByNameForProvisioning looks a source up by name (managed or not),
 	// returning models.ErrNotFound when absent.
 	GetSourceByNameForProvisioning(ctx context.Context, name string) (*models.Source, error)
@@ -246,7 +247,6 @@ type TeamStore interface {
 	GetTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) (*models.TeamMember, error)
 	UpdateTeamMemberRole(ctx context.Context, teamID models.TeamID, userID models.UserID, role models.TeamRole) error
 	RemoveTeamMember(ctx context.Context, teamID models.TeamID, userID models.UserID) error
-	ListTeamMembers(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 	ListTeamMembersWithDetails(ctx context.Context, teamID models.TeamID) ([]*models.TeamMember, error)
 
 	AddTeamSource(ctx context.Context, teamID models.TeamID, sourceID models.SourceID) error

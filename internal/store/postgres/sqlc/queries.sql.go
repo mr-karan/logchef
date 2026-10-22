@@ -2771,11 +2771,9 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, expiresAt pgtyp
 }
 
 const listManagedSources = `-- name: ListManagedSources :many
-
 SELECT id, name, _meta_is_auto_created, _meta_ts_field, _meta_severity_field, description, ttl_days, managed, secret_ref, created_at, updated_at, source_type, connection_config, identity_key FROM sources WHERE managed = true ORDER BY id
 `
 
-// Provisioning Queries
 // Get all sources managed by provisioning config
 func (q *Queries) ListManagedSources(ctx context.Context) ([]Source, error) {
 	rows, err := q.db.Query(ctx, listManagedSources)
@@ -3377,39 +3375,6 @@ func (q *Queries) ListSystemSettingsByCategory(ctx context.Context, category str
 	return items, nil
 }
 
-const listTeamMembers = `-- name: ListTeamMembers :many
-SELECT tm.team_id, tm.user_id, tm.role, tm.created_at
-FROM team_members tm
-WHERE tm.team_id = $1
-ORDER BY tm.created_at
-`
-
-// List all members of a team
-func (q *Queries) ListTeamMembers(ctx context.Context, teamID int64) ([]TeamMember, error) {
-	rows, err := q.db.Query(ctx, listTeamMembers, teamID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []TeamMember{}
-	for rows.Next() {
-		var i TeamMember
-		if err := rows.Scan(
-			&i.TeamID,
-			&i.UserID,
-			&i.Role,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listTeamMembersWithDetails = `-- name: ListTeamMembersWithDetails :many
 SELECT tm.team_id, tm.user_id, tm.role, tm.created_at, u.email, u.full_name, u.account_type
 FROM team_members tm
@@ -3680,13 +3645,50 @@ func (q *Queries) ListUsers(ctx context.Context) ([]User, error) {
 	return items, nil
 }
 
-const lockAdminInvariant = `-- name: LockAdminInvariant :exec
+const listUsersForProvisioning = `-- name: ListUsersForProvisioning :many
+SELECT id, email, full_name, role, status, last_login_at, last_active_at, managed, account_type, created_at, updated_at, password_hash FROM users WHERE email = ANY($1::text[]) ORDER BY id
+`
+
+func (q *Queries) ListUsersForProvisioning(ctx context.Context, emails []string) ([]User, error) {
+	rows, err := q.db.Query(ctx, listUsersForProvisioning, emails)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []User{}
+	for rows.Next() {
+		var i User
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.FullName,
+			&i.Role,
+			&i.Status,
+			&i.LastLoginAt,
+			&i.LastActiveAt,
+			&i.Managed,
+			&i.AccountType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PasswordHash,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockMembershipWrites = `-- name: LockMembershipWrites :exec
 SELECT pg_advisory_xact_lock($1)
 `
 
 // Hold a transaction-scoped advisory lock
-func (q *Queries) LockAdminInvariant(ctx context.Context, pgAdvisoryXactLock int64) error {
-	_, err := q.db.Exec(ctx, lockAdminInvariant, pgAdvisoryXactLock)
+func (q *Queries) LockMembershipWrites(ctx context.Context, pgAdvisoryXactLock int64) error {
+	_, err := q.db.Exec(ctx, lockMembershipWrites, pgAdvisoryXactLock)
 	return err
 }
 

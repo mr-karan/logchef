@@ -293,7 +293,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal
 	var deactivated bool
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
 		if mayRemoveAdmin {
-			if err := tx.LockAdminInvariant(ctx); err != nil {
+			if err := tx.LockMembershipWrites(ctx); err != nil {
 				return err
 			}
 		}
@@ -381,7 +381,7 @@ func isActiveAdmin(user *models.User) bool {
 	return user.Role == models.UserRoleAdmin && user.Status == models.UserStatusActive
 }
 
-// ensureAnotherActiveAdmin must run under LockAdminInvariant.
+// ensureAnotherActiveAdmin must run under LockMembershipWrites.
 func ensureAnotherActiveAdmin(ctx context.Context, tx store.StoreOps) error {
 	count, err := tx.CountAdminUsers(ctx)
 	if err != nil {
@@ -424,7 +424,7 @@ func applyStatusUpdate(existing *models.User, updateData models.User) (changed, 
 // transaction so a deleted user can never be left with a live session.
 func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
 	if err := db.WithTx(ctx, func(tx store.StoreOps) error {
-		if err := tx.LockAdminInvariant(ctx); err != nil {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
 			return err
 		}
 		existing, err := tx.GetUser(ctx, id)
@@ -460,22 +460,27 @@ func DeleteUser(ctx context.Context, db store.Store, log *slog.Logger, id models
 }
 
 // DeleteServiceAccount deletes a service principal and its tokens/memberships.
-func DeleteServiceAccount(ctx context.Context, db store.StoreOps, log *slog.Logger, id models.UserID) error {
-	existing, err := db.GetUser(ctx, id)
-	if err != nil {
-		if models.IsNotFound(err) {
+func DeleteServiceAccount(ctx context.Context, db store.Store, log *slog.Logger, id models.UserID) error {
+	return db.WithTx(ctx, func(tx store.StoreOps) error {
+		if err := tx.LockMembershipWrites(ctx); err != nil {
+			return err
+		}
+		existing, err := tx.GetUser(ctx, id)
+		if err != nil {
+			if models.IsNotFound(err) {
+				return ErrUserNotFound
+			}
+			return fmt.Errorf("error checking existing service account: %w", err)
+		}
+		if existing.AccountType != models.UserAccountTypeService {
 			return ErrUserNotFound
 		}
-		return fmt.Errorf("error checking existing service account: %w", err)
-	}
-	if existing.AccountType != models.UserAccountTypeService {
-		return ErrUserNotFound
-	}
-	if err := db.DeleteUser(ctx, id); err != nil {
-		log.Error("failed to delete service account from db", "error", err, "user_id", id)
-		return fmt.Errorf("error deleting service account: %w", err)
-	}
-	return nil
+		if err := tx.DeleteUser(ctx, id); err != nil {
+			log.Error("failed to delete service account from db", "error", err, "user_id", id)
+			return fmt.Errorf("error deleting service account: %w", err)
+		}
+		return nil
+	})
 }
 
 // InitAdminUsers ensures that specified admin users exist and are configured correctly.
