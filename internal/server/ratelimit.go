@@ -49,7 +49,7 @@ func queryRateLimitMiddleware(perUserPerMinute int) fiber.Handler {
 
 	return func(c fiber.Ctx) error {
 		key := c.IP()
-		if user, ok := c.Locals("user").(*models.User); ok && user != nil {
+		if user := currentUser(c); user != nil {
 			key = "user:" + strconv.Itoa(int(user.ID))
 		}
 		if !perUser.Allow(key) {

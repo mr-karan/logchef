@@ -39,7 +39,7 @@ func mapCollectionError(c fiber.Ctx, err error) (handled bool, sendErr error) {
 
 // handleListCollections returns the caller's collections (auto-creates personal).
 func (s *Server) handleListCollections(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	collections, err := core.ListCollectionsForUser(c.Context(), s.sqlite, s.log, user)
 	if err != nil {
 		s.log.Error("failed to list collections", "error", err, "user_id", user.ID)
@@ -50,7 +50,7 @@ func (s *Server) handleListCollections(c fiber.Ctx) error {
 
 // handleCreateCollection creates a shared collection owned by the authenticated caller.
 func (s *Server) handleCreateCollection(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	var req models.CreateCollectionRequest
 	if err := c.Bind().Body(&req); err != nil {
@@ -70,7 +70,7 @@ func (s *Server) handleCreateCollection(c fiber.Ctx) error {
 
 // handleGetCollection returns a single collection (member-only, admin bypass).
 func (s *Server) handleGetCollection(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -88,7 +88,7 @@ func (s *Server) handleGetCollection(c fiber.Ctx) error {
 
 // handleUpdateCollection updates a shared collection for its owner.
 func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -112,7 +112,7 @@ func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 
 // handleDeleteCollection removes a shared collection for its owner.
 func (s *Server) handleDeleteCollection(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -146,7 +146,7 @@ func (s *Server) handleListCollectionMembers(c fiber.Ctx) error {
 
 // handleAddCollectionMember invites a user on behalf of the collection owner.
 func (s *Server) handleAddCollectionMember(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -166,7 +166,7 @@ func (s *Server) handleAddCollectionMember(c fiber.Ctx) error {
 
 // handleRemoveCollectionMember drops a member.
 func (s *Server) handleRemoveCollectionMember(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -226,7 +226,7 @@ func (s *Server) handleAddCollectionTeam(c fiber.Ctx) error {
 
 // handleRemoveCollectionTeam removes a team share.
 func (s *Server) handleRemoveCollectionTeam(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -247,7 +247,7 @@ func (s *Server) handleRemoveCollectionTeam(c fiber.Ctx) error {
 
 // handleListCollectionItems returns items with the runnable flag.
 func (s *Server) handleListCollectionItems(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -268,7 +268,7 @@ func (s *Server) handleListCollectionItems(c fiber.Ctx) error {
 
 // handleAddCollectionItem links a saved query.
 func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
@@ -288,7 +288,7 @@ func (s *Server) handleAddCollectionItem(c fiber.Ctx) error {
 
 // handleRemoveCollectionItem unlinks a saved query.
 func (s *Server) handleRemoveCollectionItem(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	id, err := parseCollectionID(c)
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)

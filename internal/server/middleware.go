@@ -13,10 +13,22 @@ import (
 	"github.com/gofiber/fiber/v3"
 )
 
+// currentUser returns the user that requireAuth or requireSession stored on
+// the request, or nil when the route has neither.
+func currentUser(c fiber.Ctx) *models.User {
+	user, _ := c.Locals("user").(*models.User)
+	return user
+}
+
+// sendMissingUser answers a handler that found no user on the request.
+func sendMissingUser(c fiber.Ctx) error {
+	return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+}
+
 // getUserIDFromContext extracts the user ID from the context
 func getUserIDFromContext(c fiber.Ctx) models.UserID {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		return 0
 	}
 	return user.ID
@@ -196,8 +208,8 @@ func (s *Server) authenticateWithSession(c fiber.Ctx) error {
 // OAuth access tokens never pass, whatever the user's role: an OAuth client
 // holds read scopes only and must not reach administrative routes.
 func (s *Server) requireAdmin(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context for admin check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
@@ -222,7 +234,7 @@ func (s *Server) requireAdmin(c fiber.Ctx) error {
 // A request without a known auth method gets the zero Principal, which every
 // scope check denies.
 func principalFromLocals(c fiber.Ctx) access.Principal {
-	user, _ := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	switch c.Locals("auth_method") {
 	case "session":
 		return access.SessionPrincipal(user)
@@ -314,8 +326,8 @@ func (s *Server) requireTeamNotManaged(c fiber.Ctx) error {
 // without requiring a specific team context (e.g., listing users to add to teams).
 // It assumes requireAuth has already run.
 func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context for any team admin check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}
@@ -344,8 +356,8 @@ func (s *Server) requireAnyTeamAdmin(c fiber.Ctx) error {
 // specified by the ':teamID' path parameter, or is a global admin.
 // It assumes requireAuth has already run.
 func (s *Server) requireTeamMember(c fiber.Ctx) error {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context for team member check")
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 	}

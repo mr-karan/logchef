@@ -19,8 +19,8 @@ func parseSavedQueryID(c fiber.Ctx) (int, error) {
 // has visibility (source access via any team). On failure it writes the error
 // response and returns false; the caller must then return nil.
 func (s *Server) loadSavedQueryWithVisibility(c fiber.Ctx) (*models.SavedQuery, *models.User, bool) {
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.sendLoadFailure(c, fiber.StatusUnauthorized, "Authentication context missing", models.AuthenticationErrorType)
 		return nil, nil, false
 	}
@@ -75,7 +75,7 @@ func (s *Server) enrichSavedQueryPermissions(c fiber.Ctx, query *models.SavedQue
 // deliberately untouched (still source-access-gated; consumed by the explorer
 // dropdown and the CLI).
 func (s *Server) handleAdminListSavedQueries(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	queries, err := core.ListAllSavedQueries(c.Context(), s.sqlite, s.log)
 	if err != nil {
@@ -93,7 +93,7 @@ func (s *Server) handleAdminListSavedQueries(c fiber.Ctx) error {
 // ?source_id filter. Source-access-gated; consumed by the explorer dropdown and
 // the CLI, so its response shape stays stable.
 func (s *Server) handleListSavedQueries(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	if sourceParam := c.Query("source_id"); sourceParam != "" {
 		sourceID, err := core.ParseSourceID(sourceParam)
@@ -118,7 +118,7 @@ func (s *Server) handleListSavedQueries(c fiber.Ctx) error {
 // The caller must have source access via any of their teams; the resulting query
 // is owned by the caller (created_by = user.ID).
 func (s *Server) handleCreateSavedQuery(c fiber.Ctx) error {
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 
 	var req models.CreateSavedQueryRequest
 	if err := c.Bind().Body(&req); err != nil {

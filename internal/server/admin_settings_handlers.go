@@ -124,8 +124,8 @@ func (s *Server) handleGetSetting(c fiber.Ctx) error {
 // PUT /api/v1/admin/settings/:key
 func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 	// Get user from context
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -174,8 +174,8 @@ func (s *Server) handleUpdateSetting(c fiber.Ctx) error {
 // DELETE /api/v1/admin/settings/:key
 func (s *Server) handleDeleteSetting(c fiber.Ctx) error {
 	// Get user from context
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -412,8 +412,8 @@ func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 // POST /api/v1/admin/settings/test-email
 func (s *Server) handleTestEmail(c fiber.Ctx) error {
 	// Get current user for default recipient and audit log
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}
@@ -481,8 +481,8 @@ func (s *Server) handleTestEmail(c fiber.Ctx) error {
 // POST /api/v1/admin/settings/test-webhook
 func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	// Get current user for audit log
-	user, ok := c.Locals("user").(*models.User)
-	if !ok || user == nil {
+	user := currentUser(c)
+	if user == nil {
 		s.log.Error("user not found in context despite requireAuth middleware")
 		return SendError(c, fiber.StatusInternalServerError, "Error retrieving user context")
 	}

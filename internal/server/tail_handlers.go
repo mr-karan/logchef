@@ -40,9 +40,9 @@ func (s *Server) handleTailLogs(c fiber.Ctx) error { //nolint:gocyclo // request
 	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Invalid team ID format", models.ValidationErrorType)
 	}
-	user := c.Locals("user").(*models.User)
+	user := currentUser(c)
 	if user == nil {
-		return SendErrorWithType(c, fiber.StatusUnauthorized, "User context not found", models.AuthenticationErrorType)
+		return sendMissingUser(c)
 	}
 
 	// Gate on the source capability before any streaming setup so non-supporting
