@@ -23,7 +23,6 @@ type Querier interface {
 	// Team Sources
 	// Add a data source to a team
 	AddTeamSource(ctx context.Context, arg AddTeamSourceParams) error
-	ApproveOAuthDeviceAuthorization(ctx context.Context, arg ApproveOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
 	AuthenticateOAuthAccessToken(ctx context.Context, arg AuthenticateOAuthAccessTokenParams) (AuthenticateOAuthAccessTokenRow, error)
 	// Record the first decision on a pending, unexpired request. Zero rows means
 	// the request is unknown, expired or already decided.
@@ -32,9 +31,6 @@ type Querier interface {
 	CompleteExportJob(ctx context.Context, arg CompleteExportJobParams) (string, error)
 	// Single-use consumption. Exactly one concurrent caller gets the row.
 	ConsumeOAuthAuthCode(ctx context.Context, arg ConsumeOAuthAuthCodeParams) (OauthAuthRequest, error)
-	// Single-use consumption of an approved code. Expiry is checked here, before
-	// consumption, so an approved but expired code never issues tokens.
-	ConsumeOAuthDeviceCode(ctx context.Context, arg ConsumeOAuthDeviceCodeParams) (sql.NullInt64, error)
 	// Rotation claim. Exactly one concurrent caller gets the row.
 	ConsumeOAuthRefreshToken(ctx context.Context, arg ConsumeOAuthRefreshTokenParams) (int64, error)
 	// Count active admin users
@@ -66,7 +62,6 @@ type Querier interface {
 	// Times are Unix milliseconds (see 000033_oauth.up.sql). Every *_hash
 	// argument is an HMAC hex digest, never a plaintext code or token.
 	CreateOAuthAuthRequest(ctx context.Context, arg CreateOAuthAuthRequestParams) error
-	CreateOAuthDeviceAuthorization(ctx context.Context, arg CreateOAuthDeviceAuthorizationParams) error
 	CreateOAuthGrant(ctx context.Context, arg CreateOAuthGrantParams) (OauthGrant, error)
 	// Query Shares
 	// Persist an ad hoc query share token
@@ -97,7 +92,6 @@ type Querier interface {
 	DeleteExpiredExportJobs(ctx context.Context, expiresAt time.Time) error
 	DeleteExpiredOAuthAccessTokens(ctx context.Context, expiresAt int64) error
 	DeleteExpiredOAuthAuthRequests(ctx context.Context, now int64) error
-	DeleteExpiredOAuthDeviceAuthorizations(ctx context.Context, expiresAt int64) error
 	// Delete refresh rows only when no row of the same grant is still live. A
 	// consumed row therefore stays while its family can still be refreshed, so a
 	// replay of it is still detected.
@@ -119,7 +113,6 @@ type Querier interface {
 	DeleteUser(ctx context.Context, id int64) error
 	// Delete all sessions for a user
 	DeleteUserSessions(ctx context.Context, userID int64) error
-	DenyOAuthDeviceAuthorization(ctx context.Context, arg DenyOAuthDeviceAuthorizationParams) (int64, error)
 	// Mark an export job as failed and return its ID
 	FailExportJob(ctx context.Context, arg FailExportJobParams) (string, error)
 	// Get an API token by ID
@@ -141,7 +134,6 @@ type Querier interface {
 	GetOAuthAuthRequest(ctx context.Context, id string) (OauthAuthRequest, error)
 	GetOAuthGrant(ctx context.Context, id int64) (OauthGrant, error)
 	GetOAuthRefreshTokenState(ctx context.Context, tokenHash string) (GetOAuthRefreshTokenStateRow, error)
-	GetPendingOAuthDeviceAuthorization(ctx context.Context, arg GetPendingOAuthDeviceAuthorizationParams) (OauthDeviceAuthorization, error)
 	// Find the caller's personal collection if it exists
 	GetPersonalCollection(ctx context.Context, createdBy sql.NullInt64) (Collection, error)
 	// Retrieve an ad hoc query share by token with creator details
@@ -277,12 +269,6 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
-	// Record one poll. An early poll on a nonterminal request (not expired, not
-	// denied) grows the interval by 5 s (RFC 8628 section 3.5) and keeps
-	// last_polled_at, so on_time is false. Expired and denied requests are
-	// never slowed down: they report their terminal state on every poll. Every
-	// SET expression reads the pre-update row.
-	RecordOAuthDevicePoll(ctx context.Context, arg RecordOAuthDevicePollParams) (RecordOAuthDevicePollRow, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection
@@ -302,7 +288,6 @@ type Querier interface {
 	// Attach the code to an approved request. A request carries at most one code.
 	SaveOAuthAuthCode(ctx context.Context, arg SaveOAuthAuthCodeParams) (int64, error)
 	SetOAuthAuthRequestGrant(ctx context.Context, arg SetOAuthAuthRequestGrantParams) error
-	SetOAuthDeviceAuthorizationGrant(ctx context.Context, arg SetOAuthDeviceAuthorizationGrantParams) error
 	// Mark a source as managed/unmanaged and set secret_ref
 	SetSourceManaged(ctx context.Context, arg SetSourceManagedParams) error
 	// Mark a team as managed/unmanaged
