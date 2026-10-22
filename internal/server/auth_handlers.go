@@ -177,8 +177,8 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 }
 
 // handleLogin initiates the OIDC authentication flow.
-// It generates a state parameter, stores it in a cookie, and redirects the user
-// to the OIDC provider's authorization endpoint.
+// It stores a state and a nonce secret in cookies, sends the state and the secret's
+// hash as the nonce, and redirects the user to the OIDC provider's authorization endpoint.
 func (s *Server) handleLogin(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot initiate login")
@@ -273,7 +273,7 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 
 	nonceSecret := c.Cookies(nonceCookieName)
 	if nonceSecret == "" {
-		return s.redirectToFrontend(c, "", auth.ErrOIDCInvalidNonce)
+		return s.redirectToFrontend(c, "", fmt.Errorf("%w: missing nonce cookie", auth.ErrOIDCInvalidNonce))
 	}
 
 	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.sqlite, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret))
