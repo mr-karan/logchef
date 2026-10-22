@@ -369,7 +369,7 @@ func TestAdminGrantDenialAuditHTTP(t *testing.T) {
 				body = `{"role":"admin"}`
 				targetKey, targetValue = "target_user_id", fmt.Sprint(member.ID)
 			}
-			counter := vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_authorization_failures_total{endpoint=%q,reason="admin_grant_scope",user_email=%q,user_role="admin"}`, endpoint, admin.Email))
+			counter := vmmetrics.GetOrCreateCounter(fmt.Sprintf(`logchef_authorization_failures_total{endpoint=%q,reason="admin_grant_scope",user_role="admin"}`, endpoint))
 			before := counter.Get()
 			var logs bytes.Buffer
 			s.log = slog.New(slog.NewJSONHandler(&logs, nil))

@@ -33,7 +33,7 @@ func newDashboardTestServer(t *testing.T) *Server {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	t.Cleanup(func() { _ = s.Close() })
-	return &Server{sqlite: s, log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	return &Server{sqlite: s, baseCtx: t.Context(), log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 }
 
 // withUser mounts a handler with the given user injected into c.Locals, standing
