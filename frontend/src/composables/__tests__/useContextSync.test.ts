@@ -3,6 +3,7 @@ import { createPinia, setActivePinia } from "pinia";
 import { sourcesApi } from "@/api/sources";
 import { teamsApi } from "@/api/teams";
 import { useContextStore } from "@/stores/context";
+import { useSourcesStore } from "@/stores/sources";
 
 const mocks = vi.hoisted(() => ({
   route: { path: "/logs/alerts", query: {} as Record<string, string> },
@@ -56,6 +57,25 @@ describe("useContextSync route ownership", () => {
 
     await contextSync.initialize();
 
+    expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  it("clears an unconfirmed source when the team's loaded list is empty", async () => {
+    vi.mocked(sourcesApi.listTeamSources).mockReturnValue(ok([]) as never);
+
+    await useContextSync().initialize();
+
+    expect(useContextStore().sourceId).toBeNull();
+    expect(useSourcesStore().currentSourceDetails).toBeNull();
+    expect(mocks.replace).toHaveBeenCalledWith({ path: "/logs/alerts", query: { team: "3" } });
+  });
+
+  it("keeps the selected source when a list load fails", async () => {
+    vi.mocked(sourcesApi.listTeamSources).mockRejectedValue(new Error("Unavailable"));
+
+    await useContextSync().initialize();
+
+    expect(useContextStore().sourceId).toBe(7);
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 });
