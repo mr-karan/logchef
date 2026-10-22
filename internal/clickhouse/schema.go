@@ -256,7 +256,7 @@ func (c *Client) queryMetadata(ctx context.Context, query string, consume func(d
 	return c.executeQueryWithHooks(ctx, query, func(hookCtx context.Context) (err error) {
 		timeout := DefaultQueryTimeout
 		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: &timeout})
-		rows, err := c.queryRows(hookCtx, query, args...)
+		rows, err := c.conn.Query(hookCtx, query, args...)
 		if err != nil {
 			return err
 		}

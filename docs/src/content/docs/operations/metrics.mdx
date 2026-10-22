@@ -112,11 +112,9 @@ Monitor database connection health and operation performance.
 |--------|-------------|------|--------|
 | `logchef_clickhouse_connection_status` | ClickHouse connection health (0=down, 1=up) | Gauge | `source_id`, `source_name`, `database`, `table`, `host` |
 | `logchef_clickhouse_connection_validation_total` | Connection validation attempts | Counter | `source_id`, `source_name`, `database`, `table`, `host`, `result` |
-| `logchef_clickhouse_reconnections_total` | Connection reconnection attempts | Counter | `source_id`, `source_name`, `database`, `table`, `host`, `result` |
 
 **Key Use Cases:**
 - Monitor ClickHouse connection health per source
-- Track connection stability and reconnection patterns
 - Set up alerts for database connectivity issues
 
 ## Team & Source Metrics

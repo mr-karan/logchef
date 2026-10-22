@@ -78,7 +78,7 @@ func (c *Client) TableStats(ctx context.Context, database, table string) (*Table
 	queryCtx, cancel := c.statsQueryContext(ctx, tableStatsTimeoutSeconds)
 	defer cancel()
 
-	rows, err := c.queryRows(queryCtx, query)
+	rows, err := c.conn.Query(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("error executing table stats query: %w", err)
 	}
@@ -192,7 +192,7 @@ func (c *Client) IngestionStats(ctx context.Context, database, table, timestampF
 	queryCtx, cancel := context.WithTimeout(ctx, ingestionStatsTimeoutSeconds*time.Second)
 	defer cancel()
 	queryCtx = clickhouse.Context(queryCtx, clickhouse.WithSettings(buildQuerySettings(ingestionStatsTimeoutSeconds, clickhouse.Settings{"max_threads": 2}, c.querySettings)))
-	rows, err := c.queryRows(queryCtx, query)
+	rows, err := c.conn.Query(queryCtx, query)
 	if err != nil {
 		return nil, activityError(queryCtx, "error executing ingestion activity query", err)
 	}

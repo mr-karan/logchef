@@ -41,10 +41,9 @@ func TestCompileLogchefQLInspectionCache(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	manager := clickhouse.NewManager(log)
-	t.Cleanup(func() { _ = manager.Close() })
 	counter := &compilationQueryCounter{}
-	manager.AddQueryHook(counter)
+	manager := clickhouse.NewManager(log, counter)
+	t.Cleanup(func() { _ = manager.Close() })
 	source := &models.Source{
 		Name: "compilation-cache", SourceType: models.SourceTypeClickHouse, MetaTSField: "timestamp",
 		Connection: models.ConnectionInfo{Host: host, Database: "default", TableName: fmt.Sprintf("logchef_compile_cache_%d", time.Now().UnixNano())},

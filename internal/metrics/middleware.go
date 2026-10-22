@@ -110,8 +110,8 @@ func NormalizeEndpointPath(path string) string {
 		":collectionID": "{collectionID}",
 	}
 
-	for old, new := range replacements {
-		normalized = strings.ReplaceAll(normalized, old, new)
+	for old, replacement := range replacements {
+		normalized = strings.ReplaceAll(normalized, old, replacement)
 	}
 
 	return normalized

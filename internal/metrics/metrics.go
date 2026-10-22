@@ -109,18 +109,6 @@ func RecordClickHouseValidation(source *models.Source, success bool) {
 	metrics.GetOrCreateCounter(labels).Inc()
 }
 
-// RecordClickHouseReconnection records reconnection attempts
-func RecordClickHouseReconnection(source *models.Source, success bool) {
-	result := "success"
-	if !success {
-		result = "failure"
-	}
-
-	labels := fmt.Sprintf(`logchef_clickhouse_reconnections_total{source_id="%d",source_name=%q,database=%q,table=%q,host=%q,result=%q}`,
-		source.ID, source.Name, source.Connection.Database, source.Connection.TableName, source.Connection.Host, result)
-	metrics.GetOrCreateCounter(labels).Inc()
-}
-
 // RecordAuthAttempt records authentication attempt metrics
 func RecordAuthAttempt(method string, success bool, user *models.User) {
 	result := "success"

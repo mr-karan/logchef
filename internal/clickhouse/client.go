@@ -1,6 +1,6 @@
 package clickhouse
 
-// Client connection lifecycle: options, construction, hooks, close/reconnect.
+// Client connection lifecycle: options, construction, hooks, close.
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
-	"net"
 	"strings"
 	"sync"
 	"time"
@@ -43,20 +42,17 @@ const (
 // Client represents a connection to a ClickHouse database using the native protocol.
 // It provides methods for executing queries and retrieving metadata.
 type Client struct {
-	conn       driver.Conn // Underlying ClickHouse native connection.
+	conn       driver.Conn // Driver pool; it redials dead connections itself.
 	logger     *slog.Logger
-	queryHooks []QueryHook         // Hooks to execute before/after queries.
-	mu         sync.RWMutex        // Protects connection publication.
-	opts       *clickhouse.Options // Stores connection options for reconnection
-	sourceID   string              // Source ID for metrics tracking
-	source     *models.Source      // Source model for metrics with meaningful labels
+	queryHooks []QueryHook    // Hooks to execute before/after queries; fixed at construction.
+	sourceID   string         // Source ID for metrics tracking
+	source     *models.Source // Source model for metrics with meaningful labels
 	metrics    *metrics.ClickHouseMetrics
 	// querySettings holds per-source ClickHouse settings applied to every query
 	// context (e.g. max_result_rows, readonly). Nil when the source configures none.
 	querySettings  clickhouse.Settings
 	capabilitiesMu sync.Mutex
 	flattenedJSON  *bool
-	closed         bool
 }
 
 // ClientOptions holds configuration for establishing a new ClickHouse client connection.
@@ -73,6 +69,8 @@ type ClientOptions struct {
 	// context (not as connection defaults), so they can override LogChef's
 	// per-query defaults for caps/timeouts/read-only. Only set settings appear.
 	QuerySettings map[string]any
+	// QueryHooks run after the default failure-logging hook on every query.
+	QueryHooks []QueryHook
 }
 
 // NewClient establishes a new connection to a ClickHouse server using the native protocol.
@@ -146,8 +144,7 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 	client := &Client{
 		conn:       conn,
 		logger:     logger,
-		queryHooks: []QueryHook{}, // Initialize hooks slice.
-		opts:       options,
+		queryHooks: append([]QueryHook{NewLogQueryHook(logger, false)}, opts.QueryHooks...),
 		sourceID:   opts.SourceID,
 		source:     opts.Source,
 	}
@@ -155,20 +152,12 @@ func NewClient(opts ClientOptions, logger *slog.Logger) (*Client, error) {
 		client.querySettings = maps.Clone(clickhouse.Settings(opts.QuerySettings))
 	}
 
-	// Apply a default hook for basic query logging.
-	client.AddQueryHook(NewLogQueryHook(logger, false)) // Verbose logging disabled by default.
-
 	// Execution metrics are recorded once by executeQueryWithHooks.
 	if opts.Source != nil {
 		client.metrics = metrics.NewClickHouseMetrics(opts.Source)
 	}
 
 	return client, nil
-}
-
-// AddQueryHook registers a hook to be executed before and after queries run by this client.
-func (c *Client) AddQueryHook(hook QueryHook) {
-	c.queryHooks = append(c.queryHooks, hook)
 }
 
 // executeQueryWithHooks wraps the execution of a query function (`fn`)
@@ -209,114 +198,15 @@ func (c *Client) executeQueryWithHooks(ctx context.Context, query string, fn fun
 	return err // Return the error from the query function itself.
 }
 
-// Close terminates the underlying database connection with a timeout.
+// Close releases the underlying connection pool.
 func (c *Client) Close() error {
-	c.logger.Debug("closing clickhouse connection")
-
-	// Create a timeout context for the close operation
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-	defer cancel()
-
-	// Create a channel to signal completion
-	done := make(chan error, 1)
-
-	// Close the connection in a goroutine
-	c.mu.Lock()
-	c.closed = true
-	conn := c.conn
-	c.mu.Unlock()
-	go func() {
-		done <- conn.Close()
-	}()
-
-	// Wait for close to complete or timeout
-	select {
-	case err := <-done:
-		// Connection closed normally
-		return err
-	case <-ctx.Done():
-		// Timeout occurred
-		c.logger.Warn("timeout while closing clickhouse connection, abandoning")
-		return fmt.Errorf("timeout while closing connection")
-	}
-}
-
-func (c *Client) queryRows(ctx context.Context, query string, args ...any) (driver.Rows, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return nil, net.ErrClosed
-	}
-	return c.conn.Query(ctx, query, args...)
+	return c.conn.Close()
 }
 
 func (c *Client) queryResultRows(ctx context.Context, query string, opts QueryOptions, progress *queryProgress) (driver.Rows, error) {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return nil, net.ErrClosed
-	}
 	ctx = c.contextWithNativeJSON(ctx, opts)
 	// LogChef owns the progress callback for result queries. Other driver
 	// options and callbacks are inherited from the hook context.
 	ctx = clickhouse.Context(ctx, clickhouse.WithProgress(progress.add))
 	return c.conn.Query(ctx, query)
-}
-
-func (c *Client) execQuery(ctx context.Context, query string) error {
-	c.mu.RLock()
-	defer c.mu.RUnlock()
-	if c.closed {
-		return net.ErrClosed
-	}
-	return c.conn.Exec(ctx, query)
-}
-
-// Reconnect attempts to re-establish the connection to the ClickHouse server.
-// This is useful for recovering from connection failures during health checks.
-func (c *Client) Reconnect(ctx context.Context) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if c.closed {
-		return net.ErrClosed
-	}
-
-	success := false
-	defer func() {
-		if c.metrics != nil {
-			c.metrics.RecordReconnection(success)
-			c.metrics.UpdateConnectionStatus(success)
-		}
-	}()
-
-	// Use stored connection options
-	if c.opts == nil {
-		return fmt.Errorf("missing connection options for reconnect")
-	}
-
-	// Create a new connection with the same settings
-	newConn, err := clickhouse.Open(c.opts)
-	if err != nil {
-		return fmt.Errorf("reconnecting to clickhouse: %w", err)
-	}
-
-	// Test the new connection with a short timeout
-	pingCtx, pingCancel := context.WithTimeout(ctx, 3*time.Second)
-	defer pingCancel()
-
-	if err := newConn.Ping(pingCtx); err != nil {
-		_ = newConn.Close()
-		return fmt.Errorf("ping after reconnect failed: %w", err)
-	}
-
-	// Replace the connection
-	oldConn := c.conn
-	c.conn = newConn
-	c.flattenedJSON = nil
-	if oldConn != nil {
-		_ = oldConn.Close()
-	}
-	success = true
-	c.logger.Debug("reconnected to clickhouse")
-	return nil
 }

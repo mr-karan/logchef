@@ -747,7 +747,7 @@ func (c *Client) execDDLWithTimeout(ctx context.Context, query string, timeoutSe
 		hookCtx = c.contextWithQuerySettings(hookCtx, QueryOptions{TimeoutSeconds: timeoutSeconds})
 		c.logger.Debug("applying DDL query timeout", "timeout_seconds", *timeoutSeconds)
 
-		return c.execQuery(hookCtx, query)
+		return c.conn.Exec(hookCtx, query)
 	})
 
 	if err != nil {
