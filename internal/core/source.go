@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
@@ -19,27 +17,26 @@ var ErrSourceNotFound = fmt.Errorf("source not found")
 // ErrSourceAlreadyExists is returned when a source with the same identity already exists.
 var ErrSourceAlreadyExists = fmt.Errorf("source already exists")
 
-// ListSources returns all sources with basic connection status but without schema details.
-// This is optimized for list views where source metadata is enough.
+// ListSources returns stored sources with cached health and provider capabilities.
 func ListSources(ctx context.Context, db store.Store, ds *datasource.Service) ([]*models.Source, error) {
 	sources, err := db.ListSources(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error listing sources: %w", err)
 	}
 
-	if err := populateSourceStatuses(ctx, ds, sources); err != nil {
+	if err := populateSourceStatuses(ds, sources); err != nil {
 		return nil, err
 	}
 
 	return sources, nil
 }
 
-func populateSourceStatuses(ctx context.Context, ds *datasource.Service, sources []*models.Source) error {
+func populateSourceStatuses(ds *datasource.Service, sources []*models.Source) error {
 	for _, source := range sources {
 		if source == nil {
 			continue
 		}
-		source.IsConnected = false
+		source.IsConnected = ds.CachedSourceConnectionStatus(source)
 		source.Columns = nil
 		source.Schema = ""
 		source.Engine = ""
@@ -50,34 +47,6 @@ func populateSourceStatuses(ctx context.Context, ds *datasource.Service, sources
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, models.SourceHealthTimeout+500*time.Millisecond)
-	defer cancel()
-	// Checks unfinished at the listing deadline remain disconnected.
-	jobs := make(chan *models.Source)
-	var workers sync.WaitGroup
-	for range min(32, len(sources)) {
-		workers.Go(func() {
-			for source := range jobs {
-				if ctx.Err() != nil {
-					continue
-				}
-				source.IsConnected = ds.CheckSourceConnectionStatus(ctx, source)
-			}
-		})
-	}
-	for _, source := range sources {
-		if source != nil {
-			select {
-			case jobs <- source:
-			case <-ctx.Done():
-				close(jobs)
-				workers.Wait()
-				return nil
-			}
-		}
-	}
-	close(jobs)
-	workers.Wait()
 	return nil
 }
 

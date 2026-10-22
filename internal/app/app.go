@@ -29,16 +29,17 @@ import (
 
 // App represents the core application context, holding dependencies and configuration.
 type App struct {
-	Config      *config.Config
-	SQLite      store.Store
-	ClickHouse  *clickhouse.Manager
-	Datasources *datasource.Service
-	Logger      *slog.Logger
-	server      *server.Server
-	WebFS       http.FileSystem
-	BuildInfo   string
-	Version     string
-	Alerts      *alerts.Manager
+	Config       *config.Config
+	SQLite       store.Store
+	ClickHouse   *clickhouse.Manager
+	VictoriaLogs *victorialogs.Provider
+	Datasources  *datasource.Service
+	Logger       *slog.Logger
+	server       *server.Server
+	WebFS        http.FileSystem
+	BuildInfo    string
+	Version      string
+	Alerts       *alerts.Manager
 }
 
 // Options contains configuration needed when creating a new App instance.
@@ -115,7 +116,8 @@ func (a *App) Initialize(ctx context.Context) error {
 	a.ClickHouse = clickhouse.NewManager(a.Logger)
 	a.Datasources = datasource.NewService(a.SQLite, a.Logger)
 	a.Datasources.Register(datasource.NewClickHouseProvider(a.ClickHouse, a.Logger))
-	a.Datasources.Register(victorialogs.NewProvider(a.Logger))
+	a.VictoriaLogs = victorialogs.NewProvider(a.Logger)
+	a.Datasources.Register(a.VictoriaLogs)
 
 	// OIDC is optional only with local auth and no provider_url (enforced by
 	// config validation). Once configured, a failed discovery aborts startup so
@@ -164,9 +166,8 @@ func (a *App) Initialize(ctx context.Context) error {
 		return fmt.Errorf("failed to initialize datasource connections: %w", err)
 	}
 
-	// Start background health checks for the ClickHouse manager.
-	// Use 0 to trigger the default interval defined in the manager.
-	a.ClickHouse.StartBackgroundHealthChecks(0) //nolint:contextcheck // health checks run for the app lifetime on their own context
+	a.ClickHouse.StartBackgroundHealthChecks(0)
+	a.VictoriaLogs.StartBackgroundHealthChecks(0)
 
 	// Initialize alerts manager with dynamic senders that read config from DB
 	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
@@ -234,6 +235,13 @@ func (a *App) Start() error {
 //nolint:contextcheck // Shutdown receives its own context from caller (e.g., signal handler)
 func (a *App) Shutdown(ctx context.Context) error {
 	a.Logger.Info("shutting down application")
+	if a.VictoriaLogs != nil {
+		defer func() {
+			if err := a.VictoriaLogs.Close(); err != nil {
+				a.Logger.Error("error closing victorialogs provider", "error", err)
+			}
+		}()
+	}
 
 	// Ensure a shutdown context with timeout exists.
 	if ctx == nil {

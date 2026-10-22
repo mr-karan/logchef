@@ -134,7 +134,7 @@ func refusedAddr(t *testing.T) string {
 
 func addTestSource(t *testing.T, m *Manager, id models.SourceID, host string) *Client {
 	t.Helper()
-	source := &models.Source{ID: id, Name: t.Name(), Connection: models.ConnectionInfo{Host: host, Database: "default", TableName: "logs"}}
+	source := &models.Source{ID: id, Name: t.Name(), Connection: models.ConnectionInfo{Host: host, Database: "system", TableName: "tables"}}
 	if err := m.AddSource(context.Background(), source); err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestOldHealthCannotOverwriteReplacementClickHouse(t *testing.T) {
 	proxy.silent.Store(false)
 	addTestSource(t, m, id, proxy.addr)
 	waitForHealth(t, m, id, 500*time.Millisecond, healthHealthy)
-	metric := fmt.Sprintf(`logchef_clickhouse_connection_status{source_id="%d",source_name=%q,database="default",table="logs",host=%q}`, id, t.Name(), proxy.addr)
+	metric := fmt.Sprintf(`logchef_clickhouse_connection_status{source_id="%d",source_name=%q,database="system",table="tables",host=%q}`, id, t.Name(), proxy.addr)
 	assertHealthyMetric := func() {
 		t.Helper()
 		var exposition bytes.Buffer
@@ -399,6 +399,63 @@ func TestManagerCloseTwice(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCachedHealthRequiresConfiguredTableClickHouse(t *testing.T) {
+	m := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer m.Close()
+	source := &models.Source{ID: 101, Name: "missing-table", Connection: models.ConnectionInfo{Host: testClickHouseAddr(t), Database: "system", TableName: "logchef_missing_health_table"}}
+	if err := m.AddSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	waitForCondition(t, 2*time.Second, func() bool {
+		m.healthMux.RLock()
+		defer m.healthMux.RUnlock()
+		return m.health[source.ID] != healthPending
+	})
+	if m.CachedSourceConnectionStatus(source.ID) {
+		t.Fatal("source with a missing table reported connected")
+	}
+}
+
+func TestManagerCloseCancelsInitialHealth(t *testing.T) {
+	proxy := startProxy(t, "")
+	proxy.silent.Store(true)
+	var logs syncBuffer
+	m := NewManager(slog.New(slog.NewJSONHandler(&logs, nil)))
+	addTestSource(t, m, 1, proxy.addr)
+	waitForCondition(t, time.Second, func() bool { return proxy.accepted.Load() > 0 })
+	started := time.Now()
+	if err := m.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("Close waited %s for stalled initial check", elapsed)
+	}
+	if strings.Contains(logs.String(), `"msg":"source unhealthy"`) {
+		t.Fatal("shutdown cancellation reported an unhealthy source")
+	}
+	if m.CachedSourceConnectionStatus(1) {
+		t.Fatal("closed manager retained healthy status")
+	}
+	if err := m.AddSource(t.Context(), &models.Source{ID: 2}); err == nil {
+		t.Fatal("closed manager accepted a source")
+	}
+	m.StartBackgroundHealthChecks(time.Millisecond)
+}
+
+func TestTemporaryClientChecksLiveConnectionClickHouse(t *testing.T) {
+	manager := NewManager(slog.New(slog.NewTextHandler(io.Discard, nil)))
+	defer manager.Close()
+	source := &models.Source{Connection: models.ConnectionInfo{Host: testClickHouseAddr(t), Database: "system", TableName: "tables"}}
+	client, err := manager.CreateTemporaryClient(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if err := client.Ping(t.Context(), "system", "tables"); err != nil {
 		t.Fatal(err)
 	}
 }

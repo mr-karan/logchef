@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -72,5 +73,54 @@ func TestShutdownCancelsAlertQueryWithinBudget(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed >= 500*time.Millisecond {
 		t.Errorf("shutdown took %s, exceeded budget", elapsed)
+	}
+}
+
+func TestShutdownCancelsSourceHealthCheck(t *testing.T) {
+	var stalled atomic.Bool
+	entered := make(chan struct{}, 1)
+	canceled := make(chan struct{}, 1)
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if stalled.Load() {
+			entered <- struct{}{}
+			<-r.Context().Done()
+			canceled <- struct{}{}
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer remote.Close()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	provider := victorialogs.NewProvider(log)
+	defer provider.Close()
+	raw, err := json.Marshal(models.VictoriaLogsConnectionInfo{BaseURL: remote.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := &models.Source{ID: 1, SourceType: models.SourceTypeVictoriaLogs, ConnectionConfig: raw}
+	if err := provider.InitializeSource(t.Context(), source); err != nil {
+		t.Fatal(err)
+	}
+	stalled.Store(true)
+	provider.StartBackgroundHealthChecks(time.Hour)
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("background health check did not start")
+	}
+	app := &App{Logger: log, VictoriaLogs: provider}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	started := time.Now()
+	if err := app.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed >= time.Second {
+		t.Fatalf("shutdown waited %s for stalled health check", elapsed)
+	}
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("shutdown left a live health request")
 	}
 }

@@ -662,6 +662,11 @@ func (p *ClickHouseProvider) RemoveSource(sourceID models.SourceID) error {
 	return p.manager.RemoveSource(sourceID)
 }
 
+// CachedSourceConnectionStatus returns the manager's last health result without backend I/O.
+func (p *ClickHouseProvider) CachedSourceConnectionStatus(sourceID models.SourceID) bool {
+	return p.manager.CachedSourceConnectionStatus(sourceID)
+}
+
 func (p *ClickHouseProvider) CheckSourceConnectionStatus(ctx context.Context, source *models.Source) bool {
 	client, err := p.manager.GetConnection(source.ID)
 	if err != nil {
