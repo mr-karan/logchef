@@ -422,13 +422,15 @@ func (c AIConfig) AskChefEnabled() bool {
 	return false
 }
 
-// AlertsConfig controls scheduling behaviour for alert rules.
+// AlertsConfig controls scheduling and webhook network access for alert rules.
 // SMTP and other delivery settings are stored in the database and managed via Admin UI.
 type AlertsConfig struct {
-	Enabled            bool          `koanf:"enabled"`
-	EvaluationInterval time.Duration `koanf:"evaluation_interval"`
-	DefaultLookback    time.Duration `koanf:"default_lookback"`
-	HistoryLimit       int           `koanf:"history_limit"`
+	Enabled             bool             `koanf:"enabled"`
+	EvaluationInterval  time.Duration    `koanf:"evaluation_interval"`
+	DefaultLookback     time.Duration    `koanf:"default_lookback"`
+	HistoryLimit        int              `koanf:"history_limit"`
+	WebhookAllowedHosts []string         `koanf:"webhook_allowed_hosts"`
+	WebhookAllowlist    WebhookAllowlist `koanf:"-"`
 }
 
 const (
@@ -803,6 +805,11 @@ func isLoopbackHost(host string) bool {
 }
 
 func validateConfig(cfg *Config) error { //nolint:gocyclo // config validation is a flat sequence of independent required-field checks
+	allowlist, err := ParseWebhookAllowlist(cfg.Alerts.WebhookAllowedHosts)
+	if err != nil {
+		return err
+	}
+	cfg.Alerts.WebhookAllowlist = allowlist
 	// Validate the metadata backend selection.
 	switch cfg.Database.Driver {
 	case "sqlite":

@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"math"
 	"net/url"
 	"strings"
 	"time"
@@ -532,7 +531,7 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 	}
 
 	// Check if threshold would be met
-	thresholdMet := compareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
+	thresholdMet := util.CompareAlertThreshold(value, req.ThresholdValue, req.ThresholdOperator)
 
 	// Generate additional warnings
 	warnings = append(warnings, generateQueryWarnings(tempAlert.Query, executionTime, result)...)
@@ -544,25 +543,6 @@ func testAlertQuery(ctx context.Context, db store.StoreOps, ds *datasource.Servi
 		RowsReturned:    len(result.Logs),
 		Warnings:        warnings,
 	}, nil
-}
-
-func compareAlertThreshold(value, threshold float64, operator models.AlertThresholdOperator) bool {
-	switch operator {
-	case models.AlertThresholdGreaterThan:
-		return value > threshold
-	case models.AlertThresholdGreaterThanOrEqual:
-		return value >= threshold
-	case models.AlertThresholdLessThan:
-		return value < threshold
-	case models.AlertThresholdLessThanOrEqual:
-		return value <= threshold
-	case models.AlertThresholdEqual:
-		return math.Abs(value-threshold) < 1e-9
-	case models.AlertThresholdNotEqual:
-		return math.Abs(value-threshold) >= 1e-9
-	default:
-		return false
-	}
 }
 
 func generateQueryWarnings(query string, executionTime time.Duration, result *models.QueryResult) []string {

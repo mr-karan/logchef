@@ -663,7 +663,18 @@ request_timeout = "5s"
 tls_insecure_skip_verify = false
 ```
 
-**Note:** After first boot, manage all alert settings via **Administration → System Settings → Alerts**.
+Webhook requests reject private, loopback, link-local, CGNAT, unspecified, and IPv6 translation (NAT64 local-use, SIIT, 6to4, Teredo) destination addresses by default. Redirects are not followed. Failed delivery history records the HTTP status only. A short excerpt of the response body goes to the server log.
+
+To use an internal receiver, add its exact hostname or IP address to the static configuration and restart Logchef:
+
+```toml
+[alerts]
+webhook_allowed_hosts = ["receiver.example.internal", "127.0.0.1"]
+```
+
+`alerts.webhook_allowed_hosts` defaults to `[]`. Entries contain hostnames or IP addresses, without schemes, ports, or wildcards. An entry permits private destinations for that host on any port. A hostname entry skips the address check for every IP it resolves to, so only allow hostnames whose DNS you control. For the local development receiver at `http://localhost:8888`, allow `"localhost"`. This setting stays in the configuration file and is not managed through the Admin UI.
+
+**Note:** After first boot, manage all other alert settings via **Administration → System Settings → Alerts**.
 
 For alert configuration examples, notification setup, and best practices, see the [alerting feature guide](/features/alerting).
 

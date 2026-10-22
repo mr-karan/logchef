@@ -3,32 +3,58 @@ package alerts
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/store"
 )
 
 type DynamicWebhookSender struct {
-	settings store.SettingGetter
-	logger   *slog.Logger
+	settings             store.SettingGetter
+	logger               *slog.Logger
+	allowedHosts         config.WebhookAllowlist
+	defaultTimeout       time.Duration
+	defaultSkipTLSVerify bool
+	mu                   sync.Mutex
+	sender               *WebhookSender
+	timeout              time.Duration
+	skipTLSVerify        bool
 }
 
-func NewDynamicWebhookSender(settings store.SettingGetter, logger *slog.Logger) *DynamicWebhookSender {
+func NewDynamicWebhookSender(settings store.SettingGetter, opts WebhookSenderOptions) *DynamicWebhookSender {
+	logger := opts.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	if opts.Timeout <= 0 {
+		opts.Timeout = 5 * time.Second
+	}
 	return &DynamicWebhookSender{
-		settings: settings,
-		logger:   logger.With("component", "dynamic_webhook_sender"),
+		settings:             settings,
+		defaultTimeout:       opts.Timeout,
+		defaultSkipTLSVerify: opts.SkipTLSVerify,
+		allowedHosts:         opts.AllowedHosts,
+		logger:               logger.With("component", "dynamic_webhook_sender"),
 	}
 }
 
 func (d *DynamicWebhookSender) Send(ctx context.Context, notification AlertNotification) error {
 	opts := WebhookSenderOptions{
-		Timeout:       store.GetDurationSetting(ctx, d.settings, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: store.GetBoolSetting(ctx, d.settings, "alerts.tls_insecure_skip_verify", false),
+		Timeout:       store.GetDurationSetting(ctx, d.settings, "alerts.request_timeout", d.defaultTimeout),
+		SkipTLSVerify: store.GetBoolSetting(ctx, d.settings, "alerts.tls_insecure_skip_verify", d.defaultSkipTLSVerify),
 		Logger:        d.logger,
+		AllowedHosts:  d.allowedHosts,
 	}
-	sender := NewWebhookSender(opts)
+	d.mu.Lock()
+	if d.sender == nil || d.timeout != opts.Timeout || d.skipTLSVerify != opts.SkipTLSVerify {
+		if d.sender != nil {
+			d.sender.client.CloseIdleConnections()
+		}
+		d.sender = NewWebhookSender(opts)
+		d.timeout, d.skipTLSVerify = opts.Timeout, opts.SkipTLSVerify
+	}
+	sender := d.sender
+	d.mu.Unlock()
 	return sender.Send(ctx, notification)
 }

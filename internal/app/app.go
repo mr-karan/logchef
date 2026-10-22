@@ -170,7 +170,7 @@ func (a *App) Initialize(ctx context.Context) error {
 
 	// Initialize alerts manager with dynamic senders that read config from DB
 	emailSender := alerts.NewDynamicEmailSender(a.SQLite, a.Logger)
-	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, a.Logger)
+	webhookSender := alerts.NewDynamicWebhookSender(a.SQLite, alerts.WebhookSenderOptions{Logger: a.Logger, AllowedHosts: a.Config.Alerts.WebhookAllowlist})
 	alertSender := alerts.NewMultiSender(emailSender, webhookSender)
 
 	a.Alerts = alerts.NewManager(alerts.Options{
@@ -188,6 +188,7 @@ func (a *App) Initialize(ctx context.Context) error {
 		ClickHouse:    a.ClickHouse,
 		Datasources:   a.Datasources,
 		AlertsManager: a.Alerts,
+		WebhookSender: webhookSender,
 		OIDCProvider:  oidcProvider,
 		OAuth:         oauthServer,
 		FS:            a.WebFS,
@@ -234,6 +235,11 @@ func (a *App) Start() error {
 func (a *App) Shutdown(ctx context.Context) error {
 	a.Logger.Info("shutting down application")
 
+	if a.Alerts != nil {
+		a.Logger.Info("stopping alert manager")
+		a.Alerts.Stop()
+	}
+
 	// Ensure a shutdown context with timeout exists.
 	if ctx == nil {
 		var cancel context.CancelFunc
@@ -247,11 +253,6 @@ func (a *App) Shutdown(ctx context.Context) error {
 
 	clickhouseCtx, clickhouseCancel := context.WithTimeout(ctx, 8*time.Second)
 	defer clickhouseCancel()
-
-	if a.Alerts != nil {
-		a.Logger.Info("stopping alert manager")
-		a.Alerts.Stop()
-	}
 
 	// Shutdown server first to stop accepting new requests.
 	if a.server != nil {

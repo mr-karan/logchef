@@ -11,6 +11,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/datasource"
+	"github.com/mr-karan/logchef/internal/util"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -590,8 +591,8 @@ func TestCompareAlertThreshold(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := compareAlertThreshold(tc.value, tc.threshold, tc.operator); got != tc.want {
-				t.Errorf("compareAlertThreshold(%v, %v, %q) = %v, want %v", tc.value, tc.threshold, tc.operator, got, tc.want)
+			if got := util.CompareAlertThreshold(tc.value, tc.threshold, tc.operator); got != tc.want {
+				t.Errorf("CompareAlertThreshold(%v, %v, %q) = %v, want %v", tc.value, tc.threshold, tc.operator, got, tc.want)
 			}
 		})
 	}

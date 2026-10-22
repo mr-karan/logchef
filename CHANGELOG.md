@@ -34,6 +34,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   optional-block rule.
 - Process optional blocks in streaming and background exports when no variables
   are supplied, matching Explore queries.
+- Breaking change: alert webhooks to private, loopback, link-local, CGNAT and
+  IPv6 translation addresses are rejected by default. Add internal receivers to
+  `alerts.webhook_allowed_hosts` in the configuration file and restart.
+- Webhook delivery history records the HTTP status without the response body.
+
+### Fixed
+- Alert queries that return `UInt8` and other ClickHouse integer and float
+  widths are evaluated instead of failing.
+- Webhook requests share one client with a timeout and bounded response reads.
+- Stopping the server cancels running alert evaluations before shutdown.
 
 ## [2.4.0] - 2026-10-13
 
