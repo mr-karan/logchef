@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -20,6 +21,8 @@ var (
 	ErrUserNotFound = errors.New("user not found")
 	// ErrCannotDeleteLastAdmin is returned when an operation would remove the last active admin.
 	ErrCannotDeleteLastAdmin = errors.New("cannot delete, deactivate, or demote the last admin user")
+	// ErrAdminGrantForbidden means the credential cannot grant active admin access.
+	ErrAdminGrantForbidden = errors.New("granting active admin access requires a browser session or an API token with '*' scope")
 	// ErrUserAlreadyExists is returned when trying to create a user that already exists.
 	ErrUserAlreadyExists = errors.New("user already exists")
 	// ErrTeamAlreadyExists is returned when trying to create a team that already exists.
@@ -91,6 +94,17 @@ func validateUserUpdate(updateData models.User) error {
 
 // --- User Management Functions ---
 
+// AuthorizeAdminTransition requires full credential authority to grant active admin access.
+func AuthorizeAdminTransition(principal access.Principal, before, after models.User) error {
+	if isActiveAdmin(&before) || !isActiveAdmin(&after) {
+		return nil
+	}
+	if principal.Method == access.AuthSystem || principal.Method == access.AuthSession || (principal.Method == access.AuthAPIToken && principal.Require(models.TokenScopeAll) == nil) {
+		return nil
+	}
+	return ErrAdminGrantForbidden
+}
+
 // ListUsers returns all interactive users from the database.
 func ListUsers(ctx context.Context, db store.StoreOps) ([]*models.User, error) {
 	return db.ListUsers(ctx)
@@ -152,7 +166,7 @@ func GetUserByEmail(ctx context.Context, db store.StoreOps, email string) (*mode
 }
 
 // CreateUser creates a new user in the database.
-func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
+func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, principal access.Principal, email, fullName string, role models.UserRole, status models.UserStatus) (*models.User, error) {
 	// Default role if empty
 	if role == "" {
 		role = models.UserRoleMember
@@ -160,6 +174,10 @@ func CreateUser(ctx context.Context, db store.StoreOps, log *slog.Logger, email,
 	// Default status if empty
 	if status == "" {
 		status = models.UserStatusActive
+	}
+
+	if err := AuthorizeAdminTransition(principal, models.User{}, models.User{Role: role, Status: status}); err != nil {
+		return nil, err
 	}
 
 	// Validate input parameters
@@ -256,7 +274,6 @@ func GetOrCreateAutoProvisionedUser(ctx context.Context, db store.StoreOps, log 
 	return user, nil
 }
 
-// UpdateUser updates a user while preserving an active admin and revoking deactivated sessions.
 // requestMayRemoveAdmin reports whether an update could leave its target
 // without an active admin role. Unknown values count as removals.
 func requestMayRemoveAdmin(u models.User) bool {
@@ -264,7 +281,8 @@ func requestMayRemoveAdmin(u models.User) bool {
 		(u.Status != "" && u.Status != models.UserStatusActive)
 }
 
-func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID models.UserID, updateData models.User) error {
+// UpdateUser authorizes the transition while preserving an active admin and revoking deactivated sessions.
+func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, principal access.Principal, userID models.UserID, updateData models.User) error {
 	if err := validateUserUpdate(updateData); err != nil {
 		return err
 	}
@@ -287,7 +305,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 			return fmt.Errorf("error getting user for update: %w", err)
 		}
 
-		wasActiveAdmin := isActiveAdmin(existing)
+		before := *existing
 		updated, deactivating, err := applyUserUpdates(existing, updateData)
 		if err != nil {
 			return err
@@ -295,7 +313,10 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 		if !updated {
 			return nil
 		}
-		if wasActiveAdmin && !isActiveAdmin(existing) {
+		if err := AuthorizeAdminTransition(principal, before, *existing); err != nil {
+			return err
+		}
+		if isActiveAdmin(&before) && !isActiveAdmin(existing) {
 			if err := ensureAnotherActiveAdmin(ctx, tx); err != nil {
 				return err
 			}
@@ -313,7 +334,7 @@ func UpdateUser(ctx context.Context, db store.Store, log *slog.Logger, userID mo
 		}
 		return nil
 	}); err != nil {
-		if !errors.Is(err, ErrCannotDeleteLastAdmin) && !errors.Is(err, ErrUserNotFound) {
+		if !errors.Is(err, ErrCannotDeleteLastAdmin) && !errors.Is(err, ErrUserNotFound) && !errors.Is(err, ErrAdminGrantForbidden) {
 			log.Error("failed to update user", "error", err, "user_id", userID)
 		}
 		return err
@@ -476,7 +497,7 @@ func InitAdminUsers(ctx context.Context, db store.StoreOps, log *slog.Logger, ad
 			if models.IsNotFound(err) {
 				// User doesn't exist, create a new admin user
 				log.Debug("creating admin user", "email", email)
-				_, createErr := CreateUser(ctx, db, log, email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
+				_, createErr := CreateUser(ctx, db, log, access.SystemPrincipal(), email, "Admin User", models.UserRoleAdmin, models.UserStatusActive)
 				if createErr != nil {
 					errMsg := fmt.Sprintf("failed to create admin user %s: %v", email, createErr)
 					log.Error(errMsg)

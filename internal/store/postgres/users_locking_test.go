@@ -2,6 +2,7 @@ package postgres_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
@@ -49,7 +51,7 @@ func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 	demoted := make(chan error, 1)
 	demoteDone := make(chan struct{})
 	go func() {
-		demoted <- core.UpdateUser(ctx, s, discardLogger(), a.ID, models.User{Role: models.UserRoleMember})
+		demoted <- core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), a.ID, models.User{Role: models.UserRoleMember})
 		close(demoteDone)
 	}()
 	awaitLockWaitOrDone(t, ctx, monitor, demoteDone)
@@ -69,7 +71,7 @@ func TestAdminDemotionDoesNotDeadlockWithProvisioning(t *testing.T) {
 func TestConcurrentEditCannotReactivateUser(t *testing.T) {
 	edits := map[string]func(ctx context.Context, s store.Store, id models.UserID) error{
 		"name edit": func(ctx context.Context, s store.Store, id models.UserID) error {
-			return core.UpdateUser(ctx, s, discardLogger(), id, models.User{FullName: "Renamed User"})
+			return core.UpdateUser(ctx, s, discardLogger(), access.SystemPrincipal(), id, models.User{FullName: "Renamed User"})
 		},
 		"last login": func(ctx context.Context, s store.Store, id models.UserID) error {
 			return s.UpdateUserLastLogin(ctx, id, time.Now().UTC())
@@ -160,4 +162,44 @@ func awaitLockWaitOrDone(t *testing.T, ctx context.Context, monitor *pgx.Conn, d
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestAdminTransitionUsesLockedState(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	dsn := resetSchema(t)
+	s := opener(dsn)(t)
+	monitor := connect(t, ctx, dsn)
+	user := createUser(t, ctx, s, "admin-transition@test.dev", models.UserRoleAdmin)
+
+	deactivation, err := connect(t, ctx, dsn).Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deactivation.Rollback(context.Background()) }()
+	if _, err := deactivation.Exec(ctx, `UPDATE users SET status = 'inactive', updated_at = now() WHERE id = $1`, int64(user.ID)); err != nil {
+		t.Fatal(err)
+	}
+
+	result := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		principal := access.APITokenPrincipal(nil, &models.APIToken{Scopes: []models.TokenScope{models.TokenScopeUsersWrite}})
+		result <- core.UpdateUser(ctx, s, discardLogger(), principal, user.ID, models.User{Status: models.UserStatusActive})
+		close(done)
+	}()
+	awaitLockWaitOrDone(t, ctx, monitor, done)
+	if err := deactivation.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-result; !errors.Is(err, core.ErrAdminGrantForbidden) {
+		t.Fatalf("reactivation error = %v, want admin grant rejection", err)
+	}
+	stored, err := s.GetUser(ctx, user.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != models.UserStatusInactive {
+		t.Fatalf("stored status = %s, want inactive", stored.Status)
+	}
 }

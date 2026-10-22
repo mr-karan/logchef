@@ -14,6 +14,7 @@ import (
 	"github.com/mr-karan/logchef/internal/clickhouse"
 	"github.com/mr-karan/logchef/internal/config"
 	"github.com/mr-karan/logchef/internal/core"
+	"github.com/mr-karan/logchef/internal/core/access"
 	"github.com/mr-karan/logchef/internal/datasource"
 	"github.com/mr-karan/logchef/internal/oauth"
 	"github.com/mr-karan/logchef/internal/provisioning"
@@ -550,14 +551,8 @@ func ensureLocalAdmin(ctx context.Context, cfg *config.Config, db store.Store, l
 		return fmt.Errorf("looking up local admin: %w", err)
 	}
 	if user == nil || errors.Is(err, models.ErrNotFound) {
-		user = &models.User{
-			Email:       local.AdminEmail,
-			FullName:    "Local Admin",
-			Role:        models.UserRoleAdmin,
-			Status:      models.UserStatusActive,
-			AccountType: models.UserAccountTypeHuman,
-		}
-		if err := db.CreateUser(ctx, user); err != nil {
+		user, err = core.CreateUser(ctx, db, log, access.SystemPrincipal(), local.AdminEmail, "Local Admin", models.UserRoleAdmin, models.UserStatusActive)
+		if err != nil {
 			return fmt.Errorf("creating local admin: %w", err)
 		}
 	}

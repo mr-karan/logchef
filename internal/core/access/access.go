@@ -25,6 +25,8 @@ const (
 	AuthOAuth
 	// AuthAssistant is Ask Chef acting for a signed-in user.
 	AuthAssistant
+	// AuthSystem is trusted configuration or provisioning work.
+	AuthSystem
 )
 
 // assistantScopes are the read scopes the Ask Chef tools need.
@@ -48,8 +50,7 @@ var (
 	ErrGlobalAdminRequired = errors.New("global admin required")
 )
 
-// Principal is an authenticated caller. User is the active, human-or-service
-// account loaded on this request.
+// Principal identifies a request caller or trusted system work.
 type Principal struct {
 	User   *models.User
 	Method AuthMethod
@@ -58,6 +59,11 @@ type Principal struct {
 	// GrantID and ClientID are set only for AuthOAuth.
 	GrantID  models.OAuthGrantID
 	ClientID models.OAuthClientID
+}
+
+// SystemPrincipal builds the principal for trusted configuration and provisioning.
+func SystemPrincipal() Principal {
+	return Principal{Method: AuthSystem}
 }
 
 // SessionPrincipal builds the principal for a browser session.
@@ -109,6 +115,8 @@ func (p Principal) Require(scope models.TokenScope) error {
 		if slices.Contains(p.scopes, scope) || slices.Contains(p.scopes, models.TokenScopeAll) {
 			return nil
 		}
+	case AuthSystem:
+		return ErrInsufficientScope
 	case AuthOAuth, AuthAssistant:
 		if slices.Contains(p.scopes, scope) {
 			return nil

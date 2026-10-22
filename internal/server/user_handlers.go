@@ -6,6 +6,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/core"
 	"github.com/mr-karan/logchef/internal/core/access"
+	"github.com/mr-karan/logchef/internal/metrics"
 	"github.com/mr-karan/logchef/pkg/models"
 
 	// "github.com/mr-karan/logchef/internal/identity" // Removed
@@ -85,20 +86,14 @@ func (s *Server) handleCreateUser(c fiber.Ctx) error {
 		return SendError(c, fiber.StatusBadRequest, "Invalid request body")
 	}
 
-	// Convert string values to proper enum types
-	role := models.UserRole(req.Role)
-	if role == "" {
-		role = models.UserRoleMember // Default role
-	}
-
-	status := models.UserStatus(req.Status)
-	if status == "" {
-		status = models.UserStatusActive // Default status
-	}
-
-	user, err := core.CreateUser(c.Context(), s.sqlite, s.log, req.Email, req.FullName, role, status)
+	principal := principalFromLocals(c)
+	user, err := core.CreateUser(c.Context(), s.sqlite, s.log, principal, req.Email, req.FullName, models.UserRole(req.Role), models.UserStatus(req.Status))
 	if err != nil {
-		// Handle specific error types from core
+		if errors.Is(err, core.ErrAdminGrantForbidden) {
+			metrics.RecordAuthorizationFailure(c.Route().Path, principal.User, "admin_grant_scope")
+			s.log.Warn("admin grant denied", "user_id", principal.User.ID, "target_email", req.Email, "auth_method", c.Locals("auth_method"))
+			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+		}
 		if errors.Is(err, core.ErrUserAlreadyExists) {
 			return SendError(c, fiber.StatusConflict, err.Error())
 		}
@@ -149,8 +144,14 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 		updateData.Status = models.UserStatus(*req.Status)
 	}
 
-	if err := core.UpdateUser(c.Context(), s.sqlite, s.log, userID, updateData); err != nil {
+	principal := principalFromLocals(c)
+	if err := core.UpdateUser(c.Context(), s.sqlite, s.log, principal, userID, updateData); err != nil {
 		// Handle specific error types from core
+		if errors.Is(err, core.ErrAdminGrantForbidden) {
+			metrics.RecordAuthorizationFailure(c.Route().Path, principal.User, "admin_grant_scope")
+			s.log.Warn("admin grant denied", "user_id", principal.User.ID, "target_user_id", userID, "auth_method", c.Locals("auth_method"))
+			return SendErrorWithType(c, fiber.StatusForbidden, err.Error(), models.AuthorizationErrorType)
+		}
 		if errors.Is(err, core.ErrUserNotFound) {
 			return SendError(c, fiber.StatusNotFound, "User not found")
 		}
