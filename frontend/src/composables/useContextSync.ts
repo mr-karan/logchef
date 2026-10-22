@@ -23,13 +23,17 @@ export function useContextSync(options: { basePath?: string } = {}) {
     }
   }
 
+  let selectionId = 0;
+
   async function select(teamId: number, requestedSourceId: number | null) {
+    const id = ++selectionId;
     if (teamId !== contextStore.teamId) contextStore.selectTeam(teamId);
+    const generation = sourcesStore.getMetadataGeneration();
     const sources = await sourcesStore.loadTeamSources(teamId).catch((error) => {
       console.error('error loading team sources', error);
       return null;
     });
-    if (!sources || contextStore.teamId !== teamId) return;
+    if (!sources || id !== selectionId || generation !== sourcesStore.getMetadataGeneration() || contextStore.teamId !== teamId) return;
     const sourceId = pickSource(teamId, sources, requestedSourceId);
     if (sourceId === null) contextStore.clearSource();
     else if (sourceId !== contextStore.sourceId) contextStore.selectSource(sourceId);
@@ -38,7 +42,9 @@ export function useContextSync(options: { basePath?: string } = {}) {
 
   /** Keeps the team the router guard chose, picks a source and writes both to the URL. */
   async function initialize() {
+    const id = ++selectionId;
     if (teamsStore.teams.length === 0) await teamsStore.loadTeams(false, false);
+    if (id !== selectionId) return;
     const teamId = contextStore.teamId ?? pickTeam(teamsStore.teams.map((team) => team.id), null);
     if (teamId) await select(teamId, contextStore.sourceId);
   }

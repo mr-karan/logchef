@@ -2,6 +2,8 @@
 import { useI18n } from "vue-i18n";
 
 import { computed, ref } from 'vue'
+import { useContextStore } from '@/stores/context'
+import type { ExploreLocation } from '@/lib/exploreLocation'
 import { useExploreStore } from '@/stores/explore'
 import { useAskChefStore } from '@/stores/askChef'
 import { useMetaStore } from '@/stores/meta'
@@ -50,6 +52,7 @@ const { t } = useI18n();
 
 const { toast } = useToast()
 const exploreStore = useExploreStore()
+const contextStore = useContextStore()
 const askChef = useAskChefStore()
 const metaStore = useMetaStore()
 const preferencesStore = usePreferencesStore()
@@ -57,8 +60,7 @@ const preferencesStore = usePreferencesStore()
 type TeamOption = UserTeamMembership | TeamWithMemberCount
 
 interface Props {
-  currentTeamId: number | null
-  currentSourceId: number | null
+  selection: Pick<ExploreLocation, 'teamId' | 'sourceId'>
   availableTeams: TeamOption[]
   availableSources: Source[]
   selectedSource: Source | null
@@ -133,7 +135,8 @@ function copyUrlToClipboard() {
 }
 
 function copyCliCommand() {
-  if (!props.currentTeamId || !props.currentSourceId) {
+  const { teamId, sourceId } = contextStore
+  if (!teamId || !sourceId) {
     toast({
       get title() { return t('ui.cannotCopyCLICommand'); },
       get description() { return t('ui.teamAndSourceMustBeSelected'); },
@@ -144,8 +147,8 @@ function copyCliCommand() {
   }
 
   const command = generateCliCommand({
-    teamId: props.currentTeamId,
-    sourceId: props.currentSourceId,
+    teamId,
+    sourceId,
     language: exploreStore.activeMode === 'logchefql' ? 'logchefql' : getNativeQueryLanguageForSource(props.selectedSource),
     query:
       exploreStore.activeMode === 'logchefql'
@@ -186,8 +189,8 @@ defineExpose({
     <div class="flex items-center gap-3">
       <TeamSourceSelector
         variant="toolbar"
-        :current-team-id="currentTeamId"
-        :current-source-id="currentSourceId"
+        :current-team-id="selection.teamId"
+        :current-source-id="selection.sourceId"
         :available-teams="availableTeams"
         :available-sources="availableSources"
         @update:team="emit('update:team', $event)"

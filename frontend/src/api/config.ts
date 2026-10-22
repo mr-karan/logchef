@@ -78,7 +78,11 @@ api.interceptors.response.use(
       const isInitialSessionCheck = error.config?.url === "/me" &&
         !sessionStorage.getItem("hadPreviousSession");
       const expiration = handleUnauthorized({ toast: !isInitialSessionCheck });
-      if (expiration) return Promise.reject(await expiration);
+      if (expiration) {
+        const expired = await expiration;
+        if (error.config?.signal?.aborted) throw new DOMException("Request canceled", "AbortError");
+        return Promise.reject(expired);
+      }
     }
 
     // Handle CSRF token errors (must be checked BEFORE generic 403 handler)

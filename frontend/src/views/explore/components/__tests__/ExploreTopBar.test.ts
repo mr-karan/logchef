@@ -34,7 +34,7 @@ it.each([
   const host = document.createElement("div");
   document.body.append(host);
   const app = createApp(ExploreTopBar, {
-    currentTeamId: selection.teamId, currentSourceId: selection.sourceId,
+    selection,
     availableTeams: [], availableSources: [], selectedSource: shownSource,
   }).use(pinia).use(i18n);
   app.mount(host);

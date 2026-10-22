@@ -1013,8 +1013,7 @@ const onSaveQueryModalSave = async (formData: SaveQueryFormData, done?: () => vo
         <!-- Streamlined Top Bar -->
         <ExploreTopBar
           ref="topBarRef"
-          :current-team-id="selection.teamId"
-          :current-source-id="selection.sourceId"
+          :selection="selection"
           :available-teams="availableTeams"
           :available-sources="selectableSources"
           :selected-source="sourceDetails"

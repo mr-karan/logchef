@@ -238,7 +238,7 @@ export const useSourcesStore = defineStore("sources", () => {
         showToast: false,
       })
       .then((result) => {
-        if (!result.success) throw result.error ?? { status: "error", error_type: "CanceledError", message: "Request canceled" } satisfies APIErrorResponse;
+        if (!result.success) throw result.error;
         const list = result.data ?? [];
         if (current && requestedIn === generation) state.data.value.sourcesByTeam[teamId] = list;
         return list;
