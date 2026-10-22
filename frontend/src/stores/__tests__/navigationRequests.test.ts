@@ -36,6 +36,30 @@ describe('navigation request ownership', () => {
     network.restore()
   })
 
+  it('clears team loading when context is cleared during a request', async () => {
+    const store = useSourcesStore()
+    const context = useContextStore()
+    context.selectTeam(1)
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+    context.clear()
+    await nextTick()
+    network.requests[0].succeed([source(1)])
+    await vi.waitFor(() => expect(store.isLoadingOperation('loadTeamSources-1')).toBe(false))
+    expect(store.isLoadingTeamSources).toBe(false)
+  })
+
+  it('restores the stored source before releasing the team loading flag', async () => {
+    const store = useSourcesStore()
+    const context = useContextStore()
+    context.selectTeam(1)
+    context.selectSource(99)
+    localStorage.setItem('logchef_context', JSON.stringify({ lastTeamId: 1, sourcePerTeam: { 1: 3 } }))
+    await vi.waitFor(() => expect(network.requests).toHaveLength(1))
+    network.requests[0].succeed([source(2), source(3)])
+    await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
+    expect(context.sourceId).toBe(3)
+  })
+
   it('keeps the current team list when the previous team responds late', async () => {
     const store = useSourcesStore()
     const context = useContextStore()
@@ -108,16 +132,16 @@ describe('navigation request ownership', () => {
     expect(store.queries).toEqual([])
   })
 
-  it('keeps the newest saved-query list for the same source', async () => {
+  it('shares a saved-query list between concurrent same-source callers', async () => {
     const store = useSavedQueriesStore()
-    const old = store.list(1)
-    const current = store.list(1)
-    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
-    network.requests[1].succeed([query(2, 1)])
-    await current
-    network.requests[0].succeed([query(1)])
-    await old
-    expect(store.queries.map(q => q.id)).toEqual([2])
+    const first = store.list(1)
+    const second = store.list(1)
+    await vi.waitFor(() => expect(network.requests.length).toBeGreaterThan(0))
+    for (const request of network.requests) request.succeed([query(1)])
+    const results = await Promise.all([first, second])
+    expect(results.every(result => result.success)).toBe(true)
+    expect(network.requests).toHaveLength(1)
+    expect(store.queries.map(q => q.id)).toEqual([1])
   })
 
   it('keeps saved queries empty when context leaves and returns during a request', async () => {
@@ -197,6 +221,28 @@ describe('navigation request ownership', () => {
     await current
     expect(queries.queries.value?.map(q => q.id)).toEqual([2])
     expect(queries.isLoading.value).toBe(false)
+  })
+
+  it('keeps composable queries when the dropdown loads the same source concurrently', async () => {
+    const queries = await savedQueries()
+    const first = queries.loadSourceQueries(1)
+    const second = useSavedQueriesStore().list(1)
+    await vi.waitFor(() => expect(network.requests.length).toBeGreaterThan(0))
+    for (const request of network.requests) request.succeed([query(1)])
+    const results = await Promise.all([first, second])
+    expect(results.every(result => result.success)).toBe(true)
+    expect(queries.queries.value?.map(q => q.id)).toEqual([1])
+  })
+
+  it('shares a composable load between concurrent same-source callers', async () => {
+    const queries = await savedQueries()
+    const first = queries.loadSourceQueries(1)
+    const second = queries.loadSourceQueries(1)
+    await vi.waitFor(() => expect(network.requests.length).toBeGreaterThan(0))
+    for (const request of network.requests) request.succeed([query(1)])
+    const results = await Promise.all([first, second])
+    expect(results.every(result => result.success)).toBe(true)
+    expect(queries.queries.value?.map(q => q.id)).toEqual([1])
   })
 
 })

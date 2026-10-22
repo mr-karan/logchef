@@ -26,8 +26,9 @@ describe('source update caches', () => {
   it('retains updated source records and evicts only derived inspection data', async () => {
     const store = useSourcesStore()
     const other = { ...source, id: 2, name: 'Other logs' }
-    store.sources.push(source, other)
-    store.teamSources.push(source, other)
+    const original = { ...source, description: 'Old description' }
+    store.sources.push(original, other)
+    store.teamSources.push(original, other)
     await store.loadSourceDetails(1)
     const inspection = store.getSourceInspection(1)
     const activity = store.getSourceActivity(1)
