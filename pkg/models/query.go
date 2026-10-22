@@ -476,6 +476,13 @@ type ExportJob struct {
 	UpdatedAt      time.Time       `json:"updated_at" db:"updated_at"`
 }
 
+// ReapedExportJob records cleanup metadata and the timestamp before reaping.
+type ReapedExportJob struct {
+	ID                string
+	FilePath          string
+	PreviousUpdatedAt time.Time
+}
+
 // ExportJobResponse is returned for create/status operations.
 type ExportJobResponse struct {
 	ID           string          `json:"id"`

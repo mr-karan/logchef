@@ -71,6 +71,14 @@ evaluation loop on **exactly one** replica (e.g. a dedicated instance, or disabl
 alerts on all but one). See [Alerting](/features/alerting) for the `alerts.enabled`
 switch used to disable evaluation on the other replicas.
 
+### Give each export replica a stable identity
+
+Set `export.instance_id` separately for each replica, for example with
+`LOGCHEF_EXPORT__INSTANCE_ID` from a stable per-replica identity. Never set it in a
+config file shared by replicas. Duplicate IDs make each replica fail the other's
+live exports at startup. Leave it empty when no stable identity exists, so cleanup
+uses job age only.
+
 ### Source-cache is per-replica
 
 Each replica maintains its own in-memory cache of ClickHouse source connections.

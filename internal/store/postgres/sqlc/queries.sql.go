@@ -3841,20 +3841,19 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate pgtype.Date) 
 }
 
 const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
-UPDATE export_jobs
+UPDATE export_jobs AS e
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
-WHERE id IN (
-    SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running')
-      AND (export_jobs.updated_at < now() - $1::bigint * interval '1 second'
-        OR ($2::text <> '' AND export_jobs.owner_instance_id = $2 AND export_jobs.owner_process_id <> $3))
-    ORDER BY id
+FROM (
+    SELECT j.id, j.updated_at FROM export_jobs j
+    WHERE j.status IN ('pending', 'running')
+      AND (j.updated_at < now() - $1::bigint * interval '1 second'
+        OR ($2::text <> '' AND j.owner_instance_id = $2 AND j.owner_process_id <> $3))
+    ORDER BY j.id
     LIMIT 100
-)
-  AND status IN ('pending', 'running')
-  AND (export_jobs.updated_at < now() - $1::bigint * interval '1 second'
-    OR ($2::text <> '' AND export_jobs.owner_instance_id = $2 AND export_jobs.owner_process_id <> $3))
-RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
+    FOR UPDATE
+) AS interrupted
+WHERE e.id = interrupted.id
+RETURNING e.id, e.file_path, interrupted.updated_at AS previous_updated_at
 `
 
 type ReapInterruptedExportJobsParams struct {
@@ -3863,34 +3862,22 @@ type ReapInterruptedExportJobsParams struct {
 	ProcessID     string `json:"process_id"`
 }
 
-func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error) {
+type ReapInterruptedExportJobsRow struct {
+	ID                string             `json:"id"`
+	FilePath          pgtype.Text        `json:"file_path"`
+	PreviousUpdatedAt pgtype.Timestamptz `json:"previous_updated_at"`
+}
+
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ReapInterruptedExportJobsRow, error) {
 	rows, err := q.db.Query(ctx, reapInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ExportJob{}
+	items := []ReapInterruptedExportJobsRow{}
 	for rows.Next() {
-		var i ExportJob
-		if err := rows.Scan(
-			&i.ID,
-			&i.SourceID,
-			&i.CreatedBy,
-			&i.Status,
-			&i.Format,
-			&i.RequestJson,
-			&i.FileName,
-			&i.FilePath,
-			&i.ErrorMessage,
-			&i.RowsExported,
-			&i.BytesWritten,
-			&i.ExpiresAt,
-			&i.CompletedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.OwnerInstanceID,
-			&i.OwnerProcessID,
-		); err != nil {
+		var i ReapInterruptedExportJobsRow
+		if err := rows.Scan(&i.ID, &i.FilePath, &i.PreviousUpdatedAt); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

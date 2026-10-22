@@ -497,6 +497,8 @@ func (s *Server) reapInterruptedExportJobs(owner models.ExportJobOwner) {
 		maxTimeout = s.config.Export.MaxTimeoutSeconds
 	}
 	maxAge := time.Duration(maxTimeout)*time.Second + exportQueryGrace + exportReapSlack
+	reaped, recentlyUpdated := 0, 0
+	recentCutoff := time.Now().UTC().Add(-5 * time.Second)
 	for ctx.Err() == nil {
 		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge, owner)
 		if err != nil {
@@ -504,9 +506,19 @@ func (s *Server) reapInterruptedExportJobs(owner models.ExportJobOwner) {
 			return
 		}
 		if len(jobs) == 0 {
+			if owner.InstanceID != "" {
+				s.log.Info("reaped interrupted exports", "instance_id", owner.InstanceID, "reaped", reaped)
+				if recentlyUpdated > 0 {
+					s.log.Warn("reaped recently updated exports; possible duplicate export instance_id", "instance_id", owner.InstanceID, "reaped", recentlyUpdated)
+				}
+			}
 			return
 		}
+		reaped += len(jobs)
 		for _, job := range jobs {
+			if !job.PreviousUpdatedAt.Before(recentCutoff) {
+				recentlyUpdated++
+			}
 			// Legacy workers created partial files before recording a file path.
 			if _, err := uuid.Parse(job.ID); err == nil {
 				paths, err := filepath.Glob(filepath.Join(os.TempDir(), "logchef-export-"+job.ID+"-*"))

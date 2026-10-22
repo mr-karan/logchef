@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -138,18 +139,42 @@ func exportJobFromSQLC(row sqlc.ExportJob) *models.ExportJob {
 }
 
 // ReapInterruptedExportJobs fails stale exports and prior processes of owner.
-func (db *DB) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]*models.ExportJob, error) {
-	rows, err := db.writeQueries.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{
-		MaxAgeSeconds: int64(maxAge / time.Second),
-		InstanceID:    owner.InstanceID,
-		ProcessID:     owner.ProcessID,
+func (db *DB) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]models.ReapedExportJob, error) {
+	var jobs []models.ReapedExportJob
+	err := db.inWriteTx(ctx, func(q *sqlc.Queries) error {
+		rows, err := q.ListInterruptedExportJobs(ctx, sqlc.ListInterruptedExportJobsParams{
+			MaxAgeSeconds: int64(maxAge / time.Second),
+			InstanceID:    owner.InstanceID,
+			ProcessID:     owner.ProcessID,
+		})
+		if err != nil {
+			return err
+		}
+		if len(rows) == 0 {
+			return nil
+		}
+		ids := make([]string, 0, len(rows))
+		previous := make(map[string]models.ReapedExportJob, len(rows))
+		for _, row := range rows {
+			ids = append(ids, row.ID)
+			previous[row.ID] = models.ReapedExportJob{ID: row.ID, FilePath: row.FilePath.String, PreviousUpdatedAt: row.UpdatedAt}
+		}
+		encodedIDs, err := json.Marshal(ids)
+		if err != nil {
+			return err
+		}
+		// The immediate write transaction preserves the selected timestamps until the update.
+		reaped, err := q.ReapInterruptedExportJobs(ctx, string(encodedIDs))
+		if err != nil {
+			return err
+		}
+		for _, id := range reaped {
+			jobs = append(jobs, previous[id])
+		}
+		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
-	}
-	jobs := make([]*models.ExportJob, 0, len(rows))
-	for i := range rows {
-		jobs = append(jobs, exportJobFromSQLC(rows[i]))
 	}
 	return jobs, nil
 }

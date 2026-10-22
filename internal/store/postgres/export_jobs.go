@@ -147,7 +147,7 @@ func (s *Store) DeleteExpiredExportJobs(ctx context.Context, before time.Time) e
 }
 
 // ReapInterruptedExportJobs fails stale exports and prior processes of owner.
-func (s *Store) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]*models.ExportJob, error) {
+func (s *Store) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Duration, owner models.ExportJobOwner) ([]models.ReapedExportJob, error) {
 	rows, err := s.q.ReapInterruptedExportJobs(ctx, sqlc.ReapInterruptedExportJobsParams{
 		MaxAgeSeconds: int64(maxAge / time.Second),
 		InstanceID:    owner.InstanceID,
@@ -156,9 +156,9 @@ func (s *Store) ReapInterruptedExportJobs(ctx context.Context, maxAge time.Durat
 	if err != nil {
 		return nil, fmt.Errorf("error reaping interrupted exports: %w", err)
 	}
-	jobs := make([]*models.ExportJob, 0, len(rows))
-	for i := range rows {
-		jobs = append(jobs, exportJobToModel(rows[i]))
+	jobs := make([]models.ReapedExportJob, 0, len(rows))
+	for _, row := range rows {
+		jobs = append(jobs, models.ReapedExportJob{ID: row.ID, FilePath: textStr(row.FilePath), PreviousUpdatedAt: row.PreviousUpdatedAt.Time})
 	}
 	return jobs, nil
 }

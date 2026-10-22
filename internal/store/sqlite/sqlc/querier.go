@@ -211,6 +211,7 @@ type Querier interface {
 	ListDashboards(ctx context.Context) ([]ListDashboardsRow, error)
 	// List artifact paths for expired export jobs
 	ListExpiredExportJobPaths(ctx context.Context, before string) ([]sql.NullString, error)
+	ListInterruptedExportJobs(ctx context.Context, arg ListInterruptedExportJobsParams) ([]ListInterruptedExportJobsRow, error)
 	// Get all sources managed by provisioning config
 	ListManagedSources(ctx context.Context) ([]Source, error)
 	// Get all teams managed by provisioning config
@@ -262,7 +263,7 @@ type Querier interface {
 	PruneQueryHistoryForUser(ctx context.Context, arg PruneQueryHistoryForUserParams) error
 	// Per-day total query count over rollup rows on/after `since`, ascending by day.
 	QueryVolumeByDay(ctx context.Context, bucketDate string) ([]QueryVolumeByDayRow, error)
-	ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error)
+	ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error)
 	// Remove an item from a collection
 	RemoveCollectionItem(ctx context.Context, arg RemoveCollectionItemParams) error
 	// Remove a member from a collection

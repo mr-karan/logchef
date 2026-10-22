@@ -409,7 +409,7 @@ INSERT INTO export_jobs (
 
 -- name: GetExportJob :one
 -- Retrieve an export job by ID
-SELECT *
+SELECT id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
 FROM export_jobs
 WHERE id = ?;
 
@@ -1262,21 +1262,21 @@ WHERE NOT EXISTS (
       AND live.expires_at > sqlc.arg(now)
 );
 
+-- name: ListInterruptedExportJobs :many
+SELECT id, file_path, updated_at
+FROM export_jobs
+WHERE status IN ('pending', 'running')
+  AND (updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(sqlc.arg(max_age_seconds) AS INTEGER) || ' seconds')
+    OR (CAST(sqlc.arg(instance_id) AS TEXT) <> '' AND owner_instance_id = sqlc.arg(instance_id) AND owner_process_id <> sqlc.arg(process_id)))
+ORDER BY id
+LIMIT 100;
+
 -- name: ReapInterruptedExportJobs :many
 UPDATE export_jobs
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id IN (
-    SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running')
-      AND (export_jobs.updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(sqlc.arg(max_age_seconds) AS INTEGER) || ' seconds')
-        OR (CAST(sqlc.arg(instance_id) AS TEXT) <> '' AND export_jobs.owner_instance_id = sqlc.arg(instance_id) AND export_jobs.owner_process_id <> sqlc.arg(process_id)))
-    ORDER BY id
-    LIMIT 100
-)
+WHERE id IN (SELECT value FROM json_each(CAST(sqlc.arg(ids_json) AS TEXT)))
   AND status IN ('pending', 'running')
-  AND (export_jobs.updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(sqlc.arg(max_age_seconds) AS INTEGER) || ' seconds')
-    OR (CAST(sqlc.arg(instance_id) AS TEXT) <> '' AND export_jobs.owner_instance_id = sqlc.arg(instance_id) AND export_jobs.owner_process_id <> sqlc.arg(process_id)))
-RETURNING *;
+RETURNING id;
 
 -- name: MarkAlertResolved :exec
 UPDATE alerts SET last_state = 'resolved', updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now') WHERE id = ?;

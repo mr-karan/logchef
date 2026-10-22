@@ -2820,6 +2820,51 @@ func (q *Queries) ListExpiredExportJobPaths(ctx context.Context, before string) 
 	return items, nil
 }
 
+const listInterruptedExportJobs = `-- name: ListInterruptedExportJobs :many
+SELECT id, file_path, updated_at
+FROM export_jobs
+WHERE status IN ('pending', 'running')
+  AND (updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(?1 AS INTEGER) || ' seconds')
+    OR (CAST(?2 AS TEXT) <> '' AND owner_instance_id = ?2 AND owner_process_id <> ?3))
+ORDER BY id
+LIMIT 100
+`
+
+type ListInterruptedExportJobsParams struct {
+	MaxAgeSeconds int64  `json:"max_age_seconds"`
+	InstanceID    string `json:"instance_id"`
+	ProcessID     string `json:"process_id"`
+}
+
+type ListInterruptedExportJobsRow struct {
+	ID        string         `json:"id"`
+	FilePath  sql.NullString `json:"file_path"`
+	UpdatedAt time.Time      `json:"updated_at"`
+}
+
+func (q *Queries) ListInterruptedExportJobs(ctx context.Context, arg ListInterruptedExportJobsParams) ([]ListInterruptedExportJobsRow, error) {
+	rows, err := q.query(ctx, q.listInterruptedExportJobsStmt, listInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInterruptedExportJobsRow{}
+	for rows.Next() {
+		var i ListInterruptedExportJobsRow
+		if err := rows.Scan(&i.ID, &i.FilePath, &i.UpdatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listManagedSources = `-- name: ListManagedSources :many
 SELECT id, name, _meta_is_auto_created, source_type, _meta_ts_field, _meta_severity_field, connection_config, identity_key, description, ttl_days, created_at, updated_at, managed, secret_ref FROM sources WHERE managed = 1 ORDER BY id
 `
@@ -3937,57 +3982,24 @@ func (q *Queries) QueryVolumeByDay(ctx context.Context, bucketDate string) ([]Qu
 const reapInterruptedExportJobs = `-- name: ReapInterruptedExportJobs :many
 UPDATE export_jobs
 SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-WHERE id IN (
-    SELECT id FROM export_jobs
-    WHERE status IN ('pending', 'running')
-      AND (export_jobs.updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(?1 AS INTEGER) || ' seconds')
-        OR (CAST(?2 AS TEXT) <> '' AND export_jobs.owner_instance_id = ?2 AND export_jobs.owner_process_id <> ?3))
-    ORDER BY id
-    LIMIT 100
-)
+WHERE id IN (SELECT value FROM json_each(CAST(?1 AS TEXT)))
   AND status IN ('pending', 'running')
-  AND (export_jobs.updated_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '-' || CAST(?1 AS INTEGER) || ' seconds')
-    OR (CAST(?2 AS TEXT) <> '' AND export_jobs.owner_instance_id = ?2 AND export_jobs.owner_process_id <> ?3))
-RETURNING id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at, owner_instance_id, owner_process_id
+RETURNING id
 `
 
-type ReapInterruptedExportJobsParams struct {
-	MaxAgeSeconds int64  `json:"max_age_seconds"`
-	InstanceID    string `json:"instance_id"`
-	ProcessID     string `json:"process_id"`
-}
-
-func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, arg ReapInterruptedExportJobsParams) ([]ExportJob, error) {
-	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, arg.MaxAgeSeconds, arg.InstanceID, arg.ProcessID)
+func (q *Queries) ReapInterruptedExportJobs(ctx context.Context, idsJson string) ([]string, error) {
+	rows, err := q.query(ctx, q.reapInterruptedExportJobsStmt, reapInterruptedExportJobs, idsJson)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ExportJob{}
+	items := []string{}
 	for rows.Next() {
-		var i ExportJob
-		if err := rows.Scan(
-			&i.ID,
-			&i.SourceID,
-			&i.CreatedBy,
-			&i.Status,
-			&i.Format,
-			&i.RequestJson,
-			&i.FileName,
-			&i.FilePath,
-			&i.ErrorMessage,
-			&i.RowsExported,
-			&i.BytesWritten,
-			&i.ExpiresAt,
-			&i.CompletedAt,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.OwnerInstanceID,
-			&i.OwnerProcessID,
-		); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

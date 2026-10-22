@@ -126,6 +126,11 @@ func TestExportJobTimestampUpgrade(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	for _, value := range []string{"", "garbage"} {
+		if _, err := db.Exec(`INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at, completed_at, created_at, updated_at) VALUES (?, 1, 1, 'running', 'csv', '{}', ?, ?, ?, ?)`, "invalid-"+value, value, value, value, value); err != nil {
+			t.Fatal(err)
+		}
+	}
 	mustExec(t, db, `INSERT INTO export_jobs (id, source_id, created_by, status, format, request_json, expires_at, created_at, updated_at) VALUES ('nullable', 1, 1, 'running', 'csv', '{}', '2026-01-02 03:04:05', '2026-01-02 03:04:05', '2026-01-02 03:04:05')`)
 	if err := m.Up(); err != nil {
 		t.Fatal(err)
@@ -142,6 +147,17 @@ func TestExportJobTimestampUpgrade(t *testing.T) {
 		}
 		if instance != "" || process != "" {
 			t.Errorf("legacy owner = %q/%q", instance, process)
+		}
+	}
+	for _, value := range []string{"", "garbage"} {
+		var expires, completed, created, updated string
+		if err := db.QueryRow(`SELECT CAST(expires_at AS TEXT), CAST(completed_at AS TEXT), CAST(created_at AS TEXT), CAST(updated_at AS TEXT) FROM export_jobs WHERE id = ?`, "invalid-"+value).Scan(&expires, &completed, &created, &updated); err != nil {
+			t.Fatal(err)
+		}
+		for _, got := range []string{expires, completed, created, updated} {
+			if got != value {
+				t.Errorf("invalid timestamp %q changed to %q", value, got)
+			}
 		}
 	}
 	var completed sql.NullString

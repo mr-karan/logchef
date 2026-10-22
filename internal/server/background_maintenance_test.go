@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/google/uuid"
@@ -210,6 +213,152 @@ func TestTokenLastUsedCoalescesAcrossStores(t *testing.T) {
 			if writes != 3 {
 				t.Errorf("last-used writes after aging and refresh = %d, want 3", writes)
 			}
+		})
+	}
+}
+
+func TestStartupExportReapLogs(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			for _, tc := range []struct {
+				name     string
+				instance string
+				count    int
+				age      time.Duration
+				warn     bool
+			}{
+				{"empty", "replica-a", 0, 0, false},
+				{"recent", "replica-a", 101, time.Second, true},
+				{"older", "replica-a", 101, time.Minute, false},
+				{"unconfigured", "", 1, 0, false},
+			} {
+				t.Run(tc.name, func(t *testing.T) {
+					if tc.instance != "" {
+						tc.instance += "-" + uuid.NewString()
+					}
+					db, _ := backgroundTestStore(t, backend)
+					ctx := context.Background()
+					user := mkTestUser(t, db, uuid.NewString()+"@example.com", models.UserRoleMember)
+					_, source := mkTestTeam(t, db, uuid.NewString(), user)
+					now := time.Now().UTC()
+					for range tc.count {
+						job := &models.ExportJob{ID: uuid.NewString(), Owner: models.ExportJobOwner{InstanceID: tc.instance, ProcessID: "previous"}, SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now.Add(-tc.age)}
+						if err := db.CreateExportJob(ctx, job); err != nil {
+							t.Fatal(err)
+						}
+					}
+					output, err := os.Create(filepath.Join(t.TempDir(), "startup.log"))
+					if err != nil {
+						t.Fatal(err)
+					}
+					defer output.Close()
+					cfg := testOAuthConfig()
+					cfg.Export.InstanceID = tc.instance
+					srv := New(ServerOptions{Config: cfg, SQLite: db, Logger: slog.New(slog.NewJSONHandler(output, nil)), FS: http.FS(fstest.MapFS{"index.html": {Data: []byte("<html></html>")}})})
+					if err := srv.Shutdown(ctx); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := output.Seek(0, io.SeekStart); err != nil {
+						t.Fatal(err)
+					}
+					decoder := json.NewDecoder(output)
+					infos, warns := 0, 0
+					for {
+						var entry struct {
+							Level    string `json:"level"`
+							Message  string `json:"msg"`
+							Instance string `json:"instance_id"`
+							Reaped   int    `json:"reaped"`
+						}
+						if err := decoder.Decode(&entry); err == io.EOF {
+							break
+						} else if err != nil {
+							t.Fatal(err)
+						}
+						switch entry.Message {
+						case "reaped interrupted exports":
+							infos++
+							if entry.Level != "INFO" || entry.Instance != tc.instance || entry.Reaped != tc.count {
+								t.Errorf("startup summary = %+v", entry)
+							}
+						case "reaped recently updated exports; possible duplicate export instance_id":
+							warns++
+							if entry.Level != "WARN" || entry.Instance != tc.instance || entry.Reaped != tc.count {
+								t.Errorf("duplicate identity warning = %+v", entry)
+							}
+						}
+					}
+					wantInfos, wantWarns := 1, 0
+					if tc.instance == "" {
+						wantInfos = 0
+					}
+					if tc.warn {
+						wantWarns = 1
+					}
+					if infos != wantInfos || warns != wantWarns {
+						t.Errorf("summary lines = %d, warning lines = %d; want %d, %d", infos, warns, wantInfos, wantWarns)
+					}
+				})
+			}
+		})
+	}
+}
+
+func TestExportJobsIgnoreExtraColumns(t *testing.T) {
+	for _, backend := range []string{"sqlite", "postgres"} {
+		t.Run(backend, func(t *testing.T) {
+			db, raw := backgroundTestStore(t, backend)
+			ctx := context.Background()
+			if _, err := raw.ExecContext(ctx, "ALTER TABLE export_jobs ADD COLUMN test_future_column TEXT"); err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if _, err := raw.ExecContext(ctx, "ALTER TABLE export_jobs DROP COLUMN test_future_column"); err != nil {
+					t.Error(err)
+				}
+			})
+			user := mkTestUser(t, db, uuid.NewString()+"@example.com", models.UserRoleMember)
+			_, source := mkTestTeam(t, db, uuid.NewString(), user)
+			now := time.Now().UTC()
+			owner := models.ExportJobOwner{InstanceID: uuid.NewString(), ProcessID: "previous"}
+			job := &models.ExportJob{ID: uuid.NewString(), Owner: owner, SourceID: source.ID, CreatedBy: user.ID, Status: models.ExportJobStatusRunning, Format: "csv", RequestPayload: []byte(`{}`), ExpiresAt: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now}
+			if err := db.CreateExportJob(ctx, job); err != nil {
+				t.Fatal(err)
+			}
+			got, err := db.GetExportJob(ctx, job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Owner != owner || got.Status != job.Status {
+				t.Errorf("get after adding column = %+v", got)
+			}
+			columns := "id, source_id, created_by, status, format, request_json, file_name, file_path, error_message, rows_exported, bytes_written, expires_at, completed_at, created_at, updated_at"
+			var values [15]any
+			var targets [15]any
+			for i := range values {
+				targets[i] = &values[i]
+			}
+			if err := raw.QueryRowContext(ctx, "SELECT "+columns+" FROM export_jobs WHERE id = '"+job.ID+"'").Scan(targets[:]...); err != nil {
+				t.Fatalf("legacy 15-column scan after extra columns: %v", err)
+			}
+			reaped, err := db.ReapInterruptedExportJobs(ctx, time.Hour, models.ExportJobOwner{InstanceID: owner.InstanceID, ProcessID: "current"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(reaped) != 1 || reaped[0].ID != job.ID {
+				t.Fatalf("reaped after adding column = %+v", reaped)
+			}
+			if reaped[0].PreviousUpdatedAt.Sub(job.UpdatedAt).Abs() > time.Millisecond {
+				t.Errorf("previous update timestamp = %s, want %s", reaped[0].PreviousUpdatedAt, job.UpdatedAt)
+			}
+			got, err = db.GetExportJob(ctx, job.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != models.ExportJobStatusFailed {
+				t.Errorf("reaped job status = %s", got.Status)
+			}
+			t.Logf("%s legacy 15-column scan, GetExportJob, and reaper passed with ownership and dummy columns", backend)
 		})
 	}
 }
