@@ -234,3 +234,94 @@ func TestExportOptionalBlocksWithoutVariables(t *testing.T) {
 		})
 	}
 }
+
+// exportCapabilityProvider reports the exports capability only when exports is set.
+type exportCapabilityProvider struct {
+	fakeClickHouseCompiler
+	exports bool
+}
+
+func (p *exportCapabilityProvider) Describe() datasource.Descriptor {
+	descriptor := p.fakeClickHouseCompiler.Describe()
+	if p.exports {
+		descriptor.Capabilities = []datasource.Capability{datasource.CapabilityExports}
+	}
+	return descriptor
+}
+
+func TestExportRequestValidation(t *testing.T) {
+	const (
+		unsupportedFormat = "Unsupported export format. Use csv or ndjson."
+		streamingCSV      = "Streaming CSV exports are not supported. Create an export job instead."
+	)
+	cases := []struct {
+		name       string
+		noExports  bool
+		formats    []string
+		accept     string
+		body       string
+		wantStream string
+		wantJob    string
+	}{
+		{name: "source without exports", noExports: true, body: `{"raw_sql":"SELECT 1"}`,
+			wantStream: "Exports are not supported for this source type yet", wantJob: "Exports are not supported for this source type yet"},
+		{name: "invalid body", body: `{`, wantStream: "Invalid request body", wantJob: "Invalid request body"},
+		{name: "missing query", body: `{"format":"ndjson"}`,
+			wantStream: "raw_sql (or query_text) is required", wantJob: "raw_sql (or query_text) is required"},
+		{name: "unknown format", body: `{"raw_sql":"SELECT 1","format":"xml"}`, wantStream: unsupportedFormat, wantJob: unsupportedFormat},
+		{name: "format not allowed", formats: []string{"csv"}, body: `{"query_text":"SELECT 1","format":"jsonl"}`,
+			wantStream: unsupportedFormat, wantJob: unsupportedFormat},
+		{name: "explicit csv", body: `{"raw_sql":"SELECT 1","format":"CSV","query_timeout":120}`,
+			wantStream: streamingCSV, wantJob: "query timeout cannot exceed 60 seconds for Download"},
+		{name: "csv from accept", accept: "text/csv", body: `{"raw_sql":"SELECT 1","query_timeout":120}`,
+			wantStream: streamingCSV, wantJob: "query timeout cannot exceed 60 seconds for Download"},
+		{name: "default format", formats: []string{"ndjson"}, body: `{"raw_sql":"SELECT 1","query_timeout":120}`,
+			wantStream: "Query timeout cannot exceed 60 seconds for Download", wantJob: unsupportedFormat},
+		{name: "invalid timeout", body: `{"raw_sql":"SELECT 1","format":"ndjson","query_timeout":0}`,
+			wantStream: "Query timeout must be a positive number", wantJob: "Query timeout must be a positive number"},
+	}
+	for _, tc := range cases {
+		for _, endpoint := range []string{"stream", "job"} {
+			t.Run(tc.name+"/"+endpoint, func(t *testing.T) {
+				s := newDashboardTestServer(t)
+				s.config = &config.Config{}
+				s.config.Export.Formats = []string{"csv", "ndjson"}
+				if tc.formats != nil {
+					s.config.Export.Formats = tc.formats
+				}
+				s.config.Export.DefaultTimeoutSeconds = 30
+				s.config.Export.MaxTimeoutSeconds = 60
+				s.datasources = datasource.NewService(s.sqlite, s.log)
+				s.datasources.Register(&exportCapabilityProvider{exports: !tc.noExports})
+				source := &models.Source{Name: "export-validation", SourceType: models.SourceTypeClickHouse}
+				if err := s.sqlite.CreateSource(t.Context(), source); err != nil {
+					t.Fatal(err)
+				}
+				user, src := authorizeTestSource(t, s.sqlite, source.ID)
+				app := fiber.New()
+				handler, want := s.handleExportLogs, tc.wantStream
+				if endpoint == "job" {
+					handler, want = s.handleCreateExportJob, tc.wantJob
+				}
+				withAuthorizedSource(app, s, "/teams/:teamID/sources/:sourceID/export", user, handler)
+				req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/teams/%d/sources/%d/export", src.TeamID(), source.ID), strings.NewReader(tc.body))
+				req.Header.Set("Content-Type", "application/json")
+				if tc.accept != "" {
+					req.Header.Set("Accept", tc.accept)
+				}
+				resp, err := app.Test(req)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer resp.Body.Close()
+				var body map[string]any
+				if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+					t.Fatal(err)
+				}
+				if resp.StatusCode != http.StatusBadRequest || body["message"] != want || body["error_type"] != string(models.ValidationErrorType) {
+					t.Fatalf("status=%d body=%v, want 400 %q", resp.StatusCode, body, want)
+				}
+			})
+		}
+	}
+}
