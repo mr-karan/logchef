@@ -119,7 +119,6 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 	userID := existing.ID
 
 	var req struct {
-		Email    *string `json:"email"`
 		FullName *string `json:"full_name"`
 		Role     *string `json:"role"`
 		Status   *string `json:"status"`
@@ -131,9 +130,6 @@ func (s *Server) handleUpdateUser(c fiber.Ctx) error {
 
 	// Construct update DTO
 	updateData := models.User{}
-	if req.Email != nil {
-		updateData.Email = *req.Email
-	}
 	if req.FullName != nil {
 		updateData.FullName = *req.FullName
 	}

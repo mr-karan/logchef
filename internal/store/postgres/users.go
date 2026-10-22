@@ -3,19 +3,11 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
 )
-
-// normalizeEmail lowercases and trims an email address so that storage and
-// lookup are case-insensitive (#95). Uses Go's Unicode-aware ToLower, matching
-// the normalization applied to existing rows by migration 000005.
-func normalizeEmail(email string) string {
-	return strings.ToLower(strings.TrimSpace(email))
-}
 
 func userToModel(r sqlc.User) *models.User {
 	return &models.User{
@@ -39,7 +31,7 @@ func userToModel(r sqlc.User) *models.User {
 // CreateUser inserts a new user, defaulting status/account_type, and populates
 // the model's ID and timestamps on success.
 func (s *Store) CreateUser(ctx context.Context, user *models.User) error {
-	user.Email = normalizeEmail(user.Email)
+	user.Email = models.NormalizeEmail(user.Email)
 	if user.Status == "" {
 		user.Status = models.UserStatusActive
 	}
@@ -97,7 +89,7 @@ func (s *Store) GetUserForUpdate(ctx context.Context, id models.UserID) (*models
 
 // GetUserByEmail retrieves a user by email. Returns models.ErrUserNotFound if absent.
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*models.User, error) {
-	email = normalizeEmail(email)
+	email = models.NormalizeEmail(email)
 	row, err := s.q.GetUserByEmail(ctx, email)
 	if err != nil {
 		if notFound(err) {

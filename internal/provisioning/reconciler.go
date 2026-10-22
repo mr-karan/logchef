@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/config"
@@ -34,7 +33,7 @@ func Reconcile(ctx context.Context, cfg *config.ProvisioningConfig, db store.Sto
 	// Build admin email set for role precedence
 	adminSet := make(map[string]bool)
 	for _, email := range adminEmails {
-		adminSet[strings.ToLower(strings.TrimSpace(email))] = true
+		adminSet[models.NormalizeEmail(email)] = true
 	}
 
 	if err := validateNewSources(ctx, cfg, db, ds, log); err != nil {

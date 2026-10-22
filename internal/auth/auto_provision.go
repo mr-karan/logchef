@@ -40,6 +40,7 @@ func autoProvisionUser(ctx context.Context, db store.StoreOps, log *slog.Logger,
 		return nil, false, nil
 	}
 
+	email = models.NormalizeEmail(email)
 	domain, ok := matchAllowedDomain(email, cfg.AllowedDomains)
 	if !ok {
 		return nil, false, nil
