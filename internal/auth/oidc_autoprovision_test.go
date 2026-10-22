@@ -215,7 +215,7 @@ func TestHandleCallback_AutoProvisionsFirstLogin(t *testing.T) {
 		Name:          "New Hire",
 	}, "nonce")
 
-	user, session, err := provider.HandleCallback(ctx, db, log, authCfg, "code-first-login", "nonce")
+	user, session, err := provider.HandleCallback(ctx, db, log, authCfg, "code-first-login", "nonce", "test-pkce-verifier")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -281,7 +281,7 @@ func TestHandleCallback_AutoProvisionDisabledRejects(t *testing.T) {
 		Name:          "Someone",
 	}, "nonce")
 
-	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-disabled", "nonce")
+	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-disabled", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("HandleCallback error = %v, want ErrUnauthorizedUser", err)
 	}
@@ -320,7 +320,7 @@ func TestHandleCallback_AutoProvisionUnlistedDomainRejects(t *testing.T) {
 		Name:          "Outsider",
 	}, "nonce")
 
-	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-unlisted-domain", "nonce")
+	_, _, err = provider.HandleCallback(ctx, db, log, authCfg, "code-unlisted-domain", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("HandleCallback error = %v, want ErrUnauthorizedUser", err)
 	}
@@ -367,7 +367,7 @@ func TestHandleCallback_ConcurrentFirstLoginsBothSucceed(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			users[i], _, errs[i] = provider.HandleCallback(ctx, db, log, authCfg, codes[i], "nonce")
+			users[i], _, errs[i] = provider.HandleCallback(ctx, db, log, authCfg, codes[i], "nonce", "test-pkce-verifier")
 		}(i)
 	}
 	wg.Wait()
@@ -410,7 +410,7 @@ func TestCallbackFailureLeavesLoggingToCaller(t *testing.T) {
 				t.Fatal(err)
 			}
 			logs.Reset()
-			_, _, err = p.HandleCallback(t.Context(), newAuthTestDB(t), log, &config.AuthConfig{}, "code", "nonce")
+			_, _, err = p.HandleCallback(t.Context(), newAuthTestDB(t), log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
 			if !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
 			}

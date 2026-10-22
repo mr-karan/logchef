@@ -262,9 +262,9 @@ func (p *OIDCProvider) verify(ctx context.Context, rawIDToken string) (*oidc.IDT
 	return idToken, nil
 }
 
-// GetAuthURL returns the OIDC authorization URL with state and nonce binding.
-func (p *OIDCProvider) GetAuthURL(state, nonce string) string {
-	return p.oauthConf.AuthCodeURL(state, oidc.Nonce(nonce))
+// GetAuthURL returns the OIDC authorization URL with state, nonce, and PKCE binding.
+func (p *OIDCProvider) GetAuthURL(state, nonce, verifier string) string {
+	return p.oauthConf.AuthCodeURL(state, oidc.Nonce(nonce), oauth2.S256ChallengeOption(verifier))
 }
 
 // GetIssuer returns the OIDC issuer URL.
@@ -275,12 +275,12 @@ func (p *OIDCProvider) GetIssuer() string {
 // HandleCallback processes the OIDC callback, exchanges the code for tokens,
 // verifies the ID token, looks up or potentially creates the user in the local database,
 // and creates a local application session.
-func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, nonce string) (*models.User, *models.Session, error) {
+func (p *OIDCProvider) HandleCallback(ctx context.Context, db store.Store, log *slog.Logger, authCfg *config.AuthConfig, code, nonce, verifier string) (*models.User, *models.Session, error) {
 	idpCtx, cancel := context.WithTimeout(ctx, p.requestTimeout)
 	defer cancel()
 
 	// Exchange authorization code for OAuth2 tokens.
-	oauth2Token, err := p.oauthConf.Exchange(idpCtx, code)
+	oauth2Token, err := p.oauthConf.Exchange(idpCtx, code, oauth2.VerifierOption(verifier))
 	if err != nil {
 		var rejection *oauth2.RetrieveError
 		if errors.As(err, &rejection) && rejection.Response.StatusCode == http.StatusBadRequest && rejection.ErrorCode == "invalid_grant" {

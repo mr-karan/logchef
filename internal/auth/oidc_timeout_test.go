@@ -76,7 +76,7 @@ func TestCallbackBoundsUnresponsiveIDP(t *testing.T) {
 			}
 			result := make(chan error, 1)
 			go func() {
-				_, _, err := p.HandleCallback(ctx, nil, log, &config.AuthConfig{}, "code", "nonce")
+				_, _, err := p.HandleCallback(ctx, nil, log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
 				result <- err
 			}()
 			select {

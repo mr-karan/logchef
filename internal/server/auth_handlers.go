@@ -18,13 +18,15 @@ import (
 	"github.com/mr-karan/logchef/pkg/models"
 
 	"github.com/gofiber/fiber/v3"
+	"golang.org/x/oauth2"
 )
 
 const (
 	// Cookie names used for authentication state and session.
-	stateCookieName   = "auth_state"
-	nonceCookieName   = "auth_nonce"
-	sessionCookieName = "session_id"
+	stateCookieName    = "auth_state"
+	nonceCookieName    = "auth_nonce"
+	verifierCookieName = "auth_pkce"
+	sessionCookieName  = "session_id"
 	// stateCookieTTL defines how long the OIDC state cookie is valid.
 	stateCookieTTL = 5 * time.Minute
 )
@@ -177,8 +179,6 @@ func (s *Server) redirectToFrontend(c fiber.Ctx, path string, err error) error {
 }
 
 // handleLogin initiates the OIDC authentication flow.
-// It stores a state and a nonce secret in cookies, sends the state and the secret's
-// hash as the nonce, and redirects the user to the OIDC provider's authorization endpoint.
 func (s *Server) handleLogin(c fiber.Ctx) error {
 	if s.oidcProvider == nil {
 		s.log.Error("OIDC provider not configured, cannot initiate login")
@@ -197,10 +197,12 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		return s.redirectToFrontend(c, "", fmt.Errorf("nonce generation failed: %w", err))
 	}
 	nonceSecret := base64.RawURLEncoding.EncodeToString(nonceBytes[:])
+	verifier := oauth2.GenerateVerifier()
 	expires := time.Now().Add(stateCookieTTL)
 
 	s.setCookie(c, stateCookieName, state, expires)
 	s.setCookie(c, nonceCookieName, nonceSecret, expires)
+	s.setCookie(c, verifierCookieName, verifier, expires)
 
 	// Persist the requested redirect path through the OIDC round-trip. Only
 	// safe local paths are stored; anything protocol-relative or scheme-bearing
@@ -209,7 +211,7 @@ func (s *Server) handleLogin(c fiber.Ctx) error {
 		s.setCookie(c, "logchef_redirect", redirectPath, time.Now().Add(stateCookieTTL))
 	}
 
-	authURL := s.oidcProvider.GetAuthURL(state, nonceFromSecret(nonceSecret))
+	authURL := s.oidcProvider.GetAuthURL(state, nonceFromSecret(nonceSecret), verifier)
 	return c.Redirect().Status(fiber.StatusTemporaryRedirect).To(authURL)
 }
 
@@ -244,13 +246,19 @@ func (s *Server) handleCallback(c fiber.Ctx) error {
 
 	s.clearCookie(c, stateCookieName)
 	s.clearCookie(c, nonceCookieName)
+	s.clearCookie(c, verifierCookieName)
 
 	nonceSecret := c.Cookies(nonceCookieName)
 	if nonceSecret == "" {
 		return s.redirectToFrontend(c, "", fmt.Errorf("%w: missing nonce cookie", auth.ErrOIDCInvalidNonce))
 	}
 
-	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret))
+	verifier := c.Cookies(verifierCookieName)
+	if verifier == "" {
+		return s.redirectToFrontend(c, "", fmt.Errorf("%w: missing PKCE verifier cookie", errInvalidState))
+	}
+
+	loginUser, session, err := s.oidcProvider.HandleCallback(c.Context(), s.store, s.log, &s.config.Auth, code, nonceFromSecret(nonceSecret), verifier)
 	if err != nil {
 		return s.redirectToFrontend(c, "", err)
 	}

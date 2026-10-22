@@ -20,7 +20,7 @@ func TestCallbackReusesSigningKeys(t *testing.T) {
 	}
 	db := newAuthTestDB(t)
 	for i := range 20 {
-		_, _, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "nonce")
+		_, _, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
 		if !errors.Is(err, ErrUnauthorizedUser) {
 			t.Fatalf("signed login %d = %v, want unauthorized user after verification", i+1, err)
 		}
@@ -29,7 +29,7 @@ func TestCallbackReusesSigningKeys(t *testing.T) {
 		t.Errorf("20 signed logins fetched JWKS %d times, want 1", got)
 	}
 	fake.jwksUnavailable.Store(true)
-	_, _, err = p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "nonce")
+	_, _, err = p.HandleCallback(t.Context(), db, log, &config.AuthConfig{}, "code", "nonce", "test-pkce-verifier")
 	if !errors.Is(err, ErrUnauthorizedUser) {
 		t.Fatalf("cached signing key during JWKS outage = %v, want unauthorized user after verification", err)
 	}
@@ -84,7 +84,7 @@ func TestCallbackDatabaseOutlivesIDPDeadline(t *testing.T) {
 			t.Errorf("database writer transaction: %v", err)
 		}
 	}()
-	_, session, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}, "code", "nonce")
+	_, session, err := p.HandleCallback(t.Context(), db, log, &config.AuthConfig{SessionDuration: time.Hour, MaxConcurrentSessions: 5}, "code", "nonce", "test-pkce-verifier")
 	if err != nil {
 		t.Fatalf("database work inherited the IdP deadline: %v", err)
 	}
