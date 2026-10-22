@@ -3,8 +3,6 @@ package postgres
 import (
 	"context"
 	"fmt"
-	"strconv"
-	"time"
 
 	"github.com/mr-karan/logchef/internal/store/postgres/sqlc"
 	"github.com/mr-karan/logchef/pkg/models"
@@ -20,67 +18,6 @@ func (s *Store) GetSetting(ctx context.Context, key string) (string, error) {
 		return "", fmt.Errorf("failed to get setting %s: %w", key, err)
 	}
 	return setting.Value, nil
-}
-
-// GetSettingWithDefault retrieves a setting value or returns the default.
-func (s *Store) GetSettingWithDefault(ctx context.Context, key, defaultValue string) string {
-	value, err := s.GetSetting(ctx, key)
-	if err != nil {
-		return defaultValue
-	}
-	return value
-}
-
-// GetBoolSetting retrieves a boolean setting value, or the default.
-func (s *Store) GetBoolSetting(ctx context.Context, key string, defaultValue bool) bool {
-	value, err := s.GetSetting(ctx, key)
-	if err != nil {
-		return defaultValue
-	}
-	boolVal, err := strconv.ParseBool(value)
-	if err != nil {
-		return defaultValue
-	}
-	return boolVal
-}
-
-// GetIntSetting retrieves an integer setting value, or the default.
-func (s *Store) GetIntSetting(ctx context.Context, key string, defaultValue int) int {
-	value, err := s.GetSetting(ctx, key)
-	if err != nil {
-		return defaultValue
-	}
-	intVal, err := strconv.Atoi(value)
-	if err != nil {
-		return defaultValue
-	}
-	return intVal
-}
-
-// GetFloat64Setting retrieves a float64 setting value, or the default.
-func (s *Store) GetFloat64Setting(ctx context.Context, key string, defaultValue float64) float64 {
-	value, err := s.GetSetting(ctx, key)
-	if err != nil {
-		return defaultValue
-	}
-	floatVal, err := strconv.ParseFloat(value, 64)
-	if err != nil {
-		return defaultValue
-	}
-	return floatVal
-}
-
-// GetDurationSetting retrieves a duration setting value, or the default.
-func (s *Store) GetDurationSetting(ctx context.Context, key string, defaultValue time.Duration) time.Duration {
-	value, err := s.GetSetting(ctx, key)
-	if err != nil {
-		return defaultValue
-	}
-	durationVal, err := time.ParseDuration(value)
-	if err != nil || durationVal <= 0 {
-		return defaultValue
-	}
-	return durationVal
 }
 
 // ListSettings retrieves all settings.

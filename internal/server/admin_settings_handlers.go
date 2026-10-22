@@ -13,6 +13,7 @@ import (
 
 	"github.com/mr-karan/logchef/internal/alerts"
 	"github.com/mr-karan/logchef/internal/config"
+	"github.com/mr-karan/logchef/internal/store"
 	"github.com/mr-karan/logchef/pkg/models"
 )
 
@@ -394,15 +395,15 @@ type TestWebhookRequest struct {
 
 func (s *Server) loadSMTPConfig(ctx context.Context) alerts.EmailSenderOptions {
 	return alerts.EmailSenderOptions{
-		Host:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_host", ""),
-		Port:          s.sqlite.GetIntSetting(ctx, "alerts.smtp_port", 587),
-		Username:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_username", ""),
-		Password:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_password", ""),
-		From:          s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_from", ""),
-		ReplyTo:       s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_reply_to", ""),
-		Security:      s.sqlite.GetSettingWithDefault(ctx, "alerts.smtp_security", "starttls"),
-		Timeout:       s.sqlite.GetDurationSetting(ctx, "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(ctx, "alerts.tls_insecure_skip_verify", false),
+		Host:          store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_host", ""),
+		Port:          store.GetIntSetting(ctx, s.sqlite, "alerts.smtp_port", 587),
+		Username:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_username", ""),
+		Password:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_password", ""),
+		From:          store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_from", ""),
+		ReplyTo:       store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_reply_to", ""),
+		Security:      store.GetSettingWithDefault(ctx, s.sqlite, "alerts.smtp_security", "starttls"),
+		Timeout:       store.GetDurationSetting(ctx, s.sqlite, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(ctx, s.sqlite, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	}
 }
@@ -506,8 +507,8 @@ func (s *Server) handleTestWebhook(c fiber.Ctx) error {
 	}
 
 	sender := alerts.NewWebhookSender(alerts.WebhookSenderOptions{
-		Timeout:       s.sqlite.GetDurationSetting(c.Context(), "alerts.request_timeout", 5*time.Second),
-		SkipTLSVerify: s.sqlite.GetBoolSetting(c.Context(), "alerts.tls_insecure_skip_verify", false),
+		Timeout:       store.GetDurationSetting(c.Context(), s.sqlite, "alerts.request_timeout", 5*time.Second),
+		SkipTLSVerify: store.GetBoolSetting(c.Context(), s.sqlite, "alerts.tls_insecure_skip_verify", false),
 		Logger:        s.log,
 	})
 
