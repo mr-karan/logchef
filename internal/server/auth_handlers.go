@@ -381,12 +381,15 @@ func (s *Server) handleLocalLogin(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "email and password are required", models.ValidationErrorType)
 	}
 
-	if !localLoginLimiter.Allow(c.IP(), req.Email) {
-		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many login attempts, try again shortly", models.ValidationErrorType)
-	}
-
 	invalid := func() error {
 		return SendErrorWithType(c, fiber.StatusUnauthorized, "invalid email or password", models.AuthenticationErrorType)
+	}
+	if len(req.Email) > 254 {
+		return invalid()
+	}
+
+	if !localLoginLimiter.Allow(c.IP(), req.Email) {
+		return SendErrorWithType(c, fiber.StatusTooManyRequests, "Too many login attempts, try again shortly", models.ValidationErrorType)
 	}
 
 	user, err := s.sqlite.GetUserByEmail(c.Context(), req.Email)
