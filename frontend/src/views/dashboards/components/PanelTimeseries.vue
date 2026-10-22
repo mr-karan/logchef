@@ -1,20 +1,4 @@
 <script lang="ts">
-// Pure helpers shared with <script setup> below (same module scope) and
-// exported so they're independently unit-testable without mounting the chart.
-
-// s.color comes from the histogram chart model's fixed palette (see
-// utils/histogram-chart.ts), so it isn't expected to be attacker-controlled -
-// but it still ends up in a raw HTML string via buildTooltipHtml, so whitelist
-// it defensively rather than trusting the upstream contract to hold forever.
-const SAFE_COLOR_PATTERN =
-  /^(#[0-9a-fA-F]{3,8}|rgba?\(\s*[\d.]+\s*,\s*[\d.]+\s*,\s*[\d.]+\s*(,\s*[\d.]+\s*)?\)|hsla?\(\s*[\d.]+\s*,\s*[\d.]+%\s*,\s*[\d.]+%\s*(,\s*[\d.]+\s*)?\)|var\(--[\w-]+\))$/;
-const DEFAULT_SAFE_COLOR = "var(--chart-1)";
-
-export function sanitizeChartColor(value: unknown): string {
-  const str = typeof value === "string" ? value.trim() : "";
-  return str && SAFE_COLOR_PATTERN.test(str) ? str : DEFAULT_SAFE_COLOR;
-}
-
 /**
  * Resolve the effective bar mode from chart style and explicit bar_mode.
  * - When chart is "bars": barMode (defaulting to "stacked") wins.
@@ -45,7 +29,6 @@ export function shouldUseCrosshairYStacked(
 </script>
 
 <script setup lang="ts">
-import { escapeHtml } from "@/lib/html";
 import { useI18n } from "vue-i18n";
 import { computed } from "vue";
 import { VisArea, VisAxis, VisGroupedBar, VisLine, VisStackedBar, VisXYContainer } from "@unovis/vue";
@@ -54,7 +37,7 @@ import {
   buildHistogramChartModel,
   formatCompactCount,
   formatHistogramTimestamp,
-  formatTooltipTimestamp,
+  buildHistogramTooltip,
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
 import type { HistogramData } from "@/services/HistogramService";
@@ -148,42 +131,6 @@ const xDomain = computed<[number, number] | undefined>(() =>
   plotRange.value ? [plotRange.value.start, plotRange.value.end] : undefined
 );
 
-function buildTooltipHtml(datum: HistogramChartRow): string {
-  const timeLabel = formatTooltipTimestamp(datum.ts, chartRange.value);
-  const model = chartModel.value;
-  const totalCount = typeof datum.total === "number" ? datum.total : 0;
-
-  let seriesHtml = "";
-  for (const s of model.series) {
-    const val = typeof datum[s.key] === "number" ? (datum[s.key] as number) : 0;
-    // s.label is a grouped log-field value (e.g. a `service` column value)
-    // supplied by whoever produced the underlying log line - it must be
-    // HTML-escaped before landing in this raw HTML string, which unovis'
-    // crosshair renders via innerHTML. s.color is escaped/whitelisted too,
-    // defensively, even though it currently only ever comes from the chart
-    // model's fixed palette.
-    seriesHtml += `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-        <div style="display:flex;align-items:center;gap:0.5rem;">
-          <span style="width:8px;height:8px;border-radius:50%;background:${sanitizeChartColor(s.color)};flex-shrink:0;"></span>
-          <span>${escapeHtml(s.label)}</span>
-        </div>
-        <strong style="font-variant-numeric:tabular-nums;">${val.toLocaleString()}</strong>
-      </div>`;
-  }
-
-  const totalHtml =
-    model.series.length > 1
-      ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);"><span>${escapeHtml(t('common.total'))}</span><strong>${totalCount.toLocaleString()}</strong></div>`
-      : "";
-
-  return `<div style="min-width:150px;padding:0.5rem 0.65rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
-    <div style="margin-bottom:0.35rem;font-size:0.75rem;font-weight:600;">${timeLabel}</div>
-    ${totalHtml}
-    <div style="display:flex;flex-direction:column;gap:0.25rem;">${seriesHtml}</div>
-  </div>`;
-}
-
 const tooltipTemplate = computed(() => {
   return (
     _payload: unknown,
@@ -192,7 +139,12 @@ const tooltipTemplate = computed(() => {
     nearestIndex?: number
   ) => {
     if (!data || nearestIndex == null || !data[nearestIndex]) return "";
-    return buildTooltipHtml(data[nearestIndex]);
+    return buildHistogramTooltip({
+      datum: data[nearestIndex],
+      series: chartModel.value.series,
+      range: chartRange.value,
+      totalLabel: t('common.total'),
+    });
   };
 });
 

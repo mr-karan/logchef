@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { escapeHtml } from "@/lib/html";
 import {
-  sanitizeChartColor,
   resolveBarMode,
   shouldUseCrosshairYStacked,
 } from "@/views/dashboards/components/PanelTimeseries.vue";
@@ -39,25 +38,6 @@ describe("escapeHtml", () => {
     expect(escapeHtml(null)).toBe("");
     expect(escapeHtml(undefined)).toBe("");
     expect(escapeHtml(42)).toBe("42");
-  });
-});
-
-describe("sanitizeChartColor", () => {
-  it("allows known-safe color formats through unchanged", () => {
-    expect(sanitizeChartColor("#EE6666")).toBe("#EE6666");
-    expect(sanitizeChartColor("#fff")).toBe("#fff");
-    expect(sanitizeChartColor("rgb(10, 20, 30)")).toBe("rgb(10, 20, 30)");
-    expect(sanitizeChartColor("rgba(10, 20, 30, 0.5)")).toBe("rgba(10, 20, 30, 0.5)");
-    expect(sanitizeChartColor("hsl(200, 50%, 50%)")).toBe("hsl(200, 50%, 50%)");
-    expect(sanitizeChartColor("var(--chart-1)")).toBe("var(--chart-1)");
-  });
-
-  it("falls back to the default safe color for anything else, including an injection attempt", () => {
-    expect(sanitizeChartColor(`red;"></span><img src=x onerror=alert(1)>`)).toBe("var(--chart-1)");
-    expect(sanitizeChartColor("javascript:alert(1)")).toBe("var(--chart-1)");
-    expect(sanitizeChartColor("")).toBe("var(--chart-1)");
-    expect(sanitizeChartColor(null)).toBe("var(--chart-1)");
-    expect(sanitizeChartColor(undefined)).toBe("var(--chart-1)");
   });
 });
 

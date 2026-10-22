@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import { escapeHtml } from "@/lib/html";
 import { useI18n } from "vue-i18n";
 import { computed, ref } from "vue";
 import {
@@ -19,7 +18,7 @@ import {
   buildHistogramChartModel,
   formatCompactCount,
   formatHistogramTimestamp,
-  formatTooltipTimestamp,
+  buildHistogramTooltip,
   type HistogramChartRow,
 } from "@/utils/histogram-chart";
 import { useHistogramBrush } from "@/composables/useHistogramBrush";
@@ -122,37 +121,6 @@ const chartSubtitle = computed(() => {
   return parts.join(" • ");
 });
 
-function buildTooltipHtml(datum: HistogramChartRow): string {
-  const timeLabel = formatTooltipTimestamp(datum.ts, chartRange.value);
-  const model = chartModel.value;
-  const totalCount = typeof datum.total === "number" ? datum.total : 0;
-
-  let seriesHtml = "";
-  for (const s of model.series) {
-    const val = typeof datum[s.key] === "number" ? (datum[s.key] as number) : 0;
-    seriesHtml += `
-      <div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;">
-        <div style="display:flex;align-items:center;gap:0.5rem;">
-          <span style="width:8px;height:8px;border-radius:50%;background:${s.color};flex-shrink:0;"></span>
-          <span>${escapeHtml(s.label)}</span>
-        </div>
-        <strong style="font-variant-numeric:tabular-nums;">${val.toLocaleString()}</strong>
-      </div>`;
-  }
-
-  const totalHtml = model.series.length > 1
-    ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:0.5rem;padding-bottom:0.5rem;border-bottom:1px solid var(--border);font-size:0.75rem;color:var(--muted-foreground);">
-        <span>${escapeHtml(t('common.total'))}</span><strong>${totalCount.toLocaleString()}</strong>
-       </div>`
-    : "";
-
-  return `<div style="min-width:160px;padding:0.625rem 0.75rem;background:var(--popover);color:var(--popover-foreground);border-radius:0.5rem;border:1px solid var(--border);box-shadow:0 4px 12px rgba(0,0,0,0.12);font-size:0.8125rem;line-height:1.5;">
-    <div style="margin-bottom:0.375rem;font-size:0.75rem;font-weight:600;">${timeLabel}</div>
-    ${totalHtml}
-    <div style="display:flex;flex-direction:column;gap:0.25rem;">${seriesHtml}</div>
-  </div>`;
-}
-
 const tooltipTemplate = computed(() => {
   return (
     _payload: unknown,
@@ -161,7 +129,12 @@ const tooltipTemplate = computed(() => {
     nearestIndex?: number,
   ) => {
     if (!data || nearestIndex == null || !data[nearestIndex]) return "";
-    return buildTooltipHtml(data[nearestIndex]);
+    return buildHistogramTooltip({
+      datum: data[nearestIndex],
+      series: chartModel.value.series,
+      range: chartRange.value,
+      totalLabel: t('common.total'),
+    });
   };
 });
 

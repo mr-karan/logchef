@@ -729,5 +729,9 @@
   "askChef.send": "Invia",
   "askChef.stop": "Interrompi",
   "askChef.failed": "Ask Chef non è riuscito a rispondere. Riprova.",
-  "askChef.disabled": "Ask Chef è disattivato su questo server."
+  "askChef.disabled": "Ask Chef è disattivato su questo server.",
+  "dashboards.discardChangesTitle": "Scartare le modifiche?",
+  "dashboards.discardChangesConfirmation": "Scartare le modifiche non salvate a questa dashboard?",
+  "dashboards.discardChanges": "Scarta modifiche",
+  "dashboards.unsavedLeaveConfirmation": "Questa dashboard contiene modifiche non salvate. Uscire comunque?"
 }

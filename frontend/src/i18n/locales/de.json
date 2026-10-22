@@ -729,5 +729,9 @@
   "askChef.send": "Senden",
   "askChef.stop": "Stoppen",
   "askChef.failed": "Ask Chef konnte nicht antworten. Versuchen Sie es erneut.",
-  "askChef.disabled": "Ask Chef ist auf diesem Server deaktiviert."
+  "askChef.disabled": "Ask Chef ist auf diesem Server deaktiviert.",
+  "dashboards.discardChangesTitle": "Änderungen verwerfen?",
+  "dashboards.discardChangesConfirmation": "Nicht gespeicherte Änderungen an diesem Dashboard verwerfen?",
+  "dashboards.discardChanges": "Änderungen verwerfen",
+  "dashboards.unsavedLeaveConfirmation": "Dieses Dashboard enthält nicht gespeicherte Änderungen. Trotzdem verlassen?"
 }
