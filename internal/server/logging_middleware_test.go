@@ -77,18 +77,21 @@ func TestRequestLogsExcludeCredentials(t *testing.T) {
 	decoder := json.NewDecoder(strings.NewReader(logs.String()))
 	for decoder.More() {
 		var record struct {
-			Message    string `json:"msg"`
-			Method     string `json:"method"`
-			Path       string `json:"path"`
-			Route      string `json:"route"`
-			Status     int    `json:"status"`
-			DurationMS *int64 `json:"duration_ms"`
-			TeamID     string `json:"team_id"`
-			SourceID   string `json:"source_id"`
-			Token      string `json:"token"`
+			Message    string  `json:"msg"`
+			Method     string  `json:"method"`
+			Path       *string `json:"path"`
+			Route      string  `json:"route"`
+			Status     int     `json:"status"`
+			DurationMS *int64  `json:"duration_ms"`
+			TeamID     string  `json:"team_id"`
+			SourceID   string  `json:"source_id"`
+			Token      string  `json:"token"`
 		}
 		if err := decoder.Decode(&record); err != nil {
 			t.Fatal(err)
+		}
+		if record.Route != "" && record.Path != nil {
+			t.Error("log contains duplicate path attribute")
 		}
 		if record.Message == "request error" {
 			foundError = true
@@ -129,6 +132,14 @@ func TestFailureLogsExcludeCredentials(t *testing.T) {
 			message: "panic recovered",
 			handler: func(_ *Server, _ fiber.Ctx) error {
 				panic("test handler panic")
+			},
+		},
+		{
+			name:    "missing source authorization",
+			message: "route reached handler without source authorization",
+			handler: func(s *Server, c fiber.Ctx) error {
+				s.authorizedSource(c)
+				return nil
 			},
 		},
 		{
@@ -175,12 +186,15 @@ func TestFailureLogsExcludeCredentials(t *testing.T) {
 			decoder := json.NewDecoder(strings.NewReader(logs.String()))
 			for decoder.More() {
 				var record struct {
-					Message string `json:"msg"`
-					Path    string `json:"path"`
-					Route   string `json:"route"`
+					Message string  `json:"msg"`
+					Path    *string `json:"path"`
+					Route   string  `json:"route"`
 				}
 				if err := decoder.Decode(&record); err != nil {
 					t.Fatal(err)
+				}
+				if record.Route != "" && record.Path != nil {
+					t.Error("log contains duplicate path attribute")
 				}
 				if record.Message == tt.message {
 					found = true
@@ -196,10 +210,10 @@ func TestFailureLogsExcludeCredentials(t *testing.T) {
 	}
 }
 
-func TestRequestLogsRetainRedactedPaths(t *testing.T) {
+func TestRequestLogsRetainRedactedRoutes(t *testing.T) {
 	for i, tt := range []struct {
-		path, wantPath string
-		status         int
+		path, wantRoute string
+		status          int
 	}{
 		{"/api/v1/query-shares%2F12345678-secret-token", "<unmatched>", http.StatusNotFound},
 		{"/api/v1/unknown/12345678-secret-token", "<unmatched>", http.StatusNotFound},
@@ -229,20 +243,23 @@ func TestRequestLogsRetainRedactedPaths(t *testing.T) {
 			decoder := json.NewDecoder(strings.NewReader(logs.String()))
 			for decoder.More() {
 				var record struct {
-					Message string `json:"msg"`
-					Path    string `json:"path"`
-					Route   string `json:"route"`
+					Message string  `json:"msg"`
+					Path    *string `json:"path"`
+					Route   string  `json:"route"`
 				}
 				if err := decoder.Decode(&record); err != nil {
 					t.Fatal(err)
 				}
-				if record.Path != "" && record.Path != tt.wantPath {
-					t.Errorf("%s log path = %q, want %q", record.Message, record.Path, tt.wantPath)
+				if record.Route != "" && record.Path != nil {
+					t.Error("log contains duplicate path attribute")
+				}
+				if record.Route != "" && record.Route != tt.wantRoute {
+					t.Errorf("%s log route = %q, want %q", record.Message, record.Route, tt.wantRoute)
 				}
 				if record.Message == "http" {
 					found = true
-					if record.Path != tt.wantPath || record.Route == "" {
-						t.Errorf("path = %q, route = %q, want redacted path %q and route", record.Path, record.Route, tt.wantPath)
+					if record.Route != tt.wantRoute {
+						t.Errorf("route = %q, want %q", record.Route, tt.wantRoute)
 					}
 				}
 			}
@@ -302,7 +319,7 @@ func TestAuthMiddlewareRedactsSessionCookies(t *testing.T) {
 	}
 }
 
-func TestUnmatchedErrorHandlerLogsExcludePaths(t *testing.T) {
+func TestUnmatchedErrorHandlerLogsRetainRedactedRoute(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	s := New(ServerOptions{Config: &config.Config{}, SQLite: newServerTestDB(t), Logger: logger, FS: http.Dir(t.TempDir())})
@@ -323,17 +340,21 @@ func TestUnmatchedErrorHandlerLogsExcludePaths(t *testing.T) {
 	decoder := json.NewDecoder(strings.NewReader(logs.String()))
 	for decoder.More() {
 		var record struct {
-			Message string `json:"msg"`
-			Path    string `json:"path"`
-			Error   string `json:"error"`
+			Message string  `json:"msg"`
+			Path    *string `json:"path"`
+			Error   string  `json:"error"`
+			Route   string  `json:"route"`
 		}
 		if err := decoder.Decode(&record); err != nil {
 			t.Fatal(err)
 		}
+		if record.Route != "" && record.Path != nil {
+			t.Error("log contains duplicate path attribute")
+		}
 		if record.Message == "request error" {
 			found = true
-			if record.Path != "<unmatched>" {
-				t.Errorf("error log path = %q, want unmatched placeholder", record.Path)
+			if record.Route != "<unmatched>" {
+				t.Errorf("error log route = %q, want unmatched placeholder", record.Route)
 			}
 			if record.Error != "Method Not Allowed" {
 				t.Errorf("error log message = %q, want Method Not Allowed", record.Error)

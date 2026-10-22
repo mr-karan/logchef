@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   are applied. A key such as `[Server] Port` takes effect, and environment
   overrides preserve other values in that section. File keys or sections that
   differ only in case are rejected.
+- Request logs, `request error`, and `panic recovered` logs use `route` with a
+  redacted route template instead of `path` with the raw path. Dashboards or
+  alerts filtering on `path` must switch to `route`.
+- Non-empty `server.frontend_url`, `alerts.frontend_url`, `alerts.external_url`,
+  and `ai.base_url` settings require an absolute http(s) URL with a host.
 
 ## [2.4.0] - 2026-10-13
 
