@@ -825,7 +825,7 @@ func TestValidateConnectionProbesRealQueryPath(t *testing.T) {
 }
 
 // Finding #18: lifecycle operations for the same source ID must be serialised so
-// concurrent init/remove/health calls cannot deadlock or interleave unsafely.
+// concurrent init/remove/status-check calls cannot deadlock or interleave unsafely.
 func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 	t.Parallel()
 
@@ -836,10 +836,9 @@ func TestProviderLifecycleOpsAreConcurrencySafe(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 50 {
-		wg.Add(4)
+		wg.Add(3)
 		go func() { defer wg.Done(); _ = provider.InitializeSource(context.Background(), source) }()
 		go func() { defer wg.Done(); _ = provider.RemoveSource(source.ID) }()
-		go func() { defer wg.Done(); _ = provider.GetSourceHealth(context.Background(), source.ID) }()
 		go func() { defer wg.Done(); _ = provider.CheckSourceConnectionStatus(context.Background(), source) }()
 	}
 	wg.Wait()
@@ -856,5 +855,34 @@ func TestOrderFieldNamesPrioritizesMetadata(t *testing.T) {
 	want := []string{"_time", "level", "_msg", "service"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("unexpected ordered fields: got=%v want=%v", got, want)
+	}
+}
+
+func TestProviderSourceMetadata(t *testing.T) {
+	t.Parallel()
+
+	service := datasource.NewService(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	provider := newTestProvider(nil)
+	service.Register(provider)
+	source := &models.Source{SourceType: models.SourceTypeVictoriaLogs}
+	if err := service.ApplySourceMetadata(source); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name      string
+		got, want any
+	}{
+		{"query languages", source.QueryLanguages, []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageLogsQL}},
+		{"saved query editor modes", source.SavedQueryEditorModes, []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative}},
+		{"alert editor modes", source.AlertEditorModes, []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative}},
+		{"capabilities", source.Capabilities, []string{"schema_inspection", "histogram", "field_values", "source_inspection", "live_tail", "ai_sql_generation"}},
+		{"logchefql needs columns", provider.Describe().LogchefQLNeedsColumns, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !reflect.DeepEqual(tt.got, tt.want) {
+				t.Fatalf("got %v, want %v", tt.got, tt.want)
+			}
+		})
 	}
 }

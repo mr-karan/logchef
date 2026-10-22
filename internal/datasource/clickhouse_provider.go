@@ -30,37 +30,22 @@ func (p *ClickHouseProvider) Type() models.SourceType {
 	return models.SourceTypeClickHouse
 }
 
-func (p *ClickHouseProvider) Capabilities() []Capability {
-	return []Capability{
-		CapabilitySchemaInspection,
-		CapabilityHistogram,
-		CapabilityFieldValues,
-		CapabilitySourceInspection,
-		CapabilityAISQLGeneration,
-		CapabilityLogContext,
-		CapabilityExports,
-		CapabilityLiveTail,
-	}
-}
-
-func (p *ClickHouseProvider) SupportedQueryLanguages() []models.QueryLanguage {
-	return []models.QueryLanguage{
-		models.QueryLanguageLogchefQL,
-		models.QueryLanguageClickHouseSQL,
-	}
-}
-
-func (p *ClickHouseProvider) SupportedSavedQueryEditorModes() []models.SavedQueryEditorMode {
-	return []models.SavedQueryEditorMode{
-		models.SavedQueryEditorModeBuilder,
-		models.SavedQueryEditorModeNative,
-	}
-}
-
-func (p *ClickHouseProvider) SupportedAlertEditorModes() []models.AlertEditorMode {
-	return []models.AlertEditorMode{
-		models.AlertEditorModeCondition,
-		models.AlertEditorModeNative,
+func (p *ClickHouseProvider) Describe() Descriptor {
+	return Descriptor{
+		Capabilities: []Capability{
+			CapabilitySchemaInspection,
+			CapabilityHistogram,
+			CapabilityFieldValues,
+			CapabilitySourceInspection,
+			CapabilityAISQLGeneration,
+			CapabilityLogContext,
+			CapabilityExports,
+			CapabilityLiveTail,
+		},
+		QueryLanguages:        []models.QueryLanguage{models.QueryLanguageLogchefQL, models.QueryLanguageClickHouseSQL},
+		SavedQueryEditorModes: []models.SavedQueryEditorMode{models.SavedQueryEditorModeBuilder, models.SavedQueryEditorModeNative},
+		AlertEditorModes:      []models.AlertEditorMode{models.AlertEditorModeCondition, models.AlertEditorModeNative},
+		LogchefQLNeedsColumns: true,
 	}
 }
 
