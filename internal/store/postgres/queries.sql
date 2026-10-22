@@ -427,8 +427,9 @@ UPDATE export_jobs
 SET
     status = $1,
     error_message = NULL,
-    updated_at = $2
-WHERE id = $3
+    updated_at = now()
+WHERE id = $2
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: CompleteExportJob :one
@@ -444,6 +445,7 @@ SET
     completed_at = $6,
     updated_at = $7
 WHERE id = $8
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: FailExportJob :one
@@ -551,7 +553,8 @@ SELECT * FROM api_tokens WHERE user_id = $1 ORDER BY created_at DESC;
 UPDATE api_tokens
 SET last_used_at = now(),
     updated_at = now()
-WHERE id = $1;
+WHERE id = $1
+  AND (last_used_at IS NULL OR last_used_at < now() - interval '60 seconds');
 
 -- name: DeleteAPIToken :exec
 -- Delete an API token by ID and user ID (ensure user owns the token)
@@ -1252,3 +1255,15 @@ WHERE NOT EXISTS (
     WHERE live.grant_id = oauth_refresh_tokens.grant_id
       AND live.expires_at > sqlc.arg(now)::timestamptz
 );
+
+-- name: ReapInterruptedExportJobs :many
+UPDATE export_jobs
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = now()
+WHERE id IN (
+    SELECT id FROM export_jobs
+    WHERE status IN ('pending', 'running') AND export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+    ORDER BY id
+    LIMIT 100
+)
+  AND status IN ('pending', 'running') AND export_jobs.updated_at < now() - sqlc.arg(max_age_seconds)::bigint * interval '1 second'
+RETURNING *;

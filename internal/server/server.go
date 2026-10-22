@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"runtime/debug"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/mr-karan/logchef/internal/alerts"
@@ -75,7 +77,19 @@ type Server struct {
 	askChef       *askchef.Agent   // nil when Ask Chef is disabled
 	askChefTurns  askChefTurns
 
-	stop chan struct{} // closed by Shutdown to stop background maintenance loops
+	listener        net.Listener
+	baseCtx         context.Context //nolint:containedctx // Server owns the cancellation and waits for its workers.
+	backgroundMu    sync.Mutex
+	shutdownOnce    sync.Once
+	shutdownErr     error
+	backgroundDone  chan struct{}
+	historyQueue    chan *models.QueryHistory
+	historyDropped  atomic.Uint64
+	historyDrainCtx context.Context //nolint:containedctx // Published before the stop channel closes.
+	tokenQueue      chan int
+	tokenLastQueued map[int]time.Time
+	tokenDropped    atomic.Uint64
+	stop            chan struct{} // closed by Shutdown to stop background maintenance loops
 	// cancelRequests cancels the base context every request runs on (see
 	// requestContext).
 	cancelRequests context.CancelFunc
@@ -180,8 +194,13 @@ func New(opts ServerOptions) *Server {
 			MaxEntries:         opts.Config.DashboardCache.MaxEntries,
 			MaxConcurrentFills: opts.Config.DashboardCache.MaxConcurrentFills,
 		}),
-		stop:           make(chan struct{}),
-		cancelRequests: cancelRequests,
+		baseCtx:         baseCtx,
+		backgroundDone:  make(chan struct{}),
+		historyQueue:    make(chan *models.QueryHistory, 128),
+		tokenQueue:      make(chan int, 128),
+		tokenLastQueued: make(map[int]time.Time),
+		stop:            make(chan struct{}),
+		cancelRequests:  cancelRequests,
 	}
 
 	indexHTML, err := loadIndexHTML(opts.FS, opts.Config.Server.BasePath())
@@ -191,8 +210,10 @@ func New(opts ServerOptions) *Server {
 	s.indexHTML = indexHTML
 	s.askChef = s.newAskChef(opts.AskChefChat)
 
-	// Register all application routes.
+	s.reapInterruptedExportJobs()
 	s.setupRoutes()
+	s.startQueryHistoryWorker()
+	s.startTokenLastUsedWorker()
 	s.startBackgroundCleanup()
 
 	return s
@@ -546,19 +567,68 @@ func (s *Server) setupRoutes() {
 func (s *Server) Start() error {
 	addr := fmt.Sprintf("%s:%d", s.config.Server.Host, s.config.Server.Port)
 	s.log.Info("starting http server", "address", addr)
-	return s.app.Listen(addr, fiber.ListenConfig{DisableStartupMessage: true})
+	var listenConfig net.ListenConfig
+	listener, err := listenConfig.Listen(s.baseCtx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	s.backgroundMu.Lock()
+	select {
+	case <-s.stop:
+		s.backgroundMu.Unlock()
+		_ = listener.Close()
+		return nil
+	default:
+	}
+	s.listener = listener
+	s.backgroundMu.Unlock()
+	return s.app.Listener(listener, fiber.ListenConfig{DisableStartupMessage: true})
 }
 
-// Shutdown gracefully shuts down the Fiber server within the given context timeout.
-// It also stops background maintenance loops (e.g. the expired-session/export-job
-// sweeper) and waits for them to exit before returning.
+// Shutdown closes admission, cancels workers, and waits for at most five seconds.
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.log.Info("shutting down http server")
-	close(s.stop)
-	s.cancelRequests()
-	if s.dashCache != nil {
-		s.dashCache.Close()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	s.shutdownOnce.Do(func() {
+		s.backgroundMu.Lock()
+		s.historyDrainCtx = ctx
+		close(s.stop)
+		if s.listener != nil {
+			_ = s.listener.Close()
+		}
+		s.cancelRequests()
+		s.backgroundMu.Unlock()
+		go func() {
+			err := s.app.ShutdownWithContext(ctx)
+			if err != nil && !errors.Is(err, fiber.ErrNotRunning) && !errors.Is(err, net.ErrClosed) {
+				s.shutdownErr = err
+				s.log.Warn("HTTP shutdown failed", "error", err)
+			}
+			s.wg.Wait()
+			s.logBackgroundDrops()
+			if s.dashCache != nil {
+				s.dashCache.Close()
+			}
+			close(s.backgroundDone)
+		}()
+	})
+	select {
+	case <-s.backgroundDone:
+		return s.shutdownErr
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	s.wg.Wait()
-	return s.app.ShutdownWithContext(ctx)
+}
+
+func (s *Server) startBackgroundTask(run func()) bool {
+	s.backgroundMu.Lock()
+	defer s.backgroundMu.Unlock()
+	select {
+	case <-s.stop:
+		return false
+	default:
+		s.wg.Go(run)
+		return true
+	}
 }

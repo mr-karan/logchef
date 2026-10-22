@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"mime"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -74,18 +76,11 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		return SendErrorWithType(c, fiber.StatusBadRequest, "Unsupported export format. Use csv or ndjson.", models.ValidationErrorType)
 	}
 
-	if req.QueryTimeout == nil {
-		defaultTimeout := s.config.Export.DefaultTimeoutSeconds
-		req.QueryTimeout = &defaultTimeout
-	}
-	if err := models.ValidateQueryTimeout(req.QueryTimeout); err != nil {
+	timeout, err := s.exportJobTimeout(req.QueryTimeout)
+	if err != nil {
 		return SendErrorWithType(c, fiber.StatusBadRequest, err.Error(), models.ValidationErrorType)
 	}
-	if s.config.Export.MaxTimeoutSeconds > 0 && *req.QueryTimeout > s.config.Export.MaxTimeoutSeconds {
-		return SendErrorWithType(c, fiber.StatusBadRequest,
-			fmt.Sprintf("Query timeout cannot exceed %d seconds for Download", s.config.Export.MaxTimeoutSeconds),
-			models.ValidationErrorType)
-	}
+	req.QueryTimeout = &timeout
 
 	payload, err := json.Marshal(req)
 	if err != nil {
@@ -108,7 +103,7 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 
 	// Admit synchronously so a saturated cap returns 429 to the client
 	// instead of accepting the job and async-failing it.
-	queryCtx, cancel := context.WithCancel(context.Background())
+	queryCtx, cancel := context.WithTimeout(s.baseCtx, time.Duration(*req.QueryTimeout)*time.Second+exportQueryGrace)
 	if err := queryTracker.StartQueryWithID(
 		job.ID,
 		QueryClassExport,
@@ -141,7 +136,14 @@ func (s *Server) handleCreateExportJob(c fiber.Ctx) error {
 		QueryTimeout: req.QueryTimeout,
 		Variables:    req.Variables,
 	}
-	go s.runExportJob(queryCtx, job.ID, cancel, teamID, sourceID, user.Email, runReq)
+	if !s.startBackgroundTask(func() {
+		s.runExportJob(queryCtx, job.ID, cancel, teamID, sourceID, user.Email, runReq)
+	}) {
+		cancel()
+		queryTracker.RemoveQuery(job.ID)
+		s.failExportJob(queryCtx, job.ID, "", "export cancelled")
+		return SendErrorWithType(c, fiber.StatusServiceUnavailable, "Server is shutting down", models.GeneralErrorType)
+	}
 
 	return SendSuccess(c, fiber.StatusAccepted, exportJobResponse(teamID, job))
 }
@@ -246,29 +248,19 @@ func (s *Server) authorizeExportJob(c fiber.Ctx) (*models.ExportJob, bool) {
 	return job, true
 }
 
-// runExportJob runs the export pipeline. The caller must have already
-// reserved an admission slot via queryTracker.StartQueryWithID — this
-// function takes ownership and releases it on exit.
+// runExportJob releases its pre-admitted query slot when the pipeline exits.
 func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel context.CancelFunc, teamID models.TeamID, sourceID models.SourceID, userEmail string, req exportLogsRequest) {
 	defer cancel()
 	defer queryTracker.RemoveQuery(jobID)
-	// This runs in its own goroutine: a panic here would crash the whole
-	// process (Fiber's recover middleware only guards request handlers).
-	// Recover, log, and mark the job failed instead.
-	defer func() {
-		if r := recover(); r != nil {
-			s.log.Error("export job panicked", "job_id", jobID, "panic", r)
-			_ = s.sqlite.FailExportJob(context.WithoutCancel(queryCtx), jobID, "internal error while running export", time.Now().UTC())
-		}
-	}()
-
-	// Job-state writes must record the outcome even if the query context is
-	// canceled, so derive a detached context that still carries request values.
-	bgCtx := context.WithoutCancel(queryCtx)
-
-	now := time.Now().UTC()
-	if err := s.sqlite.UpdateExportJobRunning(bgCtx, jobID, now); err != nil {
-		s.log.Error("failed to mark export job running", "error", err, "job_id", jobID)
+	var filePath string
+	var tmpFile *os.File
+	complete := false
+	defer func() { s.finishExportJob(queryCtx, jobID, tmpFile, filePath, complete, recover()) }()
+	runningCtx, runningCancel := context.WithTimeout(queryCtx, time.Second)
+	err := s.sqlite.UpdateExportJobRunning(runningCtx, jobID)
+	runningCancel()
+	if err != nil {
+		s.failExportJob(queryCtx, jobID, "", "failed to mark export running")
 		return
 	}
 
@@ -282,19 +274,19 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	}
 	processedSQL, err := template.SubstituteVariables(req.RawSQL, vars)
 	if err != nil {
-		s.failExportJob(bgCtx, jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
+		s.failExportJob(queryCtx, jobID, "", fmt.Sprintf("Variable substitution failed: %v", err))
 		return
 	}
 
-	source, err := s.sqlite.GetSource(bgCtx, sourceID)
+	source, err := s.sqlite.GetSource(queryCtx, sourceID)
 	if err != nil {
-		s.failExportJob(bgCtx, jobID, "", "Source not found")
+		s.failExportJob(queryCtx, jobID, "", "Source not found")
 		return
 	}
 	client, err := s.clickhouse.GetConnection(sourceID)
 	if err != nil {
 		s.log.Error("failed to get clickhouse client for export job", "source_id", sourceID, "error", err, "job_id", jobID)
-		s.failExportJob(bgCtx, jobID, "", "Failed to get source connection")
+		s.failExportJob(queryCtx, jobID, "", "Failed to get source connection")
 		return
 	}
 
@@ -309,7 +301,7 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 	qb := clickhouse.NewExtendedQueryBuilder(source.GetFullTableName(), s.config.Export.MaxRows)
 	buildResult, err := qb.BuildRawQueryWithLimitPolicy(processedSQL, req.Limit, exportLimit, s.config.Export.MaxRows)
 	if err != nil {
-		s.failExportJob(bgCtx, jobID, "", fmt.Sprintf("Invalid request: %v", err))
+		s.failExportJob(queryCtx, jobID, "", fmt.Sprintf("Invalid request: %v", err))
 		return
 	}
 
@@ -326,42 +318,56 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 
 	_, extension := exportContentType(req.Format)
 	fileName := fmt.Sprintf("logchef-%s.%s", time.Now().UTC().Format("20060102-150405"), extension)
-	tmpFile, err := os.CreateTemp("", fmt.Sprintf("logchef-export-%s-*."+extension, jobID))
+	tmpFile, err = os.CreateTemp("", fmt.Sprintf("logchef-export-%s-*."+extension, jobID))
 	if err != nil {
 		s.log.Error("failed to create export artifact", "error", err, "job_id", jobID)
-		s.failExportJob(bgCtx, jobID, "", "Failed to create export artifact")
+		s.failExportJob(queryCtx, jobID, "", "Failed to create export artifact")
 		return
 	}
-	filePath := tmpFile.Name()
+	filePath = tmpFile.Name()
 	writer := newExportRowWriter(req.Format, bufio.NewWriter(tmpFile), jobID, buildResult.AppliedLimit)
 
 	stats, err := client.QueryStream(queryCtx, buildResult.SQL, opts, writer)
 	if err != nil {
-		s.log.Error("failed to execute export job", "error", err, "source_id", sourceID, "job_id", jobID)
+		level := slog.LevelError
+		if errors.Is(queryCtx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+			level = slog.LevelDebug
+		}
+		s.log.Log(queryCtx, level, "failed to execute export job", "error", err, "source_id", sourceID, "job_id", jobID)
 		_ = tmpFile.Close()
-		s.failExportJob(bgCtx, jobID, filePath, exportFailureMessage(err))
+		s.failExportJob(queryCtx, jobID, filePath, exportFailureMessage(err))
 		return
 	}
 	if err := tmpFile.Close(); err != nil {
 		s.log.Error("failed to close export artifact", "error", err, "job_id", jobID)
-		s.failExportJob(bgCtx, jobID, filePath, "Failed to finalize export artifact")
+		s.failExportJob(queryCtx, jobID, filePath, "Failed to finalize export artifact")
 		return
 	}
 
 	info, err := os.Stat(filePath)
 	if err != nil {
 		s.log.Error("failed to stat export artifact", "error", err, "job_id", jobID, "path", filePath)
-		s.failExportJob(bgCtx, jobID, filePath, "Failed to finalize export artifact")
+		s.failExportJob(queryCtx, jobID, filePath, "Failed to finalize export artifact")
 		return
 	}
 
+	if queryCtx.Err() != nil {
+		return
+	}
 	completedAt := time.Now().UTC()
-	if err := s.sqlite.CompleteExportJob(bgCtx, jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
-		s.log.Error("failed to complete export job", "error", err, "job_id", jobID)
-		s.failExportJob(bgCtx, jobID, filePath, "Failed to persist export metadata")
+	metadataCtx, metadataCancel := context.WithTimeout(queryCtx, time.Second)
+	defer metadataCancel()
+	if err := s.sqlite.CompleteExportJob(metadataCtx, jobID, fileName, filePath, stats.RowsReturned, info.Size(), completedAt); err != nil {
+		level := slog.LevelError
+		if errors.Is(queryCtx.Err(), context.Canceled) && errors.Is(err, context.Canceled) {
+			level = slog.LevelDebug
+		}
+		s.log.Log(queryCtx, level, "failed to complete export job", "error", err, "job_id", jobID)
+		s.failExportJob(queryCtx, jobID, filePath, "Failed to persist export metadata")
 		return
 	}
 
+	complete = true
 	s.log.Info("query.export.job.complete",
 		"user", userEmail,
 		"team_id", teamID,
@@ -376,6 +382,8 @@ func (s *Server) runExportJob(queryCtx context.Context, jobID string, cancel con
 }
 
 func (s *Server) failExportJob(ctx context.Context, jobID, filePath, message string) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Second)
+	defer cancel()
 	if filePath != "" {
 		if err := os.Remove(filePath); err != nil && !errors.Is(err, os.ErrNotExist) {
 			s.log.Warn("failed to remove partial export artifact", "error", err, "job_id", jobID, "path", filePath)
@@ -420,15 +428,16 @@ func buildExportJobDownloadURL(teamID models.TeamID, job *models.ExportJob) stri
 }
 
 func (s *Server) startBackgroundCleanup() {
-	s.wg.Go(func() {
+	s.startBackgroundTask(func() {
 		s.cleanupExpiredBackgroundState()
 
-		ticker := time.NewTicker(15 * time.Minute)
+		ticker := time.NewTicker(5 * time.Minute)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
+				queryTracker.Cleanup()
 				s.cleanupExpiredBackgroundState()
 			case <-s.stop:
 				return
@@ -438,7 +447,9 @@ func (s *Server) startBackgroundCleanup() {
 }
 
 func (s *Server) cleanupExpiredBackgroundState() {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	s.reapInterruptedExportJobs()
+	s.logBackgroundDrops()
+	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
 	defer cancel()
 
 	now := time.Now().UTC()
@@ -470,4 +481,80 @@ func (s *Server) cleanupExpiredBackgroundState() {
 	if err := s.sqlite.DeleteExpiredOAuthRows(ctx, now); err != nil {
 		s.log.Warn("failed to delete expired OAuth rows", "error", err)
 	}
+}
+
+const (
+	exportQueryGrace = 5 * time.Second
+	exportReapSlack  = 30 * time.Second
+)
+
+func (s *Server) reapInterruptedExportJobs() {
+	ctx, cancel := context.WithTimeout(s.baseCtx, 30*time.Second)
+	defer cancel()
+	maxTimeout := models.MaxQueryTimeoutSeconds
+	if s.config.Export.MaxTimeoutSeconds > 0 && s.config.Export.MaxTimeoutSeconds < maxTimeout {
+		maxTimeout = s.config.Export.MaxTimeoutSeconds
+	}
+	maxAge := time.Duration(maxTimeout)*time.Second + exportQueryGrace + exportReapSlack
+	for ctx.Err() == nil {
+		jobs, err := s.sqlite.ReapInterruptedExportJobs(ctx, maxAge)
+		if err != nil {
+			s.log.Error("failed to reap interrupted exports", "error", err)
+			return
+		}
+		if len(jobs) == 0 {
+			return
+		}
+		for _, job := range jobs {
+			// Legacy workers created partial files before recording a file path.
+			if _, err := uuid.Parse(job.ID); err == nil {
+				paths, err := filepath.Glob(filepath.Join(os.TempDir(), "logchef-export-"+job.ID+"-*"))
+				if err != nil {
+					s.log.Error("failed to find interrupted export artifacts", "error", err, "job_id", job.ID)
+				}
+				if job.FilePath != "" {
+					paths = append(paths, job.FilePath)
+				}
+				for _, path := range paths {
+					if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+						s.log.Error("failed to remove interrupted export artifact", "error", err, "job_id", job.ID)
+					}
+				}
+			}
+		}
+	}
+}
+
+func (s *Server) finishExportJob(ctx context.Context, jobID string, file *os.File, path string, complete bool, panicValue any) {
+	if file != nil {
+		_ = file.Close()
+	}
+	if !complete && path != "" {
+		_ = os.Remove(path)
+	}
+	if panicValue != nil {
+		s.log.Error("export job panicked", "job_id", jobID, "panic", panicValue)
+		s.failExportJob(ctx, jobID, path, "internal error while running export")
+	}
+	if ctx.Err() != nil && !complete {
+		reason := "export cancelled"
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+			reason = "export timed out"
+		}
+		s.failExportJob(ctx, jobID, path, reason)
+	}
+}
+
+func (s *Server) exportJobTimeout(requested *int) (int, error) {
+	timeout := s.config.Export.DefaultTimeoutSeconds
+	if requested != nil {
+		timeout = *requested
+	}
+	if err := models.ValidateQueryTimeout(&timeout); err != nil {
+		return 0, err
+	}
+	if s.config.Export.MaxTimeoutSeconds > 0 && timeout > s.config.Export.MaxTimeoutSeconds {
+		return 0, fmt.Errorf("query timeout cannot exceed %d seconds for Download", s.config.Export.MaxTimeoutSeconds)
+	}
+	return timeout, nil
 }

@@ -301,9 +301,7 @@ func (s *Server) streamPreviewQuery(
 			"limit_applied", stats.LimitApplied,
 			"truncated", stats.Truncated,
 		)
-		// Fire-and-forget with its own background context on purpose: the stream
-		// context is canceled once the response finishes writing.
-		s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage, //nolint:contextcheck // detached best-effort write
+		s.recordQueryHistory(user, teamID, sourceID, historyQueryText, historyLanguage,
 			int64(stats.ExecutionTimeMs), int64(stats.RowsReturned))
 		_ = w.Flush()
 	})

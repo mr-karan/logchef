@@ -74,6 +74,8 @@ func (s *Server) authenticateWithToken(c fiber.Ctx, authHeader string) error {
 		return SendErrorWithType(c, fiber.StatusInternalServerError, "Error validating token", models.GeneralErrorType)
 	}
 
+	s.recordTokenLastUsed(apiToken.ID)
+
 	// Record successful token authentication with user context
 	metrics.RecordAuthAttempt("token", true, user)
 

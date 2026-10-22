@@ -378,6 +378,9 @@ func Prepare(ctx context.Context, db DBTX) (*Queries, error) {
 	if q.queryVolumeByDayStmt, err = db.PrepareContext(ctx, queryVolumeByDay); err != nil {
 		return nil, fmt.Errorf("error preparing query QueryVolumeByDay: %w", err)
 	}
+	if q.reapInterruptedExportJobsStmt, err = db.PrepareContext(ctx, reapInterruptedExportJobs); err != nil {
+		return nil, fmt.Errorf("error preparing query ReapInterruptedExportJobs: %w", err)
+	}
 	if q.removeCollectionItemStmt, err = db.PrepareContext(ctx, removeCollectionItem); err != nil {
 		return nil, fmt.Errorf("error preparing query RemoveCollectionItem: %w", err)
 	}
@@ -1081,6 +1084,11 @@ func (q *Queries) Close() error {
 			err = fmt.Errorf("error closing queryVolumeByDayStmt: %w", cerr)
 		}
 	}
+	if q.reapInterruptedExportJobsStmt != nil {
+		if cerr := q.reapInterruptedExportJobsStmt.Close(); cerr != nil {
+			err = fmt.Errorf("error closing reapInterruptedExportJobsStmt: %w", cerr)
+		}
+	}
 	if q.removeCollectionItemStmt != nil {
 		if cerr := q.removeCollectionItemStmt.Close(); cerr != nil {
 			err = fmt.Errorf("error closing removeCollectionItemStmt: %w", cerr)
@@ -1418,6 +1426,7 @@ type Queries struct {
 	pruneExpiredQuerySharesStmt           *sql.Stmt
 	pruneQueryHistoryForUserStmt          *sql.Stmt
 	queryVolumeByDayStmt                  *sql.Stmt
+	reapInterruptedExportJobsStmt         *sql.Stmt
 	removeCollectionItemStmt              *sql.Stmt
 	removeCollectionMemberStmt            *sql.Stmt
 	removeCollectionTeamStmt              *sql.Stmt
@@ -1578,6 +1587,7 @@ func (q *Queries) WithTx(tx *sql.Tx) *Queries {
 		pruneExpiredQuerySharesStmt:           q.pruneExpiredQuerySharesStmt,
 		pruneQueryHistoryForUserStmt:          q.pruneQueryHistoryForUserStmt,
 		queryVolumeByDayStmt:                  q.queryVolumeByDayStmt,
+		reapInterruptedExportJobsStmt:         q.reapInterruptedExportJobsStmt,
 		removeCollectionItemStmt:              q.removeCollectionItemStmt,
 		removeCollectionMemberStmt:            q.removeCollectionMemberStmt,
 		removeCollectionTeamStmt:              q.removeCollectionTeamStmt,

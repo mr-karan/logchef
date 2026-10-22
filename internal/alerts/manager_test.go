@@ -445,3 +445,55 @@ func TestCanceledEvaluationDoesNotRecordFailure(t *testing.T) {
 		t.Fatalf("cancellation logged an evaluation error: %s", logs.String())
 	}
 }
+
+func TestStopCancelsActiveEvaluation(t *testing.T) {
+	var logs bytes.Buffer
+	log := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	db, err := sqlite.New(context.Background(), sqlite.Options{Logger: log, Config: config.SQLiteConfig{Path: filepath.Join(t.TempDir(), "alerts.db")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	source := &models.Source{Name: "logs", MetaTSField: "timestamp", Connection: models.ConnectionInfo{Host: "localhost:9000", Database: "logs", TableName: "logs"}}
+	if err := source.SyncConnectionConfig(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.CreateSource(context.Background(), source); err != nil {
+		t.Fatal(err)
+	}
+	alert := &models.Alert{SourceID: source.ID, Name: "slow", QueryLanguage: models.QueryLanguageClickHouseSQL, EditorMode: models.AlertEditorModeNative, Query: "SELECT 1", LookbackSeconds: 60, ThresholdOperator: models.AlertThresholdGreaterThan, FrequencySeconds: 60, Severity: models.AlertSeverityWarning, IsActive: true, LastState: models.AlertStateResolved}
+	if err := db.CreateAlert(context.Background(), alert); err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(Options{Logger: log, DB: db, Config: config.AlertsConfig{Enabled: true}})
+	for _, failure := range []error{context.Canceled, context.DeadlineExceeded} {
+		logs.Reset()
+		manager.evalFn = func(context.Context, *models.Alert) error { return failure }
+		manager.evaluateCycle(context.Background())
+		if !strings.Contains(logs.String(), "level=ERROR msg=\"alert evaluation failed\"") {
+			t.Errorf("evaluation failure missing error log: %s", logs.String())
+		}
+	}
+	logs.Reset()
+	entered := make(chan struct{})
+	manager.evalFn = func(ctx context.Context, _ *models.Alert) error { close(entered); <-ctx.Done(); return ctx.Err() }
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	manager.Start(ctx)
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("evaluation did not start")
+	}
+	start := time.Now()
+	manager.Stop()
+	if elapsed := time.Since(start); elapsed > 100*time.Millisecond {
+		t.Fatalf("Stop waited %s for active evaluation", elapsed)
+	}
+	if strings.Contains(logs.String(), "level=ERROR") {
+		t.Errorf("shutdown cancellation logged as error: %s", logs.String())
+	}
+	if !strings.Contains(logs.String(), "level=DEBUG msg=\"alert evaluation failed\"") {
+		t.Errorf("shutdown cancellation missing debug log: %s", logs.String())
+	}
+}

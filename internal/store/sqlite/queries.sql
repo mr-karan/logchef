@@ -420,8 +420,9 @@ UPDATE export_jobs
 SET
     status = ?,
     error_message = NULL,
-    updated_at = ?
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 WHERE id = ?
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: CompleteExportJob :one
@@ -437,6 +438,7 @@ SET
     completed_at = ?,
     updated_at = ?
 WHERE id = ?
+  AND status IN ('pending', 'running')
 RETURNING id;
 
 -- name: FailExportJob :one
@@ -542,9 +544,10 @@ SELECT * FROM api_tokens WHERE user_id = ? ORDER BY created_at DESC;
 -- name: UpdateAPITokenLastUsed :exec
 -- Update the last used timestamp for an API token
 UPDATE api_tokens
-SET last_used_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now'),
-    updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
-WHERE id = ?;
+SET last_used_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+    updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id = ?
+  AND (last_used_at IS NULL OR julianday(last_used_at) < julianday('now', '-60 seconds'));
 
 -- name: DeleteAPIToken :exec
 -- Delete an API token by ID and user ID (ensure user owns the token)
@@ -1247,3 +1250,16 @@ WHERE NOT EXISTS (
     WHERE live.grant_id = oauth_refresh_tokens.grant_id
       AND live.expires_at > sqlc.arg(now)
 );
+
+-- name: ReapInterruptedExportJobs :many
+-- Legacy workers stored UTC timestamps with a Go zone suffix.
+UPDATE export_jobs
+SET status = 'failed', error_message = 'interrupted by restart', updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+WHERE id IN (
+    SELECT id FROM export_jobs
+    WHERE status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(sqlc.arg(max_age_seconds) AS INTEGER) / 86400.0
+    ORDER BY id
+    LIMIT 100
+)
+  AND status IN ('pending', 'running') AND julianday(replace(export_jobs.updated_at, ' +0000 UTC', 'Z')) < julianday('now') - CAST(sqlc.arg(max_age_seconds) AS INTEGER) / 86400.0
+RETURNING *;
