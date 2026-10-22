@@ -1,5 +1,5 @@
 import { ref } from "vue";
-import type { Ref } from "vue";
+import type { ComputedRef, Ref } from "vue";
 import type { APIErrorResponse } from "@/api/types";
 import { useApiQuery } from "@/composables/useApiQuery";
 import { useLoadingState } from "@/composables/useLoadingState";
@@ -12,8 +12,8 @@ export interface BaseState<T> {
 }
 
 export function useBaseStore<T>(initialState: T): BaseState<T> & {
-  isLoading: Ref<boolean>;
-  loadingStates: Ref<Record<string, boolean>>;
+  isLoading: ComputedRef<boolean>;
+  loadingStates: ComputedRef<Readonly<Record<string, boolean>>>;
   withLoading: <R>(key: string, fn: () => Promise<R>) => Promise<R>;
   isLoadingOperation: (key: string) => boolean;
   startLoading: (key: string) => void;
@@ -22,7 +22,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   callApi: <R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
-    onSuccess?: (data: R | null) => void;
+    onSuccess?: (data: R | null) => void | Promise<void>;
     onError?: (error: APIErrorResponse) => void;
     successMessage?: string;
     errorMessage?: string;
@@ -42,9 +42,6 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     startLoading,
     stopLoading
   } = useLoadingState();
-
-  // Use our new API query composable
-  const { execute } = useApiQuery();
 
   function handleError(err: Error | APIErrorResponse, operation: string): { success: false; error: APIErrorResponse } {
     // Handle canceled requests silently - don't show error or store in state
@@ -85,7 +82,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
   async function callApi<R>(options: {
     apiCall: () => Promise<any>;
     operationKey?: string;
-    onSuccess?: (data: R | null) => void;
+    onSuccess?: (data: R | null) => void | Promise<void>;
     onError?: (error: APIErrorResponse) => void;
     successMessage?: string;
     errorMessage?: string;
@@ -93,7 +90,9 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
     defaultData?: R;
   }): Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }> {
     const showToast = options.showToast !== false;
-    
+    const { execute } = useApiQuery<R>();
+    error.value = null;
+
     const executeApiCall = async (): Promise<{ success: boolean; data?: R | null; error?: APIErrorResponse }> => {
       try {
         const result = await execute(options.apiCall, {
@@ -101,7 +100,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
           errorMessage: options.errorMessage,
           showToast: showToast,
           defaultData: options.defaultData,
-          onSuccess: options.onSuccess as ((data: unknown) => void) | undefined,
+          onSuccess: options.onSuccess,
           onError: (err) => {
             error.value = err;
             options.onError?.(err);
@@ -109,7 +108,7 @@ export function useBaseStore<T>(initialState: T): BaseState<T> & {
         });
         
         if (result.success) {
-          return { success: true, data: result.data as R | null };
+          return { success: true, data: result.data };
         } else {
           return { success: false, error: result.error ?? undefined };
         }

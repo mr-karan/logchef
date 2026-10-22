@@ -13,7 +13,7 @@ export function useApiQuery<T>() {
       successMessage?: string;
       errorMessage?: string;
       showToast?: boolean;
-      onSuccess?: (data: T | null) => void;  // Allow null in success handler
+      onSuccess?: (data: T | null) => void | Promise<void>;
       onError?: (error: APIErrorResponse) => void;
       defaultData?: T;  // New option for fallback data
     }
@@ -30,7 +30,7 @@ export function useApiQuery<T>() {
         data.value = resultData;
 
         // Pass data to success handler
-        options?.onSuccess?.(resultData);
+        await options?.onSuccess?.(resultData);
         return { success: true, data: resultData };
       } else {
         // Handle API error response

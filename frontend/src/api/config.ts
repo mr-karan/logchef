@@ -77,13 +77,14 @@ api.interceptors.response.use(
       // Only show the toast if:
       // 1. We're not on the login page already
       // 2. This isn't the first session check when the app loads
-      if (!isOnLoginPage && !isInitialSessionCheck) {
-        // Create a custom error object with the specific message and error type
-        const sessionError = {
-          status: "error",
-          message: "Your session has expired. Please log in again.",
-          error_type: "AuthenticationError",
-        };
+      const showSessionToast = !isOnLoginPage && !isInitialSessionCheck;
+      const sessionError = {
+        status: "error",
+        message: "Your session has expired. Please log in again.",
+        error_type: "AuthenticationError",
+        _toastShown: showSessionToast,
+      };
+      if (showSessionToast) {
         showErrorToast(sessionError);
       }
 
@@ -93,7 +94,7 @@ api.interceptors.response.use(
         query: { redirect: currentPath },
         replace: true // Replace current history entry to avoid navigation issues after login
       });
-      return Promise.reject(errorResponse);
+      return Promise.reject(sessionError);
     }
 
     // Handle CSRF token errors (must be checked BEFORE generic 403 handler)
@@ -107,6 +108,7 @@ api.interceptors.response.use(
         message:
           "Security verification failed. Please refresh the page and try again.",
         error_type: "SecurityError",
+        _toastShown: true,
       };
       showErrorToast(csrfError);
       return Promise.reject(csrfError);
@@ -126,15 +128,17 @@ api.interceptors.response.use(
         return Promise.reject(demoError);
       }
 
+      // Callers can opt out of the toast (e.g. dashboard panels render an inline
+      // locked state per panel and must not spawn one toast per forbidden source).
+      const showToast = !(error.config as { suppressErrorToast?: boolean } | undefined)?.suppressErrorToast;
       // Create a custom error object with the specific message and error type
       const forbiddenError = {
         status: "error",
         message: "You don't have permission to access this resource.",
         error_type: "AuthorizationError",
+        _toastShown: showToast,
       };
-      // Callers can opt out of the toast (e.g. dashboard panels render an inline
-      // locked state per panel and must not spawn one toast per forbidden source).
-      if (!(error.config as { suppressErrorToast?: boolean } | undefined)?.suppressErrorToast) {
+      if (showToast) {
         showErrorToast(forbiddenError);
       }
 

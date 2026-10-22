@@ -122,9 +122,6 @@ export const useTeamsStore = defineStore("teams", () => {
             if (!contextStore.teamId) {
               contextStore.restoreTeam(response.map((team) => team.id));
             }
-            return { success: true, data: state.data.value.userTeams };
-          } else {
-            return { success: false, error: { message: "Failed to load user teams: Invalid response format." } };
           }
         },
       });
