@@ -118,6 +118,7 @@ export const useAlertHistoryStore = defineStore("alertHistory", () => {
     isLoadingOperation: state.isLoadingOperation,
     loadHistory,
     resolveAlert,
+    setCurrentContext,
     setLimit,
   };
 });
