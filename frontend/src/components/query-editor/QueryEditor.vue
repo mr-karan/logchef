@@ -423,7 +423,7 @@ import {
   type ComponentPublicInstance,
   type ShallowRef,
 } from "vue";
-import { useDark } from "@vueuse/core";
+import { useThemeStore } from "@/stores/theme";
 import {
   HelpCircle,
   PanelRightOpen,
@@ -549,7 +549,8 @@ const emit = defineEmits<{
   (e: "update:query-timeout", value: number): void;
 }>();
 
-const isDark = useDark();
+const themeStore = useThemeStore();
+const isDark = computed(() => themeStore.isDark);
 const exploreStore = useExploreStore();
 const metaStore = useMetaStore();
 const variableStore = useVariableStore();

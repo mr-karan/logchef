@@ -5,11 +5,19 @@ import router from "@/router";
 import { useAuthStore } from "@/stores/auth";
 import * as errorHandler from "@/api/error-handler";
 import type { SSEEvent } from "@/lib/sse";
-import { expireSession } from "../session";
+import { setUnauthorizedHandler } from "../config";
+import { createSessionExpirationHandler, expireSession } from "../session";
 import { streamTurn } from "../askChef";
 import { subscribeToTail } from "../explore";
 import { streamWindowedQuery } from "../windowed";
 import { streamSSE, StreamHTTPError, type StreamRequest } from "../eventStream";
+
+beforeEach(() => {
+  setUnauthorizedHandler(createSessionExpirationHandler({
+    clearState: () => useAuthStore().clearState(),
+    router,
+  }));
+});
 
 const encoder = new TextEncoder();
 
@@ -272,7 +280,7 @@ describe("expireSession", () => {
     { toast: true, path: "/explore", notifications: 1 },
     { toast: false, path: "/explore", notifications: 0 },
     { toast: true, path: "/auth/login", notifications: 0 },
-  ])("clears auth and redirects with toast=$toast at $path", ({ toast, path, notifications }) => {
+  ])("expires the session with toast=$toast at $path", ({ toast, path, notifications }) => {
     const previousPath = window.location.href;
     window.history.replaceState(null, "", path);
     try {
@@ -282,9 +290,14 @@ describe("expireSession", () => {
 
       expireSession({ toast });
 
-      expect(clearState).toHaveBeenCalledTimes(1);
       expect(showErrorToast).toHaveBeenCalledTimes(notifications);
-      expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location }, replace: true });
+      if (path === "/auth/login") {
+        expect(clearState).not.toHaveBeenCalled();
+        expect(push).not.toHaveBeenCalled();
+      } else {
+        expect(clearState).toHaveBeenCalledTimes(1);
+        expect(push).toHaveBeenCalledExactlyOnceWith({ name: "Login", query: { redirect: router.options.history.location }, replace: true });
+      }
     } finally {
       window.history.replaceState(null, "", previousPath);
     }

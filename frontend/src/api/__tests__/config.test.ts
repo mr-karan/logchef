@@ -1,7 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { AxiosError, AxiosHeaders, type AxiosAdapter, type InternalAxiosRequestConfig } from 'axios'
 import { toast } from 'vue-sonner'
-import { api } from '../config'
+import { api, setUnauthorizedHandler, setForbiddenHandler } from '../config'
+import { createSessionExpirationHandler, expireSession } from '../session'
+import { useAuthStore } from '@/stores/auth'
 import { apiClient } from '../apiUtils'
 import { useBaseStore } from '@/stores/base'
 import { hasShownErrorToast } from '@/api/error-handler'
@@ -15,13 +17,16 @@ vi.mock('@/router', () => ({
   default: {
     push: vi.fn().mockResolvedValue(undefined),
     currentRoute: { value: { name: 'Home' } },
-    options: { history: { location: '/logs/explore' } },
+    options: { history: { location: '/logs/explore?query=error#row-3' } },
   },
 }))
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ clearState: vi.fn() }),
 }))
+
+setUnauthorizedHandler(createSessionExpirationHandler({ clearState: useAuthStore().clearState, router }))
+setForbiddenHandler(() => { void router.push({ name: 'Forbidden' }) })
 
 function respondWith(status: number, data: unknown): AxiosAdapter {
   return async (config: InternalAxiosRequestConfig) => {
@@ -102,7 +107,8 @@ describe('session expiration ownership', () => {
     const requests = Array.from({ length: 3 }, () => api.get('/teams').catch((error: unknown) => error))
     await vi.waitFor(() => expect(router.push).toHaveBeenCalled())
     try {
-      expect(router.push).toHaveBeenCalledTimes(1)
+      expireSession({ toast: true })
+      expect(router.push).toHaveBeenCalledExactlyOnceWith({ name: 'Login', query: { redirect: '/logs/explore?query=error#row-3' }, replace: true })
       expect(toast.error).toHaveBeenCalledTimes(1)
     } finally { finishNavigation?.() }
     const rejections = await Promise.all(requests)

@@ -1,10 +1,27 @@
 import axios from "axios";
-import { useAuthStore } from "@/stores/auth";
-import router from "@/router";
 import { showErrorToast } from "@/api/error-handler";
+import type { APIErrorResponse } from "@/api/types";
 import { basePath } from "@/utils/basePath";
 
-let handlingSessionExpiration = false;
+let unauthorizedHandler: ((options: { toast: boolean }) => Promise<APIErrorResponse>) | undefined;
+let reportedMissingUnauthorizedHandler = false;
+let forbiddenHandler: (() => void) | undefined;
+
+export function setUnauthorizedHandler(handler: NonNullable<typeof unauthorizedHandler>): void {
+  unauthorizedHandler = handler;
+}
+
+export function handleUnauthorized(options: { toast: boolean }): Promise<APIErrorResponse> | undefined {
+  if (unauthorizedHandler) return unauthorizedHandler(options);
+  if (import.meta.env.DEV && !reportedMissingUnauthorizedHandler) {
+    reportedMissingUnauthorizedHandler = true;
+    console.error("No session expiration handler registered");
+  }
+}
+
+export function setForbiddenHandler(handler: NonNullable<typeof forbiddenHandler>): void {
+  forbiddenHandler = handler;
+}
 
 export const apiBaseURL = `${basePath}api/v1`;
 
@@ -57,36 +74,11 @@ api.interceptors.response.use(
       error_type: "NetworkError",
     };
 
-    // Handle session expiration
     if (error.response?.status === 401) {
-      const isOnLoginPage = window.location.pathname.includes("/auth/login") ||
-                          window.location.pathname.includes("/login") ||
-                          router.currentRoute.value.name === "Login";
       const isInitialSessionCheck = error.config?.url === "/me" &&
-                                  !sessionStorage.getItem("hadPreviousSession");
-      const sessionError = {
-        status: "error",
-        message: "Your session has expired. Please log in again.",
-        error_type: "AuthenticationError",
-        _toastShown: isOnLoginPage || handlingSessionExpiration || !isInitialSessionCheck,
-      };
-
-      if (!handlingSessionExpiration && !isOnLoginPage) {
-        handlingSessionExpiration = true;
-        const currentPath = router.options.history.location;
-        try {
-          useAuthStore().clearState();
-          if (!isInitialSessionCheck) showErrorToast(sessionError);
-          await router.push({
-            name: "Login",
-            query: { redirect: currentPath },
-            replace: true,
-          }).catch(() => undefined);
-        } finally {
-          handlingSessionExpiration = false;
-        }
-      }
-      return Promise.reject(sessionError);
+        !sessionStorage.getItem("hadPreviousSession");
+      const expiration = handleUnauthorized({ toast: !isInitialSessionCheck });
+      if (expiration) return Promise.reject(await expiration);
     }
 
     // Handle CSRF token errors (must be checked BEFORE generic 403 handler)
@@ -142,7 +134,7 @@ api.interceptors.response.use(
       const method = (error.config?.method || "get").toLowerCase();
       const isMutation = ["post", "put", "patch", "delete"].includes(method);
       if (!isMutation) {
-        router.push({ name: "Forbidden" });
+        forbiddenHandler?.();
       }
       return Promise.reject(forbiddenError);
     }

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { computed } from "vue";
+import { computed, watch } from "vue";
 import { useBaseStore } from "./base";
 import { preferencesApi, type UserPreferences, type UserPreferencesResponse } from "@/api/preferences";
 import { useThemeStore, type ThemeMode } from "./theme";
@@ -56,8 +56,8 @@ function readStoredPreferences(themeFallback: ThemeMode): UserPreferences {
       const parsed = JSON.parse(stored) as Partial<UserPreferences>;
       return normalizePreferences({
         ...DEFAULT_PREFERENCES,
-        theme: themeFallback,
         ...parsed,
+        theme: parsed.theme && isThemeMode(parsed.theme) ? parsed.theme : themeFallback,
       } as UserPreferences);
     } catch (error) {
       console.warn("Failed to parse stored preferences, using defaults.", error);
@@ -88,7 +88,8 @@ function readStoredPreferences(themeFallback: ThemeMode): UserPreferences {
 
 function persistPreferences(preferences: UserPreferences) {
   if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(preferences));
+  const { theme, ...storedPreferences } = preferences;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(storedPreferences));
 }
 
 function persistLegacyKeys(preferences: UserPreferences) {
@@ -125,6 +126,9 @@ export const usePreferencesStore = defineStore("preferences", () => {
   });
 
   const preferences = computed(() => state.data.value.preferences);
+  watch(() => themeStore.preference, (theme) => {
+    state.data.value.preferences.theme = theme;
+  }, { flush: "sync" });
   const isLoaded = computed(() => state.data.value.isLoaded);
 
   function applyPreferences(next: UserPreferences, options?: { syncTheme?: boolean }) {
@@ -138,7 +142,7 @@ export const usePreferencesStore = defineStore("preferences", () => {
     }
   }
 
-  applyPreferences(state.data.value.preferences, { syncTheme: false });
+  applyPreferences(state.data.value.preferences);
 
   async function loadPreferences(forceReload = false) {
     const userId = authStore.user?.id ?? null;

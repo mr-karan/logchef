@@ -34,7 +34,7 @@ export function formatErrorMessage(error: unknown): string {
 /**
  * Gets the error type from an error object
  */
-export function getErrorType(error: unknown): string {
+function getErrorType(error: unknown): string {
   // API error response
   if (error && typeof error === "object" && "status" in error) {
     const response = error as APIErrorResponse;
@@ -62,26 +62,16 @@ export function formatErrorTypeToTitle(errorType: string): string {
 }
 
 /**
- * Parse error to get both title and message
- */
-export function parseError(error: unknown): { title: string; message: string } {
-  return {
-    title: formatErrorTypeToTitle(getErrorType(error)),
-    message: formatErrorMessage(error)
-  };
-}
-
-/**
  * Checks if an error is a canceled request error that should be handled silently
  */
 export function isCanceledError(error: unknown): boolean {
   if (error && typeof error === "object") {
     // Check for our custom _silent flag
-    if ("_silent" in error && (error as any)._silent === true) {
+    if ("_silent" in error && error._silent === true) {
       return true;
     }
     // Check for CanceledError type
-    if ("error_type" in error && (error as any).error_type === "CanceledError") {
+    if ("error_type" in error && error.error_type === "CanceledError") {
       return true;
     }
   }
@@ -108,7 +98,7 @@ export function showErrorToast(error: unknown, customMessage?: string): void {
   }
 
   const { toast } = useToast();
-  const { title } = parseError(error);
+  const title = formatErrorTypeToTitle(getErrorType(error));
   const message = customMessage || formatErrorMessage(error);
 
   toast({

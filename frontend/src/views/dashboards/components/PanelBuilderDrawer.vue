@@ -2,7 +2,7 @@
 import { useI18n } from "vue-i18n";
 
 import { computed, onBeforeUnmount, ref, watch } from "vue";
-import { useDark } from "@vueuse/core";
+import { useThemeStore } from "@/stores/theme";
 import { Play } from "lucide-vue-next";
 import {
   Sheet,
@@ -49,7 +49,8 @@ const emit = defineEmits<{
 
 const teamsStore = useTeamsStore();
 const store = useDashboardsStore();
-const isDark = useDark();
+const themeStore = useThemeStore();
+const isDark = computed(() => themeStore.isDark);
 const monacoTheme = computed(() => (isDark.value ? "logchef-dark" : "logchef-light"));
 
 const PANEL_TYPES: { value: DashboardPanelType; label: string }[] = [
