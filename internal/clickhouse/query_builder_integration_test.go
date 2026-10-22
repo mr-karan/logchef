@@ -87,6 +87,7 @@ func TestQuotedIdentifiersMatchClickHouse(t *testing.T) {
 		"SELECT `a` `b` FROM (SELECT 11 AS a, 22 AS b)",
 		"SELECT `a`,`b` FROM (SELECT 11 AS a, 22 AS b)",
 	)
+	queries = append(queries, acceptedNamedArguments...)
 	for _, sql := range queries {
 		t.Run(sql, func(t *testing.T) {
 			built, err := qb.BuildRawQuery(sql, 0)
@@ -113,6 +114,18 @@ func TestQuotedIdentifiersMatchClickHouse(t *testing.T) {
 		t.Run(sql, func(t *testing.T) {
 			if _, values := query(t, sql); !reflect.DeepEqual(values, []any{uint8(11)}) {
 				t.Fatalf("ClickHouse returned %v, want [11]", values)
+			}
+			if built, err := qb.BuildRawQuery(sql, 0); !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", built, err)
+			}
+		})
+	}
+
+	for _, sql := range rejectedNamedArguments {
+		t.Run(sql, func(t *testing.T) {
+			if rows, err := client.conn.Query(ctx, sql); err == nil {
+				rows.Close()
+				t.Fatalf("ClickHouse ran %q, want an unknown identifier error", sql)
 			}
 			if built, err := qb.BuildRawQuery(sql, 0); !errors.Is(err, ErrInvalidQuery) {
 				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", built, err)

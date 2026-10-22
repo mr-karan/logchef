@@ -377,6 +377,22 @@ var rejectedQuotedIdentifiers = []string{
 	"`a\\é`",
 }
 
+// acceptedNamedArguments pass a table function's named argument as a bare name.
+var acceptedNamedArguments = []string{
+	"WITH 5 AS n SELECT count() FROM numbers(n = 5)",
+	"WITH 5 AS n SELECT count() FROM numbers(n  = 5)",
+	"WITH 5 AS n SELECT number FROM numbers(10, n = 5)",
+	"WITH 2 AS n SELECT number FROM numbers(n = 2, 3)",
+}
+
+// rejectedNamedArguments quote a table function's named argument. The parser
+// leaves its quote type unset, so the formatter would drop the quotes.
+var rejectedNamedArguments = []string{
+	"SELECT number FROM numbers(`5) UNION ALL SELECT number FROM numbers(100000) --` = 10)",
+	"SELECT * FROM numbers(`1` = 10)",
+	`SELECT * FROM numbers("1" = 10)`,
+}
+
 func TestQuotedIdentifierEscapes(t *testing.T) {
 	qb := NewExtendedQueryBuilder("", 0)
 	for _, tc := range acceptedQuotedIdentifiers {
@@ -391,6 +407,21 @@ func TestQuotedIdentifierEscapes(t *testing.T) {
 	for _, ident := range rejectedQuotedIdentifiers {
 		t.Run(ident, func(t *testing.T) {
 			got, err := qb.BuildRawQuery("SELECT "+ident+" FROM logs", 0)
+			if !errors.Is(err, ErrInvalidQuery) {
+				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
+			}
+		})
+	}
+	for _, sql := range append(acceptedNamedArguments, "SELECT * FROM numbers(n  = 10)") {
+		t.Run(sql, func(t *testing.T) {
+			if got, err := qb.BuildRawQuery(sql, 0); err != nil {
+				t.Fatalf("BuildRawQuery = %q, %v; want no error", got, err)
+			}
+		})
+	}
+	for _, sql := range append(rejectedNamedArguments, "WITH 5 AS n SELECT count() FROM numbers(`n` = 5)") {
+		t.Run(sql, func(t *testing.T) {
+			got, err := qb.BuildRawQuery(sql, 0)
 			if !errors.Is(err, ErrInvalidQuery) {
 				t.Fatalf("BuildRawQuery = %q, %v; want ErrInvalidQuery", got, err)
 			}

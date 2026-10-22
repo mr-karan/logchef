@@ -130,13 +130,22 @@ func checkIdentifiers(rawSQL string, query *clickhouseparser.SelectQuery) error 
 		// The parser ends a quoted token at the first matching quote, so
 		// NameEnd indexes it. ClickHouse reads a doubled one as an embedded quote.
 		start, closing := int(ident.NamePos)-1, int(ident.NameEnd)
+		quoted := start >= 0 && closing < len(rawSQL) && rawSQL[closing] == rawSQL[start] && (rawSQL[start] == '`' || rawSQL[start] == '"')
 		switch {
-		case ident.QuoteType == clickhouseparser.Unquoted:
+		case ident.QuoteType == 0 && quoted:
+			// Paths such as a table function's named argument leave QuoteType
+			// unset, and the formatter then writes the name without quotes.
+			err = fmt.Errorf("quoted table function argument names are not supported: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
+		case ident.QuoteType == 0, ident.QuoteType == clickhouseparser.Unquoted:
 			if strings.HasPrefix(ident.Name, "$") {
 				err = fmt.Errorf("identifiers starting with $ are not supported: %q: %w", ident.Name, ErrInvalidQuery)
 			}
 		case closing+1 < len(rawSQL) && rawSQL[closing+1] == rawSQL[closing]:
-			err = fmt.Errorf("doubled quotes inside quoted identifiers are not supported, write a backtick as \\x60: %s: %w", rawSQL[start:closing+2], ErrInvalidQuery)
+			hint := "use backticks"
+			if rawSQL[closing] == '`' {
+				hint = "write a backtick as \\x60"
+			}
+			err = fmt.Errorf("doubled quotes inside quoted identifiers are not supported, %s: %s: %w", hint, rawSQL[start:closing+2], ErrInvalidQuery)
 		default:
 			if _, ok := decodeQuotedIdentifier(ident.Name); !ok {
 				err = fmt.Errorf("quoted identifiers support only the \\\\ and \\x60 escapes: %s: %w", rawSQL[start:closing+1], ErrInvalidQuery)
