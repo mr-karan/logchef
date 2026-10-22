@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createPinia, setActivePinia } from "pinia";
 import { toast } from "vue-sonner";
+import { createMemoryHistory, createRouter } from "vue-router";
 import { controlledApi } from "@/test/controlledApi";
 import { setForbiddenHandler, setUnauthorizedHandler } from "@/api/config";
+import { createSessionExpirationHandler } from "@/api/session";
 import type { APIErrorResponse } from "@/api/types";
 import { authApi } from "@/api/auth";
 import { teamsApi, type TeamWithMemberCount, type UserTeamMembership } from "@/api/teams";
@@ -238,6 +240,29 @@ describe("useTeamsStore", () => {
       expect(toast.error).toHaveBeenCalledTimes(1);
     });
 
+    it.each([
+      { code: undefined, errorType: "NetworkError", message: "Network unavailable" },
+      { code: 401, errorType: "AuthenticationError", message: "Session expired" },
+      { code: 500, errorType: "GeneralError", message: "Server failed" },
+    ])("shows one toast for a current $errorType", async ({ code, errorType, message }) => {
+      const router = createRouter({
+        history: createMemoryHistory(),
+        routes: [{ path: "/login", name: "Login", component: { template: "<div />" } }],
+      });
+      setUnauthorizedHandler(createSessionExpirationHandler({ clearState: () => undefined, router }));
+      const teams = useTeamsStore();
+      const load = teams.getTeam(1);
+      const request = await startedRequest(0);
+      if (code === undefined) request.fail(message);
+      else request.respond(code, { status: "error", message, error_type: errorType });
+      const result = await load;
+
+      expect(result.success).toBe(false);
+      expect(teams.error?.error_type).toBe(errorType);
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(forbidden).not.toHaveBeenCalled();
+    });
+
     it("keeps a current 403 on the interceptor path", async () => {
       const teams = useTeamsStore();
       const load = teams.getTeam(1);
@@ -245,6 +270,8 @@ describe("useTeamsStore", () => {
       await load;
 
       expect(forbidden).toHaveBeenCalledTimes(1);
+      expect(toast.error).toHaveBeenCalledTimes(1);
+      expect(teams.error?.error_type).toBe("AuthorizationError");
     });
   });
 
