@@ -12,7 +12,7 @@ const source: Source = {
   id: 2, name: 'Logs', source_type: 'victorialogs',
   connection: { url: 'http://localhost:9428' },
   _meta_ts_field: '_time', _meta_is_auto_created: false, ttl_days: 7,
-  created_at: '', updated_at: '', is_connected: true, columns: [],
+  created_at: '', updated_at: '', is_connected: true, columns: [{ name: "_time", type: "DateTime" }],
 }
 const query = 'service:my--svc [[ level:={{level}} ]]'
 
@@ -60,5 +60,6 @@ describe('cold template dialect hydration', () => {
     await nextTick()
     expect(useVariableStore().allVariables).toMatchObject([{ name: 'level', isOptional: true }])
     expect(store.nativeQuery).toBe(query)
+    if (path === 'share') expect(store.activeShareToken).toBe('template')
   })
 })

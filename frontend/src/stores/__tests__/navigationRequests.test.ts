@@ -6,6 +6,8 @@ import { controlledApi } from '@/test/controlledApi'
 import { useSourcesStore } from '../sources'
 import { useContextStore } from '../context'
 import { useSavedQueriesStore } from '../savedQueries'
+import { useExploreStore } from '../explore'
+import { useVariableStore } from '../variables'
 import { useSavedQueries } from '@/composables/useSavedQueries'
 
 function source(id: number) {
@@ -89,17 +91,23 @@ describe('navigation request ownership', () => {
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
   })
 
-  it('keeps the newest request for the same team', async () => {
+  it('shares the active team load until the team watcher restores its source', async () => {
     const context = useContextStore()
     context.selectTeam(1)
     const store = useSourcesStore()
     await vi.waitFor(() => expect(network.requests).toHaveLength(1))
-    const latest = store.loadTeamSources(1)
-    await vi.waitFor(() => expect(network.requests).toHaveLength(2))
-    network.requests[1].succeed([source(2)])
-    await latest
-    network.requests[0].succeed([source(1)])
+    const duplicate = store.loadTeamSources(1)
+    expect(store.isLoadingTeamSources).toBe(true)
+    let finished = false
+    void duplicate.then(() => { finished = true })
+    await vi.waitFor(() => {
+      for (const request of network.requests) request.succeed([source(2)])
+      expect(finished).toBe(true)
+    })
+    expect(network.requests).toHaveLength(1)
+    expect((await duplicate).success).toBe(true)
     await vi.waitFor(() => expect(store.isLoadingTeamSources).toBe(false))
+    expect(context.sourceId).toBe(2)
     expect(store.teamSources.map(s => s.id)).toEqual([2])
   })
 
@@ -243,6 +251,21 @@ describe('navigation request ownership', () => {
     const results = await Promise.all([first, second])
     expect(results.every(result => result.success)).toBe(true)
     expect(queries.queries.value?.map(q => q.id)).toEqual([1])
+  })
+
+  it('restores saved LogsQL variables through the composable without source details', async () => {
+    const context = useContextStore()
+    context.selectTeam(1)
+    context.selectSource(2)
+    const queries = await savedQueries()
+    await queries.loadSavedQuery({
+      id: 1, source_id: 2, name: 'Template', description: '',
+      query_language: 'logsql', editor_mode: 'native', created_at: '', updated_at: '',
+      query_content: JSON.stringify({ content: 'service:my--svc [[ level:={{level}} ]]' }),
+    })
+    await nextTick()
+    expect(useExploreStore().templateDialect).toBe('logsql')
+    expect(useVariableStore().allVariables).toMatchObject([{ name: 'level', isOptional: true }])
   })
 
 })
