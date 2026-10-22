@@ -7,6 +7,83 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+This release fixes Explorer navigation, hardens security and makes alerts and
+exports reliable. It adds few features. Metadata migrations run automatically
+at startup: SQLite to version 38 and Postgres to version 12. Back up the
+metadata database before upgrading. On SQLite, sessions stored with a non-UTC
+timestamp are revoked, so some users must sign in again.
+
+### Upgrade notes
+- The shipped `config.toml` is now a production sample. It sets
+  `secure_cookie = true`, leaves OIDC commented out and leaves
+  `api_token_secret` empty. Logchef refuses to start until you set the secret.
+  Set `secure_cookie = false` if you serve Logchef over plain HTTP. The local
+  dev stack uses `dev/config.toml`.
+- Alert webhooks reject private, loopback, link-local, CGNAT and IPv6
+  translation destinations by default, and do not follow redirects. Allow
+  internal receivers with `alerts.webhook_allowed_hosts`.
+- Prometheus metrics no longer have the `user_email` label. Update dashboards
+  that group by it.
+- A `--config` file that Logchef cannot read now stops startup, instead of
+  falling back to defaults.
+- Only a signed-in session can change the frontend URL in the Admin UI, not an
+  API token. Base URLs must be absolute `http` or `https` URLs.
+
+### Added
+- `export.instance_id` gives each replica an identity, so Logchef can recover
+  its interrupted exports at once instead of waiting for the age-based
+  fallback.
+- Alert history shows the delivery state of each notification target. A retry
+  sends again only to the targets that failed.
+
+### Changed
+- Explorer has one owner for navigation and the URL, and one for query runs.
+  Visible results:
+  - A page load runs the query once.
+  - Explorer picks a connected source first.
+  - A bare URL gets its query written back.
+  - Back and Forward restore the right view.
+  - Window, zoom and limit changes rerun the last query that ran, not unrun
+    editor text.
+  - An edited saved query stays selected and offers Update.
+  - A link to a team you cannot access shows a message and runs nothing.
+  - A link to an unavailable source opens a fallback source, names both
+    sources and does not run the linked query.
+- Source lists serve health from provider caches, and queries no longer check
+  the source live before each run.
+
+### Security
+- OIDC login uses PKCE (S256), binds its nonce to a private cookie, bounds
+  callback requests and rejects padded email claims.
+- An API token with `users:write` can no longer grant admin. Logchef serializes
+  role changes, so concurrent requests cannot demote or remove the last admin.
+- ClickHouse alert queries must be a single `SELECT`, and they run exactly as
+  validated.
+- Query template variables are escaped for each query language.
+- Logs no longer contain share tokens, credentials or request paths with
+  secrets. API tokens cannot read secret settings, and error responses no
+  longer expose backend details.
+- The login rate limiter has bounded memory. Account emails are capped at 254
+  bytes.
+
+### Fixed
+- SQLite stores timestamps in UTC, so session limits, expiry and alert
+  schedules compare correctly.
+- Alerts keep their firing state and cap delivery retries.
+  Interrupted deliveries are recovered, shutdown no longer records false
+  evaluation errors, and duplicate legacy firings are pruned.
+- A hung ClickHouse server no longer stalls other queries and health checks.
+- Exports are safe across replicas and restarts.
+- Provisioning no longer deadlocks with admin deletes. Duplicate team-source
+  links and team members are no-ops.
+- Collections and their owners are created atomically. Postgres records each
+  migration in the same transaction as its schema change.
+- Query errors return the correct HTTP status codes.
+- The web UI shows one toast per failure, not two. Late responses no longer
+  overwrite newer state in alerts, the timeline, live tail, the save-query
+  dialog and team settings.
+- Sharing a query in SQL mode no longer fails with HTTP 400.
+
 ### Changed
 - Local admin emails now use the same validation as `admin_emails`; domains without a dot, such as `admin@localhost`, fail at startup.
 - Startup now fails when a config file passed with `--config` is missing,
