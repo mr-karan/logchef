@@ -106,6 +106,18 @@ func TestEnsureTimestampInQuery(t *testing.T) {
 			timestampField: "ts",
 			wantUnchanged:  true,
 		},
+		{
+			name:           "escaped backtick in quoted timestamp is selected",
+			query:          "SELECT `event\\x60time`, msg FROM logs",
+			timestampField: "event`time",
+			wantUnchanged:  true,
+		},
+		{
+			name:           "escaped backslash in timestamp alias is selected",
+			query:          "SELECT ts AS \"event\\\\time\" FROM logs",
+			timestampField: `event\time`,
+			wantUnchanged:  true,
+		},
 	}
 
 	for _, tt := range tests {

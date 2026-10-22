@@ -175,6 +175,15 @@ func decodeQuotedIdentifier(body string) (string, bool) {
 	return name.String(), true
 }
 
+// identIs reports whether ClickHouse reads ident as name.
+func identIs(ident *clickhouseparser.Ident, name string) bool {
+	if ident.QuoteType == clickhouseparser.Unquoted {
+		return ident.Name == name
+	}
+	decoded, ok := decodeQuotedIdentifier(ident.Name)
+	return ok && decoded == name
+}
+
 // BuildRawQueryWithLimitPolicy parses, validates, and applies an explicit
 // default/max limit policy. The default limit is used for SQL without LIMIT;
 // the max limit is only a ceiling.
