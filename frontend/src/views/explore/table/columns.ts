@@ -1,4 +1,5 @@
 import { h } from "vue";
+import "./badges.css";
 import { ArrowDown, ArrowUp } from "lucide-vue-next";
 import type { Column, ColumnDef, Row } from "./tableFeatures";
 import { formatTimestamp, formatLogContent } from "@/lib/utils";

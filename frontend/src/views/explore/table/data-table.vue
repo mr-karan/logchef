@@ -8,15 +8,13 @@ import {
     useTable,
     type SortingState,
     type ExpandedState,
-    type ColumnVisibilityState as VisibilityState,
     type PaginationState,
-    type ColumnSizingState,
     type ColumnResizeMode,
     type ColumnFiltersState,
 } from '@tanstack/vue-table'
 import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { storeToRefs } from 'pinia'
-import { useDebounceFn } from '@vueuse/core'
+import { useColumnState } from '@/composables/useColumnState'
 import { Button } from '@/components/ui/button'
 import { GripVertical, Copy, Equal, EqualNot, ChevronUp, ChevronDown, Clock } from 'lucide-vue-next'
 import LogTimelineModal from '@/components/log-timeline/LogTimelineModal.vue'
@@ -25,12 +23,6 @@ import type { ColumnInfo, QueryStats } from '@/api/explore'
 import JsonViewer from '@/components/json-viewer/JsonViewer.vue'
 import EmptyState from '@/views/explore/EmptyState.vue'
 import { createColumns } from './columns'
-import {
-    COLUMN_VISIBILITY_VERSION,
-    getDefaultColumnVisibility,
-    getTrustedSavedVisibility,
-    resolveColumnVisibility,
-} from './defaultColumnVisibility'
 import { getVisibleColumnRange } from './columnVirtualization'
 import type { Source } from '@/api/sources'
 import { hasSourceCapability } from '@/lib/queryMetadata'
@@ -56,14 +48,6 @@ interface Props {
     isLoading?: boolean // Prop to indicate loading state
 }
 
-// Define the structure for storing state
-interface DataTableState {
-    columnOrder: string[];
-    columnSizing: ColumnSizingState;
-    columnVisibility: VisibilityState;
-    visibilityVersion?: number;
-}
-
 const props = withDefaults(defineProps<Props>(), {
     timestampField: 'timestamp',
     severityField: 'severity_text',
@@ -80,9 +64,6 @@ const timestampFieldName = computed(() => {
 })
 const severityFieldName = computed(() => props.severityField || 'severity_text')
 
-// Move tableColumns declaration near the top
-const tableColumns = ref<CustomColumnDef[]>([])
-
 // Table state
 const sorting = ref<SortingState>([])
 const expanded = ref<ExpandedState>({})
@@ -98,7 +79,6 @@ const openContextModal = (log: Record<string, any>) => {
     showContextModal.value = true
 }
 
-const columnVisibility = ref<VisibilityState>({})
 const pagination = ref<PaginationState>({
     pageIndex: 0,
     pageSize: 50,
@@ -108,7 +88,6 @@ const globalFilter = ref('')
 // currently loaded result page only) and reset whenever a new query runs -
 // see the watch on props.data below. They are intentionally not persisted.
 const columnFilters = ref<ColumnFiltersState>([])
-const columnSizing = ref<ColumnSizingState>({})
 const columnResizeMode = ref<ColumnResizeMode>('onChange')
 const isResizing = ref(false)
 const preferencesStore = usePreferencesStore()
@@ -119,168 +98,33 @@ const displayTimezone = computed({
         preferencesStore.updatePreferences({ timezone: value })
     }
 })
-const columnOrder = ref<string[]>([])
 const draggingColumnId = ref<string | null>(null)
 const dragOverColumnId = ref<string | null>(null)
-const isReadyToPersistState = ref(false)
-const sourceType = computed(() => props.source?.source_type ?? null)
-
-const enforceTimestampFirst = (order: string[]): string[] => {
-    const tsField = timestampFieldName.value;
-    if (!tsField) return order;
-    if (!order.includes(tsField)) return order;
-    return [tsField, ...order.filter(id => id !== tsField)];
-};
-
-// --- Local Storage State Management ---
-const storageKey = computed(() => {
-    if (props.teamId == null || !props.sourceId) return null; // Check for null teamId explicitly
-    return `logchef-tableState-${props.teamId}-${props.sourceId}`;
-});
-
-// Load state from localStorage
-function loadStateFromStorage(): DataTableState | null {
-    if (!storageKey.value) return null;
-
-    try {
-        const storedData = localStorage.getItem(storageKey.value);
-        if (!storedData) return null;
-
-        return JSON.parse(storedData) as DataTableState;
-    } catch (error) {
-        console.error("Error loading table state from localStorage:", error);
-        return null;
-    }
+const defaultColumn = {
+    minSize: 50,
+    size: 150,
+    maxSize: 3000,
+    enableResizing: true,
 }
 
-// Save state to localStorage
-function saveStateToStorage(state: DataTableState) {
-    if (!storageKey.value) return;
+const tableColumns = computed<CustomColumnDef[]>(() => props.columns.length ? createColumns(
+    props.columns,
+    timestampFieldName.value,
+    displayTimezone.value,
+    severityFieldName.value,
+    props.queryFields,
+    props.regexHighlights,
+) : [])
 
-    try {
-        localStorage.setItem(storageKey.value, JSON.stringify(state));
-    } catch (error) {
-        console.error("Error saving table state to localStorage:", error);
-    }
-}
-
-// Initialize state from localStorage or defaults
-function initializeState(columns: ColumnDef<Record<string, any>>[], options?: { ignoreSavedState?: boolean }) {
-    const currentColumnIds = columns.map(c => c.id!).filter(Boolean);
-    let initialOrder: string[] = [];
-    let initialSizing: ColumnSizingState = {};
-    let initialVisibility: VisibilityState = {};
-
-    // Try to load from storage
-    const savedState = options?.ignoreSavedState ? null : loadStateFromStorage();
-    const hasResolvedSourceType = Boolean(sourceType.value);
-
-    if (savedState && savedState.columnOrder && savedState.columnOrder.length > 0) {
-        // --- Use Saved State ---
-        // Saved entries for columns absent from this result are kept in place, so
-        // order, widths and hidden columns survive queries that return a different
-        // field set. TanStack ignores state for ids that have no column.
-        const savedOrder = savedState.columnOrder;
-        const newColumnIds = currentColumnIds.filter(id => !savedOrder.includes(id));
-        initialOrder = enforceTimestampFirst([...savedOrder, ...newColumnIds]);
-
-        initialSizing = { ...(savedState.columnSizing || {}) };
-        currentColumnIds.forEach(id => {
-            if (initialSizing[id] === undefined) {
-                const columnDef = columns.find(c => c.id === id);
-                initialSizing[id] = columnDef?.size ?? defaultColumn.size;
-            }
-        });
-
-        initialVisibility = resolveColumnVisibility(
-            columns,
-            props.source,
-            getTrustedSavedVisibility(props.source, savedState.columnVisibility, savedState.visibilityVersion),
-            timestampFieldName.value,
-            severityFieldName.value
-        );
-        // Persisting before the source type is known would stamp untrusted
-        // visibility with the current version.
-        isReadyToPersistState.value = hasResolvedSourceType;
-    } else {
-        // --- Generate Default State ---
-        // Generate default order with timestamp first
-        const tsField = timestampFieldName.value; // Get the current timestamp field name
-        const otherColumns = currentColumnIds.filter(id => id !== tsField);
-
-        if (currentColumnIds.includes(tsField)) {
-            initialOrder = [tsField, ...otherColumns]; // Put timestamp first
-        } else {
-            initialOrder = currentColumnIds; // Timestamp column doesn't exist, use default order
-        }
-        initialOrder = enforceTimestampFirst(initialOrder);
-
-        // Set default sizing and visibility for all current columns
-        currentColumnIds.forEach(id => {
-            const columnDef = columns.find(c => c.id === id);
-            initialSizing[id] = columnDef?.size ?? defaultColumn.size;
-        });
-
-        initialVisibility = getDefaultColumnVisibility(
-            columns,
-            props.source,
-            timestampFieldName.value,
-            severityFieldName.value
-        );
-        isReadyToPersistState.value = hasResolvedSourceType || currentColumnIds.length === 0;
-    }
-
-    return { initialOrder, initialSizing, initialVisibility };
-}
-
-// Watch for changes in columns OR search terms to regenerate table columns
-watch(
-    () => ({
-        columns: props.columns,
-        timezone: displayTimezone.value,
-        timestampField: props.timestampField,
-        severityField: props.severityField,
-        sourceType: sourceType.value,
-        queryFields: props.queryFields,
-        regexHighlights: props.regexHighlights,
-    }),
-    ({ columns: newColumns, timezone: newTimezone }) => {
-        if (!newColumns || newColumns.length === 0) {
-            tableColumns.value = []; // Clear columns if input is empty
-            // Reset dependent state if columns are cleared
-            columnOrder.value = [];
-            columnSizing.value = {};
-            columnVisibility.value = {};
-            isReadyToPersistState.value = false;
-            return;
-        }
-
-        // Regenerate columns with the current timezone
-        tableColumns.value = createColumns(
-            newColumns,
-            timestampFieldName.value,
-            newTimezone,
-            severityFieldName.value,
-            props.queryFields,
-            props.regexHighlights
-        );
-
-        // Re-initialize state based on the potentially new columns
-        const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value);
-
-        // Only update if different to prevent infinite loops or unnecessary updates
-        if (JSON.stringify(columnOrder.value) !== JSON.stringify(initialOrder)) {
-            columnOrder.value = initialOrder;
-        }
-        if (JSON.stringify(columnSizing.value) !== JSON.stringify(initialSizing)) {
-            columnSizing.value = initialSizing;
-        }
-        if (JSON.stringify(columnVisibility.value) !== JSON.stringify(initialVisibility)) {
-            columnVisibility.value = initialVisibility;
-        }
-    },
-    { immediate: true, deep: true } // Use deep watch for searchTerms array changes
-);
+const { columnOrder, columnSizing, columnVisibility, setColumnOrder, resetTableStateToDefaults } = useColumnState({
+    columns: tableColumns,
+    teamId: () => props.teamId,
+    sourceId: () => props.sourceId,
+    source: () => props.source,
+    timestampField: timestampFieldName,
+    severityField: severityFieldName,
+    defaultSize: defaultColumn.size,
+})
 
 // Reset column filters whenever a new query runs. A new query replaces
 // props.data with a fresh array reference, so any change here means the
@@ -291,47 +135,6 @@ watch(() => props.data, () => {
     }
 });
 
-// Save state whenever relevant parts change. Column resizing fires this watch
-// on every mousemove/touchmove, so the actual localStorage write is debounced
-// to commit once the drag settles instead of thrashing on every pixel of
-// movement.
-const debouncedSaveStateToStorage = useDebounceFn(saveStateToStorage, 300);
-
-watch([columnOrder, columnSizing, columnVisibility], () => {
-    if (!storageKey.value || !isReadyToPersistState.value) return;
-
-    // Make sure we have columns loaded before saving
-    if (props.columns && props.columns.length > 0) {
-        debouncedSaveStateToStorage({
-            columnOrder: columnOrder.value,
-            columnSizing: columnSizing.value,
-            columnVisibility: columnVisibility.value,
-            visibilityVersion: COLUMN_VISIBILITY_VERSION,
-        });
-    }
-}, { deep: true });
-
-function resetTableStateToDefaults() {
-    if (storageKey.value) {
-        localStorage.removeItem(storageKey.value);
-    }
-
-    if (!tableColumns.value.length) {
-        return;
-    }
-
-    const { initialOrder, initialSizing, initialVisibility } = initializeState(tableColumns.value, {
-        ignoreSavedState: true,
-    });
-
-    columnOrder.value = initialOrder;
-    columnSizing.value = initialSizing;
-    columnVisibility.value = initialVisibility;
-    isReadyToPersistState.value = true;
-}
-
-// Save timezone preference via preferences store
-
 // Helper function for cell handling
 function formatCellValue(value: any): string {
     if (value === null || value === undefined) return '';
@@ -341,17 +144,6 @@ function formatCellValue(value: any): string {
 // Get column type from meta data
 function getColumnType(column: any): string | undefined {
     return column?.columnDef?.meta?.columnType;
-}
-
-// Column order is now managed by state, no need for sortedColumns computed
-
-// Define default column configurations
-// Allow very large maxSize for free resizing - professional log tools need this flexibility
-const defaultColumn = {
-    minSize: 50,
-    size: 150,
-    maxSize: 3000, // Effectively unlimited - allows users to resize columns as wide as needed
-    enableResizing: true,
 }
 
 // Auto-fit column width based on content (double-click feature)
@@ -400,13 +192,15 @@ function autoFitColumn(header: any) {
     table.setColumnSizing(newSizing);
 }
 
-// Handle column resizing with a clean custom implementation
+let stopResize: (() => void) | null = null
+
 function handleResize(e: MouseEvent | TouchEvent, header: any) {
     // Prevent default behavior
     if ('preventDefault' in e) {
         e.preventDefault();
     }
 
+    stopResize?.();
     isResizing.value = true;
 
     // Get current column size and position
@@ -473,7 +267,10 @@ function handleResize(e: MouseEvent | TouchEvent, header: any) {
         window.removeEventListener('mouseup', onEnd);
         window.removeEventListener('touchend', onEnd);
         window.removeEventListener('touchcancel', onEnd);
+        stopResize = null;
     };
+
+    stopResize = onEnd;
 
     // Add the event listeners. touchcancel (e.g. an incoming call or the OS
     // interrupting the gesture) must also tear the drag down - otherwise
@@ -532,12 +329,7 @@ const table = useTable({
     onGlobalFilterChange: updaterOrValue => valueUpdater(updaterOrValue, globalFilter),
     onColumnFiltersChange: updaterOrValue => valueUpdater(updaterOrValue, columnFilters),
     onColumnSizingChange: updaterOrValue => valueUpdater(updaterOrValue, columnSizing),
-    onColumnOrderChange: updaterOrValue => {
-        const nextValue = typeof updaterOrValue === 'function'
-            ? updaterOrValue(columnOrder.value)
-            : updaterOrValue;
-        columnOrder.value = enforceTimestampFirst(nextValue);
-    },
+    onColumnOrderChange: setColumnOrder,
     getRowCanExpand: () => true,
     enableColumnResizing: true,
     columnResizeMode: columnResizeMode.value,
@@ -622,6 +414,7 @@ watch(scrollContainer, el => {
 })
 
 onBeforeUnmount(() => {
+    stopResize?.()
     viewportObserver?.disconnect()
     if (scrollFrame) cancelAnimationFrame(scrollFrame)
 })
@@ -814,7 +607,7 @@ const isLastVisibleColumn = (columnId: string): boolean => {
 </script>
 
 <template>
-    <div class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden"
+    <div data-logchef-table class="h-full flex flex-col w-full min-w-0 flex-1 overflow-hidden"
         :class="{ 'cursor-col-resize select-none': isResizing }">
         <!-- Subtle resize indicator - just a cursor change, no overlay -->
 
@@ -1285,228 +1078,6 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
     /* Ensures expanded rows appear above others */
 }
 
-/* --- Heuristic Formatting Styles (using :deep to target dynamic content) --- */
-
-/* Base HTTP Method Tag Style */
-:deep(.http-method) {
-    display: inline-block;
-    min-width: 52px;
-    text-align: center;
-    padding: 1px 6px;
-    border-radius: 4px;
-    font-weight: 500;
-    font-size: 0.6875rem;
-    /* 11px */
-    line-height: 1.4;
-    margin: 0 2px;
-    border: 1px solid transparent;
-    white-space: nowrap;
-    font-variant-numeric: tabular-nums;
-}
-
-/* Utility HTTP Methods (PATCH, OPTIONS) */
-:deep(.http-method-utility) {
-    background-color: #f3f4f6;
-    /* gray-100 */
-    color: #4b5563;
-    /* gray-600 */
-    border: 1px solid #e5e7eb;
-    /* gray-200 */
-}
-
-.dark :deep(.http-method-utility) {
-    background-color: #374151;
-    /* gray-700 */
-    color: #d1d5db;
-    /* gray-300 */
-    border: 1px solid #4b5563;
-    /* gray-600 */
-}
-
-/* GET - Success Green */
-:deep(.http-method-get) {
-    background-color: #ecfccb;
-    /* lime-100 */
-    color: #4d7c0f;
-    /* lime-800 */
-    border-color: #a3e635;
-    /* lime-400 */
-}
-
-.dark :deep(.http-method-get) {
-    background-color: #365314;
-    /* lime-950 */
-    color: #d9f99d;
-    /* lime-300 */
-    border-color: #4d7c0f;
-    /* lime-800 */
-}
-
-/* POST - Cyan */
-:deep(.http-method-post) {
-    background-color: #cffafe;
-    /* cyan-100 */
-    color: #155e75;
-    /* cyan-800 */
-    border-color: #67e8f9;
-    /* cyan-300 */
-}
-
-.dark :deep(.http-method-post) {
-    background-color: #164e63;
-    /* cyan-950 */
-    color: #a5f3fc;
-    /* cyan-200 */
-    border-color: #155e75;
-    /* cyan-800 */
-}
-
-/* PUT - Amber */
-:deep(.http-method-put) {
-    background-color: #fef3c7;
-    /* amber-100 */
-    color: #92400e;
-    /* amber-800 */
-    border-color: #fcd34d;
-    /* amber-300 */
-}
-
-.dark :deep(.http-method-put) {
-    background-color: #78350f;
-    /* amber-950 */
-    color: #fde68a;
-    /* amber-200 */
-    border-color: #92400e;
-    /* amber-800 */
-}
-
-/* DELETE - Red */
-:deep(.http-method-delete) {
-    background-color: #fee2e2;
-    /* red-100 */
-    color: #991b1b;
-    /* red-800 */
-    border-color: #fca5a5;
-    /* red-300 */
-}
-
-.dark :deep(.http-method-delete) {
-    background-color: #7f1d1d;
-    /* red-950 */
-    color: #fecaca;
-    /* red-200 */
-    border-color: #991b1b;
-    /* red-800 */
-}
-
-/* HEAD - Indigo */
-:deep(.http-method-head) {
-    background-color: #e0e7ff;
-    /* indigo-100 */
-    color: #3730a3;
-    /* indigo-800 */
-    border-color: #a5b4fc;
-    /* indigo-300 */
-}
-
-.dark :deep(.http-method-head) {
-    background-color: #312e81;
-    /* indigo-950 */
-    color: #c7d2fe;
-    /* indigo-200 */
-    border-color: #3730a3;
-    /* indigo-800 */
-}
-
-/* Status Code Styling */
-:deep(.status-code) {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 35px;
-    height: 20px;
-    padding: 1px 6px;
-    border-radius: 10px;
-    font-weight: 400;
-    font-size: 0.6875rem;
-    /* 11px */
-    line-height: 1.4;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    transition: transform 0.1s ease-in-out;
-    white-space: nowrap;
-    cursor: help;
-}
-
-:deep(.status-code:hover) {
-    transform: scale(1.05);
-}
-
-/* Status Code Types */
-:deep(.status-info) {
-    background-color: #e0f2fe;
-    /* light blue */
-    color: #075985;
-    border: 1px solid #7dd3fc;
-}
-
-.dark :deep(.status-info) {
-    background-color: #0c4a6e;
-    color: #bae6fd;
-    border: 1px solid #0284c7;
-}
-
-:deep(.status-success) {
-    background-color: #dcfce7;
-    /* light green */
-    color: #166534;
-    border: 1px solid #86efac;
-}
-
-.dark :deep(.status-success) {
-    background-color: #14532d;
-    color: #bbf7d0;
-    border: 1px solid #16a34a;
-}
-
-:deep(.status-redirect) {
-    background-color: #fef9c3;
-    /* light yellow */
-    color: #854d0e;
-    border: 1px solid #fde047;
-}
-
-.dark :deep(.status-redirect) {
-    background-color: #713f12;
-    color: #fef08a;
-    border: 1px solid #ca8a04;
-}
-
-:deep(.status-error) {
-    background-color: #fee2e2;
-    /* light red */
-    color: #b91c1c;
-    border: 1px solid #fca5a5;
-}
-
-.dark :deep(.status-error) {
-    background-color: #7f1d1d;
-    color: #fecaca;
-    border: 1px solid #ef4444;
-}
-
-:deep(.status-server) {
-    background-color: #ffe4e6;
-    /* light pink */
-    color: #be123c;
-    border: 1px solid #fda4af;
-}
-
-.dark :deep(.status-server) {
-    background-color: #881337;
-    color: #fecdd3;
-    border: 1px solid #e11d48;
-}
-
 /* Timestamp Formatting - MUST stay inline for log stream UX */
 :deep(.timestamp) {
     display: inline !important;
@@ -1553,45 +1124,6 @@ td>.flex>.cell-content :deep(.timestamp-separator) {
 .dark :deep(.timestamp-offset) {
     color: hsl(var(--muted-foreground) / 0.5);
 }
-
-/* HTTP Method Colors */
-:deep(.http-method-utility) {
-    background-color: #f3f4f6;
-    /* gray-100 */
-    color: #4b5563;
-    /* gray-600 */
-    border: 1px solid #e5e7eb;
-    /* gray-200 */
-}
-
-.dark :deep(.http-method-utility) {
-    background-color: #374151;
-    /* gray-700 */
-    color: #d1d5db;
-    /* gray-300 */
-    border: 1px solid #4b5563;
-    /* gray-600 */
-}
-
-:deep(.http-method-get) {
-    background-color: #ecfccb;
-    /* lime-100 */
-    color: #4d7c0f;
-    /* lime-800 */
-    border-color: #a3e635;
-    /* lime-400 */
-}
-
-.dark :deep(.http-method-get) {
-    background-color: #365314;
-    /* lime-950 */
-    color: #d9f99d;
-    /* lime-300 */
-    border-color: #4d7c0f;
-    /* lime-800 */
-}
-
-/* Remove all severity styling as it's handled in utils.ts */
 
 /* Better render of header contents */
 .table-fixed th>div {
