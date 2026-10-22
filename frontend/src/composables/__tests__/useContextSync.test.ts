@@ -85,7 +85,6 @@ describe("useContextSync route ownership", () => {
 
     mocks.route.path = "/logs/library";
     useContextStore().selectSource(8);
-    await vi.waitFor(() => expect(useSourcesStore().currentSourceDetails?.id).toBe(8));
     release();
     await loading;
     await new Promise(resolve => setImmediate(resolve));
@@ -168,6 +167,7 @@ describe("useContextSync route ownership", () => {
     await picking;
     await vi.waitFor(() => expect(sources.currentSourceDetails).not.toBeNull());
 
+    expect(sources.teamSources.map(source => source.id)).toEqual([9, 8]);
     expect(useContextStore().sourceId).toBe(8);
     expect(sources.currentSourceDetails?.id).toBe(8);
     expect(mocks.route.query).toEqual({ team: "3", source: "8" });
