@@ -314,6 +314,9 @@ export const useExploreStore = defineStore("explore", () => {
     source = getCurrentSource(),
   ): "logchefql" | "native" => (mode === "logchefql" && !supportsLogchefQLForSource(source) ? "native" : mode);
   const isNativeHistogramSource = (source = getCurrentSource()) => getNativeQueryLanguageForSource(source) === "logsql";
+  const templateDialect = computed(() => state.data.value.activeMode === "logchefql"
+    ? "logchefql"
+    : getNativeQueryLanguageForSource(getCurrentSource()));
 
   // Live tail: the current source must advertise the capability, and the tail
   // endpoint only accepts LogchefQL (either backend) or native logsql
@@ -404,7 +407,7 @@ export const useExploreStore = defineStore("explore", () => {
         variableStore.setAllVariable(draft.variables);
       } else {
         const { ensureVariablesFromSql } = useVariables();
-        ensureVariablesFromSql(state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode);
+        ensureVariablesFromSql(state.data.value.activeMode === "native" ? state.data.value.nativeQuery : state.data.value.logchefqlCode, templateDialect.value);
       }
       return true;
     } catch (error) {
@@ -803,7 +806,7 @@ export const useExploreStore = defineStore("explore", () => {
       ? state.data.value.nativeQuery
       : state.data.value.logchefqlCode;
     if (sqlToCheck) {
-      ensureVariablesFromSql(sqlToCheck);
+      ensureVariablesFromSql(sqlToCheck, templateDialect.value);
     }
 
     if (options?.updateLastExecutedState !== false) {
@@ -877,7 +880,7 @@ export const useExploreStore = defineStore("explore", () => {
         variableStore.setAllVariable(normalizedVariables);
       } else {
         const { ensureVariablesFromSql } = useVariables();
-        ensureVariablesFromSql(queryContent);
+        ensureVariablesFromSql(queryContent, templateDialect.value);
       }
 
       _updateLastExecutedState();
@@ -920,7 +923,7 @@ export const useExploreStore = defineStore("explore", () => {
           variableStore.setAllVariable(payload.variables as VariableState[]);
         } else {
           const { ensureVariablesFromSql } = useVariables();
-          ensureVariablesFromSql(payload.query || "");
+          ensureVariablesFromSql(payload.query || "", templateDialect.value);
         }
       } finally {
         suppressSharedVariableTracking = false;
