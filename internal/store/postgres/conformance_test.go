@@ -67,3 +67,20 @@ func opener(dsn string) storetest.Opener {
 		return s
 	}
 }
+
+// TestShareLogRedaction asserts share error logs never carry the full token.
+func TestShareLogRedaction(t *testing.T) {
+	dsn := resetSchema(t)
+	storetest.RunShareLogRedaction(t, func(t *testing.T, logger *slog.Logger) store.Store {
+		t.Helper()
+		s, err := postgres.New(context.Background(), postgres.Options{
+			Logger: logger,
+			Config: config.PostgresConfig{DSN: dsn},
+		})
+		if err != nil {
+			t.Fatalf("postgres.New: %v", err)
+		}
+		t.Cleanup(func() { _ = s.Close() })
+		return s
+	})
+}

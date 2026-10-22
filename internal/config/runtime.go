@@ -20,6 +20,18 @@ type SettingsStore interface {
 func LoadRuntimeConfig(ctx context.Context, staticConfig *Config, store SettingsStore) *Config {
 	// Start with the static configuration
 	cfg := *staticConfig
+	if cfg.Alerts.EvaluationInterval <= 0 {
+		cfg.Alerts.EvaluationInterval = defaultAlertsEvaluationInterval
+	}
+	if cfg.Alerts.DefaultLookback <= 0 {
+		cfg.Alerts.DefaultLookback = defaultAlertsDefaultLookback
+	}
+	if cfg.Auth.SessionDuration <= 0 {
+		cfg.Auth.SessionDuration = defaultAuthSessionDuration
+	}
+	if cfg.Auth.DefaultTokenExpiry <= 0 {
+		cfg.Auth.DefaultTokenExpiry = defaultAuthDefaultTokenExpiry
+	}
 
 	// If no store is provided, return static config only
 	if store == nil {

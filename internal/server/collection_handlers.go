@@ -48,7 +48,7 @@ func (s *Server) handleListCollections(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, collections)
 }
 
-// handleCreateCollection creates a shared collection. Requires team admin or global admin.
+// handleCreateCollection creates a shared collection owned by the authenticated caller.
 func (s *Server) handleCreateCollection(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 
@@ -86,7 +86,7 @@ func (s *Server) handleGetCollection(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, collection)
 }
 
-// handleUpdateCollection updates name/description. Requires team admin or global admin.
+// handleUpdateCollection updates a shared collection for its owner.
 func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 	id, err := parseCollectionID(c)
@@ -110,7 +110,7 @@ func (s *Server) handleUpdateCollection(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, updated)
 }
 
-// handleDeleteCollection removes a collection. Requires team admin or global admin.
+// handleDeleteCollection removes a shared collection for its owner.
 func (s *Server) handleDeleteCollection(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 	id, err := parseCollectionID(c)
@@ -144,7 +144,7 @@ func (s *Server) handleListCollectionMembers(c fiber.Ctx) error {
 	return SendSuccess(c, fiber.StatusOK, members)
 }
 
-// handleAddCollectionMember invites a user. Requires team admin or global admin.
+// handleAddCollectionMember invites a user on behalf of the collection owner.
 func (s *Server) handleAddCollectionMember(c fiber.Ctx) error {
 	user := c.Locals("user").(*models.User)
 	id, err := parseCollectionID(c)

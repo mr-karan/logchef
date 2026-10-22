@@ -77,7 +77,7 @@ func (s *Store) GetDurationSetting(ctx context.Context, key string, defaultValue
 		return defaultValue
 	}
 	durationVal, err := time.ParseDuration(value)
-	if err != nil {
+	if err != nil || durationVal <= 0 {
 		return defaultValue
 	}
 	return durationVal
@@ -111,7 +111,7 @@ func mapSystemSettings(rows []sqlc.SystemSetting) []*models.SystemSetting {
 			ValueType:   r.ValueType,
 			Category:    r.Category,
 			Description: textStr(r.Description),
-			IsSensitive: r.IsSensitive,
+			IsSensitive: r.IsSensitive || models.IsSensitiveSetting(r.Key),
 			CreatedAt:   r.CreatedAt.Time,
 			UpdatedAt:   r.UpdatedAt.Time,
 		})
@@ -127,7 +127,7 @@ func (s *Store) UpsertSetting(ctx context.Context, key, value, valueType, catego
 		ValueType:   valueType,
 		Category:    category,
 		Description: text(description),
-		IsSensitive: isSensitive,
+		IsSensitive: isSensitive || models.IsSensitiveSetting(key),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to upsert setting %s: %w", key, err)

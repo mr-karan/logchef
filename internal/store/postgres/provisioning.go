@@ -12,6 +12,9 @@ import (
 func (s *Store) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, error) {
 	managed, err := s.q.IsSourceManaged(ctx, int64(id))
 	if err != nil {
+		if notFound(err) {
+			return false, models.ErrNotFound
+		}
 		return false, err
 	}
 	return managed, nil
@@ -21,6 +24,9 @@ func (s *Store) IsSourceManaged(ctx context.Context, id models.SourceID) (bool, 
 func (s *Store) IsTeamManaged(ctx context.Context, id models.TeamID) (bool, error) {
 	managed, err := s.q.IsTeamManaged(ctx, int64(id))
 	if err != nil {
+		if notFound(err) {
+			return false, models.ErrNotFound
+		}
 		return false, err
 	}
 	return managed, nil

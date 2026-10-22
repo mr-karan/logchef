@@ -4691,7 +4691,7 @@ ON CONFLICT(key) DO UPDATE SET
     value = excluded.value,
     value_type = excluded.value_type,
     description = excluded.description,
-    is_sensitive = excluded.is_sensitive,
+    is_sensitive = system_settings.is_sensitive OR excluded.is_sensitive,
     updated_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now')
 `
 

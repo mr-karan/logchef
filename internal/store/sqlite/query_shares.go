@@ -65,7 +65,7 @@ func (db *DB) TouchQueryShare(ctx context.Context, token string, accessedAt time
 		LastAccessedAt: sql.NullTime{Time: accessedAt, Valid: true},
 		Token:          token,
 	}); err != nil {
-		db.log.Error("failed to touch query share", "error", err, "token", token)
+		db.log.Error("failed to touch query share", "error", err, "token_prefix", models.RedactShareToken(token))
 		return fmt.Errorf("error touching query share: %w", err)
 	}
 	return nil
