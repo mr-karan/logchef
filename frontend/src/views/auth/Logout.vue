@@ -16,7 +16,7 @@ onMounted(async () => {
     try {
         // If we're already logged out, just go to login page
         if (!authStore.isAuthenticated) {
-            router.push('/')
+            router.push({ name: 'Login', query: { logged_out: '1' } })
             return
         }
 
@@ -37,7 +37,7 @@ onMounted(async () => {
         
         // Force redirect to login after a short delay even if there was an error
         setTimeout(() => {
-            router.push('/')
+            router.push({ name: 'Login', query: { logged_out: '1' } })
         }, 2000)
     }
 })
