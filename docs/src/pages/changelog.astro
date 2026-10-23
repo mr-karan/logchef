@@ -141,10 +141,12 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <p>What's new in Logchef.</p>
     </header>
 
-    <article class="version" id="unreleased">
+    <article class="version" id="v2.5.0">
       <div class="version-header">
-        <a class="version-tag" href="#unreleased">Unreleased</a>
-        <span class="version-date">In develop</span>
+        <a class="version-tag" href="#v2.5.0">v2.5.0</a>
+        <span class="version-date">Oct 23, 2026</span>
+        <span class="version-badge">Latest</span>
+        <a href="https://github.com/mr-karan/logchef/releases/tag/v2.5.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
       <p class="release-intro">
@@ -159,6 +161,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>Metrics</strong>: The <code>user_email</code> label is removed. Update dashboards that group by it.</li>
           <li><strong>Startup</strong>: A <code>--config</code> file that Logchef cannot read stops startup instead of falling back to defaults.</li>
           <li><strong>Frontend URL</strong>: Only a signed-in session can change it in the Admin UI, not an API token. Base URLs must be absolute <code>http</code> or <code>https</code> URLs.</li>
+          <li><strong>Log fields</strong>: Request, <code>request error</code> and <code>panic recovered</code> logs use a redacted <code>route</code> template instead of the raw <code>path</code>. Update dashboards and alerts that filter on <code>path</code>.</li>
+          <li><strong>Query templates</strong>: Blocks without variables, such as <code>[[ AND active = true ]]</code>, keep their brackets so SQL arrays survive. Remove the brackets or add a variable to such queries.</li>
         </ul>
       </div>
 
@@ -167,6 +171,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
         <ul class="change-list">
           <li><strong>Export recovery per replica</strong>: <code>export.instance_id</code> lets Logchef recover a replica's interrupted exports at once instead of waiting for the age-based fallback.</li>
           <li><strong>Delivery state in alert history</strong>: History shows each notification target's result, and a retry sends again only to the targets that failed.</li>
+          <li><strong>Straight to SSO</strong>: When SSO is the only sign-in method, the login page sends users straight to the identity provider. It still shows the page after a logout or a failed sign-in (<a href="https://github.com/mr-karan/logchef/issues/190" target="_blank">#190</a>).</li>
         </ul>
       </div>
 
@@ -176,6 +181,7 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>Explorer navigation</strong>: One owner handles navigation and the URL, and one handles query runs. A page load runs the query once, a connected source is picked first, a bare URL gets its query written back, and Back and Forward restore the right view. Window, zoom and limit changes rerun the last query that ran, not unrun editor text. An edited saved query stays selected and offers Update.</li>
           <li><strong>Links that cannot open</strong>: A link to a team you cannot access shows a message and runs nothing. A link to an unavailable source opens a fallback source, names both sources and does not run the linked query.</li>
           <li><strong>Faster queries and source lists</strong>: Queries no longer check the source live before each run, and source lists serve health from provider caches.</li>
+          <li><strong>Configuration</strong>: Config file keys are normalized to lowercase before environment overrides apply, and keys that differ only in case are rejected. Local admin emails use the same validation as <code>admin_emails</code>. Non-empty frontend, external and AI base URLs must be absolute <code>http(s)</code> URLs with a host.</li>
         </ul>
       </div>
 
@@ -197,6 +203,8 @@ import BaseLayout from '../layouts/BaseLayout.astro';
           <li><strong>A hung ClickHouse server</strong> no longer stalls other queries and health checks. Exports are safe across replicas and restarts.</li>
           <li><strong>Provisioning</strong> no longer deadlocks with admin deletes, and duplicate team-source links and members are no-ops. Collections and their owners are created atomically.</li>
           <li><strong>Web UI</strong>: One toast per failure, not two. Late responses no longer overwrite newer state in alerts, the timeline, live tail, the save-query dialog and team settings. Sharing a query in SQL mode no longer fails with HTTP 400. Query errors return the correct HTTP status codes.</li>
+          <li><strong>Query templates</strong>: Optional blocks are recognized by balanced brackets and a variable, using each language's string and comment syntax, and they work in streaming and background exports.</li>
+          <li><strong>Alert evaluation and webhooks</strong>: Alert queries returning any ClickHouse integer or float width are evaluated. Webhook requests share one client with a timeout and bounded reads, and delivery history keeps the HTTP status without the response body. Stopping the server cancels running evaluations.</li>
         </ul>
       </div>
     </article>
@@ -205,7 +213,6 @@ import BaseLayout from '../layouts/BaseLayout.astro';
       <div class="version-header">
         <a class="version-tag" href="#v2.4.0">v2.4.0</a>
         <span class="version-date">Oct 13, 2026</span>
-        <span class="version-badge">Latest</span>
         <a href="https://github.com/mr-karan/logchef/releases/tag/v2.4.0" class="version-link" target="_blank">Release notes &rarr;</a>
       </div>
 
