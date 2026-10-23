@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-10-23
+
 This release fixes Explorer navigation, hardens security and makes alerts and
 exports reliable. It adds few features. Metadata migrations run automatically
 at startup: SQLite to version 38 and Postgres to version 12. Back up the
@@ -28,6 +30,12 @@ timestamp are revoked, so some users must sign in again.
   falling back to defaults.
 - Only a signed-in session can change the frontend URL in the Admin UI, not an
   API token. Base URLs must be absolute `http` or `https` URLs.
+- Request logs, `request error` and `panic recovered` logs use a redacted
+  `route` template instead of the raw `path`. Update dashboards and alerts that
+  filter on `path`.
+- Query template blocks without variables, such as `[[ AND active = true ]]`,
+  keep their brackets so SQL arrays survive. Remove the brackets or add a
+  variable to such queries.
 
 ### Added
 - `export.instance_id` gives each replica an identity, so Logchef can recover
@@ -35,6 +43,9 @@ timestamp are revoked, so some users must sign in again.
   fallback.
 - Alert history shows the delivery state of each notification target. A retry
   sends again only to the targets that failed.
+- When SSO is the only sign-in method, the login page sends users straight to
+  the identity provider. It still shows the page after a logout or a failed
+  sign-in (#190).
 
 ### Changed
 - Explorer has one owner for navigation and the URL, and one for query runs.
@@ -51,6 +62,17 @@ timestamp are revoked, so some users must sign in again.
     sources and does not run the linked query.
 - Source lists serve health from provider caches, and queries no longer check
   the source live before each run.
+- Local admin emails use the same validation as `admin_emails`. Domains
+  without a dot, such as `admin@localhost`, fail at startup.
+- Startup now fails when a config file passed with `--config` is missing,
+  unreadable or malformed, and when the default `config.toml` is unreadable or
+  malformed. Before, the server ignored the problem and ran on defaults.
+- Config file keys are normalized to lowercase before environment overrides
+  are applied. A key such as `[Server] Port` takes effect, and environment
+  overrides preserve other values in that section. File keys or sections that
+  differ only in case are rejected.
+- Non-empty `server.frontend_url`, `alerts.frontend_url`, `alerts.external_url`,
+  and `ai.base_url` settings require an absolute http(s) URL with a host.
 
 ### Security
 - OIDC login uses PKCE (S256), binds its nonce to a private cookie, bounds
@@ -83,40 +105,13 @@ timestamp are revoked, so some users must sign in again.
   overwrite newer state in alerts, the timeline, live tail, the save-query
   dialog and team settings.
 - Sharing a query in SQL mode no longer fails with HTTP 400.
-
-### Changed
-- Local admin emails now use the same validation as `admin_emails`; domains without a dot, such as `admin@localhost`, fail at startup.
-- Startup now fails when a config file passed with `--config` is missing,
-  unreadable or malformed, and when the default `config.toml` is unreadable or
-  malformed. Before, the server ignored the problem and ran on defaults.
-- Config file keys are normalized to lowercase before environment overrides
-  are applied. A key such as `[Server] Port` takes effect, and environment
-  overrides preserve other values in that section. File keys or sections that
-  differ only in case are rejected.
-- Request logs, `request error`, and `panic recovered` logs use `route` with a
-  redacted route template instead of `path` with the raw path. Dashboards or
-  alerts filtering on `path` must switch to `route`.
-- Non-empty `server.frontend_url`, `alerts.frontend_url`, `alerts.external_url`,
-  and `ai.base_url` settings require an absolute http(s) URL with a host.
-- Breaking change: blocks without variables, such as `[[ AND active = true ]]`,
-  keep their brackets to preserve SQL arrays. Remove the brackets or add a
-  variable to migrate existing queries.
-
-### Fixed
-- Escape template values and field names for SQL, LogsQL, and LogchefQL to keep
-  quotes and backslashes from changing query structure.
 - Recognize optional blocks by balanced brackets and a variable, including
   quoted variables, using each query language's string and comment syntax.
   Ignore variables in comments and preserve SQL arrays that do not meet the
   optional-block rule.
 - Process optional blocks in streaming and background exports when no variables
   are supplied, matching Explore queries.
-- Breaking change: alert webhooks to private, loopback, link-local, CGNAT and
-  IPv6 translation addresses are rejected by default. Add internal receivers to
-  `alerts.webhook_allowed_hosts` in the configuration file and restart.
 - Webhook delivery history records the HTTP status without the response body.
-
-### Fixed
 - Alert queries that return `UInt8` and other ClickHouse integer and float
   widths are evaluated instead of failing.
 - Webhook requests share one client with a timeout and bounded response reads.
@@ -1607,7 +1602,8 @@ Initial public release.
 - Embedded web UI
 - Prometheus metrics endpoint
 
-[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.4.0...HEAD
+[Unreleased]: https://github.com/mr-karan/logchef/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/mr-karan/logchef/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/mr-karan/logchef/compare/v2.3.2...v2.4.0
 [2.3.2]: https://github.com/mr-karan/logchef/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/mr-karan/logchef/compare/v2.3.0...v2.3.1
